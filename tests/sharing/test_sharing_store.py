@@ -925,3 +925,102 @@ def test_only_the_requested_digests_are_computed(
 
     assert kwargs["content_md5"] is None
     assert (store.SharedFile & declared).fetch1("content_md5") is None
+
+
+def test_narrowing_an_analysis_parent_reaches_its_derivatives(
+    store,
+    declared,
+    build_analysis,
+    broker_configured,
+    fake_client,
+    common,
+    mini_copy_name,
+):
+    """A `share_parents` entry cascades exactly as a raw parent does."""
+    upstream = build_analysis()
+    up_key = {"analysis_file_name": upstream}
+
+    with common.AnalysisNwbfile().build(
+        mini_copy_name, share_parents=[upstream]
+    ) as builder:
+        derived = builder.analysis_file_name
+
+    key = {"analysis_file_name": derived}
+    path = Path(common.AnalysisNwbfile.get_abs_path(derived))
+
+    try:
+        store.SharedFileSelection.update1({**declared, "scope": "public"})
+        store.AnalysisFileSelection.update1({**up_key, "scope": "public"})
+        store.AnalysisFileSelection.update1({**key, "scope": "public"})
+
+        store.SharedAnalysisFile.populate(up_key)
+        store.SharedAnalysisFile().update_visibility(up_key, scope="private")
+
+        assert (store.AnalysisFileSelection & key).fetch1("scope") == "private"
+    finally:
+        (store.AnalysisFileSelection & key).delete(
+            safemode=False, force_permission=True
+        )
+        (common.AnalysisNwbfile & key).delete(
+            safemode=False, force_permission=True
+        )
+        path.unlink(missing_ok=True)
+
+
+def test_share_file_on_an_upload_goes_through_the_broker(
+    store, declared, fake_client, mini_copy_name
+):
+    """populate() is a no-op once uploaded, so a local write would diverge."""
+    store.SharedFile.populate(declared)
+    fake_client.calls.clear()
+
+    store.share_file(mini_copy_name, scope="private", file_class="raw")
+
+    kinds = [call[0] for call in fake_client.calls]
+
+    assert kinds == ["visibility"], f"Broker not told: {kinds}"
+    assert (store.SharedFileSelection & declared).fetch1("scope") == "private"
+
+
+def test_a_failed_parent_insert_leaves_no_declaration(
+    store,
+    declared,
+    build_analysis,
+    broker_configured,
+    fake_client,
+    common,
+    mini_copy_name,
+):
+    """A half-written row would pass the already-declared check forever."""
+    boom = RuntimeError("duplicate parent")
+
+    # The builder swallows a failed declaration by design, so what matters is
+    # that the transaction left nothing behind for it to swallow around.
+    with patch.object(
+        store.AnalysisFileSelection.Parent, "insert", side_effect=boom
+    ):
+        with common.AnalysisNwbfile().build(mini_copy_name) as builder:
+            analysis = builder.analysis_file_name
+
+    key = {"analysis_file_name": analysis}
+    path = Path(common.AnalysisNwbfile.get_abs_path(analysis))
+
+    try:
+        assert not (store.AnalysisFileSelection & key), "Partial declaration"
+    finally:
+        (common.AnalysisNwbfile & key).delete(
+            safemode=False, force_permission=True
+        )
+        path.unlink(missing_ok=True)
+
+
+def test_a_one_shot_iterable_of_algorithms_still_digests(tmp_path):
+    """`algorithms` is documented as any iterable, generators included."""
+    from spyglass.utils import nwb_hash
+
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(b"generator safe")
+
+    digests = nwb_hash.digest_file(target, algorithms=(n for n in ["sha256"]))
+
+    assert set(digests) == {"sha256"}

@@ -83,6 +83,7 @@ def digest_file(
         If an algorithm is not one this supports.
     """
     path = Path(file_path)
+    algorithms = list(algorithms)  # may be a one-shot iterator
     unknown = set(algorithms) - set(DIGESTS)
 
     if unknown:

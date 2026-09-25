@@ -977,8 +977,15 @@ class SpyglassConfig:
         """
         name = str(backend).lower()
 
-        backends = dj.config.setdefault("custom", {}).setdefault("backends", {})
-        backends.setdefault(name, {})[key] = value
+        # `load_config` tolerates a malformed block by ignoring it, so this
+        # has to be able to repair one rather than raise on it.
+        custom = dj.config.setdefault("custom", {})
+        if not isinstance(custom.get("backends"), dict):
+            custom["backends"] = {}
+        if not isinstance(custom["backends"].get(name), dict):
+            custom["backends"][name] = {}
+
+        custom["backends"][name][key] = value
 
         self._backends.setdefault(name, {})[key] = value
 

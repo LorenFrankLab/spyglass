@@ -94,6 +94,30 @@ class StoreNotFound(StoreError):
     """The broker holds no such file."""
 
 
+class StorePossessionRequired(StoreError):
+    """The broker holds this content and wants proof the caller holds it too.
+
+    Registration deduplicates, so a digest alone would be a claim on the bytes
+    behind it. Raised only when the object is already stored and this identity
+    cannot read any registration of it; `upload` answers and retries.
+
+    Attributes
+    ----------
+    sha256 : str
+        Content being claimed.
+    offset : int
+        Start of the byte range to digest.
+    length : int
+        Number of bytes to digest.
+    """
+
+    def __init__(self, message, sha256="", offset=0, length=0):
+        super().__init__(message)
+        self.sha256 = sha256
+        self.offset = offset
+        self.length = length
+
+
 class StorePending(StoreError):
     """The user has not yet approved the login at GitHub.
 
@@ -192,14 +216,51 @@ def _write_token(base_url: str, record: dict) -> None:
     tokens = _read_tokens()
     tokens[base_url] = record
 
+    # Written to a fresh 0600 file and renamed over the cache. O_CREAT does
+    # not narrow an existing file, so writing in place would put the token in
+    # a world-readable file for as long as it took to chmod afterward.
+    temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     fd = os.open(
-        path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR
+        temp,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        stat.S_IRUSR | stat.S_IWUSR,
     )
-    with os.fdopen(fd, "w") as f:
-        json.dump(tokens, f, indent=2)
 
-    # An existing file keeps its old mode through O_CREAT, so narrow it too.
-    path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(tokens, f, indent=2)
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def possession_proof(file_path, offset: int, length: int) -> str:
+    """Answer a broker possession challenge from a local file.
+
+    Digests the named byte range with its offset folded in, so an answer for
+    one range cannot be replayed for another over the same file.
+
+    Parameters
+    ----------
+    file_path : str or pathlib.Path
+        Local copy of the content being claimed.
+    offset : int
+        Start of the challenged range.
+    length : int
+        Number of bytes to digest.
+
+    Returns
+    -------
+    str
+        Hex digest to send as `possession_proof`.
+    """
+    from hashlib import sha256
+
+    with Path(file_path).open("rb") as f:
+        f.seek(offset)
+        data = f.read(length)
+
+    return sha256(f"{offset}:".encode() + data).hexdigest()
 
 
 class StoreClient:
@@ -421,6 +482,9 @@ class StoreClient:
         detail = self._detail(response)
 
         if response.status_code == 428:
+            challenge = self._challenge(response)
+            if challenge is not None:
+                raise StorePossessionRequired(detail, **challenge)
             raise StorePending(
                 detail, interval=int(response.headers.get("Retry-After", 5))
             )
@@ -462,6 +526,38 @@ class StoreClient:
             return str(response.json().get("detail", response.text))
         except ValueError:
             return response.text.strip()[:200]
+
+    @staticmethod
+    def _challenge(response) -> Optional[dict]:
+        """Return the possession challenge in a 428, or None.
+
+        The broker spends 428 on two unrelated things: a login the user has
+        not approved yet, and content this caller must prove they hold. Only
+        the second names a byte range.
+
+        Parameters
+        ----------
+        response : requests.Response
+            A 428 response.
+
+        Returns
+        -------
+        dict or None
+            `sha256`, `offset`, `length`, or None if this is not a challenge.
+        """
+        try:
+            detail = response.json().get("detail")
+        except ValueError:
+            return None
+
+        if not isinstance(detail, dict) or "offset" not in detail:
+            return None
+
+        return {
+            "sha256": detail.get("sha256", ""),
+            "offset": int(detail["offset"]),
+            "length": int(detail["length"]),
+        }
 
     # -------------------------------- auth -------------------------------
 
@@ -559,10 +655,10 @@ class StoreClient:
     ) -> dict:
         """Look up a file by Spyglass name or by content hash.
 
-        Prefer `sha256` where it is known. Nothing enforces uniqueness of a
-        Spyglass name across owners, so a name resolves to whichever matching
-        registration the broker returns first, and the response carries no
-        owner to disambiguate with.
+        Prefer `sha256` where it is known. Neither is unique at the broker,
+        which answers with the first matching registration this identity may
+        read; a hash at least names the same bytes, where a name may be a
+        different session on another instance.
 
         Parameters
         ----------
@@ -582,9 +678,8 @@ class StoreClient:
         ValueError
             If neither argument is given.
         StoreNotFound
-            If the broker holds no such file.
-        StoreForbidden
-            If this identity may not read it.
+            If the broker holds no such file, or none this identity may read.
+            The broker does not distinguish the two.
         """
         if not name and not sha256:
             raise ValueError("Pass one of name or sha256.")
@@ -717,6 +812,7 @@ class StoreClient:
         scope: str = "private",
         teams: Optional[List[str]] = None,
         content_md5: Optional[str] = None,
+        possession_proof: Optional[str] = None,
     ) -> dict:
         """Declare an upload and ask where to put the bytes.
 
@@ -740,6 +836,9 @@ class StoreClient:
         content_md5 : str, optional
             Hex MD5 of the same bytes, signed into the presigned URL as
             `Content-MD5`. Omitted from the body when unknown, not sent null.
+        possession_proof : str, optional
+            Answer to a `StorePossessionRequired` challenge, from
+            `possession_proof`.
 
         Returns
         -------
@@ -751,6 +850,8 @@ class StoreClient:
         ------
         StoreForbidden
             If this tier may not upload. An unverified account cannot.
+        StorePossessionRequired
+            If this content is stored and this identity cannot read it.
         """
         body = {
             "sha256": sha256,
@@ -762,6 +863,8 @@ class StoreClient:
 
         if content_md5:  # optional on the wire; a null is worse than absent
             body["content_md5"] = content_md5
+        if possession_proof:
+            body["possession_proof"] = possession_proof
 
         return self._request("POST", "/file", json=body).json()
 
@@ -805,6 +908,9 @@ class StoreClient:
             If `file_path` does not exist.
         StoreError
             If the object store refuses the bytes.
+        StoreForbidden
+            If the broker refuses the possession proof, meaning this file's
+            bytes do not match the hash it was registered under.
         """
         from spyglass.utils.nwb_hash import digest_file
 
@@ -820,7 +926,7 @@ class StoreClient:
 
         sha256, content_md5 = have["sha256"], have.get("md5")
 
-        target = self.register(
+        registration = dict(
             sha256=sha256,
             size_bytes=path.stat().st_size,
             spyglass_name=spyglass_name or path.name,
@@ -829,6 +935,19 @@ class StoreClient:
             teams=teams,
             content_md5=content_md5,
         )
+
+        try:
+            target = self.register(**registration)
+        except StorePossessionRequired as challenge:
+            # Someone already stored these bytes privately. Show we hold the
+            # file rather than only its hash, and register again. Once: a
+            # second refusal is a real one.
+            target = self.register(
+                **registration,
+                possession_proof=possession_proof(
+                    path, challenge.offset, challenge.length
+                ),
+            )
 
         if target.get("deduplicated"):
             # Someone already uploaded these exact bytes. Content addressing

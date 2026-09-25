@@ -483,22 +483,13 @@ class StoreBackend(FileBackend):
     def _known_hash(self, name: str) -> Optional[str]:
         """Return the digest this instance recorded for a file name, if any.
 
-        Resolving by name is ambiguous at the broker: registration is per
-        owner, nothing enforces that a `spyglass_name` is unique across them,
-        and the resolve endpoint returns the first matching row with no owner
-        field to disambiguate by. Two people who share a
-        `minirec20230622_.nwb` therefore produce a nondeterministic winner,
-        and a reader can be handed someone else's private row and refused a
-        file they could in fact read.
+        A name is not unique at the broker, so it can name a different
+        session held by another instance. A hash names the bytes.
+        `SharedFileSelection` is keyed on the file name, so within one
+        instance a name maps to exactly one upload and one digest.
 
-        The Spyglass database settles it. `SharedFileSelection` is keyed on
-        the file name, so within one instance a name maps to exactly one
-        upload and one digest — and content addressing means that digest names
-        the bytes rather than anyone's registration of them. Where the row
-        exists, this is the authority the broker's name index is not.
-
-        Absent for a file someone else shared from a different Spyglass
-        instance, which is the case that still falls back to the name.
+        Absent for a file shared from a different Spyglass instance, which is
+        the case that falls back to the name.
 
         Parameters
         ----------
@@ -515,17 +506,18 @@ class StoreBackend(FileBackend):
                 SharedAnalysisFile,
                 SharedFile,
             )
-        except Exception as err:  # no such schema, no grants, no connection
-            logger.debug(f"No local sharing record available: {err}")
-            return None
 
-        for table, attr in (
-            (SharedFile, "nwb_file_name"),
-            (SharedAnalysisFile, "analysis_file_name"),
-        ):
-            digests = (table & {attr: name}).fetch("sha256")
-            if len(digests):
-                return digests[0]
+            for table, attr in (
+                (SharedFile, "nwb_file_name"),
+                (SharedAnalysisFile, "analysis_file_name"),
+            ):
+                digests = (table & {attr: name}).fetch("sha256")
+                if len(digests):
+                    return digests[0]
+        except Exception as err:  # no schema, no grants, no connection
+            # An optimization, so a failure here falls back to the name
+            # rather than breaking resolution.
+            logger.debug(f"No local sharing record available: {err}")
 
         return None
 
@@ -580,12 +572,17 @@ class StoreBackend(FileBackend):
             return None
 
         digest = self._known_hash(name)
-
-        self._resolved[name] = (
+        record = (
             client.find(sha256=digest) if digest else client.find(name=name)
         )
 
-        return self._resolved[name]
+        # Only a hit is cached. `find` collapses a refusal, a miss and a
+        # broker outage into None, and this instance lives for the process —
+        # so caching one would strand a file that is shared moments later.
+        if record is not None:
+            self._resolved[name] = record
+
+        return record
 
     def _resolved_with_client(self, nwb_file_path: str):
         """Return the file record and a live client, or (None, None).
@@ -670,6 +667,12 @@ class StoreBackend(FileBackend):
             True if the file is present locally after the call. False — not an
             exception — when the broker holds nothing readable, since `open`
             is what turns that into the one error the resolver looks for.
+
+        Raises
+        ------
+        requests.RequestException
+            If the transfer fails after the broker said it held the file.
+            That is a failed read, not a miss, and must not fall through.
         """
         from uuid import uuid4
 
@@ -697,10 +700,10 @@ class StoreBackend(FileBackend):
                     for chunk in response.iter_content(chunk_size=1024**2):
                         f.write(chunk)
             temp.replace(target)
-        except requests.RequestException as err:
-            logger.warning(f"Shared-store download failed: {err}")
-            return False
         finally:
+            # The broker held this file, so a transport failure is a failed
+            # read rather than a miss, and must not become the
+            # `BackendUnavailable` that sends `get_nwb_file` off to recompute.
             temp.unlink(missing_ok=True)
 
         return target.exists()

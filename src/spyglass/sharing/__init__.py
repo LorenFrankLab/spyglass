@@ -32,6 +32,7 @@ from spyglass.sharing.store_client import (  # noqa: E402, F401
     StoreForbidden,
     StoreNotConfigured,
     StoreNotFound,
+    StorePossessionRequired,
     StoreQuotaExceeded,
     get_client,
 )

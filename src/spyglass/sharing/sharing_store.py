@@ -405,24 +405,29 @@ class _UploadMixin(_SharedFile):
         self._resync_inherited(selection_key)
 
     def _resync_inherited(self, key: dict) -> None:
-        """Re-derive the derivatives that inherited from this raw.
+        """Re-derive the derivatives that inherited from this file.
 
-        Inheritance copies a parent's scope at registration, so a raw
+        Inheritance copies a parent's scope at registration, so a parent
         re-scoped afterward leaves them at the old audience. Narrows or
         widens; skips rows the user scoped by hand, which `inherited` marks.
+
+        Dependents come from the recorded `.Parent` rows, so an analysis file
+        named in `share_parents` cascades exactly as a raw does.
 
         Never raises — the raw's own change is already applied.
 
         Parameters
         ----------
         key : dict
-            Selection key of the raw file whose visibility just changed.
+            Selection key of the file whose visibility just changed.
         """
-        if self._file_class != "raw":
-            return
+        parent = {
+            "parent_name": key[self._name_attr],
+            "file_class": self._file_class,
+        }
 
         derived = AnalysisFileSelection & {"inherited": 1}
-        derived &= AnalysisNwbfile & {"nwb_file_name": key[self._name_attr]}
+        derived &= AnalysisFileSelection.Parent & parent
 
         for name in derived.fetch("analysis_file_name"):
             self._rederive(name)
@@ -655,18 +660,24 @@ def queue_inherited_share(
 
     scope, teams = inherited
 
-    AnalysisFileSelection.insert1({**key, "scope": scope, "inherited": 1})
-    AnalysisFileSelection.Team.insert([{**key, "team_name": t} for t in teams])
-    AnalysisFileSelection.Parent.insert(
-        [
-            {**key, "parent_name": name, "file_class": kind}
-            for names, kind in (
-                (raw_files, "raw"),
-                (analysis_files, "analysis"),
-            )
-            for name in names
-        ]
-    )
+    # One transaction: a half-written declaration would pass the
+    # already-declared check above, so its missing parents could never be
+    # repaired and it could never be re-derived.
+    with AnalysisFileSelection.connection.transaction:
+        AnalysisFileSelection.insert1({**key, "scope": scope, "inherited": 1})
+        AnalysisFileSelection.Team.insert(
+            [{**key, "team_name": t} for t in teams]
+        )
+        AnalysisFileSelection.Parent.insert(
+            [
+                {**key, "parent_name": name, "file_class": kind}
+                for names, kind in (
+                    (raw_files, "raw"),
+                    (analysis_files, "analysis"),
+                )
+                for name in set(names)
+            ]
+        )
 
     logger.info(
         f"Queued {analysis_file_name} for sharing as {scope}"
@@ -705,11 +716,9 @@ def share_file(
         Transfer immediately. False declares the share and leaves the upload
         for a later `populate()` — useful when queueing many large files.
 
-    Calling this again for the same file replaces the declaration, which is
-    how a share declared too widely gets narrowed *before* it is uploaded.
-    Once the file is in the store, use `update_visibility` instead: only that
-    relays the change to the broker, and only the broker's copy is what any
-    reader is actually checked against.
+    Calling this again for the same file replaces the declaration. Once the
+    file is in the store it routes through `update_visibility`, so the broker
+    applies the change before the local row records it.
 
     Returns
     -------
@@ -736,6 +745,13 @@ def share_file(
     shared = SharedFile if is_raw else SharedAnalysisFile
 
     key = {selection._name_attr: file_name}
+
+    # Already uploaded: the broker holds the authoritative visibility, and
+    # `populate` below is a no-op, so writing the row here alone would leave
+    # DataJoint claiming a scope the broker never applied.
+    if shared & key:
+        shared().update_visibility(key, scope=scope, teams=teams)
+        return key
 
     # Not `insert1(..., skip_duplicates=True)`. A second call is how a user
     # *narrows* a share they declared too widely, and skipping the duplicate

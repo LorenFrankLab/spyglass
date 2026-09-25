@@ -157,10 +157,14 @@ def test_download_writes_the_file(backend, tmp_path, monkeypatch):
     assert target.read_bytes() == b"payload"
 
 
-def test_an_interrupted_download_leaves_no_partial_file(
+def test_an_interrupted_download_raises_and_leaves_no_partial_file(
     backend, tmp_path, monkeypatch
 ):
-    """A partial file would look local to the next call and never be retried."""
+    """A partial file would look local to the next call and never be retried.
+
+    The broker said it held this file, so a dropped transfer is a failed read.
+    Returning False would make it a miss, and `get_nwb_file` would recompute.
+    """
     import requests
 
     target = tmp_path / "a.nwb"
@@ -171,7 +175,8 @@ def test_an_interrupted_download_leaves_no_partial_file(
     monkeypatch.setattr(requests, "get", _boom)
 
     with _with_client(_client()):
-        assert backend.download(str(target)) is False
+        with pytest.raises(requests.ConnectionError, match="dropped"):
+            backend.download(str(target))
 
     assert not target.exists()
     assert list(tmp_path.glob("*.part")) == []
@@ -289,3 +294,46 @@ def test_an_unreachable_sharing_schema_falls_back(backend, monkeypatch):
 def test_an_unshared_file_has_no_recorded_hash(backend, store_module):
     """A name this instance never uploaded resolves by name, as before."""
     assert backend._known_hash("never-shared-by-anyone.nwb") is None
+
+
+def test_a_miss_is_not_cached(backend, tmp_path):
+    """A refusal, a miss and an outage are all None; caching one strands it.
+
+    The chain holds one instance for the process, so a file probed before it
+    is shared must resolve once it is.
+    """
+    target = str(tmp_path / "later.nwb")
+    client = _client()
+    client.find = lambda **kw: None
+
+    with _with_client(client):
+        assert backend.has(target) is False
+
+    client.find = lambda **kw: {"file_id": "f1"}
+
+    with _with_client(client):
+        assert backend.has(target) is True, "Cached the earlier miss"
+
+
+def test_a_local_query_failure_falls_back_to_the_name(backend, tmp_path):
+    """`_known_hash` is an optimization; a denied SELECT must not break `has`.
+
+    Without this a connection loss or a missing grant escapes the chain,
+    stopping the fallback to DANDI.
+    """
+    import datajoint as dj
+
+    asked = []
+    client = _client()
+    client.find = lambda **kw: asked.append(kw) or {"file_id": "f1"}
+
+    denied = dj.errors.AccessError("Insufficient privileges.", "", "")
+    target = tmp_path / "a.nwb"
+
+    with patch(
+        "spyglass.sharing.sharing_store.SharedFile.fetch", side_effect=denied
+    ):
+        with _with_client(client):
+            assert backend.has(str(target)) is True
+
+    assert asked == [{"name": target.name}], "Did not fall back to the name"

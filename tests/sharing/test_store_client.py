@@ -6,6 +6,7 @@ answer, so what is worth testing is that translation, not HTTP.
 """
 
 import json
+import os
 import stat
 from types import SimpleNamespace
 
@@ -806,3 +807,155 @@ def test_sha256_is_always_computed(fresh_client, transport):
     transport.scripted.append(_FakeResponse(200, {"upload_digests": []}))
 
     assert fresh_client.upload_digests() == ["sha256"]
+
+
+# --------------------------- possession proof ---------------------------
+
+
+def _challenge(offset, length, sha="ab" * 32):
+    """The 428 body the broker sends for content it already holds."""
+    return _FakeResponse(
+        428,
+        {
+            "detail": {
+                "detail": "Answer the challenge to show you hold the file.",
+                "sha256": sha,
+                "offset": offset,
+                "length": length,
+            }
+        },
+    )
+
+
+def test_possession_proof_matches_the_brokers_answer(tmp_path):
+    """Digest the named range with its offset folded in."""
+    import hashlib
+
+    payload = bytes(range(256)) * 8
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(payload)
+
+    offset, length = 300, 64
+    expected = hashlib.sha256(
+        f"{offset}:".encode() + payload[offset : offset + length]
+    ).hexdigest()
+
+    assert sc.possession_proof(target, offset, length) == expected
+
+
+def test_a_challenge_is_answered_and_the_registration_retried(
+    client, transport, tmp_path
+):
+    """Claiming stored content requires holding it, not just its hash."""
+    payload = b"held locally" * 64
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(payload)
+
+    transport.scripted.extend(
+        [
+            _challenge(offset=32, length=64),
+            _FakeResponse(200, {"file_id": "f1", "deduplicated": True}),
+        ]
+    )
+
+    client.upload(str(target))
+
+    first, second = transport.calls
+
+    assert "possession_proof" not in first.json, "Proof sent unprompted"
+    assert second.json["possession_proof"] == sc.possession_proof(
+        target, 32, 64
+    )
+    assert second.json["sha256"] == first.json["sha256"]
+
+
+def test_a_second_refusal_is_not_retried(client, transport, tmp_path):
+    """One answer is the protocol; a second challenge is a real refusal."""
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(b"held locally")
+
+    transport.scripted.extend([_challenge(0, 12), _challenge(0, 12)])
+
+    with pytest.raises(sc.StorePossessionRequired):
+        client.upload(str(target))
+
+    assert len(transport.calls) == 2
+
+
+def test_a_login_pending_428_is_not_a_challenge(client, transport):
+    """The broker spends 428 on two things; only one names a byte range."""
+    transport.scripted.append(
+        _FakeResponse(428, {"detail": "authorization_pending"})
+    )
+
+    with pytest.raises(sc.StorePending):
+        client.resolve(name="a.nwb")
+
+
+def test_a_wrong_proof_surfaces_as_a_refusal(client, transport, tmp_path):
+    """Bytes that do not match the hash they were registered under."""
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(b"different bytes")
+
+    transport.scripted.extend(
+        [
+            _challenge(0, 15),
+            _FakeResponse(403, {"detail": "Possession proof did not match."}),
+        ]
+    )
+
+    with pytest.raises(sc.StoreForbidden, match="did not match"):
+        client.upload(str(target))
+
+
+def test_an_existing_cache_is_never_briefly_world_readable(
+    token_file, monkeypatch
+):
+    """O_CREAT does not narrow an existing file, so write a fresh one.
+
+    Writing in place would leave the bearer token in a 0644 file for as long
+    as it took to chmod afterward.
+    """
+    import stat as stat_mod
+
+    token_file.write_text("{}")
+    token_file.chmod(0o644)
+
+    modes = []
+    real_dump = json.dump
+
+    def _watching_dump(obj, fp, **kwargs):
+        modes.append(stat_mod.S_IMODE(os.fstat(fp.fileno()).st_mode))
+        return real_dump(obj, fp, **kwargs)
+
+    monkeypatch.setattr(json, "dump", _watching_dump)
+    sc._write_token(BROKER, TOKEN)
+
+    assert modes == [0o600], f"Token written into a {oct(modes[0])} file"
+    assert stat_mod.S_IMODE(token_file.stat().st_mode) == 0o600
+    assert sc.StoreClient(base_url=BROKER).token == "tok"
+
+
+def test_a_malformed_backends_block_can_be_repaired(monkeypatch):
+    """`load_config` ignores a malformed block, so the setter must fix it.
+
+    Otherwise `sg_config.store_url = ...` raises on exactly the configuration
+    the loader is documented to tolerate.
+    """
+    import datajoint as dj
+
+    from spyglass.settings import SpyglassConfig
+
+    custom = dj.config.setdefault("custom", {})
+    monkeypatch.setitem(custom, "backends", ["not", "a", "mapping"])
+
+    cfg = SpyglassConfig()
+    cfg.set_backend_option("store", "url", BROKER)
+
+    assert custom["backends"]["store"]["url"] == BROKER
+
+    monkeypatch.setitem(custom, "backends", {"store": "not a dict"})
+
+    cfg.set_backend_option("store", "url", BROKER)
+
+    assert custom["backends"]["store"]["url"] == BROKER
