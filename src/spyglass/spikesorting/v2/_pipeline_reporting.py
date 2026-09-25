@@ -716,31 +716,34 @@ def _observed_duration_s(sorting_id) -> float:
 
     from spyglass.common.common_interval import IntervalList
     from spyglass.spikesorting.v2._observed_time import observed_intervals
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        RecordingSelection,
+    from spyglass.spikesorting.v2._source_resolution import (
+        load_effective_recording,
     )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
     from spyglass.spikesorting.v2.utils import (
         artifact_detection_interval_list_name,
     )
 
     sorting_key = {"sorting_id": sorting_id}
-    source = SortingSelection.resolve_source(sorting_key)
+    source, traces = SortingSelection.resolve_effective_source(sorting_key)
+    # Only the sample count and timestamps are read, so the traces load
+    # without the artifact mask.
+    SortingSelection.ensure_effective_traces(traces)
+    recording = load_effective_recording(
+        traces._replace(apply_artifact_mask=False)
+    )
     if source.kind == "concatenated_recording":
         from spyglass.spikesorting.v2.session_group import (
             ConcatenatedRecording,
         )
 
         intervals = (ConcatenatedRecording & source.key).fetch1("obs_intervals")
-        recording = ConcatenatedRecording().get_recording(source.key)
         return float(
             np.diff(observed_intervals(recording, intervals), axis=1).sum()
         )
     recording_id = source.key["recording_id"]
-    artifact_detection_id = SortingSelection.resolve_artifact_detection(
-        sorting_key
-    )
+    artifact_detection_id = source.artifact_detection_id
     if artifact_detection_id is not None:
         nwb_file_name = (
             RecordingSelection & {"recording_id": recording_id}
@@ -754,11 +757,9 @@ def _observed_duration_s(sorting_id) -> float:
                 ),
             }
         ).fetch1("valid_times")
-        recording = Recording().get_recording({"recording_id": recording_id})
         return float(
             np.diff(observed_intervals(recording, valid_times), axis=1).sum()
         )
-    recording = Recording().get_recording({"recording_id": recording_id})
     return recording.get_num_samples() / recording.sampling_frequency
 
 
