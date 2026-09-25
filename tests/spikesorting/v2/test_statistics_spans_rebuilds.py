@@ -179,6 +179,18 @@ def _drop_display_folder(sort):
 
 
 @pytest.mark.slow
+def test_self_heal_rebuild_reuses_persisted_spans(masked_planted_sort):
+    """``Sorting.get_analyzer`` rebuilds a missing folder with the sort's spans."""
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sort = masked_planted_sort
+    folder = _drop_display_folder(sort)
+    rebuilt = Sorting().get_analyzer(sort["sort_key"])
+    assert folder.exists()
+    np.testing.assert_array_equal(_noise(rebuilt), sort["noise"])
+
+
+@pytest.mark.slow
 def test_curation_evaluation_builds_reuse_persisted_spans(
     masked_planted_sort, curation_evaluation_defaults, monkeypatch
 ):
@@ -256,3 +268,54 @@ def test_curation_evaluation_builds_reuse_persisted_spans(
         np.testing.assert_array_equal(display[0]["noise"], sort["noise"])
     finally:
         clear_curations_for(sorting_key)
+
+
+@pytest.mark.slow
+def test_merged_curation_analyzer_reuses_persisted_spans(
+    masked_planted_sort, tmp_path
+):
+    """``build_merged_analyzer`` estimates noise from the sort's spans."""
+    from spyglass.spikesorting.v2._curation_analyzer import (
+        build_merged_analyzer,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sort = masked_planted_sort
+    clear_curations_for(sort["sort_key"])
+    try:
+        merged = CurationV2.create_merged_curation(
+            sort["sort_key"], merge_groups=[[0, 1]], parent_curation_id=-1
+        )
+        analyzer = build_merged_analyzer(
+            merged,
+            sort["display_name"],
+            "display",
+            analyzer_folder=tmp_path / "merged.analyzer",
+        )
+        assert len(analyzer.unit_ids) == 1
+        np.testing.assert_array_equal(_noise(analyzer), sort["noise"])
+    finally:
+        clear_curations_for(sort["sort_key"])
+
+
+@pytest.mark.slow
+def test_recompute_audit_rebuilds_noise_from_persisted_spans(
+    masked_planted_sort,
+):
+    """The recompute audit's fresh build hashes to the stored noise levels."""
+    from spyglass.spikesorting.v2.recompute import _recompute_analyzer_hashes
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sort = masked_planted_sort
+    # The stored build must still carry the sort-time (span) noise, so a
+    # matching fresh hash means the audit rebuilt from the spans too.
+    np.testing.assert_array_equal(
+        _noise(Sorting().get_analyzer(sort["sort_key"], rebuild=False)),
+        sort["noise"],
+    )
+    stored, fresh = _recompute_analyzer_hashes(
+        sort["sort_key"], 4, sort["display_name"]
+    )
+    assert "noise_levels" in stored
+    assert fresh == stored

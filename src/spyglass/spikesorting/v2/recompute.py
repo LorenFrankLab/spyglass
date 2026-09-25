@@ -1302,6 +1302,9 @@ def _recompute_analyzer_hashes(
             analyzer_folder=fresh_folder,
             waveform_params=params,
             extensions=ANALYZER_RECOMPUTE_EXTENSIONS,
+            # The sort's persisted spans, so noise_levels regenerates from the
+            # same samples as the stored build it is compared against.
+            statistics_spans=Sorting().get_statistics_spans(sort_key),
         )
         fresh = load_analyzer_folder(fresh_folder)
         new_hashes = hash_extension_data(fresh, rounding=rounding)

@@ -95,7 +95,11 @@ def test_rebuild_refreshes_existing_analyzer_inventory(
     )
 
     class _SortingTable:
-        def _build_analyzer(self, **_kwargs):
+        def get_statistics_spans(self, _key):
+            return [(0, 10), (10, 20)]
+
+        def _build_analyzer(self, **kwargs):
+            assert kwargs["statistics_spans"] == [(0, 10), (10, 20)]
             events.append("build")
 
     service.rebuild_analyzer_folder(

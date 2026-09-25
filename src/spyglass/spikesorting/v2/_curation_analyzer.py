@@ -574,6 +574,9 @@ def build_merged_analyzer(
         job_kwargs=job_kwargs,
         analyzer_folder=Path(analyzer_folder),
         waveform_params=dict(recipe_row["params"]),
+        statistics_spans=Sorting().get_statistics_spans(
+            {"sorting_id": row["sorting_id"]}
+        ),
     )
     analyzer = load_analyzer_folder(analyzer_folder)
     if not analyzer.has_recording():

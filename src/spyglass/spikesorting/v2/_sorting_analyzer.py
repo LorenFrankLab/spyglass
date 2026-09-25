@@ -619,6 +619,9 @@ def rebuild_analyzer_folder(
     recording, sorting_obj = reconstruct_recording_and_sorting(
         sorting_table, key
     )
+    # The spans persisted at sort time, so the rebuilt noise levels and
+    # whitening match the build being replaced.
+    statistics_spans = sorting_table.get_statistics_spans(key)
     if waveform_params_name is None:
         waveform_params_name = resolve_display_waveform_params_name(
             sorting_table, key["sorting_id"]
@@ -649,6 +652,7 @@ def rebuild_analyzer_folder(
                     key=key,
                     analyzer_folder=temp_folder,
                     waveform_params=waveform_params,
+                    statistics_spans=statistics_spans,
                 ),
             )
     except Exception:
