@@ -329,9 +329,10 @@ samples, not SpikeInterface's own average of per-chunk values.
   sort and asking you to delete and repopulate it.
 - **`ConcatenatedRecording` gains a `statistics_spans` column (schema
   change): recreate existing `ConcatenatedRecording` rows.**
-- Units left with zero spikes after excess-spike window trimming are now
-  dropped (`n_units` and the units NWB exclude them; a dropped unit id is
-  logged), instead of persisting an empty-spike-train unit.
+- Units with zero spikes -- returned empty by the sorter, or emptied by
+  excess-spike window trimming -- are now dropped (`n_units` and the units
+  NWB exclude them; a dropped unit id is logged), instead of persisting an
+  empty-spike-train unit.
 - Artifact detection now raises on a non-finite (NaN/Inf) trace chunk, naming
   the segment, the chunk's frame range, and the per-channel non-finite
   count, instead of silently returning "no artifacts".
