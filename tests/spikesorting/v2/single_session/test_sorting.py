@@ -243,6 +243,131 @@ def test_sorting_make_fetch_resolves_artifact_obs_intervals(populated_sorting):
 
 
 @pytest.mark.slow
+def test_masked_sort_snr_matches_unmasked_within_tolerance(
+    populated_sorting, curation_evaluation_defaults
+):
+    """Masking ~10% of the recording leaves per-unit SNR within 5%.
+
+    Sorts the smoke recording once unmasked (``populated_sorting``) and once
+    with a manual artifact exclusion over 0.4 s of its 4 s, then compares the
+    ``CurationEvaluation`` SNR of matched units. SNR divides by the
+    ``noise_levels`` extension; estimated over the zero-filled mask,
+    SpikeInterface's MAD drops (inflating SNR by roughly a quarter on this
+    fixture), while the statistics-span estimate matches the unmasked noise.
+    """
+    import numpy as np
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    unmasked_pk = dict(populated_sorting)
+    recording_id = SortingSelection.resolve_source(unmasked_pk).key[
+        "recording_id"
+    ]
+    nwb_file_name, interval_list_name = (
+        RecordingSelection & {"recording_id": recording_id}
+    ).fetch1("nwb_file_name", "interval_list_name")
+    t0 = float(
+        (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_list_name,
+            }
+        ).fetch1("valid_times")[0][0]
+    )
+    art_pk = RecordingArtifactSelection.insert_selection(
+        {
+            "recording_id": recording_id,
+            "artifact_detection_params_name": "none",
+            # Each kept side stays above the "none" recipe's 1 s min length.
+            "manual_excluded_times": [[t0 + 1.8, t0 + 2.2]],
+        }
+    )
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
+    sel = (SortingSelection & unmasked_pk).fetch1()
+    masked_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": recording_id,
+            "sorter": sel["sorter"],
+            "sorter_params_name": sel["sorter_params_name"],
+            "artifact_detection_id": art_pk["artifact_detection_id"],
+        }
+    )
+    (Sorting & masked_pk).super_delete(warn=False)
+    Sorting.populate(masked_pk, reserve_jobs=False)
+
+    n_samples = (
+        Recording()
+        .get_recording({"recording_id": recording_id})
+        .get_num_samples()
+    )
+    spans = Sorting().get_statistics_spans(masked_pk)
+    masked_fraction = 1 - sum(b - a for a, b in spans) / n_samples
+    assert 0.08 < masked_fraction < 0.12, masked_fraction
+
+    def _snr(sort_pk):
+        clear_curations_for(sort_pk)
+        root = CurationV2.insert_curation(sorting_key=sort_pk)
+        eval_pk = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        CurationEvaluation.populate(eval_pk, reserve_jobs=False)
+        return CurationEvaluation.get_metrics(eval_pk)["snr"]
+
+    try:
+        unmasked_snr = _snr(unmasked_pk)
+        masked_snr = _snr(masked_pk)
+        unmasked_sorting = Sorting().get_sorting(unmasked_pk)
+        masked_sorting = Sorting().get_sorting(masked_pk)
+        fs = unmasked_sorting.get_sampling_frequency()
+        tolerance = int(round(0.0005 * fs))
+        compared = 0
+        for masked_unit in masked_sorting.unit_ids:
+            train = masked_sorting.get_unit_spike_train(masked_unit)
+            best, best_agreement = None, 0.0
+            for unit in unmasked_sorting.unit_ids:
+                ref = unmasked_sorting.get_unit_spike_train(unit)
+                idx = np.clip(np.searchsorted(ref, train), 1, len(ref) - 1)
+                nearest = np.minimum(
+                    np.abs(ref[idx] - train), np.abs(ref[idx - 1] - train)
+                )
+                agreement = float(np.mean(nearest <= tolerance))
+                if agreement > best_agreement:
+                    best, best_agreement = unit, agreement
+            if best_agreement < 0.8:
+                continue
+            compared += 1
+            ratio = float(masked_snr.loc[int(masked_unit)]) / float(
+                unmasked_snr.loc[int(best)]
+            )
+            assert abs(ratio - 1) < 0.05, (masked_unit, best, ratio)
+        assert compared >= 1, "no masked unit matched an unmasked unit"
+    finally:
+        clear_curations_for(unmasked_pk)
+        clear_curations_for(masked_pk)
+        (Sorting & masked_pk).super_delete(warn=False)
+
+
+@pytest.mark.slow
 def test_sorting_get_analyzer_loads_folder(populated_sorting):
     """``Sorting.get_analyzer`` loads the SortingAnalyzer from the folder.
 
