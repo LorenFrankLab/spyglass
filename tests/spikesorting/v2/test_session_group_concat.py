@@ -1770,7 +1770,6 @@ def test_concat_chronic_real_dataset_memory_runtime(request, dj_conn):
         concat_pk = _concat_selection(
             {"session_group_owner": owner, "session_group_name": name},
             "default",
-            "rigid_fast_default",
         )
         with _PeakRSS() as concat_measured:
             ConcatenatedRecording.populate(concat_pk, reserve_jobs=False)
