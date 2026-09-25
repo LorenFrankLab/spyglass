@@ -238,3 +238,417 @@ def test_default_rows_resolve():
     assert [row[0] for row in rows] == ["dredge_v1", "dredge_fast_v1"]
     presets = [_resolve(row[1])["preset"] for row in rows]
     assert presets == ["dredge", "dredge_fast"]
+
+
+# ---- estimation -------------------------------------------------------------
+#
+# Tolerances come from the development benchmark on this exact fixture family
+# (one 32-contact polymer shank, 30 units, 90 s, rigid +/-25 um zigzag,
+# 600-6000 Hz, seeds 0-2, dredge_fast). Its common-frame error after removing
+# one global offset was RMS 0.307 / 0.273 / 0.319 um and max |error|
+# 0.985 / 0.991 / 1.175 um; on the static twin every dredge-family estimate
+# stayed within 0.197 um of zero (dredge_fast: exactly 0). The bounds below are
+# those development maxima.
+DEV_RIGID_RMS_UM = 0.319
+DEV_RIGID_MAX_ABS_UM = 1.175
+DEV_STATIC_MAX_ABS_UM = 0.197
+KNOWN_ANSWER_DURATION_S = 90.0
+
+
+def _estimate(recording, spans=None, preset="dredge_fast"):
+    from spyglass.spikesorting.v2._motion import estimate_motion_in_spans
+    from tests.spikesorting.v2._motion_fixtures import JOB_KWARGS
+
+    n = recording.get_num_samples()
+    return estimate_motion_in_spans(
+        recording,
+        statistics_spans=[(0, n)] if spans is None else spans,
+        continuity_spans=[(0, n)],
+        resolved_params=_resolve({"preset": preset}),
+        job_kwargs=JOB_KWARGS,
+    )
+
+
+@pytest.fixture(scope="module")
+def rigid_drift_90s():
+    from tests.spikesorting.v2._motion_fixtures import rigid_drift_recordings
+
+    drifting, _static, displacement = rigid_drift_recordings(
+        seed=0, duration_s=KNOWN_ANSWER_DURATION_S
+    )
+    motion, diagnostics = _estimate(drifting)
+    return {
+        "displacement": displacement,
+        "depths": drifting.get_channel_locations()[:, 1],
+        "motion": motion,
+        "diagnostics": diagnostics,
+    }
+
+
+@pytest.mark.parametrize("preset", ["rigid_fast", "dredge", "dredge_fast"])
+def test_unmasked_single_span_estimate_equals_compute_motion(preset):
+    """With one span and every peak kept, the estimator is compute_motion run
+    on a recording whose noise levels were pre-cached with the same seed."""
+    import spikeinterface as si
+    import spikeinterface.preprocessing as sip
+
+    from spyglass.spikesorting.v2._motion import spikeinterface_step_kwargs
+    from tests.spikesorting.v2._motion_fixtures import (
+        JOB_KWARGS,
+        rigid_drift_recordings,
+    )
+
+    ours_rec, _, _ = rigid_drift_recordings(seed=0, duration_s=20.0)
+    motion, diagnostics = _estimate(ours_rec, preset=preset)
+
+    oracle_rec, _, _ = rigid_drift_recordings(seed=0, duration_s=20.0)
+    resolved = _resolve({"preset": preset})
+    si.get_noise_levels(
+        oracle_rec,
+        return_in_uV=False,
+        random_slices_kwargs={
+            "method": "full_random",
+            "num_chunks_per_segment": 20,
+            "chunk_duration": "500ms",
+            "seed": 0,
+        },
+        n_jobs=1,
+    )
+    detect, localize, estimate = spikeinterface_step_kwargs(resolved)
+    oracle = sip.compute_motion(
+        oracle_rec,
+        preset=preset,
+        detect_kwargs=detect,
+        localize_peaks_kwargs=localize,
+        estimate_motion_kwargs=estimate,
+        **JOB_KWARGS,
+    )
+
+    assert diagnostics.n_peaks_kept == diagnostics.n_peaks_detected > 0
+    np.testing.assert_array_equal(
+        diagnostics.noise_levels, oracle_rec.get_property("noise_level_mad_raw")
+    )
+    np.testing.assert_array_equal(
+        motion.displacement[0], oracle.displacement[0]
+    )
+    np.testing.assert_array_equal(
+        motion.temporal_bins_s[0], oracle.temporal_bins_s[0]
+    )
+    np.testing.assert_array_equal(
+        motion.spatial_bins_um, oracle.spatial_bins_um
+    )
+
+
+def test_repeated_estimates_are_bit_identical():
+    from tests.spikesorting.v2._motion_fixtures import rigid_drift_recordings
+
+    first, first_diag = _estimate(
+        rigid_drift_recordings(seed=0, duration_s=20.0)[0]
+    )
+    second, second_diag = _estimate(
+        rigid_drift_recordings(seed=0, duration_s=20.0)[0]
+    )
+
+    np.testing.assert_array_equal(first.displacement[0], second.displacement[0])
+    np.testing.assert_array_equal(
+        first_diag.peaks_per_temporal_bin, second_diag.peaks_per_temporal_bin
+    )
+
+
+def test_known_rigid_drift_is_recovered_in_a_common_frame(rigid_drift_90s):
+    from tests.spikesorting.v2._motion_fixtures import common_frame_error
+
+    rms, max_abs = common_frame_error(
+        rigid_drift_90s["motion"],
+        rigid_drift_90s["displacement"],
+        rigid_drift_90s["depths"],
+    )
+    diagnostics = rigid_drift_90s["diagnostics"]
+
+    assert rms <= DEV_RIGID_RMS_UM
+    assert max_abs <= DEV_RIGID_MAX_ABS_UM
+    assert diagnostics.peaks_per_temporal_bin.shape == (
+        rigid_drift_90s["motion"].displacement[0].shape[0],
+    )
+    assert diagnostics.peaks_per_temporal_bin.sum() == diagnostics.n_peaks_kept
+
+
+def test_static_twin_estimates_no_motion():
+    from tests.spikesorting.v2._motion_fixtures import rigid_drift_recordings
+
+    _, static, _ = rigid_drift_recordings(
+        seed=0, duration_s=KNOWN_ANSWER_DURATION_S
+    )
+    motion, _ = _estimate(static)
+
+    assert np.max(np.abs(motion.displacement[0])) <= DEV_STATIC_MAX_ABS_UM
+
+
+def _bin_error(motion, displacement, depths, bins):
+    """Common-frame error restricted to ``bins`` (offset removed on them)."""
+    from tests.spikesorting.v2._motion_fixtures import (
+        DISPLACEMENT_SAMPLING_FREQUENCY,
+    )
+
+    edges = motion.temporal_bin_edges_s[0]
+    sample_times = (
+        np.arange(displacement.size) + 0.5
+    ) / DISPLACEMENT_SAMPLING_FREQUENCY
+    truth = np.array(
+        [
+            displacement[(sample_times >= lo) & (sample_times < hi)].mean()
+            for lo, hi in zip(edges[:-1], edges[1:])
+        ]
+    )
+    estimate = np.stack(
+        [
+            motion.get_displacement_at_time_and_depth(
+                np.full(depths.size, center), depths
+            )
+            for center in motion.temporal_bins_s[0]
+        ]
+    )
+    diff = (estimate - truth[:, None])[bins]
+    diff -= diff.mean()
+    return float(np.sqrt(np.mean(diff**2))), float(np.max(np.abs(diff)))
+
+
+def test_masked_artifacts_do_not_reach_the_estimate(rigid_drift_90s):
+    """Stationary artifact bursts, masked by frame ranges, leave the estimate
+    as accurate as the clean twin's on every bin with evidence; unmasked, the
+    same bursts corrupt it. No kept peak's window touches a masked range."""
+    from unittest import mock
+
+    import spikeinterface.sortingcomponents.motion as si_motion
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        silence_frame_ranges,
+        statistics_spans,
+    )
+    from tests.spikesorting.v2._motion_fixtures import (
+        common_frame_error,
+        plant_artifact_bursts,
+        rigid_drift_recordings,
+    )
+
+    windows = [(10.0, 13.0), (50.0, 53.0), (75.0, 78.0)]
+    drifting, _, displacement = rigid_drift_recordings(
+        seed=0, duration_s=KNOWN_ANSWER_DURATION_S
+    )
+    depths = rigid_drift_90s["depths"]
+    n = drifting.get_num_samples()
+
+    contaminated, ranges = plant_artifact_bursts(
+        drifting, windows, rate_hz=100.0, amplitude_uv=400.0
+    )
+    unmasked, _ = _estimate(contaminated)
+
+    masked_rec = silence_frame_ranges(contaminated, ranges)
+    spans = statistics_spans(n, ranges, [(0, n)])
+    estimate_motion = si_motion.estimate_motion
+    seen = {}
+
+    def _spy(recording, peaks, peak_locations, **kwargs):
+        seen["sample_index"] = np.array(peaks["sample_index"])
+        return estimate_motion(recording, peaks, peak_locations, **kwargs)
+
+    with mock.patch.object(si_motion, "estimate_motion", _spy):
+        masked, masked_diag = _estimate(masked_rec, spans=spans)
+
+    # No kept waveform window (0.1 ms before, 0.3 ms after) reaches a masked
+    # frame: every kept peak's window lies inside one statistics span.
+    starts = seen["sample_index"] - 3
+    stops = seen["sample_index"] + 9
+    for lo, hi in ranges:
+        assert not np.any((starts < hi) & (stops > lo))
+    assert len(seen["sample_index"]) == masked_diag.n_peaks_kept
+
+    fs = drifting.get_sampling_frequency()
+    edges = masked.temporal_bin_edges_s[0]
+    touched = np.zeros(edges.size - 1, dtype=bool)
+    for lo, hi in ranges:
+        touched |= (edges[:-1] < hi / fs) & (edges[1:] > lo / fs)
+    evidence = ~touched
+
+    masked_rms, masked_max = _bin_error(masked, displacement, depths, evidence)
+    assert masked_rms <= DEV_RIGID_RMS_UM
+    assert masked_max <= DEV_RIGID_MAX_ABS_UM
+
+    # The fixture discriminates: unmasked, the bursts pull the estimate far
+    # outside the development envelope.
+    unmasked_rms, _ = common_frame_error(unmasked, displacement, depths)
+    clean_rms, _ = common_frame_error(
+        rigid_drift_90s["motion"], displacement, depths
+    )
+    assert unmasked_rms > 5 * DEV_RIGID_RMS_UM
+    assert clean_rms <= DEV_RIGID_RMS_UM
+
+
+# ---- span filter and failures -----------------------------------------------
+
+
+def test_peak_window_must_lie_inside_one_span():
+    from spyglass.spikesorting.v2._motion import peaks_within_spans
+
+    spans = [(10, 30), (30, 60)]
+    peaks = np.array([5, 12, 13, 21, 22, 30, 33, 51, 52, 70])
+
+    keep = peaks_within_spans(peaks, spans, n_before=3, n_after=9)
+
+    # 13 reads [10, 22); 21 reads [18, 30); 33 reads [30, 42); 51 reads
+    # [48, 60). 30 reads [27, 39), crossing the span edge at 30.
+    assert peaks[keep].tolist() == [13, 21, 33, 51]
+
+
+def _bare_recording(positions, *, duration_s=0.2, properties=None):
+    """A noise recording with explicit contact positions and no probe."""
+    from spikeinterface.core import NumpyRecording
+
+    positions = np.asarray(positions, dtype=float)
+    rng = np.random.default_rng(0)
+    traces = rng.normal(
+        size=(int(duration_s * 30_000), positions.shape[0])
+    ).astype("float32")
+    recording = NumpyRecording([traces], sampling_frequency=30_000.0)
+    recording.set_property("location", positions)
+    for key, values in (properties or {}).items():
+        recording.set_property(key, values)
+    return recording
+
+
+def _column(n_contacts, pitch=26.0):
+    return np.column_stack(
+        [np.zeros(n_contacts), -pitch * np.arange(n_contacts)]
+    )
+
+
+@pytest.mark.parametrize(
+    "positions, properties, match",
+    [
+        (
+            np.column_stack([_column(32), np.arange(32.0)]),
+            None,
+            "not planar",
+        ),
+        (
+            np.vstack([_column(31), [[np.nan, 0.0]]]),
+            None,
+            "finite",
+        ),
+        (np.vstack([_column(31), [[0.0, 0.0]]]), None, "share a position"),
+        (
+            _column(32),
+            {"probe_shank": [0] * 16 + [1] * 16, "group": ["0"] * 32},
+            "2 shanks",
+        ),
+        (
+            [[-6.25, 6.25], [6.25, 6.25], [-6.25, -6.25], [6.25, -6.25]],
+            None,
+            "less than the detection radius_um",
+        ),
+        (_column(16), None, "too short for the nonrigid windows"),
+    ],
+    ids=[
+        "non-planar",
+        "non-finite",
+        "coincident",
+        "two-shanks",
+        "tetrode",
+        "short-nonrigid",
+    ],
+)
+def test_ineligible_geometry_is_rejected(positions, properties, match):
+    from spyglass.spikesorting.v2._motion import check_estimation_eligibility
+
+    recording = _bare_recording(positions, properties=properties)
+    with pytest.raises(ValueError, match=match):
+        check_estimation_eligibility(recording, _resolve({"preset": "dredge"}))
+
+
+def test_short_probe_is_eligible_for_a_rigid_recipe():
+    """The nonrigid-window check applies only to nonrigid recipes."""
+    from spyglass.spikesorting.v2._motion import check_estimation_eligibility
+
+    recording = _bare_recording(_column(16))
+    check_estimation_eligibility(recording, _resolve({"preset": "rigid_fast"}))
+
+
+def test_recording_without_positions_has_no_probe():
+    from spikeinterface.core import NumpyRecording
+
+    from spyglass.spikesorting.v2._motion import check_estimation_eligibility
+
+    recording = NumpyRecording(
+        [np.zeros((100, 4), dtype="float32")], sampling_frequency=30_000.0
+    )
+    with pytest.raises(ValueError, match="no probe can be attached"):
+        check_estimation_eligibility(recording, _resolve({"preset": "dredge"}))
+
+
+def test_ineligible_geometry_fails_before_estimation():
+    from spyglass.spikesorting.v2._motion import estimate_motion_in_spans
+
+    recording = _bare_recording(_column(16))
+    n = recording.get_num_samples()
+    with pytest.raises(ValueError, match="too short for the nonrigid"):
+        estimate_motion_in_spans(
+            recording,
+            statistics_spans=[(0, n)],
+            continuity_spans=[(0, n)],
+            resolved_params=_resolve({"preset": "dredge_fast"}),
+        )
+
+
+@pytest.mark.parametrize(
+    "continuity, statistics, match",
+    [
+        ([(0, 3000), (3000, 6000)], [(0, 3000)], "not supported yet"),
+        ([(0, 5000)], [(0, 5000)], "does not cover"),
+        ([(0, 6000)], [(100, 50)], "sorted, disjoint"),
+        ([(0, 6000)], [(0, 3000), (2000, 4000)], "sorted, disjoint"),
+        ([(0, 6000)], [], "no statistics spans"),
+    ],
+)
+def test_invalid_spans_are_rejected(continuity, statistics, match):
+    from spyglass.spikesorting.v2._motion import estimate_motion_in_spans
+
+    recording = _bare_recording(_column(32))
+    assert recording.get_num_samples() == 6000
+    with pytest.raises(ValueError, match=match):
+        estimate_motion_in_spans(
+            recording,
+            statistics_spans=statistics,
+            continuity_spans=continuity,
+            resolved_params=_resolve({"preset": "dredge_fast"}),
+        )
+
+
+def test_no_kept_peak_is_an_error():
+    """Statistics spans shorter than the localization window keep no peak."""
+    from tests.spikesorting.v2._motion_fixtures import rigid_drift_recordings
+
+    recording, _, _ = rigid_drift_recordings(seed=0, duration_s=5.0)
+    n = recording.get_num_samples()
+    spans = [(start, start + 8) for start in range(0, n - 8, 1000)]
+
+    with pytest.raises(ValueError, match="none has its localization window"):
+        _estimate(recording, spans=spans)
+
+
+def test_non_finite_displacement_is_an_error():
+    from unittest import mock
+
+    import spikeinterface.sortingcomponents.motion as si_motion
+    from spikeinterface.core.motion import Motion
+
+    from tests.spikesorting.v2._motion_fixtures import rigid_drift_recordings
+
+    def _nan_motion(recording, peaks, peak_locations, **kwargs):
+        return Motion(
+            [np.full((5, 1), np.nan)], [np.arange(5.0) + 0.5], np.zeros(1)
+        )
+
+    recording, _, _ = rigid_drift_recordings(seed=0, duration_s=5.0)
+    with mock.patch.object(si_motion, "estimate_motion", _nan_motion):
+        with pytest.raises(ValueError, match="non-finite"):
+            _estimate(recording)

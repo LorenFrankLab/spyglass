@@ -8,6 +8,11 @@ and ``motion_n_temporal_bins`` summarize one for a stored row.
 the fully resolved configuration the estimator passes to SpikeInterface, and
 ``resolved_params_hash`` content-addresses it.
 
+``estimate_motion_in_spans`` estimates motion from the valid samples of one
+recording: it reproduces SpikeInterface's ``compute_motion`` with explicit
+noise levels from the statistics spans and keeps only peaks whose localization
+window lies inside one statistics span.
+
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection; SpikeInterface is imported lazily inside the functions that need
 it.
@@ -19,6 +24,7 @@ import copy
 import hashlib
 import inspect
 import json
+from typing import NamedTuple
 
 import numpy as np
 
@@ -399,3 +405,484 @@ def spikeinterface_step_kwargs(resolved: dict) -> tuple[dict, dict, dict]:
     estimate = copy.deepcopy(dict(resolved["estimate_motion_kwargs"]))
     estimate["post_transform"] = _NAMED_CALLABLES[estimate["post_transform"]]
     return detect, localize, estimate
+
+
+class MotionDiagnostics(NamedTuple):
+    """Compact evidence summary of one motion estimate.
+
+    Attributes
+    ----------
+    n_peaks_detected : int
+        Peaks the detector found on the masked recording.
+    n_peaks_kept : int
+        Peaks whose localization window lies inside one statistics span; only
+        these reach the estimator.
+    peaks_per_temporal_bin : numpy.ndarray
+        ``(n_temporal_bins,)`` int64 count of kept peaks in each of the
+        estimate's temporal bins.
+    noise_levels : numpy.ndarray
+        ``(n_channels,)`` float64 per-channel noise (recording units) the
+        detection threshold was scaled by.
+    """
+
+    n_peaks_detected: int
+    n_peaks_kept: int
+    peaks_per_temporal_bin: np.ndarray
+    noise_levels: np.ndarray
+
+
+def normalize_spans(spans) -> list[tuple[int, int]]:
+    """Return ``spans`` as a list of ``(start, end)`` Python-int tuples."""
+    return [
+        (int(a), int(b))
+        for a, b in np.asarray(spans, dtype=np.int64).reshape(-1, 2)
+    ]
+
+
+def _check_estimation_spans(
+    n_samples: int,
+    continuity_spans: list[tuple[int, int]],
+    statistics_spans: list[tuple[int, int]],
+) -> None:
+    """Validate the span inputs of :func:`estimate_motion_in_spans`.
+
+    Raises
+    ------
+    ValueError
+        If the input has more than one continuity span (not supported yet),
+        the continuity span does not cover the recording, or the statistics
+        spans are empty, unsorted, overlapping or outside the recording.
+    """
+    if len(continuity_spans) != 1:
+        raise ValueError(
+            f"Motion estimation: the input has {len(continuity_spans)} "
+            "continuity spans (acquisition gaps or member joins); "
+            "discontinuous inputs are not supported yet. Estimate each "
+            "gap-free recording separately."
+        )
+    if continuity_spans != [(0, int(n_samples))]:
+        raise ValueError(
+            f"Motion estimation: continuity span {continuity_spans[0]} does "
+            f"not cover the recording's {n_samples} samples."
+        )
+    if not statistics_spans:
+        raise ValueError("Motion estimation: no statistics spans were given.")
+    previous_end = 0
+    for start, end in statistics_spans:
+        if not previous_end <= start < end <= n_samples:
+            raise ValueError(
+                "Motion estimation: statistics spans must be sorted, "
+                f"disjoint, non-empty and inside [0, {n_samples}); got "
+                f"{statistics_spans}."
+            )
+        previous_end = end
+
+
+def peaks_within_spans(
+    sample_index, spans: list[tuple[int, int]], *, n_before: int, n_after: int
+) -> np.ndarray:
+    """Mark peaks whose waveform window lies inside a single span.
+
+    A peak at frame ``s`` reads frames ``[s - n_before, s + n_after)``
+    (SpikeInterface's ``ExtractDenseWaveforms``,
+    ``core/node_pipeline.py:363-364``). It is kept only when some span
+    ``[a, b)`` holds all of them, so no kept localization reads a masked
+    sample, the zero padding past the recording's ends, or across a span edge.
+
+    Parameters
+    ----------
+    sample_index : numpy.ndarray
+        ``(n_peaks,)`` peak frames.
+    spans : list[tuple[int, int]]
+        Sorted, disjoint, half-open frame spans.
+    n_before, n_after : int
+        Keyword-only. Waveform frames before and from the peak.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_peaks,)`` bool mask of kept peaks.
+    """
+    sample_index = np.asarray(sample_index, dtype=np.int64)
+    starts = np.array([a for a, _ in spans], dtype=np.int64)
+    ends = np.array([b for _, b in spans], dtype=np.int64)
+    span = np.searchsorted(starts, sample_index, side="right") - 1
+    found = span >= 0
+    span = np.clip(span, 0, len(spans) - 1)
+    return (
+        found
+        & (sample_index - n_before >= starts[span])
+        & (sample_index + n_after <= ends[span])
+    )
+
+
+def _shank_labels(recording) -> set:
+    """Distinct shanks among a recording's channels.
+
+    A shank is an ``(electrode group, probe_shank)`` pair, read from the
+    electrode-table properties a v2 recording artifact carries; a recording
+    without them (a synthetic one) falls back to its probe's shank ids, and a
+    recording with neither counts as one shank.
+    """
+    keys = recording.get_property_keys()
+    n_channels = recording.get_num_channels()
+    if "probe_shank" in keys:
+        groups = (
+            recording.get_property("group")
+            if "group" in keys
+            else [""] * n_channels
+        )
+        shanks = recording.get_property("probe_shank")
+        return {(str(g), str(s)) for g, s in zip(groups, shanks)}
+    if recording.get_property("contact_vector") is not None:
+        shank_ids = recording.get_probe().shank_ids
+        if shank_ids is not None:
+            return {str(s) for s in shank_ids}
+    return {""}
+
+
+def check_estimation_eligibility(recording, resolved_params: dict) -> None:
+    """Refuse a recording whose geometry cannot support the recipe.
+
+    Flattens a reloaded artifact's constant third coordinate in place
+    (:func:`._recording_geometry.flatten_planar_geometry`), then requires:
+
+    - finite, distinct 2D contact positions;
+    - one shank (nonrigid windows are built along the motion axis only, so
+      several shanks would be registered as one column);
+    - a probe SpikeInterface can attach (``get_probe`` builds a dummy probe
+      from the locations; the estimator's spatial bins come from it,
+      ``sortingcomponents/motion/motion_utils.py:160-170``);
+    - a depth extent along the motion axis of at least the detection
+      ``radius_um``;
+    - for a nonrigid recipe, room for at least one step of spatial windows.
+      SpikeInterface computes ``(extent + 2 * margin) // win_step_um`` with
+      ``margin = win_margin_um`` or ``-win_scale_um / 2``
+      (``motion_utils.py:72-78``) and, when that is below 1, only warns and
+      builds a window layout other than the configured one
+      (``motion_utils.py:80-88``); this raises instead.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The recording to estimate on. Mutated only by the flattening.
+    resolved_params : dict
+        Output of :func:`resolve_estimation_params`.
+
+    Raises
+    ------
+    ValueError
+        Naming the first failed condition.
+    """
+    import warnings
+
+    from spyglass.spikesorting.v2._recording_geometry import (
+        flatten_planar_geometry,
+    )
+
+    if (
+        recording.get_property("contact_vector") is None
+        and recording.get_property("location") is None
+    ):
+        raise ValueError(
+            "Motion estimation: the recording carries no contact positions, "
+            "so no probe can be attached."
+        )
+    flatten_planar_geometry(recording)
+    positions = np.asarray(recording.get_channel_locations(), dtype=float)
+    if positions.ndim != 2 or positions.shape[1] != 2:
+        raise ValueError(
+            "Motion estimation: contact positions must be 2D after planar "
+            f"flattening; got shape {positions.shape}."
+        )
+    if not np.isfinite(positions).all():
+        raise ValueError(
+            "Motion estimation: contact positions must be finite; got "
+            f"{positions.tolist()}."
+        )
+    if len(np.unique(np.round(positions, 6), axis=0)) != len(positions):
+        raise ValueError(
+            "Motion estimation: two or more contacts share a position "
+            f"({positions.tolist()}); motion cannot be estimated on "
+            "coincident contacts."
+        )
+    shanks = _shank_labels(recording)
+    if len(shanks) > 1:
+        raise ValueError(
+            f"Motion estimation: the recording spans {len(shanks)} shanks "
+            f"({sorted(shanks)}); estimate one shank at a time."
+        )
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            recording.get_probe()
+    except Exception as exc:  # probeinterface raises assorted types
+        raise ValueError(
+            "Motion estimation: no probe can be attached to the recording "
+            f"after planar flattening ({exc})."
+        ) from exc
+
+    estimate = resolved_params["estimate_motion_kwargs"]
+    axis = "xyz".index(estimate["direction"])
+    if axis >= positions.shape[1]:
+        raise ValueError(
+            f"Motion estimation: motion direction {estimate['direction']!r} "
+            "is not an axis of the 2D contact positions."
+        )
+    extent = float(np.ptp(positions[:, axis]))
+    radius = float(resolved_params["detect_kwargs"]["radius_um"])
+    if extent < radius:
+        raise ValueError(
+            f"Motion estimation: the contacts span {extent:g} um along the "
+            f"motion axis, less than the detection radius_um ({radius:g}); "
+            "the probe is too short to track motion with this recipe."
+        )
+    if not estimate["rigid"]:
+        margin = estimate["win_margin_um"]
+        if margin is None:
+            margin = -float(estimate["win_scale_um"]) / 2.0
+        n_steps = (extent + 2.0 * float(margin)) // float(
+            estimate["win_step_um"]
+        )
+        if n_steps < 1:
+            raise ValueError(
+                f"Motion estimation: the contacts span {extent:g} um along "
+                "the motion axis, too short for the nonrigid windows "
+                f"(win_step_um={estimate['win_step_um']:g}, "
+                f"win_scale_um={estimate['win_scale_um']:g}, "
+                f"win_margin_um={estimate['win_margin_um']}); SpikeInterface "
+                "would silently change the window layout. Use a rigid recipe."
+            )
+
+
+def estimation_noise_levels(
+    recording, statistics_spans: list[tuple[int, int]], noise_kwargs: dict
+) -> np.ndarray:
+    """Per-channel noise the detection threshold is scaled by.
+
+    With spans that exclude samples, the MAD of seeded random samples drawn
+    only inside the statistics spans (``_sorting_dispatch.
+    cache_span_noise_levels``, the estimate the analyzer noise levels use),
+    so masked zeros and joins do not lower the threshold. With one span
+    covering the recording, SpikeInterface's own ``get_noise_levels`` -- the
+    call ``compute_motion`` makes (``preprocessing/motion.py:359``) -- with
+    its random chunks seeded, since the unseeded call is not repeatable
+    (``core/recording_tools.py:461-468``). ``n_jobs=1`` keeps the chunk
+    average in a fixed order.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The masked recording. Its ``noise_level_mad_raw`` property is set.
+    statistics_spans : list[tuple[int, int]]
+        Half-open frame spans of valid samples.
+    noise_kwargs : dict
+        ``resolved_params["noise_levels_kwargs"]``.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_channels,)`` float64 noise levels in recording units.
+    """
+    from spikeinterface.core import get_noise_levels
+
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        cache_span_noise_levels,
+    )
+
+    seed = int(noise_kwargs["seed"])
+    levels = cache_span_noise_levels(
+        recording,
+        statistics_spans,
+        return_in_uV=False,
+        seed=seed,
+        method=noise_kwargs["method"],
+    )
+    if levels is None:
+        levels = get_noise_levels(
+            recording,
+            return_in_uV=False,
+            method=noise_kwargs["method"],
+            force_recompute=True,
+            random_slices_kwargs={
+                "method": "full_random",
+                "num_chunks_per_segment": int(
+                    noise_kwargs["num_chunks_per_segment"]
+                ),
+                "chunk_duration": noise_kwargs["chunk_duration"],
+                "seed": seed,
+            },
+            n_jobs=1,
+        )
+    return np.asarray(levels, dtype=np.float64)
+
+
+def estimate_motion_in_spans(
+    recording,
+    *,
+    statistics_spans,
+    continuity_spans,
+    resolved_params: dict,
+    job_kwargs: dict | None = None,
+):
+    """Estimate motion from the valid samples of one continuous recording.
+
+    Reproduces SpikeInterface 0.104.3's ``compute_motion``
+    (``preprocessing/motion.py:279-461``) step by step with two changes:
+
+    1. ``noise_levels`` is passed explicitly (:func:`estimation_noise_levels`)
+       instead of ``compute_motion``'s unseeded ``get_noise_levels`` call
+       (``motion.py:359``).
+    2. Between localization and estimation, only peaks whose localization
+       window lies inside one statistics span are kept
+       (:func:`peaks_within_spans`).
+
+    Detection and localization run as ``compute_motion``'s own pipeline for an
+    empty ``select_kwargs`` (``motion.py:371-412``): the detector node, an
+    ``ExtractDenseWaveforms`` node with the 0.1/0.3 ms window (``motion.py:
+    387``) and the localization node, in one ``run_node_pipeline`` pass.
+    ``compute_motion``'s other branch (``motion.py:413-432``) is not used: its
+    ``localize_peaks`` defaults to a 0.5/0.5 ms window and, for
+    ``grid_convolution``, replaces the Gaussian prototype with one built from
+    the detected peaks (``sortingcomponents/peak_localization/main.py:44-56``),
+    so it would not reproduce what the presets run. Each peak is localized
+    from its own waveform, so dropping peaks after localization keeps the
+    other peaks' locations unchanged. ``estimate_motion`` then receives every
+    resolved argument explicitly. On one span covering the recording with no
+    peak dropped, the result equals ``compute_motion`` run with the same
+    seeded noise levels.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        Single-segment, unwhitened recording, already silenced over any masked
+        ranges. Mutated: its planar geometry is flattened and its
+        ``noise_level_mad_raw`` property set.
+    statistics_spans : array_like
+        ``(n, 2)`` half-open frame ranges of valid samples, sorted and
+        disjoint, each inside one continuity span.
+    continuity_spans : array_like
+        ``(m, 2)`` half-open frame ranges of uninterrupted acquisition covering
+        the recording. Only ``m == 1`` is supported.
+    resolved_params : dict
+        Output of :func:`resolve_estimation_params`.
+    job_kwargs : dict, optional
+        SpikeInterface job kwargs for the detect-and-localize pass. A
+        Spyglass ``random_seed`` key is ignored.
+
+    Returns
+    -------
+    motion : spikeinterface.core.motion.Motion
+        The single-segment estimate.
+    diagnostics : MotionDiagnostics
+        Peak counts and noise levels.
+
+    Raises
+    ------
+    ValueError
+        If the input has more than one continuity span, invalid spans, an
+        ineligible geometry (:func:`check_estimation_eligibility`), no kept
+        peaks, or a non-finite displacement.
+    """
+    from spikeinterface.core.job_tools import fix_job_kwargs
+    from spikeinterface.core.node_pipeline import (
+        ExtractDenseWaveforms,
+        run_node_pipeline,
+    )
+    from spikeinterface.sortingcomponents.motion import estimate_motion
+    from spikeinterface.sortingcomponents.peak_detection import (
+        detect_peak_methods,
+    )
+    from spikeinterface.sortingcomponents.peak_localization import (
+        peak_localization_methods,
+    )
+
+    if recording.get_num_segments() != 1:
+        raise ValueError(
+            "Motion estimation: expected a single-segment recording; got "
+            f"{recording.get_num_segments()} segments."
+        )
+    n_samples = int(recording.get_num_samples())
+    continuity = normalize_spans(continuity_spans)
+    statistics = normalize_spans(statistics_spans)
+    _check_estimation_spans(n_samples, continuity, statistics)
+    check_estimation_eligibility(recording, resolved_params)
+
+    noise_levels = estimation_noise_levels(
+        recording, statistics, resolved_params["noise_levels_kwargs"]
+    )
+    detect, localize, estimate = spikeinterface_step_kwargs(resolved_params)
+    job_kwargs = fix_job_kwargs(
+        {k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"}
+    )
+    window = resolved_params["localization_window_ms"]
+
+    detect_node = detect_peak_methods[detect.pop("method")](
+        recording, noise_levels=noise_levels, **detect
+    )
+    waveform_node = ExtractDenseWaveforms(
+        recording,
+        parents=[detect_node],
+        ms_before=float(window["ms_before"]),
+        ms_after=float(window["ms_after"]),
+    )
+    localize_node = peak_localization_methods[localize.pop("method")](
+        recording,
+        parents=[detect_node, waveform_node],
+        return_output=True,
+        **localize,
+    )
+    peaks, peak_locations = run_node_pipeline(
+        recording,
+        [detect_node, waveform_node, localize_node],
+        job_kwargs,
+        job_name="detect and localize",
+        gather_mode="memory",
+        gather_kwargs=None,
+        squeeze_output=False,
+        folder=None,
+        names=None,
+    )
+
+    keep = peaks_within_spans(
+        peaks["sample_index"],
+        statistics,
+        n_before=waveform_node.nbefore,
+        n_after=waveform_node.nafter,
+    )
+    n_kept = int(keep.sum())
+    if n_kept == 0:
+        raise ValueError(
+            f"Motion estimation: {len(peaks)} peaks were detected but none "
+            "has its localization window inside a statistics span; there is "
+            "no valid evidence to estimate motion from."
+        )
+    kept_peaks = peaks[keep]
+    motion = estimate_motion(
+        recording,
+        kept_peaks,
+        peak_locations[keep],
+        progress_bar=False,
+        **estimate,
+    )
+    displacement = np.asarray(motion.displacement[0])
+    if not np.isfinite(displacement).all():
+        raise ValueError(
+            "Motion estimation: the estimated displacement has "
+            f"{int((~np.isfinite(displacement)).sum())} non-finite values."
+        )
+    # Count against the histogram bins dredge_ap estimated on
+    # (``np.arange(t0, t_last + bin_s, bin_s)``, ``motion_utils.py:230-233``),
+    # recovered from the bin centers; ``Motion.temporal_bin_edges_s`` instead
+    # clips the outer edges to the outer centers (``core/motion.py:302-305``).
+    centers = np.asarray(motion.temporal_bins_s[0], dtype=float)
+    half_bin = float(estimate["bin_s"]) / 2.0
+    edges = np.append(centers - half_bin, centers[-1] + half_bin)
+    times = recording.sample_index_to_time(kept_peaks["sample_index"])
+    per_bin, _ = np.histogram(times, bins=edges)
+    return motion, MotionDiagnostics(
+        n_peaks_detected=int(len(peaks)),
+        n_peaks_kept=n_kept,
+        peaks_per_temporal_bin=per_bin.astype(np.int64),
+        noise_levels=noise_levels,
+    )
