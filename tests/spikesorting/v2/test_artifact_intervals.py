@@ -1209,7 +1209,8 @@ def test_scan_artifact_frames_raises_on_nan_at_n_jobs_2_process_pool(
 ):
     """The same ``ValueError`` reaches the caller under a REAL multi-process
     ``ChunkRecordingExecutor`` pool (``n_jobs=2``, ``pool_engine='process'``)
-    -- the propagation path the plan flagged as unverified.
+    -- a propagation path otherwise verified only by reading
+    SpikeInterface's source.
 
     SpikeInterface's ``process_function_wrapper``
     (``spikeinterface/core/job_tools.py``) calls the worker function
