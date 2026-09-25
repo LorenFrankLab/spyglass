@@ -1095,6 +1095,156 @@ def test_gain_conversion_low_threshold_flags_both_peaks():
 
 
 # --------------------------------------------------------------------------- #
+# I. Non-finite (NaN/Inf) traces fail loudly instead of silently reporting
+# "no artifacts". A NaN compares False against every threshold, so a
+# corrupted chunk would otherwise vanish into an empty result; the
+# finiteness check runs unconditionally before any threshold comparison.
+# --------------------------------------------------------------------------- #
+
+
+def test_compute_artifact_chunk_raises_on_single_nan_sample():
+    """One NaN sample (on one channel) makes the chunk detector raise a
+    ``ValueError`` naming the chunk's frame range and that channel's
+    non-finite count, instead of silently returning zero flagged runs."""
+    from spyglass.spikesorting.v2._artifact_compute import (
+        _compute_artifact_chunk,
+        _init_artifact_worker,
+    )
+
+    traces = np.zeros((100, 3), dtype="float32")
+    traces[42, 1] = np.nan  # channel 1 only
+    rec = _rec(traces)
+    ctx = _init_artifact_worker(
+        rec,
+        zscore_threshold=None,
+        amplitude_threshold_uv=1000.0,
+        proportion_above_threshold=1.0,
+    )
+    with pytest.raises(ValueError) as excinfo:
+        _compute_artifact_chunk(
+            segment_index=0, start_frame=0, end_frame=100, worker_ctx=ctx
+        )
+    msg = str(excinfo.value)
+    assert "segment 0" in msg, msg
+    assert "[0, 100)" in msg, msg
+    assert "channel 1: 1" in msg, msg
+    # Channels with zero non-finite samples are not named.
+    assert "channel 0:" not in msg and "channel 2:" not in msg, msg
+
+
+def test_compute_artifact_chunk_raises_on_all_nan_chunk():
+    """An all-NaN chunk (e.g. a corrupted segment) raises with the full
+    per-channel non-finite count for every channel, not a silent
+    all-quiet chunk."""
+    from spyglass.spikesorting.v2._artifact_compute import (
+        _compute_artifact_chunk,
+        _init_artifact_worker,
+    )
+
+    traces = np.full((50, 2), np.nan, dtype="float32")
+    rec = _rec(traces)
+    ctx = _init_artifact_worker(
+        rec,
+        zscore_threshold=None,
+        amplitude_threshold_uv=1000.0,
+        proportion_above_threshold=1.0,
+    )
+    with pytest.raises(ValueError) as excinfo:
+        _compute_artifact_chunk(
+            segment_index=0, start_frame=0, end_frame=50, worker_ctx=ctx
+        )
+    msg = str(excinfo.value)
+    assert "[0, 50)" in msg, msg
+    assert "channel 0: 50" in msg, msg
+    assert "channel 1: 50" in msg, msg
+
+
+def test_compute_artifact_chunk_finite_recording_unaffected():
+    """A fully-finite chunk is unaffected by the new guard (the guard is a
+    pure addition, not a behavior change on well-formed data)."""
+    from spyglass.spikesorting.v2._artifact_compute import (
+        _compute_artifact_chunk,
+        _init_artifact_worker,
+    )
+
+    traces = np.zeros((100, 2), dtype="float32")
+    traces[10, :] = 5000.0
+    rec = _rec(traces)
+    ctx = _init_artifact_worker(
+        rec,
+        zscore_threshold=None,
+        amplitude_threshold_uv=1000.0,
+        proportion_above_threshold=1.0,
+    )
+    runs = _compute_artifact_chunk(
+        segment_index=0, start_frame=0, end_frame=100, worker_ctx=ctx
+    )
+    assert runs.tolist() == [[10, 10]]
+
+
+def test_scan_artifact_frames_raises_on_nan_at_n_jobs_1():
+    """The finiteness ``ValueError`` (naming the frame range) reaches the
+    caller through ``scan_artifact_frames`` at ``n_jobs=1`` -- the
+    single-process path, where the live recording object is passed
+    straight to the worker (no pickling)."""
+    from spyglass.spikesorting.v2._artifact_intervals import (
+        scan_artifact_frames,
+    )
+
+    traces = np.zeros((3000, 2), dtype="float32")
+    traces[1500, 0] = np.nan
+    rec = _rec(traces)
+    validated = _artifact_params(amplitude_threshold_uv=1000.0)
+    with pytest.raises(ValueError, match=r"non-finite"):
+        scan_artifact_frames(
+            rec,
+            validated,
+            job_kwargs={"n_jobs": 1, "chunk_duration": "0.05s"},
+        )
+
+
+@pytest.mark.slow
+def test_scan_artifact_frames_raises_on_nan_at_n_jobs_2_process_pool(
+    tmp_path,
+):
+    """The same ``ValueError`` reaches the caller under a REAL multi-process
+    ``ChunkRecordingExecutor`` pool (``n_jobs=2``, ``pool_engine='process'``)
+    -- the propagation path the plan flagged as unverified.
+
+    SpikeInterface's ``process_function_wrapper``
+    (``spikeinterface/core/job_tools.py``) calls the worker function
+    directly with no ``try``/``except`` around it, so a worker exception
+    propagates through ``ProcessPoolExecutor.map`` like any other -- pickled
+    across the process boundary and re-raised in the parent when the result
+    iterator is consumed. ``ValueError`` (a builtin with only a string
+    ``args``) round-trips through pickling losslessly, so its message
+    survives. This test proves that end-to-end on a real process pool
+    rather than only reading the source.
+    """
+    from spyglass.spikesorting.v2._artifact_intervals import (
+        scan_artifact_frames,
+    )
+
+    traces = np.zeros((3000, 2), dtype="float32")
+    traces[1500, 0] = np.nan
+    rec = _rec(traces)
+    # Save to a binary folder so to_dict()/si.load() round-trips through the
+    # worker processes (an in-memory NumpyRecording is not dict-serializable).
+    saved = rec.save(folder=tmp_path / "rec")
+    validated = _artifact_params(amplitude_threshold_uv=1000.0)
+    with pytest.raises(ValueError, match=r"non-finite"):
+        scan_artifact_frames(
+            saved,
+            validated,
+            job_kwargs={
+                "n_jobs": 2,
+                "pool_engine": "process",
+                "chunk_duration": "0.05s",
+            },
+        )
+
+
+# --------------------------------------------------------------------------- #
 # H. The timestamp helpers stay LAZY on an explicit (h5py-backed) recording.
 #
 # ``Recording.get_recording`` loads the cached preprocessed NWB with

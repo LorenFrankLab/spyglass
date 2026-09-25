@@ -128,6 +128,29 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
         end_frame=end_frame,
         return_in_uV=True,
     ).astype(np.float32)
+
+    # Fail loudly on a non-finite chunk instead of silently reporting "no
+    # artifacts": a NaN (or Inf) sample compares False against every
+    # threshold below (``np.abs(nan) > x`` is False, and a NaN channel
+    # poisons that channel's mean/std for the z-score too), so a corrupted
+    # chunk -- one bad sample, or a whole all-NaN chunk -- would otherwise
+    # flag nothing and vanish into an empty interval list. ``get_traces``
+    # already read every sample above, so this scan is nearly free.
+    non_finite = ~np.isfinite(traces_uv)
+    if non_finite.any():
+        channel_ids = recording.get_channel_ids()
+        counts = non_finite.sum(axis=0)
+        per_channel = ", ".join(
+            f"channel {channel_ids[i]}: {int(counts[i])}"
+            for i in range(len(counts))
+            if counts[i] > 0
+        )
+        raise ValueError(
+            "_compute_artifact_chunk: non-finite (NaN/Inf) samples in "
+            f"segment {segment_index} frames [{start_frame}, {end_frame}): "
+            f"{per_channel} non-finite sample(s) each."
+        )
+
     absolute = np.abs(traces_uv)
 
     if amplitude_threshold_uv is not None:
