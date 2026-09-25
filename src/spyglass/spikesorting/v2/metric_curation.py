@@ -2193,15 +2193,20 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         ``statistics_spans`` are the sort's artifact-free, join-free frame
         spans (``Sorting.get_statistics_spans``); ``nn_noise_overlap`` draws
         its noise cluster only from inside them. They are set (via
-        ``noise_cluster_spans``) around the PC-metric compute only, which runs
-        in this process. ``sd_ratio``'s noise standard deviation is likewise
-        estimated from the span samples. ``None`` (or one span covering the
-        recording) keeps SpikeInterface's whole-recording estimates.
+        ``noise_cluster_spans``) around both metric computes, which run in
+        this process. ``sd_ratio``'s noise standard deviation is likewise
+        estimated from the span samples, and its correction for the unit's
+        own template variance counts only the spikes and samples inside
+        them. ``None`` (or one span covering the recording) keeps
+        SpikeInterface's whole-recording estimates.
         """
         import numpy as np
         import pandas as pd
         from spikeinterface.metrics.quality import compute_quality_metrics
 
+        from spyglass.spikesorting.v2._si_metric_patches import (
+            noise_cluster_spans,
+        )
         from spyglass.spikesorting.v2._sorting_analyzer import (
             ensure_extensions,
         )
@@ -2247,6 +2252,13 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 # the span samples there (same seed and budget as the
                 # analyzer's MAD), so masked zeros do not bias it low.
                 # Covering spans cache nothing and leave SI's estimator.
+                # SI's correction for the unit's own template variance must
+                # then count spikes and samples over the same spans; the
+                # patched metric reads them from noise_cluster_spans below
+                # (SI runs each metric in this thread).
+                from spyglass.spikesorting.v2._si_metric_patches import (
+                    patch_sd_ratio_statistics_spans,
+                )
                 from spyglass.spikesorting.v2._sorting_dispatch import (
                     cache_span_noise_levels,
                 )
@@ -2258,20 +2270,25 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                     seed=(job_kwargs or {}).get("random_seed", 0),
                     method="std",
                 )
-            voltage_df = compute_quality_metrics(
-                display_analyzer,
-                metric_names=voltage_names,
-                metric_params={
-                    k: v for k, v in metric_kwargs.items() if k in voltage_names
-                }
-                or None,
-                skip_pc_metrics=True,
-                # The analyzer is shared across curations; SI preserves the
-                # stored quality_metrics by default, so a prior curation's
-                # columns would leak into this result (and an auto-rule could
-                # threshold a stale metric). Compute only THIS row's metrics.
-                delete_existing_metrics=True,
-            )
+                patch_sd_ratio_statistics_spans()
+            with noise_cluster_spans(statistics_spans):
+                voltage_df = compute_quality_metrics(
+                    display_analyzer,
+                    metric_names=voltage_names,
+                    metric_params={
+                        k: v
+                        for k, v in metric_kwargs.items()
+                        if k in voltage_names
+                    }
+                    or None,
+                    skip_pc_metrics=True,
+                    # The analyzer is shared across curations; SI preserves
+                    # the stored quality_metrics by default, so a prior
+                    # curation's columns would leak into this result (and an
+                    # auto-rule could threshold a stale metric). Compute only
+                    # THIS row's metrics.
+                    delete_existing_metrics=True,
+                )
             voltage_df.index = voltage_df.index.astype(int)
             frames.append(voltage_df)
 
@@ -2290,7 +2307,6 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             # sparse fix. The PC compute below runs n_jobs=1 so the fix (a
             # main-process monkeypatch) is the code that actually runs.
             from spyglass.spikesorting.v2._si_metric_patches import (
-                noise_cluster_spans,
                 patch_nn_noise_overlap_sparsity,
             )
 

@@ -1,4 +1,4 @@
-"""Local fix for a SpikeInterface ``nn_noise_overlap`` bug on sparse analyzers.
+"""Local fixes for SpikeInterface quality metrics on sparse or masked sorts.
 
 SI's ``nearest_neighbors_noise_overlap`` (``spikeinterface.metrics.quality.
 pca_metrics``) sparsifies the per-unit noise cluster to the unit's sparse channel
@@ -27,6 +27,14 @@ The corrected metric must run in-process (``n_jobs=1``): SI parallelises
 and would not see this monkeypatch (nor the spans, which live in a
 ``ContextVar`` of the calling context), so the caller forces ``n_jobs=1`` for the
 PC/NN metric computation. Remove this shim once a fixed SpikeInterface is adopted.
+
+``sd_ratio`` divides by a noise std that, on a masked sort, is estimated from
+the statistics spans (``cache_span_noise_levels``), but SI's correction for
+the unit's own template variance counts the unit's spikes over every sample,
+masked ones included, so it under-subtracts and biases ``sd_ratio`` low.
+:func:`patch_sd_ratio_statistics_spans` takes that correction over the spikes
+and samples inside the spans set by :func:`noise_cluster_spans`; without
+spans (or with one covering the recording) it is SI's function, unchanged.
 """
 
 from __future__ import annotations
@@ -35,19 +43,23 @@ import contextlib
 import contextvars
 
 import spikeinterface as si
+import spikeinterface.metrics.quality.misc_metrics as _mm
 import spikeinterface.metrics.quality.pca_metrics as _pm
 
 from spyglass.utils import logger
 
-#: SI version families whose ``nearest_neighbors_noise_overlap`` carries the
-#: sparse bug this module patches. Revisit (and delete the shim) on SI upgrade.
+#: SI version families whose ``nearest_neighbors_noise_overlap`` and
+#: ``compute_sd_ratio`` this module patches. Revisit (and delete the shims)
+#: on SI upgrade.
 _VALIDATED_SI_PREFIXES = ("0.104",)
 
 _PATCH_FLAG = "_spyglass_v2_nn_noise_overlap_sparsity_patched"
+_SD_RATIO_PATCH_FLAG = "_spyglass_v2_sd_ratio_statistics_spans_patched"
 
-#: Statistics spans the nn noise cluster is drawn from, as a tuple of
-#: half-open ``(start, end)`` frame pairs of the analyzer's recording; ``None``
-#: keeps SI's whole-recording draw. Set only through ``noise_cluster_spans``.
+#: Statistics spans the nn noise cluster is drawn from and ``sd_ratio``'s
+#: template correction counts over, as a tuple of half-open ``(start, end)``
+#: frame pairs of the analyzer's recording; ``None`` keeps SI's
+#: whole-recording behavior. Set only through ``noise_cluster_spans``.
 _NOISE_CLUSTER_SPANS: contextvars.ContextVar[
     tuple[tuple[int, int], ...] | None
 ] = contextvars.ContextVar("nn_noise_cluster_spans", default=None)
@@ -55,14 +67,18 @@ _NOISE_CLUSTER_SPANS: contextvars.ContextVar[
 
 @contextlib.contextmanager
 def noise_cluster_spans(spans):
-    """Draw the nn noise cluster only from ``spans`` inside this block.
+    """Restrict the span-aware metrics to ``spans`` inside this block.
+
+    The nn noise cluster is drawn only from ``spans``, and ``sd_ratio``'s
+    template correction counts spikes and samples only inside them.
 
     Parameters
     ----------
     spans : list[tuple[int, int]] or None
-        Half-open statistics spans in the frame coordinates of the metric
-        analyzer's recording. ``None`` (or one span covering the recording)
-        keeps SpikeInterface's own draw.
+        Half-open statistics spans in the frame coordinates of the measured
+        analyzer's recording (the display and metric analyzers are built
+        on the same frames). ``None`` (or one span covering the recording)
+        keeps SpikeInterface's own behavior.
 
     Notes
     -----
@@ -317,3 +333,196 @@ def patch_nn_noise_overlap_sparsity() -> None:
         )
     _pm.nearest_neighbors_noise_overlap = _nn_noise_overlap_sparse_fixed
     setattr(_pm, _PATCH_FLAG, True)
+
+
+def _template_corrected_sd_ratio(
+    sorting_analyzer,
+    *,
+    n_spikes,
+    total_samples,
+    unit_ids=None,
+    periods=None,
+    censored_period_ms=4.0,
+    correct_for_drift=True,
+    peak_sign="neg",
+    **job_kwargs,
+):
+    """SI 0.104.3's ``sd_ratio`` with its template correction over a population.
+
+    SI's ``compute_sd_ratio`` divides the amplitude spread by
+    ``sqrt(std_noise**2 - template_variance)``, the noise std less the
+    variance a unit's own non-overlapping template adds to its extremum
+    channel, with ``p = len(template) * n_spikes / get_total_samples()``.
+    Here SI computes the uncorrected ratio (``correct_for_template_itself=
+    False``: same censoring, drift correction and NaN / 0.0 edge cases) and
+    the correction is applied to it with SI's formula and inputs -- the same
+    cached ``std`` noise level, extremum channel and dense template -- except
+    that ``p`` is taken over the given population::
+
+        p = len(template) * n_spikes[unit_id] / total_samples
+
+    The result equals SI's corrected value up to floating-point rounding
+    when ``n_spikes`` and ``total_samples`` are SI's own.
+
+    Parameters
+    ----------
+    sorting_analyzer : spikeinterface.SortingAnalyzer
+        Needs the ``templates`` and ``spike_amplitudes`` extensions.
+    n_spikes : dict
+        Keyword-only. ``{unit_id: int}`` spikes of the population the noise
+        std was measured on.
+    total_samples : int
+        Keyword-only. Samples in that population.
+    unit_ids, periods, censored_period_ms, correct_for_drift, peak_sign
+        Keyword-only. SI's ``compute_sd_ratio`` arguments, with its defaults.
+    **job_kwargs
+        SI's noise-level kwargs (e.g. ``random_slices_kwargs``), forwarded
+        to ``get_noise_levels`` as SI forwards them.
+
+    Returns
+    -------
+    dict
+        ``{unit_id: float}`` corrected ``sd_ratio``.
+    """
+    from spikeinterface.core import get_noise_levels
+
+    np = _mm.np
+    uncorrected = _mm.compute_sd_ratio(
+        sorting_analyzer,
+        unit_ids=unit_ids,
+        periods=periods,
+        censored_period_ms=censored_period_ms,
+        correct_for_drift=correct_for_drift,
+        correct_for_template_itself=False,
+        peak_sign=peak_sign,
+        **job_kwargs,
+    )
+    # SI's call above cached this std on the recording (or read the cached
+    # span std), so this is the std it divided by.
+    noise_levels = get_noise_levels(
+        sorting_analyzer.recording,
+        return_in_uV=sorting_analyzer.return_in_uV,
+        method="std",
+        **{**job_kwargs, "progress_bar": False},
+    )
+    best_channels = _mm.get_template_extremum_channel(
+        sorting_analyzer, outputs="index", peak_sign=peak_sign
+    )
+    templates_array = _mm.get_dense_templates_array(
+        sorting_analyzer, return_in_uV=sorting_analyzer.return_in_uV
+    )
+    corrected = {}
+    for unit_id, ratio in uncorrected.items():
+        best_channel = best_channels[unit_id]
+        unit_index = sorting_analyzer.sorting.id_to_index(unit_id)
+        template = templates_array[unit_index, :, best_channel]
+        # Changed vs SI: the population the noise std was measured on.
+        p = len(template) * n_spikes[unit_id] / total_samples
+        template_variance = (
+            p * np.mean(template**2) - p**2 * np.mean(template) ** 2
+        )
+        std_noise = noise_levels[best_channel]
+        # (unit_std / std_noise) * std_noise / corrected std is SI's
+        # unit_std / corrected std. SI's NaN (no spikes) stays NaN and its
+        # 0.0 (one spike) stays 0.0 whenever the corrected std is real.
+        corrected[unit_id] = (
+            ratio * std_noise / np.sqrt(std_noise**2 - template_variance)
+        )
+    return corrected
+
+
+def _span_spike_counts(sorting, spans):
+    """``{unit_id: int}`` spikes whose frame lies inside a half-open span."""
+    np = _mm.np
+    spike_vector = sorting.to_spike_vector()
+    frames = spike_vector["sample_index"]
+    starts = np.array([a for a, _ in spans], dtype=np.int64)
+    ends = np.array([b for _, b in spans], dtype=np.int64)
+    owner = np.searchsorted(starts, frames, side="right") - 1
+    inside = (owner >= 0) & (frames < ends[np.maximum(owner, 0)])
+    counts = np.bincount(
+        spike_vector["unit_index"][inside], minlength=len(sorting.unit_ids)
+    )
+    return {
+        unit_id: int(count) for unit_id, count in zip(sorting.unit_ids, counts)
+    }
+
+
+def _sd_ratio_statistics_spans(
+    sorting_analyzer,
+    unit_ids=None,
+    periods=None,
+    censored_period_ms=4.0,
+    correct_for_drift=True,
+    correct_for_template_itself=True,
+    peak_sign="neg",
+    **job_kwargs,
+):
+    """``compute_sd_ratio`` whose template correction uses the spans.
+
+    Same signature as SI 0.104.3's ``compute_sd_ratio``. Without statistics
+    spans set by :func:`noise_cluster_spans` (or with one span covering the
+    recording), or with ``correct_for_template_itself=False``, this is SI's
+    function, called unchanged. With spans, the noise std it divides by is
+    the std of the span samples (``cache_span_noise_levels``), so the
+    template correction takes ``p`` over the same population: the unit's
+    spikes whose frame lies inside a span, over the total span samples.
+    Counting a spike by its frame -- the sample index SI aligns its waveform
+    on -- selects the spikes whose waveforms the span samples contain; a
+    spike within a waveform length of a span edge contributes part of its
+    waveform either way, an edge effect SI's non-overlapping-template
+    approximation already neglects. The spans are in the frame
+    coordinates of ``sorting_analyzer``'s recording.
+    """
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        spans_cover_recording,
+    )
+
+    sd_ratio_kwargs = dict(
+        unit_ids=unit_ids,
+        periods=periods,
+        censored_period_ms=censored_period_ms,
+        correct_for_drift=correct_for_drift,
+        peak_sign=peak_sign,
+    )
+    spans = _NOISE_CLUSTER_SPANS.get()
+    if not correct_for_template_itself or spans_cover_recording(
+        spans, sorting_analyzer.get_total_samples()
+    ):
+        return _mm.compute_sd_ratio(
+            sorting_analyzer,
+            correct_for_template_itself=correct_for_template_itself,
+            **sd_ratio_kwargs,
+            **job_kwargs,
+        )
+    return _template_corrected_sd_ratio(
+        sorting_analyzer,
+        n_spikes=_span_spike_counts(sorting_analyzer.sorting, spans),
+        total_samples=sum(end - start for start, end in spans),
+        **sd_ratio_kwargs,
+        **job_kwargs,
+    )
+
+
+def patch_sd_ratio_statistics_spans() -> None:
+    """Idempotently route SI's ``sd_ratio`` metric through the spans.
+
+    SI's quality-metrics extension runs each metric as
+    ``metric_class.metric_function(...)``, so the ``SDRatio`` class
+    attribute is replaced; the module-level ``compute_sd_ratio`` stays
+    SI's own. The metric runs in the calling thread, so the spans set by
+    :func:`noise_cluster_spans` reach it. Warns (and still applies) outside
+    the validated SI versions.
+    """
+    if getattr(_mm.SDRatio, _SD_RATIO_PATCH_FLAG, False):
+        return
+    if not si.__version__.startswith(_VALIDATED_SI_PREFIXES):
+        logger.warning(
+            "spikesorting v2: SpikeInterface %s is outside the validated set "
+            "%s for the sd_ratio statistics-span patch; applying anyway -- "
+            "re-verify or remove this shim.",
+            si.__version__,
+            _VALIDATED_SI_PREFIXES,
+        )
+    _mm.SDRatio.metric_function = _sd_ratio_statistics_spans
+    setattr(_mm.SDRatio, _SD_RATIO_PATCH_FLAG, True)

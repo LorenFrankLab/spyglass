@@ -409,3 +409,206 @@ def test_nn_noise_overlap_invariant_to_excluded_sample_values(
 
     assert not np.array_equal(values["10mV", False], values["zeros", False])
     assert not np.all(np.isfinite(values["nan", False]))
+
+
+# ---------- sd_ratio template correction over the statistics spans ----------
+
+# ``sd_ratio_twins`` is seed 0 of a construction measured over seeds 0-29:
+# the span-corrected masked ``sd_ratio`` stays within 0.19% of the clean
+# twin's (max |masked / clean - 1|; per-unit sd <= 0.086%), while SI's
+# correction on the masked twin is low by at least 1.1%, 6.3% and 17% for
+# the three units. 0.5% clears the first with margin and stays below the
+# smallest of the second.
+_SD_RATIO_RTOL = 5e-3
+
+
+@pytest.fixture(scope="module")
+def sd_ratio_twins():
+    """Clean and 30%-masked analyzers over the same spikes and noise.
+
+    14 s, 4 channels, 10 uV white noise. Three units, each a fixed
+    waveform on its own channel only (peaks 60/100/150 uV, 10/20/30 Hz,
+    ISIs >= 5 ms so a unit's waveforms never overlap). Every spike sits at
+    least 4 ms from an excluded frame, so the two analyzers share their
+    waveforms, templates and spike amplitudes: only the noise estimate can
+    differ. Each recording caches its ``std`` noise from every frame it is
+    measured on -- the clean twin over every frame, the masked twin over
+    every retained frame (the span sampler's 10 s budget covers all 9.8 s
+    of them, so the estimate is deterministic).
+
+    Returns
+    -------
+    clean, masked : spikeinterface.SortingAnalyzer
+    spans : list[tuple[int, int]]
+        The masked twin's statistics spans.
+    """
+    import spikeinterface as si
+    from probeinterface import generate_linear_probe
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        silence_frame_ranges,
+        statistics_spans,
+    )
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        cache_span_noise_levels,
+    )
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        excluded_ranges,
+        numpy_recording,
+    )
+
+    n_samples, n_channels = int(14 * _FS), 4
+    rng = np.random.default_rng(0)
+    ranges = excluded_ranges(n_samples, 0.30)
+    spans = statistics_spans(n_samples, ranges, [(0, n_samples)])
+    assert sum(b - a for a, b in spans) <= 20 * int(0.5 * _FS)
+    margin = int(0.004 * _FS)
+    lags = np.arange(_NSAMPLES) - 30
+    shape = -np.exp(-0.5 * (lags / 4.0) ** 2) + 0.25 * np.exp(
+        -0.5 * ((lags - 18) / 10.0) ** 2
+    )
+    shape /= np.abs(shape).max()
+
+    traces = rng.normal(0.0, 10.0, size=(n_samples, n_channels))
+    traces = traces.astype("float32")
+    frames, labels = [], []
+    for unit, (peak, rate) in enumerate([(60, 10), (100, 20), (150, 30)]):
+        isi = 0.005 + rng.exponential(1 / rate - 0.005, size=40 * rate)
+        train = (np.cumsum(isi) * _FS).astype(np.int64)
+        keep = (train >= margin) & (train < n_samples - margin)
+        for start, end in ranges:
+            keep &= (train + margin <= start) | (train - margin >= end)
+        train = train[keep]
+        traces[train[:, None] + lags, unit] += (peak * shape).astype("float32")
+        frames.append(train)
+        labels.append(np.full(train.size, unit))
+    order = np.argsort(np.concatenate(frames), kind="stable")
+    sorting = si.NumpySorting.from_samples_and_labels(
+        [np.concatenate(frames)[order]], [np.concatenate(labels)[order]], _FS
+    )
+    probe = generate_linear_probe(num_elec=n_channels, ypitch=40)
+    probe.set_device_channel_indices(np.arange(n_channels))
+
+    def analyzer(recording):
+        out = si.create_sorting_analyzer(
+            sorting, recording, format="memory", sparse=False
+        )
+        out.compute("random_spikes", seed=0)
+        out.compute(
+            ["waveforms", "templates", "spike_amplitudes"], progress_bar=False
+        )
+        return out
+
+    clean = analyzer(numpy_recording(traces, probe))
+    clean.recording.set_property(
+        "noise_level_std_scaled", np.std(traces, axis=0)
+    )
+    masked = analyzer(
+        silence_frame_ranges(numpy_recording(traces, probe), ranges)
+    )
+    cache_span_noise_levels(
+        masked.recording, spans, return_in_uV=True, seed=0, method="std"
+    )
+    return clean, masked, spans
+
+
+def _si_sd_ratio(analyzer, **kwargs):
+    """SpikeInterface's own ``compute_sd_ratio`` as a unit-ordered array."""
+    import spikeinterface.metrics.quality.misc_metrics as mm
+
+    values = mm.compute_sd_ratio(analyzer, **kwargs)
+    return np.array([values[u] for u in analyzer.unit_ids])
+
+
+def test_sd_ratio_patch_replaces_the_dispatched_metric_function():
+    """SI calls ``SDRatio.metric_function``; the patch replaces exactly that.
+
+    ``BaseMetric.compute`` calls ``cls.metric_function``, and the
+    quality-metrics extension looks the class up in its ``metric_list``,
+    so the module-level ``compute_sd_ratio`` stays SI's own. Idempotent.
+    """
+    import spikeinterface.metrics.quality.misc_metrics as mm
+    from spikeinterface.metrics.quality.quality_metrics import (
+        ComputeQualityMetrics,
+    )
+
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        _sd_ratio_statistics_spans,
+        patch_sd_ratio_statistics_spans,
+    )
+
+    original = mm.compute_sd_ratio
+    for _ in range(2):
+        patch_sd_ratio_statistics_spans()
+        metric = ComputeQualityMetrics.get_metric_by_name("sd_ratio")
+        assert metric is mm.SDRatio
+        assert metric.metric_function is _sd_ratio_statistics_spans
+    assert mm.compute_sd_ratio is original
+
+
+@pytest.mark.parametrize("cover", ["none", "whole_recording"])
+def test_sd_ratio_unchanged_when_spans_cover_recording(sd_ratio_twins, cover):
+    """No spans, or one span over the recording, is SI's value bit for bit."""
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        _sd_ratio_statistics_spans,
+        noise_cluster_spans,
+    )
+
+    _, masked, _ = sd_ratio_twins
+    spans = None if cover == "none" else [(0, masked.get_total_samples())]
+    with noise_cluster_spans(spans):
+        values = _sd_ratio_statistics_spans(masked)
+    patched = np.array([values[u] for u in masked.unit_ids])
+    assert np.array_equal(patched, _si_sd_ratio(masked))
+
+
+def test_template_correction_reproduces_spikeinterface(sd_ratio_twins):
+    """Over SI's own spike population the correction is SI's, to rounding.
+
+    Given every spike and every sample -- SI's ``p`` -- the correction
+    applied to SI's uncorrected ratio reproduces SI's corrected ratio, so
+    the noise level, extremum channel and template it reads are SI's.
+    """
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        _template_corrected_sd_ratio,
+    )
+
+    _, masked, _ = sd_ratio_twins
+    values = _template_corrected_sd_ratio(
+        masked,
+        n_spikes=masked.sorting.count_num_spikes_per_unit(),
+        total_samples=masked.get_total_samples(),
+    )
+    corrected = np.array([values[u] for u in masked.unit_ids])
+    np.testing.assert_allclose(corrected, _si_sd_ratio(masked), rtol=1e-12)
+
+
+def test_sd_ratio_on_masked_sort_matches_clean_twin(sd_ratio_twins):
+    """Through SI's own metric dispatch, a masked sort's ``sd_ratio`` with
+    its statistics spans equals the clean twin's, while SI's correction
+    (every sample in the denominator) leaves it measurably low.
+    """
+    from spikeinterface.metrics.quality import compute_quality_metrics
+
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        noise_cluster_spans,
+        patch_sd_ratio_statistics_spans,
+    )
+
+    clean, masked, spans = sd_ratio_twins
+    patch_sd_ratio_statistics_spans()
+    with noise_cluster_spans(spans):
+        metrics = compute_quality_metrics(
+            masked,
+            metric_names=["sd_ratio"],
+            skip_pc_metrics=True,
+            delete_existing_metrics=True,
+        )
+    fixed = metrics["sd_ratio"].to_numpy(dtype=float)
+    target = _si_sd_ratio(clean)
+    uncorrected = _si_sd_ratio(masked)
+
+    np.testing.assert_allclose(fixed, target, rtol=_SD_RATIO_RTOL)
+    assert np.all(
+        uncorrected < target * (1 - _SD_RATIO_RTOL)
+    ), f"fixture does not discriminate: SI {uncorrected} vs clean {target}"

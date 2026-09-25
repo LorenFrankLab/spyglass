@@ -621,14 +621,15 @@ def _small_in_memory_analyzer():
 
 @pytest.mark.db_unit
 @pytest.mark.parametrize("pc_compute_raises", [False, True])
-def test_compute_metrics_scopes_noise_cluster_spans_to_pc_compute(
+def test_compute_metrics_scopes_noise_cluster_spans_to_metric_computes(
     dj_conn, monkeypatch, pc_compute_raises
 ):
-    """The spans are visible to the PC-metric compute only, then reset.
+    """The spans are visible to both metric computes, then reset.
 
-    The voltage-metric compute sees no spans; the PC-metric compute sees the
-    ones passed to ``_compute_metrics``; afterwards -- whether the PC compute
-    returned or raised -- the ContextVar is back to ``None``.
+    The voltage-metric compute (``sd_ratio``'s template correction) and the
+    PC-metric compute (the nn noise cluster) both see the spans passed to
+    ``_compute_metrics``; afterwards -- whether the PC compute returned or
+    raised -- the ContextVar is back to ``None``.
     """
     import spikeinterface.metrics.quality as sqm
 
@@ -667,7 +668,7 @@ def test_compute_metrics_scopes_noise_cluster_spans_to_pc_compute(
     else:
         metrics = compute()
         assert metrics["nn_noise_overlap"].notna().all()
-    assert seen == [(True, None), (False, tuple(spans))]
+    assert seen == [(True, tuple(spans)), (False, tuple(spans))]
     assert _NOISE_CLUSTER_SPANS.get() is None
 
 
@@ -739,10 +740,18 @@ def test_compute_metrics_sd_ratio_ignores_excluded_samples(dj_conn):
     +/-10 mV, then NaN: ``sd_ratio`` from ``_compute_metrics`` must be
     bit-identical and finite across the three. The std it divides by is
     the per-channel std of the span samples (SI's default 20 x 500 ms budget,
-    the job's ``random_seed``), cached on the display analyzer's recording.
+    the job's ``random_seed``), cached on the display analyzer's recording,
+    and the template correction is the span-restricted one: the value is
+    the patched metric's under the spans, above SI's own correction (which
+    counts every sample and so leaves it low).
     """
     import numpy as np
+    import spikeinterface.metrics.quality.misc_metrics as mm
 
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        _sd_ratio_statistics_spans,
+        noise_cluster_spans,
+    )
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
         sample_span_data,
     )
@@ -775,6 +784,15 @@ def test_compute_metrics_sd_ratio_ignores_excluded_samples(dj_conn):
             analyzer.recording.get_property("noise_level_std_scaled"),
             np.std(span_data, axis=0),
         ), fill
+
+        with noise_cluster_spans(spans):
+            patched = _sd_ratio_statistics_spans(analyzer)
+        si_value = mm.compute_sd_ratio(analyzer)
+        unit_ids = analyzer.unit_ids
+        assert np.array_equal(
+            results[fill], [patched[u] for u in unit_ids]
+        ), fill
+        assert np.all(results[fill] > [si_value[u] for u in unit_ids]), fill
 
     assert np.all(np.isfinite(results["zeros"])), results["zeros"]
     for fill in ("10mV", "nan"):
