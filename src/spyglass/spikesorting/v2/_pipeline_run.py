@@ -887,9 +887,6 @@ def run_v2_pipeline(
                 "session_group_owner": concat_session_group_owner,
                 "session_group_name": concat_session_group_name,
                 "preprocessing_params_name": bundle.preprocessing_params_name,
-                "motion_correction_params_name": (
-                    bundle.motion_correction_params_name
-                ),
             },
             artifact_detection_ids=artifact_ids,
         )

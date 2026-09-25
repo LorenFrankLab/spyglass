@@ -48,7 +48,6 @@ def concat_member_curation(chronic_2_session_minirec):
         {
             **group_key,
             "preprocessing_params_name": sub["preprocessing_params_name"],
-            "motion_correction_params_name": "none",
         }
     )
     ConcatenatedRecording.populate(concat_key, reserve_jobs=False)

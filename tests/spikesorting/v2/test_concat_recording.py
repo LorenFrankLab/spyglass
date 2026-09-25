@@ -1,7 +1,7 @@
 """Unit tests for the DB-free concatenated-recording service helpers.
 
-Drive ``_concat_recording`` directly -- motion-preset resolution and the
-sample-boundary / spike-train back-mapping math are pure, and the
+Drive ``_concat_recording`` directly -- the sample-boundary / spike-train
+back-mapping math is pure, and the
 concatenate path runs on synthetic ``NumpyRecording`` objects with no DB.
 """
 
@@ -11,61 +11,15 @@ import numpy as np
 import pytest
 
 from spyglass.spikesorting.v2._concat_recording import (
-    AUTO_SAME_DAY_PRESET,
     build_concatenated_recording,
     cumulative_member_boundaries,
     member_set_hash,
     member_split_key,
-    resolve_motion_correction,
     split_unit_spike_trains,
 )
 from spyglass.spikesorting.v2.exceptions import ConcatSplitError
 
 pytestmark = pytest.mark.unit
-
-
-# ---------- resolve_motion_correction --------------------------------------
-
-
-def test_resolve_motion_none_skips():
-    """``preset='none'`` resolves to no correction (None) with empty kwargs."""
-    assert resolve_motion_correction(
-        {"preset": "none", "preset_kwargs": {}}, is_multi_day=False
-    ) == (None, {})
-
-
-def test_resolve_motion_auto_same_day_maps_to_rigid_fast():
-    """``preset='auto'`` maps to the same-day preset for a single-day group."""
-    preset, kwargs = resolve_motion_correction(
-        {"preset": "auto", "preset_kwargs": {}}, is_multi_day=False
-    )
-    assert preset == AUTO_SAME_DAY_PRESET == "rigid_fast"
-    assert kwargs == {}
-
-
-def test_resolve_motion_auto_multi_day_raises():
-    """``preset='auto'`` is rejected for a multi-day group."""
-    with pytest.raises(ValueError, match="single-day only"):
-        resolve_motion_correction(
-            {"preset": "auto", "preset_kwargs": {}}, is_multi_day=True
-        )
-
-
-def test_resolve_motion_explicit_preset_passes_through():
-    """An explicit SI preset (and its kwargs) is returned unchanged, even on a
-    multi-day group."""
-    preset, kwargs = resolve_motion_correction(
-        {"preset": "dredge_fast", "preset_kwargs": {"detect_kwargs": {"x": 1}}},
-        is_multi_day=True,
-    )
-    assert preset == "dredge_fast"
-    assert kwargs == {"detect_kwargs": {"x": 1}}
-
-
-def test_resolve_motion_missing_preset_raises():
-    """A blob with no ``preset`` key is rejected."""
-    with pytest.raises(ValueError, match="no 'preset'"):
-        resolve_motion_correction({}, is_multi_day=False)
 
 
 # ---------- cumulative_member_boundaries -----------------------------------
@@ -291,85 +245,25 @@ def test_member_set_hash_normalizes_uuid_and_int_forms():
 # ---------- build_concatenated_recording -----------------------------------
 
 
-def test_build_concatenated_recording_no_motion_sums_samples():
-    """With ``motion_preset=None`` the members are stitched into one segment
-    whose sample count is the sum and whose channels are preserved."""
+def test_build_concatenated_recording_returns_members_traces_unchanged():
+    """The members are stitched into one segment whose traces are exactly the
+    members' traces in order: the sample count is the sum, the channels are
+    preserved, and no motion correction (or any other transform) runs."""
     import spikeinterface as si
 
     fs = 30_000.0
     rng = np.random.default_rng(0)
-    rec_a = si.NumpyRecording(
-        [rng.normal(0, 1, size=(300, 4)).astype(np.float32)],
-        sampling_frequency=fs,
-    )
-    rec_b = si.NumpyRecording(
-        [rng.normal(0, 1, size=(200, 4)).astype(np.float32)],
-        sampling_frequency=fs,
-    )
-    concat = build_concatenated_recording([rec_a, rec_b], motion_preset=None)
+    traces_a = rng.normal(0, 1, size=(300, 4)).astype(np.float32)
+    traces_b = rng.normal(0, 1, size=(200, 4)).astype(np.float32)
+    rec_a = si.NumpyRecording([traces_a], sampling_frequency=fs)
+    rec_b = si.NumpyRecording([traces_b], sampling_frequency=fs)
+    concat = build_concatenated_recording([rec_a, rec_b])
     assert concat.get_num_segments() == 1
     assert concat.get_num_samples() == 500
     assert list(concat.get_channel_ids()) == list(rec_a.get_channel_ids())
-
-
-def test_build_concatenated_recording_merges_overlapping_motion_kwargs(
-    monkeypatch,
-):
-    """An overlapping key (e.g. n_jobs) in both preset_kwargs and job_kwargs is
-    merged into one correct_motion call (job kwargs win) instead of
-    double-splatting into a TypeError."""
-    import spikeinterface as si
-    import spikeinterface.preprocessing as sp
-
-    captured = {}
-
-    def fake_correct_motion(recording, **kwargs):
-        captured.update(kwargs)
-        return recording
-
-    # build_concatenated_recording does `from spikeinterface.preprocessing
-    # import correct_motion` at call time, so patching the module attr is seen.
-    monkeypatch.setattr(sp, "correct_motion", fake_correct_motion)
-    rec = si.NumpyRecording(
-        [np.zeros((100, 4), dtype=np.float32)], sampling_frequency=30_000.0
+    np.testing.assert_array_equal(
+        concat.get_traces(), np.concatenate([traces_a, traces_b], axis=0)
     )
-    build_concatenated_recording(
-        [rec],
-        motion_preset="rigid_fast",
-        preset_kwargs={"n_jobs": 1, "detect_kwargs": {"x": 1}},
-        job_kwargs={"n_jobs": 4},
-    )
-    assert captured["preset"] == "rigid_fast"
-    assert captured["n_jobs"] == 4  # resolved job kwargs win on conflict
-    assert captured["detect_kwargs"] == {"x": 1}
-    assert captured["output_motion"] is False
-    assert captured["output_motion_info"] is False
-
-
-@pytest.mark.parametrize(
-    "bad_key, bad_val",
-    [
-        ("folder", "/tmp/motion"),  # side-artifact write
-        ("overwrite", True),  # side-artifact / return-type contract
-        ("output_motion", True),  # changes return type
-        ("detect_kwargs", {"x": 1}),  # motion param outside the concat identity
-    ],
-)
-def test_build_concatenated_recording_rejects_non_job_motion_job_kwargs(
-    bad_key, bad_val
-):
-    """A non-SI-job key in the resolved motion job_kwargs is rejected before it
-    can bind a correct_motion top-level param (side artifacts / return type /
-    motion params) and bypass the concat persistence contract."""
-    import spikeinterface as si
-
-    rec = si.NumpyRecording(
-        [np.zeros((50, 4), dtype=np.float32)], sampling_frequency=30_000.0
-    )
-    with pytest.raises(ValueError, match="non-job key"):
-        build_concatenated_recording(
-            [rec], motion_preset="rigid_fast", job_kwargs={bad_key: bad_val}
-        )
 
 
 # ---------- assert_concat_compatible ---------------------------------------
@@ -559,19 +453,3 @@ def test_electrode_signature_marks_missing_region_as_none():
         [{"electrode_group_name": "probeA", "electrode_id": 0}], {}
     )
     assert sig == (("probeA", 0, None),)
-
-
-def test_motion_removing_all_channels_has_actionable_error(monkeypatch):
-    import spikeinterface as si
-    import spikeinterface.preprocessing as sp
-
-    rec = si.NumpyRecording(
-        [np.zeros((100, 4), dtype=np.float32)], sampling_frequency=30_000
-    )
-    monkeypatch.setattr(
-        sp,
-        "correct_motion",
-        lambda recording, **kwargs: recording.select_channels([]),
-    )
-    with pytest.raises(ValueError, match="removed every channel.*probe border"):
-        build_concatenated_recording([rec], motion_preset="rigid_fast")

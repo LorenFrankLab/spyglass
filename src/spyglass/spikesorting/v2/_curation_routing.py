@@ -43,13 +43,10 @@ _REC_KEYS = (
 # Concat-source restriction keys: route through
 # ``SortingSelection.ConcatenatedRecordingSource`` ->
 # ``ConcatenatedRecordingSelection`` -> ``SessionGroup``.
-# ``motion_correction_params_name`` is included so a concat restriction can pin
-# the motion recipe too.
 _CONCAT_KEYS = (
     "concat_recording_id",
     "session_group_owner",
     "session_group_name",
-    "motion_correction_params_name",
 )
 # Cross-source restriction keys: columns present on BOTH ``RecordingSelection``
 # and ``ConcatenatedRecordingSelection`` (the preprocessing recipe is shared by
@@ -183,7 +180,7 @@ def classify_and_normalize_restriction(
         )
 
     # Route through the input source the restriction names. A concat
-    # restriction (concat_recording_id / session-group / motion recipe) and a
+    # restriction (concat_recording_id / session group) and a
     # single-recording restriction are mutually exclusive (a sort has exactly
     # one input source), so mixing them is a contradictory restriction and is
     # rejected.

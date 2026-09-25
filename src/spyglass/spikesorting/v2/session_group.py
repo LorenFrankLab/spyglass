@@ -2,7 +2,7 @@
 
 Implements same-day chronic concatenate-and-sort: ``SessionGroup`` names a
 bundle of sorting members, and ``ConcatenatedRecording`` materializes one
-motion-corrected, unwhitened concatenated recording cache from each member's
+masked, unwhitened concatenated recording cache from each member's
 already-populated ``Recording`` artifact. A ``SortingSelection`` then FKs
 ``ConcatenatedRecording`` (via its ``ConcatenatedRecordingSource`` part) and
 sorts the concatenation as one piece.
@@ -151,8 +151,7 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     group named ``"day1"`` without collision.
 
     Same-day groups are the default; multi-day requires
-    ``allow_multi_day=True`` AND forces an explicit
-    ``MotionCorrectionParameters`` row (see ``create_group``).
+    ``allow_multi_day=True`` (see ``create_group``).
 
     A direct ``insert`` / ``insert1`` and an in-place ``update1`` are blocked
     (``FactoryOnlyMaster``): a group is a provenance root that
@@ -211,10 +210,7 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         Recording dates are DERIVED from each member's
         ``Session.session_start_time``, never stored on Member rows and never
         caller-supplied. Same-day groups are the default; members spanning two
-        or more dates require ``allow_multi_day=True``. (Multi-day groups also
-        require an explicit, non-``auto`` motion-correction preset on the
-        downstream ``ConcatenatedRecording``; that is enforced in
-        ``ConcatenatedRecording.make``, not here.) For days/weeks-apart
+        or more dates require ``allow_multi_day=True``. For days/weeks-apart
         sessions the recommended path is sort-then-match, not concatenation.
 
         Parameters
@@ -481,7 +477,6 @@ class ConcatenatedRecordingSelection(
     ---
     -> SessionGroup
     -> PreprocessingParameters
-    -> MotionCorrectionParameters
     member_set_hash: char(64)   # sha256 of the ordered frozen member set; also folded into concat_recording_id
     """
 
@@ -524,7 +519,6 @@ class ConcatenatedRecordingSelection(
         "session_group_owner",
         "session_group_name",
         "preprocessing_params_name",
-        "motion_correction_params_name",
     )
 
     @classmethod
@@ -545,15 +539,15 @@ class ConcatenatedRecordingSelection(
         ``MissingRecordingForConcatError`` listing the offending member keys,
         not as a confusing nested-populate failure later.
 
-        Idempotent: a repeat request for the same (group, preprocessing,
-        motion) identity returns the existing ``concat_recording_id`` rather
-        than minting a second one.
+        Idempotent: a repeat request for the same (group, preprocessing)
+        identity over the same frozen member set returns the existing
+        ``concat_recording_id`` rather than minting a second one.
 
         Parameters
         ----------
         key : dict
-            Must carry ``session_group_owner``, ``session_group_name``,
-            ``preprocessing_params_name``, ``motion_correction_params_name``.
+            Must carry ``session_group_owner``, ``session_group_name``, and
+            ``preprocessing_params_name``.
             A caller-supplied ``concat_recording_id`` is ignored; the id is
             minted/found here.
         artifact_detection_ids : mapping
@@ -696,7 +690,7 @@ class ConcatenatedRecordingSelection(
         # Content-address the concat_recording_id from the logical identity AND
         # the ordered member-set hash (mirrors RecordingSelection /
         # SortingSelection): two callers that request the same (group,
-        # preprocessing, motion) over the same ordered member set compute the
+        # preprocessing) over the same ordered member set compute the
         # same id, so the PK-uniqueness constraint -- not a check-then-insert
         # dedup race -- is the concurrency guard. A different member set folds to
         # a different id rather than silently reusing this concat.
@@ -769,7 +763,7 @@ class ConcatenatedRecordingSelection(
     ) -> dict | None:
         """Return the canonical PK for this selection identity, or None.
 
-        The full logical identity (group + preprocessing + motion params) plus
+        The full logical identity (group + preprocessing params) plus
         the derived ``member_set_hash`` lives in the master's own columns, so it
         is checked against the master alone. Restricting on ``member_set_hash``
         too means two selections sharing a group name but over DIFFERENT frozen
@@ -823,10 +817,6 @@ class ConcatRecordingFetched(NamedTuple):
 
     member_plan: list[dict]
     preprocessing_params_name: str
-    motion_params: dict
-    motion_job_kwargs: dict | None
-    preprocessing_job_kwargs: dict | None
-    is_multi_day: bool
     anchor_nwb_file_name: str
 
 
@@ -835,7 +825,7 @@ class ConcatRecordingComputed(NamedTuple):
 
     DeepHash-stable scalars plus ``member_boundaries`` -- the per-member
     ``{"member_index" (int), "end_sample" (int)}`` rows derived from the
-    PRE-motion sample counts (``make_insert`` adds the master PK).
+    per-member sample counts (``make_insert`` adds the master PK).
     """
 
     analysis_file_name: str
@@ -852,19 +842,14 @@ class ConcatRecordingComputed(NamedTuple):
     # never cross a member join or a member-internal timestamp gap; every
     # estimator over the concat samples statistics only inside them.
     statistics_spans: object
-    # The RESOLVED motion-correction preset string ("rigid_fast" for an "auto"
-    # same-day request, the explicit preset otherwise, "none" when skipped) --
-    # resolved in make_compute and persisted so the row records what actually
-    # ran, not the unresolved alias.
-    motion_preset: str
 
 
 @schema
 class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     """Materialized cross-session concatenated recording cache.
 
-    Tri-part ``make`` writes a single motion-corrected, unwhitened
-    ``ElectricalSeries`` spanning the ordered member recordings, plus the
+    Tri-part ``make`` writes a single masked, unwhitened ``ElectricalSeries``
+    spanning the ordered member recordings (no motion correction), plus the
     cumulative per-member integer sample boundaries on the ``MemberBoundary``
     part (consumed by ``split_sorting_by_session``). Downstream
     ``SortingSelection`` FKs this table via its ``ConcatenatedRecordingSource``
@@ -882,7 +867,6 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     total_duration_s: float
     n_samples: bigint            # concat sample count; exact integer basis for the MemberBoundary back-mapping
     content_hash: char(64)
-    motion_preset: varchar(64)   # RESOLVED motion preset ('rigid_fast' for 'auto' same-day, the explicit preset, or 'none')
     obs_intervals: longblob     # kept intervals on the synthetic concat timeline, in seconds
     statistics_spans: longblob  # (n, 2) int64 half-open concat frame ranges: artifact-free and never crossing a member join or a member-internal timestamp gap
     """
@@ -1018,30 +1002,12 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         return member_plan
 
     @staticmethod
-    def _snapshot_is_multi_day(snapshot_rows) -> bool:
-        """Report whether the frozen member set spans two or more dates.
-
-        Derived from the snapshot's distinct ``nwb_file_name``s (the frozen
-        member set), not the live ``SessionGroup.Member`` rows, so a concat's
-        multi-day status is fixed once its id is minted. ``Session`` start times
-        are themselves immutable, so reading them live is safe.
-        """
-        nwb_keys = [
-            {"nwb_file_name": name}
-            for name in {row["nwb_file_name"] for row in snapshot_rows}
-        ]
-        if not nwb_keys:
-            return False
-        start_times = (Session & nwb_keys).fetch("session_start_time")
-        return len({start_time.date() for start_time in start_times}) > 1
-
-    @staticmethod
     def _load_member_recordings(member_plan):
         """Load each member's cached ``Recording`` from the resolved plan (SI I/O).
 
         The compute-side half: given the fetch-resolved ``member_plan`` (see
         :meth:`_resolve_snapshot_recordings`), load each cached ``Recording``
-        and collect the pre-motion sample count (the basis for the
+        and collect its sample count (the basis for the
         ``MemberBoundary`` back-mapping). Aligned element-wise in
         ``member_index`` order. No DB resolution happens here -- the PKs were
         pinned at fetch time.
@@ -1071,8 +1037,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         return recordings, member_sample_counts, member_indices
 
     # ``_parallel_make = True`` + the tri-part ``make_fetch`` / ``make_compute``
-    # / ``make_insert`` keep the long SpikeInterface concat + motion correction
-    # + NWB write OUTSIDE the framework's commit transaction (mirroring
+    # / ``make_insert`` keep the long SpikeInterface concat + NWB write
+    # OUTSIDE the framework's commit transaction (mirroring
     # ``Recording`` / ``Sorting``); a single ``make()`` held the lock for the
     # whole materialization.
     _parallel_make = True
@@ -1082,10 +1048,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
         Resolves the selection row, the FROZEN member snapshot (never the live
         ``SessionGroup.Member`` set) and each member's still-current ``Recording``
-        (raising if any is missing or its content drifted from the snapshot), the
-        motion-correction and preprocessing parameter blobs, and the group's
-        multi-day status. Returns a DeepHash-stable carrier so the framework's
-        two-fetch integrity check does not trip.
+        (raising if any is missing or its content drifted from the snapshot).
+        Returns a DeepHash-stable carrier so the framework's two-fetch
+        integrity check does not trip.
 
         Parameters
         ----------
@@ -1134,27 +1099,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # ids/geometry, different DB electrodes/regions).
         assert_members_share_electrode_space(snapshot)
         member_plan = self._resolve_snapshot_recordings(snapshot)
-        motion_row = (
-            MotionCorrectionParameters
-            & {
-                "motion_correction_params_name": (
-                    sel["motion_correction_params_name"]
-                )
-            }
-        ).fetch1()
-        preprocessing_job_kwargs = (
-            PreprocessingParameters
-            & {"preprocessing_params_name": preprocessing_params_name}
-        ).fetch1("job_kwargs")
         return ConcatRecordingFetched(
             member_plan=member_plan,
             preprocessing_params_name=preprocessing_params_name,
-            motion_params=motion_row["params"],
-            motion_job_kwargs=motion_row["job_kwargs"],
-            preprocessing_job_kwargs=preprocessing_job_kwargs,
-            # Multi-day status of the FROZEN member set (DB-derived); the 'auto'
-            # motion alias is resolved against it in compute.
-            is_multi_day=self._snapshot_is_multi_day(snapshot),
             anchor_nwb_file_name=snapshot[0]["nwb_file_name"],
         )
 
@@ -1163,23 +1110,19 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         key,
         member_plan,
         preprocessing_params_name,
-        motion_params,
-        motion_job_kwargs,
-        preprocessing_job_kwargs,
-        is_multi_day,
         anchor_nwb_file_name,
     ) -> ConcatRecordingComputed:
         """Materialize the concat cache outside any DB transaction.
 
         Reuses each member's already-populated, cached ``Recording`` artifact
         (NEVER calls ``Recording.populate`` -- the PKs were pinned in
-        ``make_fetch``), stitches them into one mono-segment recording, applies
-        motion correction (resolving the Spyglass ``"auto"`` alias to a same-day
-        preset and rejecting it on multi-day groups), and writes a single
-        ``ElectricalSeries`` into a fresh ``AnalysisNwbfile``. Whitening is
-        deliberately NOT applied here -- it stays a sorter/analyzer concern, so
-        the persisted concat recording is motion-corrected but unwhitened. The
-        cumulative per-member sample boundaries are carried to ``make_insert``.
+        ``make_fetch``), zeros each member's selected artifact intervals,
+        stitches the members into one mono-segment recording, and writes a
+        single ``ElectricalSeries`` into a fresh ``AnalysisNwbfile``. No motion
+        correction and no whitening are applied here -- whitening stays a
+        sorter/analyzer concern, so the persisted concat recording is the
+        masked, unwhitened concatenation of the member traces. The cumulative
+        per-member sample boundaries are carried to ``make_insert``.
 
         Returns
         -------
@@ -1187,11 +1130,10 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
         Raises
         ------
-        ValueError
-            If ``preset="auto"`` on a multi-day group.
         RuntimeError
-            If motion correction did not preserve the total sample count (which
-            would misalign the ``MemberBoundary`` back-mapping).
+            If the stitched recording's sample count differs from the summed
+            member sample counts (which would misalign the ``MemberBoundary``
+            back-mapping).
         """
         import numpy as np
 
@@ -1201,7 +1143,6 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             cumulative_member_boundaries,
             mask_member_recordings,
             observation_intervals,
-            resolve_motion_correction,
         )
         from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
         from spyglass.spikesorting.v2._sorting_artifact_mask import (
@@ -1210,7 +1151,6 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._units_nwb import (
             _base_intervals_from_recording,
         )
-        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         recordings, member_sample_counts, member_indices = (
             self._load_member_recordings(member_plan)
@@ -1239,58 +1179,40 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         ).reshape(-1, 2)
         recordings = masked_recordings
 
-        # Resolve the Spyglass 'auto' alias against the group's (fetch-time)
-        # multi-day status before any SpikeInterface call.
-        motion_preset, preset_kwargs = resolve_motion_correction(
-            motion_params, is_multi_day=is_multi_day
-        )
-        # Job kwargs: preprocessing first, motion last (motion wins on
-        # conflict), per the job-kwargs resolution contract.
-        job_kwargs = _resolved_job_kwargs(
-            preprocessing_job_kwargs, motion_job_kwargs
-        )
-
-        corrected = build_concatenated_recording(
-            recordings,
-            motion_preset=motion_preset,
-            preset_kwargs=preset_kwargs,
-            job_kwargs=job_kwargs,
-        )
+        concatenated = build_concatenated_recording(recordings)
 
         # Compute the member boundaries + recording metadata BEFORE staging the
         # NWB, so a failure in this pure arithmetic cannot orphan a staged file.
         boundaries = cumulative_member_boundaries(member_sample_counts)
-        corrected_n_samples = int(corrected.get_num_samples())
-        # Member boundaries come from the PRE-motion per-member sample counts;
-        # motion correction is interpolation that preserves sample count. Guard
-        # that invariant explicitly -- a mismatch (an SI change or an unexpected
-        # preset that resampled) would silently misalign the boundaries and
+        concat_n_samples = int(concatenated.get_num_samples())
+        # Member boundaries come from the per-member sample counts. Guard that
+        # the stitched recording has exactly their sum -- a mismatch (e.g. an SI
+        # concatenation change) would silently misalign the boundaries and
         # corrupt split_sorting_by_session's back-mapping.
-        if boundaries and corrected_n_samples != boundaries[-1]:
+        if boundaries and concat_n_samples != boundaries[-1]:
             raise RuntimeError(
-                "ConcatenatedRecording.make: the motion-corrected recording "
-                f"has {corrected_n_samples} samples but the cumulative member "
-                f"sample count is {boundaries[-1]}; motion correction must "
-                "preserve the sample count or the MemberBoundary back-mapping "
-                "would be wrong."
+                "ConcatenatedRecording.make: the concatenated recording has "
+                f"{concat_n_samples} samples but the cumulative member sample "
+                f"count is {boundaries[-1]}; the concatenation must preserve "
+                "the sample count or the MemberBoundary back-mapping would be "
+                "wrong."
             )
-        sampling_frequency = float(corrected.get_sampling_frequency())
-        # Keep the same excluded frames after spatial interpolation as before it.
-        corrected = silence_frame_ranges(corrected, artifact_ranges)
+        sampling_frequency = float(concatenated.get_sampling_frequency())
+        # Re-apply the excluded frames on the stitched recording so the written
+        # traces are exactly zero there.
+        concatenated = silence_frame_ranges(concatenated, artifact_ranges)
         obs_intervals = observation_intervals(
-            corrected_n_samples, sampling_frequency, artifact_ranges
+            concat_n_samples, sampling_frequency, artifact_ranges
         )
-        n_channels = int(corrected.get_num_channels())
-        total_duration_s = corrected_n_samples / sampling_frequency
+        n_channels = int(concatenated.get_num_channels())
+        total_duration_s = concat_n_samples / sampling_frequency
 
         # Anchor the analysis NWB to the FIRST member's session (deterministic
         # parent, resolved in make_fetch); full multi-session provenance stays
         # queryable through ConcatenatedRecordingSelection -> SessionGroup.Member.
-        preset_label = motion_preset or "none"
-        # Self-describing provenance: a header (the resolved motion preset +
-        # KWARGS -- the producing params, NOT the displacement field, which stays
-        # derivable) and the ordered member map with per-member frame boundaries,
-        # so split_sorting_by_session is reconstructable from the file alone.
+        # Self-describing provenance: a header and the ordered member map with
+        # per-member frame boundaries, so split_sorting_by_session is
+        # reconstructable from the file alone.
         from spyglass.spikesorting.v2._nwb_provenance import (
             CONCAT_MEMBERS,
             CONCAT_PROVENANCE,
@@ -1324,8 +1246,6 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 {
                     "concat_recording_id": str(key["concat_recording_id"]),
                     "preprocessing_params_name": preprocessing_params_name,
-                    "motion_preset": preset_label,
-                    "motion_kwargs": preset_kwargs,
                     "anchor_nwb_file_name": anchor_nwb_file_name,
                     "n_members": len(member_plan),
                     "artifact_frame_ranges": artifact_ranges,
@@ -1349,13 +1269,13 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             ),
         ]
         analysis_file_name, object_id, content_hash = write_nwb_artifact(
-            corrected,
+            concatenated,
             anchor_nwb_file_name,
             filtering_description=(
                 f"Concatenated {len(recordings)} member recording(s) "
                 f"(preprocessing_params={preprocessing_params_name!r}); "
-                f"motion correction preset={preset_label!r}; selected member artifact "
-                "masks applied before motion correction; unwhitened"
+                "selected member artifact masks applied; no motion "
+                "correction; unwhitened"
             ),
             provenance_tables=provenance_tables,
         )
@@ -1379,15 +1299,12 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             # above) -- the authoritative basis split-back checks the cumulative
             # MemberBoundary set against, avoiding a float total_duration_s*fs
             # round-trip.
-            n_samples=corrected_n_samples,
+            n_samples=concat_n_samples,
             content_hash=content_hash,
             anchor_nwb_file_name=anchor_nwb_file_name,
             member_boundaries=member_boundaries,
             obs_intervals=obs_intervals,
             statistics_spans=statistics_spans,
-            # Persist the RESOLVED preset ("rigid_fast" for "auto" same-day),
-            # not the alias; ``preset_label`` already maps a None (skip) to "none".
-            motion_preset=preset_label,
         )
 
     def make_insert(
@@ -1404,7 +1321,6 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         member_boundaries,
         obs_intervals,
         statistics_spans,
-        motion_preset,
     ):
         """Atomically register the staged concat artifact + boundary rows.
 
@@ -1443,7 +1359,6 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                         "total_duration_s": total_duration_s,
                         "n_samples": n_samples,
                         "content_hash": content_hash,
-                        "motion_preset": motion_preset,
                         "obs_intervals": obs_intervals,
                         "statistics_spans": statistics_spans,
                     }
@@ -1466,8 +1381,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         Rebuilds the concat NWB artifact on demand if the file is missing
         (mirroring ``Recording.get_recording``); the DataJoint row is never
         deleted by this path -- the stored ``content_hash`` is the source of
-        truth for re-verification. Reads the persisted motion-corrected,
-        unwhitened ``ElectricalSeries`` through the stored
+        truth for re-verification. Reads the persisted masked, unwhitened
+        ``ElectricalSeries`` through the stored
         ``electrical_series_path`` (authoritative, not an auto-detect hint) and
         annotates ``is_filtered=True`` so a downstream sorter does not re-filter
         the already-filtered cache.
@@ -1480,7 +1395,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         Returns
         -------
         si.BaseRecording
-            The concatenated, motion-corrected, unwhitened recording.
+            The concatenated, masked, unwhitened recording.
         """
         from pathlib import Path
 
@@ -1519,10 +1434,10 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         ``get_recording``. Ordering is load-bearing -- the atomic ``os.replace``
         precedes ``_resolve_external``.
 
-        Note: a motion-corrected concat is only byte-reproducible insofar as
-        ``correct_motion`` is deterministic; an irreproducible rebuild surfaces
-        loudly as ``RecordingContentDriftError`` rather than silently serving
-        different bytes (the fingerprint's trace rounding absorbs sub-µV noise).
+        An irreproducible rebuild (e.g. a changed SpikeInterface or NWB read
+        path) surfaces loudly as ``RecordingContentDriftError`` rather than
+        silently serving different bytes (the fingerprint's trace rounding
+        absorbs sub-µV noise).
         Safe to call directly (it takes the lock itself) and from
         ``get_recording`` (which does not hold the lock).
         """
@@ -1576,8 +1491,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                     f"stored content_hash {row['content_hash']} for "
                     f"{analysis_file_name!r}. The current environment no longer "
                     "reproduces this concatenated recording (e.g. a "
-                    "SpikeInterface/BLAS upgrade, a changed member recording, or "
-                    "non-deterministic motion correction). The canonical artifact "
+                    "SpikeInterface/BLAS upgrade or a changed member recording). "
+                    "The canonical artifact "
                     "was NOT modified. Recover by restoring a backup, rerunning "
                     "under the original environment, or deleting and repopulating "
                     "the ConcatenatedRecording row (and its downstream)."

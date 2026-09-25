@@ -1979,7 +1979,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         A standalone source returns its reusable preprocessed ``Recording``;
         its sorting-stage artifact mask is not applied here. A concat source
         returns the materialized ``ConcatenatedRecording``, which includes
-        member masks and motion correction. Use ``CurationRef.open_analyzer``
+        the member masks. Use ``CurationRef.open_analyzer``
         for the masked traces used by sorting/QC in either mode.
 
         ``@classmethod`` so the merge-table dispatcher's
@@ -2309,7 +2309,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
           ``SortingSelection.RecordingSource`` -> ``SortingSelection`` ->
           ``ArtifactDetectionSource``;
         - concat keys (``concat_recording_id`` / ``session_group_owner`` /
-          ``session_group_name`` / ``motion_correction_params_name``) route
+          ``session_group_name``) route
           ``ConcatenatedRecordingSelection`` ->
           ``SortingSelection.ConcatenatedRecordingSource`` ->
           ``SortingSelection``;

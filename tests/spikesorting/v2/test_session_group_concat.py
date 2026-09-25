@@ -394,7 +394,6 @@ def test_concat_selection_inserts_and_is_idempotent(same_day_group):
     request = {
         **grp["group_key"],
         "preprocessing_params_name": grp["preprocessing_params_name"],
-        "motion_correction_params_name": "none",
     }
     pk = select_unmasked_concat(request)
     assert set(pk) == {"concat_recording_id"}
@@ -420,7 +419,6 @@ def test_concat_id_folds_member_set(same_day_group):
         {
             **grp["group_key"],
             "preprocessing_params_name": grp["preprocessing_params_name"],
-            "motion_correction_params_name": "none",
         }
     )
     row = (ConcatenatedRecordingSelection & pk).fetch1()
@@ -457,7 +455,6 @@ def test_concat_member_snapshot_freezes_recording_identity(same_day_group):
         {
             **grp["group_key"],
             "preprocessing_params_name": grp["preprocessing_params_name"],
-            "motion_correction_params_name": "none",
         }
     )
     snap = (ConcatenatedRecordingSelection.MemberSnapshot & pk).fetch(
@@ -487,7 +484,6 @@ def test_concat_id_changes_with_member_set(same_day_group):
         {
             **grp["group_key"],
             "preprocessing_params_name": grp["preprocessing_params_name"],
-            "motion_correction_params_name": "none",
         }
     )
     # A second group over only the first member -- same owner + params, a
@@ -501,7 +497,6 @@ def test_concat_id_changes_with_member_set(same_day_group):
             "session_group_owner": owner,
             "session_group_name": "sg_concat_subset",
             "preprocessing_params_name": grp["preprocessing_params_name"],
-            "motion_correction_params_name": "none",
         }
     )
     assert subset["concat_recording_id"] != both["concat_recording_id"]
@@ -527,7 +522,6 @@ def test_concat_member_edit_remints_id_and_freezes_old_snapshot(
     request = {
         **grp["group_key"],
         "preprocessing_params_name": grp["preprocessing_params_name"],
-        "motion_correction_params_name": "none",
     }
     original = select_unmasked_concat(dict(request))
     original_snapshot = (
@@ -584,7 +578,6 @@ def test_concat_selection_missing_recording_raises(chronic_2_session_minirec):
                     "session_group_owner": owner,
                     "session_group_name": name,
                     "preprocessing_params_name": "default",
-                    "motion_correction_params_name": "none",
                 }
             )
     finally:
@@ -647,7 +640,6 @@ def test_concat_make_fetch_rejects_mismatched_electrode_space(
             "preprocessing_params_name": same_day_group[
                 "preprocessing_params_name"
             ],
-            "motion_correction_params_name": "none",
         }
     )
     # Simulate post-selection drift: the per-member electrode/region signatures
@@ -758,56 +750,24 @@ def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
-@pytest.mark.slow
-def test_concat_selection_distinct_for_distinct_motion_params(same_day_group):
-    """Changing only the motion-correction recipe yields a distinct
-    concat_recording_id (independent selections)."""
-    from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecordingSelection,
-        MotionCorrectionParameters,
-    )
-
-    MotionCorrectionParameters.insert_default()
-    grp = same_day_group
-    base = {
-        **grp["group_key"],
-        "preprocessing_params_name": grp["preprocessing_params_name"],
-    }
-    none_pk = select_unmasked_concat(
-        {**base, "motion_correction_params_name": "none"}
-    )
-    rigid_pk = select_unmasked_concat(
-        {**base, "motion_correction_params_name": "rigid_fast_default"}
-    )
-    assert none_pk["concat_recording_id"] != rigid_pk["concat_recording_id"]
-
-
 # ---------- ConcatenatedRecording.make / get_recording -------------------
 
 
-def _concat_selection(group_key, preprocessing_params_name, motion="none"):
-    """Insert a ConcatenatedRecordingSelection (any motion preset); return PK."""
-    from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecordingSelection,
-        MotionCorrectionParameters,
-    )
-
-    if motion != "none":
-        MotionCorrectionParameters.insert_default()
+def _concat_selection(group_key, preprocessing_params_name):
+    """Insert an unmasked ConcatenatedRecordingSelection; return its PK."""
     return select_unmasked_concat(
         {
             **group_key,
             "preprocessing_params_name": preprocessing_params_name,
-            "motion_correction_params_name": motion,
         }
     )
 
 
-def _populate_concat(group_key, preprocessing_params_name, motion="none"):
+def _populate_concat(group_key, preprocessing_params_name):
     """Insert + populate a ConcatenatedRecording; return its PK."""
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
-    concat_pk = _concat_selection(group_key, preprocessing_params_name, motion)
+    concat_pk = _concat_selection(group_key, preprocessing_params_name)
     ConcatenatedRecording.populate(concat_pk, reserve_jobs=False)
     return concat_pk
 
@@ -851,7 +811,6 @@ def _member_snapshot(grp):
         {
             **grp["group_key"],
             "preprocessing_params_name": grp["preprocessing_params_name"],
-            "motion_correction_params_name": "none",
         }
     )
     return (ConcatenatedRecordingSelection.MemberSnapshot & sel).fetch(
@@ -962,8 +921,7 @@ def test_concatenated_recording_make_shape(same_day_group):
 def test_concat_get_recording_rebuilds_on_missing(same_day_group):
     """A missing concat cache file is rebuilt on demand: ``get_recording``
     reconciles the ``~external`` checksum and returns a valid, content-identical
-    recording -- mirroring ``Recording.get_recording``. Uses ``motion='none'`` so
-    the rebuild is bit-deterministic."""
+    recording -- mirroring ``Recording.get_recording``."""
     import numpy as np
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -971,7 +929,7 @@ def test_concat_get_recording_rebuilds_on_missing(same_day_group):
 
     grp = same_day_group
     concat_pk = _populate_concat(
-        grp["group_key"], grp["preprocessing_params_name"], motion="none"
+        grp["group_key"], grp["preprocessing_params_name"]
     )
     row = (ConcatenatedRecording & concat_pk).fetch1()
     abs_path = AnalysisNwbfile.get_abs_path(
@@ -1006,7 +964,7 @@ def test_concat_rebuild_refuses_on_content_drift(same_day_group, monkeypatch):
 
     grp = same_day_group
     concat_pk = _populate_concat(
-        grp["group_key"], grp["preprocessing_params_name"], motion="none"
+        grp["group_key"], grp["preprocessing_params_name"]
     )
     row = (ConcatenatedRecording & concat_pk).fetch1()
     abs_path = AnalysisNwbfile.get_abs_path(
@@ -1053,7 +1011,7 @@ def test_concat_split_conserves_all_spikes(same_day_group):
 
     grp = same_day_group
     concat_pk = _populate_concat(
-        grp["group_key"], grp["preprocessing_params_name"], motion="none"
+        grp["group_key"], grp["preprocessing_params_name"]
     )
     n0, n1 = _member_sample_counts(grp)
     total = n0 + n1
@@ -1113,11 +1071,9 @@ def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
 
     It embeds the ordered member provenance + frame boundaries that reproduce
     ``split_sorting_by_session``'s mapping without reading live
-    ``SessionGroup.Member``, plus the RESOLVED motion preset + kwargs (the
-    producing params, not the displacement field).
+    ``SessionGroup.Member``. The header carries no motion-correction fields:
+    concatenation does not correct motion.
     """
-    import pynwb
-
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._nwb_provenance import (
         CONCAT_MEMBERS,
@@ -1132,9 +1088,7 @@ def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
 
     grp = same_day_group
     concat_pk = _populate_concat(
-        grp["group_key"],
-        grp["preprocessing_params_name"],
-        motion="auto_default",
+        grp["group_key"], grp["preprocessing_params_name"]
     )
     row = (ConcatenatedRecording & concat_pk).fetch1()
     abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
@@ -1143,10 +1097,7 @@ def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
     assert header["concat_recording_id"] == str(
         concat_pk["concat_recording_id"]
     )
-    # The RESOLVED preset (e.g. rigid_fast for auto same-day), and the producing
-    # kwargs -- not the displacement field.
-    assert header["motion_preset"] == row["motion_preset"]
-    assert isinstance(header["motion_kwargs"], dict)
+    assert not any("motion" in field for field in header)
 
     members = sorted(
         read_long_provenance(abs_path, CONCAT_MEMBERS),
@@ -1180,30 +1131,6 @@ def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
         exp = expected[m["member_index"]]
         assert m["nwb_file_name"] == exp["nwb_file_name"]
         assert m["interval_list_name"] == exp["interval_list_name"]
-
-    # The motion displacement field is NOT written (params only).
-    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
-        scratch_names = set(io.read().scratch.keys())
-    assert not any("displacement" in name for name in scratch_names)
-
-
-@pytest.mark.slow
-def test_resolved_motion_preset_persisted(same_day_group):
-    """A same-day concat built with ``preset='auto'`` stores the RESOLVED preset
-    string (``'rigid_fast'``) on the row, not the unresolved ``'auto'`` alias --
-    so the row records what motion correction actually ran.
-    """
-    from spyglass.spikesorting.v2._concat_recording import AUTO_SAME_DAY_PRESET
-    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
-
-    grp = same_day_group
-    concat_pk = _populate_concat(
-        grp["group_key"],
-        grp["preprocessing_params_name"],
-        motion="auto_default",
-    )
-    stored = (ConcatenatedRecording & concat_pk).fetch1("motion_preset")
-    assert stored == AUTO_SAME_DAY_PRESET == "rigid_fast"
 
 
 @pytest.mark.slow
@@ -1257,45 +1184,49 @@ def test_concat_make_uses_selection_row_not_uuid_key(same_day_group):
 
 
 @pytest.mark.slow
-def test_concatenated_recording_make_with_rigid_fast_motion(same_day_group):
-    """Materializing with a REAL motion preset (rigid_fast) runs correct_motion
-    on the concatenated segment and preserves the sample count, so the
-    MemberBoundary back-mapping stays valid. Exercises the production motion
-    branch (resolve_motion_correction -> real preset, job-kwargs resolution, the
-    correct_motion call) and the post-motion sample-count invariant -- the
-    other materialization tests use preset='none' and never run motion."""
+def test_concatenated_recording_is_the_uncorrected_member_concatenation(
+    same_day_group,
+):
+    """Materialization applies no motion correction: the persisted traces are
+    exactly the members' stored traces in member order (an unmasked selection),
+    every member channel is kept, and the MemberBoundary ends are the running
+    member sample counts."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
     grp = same_day_group
     concat_pk = _populate_concat(
-        grp["group_key"],
-        grp["preprocessing_params_name"],
-        "rigid_fast_default",
+        grp["group_key"], grp["preprocessing_params_name"]
     )
-
-    n0, n1 = _member_sample_counts(grp)
+    members = [
+        Recording().get_recording(rec_pk) for rec_pk in grp["recording_pks"]
+    ]
+    n0, n1 = (member.get_num_samples() for member in members)
     row = (ConcatenatedRecording & concat_pk).fetch1()
-    fs = float(row["sampling_frequency"])
-    # Motion correction is interpolation -> sample count preserved -> the
-    # boundaries (built from PRE-motion member counts) remain valid.
-    assert row["total_duration_s"] == pytest.approx((n0 + n1) / fs)
+    concat = ConcatenatedRecording().get_recording(concat_pk)
+
+    np.testing.assert_array_equal(
+        concat.get_traces(),
+        np.concatenate([member.get_traces() for member in members], axis=0),
+    )
+    for member in members:
+        assert concat.get_num_channels() == member.get_num_channels()
+    assert row["n_channels"] == members[0].get_num_channels()
+    assert row["n_samples"] == n0 + n1
     ends = (ConcatenatedRecording.MemberBoundary & concat_pk).fetch(
         "end_sample", order_by="member_index"
     )
     assert [int(e) for e in ends] == [n0, n0 + n1]
-    assert (
-        ConcatenatedRecording().get_recording(concat_pk).get_num_samples()
-        == n0 + n1
-    )
 
 
 @pytest.mark.slow
-def test_concat_make_raises_on_motion_sample_count_drift(
-    same_day_group, monkeypatch
-):
-    """If motion correction ever changed the sample count, make() raises
-    (and persists nothing) rather than writing MemberBoundary rows that would
-    misalign split_sorting_by_session's back-mapping."""
+def test_concat_make_raises_on_sample_count_drift(same_day_group, monkeypatch):
+    """If the stitched recording's sample count ever differed from the summed
+    member counts, make() raises (and persists nothing) rather than writing
+    MemberBoundary rows that would misalign split_sorting_by_session's
+    back-mapping."""
     import numpy as np
     import spikeinterface as si
 
@@ -1305,10 +1236,8 @@ def test_concat_make_raises_on_motion_sample_count_drift(
         ConcatenatedRecordingSelection,
     )
 
-    def _drifted(
-        recordings, *, motion_preset, preset_kwargs=None, job_kwargs=None
-    ):
-        # Simulate a motion step that changed the sample count.
+    def _drifted(recordings):
+        # Simulate a concatenation that changed the sample count.
         total = sum(int(r.get_num_samples()) for r in recordings)
         return si.NumpyRecording(
             [np.zeros((total + 1, 4), dtype=np.float32)],
@@ -1317,7 +1246,7 @@ def test_concat_make_raises_on_motion_sample_count_drift(
 
     grp = same_day_group
     concat_pk = _concat_selection(
-        grp["group_key"], grp["preprocessing_params_name"], "none"
+        grp["group_key"], grp["preprocessing_params_name"]
     )
     monkeypatch.setattr(concat_mod, "build_concatenated_recording", _drifted)
     # Drive make_compute directly so the raw RuntimeError surfaces; it raises
@@ -1327,59 +1256,6 @@ def test_concat_make_raises_on_motion_sample_count_drift(
     with pytest.raises(RuntimeError, match="sample count"):
         ConcatenatedRecording().make_compute(concat_pk, **fetched._asdict())
     assert not (ConcatenatedRecording & concat_pk)
-
-
-@pytest.mark.slow
-def test_motion_correction_preset_auto_rejects_multi_day(
-    chronic_2_session_minirec,
-):
-    """A multi-day group with the 'auto' motion preset is rejected at
-    materialization: 'auto' is single-day only, no silent DREDge dispatch."""
-    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
-    from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecording,
-        SessionGroup,
-    )
-    from tests.spikesorting.v2._ingest_helpers import (
-        clean_session_groups_for_owner,
-    )
-
-    sub = chronic_2_session_minirec
-    owner, name = sub["owner"], "sg_multi_auto"
-
-    # The 'auto' preset rejection happens at make() time, AFTER the
-    # selection-time precondition that every member has a populated Recording,
-    # so the next-day member's Recording must be populated first.
-    next_day = sub["next_day_member"]
-    next_day_rec_pk = RecordingSelection.insert_selection(
-        {
-            **next_day,
-            "preprocessing_params_name": "default",
-            "team_name": owner,
-        }
-    )
-    if not (Recording & next_day_rec_pk):
-        Recording.populate(next_day_rec_pk, reserve_jobs=False)
-
-    members = [sub["same_day_members"][0], next_day]
-    SessionGroup.create_group(owner, name, members, allow_multi_day=True)
-    try:
-        concat_pk = _concat_selection(
-            {"session_group_owner": owner, "session_group_name": name},
-            "default",
-            "auto_default",
-        )
-        # Drive make_compute directly so the raw ValueError surfaces (populate
-        # would wrap it). resolve_motion_correction raises before any artifact
-        # write; make_fetch resolves the (multi-day) status it checks against.
-        fetched = ConcatenatedRecording().make_fetch(concat_pk)
-        with pytest.raises(ValueError, match="single-day only"):
-            ConcatenatedRecording().make_compute(concat_pk, **fetched._asdict())
-        assert not (ConcatenatedRecording & concat_pk)
-    finally:
-        clean_session_groups_for_owner(owner)
-        (Recording & next_day_rec_pk).super_delete(warn=False)
-        (RecordingSelection & next_day_rec_pk).super_delete(warn=False)
 
 
 # ---------- concat-backed Sorting end-to-end ------------------------------
@@ -1843,7 +1719,7 @@ def test_concat_chronic_real_dataset_memory_runtime(request, dj_conn):
     polymer probe), and runs the Phase end-to-end path
     (``ConcatenatedRecording.populate`` then concat-backed ``Sorting.populate``).
     Asserts peak RSS < 8 GB and total runtime < 10 min on a 16-core machine,
-    and logs the materialization vs sort timings separately so motion-correction
+    and logs the materialization vs sort timings separately so concatenation
     vs sorter cost is visible. Reports timing + memory even on pass."""
     import os
 

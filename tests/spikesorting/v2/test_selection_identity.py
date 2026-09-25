@@ -800,7 +800,6 @@ def test_direct_master_insert_rejected_without_flag(fresh_recording_identity):
                 "session_group_owner": "o",
                 "session_group_name": "g",
                 "preprocessing_params_name": "p",
-                "motion_correction_params_name": "m",
             },
         ),
     ],

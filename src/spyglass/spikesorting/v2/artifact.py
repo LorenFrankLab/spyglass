@@ -115,8 +115,8 @@ class ArtifactDetectionParameters(
     proportion) and ``"franklab_50uv_p07_2026_06"`` (50 uV, 0.7). A preset that
     omits ``artifact_detection_params_name`` runs no detection at all (no
     ``ArtifactDetectionSource`` row on a standalone sort, or all-null member
-    detections on a concat selection). Concat presets otherwise apply this
-    detector independently to each member before motion correction.
+    detections on a concat selection). In concat mode this detector runs
+    independently on each member before concatenation.
 
     ``job_kwargs`` is the optional per-row SpikeInterface job-kwargs blob that
     governs the chunked detection scan

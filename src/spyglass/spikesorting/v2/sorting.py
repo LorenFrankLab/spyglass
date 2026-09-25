@@ -1566,7 +1566,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                 obs_intervals = None
             concat_statistics_spans = None
         else:  # concatenated_recording
-            # Concat artifacts are masked before motion correction and carry
+            # Concat artifacts are masked before concatenation and carry
             # their own member detection provenance and kept intervals.
             # ``insert_selection`` rejects a concat source carrying an
             # artifact_detection_id, but a direct insert of a

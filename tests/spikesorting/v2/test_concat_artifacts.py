@@ -95,11 +95,9 @@ def test_concat_preserves_member_internal_gaps():
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("motion", ["none", "rigid_fast"])
 def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     chronic_2_session_minirec,
     monkeypatch,
-    motion,
     curation_evaluation_defaults,
 ):
     from pathlib import Path
@@ -118,28 +116,11 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
         ConcatenatedRecordingSelection,
-        MotionCorrectionParameters,
         SessionGroup,
     )
 
-    motion_name = "artifact_test_rigid" if motion != "none" else "none"
-    if motion != "none":
-        MotionCorrectionParameters.insert1(
-            {
-                "motion_correction_params_name": motion_name,
-                "params": {
-                    "preset": "rigid_fast",
-                    "preset_kwargs": {
-                        "interpolate_motion_kwargs": {
-                            "border_mode": "force_extrapolate"
-                        }
-                    },
-                },
-            },
-            skip_duplicates=True,
-        )
     fixture = chronic_2_session_minirec
-    name = f"artifact_concat_{motion}"
+    name = "artifact_concat"
     SessionGroup.create_group(
         fixture["owner"], name, fixture["same_day_members"]
     )
@@ -150,7 +131,6 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     request = {
         **group,
         "preprocessing_params_name": fixture["preprocessing_params_name"],
-        "motion_correction_params_name": (motion_name),
     }
     recordings = [
         Recording().get_recording(key) for key in fixture["recording_pks"]
@@ -201,17 +181,17 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     observed = []
     original = concat_services.build_concatenated_recording
 
-    def inspect_motion_input(member_recordings, **kwargs):
+    def inspect_concat_input(member_recordings):
         for member, excluded in zip(member_recordings, ranges):
             for start, end in excluded:
                 np.testing.assert_array_equal(
                     member.get_traces(start_frame=start, end_frame=end), 0
                 )
         observed.append(True)
-        return original(member_recordings, **kwargs)
+        return original(member_recordings)
 
     monkeypatch.setattr(
-        concat_services, "build_concatenated_recording", inspect_motion_input
+        concat_services, "build_concatenated_recording", inspect_concat_input
     )
     key = ConcatenatedRecordingSelection.insert_selection(
         request, artifact_detection_ids=detection_ids
@@ -260,12 +240,30 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     assert combined.get_num_samples() == offset
     assert np.diff(row["obs_intervals"], axis=1).sum() < row["total_duration_s"]
 
-    if motion == "none":
-        before = combined.get_traces()
-        Path(AnalysisNwbfile.get_abs_path(row["analysis_file_name"])).unlink()
-        after = ConcatenatedRecording().get_recording(key)
-        np.testing.assert_array_equal(after.get_traces(), before)
-        assert len(observed) == 2
+    # Concatenation applies no motion correction: the artifact holds exactly
+    # the members' stored traces, in order, with the selected ranges zeroed,
+    # and keeps every member channel.
+    expected_parts = []
+    for recording, excluded in zip(recordings, ranges):
+        member_traces = recording.get_traces().copy()
+        for start, end in excluded:
+            member_traces[start:end] = 0
+        expected_parts.append(member_traces)
+    np.testing.assert_array_equal(
+        combined.get_traces(), np.concatenate(expected_parts, axis=0)
+    )
+    assert row["n_channels"] == combined.get_num_channels()
+    for recording in recordings:
+        assert combined.get_num_channels() == recording.get_num_channels()
+        assert list(combined.get_channel_ids()) == list(
+            recording.get_channel_ids()
+        )
+
+    before = combined.get_traces()
+    Path(AnalysisNwbfile.get_abs_path(row["analysis_file_name"])).unlink()
+    after = ConcatenatedRecording().get_recording(key)
+    np.testing.assert_array_equal(after.get_traces(), before)
+    assert len(observed) == 2
 
     # Inspect the actual sorter input, then plant two deterministic units so
     # the test covers interval propagation even if a detector finds no units.

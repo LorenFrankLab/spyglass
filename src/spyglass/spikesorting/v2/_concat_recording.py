@@ -2,26 +2,19 @@
 
 ``ConcatenatedRecording`` is a DataJoint *schema* module: importing it activates
 ``dj.schema(...)`` and the source-part dependencies. The concat math and the
-SpikeInterface concatenate/motion-correct calls need none of that at import, so
+SpikeInterface concatenate call needs none of that at import, so
 they live here and the table becomes a thin orchestrator (fetch -> call these ->
 write -> insert). Same "thin DataJoint shell over pure/IO services" direction as
 ``_recording_nwb`` / ``_selection_identity`` / ``_signal_math``.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import; the SpikeInterface dependency is imported lazily inside
-:func:`build_concatenated_recording`. The motion-preset resolution and the
-sample-boundary / back-mapping math are pure (stdlib + numpy) so they are
-unit-testable without a database or a real recording.
+:func:`build_concatenated_recording`. The sample-boundary / back-mapping math
+is pure (stdlib + numpy) so it is unit-testable without a database or a real
+recording.
 """
 
 from __future__ import annotations
-
-#: The Spyglass ``"auto"`` motion-correction alias resolves to this
-#: SpikeInterface preset for same-day groups. It is NOT passed through to
-#: ``correct_motion`` (SI has no ``"auto"`` preset). The RESOLVED preset (this
-#: value, not the ``"auto"`` alias) is what ``ConcatenatedRecording`` persists in
-#: its ``motion_preset`` column, so each row records what actually ran.
-AUTO_SAME_DAY_PRESET = "rigid_fast"
 
 
 def member_recording_selection_key(
@@ -208,62 +201,6 @@ def concat_recording_artifact_lock(concat_recording_id, *, timeout: float = -1):
         str(root / f"concat_recording_{concat_recording_id}.artifact.lock"),
         timeout=timeout,
     )
-
-
-def resolve_motion_correction(
-    motion_params: dict, *, is_multi_day: bool
-) -> tuple[str | None, dict]:
-    """Resolve a motion-correction params blob to an SI preset + kwargs.
-
-    Translates the Spyglass-only ``"auto"`` alias before any SpikeInterface
-    call: ``"auto"`` maps to :data:`AUTO_SAME_DAY_PRESET` for a same-day group
-    and is REJECTED for a multi-day group (cross-day drift needs a deliberate
-    preset choice, not a silent default). ``"none"`` means "skip motion
-    correction" and returns ``(None, {})``. Any other value is an explicit
-    SpikeInterface preset and is passed through unchanged.
-
-    Parameters
-    ----------
-    motion_params : dict
-        The ``MotionCorrectionParameters.params`` blob, carrying ``preset``
-        and ``preset_kwargs``.
-    is_multi_day : bool
-        Whether the underlying ``SessionGroup`` spans two or more dates.
-
-    Returns
-    -------
-    tuple[str | None, dict]
-        ``(preset, preset_kwargs)``. ``preset`` is ``None`` when motion
-        correction is skipped (``preset="none"``); otherwise it is the
-        SpikeInterface preset name to pass to ``correct_motion``.
-
-    Raises
-    ------
-    ValueError
-        If ``preset="auto"`` on a multi-day group (choose an explicit,
-        non-``auto`` preset), or if ``preset`` is missing from the blob.
-    """
-    if "preset" not in motion_params:
-        raise ValueError(
-            "resolve_motion_correction: motion_params has no 'preset' key; "
-            "expected a validated MotionCorrectionParameters.params blob."
-        )
-    preset = motion_params["preset"]
-    preset_kwargs = dict(motion_params.get("preset_kwargs") or {})
-
-    if preset == "none":
-        return None, {}
-    if preset == "auto":
-        if is_multi_day:
-            raise ValueError(
-                "Motion-correction preset 'auto' is single-day only; this "
-                "concat group spans multiple dates. Choose an explicit "
-                "non-'auto' preset (e.g. 'dredge_fast') for multi-day "
-                "concatenation, though sort-then-match remains the "
-                "recommended cross-day workflow."
-            )
-        return AUTO_SAME_DAY_PRESET, preset_kwargs
-    return preset, preset_kwargs
 
 
 def cumulative_member_boundaries(
@@ -691,9 +628,9 @@ def _flatten_planar_geometry(recording) -> None:
     does for an artifact ``write_nwb_artifact`` produced. That writer persists
     the members' NORMALIZED 2D geometry with a constant ``rel_z = 0``, so the
     x-y columns already ARE the geometry the members were sorted with. Making
-    that explicit here keeps every downstream consumer -- motion estimation,
-    the artifact mask, and the concat writer, which REFUSES 3D locations
-    rather than silently projecting them -- on one unambiguous plane.
+    that explicit here keeps every downstream consumer -- the artifact mask,
+    the sorter, and the concat writer, which REFUSES 3D locations rather than
+    silently projecting them -- on one unambiguous plane.
 
     No-op when the locations are already 2D or absent (a bare synthetic
     recording in a test).
@@ -701,7 +638,7 @@ def _flatten_planar_geometry(recording) -> None:
     Parameters
     ----------
     recording : si.BaseRecording
-        The stitched recording, before motion correction.
+        The stitched recording.
 
     Raises
     ------
@@ -726,30 +663,16 @@ def _flatten_planar_geometry(recording) -> None:
     recording.set_channel_locations(locations[:, :2])
 
 
-def build_concatenated_recording(
-    recordings: list,
-    *,
-    motion_preset: str | None,
-    preset_kwargs: dict | None = None,
-    job_kwargs: dict | None = None,
-):
-    """Concatenate per-member recordings and optionally motion-correct them.
+def build_concatenated_recording(recordings: list):
+    """Concatenate per-member recordings into one mono-segment recording.
 
     Stitches the ordered per-member ``Recording`` artifacts into one
     mono-segment recording with a continuous (uniform) timeline -- the members
     are independent sessions, so their wall-clock gaps are dropped
     (``ignore_times=True``) and the result is a synthetic continuous recording
-    a sorter can consume as one piece. When ``motion_preset`` is not ``None``,
-    ``correct_motion`` runs on that single concatenated segment (SI's
-    ``estimate_motion`` is single-segment only, which is exactly what
-    concatenation produces). Motion correction is run BEFORE any whitening:
-    whitening stays a sorter/analyzer concern, so the returned recording is
-    motion-corrected but unwhitened.
-
-    ``output_motion`` / ``output_motion_info`` are pinned ``False`` so
-    ``correct_motion`` returns just the corrected recording (the MVP concat
-    cache does not persist motion trajectories); the params schema already
-    forbids those kwargs in ``preset_kwargs``.
+    a sorter can consume as one piece. The traces are the members' traces
+    unchanged (no motion correction, no whitening); only the constant third
+    contact coordinate is dropped (see :func:`_flatten_planar_geometry`).
 
     Parameters
     ----------
@@ -757,20 +680,12 @@ def build_concatenated_recording(
         Per-member preprocessed recordings, ordered by ``member_index``. Must
         share channel ids and geometry (enforced upstream by reusing the same
         sort group / probe layout across members).
-    motion_preset : str or None
-        Resolved SpikeInterface ``correct_motion`` preset, or ``None`` to skip
-        motion correction. Resolve the Spyglass ``"auto"`` alias via
-        :func:`resolve_motion_correction` before calling.
-    preset_kwargs : dict, optional
-        Extra kwargs forwarded to ``correct_motion`` (per-step ``*_kwargs``).
-    job_kwargs : dict, optional
-        Resolved SpikeInterface job kwargs (``n_jobs`` etc.) forwarded to
-        ``correct_motion``.
 
     Returns
     -------
     si.BaseRecording
-        The concatenated (and, unless skipped, motion-corrected) recording.
+        The concatenated recording, with ``sum(n_samples_i)`` samples and the
+        members' channels.
     """
     from spikeinterface.core import concatenate_recordings
 
@@ -780,51 +695,4 @@ def build_concatenated_recording(
 
     concatenated = concatenate_recordings(recordings, ignore_times=True)
     _flatten_planar_geometry(concatenated)
-    if motion_preset is None:
-        return concatenated
-
-    from spikeinterface.core.job_tools import job_keys
-    from spikeinterface.preprocessing import correct_motion
-
-    # The resolved ``job_kwargs`` may carry ONLY SpikeInterface job kwargs
-    # (n_jobs, chunk_duration, progress_bar, ...). ``correct_motion`` has
-    # top-level params BEFORE its ``**job_kwargs`` -- ``folder`` / ``overwrite``
-    # / ``output_motion`` / ``output_motion_info`` (the side-artifact + return-
-    # type contract the concat cache forbids) and ``detect_kwargs`` /
-    # ``estimate_motion_kwargs`` / ... (motion parameters that belong in
-    # ``preset_kwargs``, which IS part of the concat identity). A non-job key in
-    # ``job_kwargs`` would silently bind one of those, bypassing the persistence
-    # contract or changing the motion outside the content hash, so reject it.
-    resolved_job_kwargs = dict(job_kwargs or {})
-    non_job_keys = sorted(set(resolved_job_kwargs) - set(job_keys))
-    if non_job_keys:
-        raise ValueError(
-            "build_concatenated_recording: motion job_kwargs carries non-job "
-            f"key(s) {non_job_keys}; only SpikeInterface job kwargs "
-            f"{sorted(job_keys)} are allowed there. Motion per-step kwargs "
-            "(detect_kwargs, estimate_motion_kwargs, ...) belong in "
-            "MotionCorrectionParameters.preset_kwargs; side-artifact / output "
-            "kwargs (folder / overwrite / output_motion / output_motion_info) "
-            "are unsupported (the concat cache does not persist them)."
-        )
-
-    # Merge into ONE kwargs dict (resolved job kwargs win on conflict, per the
-    # job-kwargs resolution contract) so an overlapping key -- e.g. ``n_jobs``
-    # in both ``preset_kwargs`` and the resolved ``job_kwargs`` -- does not
-    # raise ``TypeError: got multiple values for keyword`` from a double splat.
-    motion_kwargs = {**(preset_kwargs or {}), **resolved_job_kwargs}
-    corrected = correct_motion(
-        concatenated,
-        preset=motion_preset,
-        output_motion=False,
-        output_motion_info=False,
-        **motion_kwargs,
-    )
-    if corrected.get_num_channels() == 0:
-        raise ValueError(
-            "Motion correction removed every channel at the probe border. "
-            "Inspect the motion estimate and choose suitable "
-            "interpolate_motion_kwargs in MotionCorrectionParameters, or "
-            "explicitly select the no-motion recipe."
-        )
-    return corrected
+    return concatenated

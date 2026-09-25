@@ -1,8 +1,9 @@
 """SessionGroup / ConcatenatedRecording schema-shape invariants.
 
 Behavioral / schema-shape only: ``SessionGroup.Member`` primary-key uniqueness
-within a master, and the ``ConcatenatedRecording.total_duration_s`` column
-(named differently from ``Recording.duration_s``).
+within a master, the ``ConcatenatedRecording.total_duration_s`` column
+(named differently from ``Recording.duration_s``), and the absence of any
+motion-correction column on the concat tables.
 """
 
 from __future__ import annotations
@@ -128,3 +129,24 @@ def test_concat_selection_member_snapshot_part_shape():
         RecordingArtifactDetection.full_table_name,
     }
     assert attrs["artifact_detection_id"].nullable
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_concat_tables_carry_no_motion_correction():
+    """Concatenation applies no motion correction, so neither the concat
+    selection identity nor the materialized row names a motion recipe or
+    preset."""
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+    )
+
+    assert ConcatenatedRecordingSelection._IDENTITY_FIELDS == (
+        "session_group_owner",
+        "session_group_name",
+        "preprocessing_params_name",
+    )
+    for table in (ConcatenatedRecordingSelection, ConcatenatedRecording):
+        assert not any(
+            "motion" in name for name in table.heading.attributes
+        ), table.__name__
