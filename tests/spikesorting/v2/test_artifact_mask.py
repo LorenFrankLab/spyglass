@@ -10,6 +10,8 @@ Hermetic -- in-memory NumpyRecording, no DB.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -198,3 +200,211 @@ def test_masked_recording_survives_run_sorter_serialization(tmp_path):
     assert np.all(first_gap == 0)
     assert np.all(second_gap == 0)
     assert np.any(kept != 0)
+
+
+# ---------------------------------------------------------------------------
+# Statistics-span helpers (DB-free): complement/boundary/statistics spans,
+# and the span-respecting samplers built on top of them.
+# ---------------------------------------------------------------------------
+
+
+def _gapped_recording(
+    seg_lengths, *, fs=1000.0, gap_s=1.0, n_channels=2, seed=0
+):
+    """A NumpyRecording whose persisted timestamps have one wall-clock gap
+    per segment boundary (the gapped-recording idiom from
+    ``test_concat_artifacts.py``). ``seg_lengths`` are frame counts; frames
+    stay contiguous, only the persisted TIMES jump between segments.
+    """
+    import spikeinterface as si
+
+    n = sum(seg_lengths)
+    rng = np.random.default_rng(seed)
+    traces = rng.standard_normal((n, n_channels)).astype("float64")
+    rec = si.NumpyRecording([traces], sampling_frequency=fs)
+    chunks = []
+    t0 = 0.0
+    for length in seg_lengths:
+        chunks.append(t0 + np.arange(length) / fs)
+        t0 = chunks[-1][-1] + gap_s
+    rec.set_times(np.concatenate(chunks))
+    return rec
+
+
+def _frame_indexed_recording(n_samples, *, fs=1000.0, n_channels=2):
+    """A NumpyRecording whose channel 0 holds the frame index, so a returned
+    row identifies exactly which frame it came from.
+    """
+    import spikeinterface as si
+
+    traces = np.zeros((n_samples, n_channels), dtype="float64")
+    traces[:, 0] = np.arange(n_samples)
+    if n_channels > 1:
+        traces[:, 1] = -np.arange(n_samples)
+    return si.NumpyRecording([traces], sampling_frequency=fs)
+
+
+def _contiguous_runs(frame_ids):
+    """Split a 1-D int array of frame indices into maximal half-open
+    ``[start, end)`` runs of consecutive integers, in order of appearance.
+    """
+    runs = []
+    start = 0
+    for i in range(1, len(frame_ids) + 1):
+        if i == len(frame_ids) or frame_ids[i] != frame_ids[i - 1] + 1:
+            runs.append((int(frame_ids[start]), int(frame_ids[i - 1]) + 1))
+            start = i
+    return runs
+
+
+def _mixture_mad(weights_sigmas, *, lo=0.0, hi=50.0, iterations=200):
+    """Numerically solve for the MAD ``m`` of a zero-mean Gaussian mixture.
+
+    The mixture is symmetric about 0, so its median is 0 and the MAD is the
+    smallest ``m >= 0`` solving ``sum_i w_i * (2*Phi(m/sigma_i) - 1) = 0.5``
+    (``Phi`` the standard normal CDF), found by bisection.
+    """
+
+    def mass_within(m):
+        return sum(
+            w * math.erf(m / (sigma * math.sqrt(2.0)))
+            for w, sigma in weights_sigmas
+        )
+
+    for _ in range(iterations):
+        mid = (lo + hi) / 2.0
+        if mass_within(mid) < 0.5:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
+def test_complement_frame_ranges_basic():
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        complement_frame_ranges,
+    )
+
+    assert complement_frame_ranges([(100, 200), (500, 700)], 1000) == [
+        (0, 100),
+        (200, 500),
+        (700, 1000),
+    ]
+
+
+def test_complement_frame_ranges_merges_overlapping_and_unsorted():
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        complement_frame_ranges,
+    )
+
+    # Unsorted, overlapping ((100,200) & (150,210)), and adjacent
+    # ((500,700) & (700,705)) excluded ranges must all merge first.
+    excluded = [(500, 700), (150, 210), (100, 200), (700, 705)]
+    assert complement_frame_ranges(excluded, 1000) == [
+        (0, 100),
+        (210, 500),
+        (705, 1000),
+    ]
+
+
+def test_complement_frame_ranges_empty_excluded():
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        complement_frame_ranges,
+    )
+
+    assert complement_frame_ranges([], 1000) == [(0, 1000)]
+
+
+def test_boundary_spans_from_timestamps_splits_at_gaps():
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        boundary_spans_from_timestamps,
+    )
+
+    rec = _gapped_recording((100, 100, 100))
+    assert boundary_spans_from_timestamps(rec) == [
+        (0, 100),
+        (100, 200),
+        (200, 300),
+    ]
+
+
+def test_boundary_spans_from_timestamps_continuous_is_single_span():
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        boundary_spans_from_timestamps,
+    )
+
+    rec = si.NumpyRecording(
+        [np.zeros((300, 2), dtype="float32")], sampling_frequency=1000.0
+    )
+    assert boundary_spans_from_timestamps(rec) == [(0, 300)]
+
+
+def test_concat_boundary_spans_offsets_members():
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        concat_boundary_spans,
+    )
+
+    member0 = si.NumpyRecording(
+        [np.zeros((100, 2), dtype="float32")], sampling_frequency=1000.0
+    )
+    member1 = _gapped_recording((80, 120))
+    spans = concat_boundary_spans([member0, member1], [0, 100])
+    assert spans == [(0, 100), (100, 180), (180, 300)]
+
+
+def test_statistics_spans_intersect_boundaries_and_artifacts():
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        statistics_spans,
+    )
+
+    boundary = [(0, 500), (500, 1000)]
+    assert statistics_spans(1000, [(450, 550)], boundary) == [
+        (0, 450),
+        (550, 1000),
+    ]
+
+
+def test_statistics_spans_keeps_adjacent_boundary_spans_unmerged():
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        statistics_spans,
+    )
+
+    boundary = [(0, 500), (500, 1000)]
+    assert statistics_spans(1000, [], boundary) == [(0, 500), (500, 1000)]
+
+
+def test_statistics_spans_all_excluded_raises():
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        statistics_spans,
+    )
+
+    with pytest.raises(ValueError, match="no artifact-free samples"):
+        statistics_spans(1000, [(0, 1000)], [(0, 1000)])
+
+
+def test_statistics_spans_logs_masked_fraction_and_span_count(caplog):
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        statistics_spans,
+    )
+
+    with caplog.at_level("INFO", logger="spyglass"):
+        spans = statistics_spans(1000, [(450, 550)], [(0, 500), (500, 1000)])
+    assert spans == [(0, 450), (550, 1000)]
+    messages = " ".join(record.getMessage() for record in caplog.records)
+    assert "masked_fraction=0.1000" in messages
+    assert "across 2 statistics span" in messages
+
+
+def test_spans_cover_recording():
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        spans_cover_recording,
+    )
+
+    assert spans_cover_recording(None, 1000)
+    assert spans_cover_recording([(0, 1000)], 1000)
+    assert not spans_cover_recording([(0, 999)], 1000)
+    assert not spans_cover_recording([(0, 500), (500, 1000)], 1000)

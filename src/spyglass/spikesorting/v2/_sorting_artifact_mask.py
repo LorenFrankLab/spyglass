@@ -341,3 +341,192 @@ def silence_frame_ranges(recording, frame_ranges):
     # upstream in SpikeInterface.)
     masked._serializability["json"] = False
     return masked
+
+
+def complement_frame_ranges(
+    excluded_ranges: list[tuple[int, int]], n_samples: int
+) -> list[tuple[int, int]]:
+    """Half-open valid-frame ranges left after removing ``excluded_ranges``.
+
+    ``excluded_ranges`` may be unsorted, overlapping, or adjacent; they are
+    sorted and merged before the complement in ``[0, n_samples)`` is taken.
+
+    Parameters
+    ----------
+    excluded_ranges : list[tuple[int, int]]
+        Half-open ``(start, end)`` frame ranges to remove. Need not be
+        sorted, non-overlapping, or merged.
+    n_samples : int
+        Total number of frames; the complement is bounded to ``[0,
+        n_samples)``.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Sorted, disjoint, half-open valid frame ranges. ``[(0, n_samples)]``
+        when ``excluded_ranges`` is empty.
+    """
+    n_samples = int(n_samples)
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted((int(a), int(b)) for a, b in excluded_ranges):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+
+    valid: list[tuple[int, int]] = []
+    cursor = 0
+    for start, end in merged:
+        if start > cursor:
+            valid.append((cursor, start))
+        cursor = max(cursor, end)
+    if cursor < n_samples:
+        valid.append((cursor, n_samples))
+    return valid
+
+
+def boundary_spans_from_timestamps(recording) -> list[tuple[int, int]]:
+    """Half-open spans that never cross a wall-clock gap in ``recording``'s
+    persisted timestamps.
+
+    A gap is a step between consecutive persisted timestamps greater than
+    ``1.5 / fs`` (``base_intervals_and_gaps``, ``_signal_math.py``); a
+    recording with no explicit time vector (uniform sample-rate timestamps)
+    has no gaps and yields a single span covering the whole recording.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        Single-segment recording whose persisted timestamps define frame
+        coordinates. Not modified.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Sorted, disjoint, half-open frame spans covering ``[0,
+        recording.get_num_samples())``.
+
+    Raises
+    ------
+    ValueError
+        If ``recording`` has more than one segment; the v2 sort/statistics
+        pipeline is single-segment only.
+    """
+    from spyglass.spikesorting.v2._signal_math import base_intervals_and_gaps
+
+    n_segments = recording.get_num_segments()
+    if n_segments != 1:
+        raise ValueError(
+            "boundary_spans_from_timestamps: expected a single-segment "
+            f"recording; got {n_segments} segments."
+        )
+    n = recording.get_num_samples()
+    cuts = sorted(
+        {
+            0,
+            n,
+            *(int(g) + 1 for g in base_intervals_and_gaps(recording).gap_after),
+        }
+    )
+    return [(a, b) for a, b in zip(cuts[:-1], cuts[1:]) if b > a]
+
+
+def concat_boundary_spans(
+    member_recordings, member_starts: list[int]
+) -> list[tuple[int, int]]:
+    """Union of each member's boundary spans, offset into concat-frame
+    coordinates.
+
+    Parameters
+    ----------
+    member_recordings : list[si.BaseRecording]
+        Per-member recordings, ordered by ``member_index``.
+    member_starts : list[int]
+        Each member's cumulative start frame in the concatenated recording,
+        same order/length as ``member_recordings``.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Half-open concat-frame spans; a join between two members is never
+        inside a single span.
+    """
+    out: list[tuple[int, int]] = []
+    for rec, start in zip(member_recordings, member_starts):
+        out.extend(
+            (start + a, start + b)
+            for a, b in boundary_spans_from_timestamps(rec)
+        )
+    return out
+
+
+def statistics_spans(
+    n_samples: int,
+    excluded_ranges: list[tuple[int, int]],
+    boundary_spans: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Artifact-free frame spans that each lie inside a single boundary span.
+
+    The intersection of the artifact-free complement of ``excluded_ranges``
+    with ``boundary_spans``. Two output spans that are adjacent in frame
+    coordinates are never merged: adjacency across a boundary-span edge is
+    exactly the join information the spans exist to preserve.
+
+    Parameters
+    ----------
+    n_samples : int
+        Total number of frames.
+    excluded_ranges : list[tuple[int, int]]
+        Half-open artifact-masked frame ranges (need not be sorted/merged).
+    boundary_spans : list[tuple[int, int]]
+        Half-open frame spans that never cross a join (e.g. from
+        ``boundary_spans_from_timestamps`` / ``concat_boundary_spans``).
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Sorted, half-open statistics spans.
+
+    Raises
+    ------
+    ValueError
+        If no artifact-free frame lies inside any boundary span.
+    """
+    from spyglass.utils import logger
+
+    n_samples = int(n_samples)
+    valid = complement_frame_ranges(excluded_ranges, n_samples)
+    valid_samples = sum(b - a for a, b in valid)
+    out: list[tuple[int, int]] = []
+    for a, b in valid:
+        for c, d in boundary_spans:
+            lo, hi = max(a, c), min(b, d)
+            if lo < hi:
+                out.append((lo, hi))
+    if not out:
+        raise ValueError(
+            "statistics_spans: no artifact-free samples inside any "
+            "acquisition span."
+        )
+    out = sorted(out)
+    masked_fraction = (
+        (n_samples - valid_samples) / n_samples if n_samples else 0.0
+    )
+    logger.info(
+        "statistics_spans: masked_fraction=%.4f across %d statistics span(s) "
+        "(n_samples=%d).",
+        masked_fraction,
+        len(out),
+        n_samples,
+    )
+    return out
+
+
+def spans_cover_recording(spans, n_samples: int) -> bool:
+    """True when ``spans`` is ``None`` or exactly ``[(0, n_samples)]``.
+
+    Later estimator code delegates to SpikeInterface's own unchanged path
+    in exactly this case, so an unmasked, unjoined recording stays
+    bit-identical to today's behavior.
+    """
+    return spans is None or list(spans) == [(0, int(n_samples))]
