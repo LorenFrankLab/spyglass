@@ -42,12 +42,12 @@ _PARAMETER_ROW_COLUMNS = [
 def describe_parameter_rows() -> "pd.DataFrame":
     """Catalog the parameter-Lookup rows currently in the database.
 
-    One row per parameter-Lookup row across ALL eight v2 parameter tables that
+    One row per parameter-Lookup row across ALL seven v2 parameter tables that
     ``initialize_v2_defaults`` seeds -- the three preset-referenced tables
     (``PreprocessingParameters`` / ``ArtifactDetectionParameters`` /
     ``SorterParameters``) plus the downstream / cross-session ones
-    (``AnalyzerWaveformParameters`` / ``MotionCorrectionParameters`` /
-    ``QualityMetricParameters`` / ``AutoCurationRules`` / ``MatcherParameters``)
+    (``AnalyzerWaveformParameters`` / ``QualityMetricParameters`` /
+    ``AutoCurationRules`` / ``MatcherParameters``)
     -- each with its content fingerprint (the row name excluded;
     ``SorterParameters`` scoped per sorter), whether it is a shipped catalog
     default, which pipeline presets reference it, and -- when its content
@@ -270,13 +270,10 @@ def describe_parameter_rows() -> "pd.DataFrame":
     # sampling_rate_hz / adjacency_radius_um / used_by_pipeline_presets /
     # recommendation_status) stay blank. They ARE content-addressed by name and
     # user-populatable, so listing them keeps this report aligned with the full
-    # ``initialize_v2_defaults`` surface (eight Lookups, not three).
+    # ``initialize_v2_defaults`` surface (seven Lookups, not three).
     from spyglass.spikesorting.v2.metric_curation import (
         AutoCurationRules,
         QualityMetricParameters,
-    )
-    from spyglass.spikesorting.v2.session_group import (
-        MotionCorrectionParameters,
     )
     from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
@@ -329,13 +326,6 @@ def describe_parameter_rows() -> "pd.DataFrame":
         "waveform_params_name",
         {r[0] for r in AnalyzerWaveformParameters._DEFAULT_CONTENTS},
         lambda r: "",
-    )
-    _append_simple_param_records(
-        MotionCorrectionParameters,
-        "MotionCorrectionParameters",
-        "motion_correction_params_name",
-        {r[0] for r in MotionCorrectionParameters._DEFAULT_CONTENTS},
-        lambda r: str(_jsonable_blob(r.get("params") or {}).get("preset", "")),
     )
     _append_simple_param_records(
         QualityMetricParameters,
@@ -532,9 +522,6 @@ def _v2_default_catalog_tables():
         QualityMetricParameters,
     )
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
-    from spyglass.spikesorting.v2.session_group import (
-        MotionCorrectionParameters,
-    )
     from spyglass.spikesorting.v2.sorting import (
         AnalyzerWaveformParameters,
         SorterParameters,
@@ -546,7 +533,6 @@ def _v2_default_catalog_tables():
         (ArtifactDetectionParameters, "artifact_detection_params_name"),
         (SorterParameters, "sorter_params_name"),
         (AnalyzerWaveformParameters, "waveform_params_name"),
-        (MotionCorrectionParameters, "motion_correction_params_name"),
         (QualityMetricParameters, "metric_params_name"),
         (AutoCurationRules, "auto_curation_rules_name"),
         (MatcherParameters, "matcher_params_name"),

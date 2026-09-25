@@ -18,10 +18,6 @@ from spyglass.spikesorting.v2._params.artifact_detection import (
     ARTIFACT_DETECTION_SCHEMA_VERSION,
     ArtifactDetectionParamsSchema,
 )
-from spyglass.spikesorting.v2._params.motion_correction import (
-    MOTION_CORRECTION_SCHEMA_VERSION,
-    MotionCorrectionParamsSchema,
-)
 from spyglass.spikesorting.v2._params.preprocessing import (
     PREPROCESSING_SCHEMA_VERSION,
     PreprocessingParamsSchema,
@@ -278,71 +274,6 @@ def test_artifact_thresholds_or_semantics():
         detect=False, amplitude_threshold_uv=500.0, zscore_threshold=5.0
     ).model_dump()
     assert disabled["detect"] is False
-
-
-# ---------- motion correction ----------------------------------------------
-
-
-def test_motion_default_is_no_op():
-    """The default preset is ``"none"`` with empty kwargs."""
-    blob = MotionCorrectionParamsSchema().model_dump()
-    assert blob["preset"] == "none"
-    assert blob["preset_kwargs"] == {}
-
-
-def test_motion_none_preset_rejects_kwargs():
-    """``preset='none'`` with non-empty kwargs is a configuration error."""
-    with pytest.raises(ValidationError):
-        MotionCorrectionParamsSchema(
-            preset="none", preset_kwargs={"detect_kwargs": {}}
-        )
-
-
-@pytest.mark.parametrize(
-    "preset",
-    [
-        "dredge",
-        "medicine",
-        "dredge_fast",
-        "nonrigid_accurate",
-        "nonrigid_fast_and_accurate",
-        "rigid_fast",
-        "kilosort_like",
-        "auto",
-    ],
-)
-def test_motion_accepts_si_native_preset(preset):
-    """All SI 0.104 native presets are accepted."""
-    blob = MotionCorrectionParamsSchema(preset=preset).model_dump()
-    assert blob["preset"] == preset
-
-
-@pytest.mark.parametrize(
-    "forbidden",
-    [
-        "output_motion",
-        "output_motion_info",
-        "folder",
-        "overwrite",
-        # Set by the concat materializer; overriding them double-binds into a
-        # correct_motion TypeError at populate time, so reject at insert.
-        "recording",
-        "preset",
-    ],
-)
-def test_motion_rejects_forbidden_kwargs(forbidden):
-    """Forbidden kwargs change return type, write untracked artifacts, or
-    double-bind a materializer-set argument."""
-    with pytest.raises(ValidationError):
-        MotionCorrectionParamsSchema(
-            preset="rigid_fast", preset_kwargs={forbidden: True}
-        )
-
-
-def test_motion_rejects_unknown_preset():
-    """An unknown preset string is a Pydantic ``Literal`` rejection."""
-    with pytest.raises(ValidationError):
-        MotionCorrectionParamsSchema(preset="rigid_unknown")
 
 
 # ---------- sorter dispatch ------------------------------------------------
@@ -835,7 +766,6 @@ def test_uncurated_sorter_schemas_accept_arbitrary_kwargs(schema_cls):
     [
         PreprocessingParamsSchema,
         ArtifactDetectionParamsSchema,
-        MotionCorrectionParamsSchema,
         MountainSort4Schema,
         MountainSort5Schema,
         Kilosort4Schema,
@@ -869,10 +799,6 @@ def test_schema_version_constants_match_schema_defaults():
     assert (
         ArtifactDetectionParamsSchema().schema_version
         == ARTIFACT_DETECTION_SCHEMA_VERSION
-    )
-    assert (
-        MotionCorrectionParamsSchema().schema_version
-        == MOTION_CORRECTION_SCHEMA_VERSION
     )
 
 
@@ -1040,21 +966,6 @@ _BULK_INSERT_CASES = [
             "params_schema_version": 2,
         },
         id="ArtifactDetectionParameters",
-    ),
-    pytest.param(
-        "spyglass.spikesorting.v2.session_group",
-        "MotionCorrectionParameters",
-        {
-            "motion_correction_params_name": "_pytest_bulk_a",
-            "params": MotionCorrectionParamsSchema().model_dump(),
-            "params_schema_version": 1,
-        },
-        {
-            "motion_correction_params_name": "_pytest_bulk_b",
-            "params": MotionCorrectionParamsSchema().model_dump(),
-            "params_schema_version": 1,
-        },
-        id="MotionCorrectionParameters",
     ),
     pytest.param(
         "spyglass.spikesorting.v2.recording",

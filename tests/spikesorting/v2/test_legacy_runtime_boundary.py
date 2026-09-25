@@ -10,9 +10,7 @@ breaking existing v0/v1 query paths:
   call time,
 - existing v0/v1 `SpikeSortingOutput` merge queries remain functional,
 - v0/v1 DataJoint ``definition`` strings have not drifted,
-- the resolver finds ``mountainsort5`` and the optional matching extra,
-- ``correct_motion`` exposes the kwargs the v2 motion-correction contract
-  requires.
+- the resolver finds ``mountainsort5`` and the optional matching extra.
 
 These tests run under the resolver-clean SI 0.104 environment; the
 merge-query smoke test additionally needs Docker.
@@ -21,7 +19,6 @@ merge-query smoke test additionally needs Docker.
 from __future__ import annotations
 
 import importlib
-import inspect
 import json
 import re
 from collections.abc import Callable
@@ -158,27 +155,6 @@ def test_sorter_runtime_resolution():
         f"mountainsort4 in installed_sorters(): "
         f"{'mountainsort4' in installed}"
     )
-
-
-# ---------- correct_motion contract for the motion-correction MVP ----------
-
-
-def test_correct_motion_api_contract():
-    """``correct_motion`` exposes the kwargs the motion-correction MVP
-    contract needs.
-
-    The MVP persists only the corrected ``ElectricalSeries`` + sample
-    boundaries + hash. The API must accept ``output_motion=False`` and
-    ``output_motion_info=False`` and have a ``preset`` kwarg.
-    """
-    from spikeinterface.preprocessing import correct_motion
-
-    params = inspect.signature(correct_motion).parameters
-    for required in ("preset", "output_motion", "output_motion_info", "folder"):
-        assert required in params, (
-            f"correct_motion is missing kwarg {required!r}; "
-            f"available: {sorted(params)}"
-        )
 
 
 def test_default_merge_sources_skip_v2_when_unavailable(dj_conn, monkeypatch):

@@ -9,7 +9,6 @@ sorts the concatenation as one piece.
 
 Tables:
     SessionGroup (+ Member)                  -- Manual; user-facing grouping.
-    MotionCorrectionParameters               -- Lookup; Pydantic-validated.
     ConcatenatedRecordingSelection           -- Manual; UUID PK.
     ConcatenatedRecording (+ MemberBoundary) -- Computed; materialized cache.
 """
@@ -24,10 +23,6 @@ import datajoint as dj
 
 from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
-from spyglass.spikesorting.v2._params.motion_correction import (
-    MOTION_CORRECTION_SCHEMA_VERSION,
-    MotionCorrectionParamsSchema,
-)
 from spyglass.spikesorting.v2.artifact import (
     RecordingArtifactDetection,
     RecordingArtifactSelection,
@@ -38,11 +33,8 @@ from spyglass.spikesorting.v2.recording import (
 )
 from spyglass.spikesorting.v2.utils import (
     FactoryOnlyMaster,
-    ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _validate_params,
-    reject_duplicate_parameter_content,
-    validate_lookup_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
@@ -377,86 +369,6 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         start_times = (Session & nwb_file_names).fetch("session_start_time")
         dates = {start_time.date() for start_time in start_times}
         return len(dates) > 1
-
-
-@schema
-class MotionCorrectionParameters(
-    ImmutableParamsLookup, SpyglassMixin, dj.Lookup
-):
-    """Validated motion-correction parameter blob.
-
-    ``insert1`` Pydantic-validates the ``params`` blob (preset +
-    ``preset_kwargs``). ``ConcatenatedRecording.make()`` reads the chosen row
-    and resolves the Spyglass ``"auto"`` alias (``rigid_fast`` for same-day,
-    rejected for multi-day) before calling SpikeInterface.
-    """
-
-    definition = f"""
-    motion_correction_params_name: varchar(64)
-    ---
-    params: blob
-    params_schema_version={MOTION_CORRECTION_SCHEMA_VERSION}: int
-    job_kwargs=null: blob
-    """
-
-    _DEFAULT_CONTENTS: tuple = (
-        (
-            "none",
-            MotionCorrectionParamsSchema().model_dump(),
-            MOTION_CORRECTION_SCHEMA_VERSION,
-            None,
-        ),
-        (
-            "auto_default",
-            MotionCorrectionParamsSchema(preset="auto").model_dump(),
-            MOTION_CORRECTION_SCHEMA_VERSION,
-            None,
-        ),
-        (
-            "rigid_fast_default",
-            MotionCorrectionParamsSchema(preset="rigid_fast").model_dump(),
-            MOTION_CORRECTION_SCHEMA_VERSION,
-            None,
-        ),
-    )
-
-    def insert1(self, row, allow_duplicate_params=False, **kwargs):
-        """Validate and insert a single motion-correction parameter row."""
-        # Delegate to ``insert`` so one validated path serves both.
-        self.insert(
-            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
-        )
-
-    def insert(self, rows, allow_duplicate_params=False, **kwargs):
-        """Validate and insert motion-correction parameter rows.
-
-        ``allow_duplicate_params=True`` opts out of the duplicate-content
-        guard (a second name for an existing blob); see
-        ``reject_duplicate_parameter_content``.
-        """
-        # Validate every row (incl. ``insert_default``'s positional
-        # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
-        # validation or the outer-vs-inner params_schema_version drift
-        # check.
-        validated = validate_lookup_rows(
-            rows,
-            self.heading.names,
-            schema_for=lambda _row: MotionCorrectionParamsSchema,
-            table_name="MotionCorrectionParameters",
-        )
-        reject_duplicate_parameter_content(
-            self,
-            validated,
-            table_name="MotionCorrectionParameters",
-            name_attr="motion_correction_params_name",
-            allow_duplicate_params=allow_duplicate_params,
-        )
-        super().insert(validated, **kwargs)
-
-    @classmethod
-    def insert_default(cls):
-        """Insert v2 default motion-correction presets if missing."""
-        cls.insert(cls._DEFAULT_CONTENTS, skip_duplicates=True)
 
 
 @schema

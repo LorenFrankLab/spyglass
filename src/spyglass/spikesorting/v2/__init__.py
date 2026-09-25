@@ -23,17 +23,11 @@ def initialize_v2_defaults() -> None:
 
     Calls ``insert_default()`` on ``PreprocessingParameters``,
     ``ArtifactDetectionParameters``, ``SorterParameters``,
-    ``AnalyzerWaveformParameters``, ``MotionCorrectionParameters``,
-    ``QualityMetricParameters``, ``AutoCurationRules``, ``MatcherParameters``,
-    and the shipped ``CurationReviewProfile`` (each accepts duplicate-row
+    ``AnalyzerWaveformParameters``, ``QualityMetricParameters``,
+    ``AutoCurationRules``, ``MatcherParameters``, and the shipped ``CurationReviewProfile`` (each accepts duplicate-row
     noise), so a notebook user can run one helper instead of remembering the
     per-table calls before the first ``run_v2_pipeline`` / cross-session match
     or browser review. Idempotent.
-
-    ``MotionCorrectionParameters`` presets are seeded here so a missing
-    motion-preset row does not surface as an opaque FK violation on the first
-    ``ConcatenatedRecording`` run (the same-day chronic concatenate-and-sort
-    consumer).
 
     Examples
     --------
@@ -47,9 +41,6 @@ def initialize_v2_defaults() -> None:
     )
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.review_profile import CurationReviewProfile
-    from spyglass.spikesorting.v2.session_group import (
-        MotionCorrectionParameters,
-    )
     from spyglass.spikesorting.v2.sorting import (
         AnalyzerWaveformParameters,
         SorterParameters,
@@ -60,7 +51,6 @@ def initialize_v2_defaults() -> None:
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
     AnalyzerWaveformParameters.insert_default()
-    MotionCorrectionParameters.insert_default()
     QualityMetricParameters.insert_default()
     AutoCurationRules.insert_default()
     MatcherParameters.insert_default()

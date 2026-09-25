@@ -383,7 +383,7 @@ class ImmutableParamsLookup:
     The v2 parameter Lookups
     (``PreprocessingParameters`` / ``ArtifactDetectionParameters`` /
     ``SorterParameters`` / ``AnalyzerWaveformParameters`` /
-    ``MotionCorrectionParameters`` / ``MatcherParameters``) are keyed by a
+    ``MatcherParameters``) are keyed by a
     human-chosen NAME, and that name -- not the parameter content -- is what
     flows into the deterministic ``recording_id`` / ``artifact_detection_id``
     / ``sorting_id`` / ``concat_recording_id`` / ``unitmatch_id`` of every

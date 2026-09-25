@@ -586,8 +586,8 @@ def test_describe_parameter_rows_columns_and_usage(dj_conn):
 def test_describe_parameter_rows_covers_all_seeded_tables(dj_conn):
     """The report lists every parameter Lookup ``initialize_v2_defaults`` seeds.
 
-    Pins the report against operational drift: it must cover all EIGHT seeded
-    parameter tables, not just the three preset-referenced ones. The five
+    Pins the report against operational drift: it must cover all SEVEN seeded
+    parameter tables, not just the three preset-referenced ones. The four
     downstream / cross-session tables carry blank preset-fold columns but still
     appear so a user can audit every row they can populate.
     """
@@ -603,7 +603,6 @@ def test_describe_parameter_rows_covers_all_seeded_tables(dj_conn):
         "ArtifactDetectionParameters",
         "SorterParameters",
         "AnalyzerWaveformParameters",
-        "MotionCorrectionParameters",
         "QualityMetricParameters",
         "AutoCurationRules",
         "MatcherParameters",
@@ -821,7 +820,6 @@ def test_duplicate_rejected_when_schema_version_column_omitted(dj_conn):
 _VALIDATED_LOOKUP_SCHEMAS = [
     ("preprocessing", "PreprocessingParamsSchema"),
     ("artifact_detection", "ArtifactDetectionParamsSchema"),
-    ("motion_correction", "MotionCorrectionParamsSchema"),
     ("analyzer_waveform", "AnalyzerWaveformParamsSchema"),
     ("matcher", "UnitMatchParamsSchema"),
     ("sorter", "GenericSorterParamsSchema"),
@@ -832,7 +830,7 @@ _VALIDATED_LOOKUP_SCHEMAS = [
 def test_outer_version_backfilled_for_all_lookups(module_name, schema_name):
     """``validate_lookup_rows`` backfills the outer ``params_schema_version``
     from the validated blob for EVERY Lookup that routes through it (Preprocessing
-    / Artifact / Sorter / Waveform / Motion / Matcher), not just the DataJoint
+    / Artifact / Sorter / Waveform / Matcher), not just the DataJoint
     column default. A row that omits the column and carries an explicit inner
     ``schema_version`` lands tagged with the blob's version, never a default that
     silently disagrees. Fails before the change: the shared validator did not

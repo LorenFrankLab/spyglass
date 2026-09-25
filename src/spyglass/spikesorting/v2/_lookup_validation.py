@@ -113,8 +113,7 @@ def validate_lookup_rows(
 
     Shared body of the validated-Lookup ``insert`` overrides
     (``PreprocessingParameters``, ``ArtifactDetectionParameters``,
-    ``SorterParameters``, ``MotionCorrectionParameters``,
-    ``AnalyzerWaveformParameters``): for each row,
+    ``SorterParameters``, ``AnalyzerWaveformParameters``): for each row,
     normalize to a dict, validate its ``params`` blob against the row's
     schema, run an optional per-row check, and assert the outer
     ``params_schema_version`` agrees with the validated blob. Returns the
