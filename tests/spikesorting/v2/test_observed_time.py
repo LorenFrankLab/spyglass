@@ -138,6 +138,75 @@ def test_observed_metrics_weight_partial_bins_and_ignore_excluded_spikes():
     )
 
 
+def test_intersect_intervals_normalizes_duplicates_and_order():
+    from spyglass.spikesorting.v2._signal_math import intersect_intervals
+
+    duplicated = np.array([[0.0, 10.0], [0.0, 10.0]])
+    result = intersect_intervals(duplicated, duplicated)
+    np.testing.assert_array_equal(result, [[0.0, 10.0]])
+    # ``observed_metrics``'s own ``observed_duration_s`` key sums its
+    # ``intervals`` argument directly (``np.diff(intervals, axis=1).sum()``)
+    # and does not route through ``intersect_intervals``, so it would NOT
+    # reflect this normalization if fed duplicate rows directly; assert the
+    # duration of the normalized intersection itself instead.
+    assert np.diff(result, axis=1).sum() == 10.0
+
+    unsorted_left = np.array([[5.0, 6.0], [0.0, 2.0]])
+    sorted_left = np.array([[0.0, 2.0], [5.0, 6.0]])
+    right = np.array([[0.0, 6.0]])
+    np.testing.assert_array_equal(
+        intersect_intervals(unsorted_left, right),
+        intersect_intervals(sorted_left, right),
+    )
+
+    # Overlapping and adjacent rows on one operand merge before intersecting.
+    overlapping = np.array([[0.0, 5.0], [4.0, 10.0]])
+    np.testing.assert_array_equal(
+        intersect_intervals(overlapping, np.array([[0.0, 10.0]])),
+        [[0.0, 10.0]],
+    )
+    adjacent = np.array([[0.0, 5.0], [5.0, 10.0]])
+    np.testing.assert_array_equal(
+        intersect_intervals(adjacent, np.array([[0.0, 10.0]])),
+        [[0.0, 10.0]],
+    )
+
+    # Zero-length rows are dropped.
+    with_zero_length = np.array([[3.0, 3.0], [4.0, 6.0]])
+    np.testing.assert_array_equal(
+        intersect_intervals(with_zero_length, np.array([[0.0, 10.0]])),
+        [[4.0, 6.0]],
+    )
+
+
+def test_observation_availability_rejects_unsorted():
+    unsorted = np.array([[5.0, 6.0], [0.0, 1.0]])
+    with pytest.raises(ValueError):
+        ObservationAvailability(unsorted)
+
+    overlapping = np.array([[0.0, 5.0], [3.0, 8.0]])
+    with pytest.raises(ValueError):
+        ObservationAvailability(overlapping)
+
+    non_finite = np.array([[0.0, np.nan]])
+    with pytest.raises(ValueError):
+        ObservationAvailability(non_finite)
+
+    valid = ObservationAvailability(np.array([[0.0, 1.0], [2.0, 3.0]]))
+    with pytest.raises(ValueError):
+        valid.intervals[0, 0] = 5.0
+
+    np.testing.assert_array_equal(
+        ObservationAvailability(None).restrict(np.empty((0, 2))),
+        np.empty((0, 2)),
+    )
+    assert ObservationAvailability(None).restrict(np.empty((0, 2))).shape == (
+        0,
+        2,
+    )
+    assert ObservationAvailability(None).restrict([]).shape == (0, 2)
+
+
 def test_population_intersects_selected_sources_and_reports_unknown_coverage():
     availability = population_availability(
         [

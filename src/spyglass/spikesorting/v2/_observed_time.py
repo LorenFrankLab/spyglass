@@ -157,6 +157,27 @@ class ObservationAvailability:
     intervals: np.ndarray | None
     unknown_sources: tuple[str, ...] = ()
 
+    def __post_init__(self):
+        if self.intervals is None:
+            return
+        arr = np.asarray(self.intervals, dtype=float).reshape(-1, 2)
+        if not np.all(np.isfinite(arr)):
+            raise ValueError(
+                "ObservationAvailability: intervals contain non-finite "
+                f"(NaN/Inf) values: {arr.tolist()!r}."
+            )
+        if len(arr) > 1:
+            bad = np.flatnonzero(arr[1:, 0] < arr[:-1, 1])
+            if bad.size:
+                i = int(bad[0])
+                raise ValueError(
+                    "ObservationAvailability: intervals must be sorted by "
+                    f"start and disjoint; interval {arr[i].tolist()} "
+                    f"overlaps the next interval {arr[i + 1].tolist()}."
+                )
+        arr.setflags(write=False)
+        object.__setattr__(self, "intervals", arr)
+
     @property
     def duration_s(self):
         return (
@@ -173,11 +194,10 @@ class ObservationAvailability:
         )
 
     def restrict(self, intervals):
-        return (
-            np.asarray(intervals)
-            if self.intervals is None
-            else intersect_intervals(intervals, self.intervals)
-        )
+        if self.intervals is None:
+            arr = np.asarray(intervals)
+            return np.empty((0, 2)) if arr.size == 0 else arr
+        return intersect_intervals(intervals, self.intervals)
 
     def valid_bins(self, time):
         """Only bins wholly inside an observed span are available."""

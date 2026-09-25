@@ -198,14 +198,41 @@ def _get_recording_timestamps(
     return timestamps
 
 
+def _normalize(intervals):
+    """Sort by start, merge overlapping/adjacent/duplicate rows, drop
+    zero-length rows.
+
+    Guards :func:`intersect_intervals` (and, through it,
+    :func:`intersect_interval_sets`) against a caller-supplied interval set
+    that is unsorted or carries overlapping/duplicate rows -- notably the
+    identical-input fast path below, which previously compared the raw
+    operands and returned duplicate rows unchanged when both operands were
+    identically duplicated.
+    """
+    import numpy as np
+
+    intervals = np.asarray(intervals, dtype=float).reshape(-1, 2)
+    intervals = intervals[intervals[:, 1] > intervals[:, 0]]
+    if len(intervals) == 0:
+        return intervals
+    intervals = intervals[np.argsort(intervals[:, 0], kind="stable")]
+    merged = [intervals[0].tolist()]
+    for start, stop in intervals[1:]:
+        if start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], stop)
+        else:
+            merged.append([start, stop])
+    return np.asarray(merged, dtype=float).reshape(-1, 2)
+
+
 def intersect_intervals(left, right):
     """Intersect sorted, disjoint intervals, omitting zero-length overlaps."""
     import numpy as np
 
-    left = np.asarray(left, dtype=float).reshape(-1, 2)
-    right = np.asarray(right, dtype=float).reshape(-1, 2)
+    left = _normalize(left)
+    right = _normalize(right)
     if np.array_equal(left, right):
-        return left[left[:, 1] > left[:, 0]]
+        return left
     result = []
     i = j = 0
     while i < len(left) and j < len(right):
