@@ -29,6 +29,9 @@ from spyglass.spikesorting.v2._params.analyzer_waveform import (
 from spyglass.spikesorting.v2._params.artifact_detection import (
     ArtifactDetectionParamsSchema,
 )
+from spyglass.spikesorting.v2._params.motion_estimation import (
+    MotionEstimationParamsSchema,
+)
 from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
@@ -254,6 +257,26 @@ def artifact_default_contents() -> tuple:
                 amplitude_threshold_uv=50.0,
                 proportion_above_threshold=0.7,
             ).model_dump(),
+        ),
+    )
+
+
+def motion_estimation_default_contents() -> tuple:
+    """Return ``MotionEstimationParameters._DEFAULT_CONTENTS``.
+
+    Each row is ``(motion_estimation_params_name, params_blob,
+    params_schema_version, job_kwargs)``. Only the two DREDge presets ship as
+    rows; ``rigid_fast`` stays an allowed preset that a user inserts
+    explicitly. None of these recipes is validated for a probe.
+    """
+    return (
+        _lookup_row(
+            "dredge_v1",
+            MotionEstimationParamsSchema(preset="dredge").model_dump(),
+        ),
+        _lookup_row(
+            "dredge_fast_v1",
+            MotionEstimationParamsSchema(preset="dredge_fast").model_dump(),
         ),
     )
 
