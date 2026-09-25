@@ -848,6 +848,10 @@ class ConcatRecordingComputed(NamedTuple):
     anchor_nwb_file_name: str
     member_boundaries: list[dict]
     obs_intervals: object
+    # ``(n, 2)`` int64 half-open concat frame ranges that are artifact-free and
+    # never cross a member join or a member-internal timestamp gap; every
+    # estimator over the concat samples statistics only inside them.
+    statistics_spans: object
     # The RESOLVED motion-correction preset string ("rigid_fast" for an "auto"
     # same-day request, the explicit preset otherwise, "none" when skipped) --
     # resolved in make_compute and persisted so the row records what actually
@@ -880,6 +884,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     content_hash: char(64)
     motion_preset: varchar(64)   # RESOLVED motion preset ('rigid_fast' for 'auto' same-day, the explicit preset, or 'none')
     obs_intervals: longblob     # kept intervals on the synthetic concat timeline, in seconds
+    statistics_spans: longblob  # (n, 2) int64 half-open concat frame ranges: artifact-free and never crossing a member join or a member-internal timestamp gap
     """
 
     class MemberBoundary(SpyglassMixinPart):
@@ -1188,8 +1193,11 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             If motion correction did not preserve the total sample count (which
             would misalign the ``MemberBoundary`` back-mapping).
         """
+        import numpy as np
+
         from spyglass.spikesorting.v2._concat_recording import (
             build_concatenated_recording,
+            concat_statistics_spans,
             cumulative_member_boundaries,
             mask_member_recordings,
             observation_intervals,
@@ -1217,9 +1225,19 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             )
             for plan, recording in zip(member_plan, recordings, strict=True)
         ]
-        recordings, artifact_ranges = mask_member_recordings(
+        masked_recordings, artifact_ranges = mask_member_recordings(
             recordings, [plan["valid_times"] for plan in member_plan]
         )
+        # Statistics spans come from the members as loaded, whose persisted
+        # timestamps still carry each member's own gaps; the concatenation
+        # below replaces them with one synthetic continuous timeline.
+        statistics_spans = np.asarray(
+            concat_statistics_spans(
+                recordings, member_sample_counts, artifact_ranges
+            ),
+            dtype=np.int64,
+        ).reshape(-1, 2)
+        recordings = masked_recordings
 
         # Resolve the Spyglass 'auto' alias against the group's (fetch-time)
         # multi-day status before any SpikeInterface call.
@@ -1366,6 +1384,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             anchor_nwb_file_name=anchor_nwb_file_name,
             member_boundaries=member_boundaries,
             obs_intervals=obs_intervals,
+            statistics_spans=statistics_spans,
             # Persist the RESOLVED preset ("rigid_fast" for "auto" same-day),
             # not the alias; ``preset_label`` already maps a None (skip) to "none".
             motion_preset=preset_label,
@@ -1384,6 +1403,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         anchor_nwb_file_name,
         member_boundaries,
         obs_intervals,
+        statistics_spans,
         motion_preset,
     ):
         """Atomically register the staged concat artifact + boundary rows.
@@ -1425,6 +1445,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                         "content_hash": content_hash,
                         "motion_preset": motion_preset,
                         "obs_intervals": obs_intervals,
+                        "statistics_spans": statistics_spans,
                     }
                 )
                 self.MemberBoundary.insert(boundary_rows)
@@ -1507,6 +1528,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         """
         from pathlib import Path
 
+        import numpy as np
+
         from spyglass.spikesorting.v2._concat_recording import (
             concat_recording_artifact_lock,
         )
@@ -1558,6 +1581,24 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                     "was NOT modified. Recover by restoring a backup, rerunning "
                     "under the original environment, or deleting and repopulating "
                     "the ConcatenatedRecording row (and its downstream)."
+                )
+            # The traces fingerprint does not include the stored statistics
+            # spans; downstream sorts estimate noise from those spans, so a
+            # rebuild must reproduce them exactly too.
+            if not np.array_equal(
+                np.asarray(computed.statistics_spans).reshape(-1, 2),
+                np.asarray(row["statistics_spans"]).reshape(-1, 2),
+            ):
+                _unlink_staged_analysis_file(
+                    computed.analysis_file_name,
+                    context="ConcatenatedRecording._rebuild_nwb_artifact",
+                )
+                raise RecordingContentDriftError(
+                    "ConcatenatedRecording._rebuild_nwb_artifact: rebuilt "
+                    "statistics spans do not match the stored "
+                    f"statistics_spans for {analysis_file_name!r}. The canonical "
+                    "artifact was NOT modified. Delete and repopulate the "
+                    "ConcatenatedRecording row (and its downstream)."
                 )
 
             install_rebuilt_recording(

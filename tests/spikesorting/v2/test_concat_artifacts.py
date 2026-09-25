@@ -54,6 +54,46 @@ def test_unmasked_members_keep_their_samples():
     assert ranges == []
 
 
+def test_concat_preserves_member_internal_gaps():
+    """Concat statistics spans split at member joins and member-internal gaps.
+
+    The first member is continuous with one artifact; the second has a
+    wall-clock gap between its internal spans ``[0, 500)`` and ``[500, 1000)``.
+    The concat span list must keep both offset internal spans (not one
+    ``[800, 1800)``), split at the member join (frame 800) even though
+    neither side is masked there, and drop the artifact frames.
+    """
+    from spikeinterface.core import NumpyRecording
+
+    from spyglass.spikesorting.v2._concat_recording import (
+        concat_statistics_spans,
+        mask_member_recordings,
+    )
+
+    first = NumpyRecording(np.ones((800, 2), dtype="float32"), 1000)
+    first.set_times(5 + np.arange(800) / 1000)
+    gapped = NumpyRecording(np.ones((1000, 2), dtype="float32"), 1000)
+    gapped.set_times(
+        np.r_[10 + np.arange(500) / 1000, 20 + np.arange(500) / 1000]
+    )
+    # Keep everything in the first member except frames [100, 150).
+    valid = [np.array([[5.0, 5.0995], [5.15, 5.799]]), None]
+    _masked, artifact_ranges = mask_member_recordings([first, gapped], valid)
+    assert artifact_ranges == [(100, 150)]
+
+    spans = concat_statistics_spans(
+        [first, gapped], [800, 1000], artifact_ranges
+    )
+
+    assert spans == [(0, 100), (150, 800), (800, 1300), (1300, 1800)]
+    # The unmasked, gapless case still splits at the member join.
+    continuous = NumpyRecording(np.ones((1000, 2), dtype="float32"), 1000)
+    assert concat_statistics_spans([first, continuous], [800, 1000], []) == [
+        (0, 800),
+        (800, 1800),
+    ]
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("motion", ["none", "rigid_fast"])
 def test_detected_artifacts_survive_concat_rebuild_and_member_export(

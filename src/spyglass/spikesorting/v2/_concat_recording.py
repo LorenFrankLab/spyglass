@@ -623,6 +623,48 @@ def mask_member_recordings(recordings, member_valid_times):
     return masked, concat_ranges
 
 
+def concat_statistics_spans(
+    member_recordings, member_sample_counts, artifact_ranges
+) -> list[tuple[int, int]]:
+    """Artifact-free concat frame spans that never cross a member join.
+
+    Each member's boundary spans come from its own persisted timestamps, so a
+    member-internal wall-clock gap is a boundary too; they are offset into
+    concat frames by the cumulative member sample counts (the same basis as
+    :func:`cumulative_member_boundaries`), then intersected with the
+    complement of ``artifact_ranges``.
+
+    Parameters
+    ----------
+    member_recordings : list[si.BaseRecording]
+        Per-member recordings carrying their real timestamps (as loaded,
+        before ``concatenate_recordings(..., ignore_times=True)``), ordered by
+        ``member_index``.
+    member_sample_counts : list[int]
+        Per-member sample counts, same order.
+    artifact_ranges : list[tuple[int, int]]
+        Excluded half-open ranges already in concat frames (as returned by
+        :func:`mask_member_recordings`); empty when nothing is masked.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Sorted half-open concat-frame statistics spans.
+    """
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        concat_boundary_spans,
+        statistics_spans,
+    )
+
+    ends = cumulative_member_boundaries(member_sample_counts)
+    starts = [0, *ends[:-1]]
+    return statistics_spans(
+        ends[-1] if ends else 0,
+        artifact_ranges,
+        concat_boundary_spans(member_recordings, starts),
+    )
+
+
 def observation_intervals(n_samples, sampling_frequency, artifact_ranges):
     """Return kept concat intervals in seconds from ordered half-open ranges."""
     import numpy as np
