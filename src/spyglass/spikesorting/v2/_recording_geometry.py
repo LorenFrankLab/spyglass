@@ -29,7 +29,8 @@ inherently touch the DB / DataJoint at CALL time via lazy imports:
 (``tetrode_repair_applies``), the plane-normalization helpers
 (``classify_missing_geometry``, ``select_distinct_plane``,
 ``normalize_channel_locations``,
-``assert_unique_contact_positions``) and the pitch/adjacency helpers
+``assert_unique_contact_positions``, ``flatten_planar_geometry``) and the
+pitch/adjacency helpers
 (``_shank_pitch``, ``_interior_bad_channel_ids``) are pure.
 """
 
@@ -763,6 +764,49 @@ def assert_unique_contact_positions(
             "tetrode_12.5 repair applies only to 4-channel single-group "
             "tetrodes."
         )
+
+
+def flatten_planar_geometry(recording) -> None:
+    """Drop the constant third coordinate from a reloaded recording, in place.
+
+    Recording artifacts are read back from NWB, and SpikeInterface builds a 3D
+    ``location`` property whenever the electrodes table carries ``rel_z``
+    (``NwbRecordingExtractor._fetch_locations_and_groups``) -- which it always
+    does for an artifact ``write_nwb_artifact`` produced. That writer persists
+    the NORMALIZED 2D geometry with a constant ``rel_z = 0``, so the x-y
+    columns already ARE the geometry the recording was prepared with. Making
+    that explicit keeps every consumer -- the artifact mask, the sorter, the
+    motion estimator, and the artifact writer, which REFUSES 3D locations
+    rather than silently projecting them -- on one unambiguous plane.
+
+    No-op when the locations are already 2D or absent (a bare synthetic
+    recording in a test).
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The reloaded recording.
+
+    Raises
+    ------
+    ValueError
+        If the third coordinate is not constant across contacts: the geometry
+        was never reduced to a plane, so dropping z would move contacts.
+    """
+    import numpy as np
+
+    locations = recording.get_property("location")
+    if locations is None or np.asarray(locations).shape[1] != 3:
+        return
+    locations = np.asarray(locations, dtype=float)
+    if len(np.unique(np.round(locations[:, 2], _POSITION_DECIMALS))) != 1:
+        raise ValueError(
+            "The recording's contacts are not planar -- their third "
+            f"coordinate varies (rel_z={locations[:, 2].tolist()}), so it "
+            "cannot be dropped. These artifacts predate geometry "
+            "normalization; re-populate the Recording rows."
+        )
+    recording.set_channel_locations(locations[:, :2])
 
 
 # Pitch-anchored adjacency for the ``interpolate`` re-inclusion. Constants are
