@@ -754,6 +754,12 @@ class ConcatRecordingComputed(NamedTuple):
     # never cross a member join or a member-internal timestamp gap; every
     # estimator over the concat samples statistics only inside them.
     statistics_spans: object
+    # ``(n, 2)`` int64 half-open concat frame ranges of uninterrupted
+    # acquisition (split at every member join and member-internal gap) and
+    # ``(n,)`` float64 start time of each on its member's own clock; the
+    # synthetic concat timeline cannot recover them.
+    continuity_spans: object
+    continuity_start_s: object
 
 
 @schema
@@ -781,6 +787,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     content_hash: char(64)
     obs_intervals: longblob     # kept intervals on the synthetic concat timeline, in seconds
     statistics_spans: longblob  # (n, 2) int64 half-open concat frame ranges: artifact-free and never crossing a member join or a member-internal timestamp gap
+    continuity_spans: longblob  # (n, 2) int64 half-open concat frame ranges of uninterrupted acquisition, split at every member join and member-internal timestamp gap
+    continuity_start_s: longblob  # (n,) float64 first timestamp of each continuity span on its member's own acquisition clock, in seconds
     """
 
     class MemberBoundary(SpyglassMixinPart):
@@ -1051,7 +1059,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
         from spyglass.spikesorting.v2._concat_recording import (
             build_concatenated_recording,
-            concat_statistics_spans,
+            concat_continuity,
             cumulative_member_boundaries,
             mask_member_recordings,
             observation_intervals,
@@ -1059,6 +1067,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
         from spyglass.spikesorting.v2._sorting_artifact_mask import (
             silence_frame_ranges,
+            statistics_spans,
         )
         from spyglass.spikesorting.v2._units_nwb import (
             _base_intervals_from_recording,
@@ -1080,12 +1089,18 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         masked_recordings, artifact_ranges = mask_member_recordings(
             recordings, [plan["valid_times"] for plan in member_plan]
         )
-        # Statistics spans come from the members as loaded, whose persisted
-        # timestamps still carry each member's own gaps; the concatenation
-        # below replaces them with one synthetic continuous timeline.
-        statistics_spans = np.asarray(
-            concat_statistics_spans(
-                recordings, member_sample_counts, artifact_ranges
+        # Continuity spans (and so statistics spans) come from the members as
+        # loaded, whose persisted timestamps still carry each member's own
+        # gaps; the concatenation below replaces them with one synthetic
+        # continuous timeline.
+        continuity = concat_continuity(recordings, member_sample_counts)
+        continuity_spans = np.asarray(continuity.spans, dtype=np.int64).reshape(
+            -1, 2
+        )
+        continuity_start_s = np.asarray(continuity.start_s, dtype=np.float64)
+        statistics = np.asarray(
+            statistics_spans(
+                sum(member_sample_counts), artifact_ranges, continuity.spans
             ),
             dtype=np.int64,
         ).reshape(-1, 2)
@@ -1216,7 +1231,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             anchor_nwb_file_name=anchor_nwb_file_name,
             member_boundaries=member_boundaries,
             obs_intervals=obs_intervals,
-            statistics_spans=statistics_spans,
+            statistics_spans=statistics,
+            continuity_spans=continuity_spans,
+            continuity_start_s=continuity_start_s,
         )
 
     def make_insert(
@@ -1233,6 +1250,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         member_boundaries,
         obs_intervals,
         statistics_spans,
+        continuity_spans,
+        continuity_start_s,
     ):
         """Atomically register the staged concat artifact + boundary rows.
 
@@ -1273,6 +1292,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                         "content_hash": content_hash,
                         "obs_intervals": obs_intervals,
                         "statistics_spans": statistics_spans,
+                        "continuity_spans": continuity_spans,
+                        "continuity_start_s": continuity_start_s,
                     }
                 )
                 self.MemberBoundary.insert(boundary_rows)
@@ -1409,22 +1430,32 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                     "under the original environment, or deleting and repopulating "
                     "the ConcatenatedRecording row (and its downstream)."
                 )
-            # The traces fingerprint does not include the stored statistics
-            # spans; downstream sorts estimate noise from those spans, so a
-            # rebuild must reproduce them exactly too.
-            if not np.array_equal(
-                np.asarray(computed.statistics_spans).reshape(-1, 2),
-                np.asarray(row["statistics_spans"]).reshape(-1, 2),
-            ):
+            # The traces fingerprint does not include the stored spans:
+            # downstream sorts estimate noise from the statistics spans and
+            # motion estimation reads the continuity spans and their start
+            # times, so a rebuild must reproduce them exactly too.
+            drifted = [
+                name
+                for name, shape in (
+                    ("statistics_spans", (-1, 2)),
+                    ("continuity_spans", (-1, 2)),
+                    ("continuity_start_s", (-1,)),
+                )
+                if not np.array_equal(
+                    np.asarray(getattr(computed, name)).reshape(shape),
+                    np.asarray(row[name]).reshape(shape),
+                )
+            ]
+            if drifted:
                 _unlink_staged_analysis_file(
                     computed.analysis_file_name,
                     context="ConcatenatedRecording._rebuild_nwb_artifact",
                 )
                 raise RecordingContentDriftError(
                     "ConcatenatedRecording._rebuild_nwb_artifact: rebuilt "
-                    "statistics spans do not match the stored "
-                    f"statistics_spans for {analysis_file_name!r}. The canonical "
-                    "artifact was NOT modified. Delete and repopulate the "
+                    f"{drifted} do not match the stored values for "
+                    f"{analysis_file_name!r}. The canonical artifact was NOT "
+                    "modified. Delete and repopulate the "
                     "ConcatenatedRecording row (and its downstream)."
                 )
 

@@ -16,6 +16,8 @@ recording.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 
 def member_recording_selection_key(
     member: dict, preprocessing_params_name: str
@@ -560,16 +562,35 @@ def mask_member_recordings(recordings, member_valid_times):
     return masked, concat_ranges
 
 
-def concat_statistics_spans(
-    member_recordings, member_sample_counts, artifact_ranges
-) -> list[tuple[int, int]]:
-    """Artifact-free concat frame spans that never cross a member join.
+class ConcatContinuity(NamedTuple):
+    """Continuity spans of a concatenation and their real start times.
 
-    Each member's boundary spans come from its own persisted timestamps, so a
-    member-internal wall-clock gap is a boundary too; they are offset into
-    concat frames by the cumulative member sample counts (the same basis as
-    :func:`cumulative_member_boundaries`), then intersected with the
-    complement of ``artifact_ranges``.
+    Attributes
+    ----------
+    spans : list[tuple[int, int]]
+        Half-open concat-frame spans of uninterrupted acquisition, split at
+        every member join and every member-internal timestamp gap.
+    start_s : list[float]
+        Each span's first timestamp on its member's own acquisition clock (s).
+    """
+
+    spans: list[tuple[int, int]]
+    start_s: list[float]
+
+
+def concat_continuity(
+    member_recordings, member_sample_counts
+) -> ConcatContinuity:
+    """Continuity spans of a concatenation, from its members' own timestamps.
+
+    Each member's spans come from its persisted timestamps
+    (``boundary_spans_from_timestamps``), so a member-internal wall-clock gap
+    is a boundary too; they are offset into concat frames by the cumulative
+    member sample counts (the same basis as
+    :func:`cumulative_member_boundaries`), so every member join is a boundary
+    as well, however short the real gap. The concatenation itself replaces the
+    members' timestamps with one synthetic clock, so these must be taken from
+    the members before they are concatenated.
 
     Parameters
     ----------
@@ -579,27 +600,25 @@ def concat_statistics_spans(
         ``member_index``.
     member_sample_counts : list[int]
         Per-member sample counts, same order.
-    artifact_ranges : list[tuple[int, int]]
-        Excluded half-open ranges already in concat frames (as returned by
-        :func:`mask_member_recordings`); empty when nothing is masked.
 
     Returns
     -------
-    list[tuple[int, int]]
-        Sorted half-open concat-frame statistics spans.
+    ConcatContinuity
     """
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        concat_boundary_spans,
-        statistics_spans,
+        boundary_spans_from_timestamps,
     )
 
     ends = cumulative_member_boundaries(member_sample_counts)
-    starts = [0, *ends[:-1]]
-    return statistics_spans(
-        ends[-1] if ends else 0,
-        artifact_ranges,
-        concat_boundary_spans(member_recordings, starts),
-    )
+    spans: list[tuple[int, int]] = []
+    start_s: list[float] = []
+    for recording, offset in zip(
+        member_recordings, [0, *ends[:-1]], strict=True
+    ):
+        for a, b in boundary_spans_from_timestamps(recording):
+            spans.append((offset + a, offset + b))
+            start_s.append(float(recording.sample_index_to_time(a)))
+    return ConcatContinuity(spans=spans, start_s=start_s)
 
 
 def observation_intervals(n_samples, sampling_frequency, artifact_ranges):

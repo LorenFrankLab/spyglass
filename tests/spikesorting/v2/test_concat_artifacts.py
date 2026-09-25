@@ -55,7 +55,8 @@ def test_unmasked_members_keep_their_samples():
 
 
 def test_concat_preserves_member_internal_gaps():
-    """Concat statistics spans split at member joins and member-internal gaps.
+    """Concat continuity and statistics spans split at member joins and
+    member-internal gaps, and each continuity span keeps its real start time.
 
     The first member is continuous with one artifact; the second has a
     wall-clock gap between its internal spans ``[0, 500)`` and ``[500, 1000)``.
@@ -66,8 +67,11 @@ def test_concat_preserves_member_internal_gaps():
     from spikeinterface.core import NumpyRecording
 
     from spyglass.spikesorting.v2._concat_recording import (
-        concat_statistics_spans,
+        concat_continuity,
         mask_member_recordings,
+    )
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        statistics_spans,
     )
 
     first = NumpyRecording(np.ones((800, 2), dtype="float32"), 1000)
@@ -81,17 +85,24 @@ def test_concat_preserves_member_internal_gaps():
     _masked, artifact_ranges = mask_member_recordings([first, gapped], valid)
     assert artifact_ranges == [(100, 150)]
 
-    spans = concat_statistics_spans(
-        [first, gapped], [800, 1000], artifact_ranges
-    )
+    continuity = concat_continuity([first, gapped], [800, 1000])
 
-    assert spans == [(0, 100), (150, 800), (800, 1300), (1300, 1800)]
-    # The unmasked, gapless case still splits at the member join.
-    continuous = NumpyRecording(np.ones((1000, 2), dtype="float32"), 1000)
-    assert concat_statistics_spans([first, continuous], [800, 1000], []) == [
-        (0, 800),
-        (800, 1800),
+    assert continuity.spans == [(0, 800), (800, 1300), (1300, 1800)]
+    assert continuity.start_s == [5.0, 10.0, 20.0]
+    assert statistics_spans(1800, artifact_ranges, continuity.spans) == [
+        (0, 100),
+        (150, 800),
+        (800, 1300),
+        (1300, 1800),
     ]
+    # The gapless case still splits at the member join, and a member without
+    # a time vector starts at its own t_start.
+    continuous = NumpyRecording(np.ones((1000, 2), dtype="float32"), 1000)
+    continuous.shift_times(7.5)
+    assert concat_continuity([first, continuous], [800, 1000]) == (
+        [(0, 800), (800, 1800)],
+        [5.0, 7.5],
+    )
 
 
 @pytest.mark.slow
