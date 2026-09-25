@@ -341,3 +341,45 @@ def test_effective_source_reads_base_recording_masked_at_load(
     assert effective.traces.key == source.key
     assert effective.traces.row == (Recording & source.key).fetch1()
     assert effective.traces.apply_artifact_mask is True
+
+
+@pytest.mark.slow
+def test_curation_recording_accessor_returns_unmasked_traces(
+    masked_planted_sort,
+):
+    """``CurationV2.get_recording`` returns a single recording unmasked.
+
+    The accessor serves the reusable preprocessed traces, while every analyzer
+    rebuild reads them with the sort's artifact mask applied.
+    """
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        reconstruct_recording_and_sorting,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sort_key = masked_planted_sort["sort_key"]
+    (_, masked_start), (masked_stop, _) = Sorting().get_statistics_spans(
+        sort_key
+    )
+    window = {"start_frame": masked_start, "end_frame": masked_stop}
+    base = Recording().get_recording(
+        SortingSelection.resolve_source(sort_key).key
+    )
+    base_window = base.get_traces(**window)
+    assert np.any(base_window != 0)
+    clear_curations_for(sort_key)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sort_key)
+        accessor = CurationV2.get_recording(root)
+        rebuilt, _ = reconstruct_recording_and_sorting(Sorting(), sort_key)
+
+        assert accessor.get_annotation("is_filtered") is True
+        np.testing.assert_array_equal(
+            accessor.get_traces(**window), base_window
+        )
+        np.testing.assert_array_equal(rebuilt.get_traces(**window), 0)
+    finally:
+        clear_curations_for(sort_key)

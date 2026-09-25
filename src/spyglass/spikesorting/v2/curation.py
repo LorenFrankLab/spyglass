@@ -1975,8 +1975,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     def get_recording(cls, key: dict) -> "si.BaseRecording":
         """Return the cached preprocessed recording for a CurationV2 row.
 
-        Resolves the source via ``SortingSelection.resolve_source``. A
-        standalone source returns its reusable preprocessed ``Recording``;
+        Resolves the traces via ``SortingSelection.resolve_effective_source``.
+        A standalone source returns its reusable preprocessed ``Recording``;
         its sorting-stage artifact mask is not applied here. A concat source
         returns the materialized ``ConcatenatedRecording``, which includes
         member masks and motion correction. Use ``CurationRef.open_analyzer``
@@ -2006,22 +2006,23 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             The cached preprocessed recording, annotated
             ``is_filtered=True``.
         """
-        from spyglass.spikesorting.v2.recording import Recording
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecording,
+        from spyglass.spikesorting.v2._source_resolution import (
+            load_effective_recording,
         )
 
         sorting_id = (cls & key).fetch1("sorting_id")
-        source = SortingSelection.resolve_source({"sorting_id": sorting_id})
-        # The curated spike times live in the sort's input-recording timeline:
+        traces = SortingSelection.resolve_effective_source(
+            {"sorting_id": sorting_id}
+        ).traces
+        # The curated spike times live in the sort's effective-traces timeline:
         # a single-recording sort reads its Recording cache; a concat sort reads
-        # the materialized ConcatenatedRecording cache.
-        if source.kind == "recording":
-            recording = Recording().get_recording(source.key)
-        else:  # concatenated_recording
-            recording = ConcatenatedRecording().get_recording(source.key)
-        recording.annotate(is_filtered=True)
-        return recording
+        # the materialized ConcatenatedRecording cache. This accessor
+        # deliberately returns a single recording WITHOUT the sort's artifact
+        # mask (the reusable preprocessed traces), so the mask flag is cleared.
+        SortingSelection.ensure_effective_traces(traces)
+        return load_effective_recording(
+            traces._replace(apply_artifact_mask=False)
+        )
 
     @classmethod
     def _load_curation_recording_meta(cls, key):
