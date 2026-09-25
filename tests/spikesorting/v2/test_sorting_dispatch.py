@@ -572,3 +572,61 @@ def test_ms5_non_default_params_reach_run_sorter_unchanged(monkeypatch):
     assert config.external_whiten is True
     assert config.random_seed == 3
     assert config.job_kwargs == {"n_jobs": 2}
+
+
+def test_remove_excess_spikes_drops_empty_units(caplog):
+    """A unit whose only spikes fall outside the recording window is left
+    with zero spikes by ``sic.remove_excess_spikes``'s window trim; it must
+    then be dropped from the returned sorting entirely (not kept as an empty
+    unit). Other units and their spike trains must be unchanged, and a
+    sorting with no empty units must keep every unit id.
+
+    Uses sparse, non-contiguous unit ids ([3, 7, 12]) so an index/id mix-up
+    in the drop logic would show up as the wrong unit being removed.
+    """
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        remove_excess_spikes,
+    )
+
+    fs = 30_000.0
+    rec = si.generate_recording(
+        num_channels=4, durations=[1.0], sampling_frequency=fs
+    )
+    n = rec.get_num_samples()
+    assert n == 30_000
+
+    # Unit 3: two in-window spikes (unchanged). Unit 7: its only spike is
+    # past the recording window -> left empty by the trim -> must be
+    # dropped. Unit 12: one in-window spike (unchanged).
+    samples = np.array([100, 200, n + 500, 300], dtype=np.int64)
+    labels = np.array([3, 3, 7, 12], dtype=np.int64)
+    sorting = si.NumpySorting.from_samples_and_labels(
+        samples_list=[samples], labels_list=[labels], sampling_frequency=fs
+    )
+
+    with caplog.at_level("INFO"):
+        out = remove_excess_spikes(sorting, rec)
+
+    assert list(out.unit_ids) == [3, 12], (
+        f"expected unit 7 (left empty by the window trim) to be dropped; "
+        f"got unit_ids={list(out.unit_ids)}"
+    )
+    np.testing.assert_array_equal(out.get_unit_spike_train(3), [100, 200])
+    np.testing.assert_array_equal(out.get_unit_spike_train(12), [300])
+    assert any(
+        "7" in r.message for r in caplog.records
+    ), "dropped unit id 7 must be logged"
+
+    # No empty units -> every unit id is kept.
+    samples_all_in_window = np.array([100, 200, 300], dtype=np.int64)
+    labels_all_in_window = np.array([3, 7, 12], dtype=np.int64)
+    sorting_no_empty = si.NumpySorting.from_samples_and_labels(
+        samples_list=[samples_all_in_window],
+        labels_list=[labels_all_in_window],
+        sampling_frequency=fs,
+    )
+    out_no_empty = remove_excess_spikes(sorting_no_empty, rec)
+    assert list(out_no_empty.unit_ids) == [3, 7, 12]

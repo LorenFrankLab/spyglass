@@ -833,7 +833,13 @@ def run_si_sorter(
 
 
 def remove_excess_spikes(sorting, recording):
-    """Drop spikes whose sample index is outside the recording window.
+    """Drop spikes whose sample index is outside the recording window, then
+    drop any unit left with zero spikes (in every segment) by that trim.
+
+    A unit whose only spikes fell outside the recording window would
+    otherwise survive as a spurious zero-spike unit -- inflating ``n_units``
+    and appearing in the units NWB with an empty spike train. Dropping it
+    here means ``n_units`` and the persisted units NWB never include it.
 
     Parameters
     ----------
@@ -845,8 +851,22 @@ def remove_excess_spikes(sorting, recording):
     Returns
     -------
     spikeinterface.BaseSorting
-        The sorting with out-of-window spikes removed.
+        The sorting with out-of-window spikes removed and any unit left
+        with zero spikes dropped.
     """
+    import numpy as np
     import spikeinterface.curation as sic
 
-    return sic.remove_excess_spikes(sorting, recording)
+    from spyglass.utils import logger
+
+    trimmed = sic.remove_excess_spikes(sorting, recording)
+    before_ids = trimmed.unit_ids
+    result = trimmed.remove_empty_units()
+    dropped = np.setdiff1d(before_ids, result.unit_ids)
+    if dropped.size:
+        logger.info(
+            "Sorting._remove_excess_spikes: dropped unit(s) "
+            f"{dropped.tolist()} left with zero spikes after window "
+            "trimming."
+        )
+    return result
