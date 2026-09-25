@@ -124,10 +124,35 @@ DLCProject().alter()
   `run_v2_pipeline` now set single-session or concat mode, so any preset runs
   in either mode.
 - **Schema change: `concat_recording_id` values change.** Motion correction
-  is no longer part of the concat identity. Drop the old
-  `MotionCorrectionParameters` table. Then recreate your v2
-  `ConcatenatedRecordingSelection` / `ConcatenatedRecording` rows and the
-  sorts and curations built on them, following the
+  is no longer part of the concat identity. `alter()` cannot remove the
+  foreign key, and `drop()` refuses to drop the `SortingSelection` part table
+  alone. On an existing preproduction database, delete the concat
+  selections, which cascades to their sorts and curations. Then drop the
+  emptied tables leaves-first:
+
+  ```python
+  import datajoint as dj
+  from spyglass.spikesorting.v2.session_group import (
+      ConcatenatedRecording,
+      ConcatenatedRecordingSelection,
+  )
+  from spyglass.spikesorting.v2.sorting import SortingSelection
+
+  ConcatenatedRecordingSelection().delete()
+  for name in (
+      SortingSelection.ConcatenatedRecordingSource.full_table_name,
+      ConcatenatedRecording.MemberBoundary.full_table_name,
+      ConcatenatedRecording.full_table_name,
+      ConcatenatedRecordingSelection.MemberSnapshot.full_table_name,
+      ConcatenatedRecordingSelection.full_table_name,
+      "`spikesorting_v2_session_group`.`#motion_correction_parameters`",
+  ):
+      dj.FreeTable(dj.conn(), name).drop_quick()
+  ```
+
+  In a new Python session, `import spyglass.spikesorting.v2.sorting`
+  redeclares the tables. Then recreate the concat selections, sorts and
+  curations. Do this after the
   [preproduction database upgrade sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database).
 - Optional motion correction will be a separate stage. `DriftEstimate` is
   unchanged and stays QC-only.
