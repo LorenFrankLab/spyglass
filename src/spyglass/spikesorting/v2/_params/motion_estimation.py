@@ -81,6 +81,11 @@ class MotionEstimationParamsSchema(BaseModel):
     noise_levels_seed : int
         Seed of the random chunks the per-channel noise levels are estimated
         from. Pinned so a rerun or a cache rebuild detects the same peaks.
+    max_gap_s : float
+        Required. Longest stretch of unobserved time (s) the estimation clock
+        keeps between two continuity spans (an acquisition gap or a
+        concatenation member join); a longer real gap is shortened to it. All
+        spans are estimated together on that clock, in one reference frame.
     schema_version : int
         Bumped on breaking field changes; rows insert at the current version.
     """
@@ -93,6 +98,7 @@ class MotionEstimationParamsSchema(BaseModel):
     localize_peaks_kwargs: dict = Field(default_factory=dict)
     estimate_motion_kwargs: dict = Field(default_factory=dict)
     noise_levels_seed: int = Field(default=0, ge=0)
+    max_gap_s: float = Field(ge=0, allow_inf_nan=False)
     schema_version: int = MOTION_ESTIMATION_SCHEMA_VERSION
 
     @model_validator(mode="after")

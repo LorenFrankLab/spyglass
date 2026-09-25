@@ -57,6 +57,7 @@ def test_estimation_row_with_unknown_override_is_rejected(motion_params):
                 "params": {
                     "preset": "dredge",
                     "detect_kwargs": {"detect_treshold": 6.0},
+                    "max_gap_s": 30.0,
                 },
             }
         )
@@ -68,7 +69,7 @@ def test_estimation_row_rejects_job_kwargs_seed(motion_params):
         motion_params.insert1(
             {
                 "motion_estimation_params_name": "seeded_job_kwargs",
-                "params": {"preset": "rigid_fast"},
+                "params": {"preset": "rigid_fast", "max_gap_s": 30.0},
                 "job_kwargs": {"random_seed": 3},
             }
         )
@@ -87,7 +88,7 @@ def test_estimation_row_duplicating_a_default_is_rejected(motion_params):
             {
                 "motion_estimation_params_name": "dredge_copy",
                 "params": MotionEstimationParamsSchema(
-                    preset="dredge"
+                    preset="dredge", max_gap_s=30.0
                 ).model_dump(),
             }
         )

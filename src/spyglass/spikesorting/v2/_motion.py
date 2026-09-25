@@ -258,6 +258,7 @@ def resolve_estimation_params(params: dict) -> dict:
       ``dredge.py:984-985``).
     - ``localization_window_ms``: the fixed peak waveform window.
     - ``noise_levels_kwargs``: the noise estimator and its seeded chunk budget.
+    - ``max_gap_s``: the cap on unobserved time kept between continuity spans.
 
     Values are canonical (plain Python numbers, lists, ``None``; ``post_transform``
     as ``"numpy.log1p"``), so :func:`resolved_params_hash` is stable.
@@ -372,6 +373,7 @@ def resolve_estimation_params(params: dict) -> dict:
             "chunk_duration": _NOISE_CHUNK_DURATION,
             "seed": int(validated.noise_levels_seed),
         },
+        "max_gap_s": float(validated.max_gap_s),
     }
 
 

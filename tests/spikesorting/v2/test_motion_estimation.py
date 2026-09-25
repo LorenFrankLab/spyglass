@@ -14,9 +14,11 @@ import pytest
 
 
 def _resolve(params):
+    """Resolve ``params``, naming the shipped rows' gap cap unless given."""
     from spyglass.spikesorting.v2._motion import resolve_estimation_params
+    from spyglass.spikesorting.v2._recipe_catalog import MOTION_MAX_GAP_S
 
-    return resolve_estimation_params(params)
+    return resolve_estimation_params({"max_gap_s": MOTION_MAX_GAP_S, **params})
 
 
 def _hash(resolved):
@@ -62,6 +64,7 @@ def test_resolution_pins_cpu_and_excludes_interpolation(preset):
         "estimate_motion_kwargs",
         "localization_window_ms",
         "noise_levels_kwargs",
+        "max_gap_s",
     }
     assert resolved["localization_window_ms"] == {
         "ms_before": 0.1,
@@ -160,6 +163,25 @@ def test_noise_seed_is_part_of_the_resolved_configuration():
     assert _hash(seeded) != _hash(_resolve({"preset": "dredge"}))
 
 
+def test_gap_cap_is_required_and_part_of_the_resolved_configuration():
+    from pydantic import ValidationError
+
+    from spyglass.spikesorting.v2._motion import resolve_estimation_params
+
+    with pytest.raises(ValidationError, match="max_gap_s"):
+        resolve_estimation_params({"preset": "dredge"})
+    for bad in (-1.0, float("nan"), float("inf")):
+        with pytest.raises(ValidationError, match="max_gap_s"):
+            _resolve({"preset": "dredge", "max_gap_s": bad})
+
+    capped = _resolve({"preset": "dredge", "max_gap_s": 10})
+    assert capped["max_gap_s"] == 10.0
+    assert _hash(capped) == _hash(
+        _resolve({"preset": "dredge", "max_gap_s": 10.0})
+    )
+    assert _hash(capped) != _hash(_resolve({"preset": "dredge"}))
+
+
 def test_resolved_configuration_is_json_stable():
     import json
 
@@ -236,6 +258,7 @@ def test_default_rows_resolve():
     rows = motion_estimation_default_contents()
 
     assert [row[0] for row in rows] == ["dredge_v1", "dredge_fast_v1"]
+    assert [row[1]["max_gap_s"] for row in rows] == [30.0, 30.0]
     presets = [_resolve(row[1])["preset"] for row in rows]
     assert presets == ["dredge", "dredge_fast"]
 

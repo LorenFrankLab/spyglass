@@ -261,6 +261,16 @@ def artifact_default_contents() -> tuple:
     )
 
 
+#: Cap (s) on the unobserved time kept between continuity spans in the
+#: shipped motion-estimation rows. Development measurement (simulated 32-contact
+#: polymer shank, two 30 s spans around a 600 s gap holding a 30 um rigid jump,
+#: seeds 0-2): with ``dredge`` / ``dredge_fast`` (1 s bins) the common-frame
+#: error stops changing from a 5 s cap on (it is higher at 0 s and 1 s), and
+#: 30 s is within 0.03 um of the uncapped gap for ``rigid_fast`` (5 s bins).
+#: Each capped gap adds at most ``max_gap_s / bin_s`` temporal bins.
+MOTION_MAX_GAP_S = 30.0
+
+
 def motion_estimation_default_contents() -> tuple:
     """Return ``MotionEstimationParameters._DEFAULT_CONTENTS``.
 
@@ -272,11 +282,15 @@ def motion_estimation_default_contents() -> tuple:
     return (
         _lookup_row(
             "dredge_v1",
-            MotionEstimationParamsSchema(preset="dredge").model_dump(),
+            MotionEstimationParamsSchema(
+                preset="dredge", max_gap_s=MOTION_MAX_GAP_S
+            ).model_dump(),
         ),
         _lookup_row(
             "dredge_fast_v1",
-            MotionEstimationParamsSchema(preset="dredge_fast").model_dump(),
+            MotionEstimationParamsSchema(
+                preset="dredge_fast", max_gap_s=MOTION_MAX_GAP_S
+            ).model_dump(),
         ),
     )
 
