@@ -277,9 +277,10 @@ Recording.populate()  # recompute every remaining selection's artifact
 ```
 
 After upgrading, reevaluate the chosen curation and start a review with
-`franklab_hippocampus_2026_09_17`. New evaluations use observation version 1 and do
-not relabel historical version-0 evaluations. For saved drafts and analysis
-populations, follow [resuming reviews and rebuilding populations](#resuming-reviews-and-rebuilding-populations)
+`franklab_hippocampus_2026_09_17`. New evaluations use observation version 2.
+Evaluations stamped with an earlier version are not relabeled: populating one
+raises, and you must recreate its selection via `insert_selection`. For saved
+drafts and analysis populations, follow [resuming reviews and rebuilding populations](#resuming-reviews-and-rebuilding-populations)
 below. Import/commit an old draft through its original review before reviewing
 that committed child with the new profile; never overwrite its identity sidecar.
 

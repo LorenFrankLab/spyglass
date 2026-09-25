@@ -1017,7 +1017,11 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         _assert_is_metric_recipe(sel["metric_waveform_params_name"])
         if sel["observation_version"] != OBSERVATION_VERSION:
             raise ValueError(
-                "Recreate this evaluation selection with insert_selection to include observed-time metrics."
+                "This evaluation selection is stamped with observation "
+                f"version {sel['observation_version']}, but the current "
+                f"observation version is {OBSERVATION_VERSION}. Recreate the "
+                "selection with CurationEvaluationSelection.insert_selection "
+                "and populate that."
             )
 
         qm = (
