@@ -764,7 +764,7 @@ def estimate_motion_in_spans(
        (:func:`peaks_within_spans`).
 
     Detection and localization run as ``compute_motion``'s own pipeline for an
-    empty ``select_kwargs`` (``motion.py:371-412``): the detector node, an
+    empty ``select_kwargs`` (``motion.py:373-412``): the detector node, an
     ``ExtractDenseWaveforms`` node with the 0.1/0.3 ms window (``motion.py:
     387``) and the localization node, in one ``run_node_pipeline`` pass.
     ``compute_motion``'s other branch (``motion.py:413-432``) is not used: its
