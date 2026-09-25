@@ -69,6 +69,7 @@ from spyglass.spikesorting.v2._source_resolution import (
     EffectiveTraces,
     SourceLineage,
     effective_source_from_base,
+    load_effective_recording,
 )
 from spyglass.spikesorting.v2._units_nwb import (
     STATISTICS_SPANS_FIELD,
@@ -176,6 +177,10 @@ class SortingFetched(NamedTuple):
     # (``(n, 2)`` int64 concat frame ranges); ``None`` for a single-recording
     # source, whose spans ``make_compute`` derives from the reloaded recording.
     concat_statistics_spans: np.ndarray | None
+    # The sort's effective traces from
+    # ``SortingSelection.resolve_effective_source``: the cached artifact
+    # ``make_compute`` loads as the sorter input.
+    traces: EffectiveTraces
 
 
 class SortingComputed(NamedTuple):
@@ -1488,7 +1493,8 @@ class Sorting(SpyglassMixin, dj.Computed):
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
-        source = SortingSelection.resolve_source(key)
+        lineage, traces = SortingSelection.resolve_effective_source(key)
+        source = SourceResolution(kind=lineage.kind, key=lineage.key)
 
         sel_row = (SortingSelection & key).fetch1()
         # The artifact-detection pass lives on the zero-or-one
@@ -1502,9 +1508,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         # ``sel_row.get("artifact_detection_id")`` reads would always be None
         # and every artifact-backed sort would silently skip artifact masking.
         # (Concat member masks are already materialized, so this is None there.)
-        sel_row["artifact_detection_id"] = (
-            SortingSelection.resolve_artifact_detection(key)
-        )
+        sel_row["artifact_detection_id"] = lineage.artifact_detection_id
         sorter_row = (
             SorterParameters
             & {
@@ -1639,6 +1643,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             electrode_by_id=electrode_by_id,
             region_by_electrode=region_by_electrode,
             concat_statistics_spans=concat_statistics_spans,
+            traces=traces,
         )
 
     @staticmethod
@@ -1802,6 +1807,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         electrode_by_id,
         region_by_electrode,
         concat_statistics_spans,
+        traces,
     ):
         """Sort, build analyzer, stage Units NWB outside any DB transaction.
 
@@ -1830,7 +1836,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             Primary key of the sorting being populated.
         source : SourceResolution
             Resolved sort input source from ``make_fetch`` (selects whether the
-            recording is loaded from ``Recording`` or ``ConcatenatedRecording``).
+            statistics spans are derived here or read from the concat row).
         recording_id : str
             The anchor ``recording_id`` from ``make_fetch`` (the sort's own
             recording, or the first concat member's), threaded forward so the
@@ -1858,6 +1864,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         concat_statistics_spans : numpy.ndarray or None
             A concat source's stored statistics spans, used as is; ``None``
             for a single-recording source.
+        traces : EffectiveTraces
+            The sort's effective traces from ``make_fetch``: the cached
+            artifact loaded as the sorter input.
 
         Returns
         -------
@@ -1865,19 +1874,19 @@ class Sorting(SpyglassMixin, dj.Computed):
             Carrier of the computed sorting, staged units NWB, analyzer
             folder, and lookups threaded into ``make_insert``.
         """
-        # Load the sort input: a single-recording source reads the cached
-        # Recording; a concat source reads the materialized ConcatenatedRecording
-        # cache. ``recording_id`` is the anchor (threaded from make_fetch) used
-        # for the per-unit Electrode FK, NOT necessarily the loaded recording's
-        # own id. Concat masks are already materialized, so only standalone
-        # sources need masking here. Both modes pass observation intervals to
-        # the units writer.
-        if source.kind == "recording":
-            recording = Recording().get_recording(
-                {"recording_id": recording_id}
-            )
-        else:  # concatenated_recording
-            recording = ConcatenatedRecording().get_recording(source.key)
+        # Load the sort input from the effective traces: the cached Recording
+        # for a single-recording source, the materialized ConcatenatedRecording
+        # for a concat source (a missing file is rebuilt first). ``recording_id``
+        # is the anchor (threaded from make_fetch) used for the per-unit
+        # Electrode FK, NOT necessarily the loaded recording's own id. The
+        # traces load unmasked because the artifact mask is applied below
+        # through ``artifact_frame_ranges``, whose excluded ranges also feed the
+        # statistics spans. Concat masks are already materialized. Both modes
+        # pass observation intervals to the units writer.
+        SortingSelection.ensure_effective_traces(traces)
+        recording = load_effective_recording(
+            traces._replace(apply_artifact_mask=False)
+        )
 
         # Statistics spans: the artifact-free frame ranges every noise and
         # whitening estimate samples from, persisted with the sort so each
@@ -1888,10 +1897,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             # read before masking (silencing keeps the same timestamps).
             boundary_spans = boundary_spans_from_timestamps(recording)
             excluded_ranges = []
-            if (
-                sel_row.get("artifact_detection_id") is not None
-                and obs_intervals is not None
-            ):
+            if traces.apply_artifact_mask:
                 excluded_ranges = artifact_frame_ranges(
                     recording,
                     obs_intervals,
