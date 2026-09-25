@@ -1493,8 +1493,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
-        lineage, traces = SortingSelection.resolve_effective_source(key)
-        source = SourceResolution(kind=lineage.kind, key=lineage.key)
+        source = SortingSelection.resolve_source(key)
 
         sel_row = (SortingSelection & key).fetch1()
         # The artifact-detection pass lives on the zero-or-one
@@ -1508,7 +1507,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         # ``sel_row.get("artifact_detection_id")`` reads would always be None
         # and every artifact-backed sort would silently skip artifact masking.
         # (Concat member masks are already materialized, so this is None there.)
-        sel_row["artifact_detection_id"] = lineage.artifact_detection_id
+        sel_row["artifact_detection_id"] = (
+            SortingSelection.resolve_artifact_detection(key)
+        )
         sorter_row = (
             SorterParameters
             & {
@@ -1643,7 +1644,9 @@ class Sorting(SpyglassMixin, dj.Computed):
             electrode_by_id=electrode_by_id,
             region_by_electrode=region_by_electrode,
             concat_statistics_spans=concat_statistics_spans,
-            traces=traces,
+            # Resolved after the concat schema-bypass check above, which must
+            # fire before any source-row fetch.
+            traces=SortingSelection.resolve_effective_source(key).traces,
         )
 
     @staticmethod
