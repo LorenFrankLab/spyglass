@@ -388,7 +388,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
         # Save discrete transition and initial conditions
         # Use existing coordinates from results
-        state_names = results.coords["states"].values
+        state_names = np.atleast_1d(results.coords["states"].values)
         results["initial_conditions"] = xr.DataArray(
             classifier.initial_conditions_,
             dims=("state_bins",),

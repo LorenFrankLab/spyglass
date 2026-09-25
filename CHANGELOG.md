@@ -10,6 +10,11 @@
 ```
 -->
 
+### Fixed
+
+- Preserve one-dimensional state coordinates when attaching discrete transition
+  matrices to single-state sorted-spikes and clusterless decode results.
+
 ### Documentation
 
 - Add LFP artifact detection to the LFP notebook #1641
