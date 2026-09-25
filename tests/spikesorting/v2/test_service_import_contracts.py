@@ -150,6 +150,7 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "recording",
         "artifact_detection",
         "member_recording",
+        "member_artifact_detection",
         "concat_recording",
         "member_curation",
         "auto_curation",
@@ -163,6 +164,7 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
     # auto-curation / figpack keys stay optional on both arms.
     _SUMMARY_BASE_REQUIRED = {
         "pipeline_preset",
+        "scientific_config",
         "source_mode",
         "sorting_id",
         "root_curation_id",
@@ -202,6 +204,9 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         | {
             "member_recording_status",
             "member_recording_ids",
+            "member_artifact_detection_status",
+            "member_artifacts",
+            "artifact_masked_duration_s",
             "concat_recording_id",
             "concat_recording_status",
             "member_curation_status",
