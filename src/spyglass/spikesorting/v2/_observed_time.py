@@ -13,7 +13,7 @@ import numpy as np
 
 from spyglass.spikesorting.v2._signal_math import intersect_intervals
 
-OBSERVATION_VERSION = 1
+OBSERVATION_VERSION = 2
 
 
 def compact_observation_intervals(intervals_by_unit):
