@@ -363,9 +363,34 @@ def _analyzer_noise_estimates(recording, spans, folder):
     return out
 
 
+def _nn_noise_cluster_estimates(recording, spans, folder):
+    """The nn noise-cluster draw, raw and on the span-whitened recording."""
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        _draw_noise_cluster,
+        noise_cluster_spans,
+    )
+    from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+
+    whitened = pinned_whiten(recording, random_seed=0, spans=spans)
+    out = {}
+    with noise_cluster_spans(spans):
+        for name, source, in_uv in (
+            ("raw", recording, True),
+            ("whitened", whitened, False),
+        ):
+            out[f"nn_noise_cluster[{name}]"] = _draw_noise_cluster(
+                source, n_snippets=500, nsamples=90, seed=0, return_in_uV=in_uv
+            )
+    return out
+
+
 # Every estimator that must draw only from the statistics spans. Each takes
 # (recording, spans, scratch folder) and returns named arrays.
-_SPAN_ESTIMATORS = (_whitening_estimates, _analyzer_noise_estimates)
+_SPAN_ESTIMATORS = (
+    _whitening_estimates,
+    _analyzer_noise_estimates,
+    _nn_noise_cluster_estimates,
+)
 
 
 @pytest.mark.medium
