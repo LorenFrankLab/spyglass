@@ -124,9 +124,21 @@ def _draw_noise_cluster(recording, *, n_snippets, nsamples, seed, return_in_uV):
             seed=seed,
         )
         return np.reshape(noise_cluster, (n_snippets, nsamples, -1))
-    starts = sample_span_snippet_starts(
-        list(spans), nsamples=nsamples, n_snippets=n_snippets, seed=seed
-    )
+    try:
+        starts = sample_span_snippet_starts(
+            list(spans), nsamples=nsamples, n_snippets=n_snippets, seed=seed
+        )
+    except ValueError:
+        # SI's nn_noise_overlap caller catches every exception and returns
+        # NaN without a log, so this warning is the only trace of why.
+        longest = max(spans, key=lambda span: span[1] - span[0], default=(0, 0))
+        logger.warning(
+            "nn_noise_overlap: no statistics span fits a noise snippet of "
+            f"{nsamples} frames; the longest span is {longest} "
+            f"({longest[1] - longest[0]} frames). SpikeInterface reports "
+            "this unit's nn_noise_overlap as NaN."
+        )
+        raise
     return np.stack(
         [
             recording.get_traces(

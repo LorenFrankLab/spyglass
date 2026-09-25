@@ -225,6 +225,33 @@ def test_nn_noise_cluster_unchanged_when_spans_cover_recording(cover):
     assert np.array_equal(noise, expected)
 
 
+def test_nn_noise_cluster_warns_when_no_span_fits_a_snippet(caplog):
+    """No span long enough for one snippet: a warning names the snippet
+    length and the longest span, then the error propagates (SI's caller
+    turns it into a silent NaN, so the warning is the only trace)."""
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        _draw_noise_cluster,
+        noise_cluster_spans,
+    )
+
+    recording, _, _, _ = _masked_frame_indexed_recording()
+    with caplog.at_level("WARNING"):
+        with noise_cluster_spans([(0, 50), (100, 180)]):
+            with pytest.raises(ValueError, match="no span admits"):
+                _draw_noise_cluster(
+                    recording,
+                    n_snippets=_N_SNIPPETS,
+                    nsamples=_NSAMPLES,
+                    seed=0,
+                    return_in_uV=False,
+                )
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert f"{_NSAMPLES} frames" in message
+    assert "80 frames" in message and "(100, 180)" in message
+
+
 def test_noise_cluster_spans_reset_on_exit_and_on_error():
     """The spans are visible only inside the block, and reset on an error."""
     from spyglass.spikesorting.v2._si_metric_patches import (
