@@ -255,7 +255,20 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
     folder = tmp_path / "bad.analyzer"
     folder.mkdir()
     rebuilt_marker = folder / "rebuilt"
-    loaded = object()
+
+    class _LazyAnalyzer:
+        """Stand-in for a lazily loaded SI analyzer with saved extensions."""
+
+        def __init__(self):
+            self.loaded_extensions = []
+
+        def get_saved_extension_names(self):
+            return ["templates", "waveforms"]
+
+        def get_extension(self, name):
+            self.loaded_extensions.append(name)
+
+    loaded = _LazyAnalyzer()
 
     class _OneUnitSortingRelation:
         def __and__(self, key):
@@ -300,3 +313,6 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
 
     assert analyzer is loaded
     assert rebuilt_marker.exists()
+    # The default public load returns a mutable analyzer, so every saved
+    # extension must be loaded (SI's save/select/merge copy only loaded ones).
+    assert loaded.loaded_extensions == ["templates", "waveforms"]
