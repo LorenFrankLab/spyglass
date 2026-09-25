@@ -319,3 +319,25 @@ def test_recompute_audit_rebuilds_noise_from_persisted_spans(
     )
     assert "noise_levels" in stored
     assert fresh == stored
+
+
+@pytest.mark.slow
+def test_effective_source_reads_base_recording_masked_at_load(
+    masked_planted_sort,
+):
+    """A masked single-recording sort reads its own ``Recording``, masked."""
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    sort_key = masked_planted_sort["sort_key"]
+    source = SortingSelection.resolve_source(sort_key)
+    detection_id = SortingSelection.resolve_artifact_detection(sort_key)
+    assert detection_id is not None
+
+    effective = SortingSelection.resolve_effective_source(sort_key)
+
+    assert tuple(effective.lineage) == ("recording", source.key, detection_id)
+    assert effective.traces.kind == "recording"
+    assert effective.traces.key == source.key
+    assert effective.traces.row == (Recording & source.key).fetch1()
+    assert effective.traces.apply_artifact_mask is True

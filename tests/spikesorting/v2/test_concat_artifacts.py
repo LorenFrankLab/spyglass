@@ -326,6 +326,22 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     )
     monkeypatch.setattr(Sorting, "_run_sorter", staticmethod(sort_masked))
     Sorting.populate(sorting_key, reserve_jobs=False)
+    # The sort reads the concat cache itself, whose member masks are already
+    # written in, so no mask is applied again at load.
+    effective = SortingSelection.resolve_effective_source(sorting_key)
+    source = SortingSelection.resolve_source(sorting_key)
+    assert str(source.key["concat_recording_id"]) == str(
+        key["concat_recording_id"]
+    )
+    assert tuple(effective.lineage) == (
+        "concatenated_recording",
+        source.key,
+        None,
+    )
+    assert effective.traces.kind == "concatenated_recording"
+    assert effective.traces.key == source.key
+    assert effective.traces.row["content_hash"] == row["content_hash"]
+    assert effective.traces.apply_artifact_mask is False
     # Both analyzer rebuild routes must see the exact materialized mask, not
     # reload an unmasked member or apply member wall-clock intervals to concat.
     from spyglass.spikesorting.v2._sorting_analyzer import (

@@ -64,6 +64,12 @@ from spyglass.spikesorting.v2._sorting_dispatch import (
     sorter_distribution_version,
 )
 from spyglass.spikesorting.v2._sorting_units import build_sorting_unit_rows
+from spyglass.spikesorting.v2._source_resolution import (
+    EffectiveSource,
+    EffectiveTraces,
+    SourceLineage,
+    effective_source_from_base,
+)
 from spyglass.spikesorting.v2._units_nwb import (
     STATISTICS_SPANS_FIELD,
     abs_spike_times_dataframe,
@@ -103,6 +109,12 @@ if TYPE_CHECKING:
     import spikeinterface as si
 
     from spyglass.spikesorting.v2._analyzer_cache import StagedAnalyzer
+
+#: The table owning each effective-traces kind's cached NWB artifact.
+_TRACE_TABLES = {
+    "recording": Recording,
+    "concatenated_recording": ConcatenatedRecording,
+}
 
 
 class SortingFetched(NamedTuple):
@@ -1287,6 +1299,58 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         if len(rows) == 0:
             return None
         return ArtifactDetectionOutput.resolve_artifact_detection_id(rows[0])
+
+    @classmethod
+    def resolve_effective_source(cls, key: dict) -> EffectiveSource:
+        """Return a sort's lineage and the traces its consumers must read.
+
+        Built on :meth:`resolve_source` and :meth:`resolve_artifact_detection`.
+        Every consumer that loads the traces a sort ran on (sorter input,
+        analyzer builds and rebuilds, metric curation, the recompute audit,
+        the curation recording accessor) reads ``traces``; metadata consumers
+        keep using :meth:`resolve_source`. The effective traces are the lineage
+        source's own cached artifact, fetched here; no trace file is opened.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction carrying the ``SortingSelection`` primary key.
+
+        Returns
+        -------
+        EffectiveSource
+            ``lineage`` (source kind, source key, pinned artifact detection)
+            and ``traces`` (owning table, key, fetched row, whether the loaded
+            traces must still be artifact-masked).
+        """
+        source = cls.resolve_source(key)
+        lineage = SourceLineage(
+            kind=source.kind,
+            key=source.key,
+            artifact_detection_id=cls.resolve_artifact_detection(key),
+        )
+        row = (_TRACE_TABLES[source.kind] & source.key).fetch1()
+        return effective_source_from_base(lineage, row)
+
+    @staticmethod
+    def ensure_effective_traces(traces: EffectiveTraces) -> None:
+        """Rebuild the effective traces' cached NWB file if it is missing.
+
+        The same self-heal the owning table's ``get_recording`` performs
+        (``Recording`` or ``ConcatenatedRecording``): a locked, verified
+        rebuild whose content must match the stored ``content_hash``. Call it
+        before :func:`._source_resolution.load_effective_recording`.
+
+        Parameters
+        ----------
+        traces : EffectiveTraces
+            The ``traces`` of :meth:`resolve_effective_source`.
+        """
+        abs_path = AnalysisNwbfile.get_abs_path(
+            traces.row["analysis_file_name"]
+        )
+        if not Path(abs_path).exists():
+            _TRACE_TABLES[traces.kind]()._rebuild_nwb_artifact(traces.key)
 
     @classmethod
     def resolve_source_preprocessing_params_name(cls, key: dict) -> str:
