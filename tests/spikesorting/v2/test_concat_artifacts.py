@@ -346,15 +346,15 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     # reload an unmasked member or apply member wall-clock intervals to concat.
     from spyglass.spikesorting.v2._sorting_analyzer import (
         reconstruct_recording_and_sorting,
-        reconstruct_recording_for_sorting_from_resolved,
+    )
+    from spyglass.spikesorting.v2._source_resolution import (
+        load_effective_recording,
     )
 
     rebuilt, canonical_sorting = reconstruct_recording_and_sorting(
         Sorting(), sorting_key
     )
-    resolved = reconstruct_recording_for_sorting_from_resolved(
-        recording_row=row, source_kind="concatenated_recording"
-    )
+    resolved = load_effective_recording(effective.traces)
     for recording in (rebuilt, resolved):
         np.testing.assert_array_equal(
             recording.get_traces(), combined.get_traces()

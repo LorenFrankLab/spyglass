@@ -60,6 +60,7 @@ from spyglass.spikesorting.v2._recipe_catalog import (
 from spyglass.spikesorting.v2._sorting_analyzer import (
     STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
 )
+from spyglass.spikesorting.v2._source_resolution import EffectiveTraces
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.exceptions import (
     UnsupportedDirectInsertError,
@@ -192,7 +193,8 @@ class EvaluationRecordingInputs(NamedTuple):
     recording_id: str | None
     artifact_detection_id: str | None
     artifact_valid_times: object  # np.ndarray | None (DeepHashed, not ==)
-    recording_row: dict
+    # The sort's effective traces: the artifact every recording load reads.
+    traces: EffectiveTraces
     fs: float
     # The sort's persisted statistics spans (``Sorting.get_statistics_spans``)
     # as a tuple of ``(start, end)`` int frame pairs; every analyzer built or
@@ -994,10 +996,6 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             fetch_waveform_params,
             resolve_display_waveform_params_name,
         )
-        from spyglass.spikesorting.v2.recording import Recording
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecording,
-        )
 
         sel = (CurationEvaluationSelection & key).fetch1()
         sorting_id = str(sel["sorting_id"])
@@ -1046,28 +1044,18 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         )
 
         # Recording reconstruction inputs. make_compute rebuilds the recording
-        # from these without resolving more upstream inputs; self-heal the
-        # regeneratable cache here so that read succeeds, mirroring
-        # Recording().get_recording's rebuild-if-missing (the same self-heal
-        # get_analyzer provides).
-        source = SortingSelection.resolve_source(sorting_key)
-        artifact_detection_id = SortingSelection.resolve_artifact_detection(
-            sorting_key
-        )
-        if source.kind == "recording":
-            recording_id = source.key["recording_id"]
-            Recording().get_recording({"recording_id": recording_id})
-            recording_row = (
-                Recording & {"recording_id": recording_id}
-            ).fetch1()
-        else:  # concatenated_recording
-            recording_id = None
-            ConcatenatedRecording().get_recording(source.key)
-            recording_row = (ConcatenatedRecording & source.key).fetch1()
-        fs = float(recording_row["sampling_frequency"])
+        # from the sort's effective traces without resolving more upstream
+        # inputs; self-heal the regeneratable cache here so that read succeeds,
+        # mirroring Recording().get_recording's rebuild-if-missing (the same
+        # self-heal get_analyzer provides).
+        lineage, traces = SortingSelection.resolve_effective_source(sorting_key)
+        artifact_detection_id = lineage.artifact_detection_id
+        recording_id = lineage.key.get("recording_id")
+        SortingSelection.ensure_effective_traces(traces)
+        fs = float(traces.row["sampling_frequency"])
 
         artifact_valid_times = None
-        if source.kind == "recording" and artifact_detection_id is not None:
+        if traces.apply_artifact_mask:
             from spyglass.spikesorting.v2.recording import RecordingSelection
 
             nwb_file_name = (
@@ -1131,11 +1119,11 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         return CurationEvaluationFetched(
             recording_inputs=EvaluationRecordingInputs(
                 nwb_file_name=_nwb_file_name_for_sorting(sorting_key),
-                source_kind=source.kind,
+                source_kind=lineage.kind,
                 recording_id=recording_id,
                 artifact_detection_id=artifact_detection_id,
                 artifact_valid_times=artifact_valid_times,
-                recording_row=recording_row,
+                traces=traces,
                 fs=fs,
                 statistics_spans=tuple(
                     Sorting().get_statistics_spans(sorting_key)
@@ -1221,7 +1209,9 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._sorting_analyzer import (
             build_analyzer,
             load_or_rebuild_analyzer_from_resolved,
-            reconstruct_recording_for_sorting_from_resolved,
+        )
+        from spyglass.spikesorting.v2._source_resolution import (
+            load_effective_recording,
         )
 
         spikeinterface_version = si.__version__
@@ -1239,7 +1229,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         # the file identifies its upstream standalone. recording_content_hash is
         # the source row's content_hash either way (the concat's, for a concat).
         concat_recording_id = (
-            str(recording_inputs.recording_row["concat_recording_id"])
+            str(recording_inputs.traces.row["concat_recording_id"])
             if recording_inputs.source_kind == "concatenated_recording"
             else None
         )
@@ -1263,7 +1253,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             "source_kind": recording_inputs.source_kind,
             "recording_id": recording_inputs.recording_id,
             "concat_recording_id": concat_recording_id,
-            "recording_content_hash": recording_inputs.recording_row[
+            "recording_content_hash": recording_inputs.traces.row[
                 "content_hash"
             ],
             "spikeinterface_version": spikeinterface_version,
@@ -1308,9 +1298,8 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                     None,
                 )
 
-            recording = reconstruct_recording_for_sorting_from_resolved(
-                recording_row=recording_inputs.recording_row,
-                source_kind=recording_inputs.source_kind,
+            recording = load_effective_recording(
+                recording_inputs.traces,
                 artifact_valid_times=recording_inputs.artifact_valid_times,
                 artifact_detection_id=recording_inputs.artifact_detection_id,
                 recording_id=recording_inputs.recording_id,
@@ -1336,7 +1325,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 # analyzer in place).
                 raw_sorting = self._sorting_from_units_nwb(
                     sorting_inputs.raw_units_abs_path,
-                    recording_inputs.recording_row,
+                    recording_inputs.traces.row,
                     recording_inputs.fs,
                 )
                 with analyzer_cache_lock(sorting_inputs.sorting_id):
@@ -1392,7 +1381,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 # scoped); cleaned on success and failure by TemporaryDirectory.
                 curated_sorting = self._sorting_from_units_nwb(
                     sorting_inputs.curated_units_abs_path,
-                    recording_inputs.recording_row,
+                    recording_inputs.traces.row,
                     recording_inputs.fs,
                 )
                 compute_key = {"sorting_id": sorting_inputs.sorting_id}

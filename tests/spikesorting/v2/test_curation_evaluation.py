@@ -86,68 +86,45 @@ def test_is_committed_curation_distinguishes_preview(planted_two_unit_sort):
 # paths: a divergence here would silently feed metrics the wrong recording.
 
 
-def _resolved_recording_inputs(sorting_key):
-    """Resolve (the way make_fetch will) the DB-free recording inputs."""
-    from spyglass.spikesorting.v2._artifact_intervals import (
-        read_artifact_removed_intervals,
-    )
-    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
-    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
-    source = SortingSelection.resolve_source(sorting_key)
-    artifact_detection_id = SortingSelection.resolve_artifact_detection(
-        sorting_key
-    )
-    if source.kind == "recording":
-        rec_row = (
-            Recording & {"recording_id": source.key["recording_id"]}
-        ).fetch1()
-        recording_id = source.key["recording_id"]
-    else:
-        rec_row = (ConcatenatedRecording & source.key).fetch1()
-        recording_id = None
-    valid_times = None
-    if source.kind == "recording" and artifact_detection_id is not None:
-        nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
-            "nwb_file_name"
-        )
-        valid_times = read_artifact_removed_intervals(
-            {"artifact_detection_id": artifact_detection_id}, as_dict=True
-        )[nwb]
-    return source, rec_row, recording_id, artifact_detection_id, valid_times
-
-
 @pytest.mark.slow
 @pytest.mark.integration
-def test_resolved_recording_reconstruction_matches_db_path(populated_sorting):
-    """The DB-free recording reconstruction equals the DB-coupled path.
+def test_effective_recording_load_matches_table_accessor(populated_sorting):
+    """The DB-free traces load equals the table accessor plus the sort's mask.
 
-    ``reconstruct_recording_for_sorting_from_resolved`` reads the cached
-    recording NWB + applies the artifact mask from make_fetch-resolved inputs,
-    with no DB access; it must reproduce the same channels/samples/traces as the
-    DB-coupled ``reconstruct_recording_and_sorting``.
+    ``load_effective_recording`` reads the cached recording NWB and applies the
+    artifact mask from make_fetch-resolved inputs, with no DB access beyond the
+    file-path lookup; it must reproduce ``Recording().get_recording`` masked by
+    the sort's artifact-removed intervals.
     """
     import numpy as np
 
-    from spyglass.spikesorting.v2._sorting_analyzer import (
-        reconstruct_recording_and_sorting,
-        reconstruct_recording_for_sorting_from_resolved,
+    from spyglass.spikesorting.v2._artifact_intervals import (
+        read_artifact_removed_intervals,
     )
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._source_resolution import (
+        load_effective_recording,
+    )
+    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     sorting_key = dict(populated_sorting)
-    ref_rec, _ = reconstruct_recording_and_sorting(Sorting(), sorting_key)
+    lineage, traces = SortingSelection.resolve_effective_source(sorting_key)
+    assert lineage.kind == traces.kind == "recording"
+    ref_rec = Recording().get_recording(traces.key)
+    valid_times = None
+    if traces.apply_artifact_mask:
+        nwb = (RecordingSelection & lineage.key).fetch1("nwb_file_name")
+        valid_times = read_artifact_removed_intervals(
+            {"artifact_detection_id": lineage.artifact_detection_id},
+            as_dict=True,
+        )[nwb]
+        ref_rec = Sorting._apply_artifact_mask(ref_rec, valid_times)
 
-    source, rec_row, recording_id, artifact_id, valid_times = (
-        _resolved_recording_inputs(sorting_key)
-    )
-    out_rec = reconstruct_recording_for_sorting_from_resolved(
-        recording_row=rec_row,
-        source_kind=source.kind,
+    out_rec = load_effective_recording(
+        traces,
         artifact_valid_times=valid_times,
-        artifact_detection_id=artifact_id,
-        recording_id=recording_id,
+        artifact_detection_id=lineage.artifact_detection_id,
+        recording_id=lineage.key["recording_id"],
     )
 
     assert out_rec.get_num_channels() == ref_rec.get_num_channels()
