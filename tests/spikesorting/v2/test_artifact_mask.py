@@ -429,6 +429,16 @@ def test_sample_span_data_never_crosses_a_span_boundary():
 
 
 def test_sample_span_data_uses_short_spans():
+    """Every span here is shorter than ``max_piece`` (matching production's
+    ``int(0.5 * fs)`` default against 400-frame spans), and only the spans
+    carry noise -- the 100-frame gaps between them stay exactly zero. Two
+    distinct bugs must fail this test: (1) a sampler that drops/rejects a
+    span shorter than ``max_piece`` (SpikeInterface's own failure mode)
+    would process zero spans, so ``data.shape[0] != 4000``; (2) a sampler
+    that ignores ``spans`` and reads anywhere in the recording would pull in
+    some of the zeroed gap frames, pulling the sampled MAD below the
+    all-noise reference built strictly from the spans.
+    """
     import spikeinterface as si
 
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
@@ -439,11 +449,14 @@ def test_sample_span_data_uses_short_spans():
     sigma = 3.5
     n = 10_000  # 10 s
     rng = np.random.default_rng(1)
-    traces = (sigma * rng.standard_normal((n, 1))).astype("float64")
-    rec = si.NumpyRecording([traces], sampling_frequency=fs)
+    traces = np.zeros((n, 1), dtype="float64")
     # 20 spans of 400 ms (400 samples) each, 500 samples apart -> 8 s valid
-    # inside the 10 s recording.
+    # inside the 10 s recording; the 100-frame gaps between spans are left
+    # at their initial zero (never assigned noise).
     spans = [(k * 500, k * 500 + 400) for k in range(20)]
+    for a, b in spans:
+        traces[a:b, 0] = sigma * rng.standard_normal(b - a)
+    rec = si.NumpyRecording([traces], sampling_frequency=fs)
     assert sum(b - a for a, b in spans) == 8000
 
     reference = np.concatenate(
@@ -455,7 +468,9 @@ def test_sample_span_data_uses_short_spans():
         rec,
         spans,
         target_samples=4000,
-        max_piece=400,
+        max_piece=500,  # > every span's length (400): exercises the "piece
+        # never longer than its own span" cap, not the max_piece cap, and
+        # would starve every span under a drop-short-spans bug.
         seed=2,
         return_in_uV=False,
     )
