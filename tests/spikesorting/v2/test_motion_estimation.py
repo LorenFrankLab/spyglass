@@ -247,11 +247,15 @@ def test_default_rows_resolve():
 # 600-6000 Hz, seeds 0-2, dredge_fast). Its common-frame error after removing
 # one global offset was RMS 0.307 / 0.273 / 0.319 um and max |error|
 # 0.985 / 0.991 / 1.175 um; on the static twin every dredge-family estimate
-# stayed within 0.197 um of zero (dredge_fast: exactly 0). The bounds below are
-# those development maxima.
+# stayed within 0.197 um of zero (dredge_fast: exactly 0). The absolute bounds
+# below are those development maxima; the masked-versus-clean comparison allows
+# the development seed-to-seed spread of the same errors (RMS 0.319 - 0.273,
+# max |error| 1.175 - 0.985).
 DEV_RIGID_RMS_UM = 0.319
 DEV_RIGID_MAX_ABS_UM = 1.175
 DEV_STATIC_MAX_ABS_UM = 0.197
+DEV_RIGID_RMS_SPREAD_UM = 0.319 - 0.273
+DEV_RIGID_MAX_ABS_SPREAD_UM = 1.175 - 0.985
 KNOWN_ANSWER_DURATION_S = 90.0
 
 
@@ -470,9 +474,15 @@ def test_masked_artifacts_do_not_reach_the_estimate(rigid_drift_90s):
         touched |= (edges[:-1] < hi / fs) & (edges[1:] > lo / fs)
     evidence = ~touched
 
+    # On every bin with evidence, the masked estimate is as accurate as the
+    # clean twin's (same bins, same offset removal) within the development
+    # seed-to-seed spread.
     masked_rms, masked_max = _bin_error(masked, displacement, depths, evidence)
-    assert masked_rms <= DEV_RIGID_RMS_UM
-    assert masked_max <= DEV_RIGID_MAX_ABS_UM
+    clean_bin_rms, clean_bin_max = _bin_error(
+        rigid_drift_90s["motion"], displacement, depths, evidence
+    )
+    assert masked_rms <= clean_bin_rms + DEV_RIGID_RMS_SPREAD_UM
+    assert masked_max <= clean_bin_max + DEV_RIGID_MAX_ABS_SPREAD_UM
 
     # The fixture discriminates: unmasked, the bursts pull the estimate far
     # outside the development envelope.
