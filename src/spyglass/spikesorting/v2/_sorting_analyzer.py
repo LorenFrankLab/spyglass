@@ -680,6 +680,7 @@ def build_analyzer(
     analyzer_folder=None,
     waveform_params=None,
     extensions=None,
+    statistics_spans=None,
 ):
     """Build the ``binary_folder`` SortingAnalyzer + base extensions.
 
@@ -743,6 +744,13 @@ def build_analyzer(
         Keyword-only. Resolved analyzer-waveform params blob. Required;
         ``None`` raises ``ValueError`` (a caller must pass the sort's resolved
         recipe, never let the build pick a default). Default ``None``.
+    statistics_spans : list[tuple[int, int]], optional
+        Keyword-only. Artifact-free frame spans of ``recording`` (probe
+        projection and whitening preserve frames). The metric recipe's
+        whitening covariance and the ``noise_levels`` extension are then
+        estimated only from samples inside them, so artifact-masked zeros do
+        not bias either. ``None`` (default) or one span covering the
+        recording keeps SpikeInterface's own estimators unchanged.
 
     Returns
     -------
@@ -901,8 +909,27 @@ def build_analyzer(
         from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
 
         recording = pinned_whiten(
-            recording, random_seed=(job_kwargs or {}).get("random_seed", 0)
+            recording,
+            random_seed=(job_kwargs or {}).get("random_seed", 0),
+            spans=statistics_spans,
         )
+
+    # Span noise levels are cached on the FINAL object handed to
+    # ``create_sorting_analyzer``: every preprocessor (probe projection,
+    # whitening) drops SI's ``noise_level_*`` properties, and the
+    # ``noise_levels`` extension reads the cache matching the analyzer's
+    # ``return_in_uV`` (``not whiten``; the metric recipe estimates on the
+    # whitened traces). Same seed as the extension's own pin below.
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        cache_span_noise_levels,
+    )
+
+    cache_span_noise_levels(
+        recording,
+        statistics_spans,
+        return_in_uV=not whiten,
+        seed=(job_kwargs or {}).get("random_seed", 0),
+    )
 
     try:
         # SI 0.104 loses structured preprocessing parameters (notably artifact

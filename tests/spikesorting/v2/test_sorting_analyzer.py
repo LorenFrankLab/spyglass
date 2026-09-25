@@ -129,3 +129,294 @@ def test_build_analyzer_accepts_distinct_contacts(tmp_path, monkeypatch):
             },
         )
     assert reached["recording"].get_num_channels() == 4
+
+
+# ---------------------------------------------------------------------------
+# Noise levels (and whitening) from valid samples only.
+#
+# The sort stage silences artifact frames with zeros; the analyzer's
+# ``noise_levels`` must be estimated from samples inside the statistics spans
+# so the zeros do not bias it low. Targets come from the clean twin (see
+# ``_masked_statistics_helpers``).
+# ---------------------------------------------------------------------------
+
+# ``build_analyzer`` fetches the SorterParameters row only when ``sorter_row``
+# is None; with ``job_kwargs`` supplied the row is never read further, so a
+# row carrying just its ``job_kwargs`` blob keeps the build DB-free.
+_SORTER_ROW = {"job_kwargs": {}}
+_JOB_KWARGS = {"random_seed": 0}
+
+
+def _waveform_params(*, whiten, sparsity=None):
+    params = {
+        "ms_before": 1.0,
+        "ms_after": 2.0,
+        "max_spikes_per_unit": 50,
+        "whiten": whiten,
+    }
+    if sparsity is not None:
+        params["sparsity"] = sparsity
+    return params
+
+
+@pytest.fixture(scope="module")
+def clean_ground_truth():
+    """(traces, probe, sorting) of the 60 s, 16-channel clean recording."""
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        clean_ground_truth as _clean_ground_truth,
+    )
+
+    return _clean_ground_truth()
+
+
+def _analyzer_noise_levels(folder):
+    analyzer = si.load_sorting_analyzer(folder, load_extensions=True)
+    return analyzer.get_extension("noise_levels").get_data()
+
+
+@pytest.mark.medium
+@pytest.mark.parametrize("fraction", [0.05, 0.30, 0.45])
+def test_noise_levels_unbiased_by_masking(
+    clean_ground_truth, tmp_path, fraction
+):
+    """Analyzer noise levels on a masked recording match the clean twin.
+
+    Per channel, max relative error below 2% against the clean recording's
+    exact MAD over all of its samples, via the display (unwhitened) recipe.
+    """
+    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        exact_mad,
+        masked_twin,
+    )
+
+    traces, probe, sorting = clean_ground_truth
+    masked, spans, _ = masked_twin(traces, probe, fraction)
+    folder = build_analyzer(
+        sorting,
+        masked,
+        {"sorting_id": "noise-unbiased"},
+        sorter_row=_SORTER_ROW,
+        job_kwargs=_JOB_KWARGS,
+        analyzer_folder=tmp_path / "display.analyzer",
+        waveform_params=_waveform_params(whiten=False),
+        statistics_spans=spans,
+    )
+    noise_levels = _analyzer_noise_levels(folder)
+    clean = exact_mad(traces)
+    rel_err = np.abs(noise_levels - clean) / clean
+    assert rel_err.max() < 0.02, rel_err
+
+
+@pytest.mark.medium
+@pytest.mark.parametrize("whiten", [False, True], ids=["display", "metric"])
+def test_noise_levels_extension_equals_cached_values(
+    clean_ground_truth, tmp_path, monkeypatch, whiten
+):
+    """The extension reports exactly the span noise levels cached on the
+    recording handed to ``create_sorting_analyzer``.
+
+    The key follows the analyzer's ``return_in_uV`` (``not whiten``): the
+    display recipe caches ``noise_level_mad_scaled``; the metric recipe caches
+    ``noise_level_mad_raw`` computed on the WHITENED traces. The cached value
+    is also recomputed independently from the span samples of that same
+    final recording.
+    """
+    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        sample_span_data,
+    )
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        SAMPLING_FREQUENCY,
+        exact_mad,
+        masked_twin,
+    )
+
+    real_create = si.create_sorting_analyzer
+    received = {}
+
+    def _spy_create(*args, **kwargs):
+        received["recording"] = kwargs["recording"]
+        received["analyzer"] = real_create(*args, **kwargs)
+        return received["analyzer"]
+
+    monkeypatch.setattr(si, "create_sorting_analyzer", _spy_create)
+
+    traces, probe, sorting = clean_ground_truth
+    masked, spans, _ = masked_twin(traces, probe, 0.30)
+    build_analyzer(
+        sorting,
+        masked,
+        {"sorting_id": "noise-cached"},
+        sorter_row=_SORTER_ROW,
+        job_kwargs=_JOB_KWARGS,
+        analyzer_folder=tmp_path / "recipe.analyzer",
+        waveform_params=_waveform_params(whiten=whiten),
+        statistics_spans=spans,
+    )
+
+    final = received["recording"]
+    key, other = (
+        ("noise_level_mad_raw", "noise_level_mad_scaled")
+        if whiten
+        else ("noise_level_mad_scaled", "noise_level_mad_raw")
+    )
+    keys = final.get_property_keys()
+    assert key in keys and other not in keys
+    cached = final.get_property(key)
+    extension = received["analyzer"].get_extension("noise_levels").get_data()
+    assert np.array_equal(extension, cached)
+
+    chunk = int(0.5 * SAMPLING_FREQUENCY)
+    span_data = sample_span_data(
+        final,
+        spans,
+        target_samples=20 * chunk,
+        max_piece=chunk,
+        seed=_JOB_KWARGS["random_seed"],
+        return_in_uV=not whiten,
+    )
+    assert np.array_equal(cached, exact_mad(span_data))
+
+
+@pytest.mark.medium
+def test_noise_levels_unmasked_match_spikeinterface(
+    clean_ground_truth, tmp_path
+):
+    """No spans, or one span covering the recording, keeps SI's estimator.
+
+    The extension equals SpikeInterface's own seeded ``get_noise_levels`` on
+    an untouched copy of the recording, bit for bit.
+    """
+    from spikeinterface.core import get_noise_levels
+
+    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        numpy_recording,
+    )
+
+    traces, probe, sorting = clean_ground_truth
+    expected = get_noise_levels(
+        numpy_recording(traces, probe),
+        return_in_uV=True,
+        random_slices_kwargs={"seed": _JOB_KWARGS["random_seed"]},
+    )
+    n_samples = traces.shape[0]
+    for label, spans in (("none", None), ("full", [(0, n_samples)])):
+        folder = build_analyzer(
+            sorting,
+            numpy_recording(traces, probe),
+            {"sorting_id": "noise-unmasked"},
+            sorter_row=_SORTER_ROW,
+            job_kwargs=_JOB_KWARGS,
+            analyzer_folder=tmp_path / f"{label}.analyzer",
+            waveform_params=_waveform_params(whiten=False),
+            extensions=("noise_levels",),
+            statistics_spans=spans,
+        )
+        assert _same(_analyzer_noise_levels(folder), expected), label
+
+
+def _same(a, b):
+    """Bit-identical arrays (NaN is never equal), or both None."""
+    if a is None or b is None:
+        return a is None and b is None
+    return a.dtype == b.dtype and np.array_equal(a, b)
+
+
+def _whitening_estimates(recording, spans, folder):
+    """W and M the span-aware whitening applies."""
+    from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+
+    segment = pinned_whiten(recording, random_seed=0, spans=spans)
+    w, m = segment._recording_segments[0].W, segment._recording_segments[0].M
+    return {"W": w, "M": m}
+
+
+def _analyzer_noise_estimates(recording, spans, folder):
+    """``noise_levels`` of both analyzer recipes built with ``spans``."""
+    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+
+    out = {}
+    sorting = si.NumpySorting.from_samples_and_labels(
+        [np.array([30_000, 600_000, 1_200_000])],
+        [np.array([0, 0, 0])],
+        sampling_frequency=recording.get_sampling_frequency(),
+    )
+    for whiten in (False, True):
+        analyzer_folder = build_analyzer(
+            sorting,
+            recording,
+            {"sorting_id": "invariance"},
+            sorter_row=_SORTER_ROW,
+            job_kwargs=_JOB_KWARGS,
+            analyzer_folder=folder / f"whiten_{whiten}.analyzer",
+            waveform_params=_waveform_params(
+                whiten=whiten, sparsity={"method": "dense"}
+            ),
+            extensions=("noise_levels",),
+            statistics_spans=spans,
+        )
+        out[f"noise_levels[whiten={whiten}]"] = _analyzer_noise_levels(
+            analyzer_folder
+        )
+    return out
+
+
+# Every estimator that must draw only from the statistics spans. Each takes
+# (recording, spans, scratch folder) and returns named arrays.
+_SPAN_ESTIMATORS = (_whitening_estimates, _analyzer_noise_estimates)
+
+
+@pytest.mark.medium
+def test_estimates_invariant_to_excluded_sample_values(
+    clean_ground_truth, tmp_path
+):
+    """With the spans fixed, the excluded samples' values cannot matter.
+
+    The excluded frames are overwritten with zeros, then +/-10 mV, then NaN;
+    every span estimator must return bit-identical results across the three.
+    """
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        statistics_spans,
+    )
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        excluded_ranges,
+        numpy_recording,
+    )
+
+    traces, probe, _ = clean_ground_truth
+    n_samples = traces.shape[0]
+    ranges = excluded_ranges(n_samples, 0.30)
+    spans = statistics_spans(n_samples, ranges, [(0, n_samples)])
+
+    def _fill(name):
+        filled = traces.copy()
+        for start, end in ranges:
+            if name == "zeros":
+                filled[start:end] = 0.0
+            elif name == "10mV":
+                sign = np.where(np.arange(end - start) % 2 == 0, 1.0, -1.0)
+                filled[start:end] = (10_000.0 * sign)[:, None]
+            else:
+                filled[start:end] = np.nan
+        return numpy_recording(filled, probe)
+
+    results = {}
+    for name in ("zeros", "10mV", "nan"):
+        recording = _fill(name)
+        estimates = {}
+        for estimator in _SPAN_ESTIMATORS:
+            estimates.update(estimator(recording, spans, tmp_path / name))
+        results[name] = estimates
+
+    reference = results["zeros"]
+    for name in ("10mV", "nan"):
+        assert results[name].keys() == reference.keys()
+        for estimate, value in reference.items():
+            assert _same(
+                results[name][estimate], value
+            ), f"{estimate} changed when excluded samples were {name}"
+    for estimate, value in reference.items():
+        if value is not None:
+            assert np.all(np.isfinite(value)), estimate

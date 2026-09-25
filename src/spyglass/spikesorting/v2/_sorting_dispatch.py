@@ -448,6 +448,63 @@ def pinned_whiten(recording, *, random_seed: int = 0, spans=None):
     return sip.whiten(recording, dtype=np.float64, W=whitening, M=None)
 
 
+def cache_span_noise_levels(recording, spans, *, return_in_uV: bool, seed):
+    """Cache per-channel MAD noise levels estimated from ``spans`` only.
+
+    SpikeInterface's ``get_noise_levels`` returns a cached
+    ``noise_level_mad_scaled`` (``return_in_uV=True``) or
+    ``noise_level_mad_raw`` (``False``) recording property whenever one is
+    present, whatever its other arguments. Setting that property here makes
+    every downstream SI noise estimate on this exact object -- the analyzer
+    ``noise_levels`` extension, ``detect_peaks``'s MAD threshold -- use
+    samples inside the statistics spans, so artifact-masked zeros do not
+    bias the noise low. Preprocessors drop the ``noise_level_*`` properties,
+    so call this on the final object the consumer receives.
+
+    The estimate is the MAD of the pooled span samples
+    (``median(|x - median(x)|) / 0.6744897501960817``, SI's scale constant)
+    drawn with SI's default 20 x 500 ms budget; SI's own estimator instead
+    averages per-chunk MADs.
+
+    Parameters
+    ----------
+    recording : spikeinterface.BaseRecording
+        The exact object whose noise SI will read. Mutated: the property is
+        set on it (as SI's own ``get_noise_levels`` would).
+    spans : list[tuple[int, int]] or None
+        Statistics spans in ``recording``'s frame coordinates. ``None`` or
+        one span covering the recording leaves SI's own estimator in charge
+        (nothing is cached).
+    return_in_uV : bool
+        Keyword-only. Estimate on microvolt (``True``) or raw (``False``)
+        traces; selects the property key to match the consumer.
+    seed : int
+        Keyword-only. Seed of the span sampler.
+
+    Returns
+    -------
+    numpy.ndarray or None
+        ``(n_channels,)`` cached noise levels, or ``None`` when nothing was
+        cached.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        spans_cover_recording,
+    )
+
+    if spans_cover_recording(spans, recording.get_num_samples()):
+        return None
+    data = _sample_statistics_spans(
+        recording, spans, seed=seed, return_in_uV=return_in_uV
+    )
+    median = np.median(data, axis=0, keepdims=True)
+    noise_levels = np.median(np.abs(data - median), axis=0) / 0.6744897501960817
+    key = "noise_level_mad_scaled" if return_in_uV else "noise_level_mad_raw"
+    recording.set_property(key, noise_levels)
+    return noise_levels
+
+
 def _clusterless_noise_levels(
     noise_levels: list[float] | None, threshold_unit: str
 ) -> list[float] | None:
