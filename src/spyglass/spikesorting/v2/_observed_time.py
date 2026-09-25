@@ -11,7 +11,10 @@ from itertools import pairwise
 
 import numpy as np
 
-from spyglass.spikesorting.v2._signal_math import intersect_intervals
+from spyglass.spikesorting.v2._signal_math import (
+    _normalize,
+    intersect_intervals,
+)
 
 OBSERVATION_VERSION = 2
 
@@ -108,10 +111,12 @@ def observed_metrics(
     Presence means at least one observed spike per fixed-width bin. Partly
     observed bins contribute only their observed duration; excluded bins
     contribute nothing. No observed exposure yields unavailable metrics.
+    ``intervals`` are first sorted, merged and stripped of zero-length rows,
+    so duplicated or overlapping time counts once.
     """
     if not np.isfinite(bin_duration_s) or bin_duration_s <= 0:
         raise ValueError("bin_duration_s must be finite and positive.")
-    intervals = np.asarray(intervals, dtype=float).reshape(-1, 2)
+    intervals = _normalize(intervals)
     duration = float(np.diff(intervals, axis=1).sum())
     spikes = np.asarray(spike_times)[contains_times(intervals, spike_times)]
     exposure = {}

@@ -144,11 +144,6 @@ def test_intersect_intervals_normalizes_duplicates_and_order():
     duplicated = np.array([[0.0, 10.0], [0.0, 10.0]])
     result = intersect_intervals(duplicated, duplicated)
     np.testing.assert_array_equal(result, [[0.0, 10.0]])
-    # ``observed_metrics``'s own ``observed_duration_s`` key sums its
-    # ``intervals`` argument directly (``np.diff(intervals, axis=1).sum()``)
-    # and does not route through ``intersect_intervals``, so it would NOT
-    # reflect this normalization if fed duplicate rows directly; assert the
-    # duration of the normalized intersection itself instead.
     assert np.diff(result, axis=1).sum() == 10.0
 
     unsorted_left = np.array([[5.0, 6.0], [0.0, 2.0]])
@@ -177,6 +172,27 @@ def test_intersect_intervals_normalizes_duplicates_and_order():
         intersect_intervals(with_zero_length, np.array([[0.0, 10.0]])),
         [[4.0, 6.0]],
     )
+
+
+def test_observed_metrics_normalizes_duplicate_and_unsorted_intervals():
+    """Duplicate rows count once and unsorted rows are ordered before the
+    duration, the membership test, and the per-bin exposure are computed."""
+    spikes = np.array([1.0, 5.5, 8.0])
+    expected = observed_metrics(
+        spikes, np.array([[0.0, 2.0], [5.0, 6.0]]), bin_duration_s=1.0
+    )
+    assert expected["observed_duration_s"] == 3.0
+
+    duplicated = observed_metrics(
+        spikes, np.array([[0.0, 10.0], [0.0, 10.0]]), bin_duration_s=1.0
+    )
+    assert duplicated["observed_duration_s"] == 10.0
+    assert duplicated["observed_firing_rate_hz"] == 3 / 10.0
+
+    unsorted = observed_metrics(
+        spikes, np.array([[5.0, 6.0], [0.0, 2.0]]), bin_duration_s=1.0
+    )
+    assert unsorted == expected
 
 
 def test_observation_availability_rejects_unsorted():
