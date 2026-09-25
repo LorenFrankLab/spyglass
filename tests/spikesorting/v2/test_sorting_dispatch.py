@@ -804,3 +804,124 @@ def test_run_si_sorter_whitens_from_statistics_spans(
     assert np.array_equal(
         w, _span_whitening_matrix(masked, spans, random_seed=5)
     )
+
+
+def _clusterless_mad_params():
+    return {
+        "detect_threshold": 5.0,
+        "threshold_unit": "mad",
+        "method": "locally_exclusive",
+        "peak_sign": "neg",
+        "exclude_sweep_ms": 0.1,
+        "radius_um": 100.0,
+    }
+
+
+@pytest.mark.medium
+def test_clusterless_mad_noise_levels_come_from_statistics_spans(
+    clean_ground_truth,
+):
+    """``threshold_unit="mad"`` thresholds against the span MAD.
+
+    Observables: the noise levels SI's ``get_noise_levels`` returned to
+    ``detect_peaks`` (its cache on the exact recording it received) equal the
+    pooled MAD of the span samples, the detected peaks equal a
+    ``detect_peaks`` run handed those levels explicitly, and they are within
+    2% of the clean twin's exact MAD.
+    """
+    import numpy as np
+    from spikeinterface.sortingcomponents.peak_detection import detect_peaks
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        sample_span_data,
+    )
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        run_clusterless_thresholder,
+    )
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        SAMPLING_FREQUENCY,
+        exact_mad,
+        masked_twin,
+    )
+
+    traces, probe, _ = clean_ground_truth
+    masked, spans, _ = masked_twin(traces, probe, 0.30)
+    seed = 3
+
+    sorting = run_clusterless_thresholder(
+        _clusterless_mad_params(),
+        masked,
+        {"random_seed": seed},
+        statistics_spans=spans,
+    )
+
+    chunk = int(0.5 * SAMPLING_FREQUENCY)
+    span_data = sample_span_data(
+        masked,
+        spans,
+        target_samples=20 * chunk,
+        max_piece=chunk,
+        seed=seed,
+        return_in_uV=False,
+    )
+    expected = exact_mad(span_data)
+    used = masked.get_property("noise_level_mad_raw")
+    assert np.array_equal(used, expected)
+
+    clean_mad = exact_mad(traces)
+    assert np.max(np.abs(used - clean_mad) / clean_mad) < 0.02
+
+    params = _clusterless_mad_params()
+    params.pop("threshold_unit")
+    params.pop("method")
+    explicit = detect_peaks(
+        masked,
+        method="locally_exclusive",
+        method_kwargs={**params, "noise_levels": expected},
+    )
+    assert np.array_equal(
+        sorting.to_spike_vector()["sample_index"], explicit["sample_index"]
+    )
+
+
+@pytest.mark.medium
+@pytest.mark.parametrize(
+    "extra_params",
+    [
+        {"threshold_unit": "mad", "noise_levels": [4.0]},
+        {"threshold_unit": "uv", "detect_threshold": 30.0},
+    ],
+    ids=["explicit_noise_levels", "uv"],
+)
+def test_clusterless_non_mad_paths_ignore_statistics_spans(
+    clean_ground_truth, extra_params
+):
+    """Explicit ``noise_levels`` and ``"uv"`` never estimate noise, so spans
+    change nothing: same peaks with and without spans, and no noise cache is
+    written to the recording."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        run_clusterless_thresholder,
+    )
+    from tests.spikesorting.v2._masked_statistics_helpers import masked_twin
+
+    traces, probe, _ = clean_ground_truth
+    params = {**_clusterless_mad_params(), **extra_params}
+
+    masked_plain, spans, _ = masked_twin(traces, probe, 0.30)
+    plain = run_clusterless_thresholder(dict(params), masked_plain, {})
+    masked_spans, _, _ = masked_twin(traces, probe, 0.30)
+    with_spans = run_clusterless_thresholder(
+        dict(params), masked_spans, {}, statistics_spans=spans
+    )
+
+    assert np.array_equal(
+        plain.to_spike_vector()["sample_index"],
+        with_spans.to_spike_vector()["sample_index"],
+    )
+    assert plain.to_spike_vector().size > 0
+    for recording in (masked_plain, masked_spans):
+        keys = recording.get_property_keys()
+        assert "noise_level_mad_raw" not in keys
+        assert "noise_level_mad_scaled" not in keys

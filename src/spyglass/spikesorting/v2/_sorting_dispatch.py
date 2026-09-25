@@ -531,6 +531,7 @@ def run_clusterless_thresholder(
     sorter_params,
     recording,
     job_kwargs,
+    statistics_spans=None,
 ):
     """Run Spyglass's clusterless-thresholder peak-detection path.
 
@@ -556,7 +557,11 @@ def run_clusterless_thresholder(
     (what the ``smoke_clusterless_5uv`` / synthetic-fixture rows set
     EXPLICITLY) leaves it unset so SI computes per-channel MAD and
     ``detect_threshold`` is a MAD multiplier, which finds peaks on the
-    low-amplitude MEArec fixture.
+    low-amplitude MEArec fixture. On that MAD path the per-channel MAD is
+    estimated only from samples inside ``statistics_spans``
+    (``cache_span_noise_levels``), so artifact-masked zeros do not lower
+    the threshold; without spans, or with one span covering the
+    recording, SpikeInterface's own estimator runs unchanged.
 
     Parameters
     ----------
@@ -569,6 +574,10 @@ def run_clusterless_thresholder(
     job_kwargs : dict or None
         Resolved SI job kwargs; the Spyglass-side ``random_seed`` is
         stripped before the ``detect_peaks`` call.
+    statistics_spans : list[tuple[int, int]] or None, optional
+        Artifact-free frame spans of ``recording`` for the MAD noise
+        estimate. Ignored when ``noise_levels`` is explicit or derived
+        (``"uv"``). Default ``None`` (the whole recording).
 
     Returns
     -------
@@ -722,6 +731,17 @@ def run_clusterless_thresholder(
                 "gain-free relative threshold."
             )
         recording = sip.scale_to_uV(recording)
+    if nl_in is None:
+        # SI's ``detect_peaks`` asks ``get_noise_levels(recording,
+        # return_in_uV=False, ...)`` for the MAD, which returns a cached
+        # ``noise_level_mad_raw`` property when present -- so the span MAD is
+        # cached on the exact object handed to ``detect_peaks``.
+        cache_span_noise_levels(
+            recording,
+            statistics_spans,
+            return_in_uV=False,
+            seed=_random_seed,
+        )
     detected = detect_peaks(
         recording,
         method=method,
