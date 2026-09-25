@@ -309,7 +309,12 @@ concatenation member join, or a member-internal timestamp gap. A recording
 with no masking and a single continuous span keeps SpikeInterface's own
 estimators bit-identical to today. The masked-path noise estimators are a
 pooled MAD (and, for `sd_ratio`, a pooled standard deviation) over the span
-samples, not SpikeInterface's own average of per-chunk values.
+samples, not SpikeInterface's own average of per-chunk values. `sd_ratio`'s
+correction for the unit's own template variance likewise counts only the
+unit's spikes inside the spans over the span samples; SpikeInterface's count
+over every sample left a masked sort's `sd_ratio` low (by ≈1.4% / 7% / 19%
+for 60 µV/10 Hz, 100 µV/20 Hz, and 150 µV/30 Hz synthetic units at 30%
+masked).
 
 - **Magnitude, measured on a synthetic 16-channel/60 s benchmark:** at 5 /
   30 / 48% masked, `noise_levels` was biased −13.5 / −48.4 / −77.2% against
