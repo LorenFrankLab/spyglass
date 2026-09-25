@@ -93,11 +93,13 @@ The schema changes covered here are:
   targets `ArtifactDetectionOutput`; the script remaps the old references.
 - New review-profile, typed annotation, and `SortedSpikesGroup.UnitSelection`
   tables/parts are declared on import.
-- `ConcatenatedRecording.statistics_spans`: nullable frame-range blob. An
-  existing row has no value for it and must be recreated (see "Finally,
-  recreate every v2 `Recording` row and artifact" below) — noise, whitening,
-  and the nn-noise cluster now read this column for every concat-backed
-  sort.
+- `ConcatenatedRecording.statistics_spans`: `NOT NULL`, no default. Adding it
+  to a table that still has rows raises a MySQL "doesn't have a default
+  value" error (1364), so the recreation sequence below deletes
+  `ConcatenatedRecordingSelection` (which cascades to `ConcatenatedRecording`)
+  **before** altering this table, not after — see "Finally, recreate every
+  v2 `Recording` row and artifact" below. Noise, whitening, and the
+  nn-noise cluster now read this column for every concat-backed sort.
 
 Run the following in order in the development environment, reviewing DataJoint's
 proposed DDL. In particular, assign distinct UUIDs **before** the final curation
@@ -120,7 +122,6 @@ from spyglass.spikesorting.v2.artifact import (
     RecordingArtifactSelection,
     SharedGroupArtifactSelection,
 )
-from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
 curation_table = CurationV2()
 if "curation_uuid" not in curation_table.heading.names:
@@ -157,8 +158,10 @@ for table in (
     CurationEvaluationSelection,  # old evaluations retain observation_version=0
     RecordingArtifactSelection,  # nullable manual_excluded_times
     SharedGroupArtifactSelection,  # nullable manual_excluded_times
-    ConcatenatedRecording,  # nullable statistics_spans; existing rows need it
-    # recomputed -- see "Finally, recreate every v2 Recording row" below
+    # ConcatenatedRecording.statistics_spans is NOT NULL with no default, so
+    # it cannot go in this loop while rows still exist; it is altered below,
+    # after ConcatenatedRecordingSelection().delete() empties the table --
+    # see "Finally, recreate every v2 Recording row and artifact".
 ):
     table().alter(context=table.declaration_context)
 
@@ -239,21 +242,21 @@ This same recreation is also what gives every sort correct, artifact-aware
 noise and whitening: a fresh `Sorting.populate()` computes and persists the
 sort's **statistics spans** (the artifact-free frame ranges its noise,
 whitening, and nn-noise-cluster estimates now read from), and a fresh
-`ConcatenatedRecordingSelection.insert_selection(...)` (after the
-`ConcatenatedRecording` alter above) computes and persists the analogous
-concat-frame spans. In dependency order: `Recording` rows, then
-`ConcatenatedRecording` rows (for any concatenated session group), then the
-sort/curation pipeline, then evaluations. A sort or an evaluation selection
-you do **not** recreate is not silently stale — rebuilding that sort's
-analyzer (self-heal, a curation evaluation, a merged-curation analyzer, the
-recompute audit) raises, naming the sort and asking you to delete and
-repopulate it, and populating an evaluation selection stamped with the prior
-`observation_version` raises, asking you to recreate it via
-`insert_selection`.
+`ConcatenatedRecordingSelection.insert_selection(...)` (after the delete and
+alter below) computes and persists the analogous concat-frame spans. In
+dependency order: `Recording` rows, then `ConcatenatedRecording` rows (for
+any concatenated session group), then the sort/curation pipeline, then
+evaluations. A sort or an evaluation selection you do **not** recreate is
+not silently stale — rebuilding that sort's analyzer (self-heal, a curation
+evaluation, a merged-curation analyzer, the recompute audit) raises, naming
+the sort and asking you to delete and repopulate it, and populating an
+evaluation selection stamped with the prior `observation_version` raises,
+asking you to recreate it via `insert_selection`.
 
 ```python
 from spyglass.spikesorting.v2.recording import Recording
 from spyglass.spikesorting.v2.session_group import (
+    ConcatenatedRecording,
     ConcatenatedRecordingSelection,
 )
 
@@ -261,6 +264,10 @@ from spyglass.spikesorting.v2.session_group import (
 # concat selections go too, because a frozen member set cannot be
 # re-snapshotted in place.
 ConcatenatedRecordingSelection().delete()
+# statistics_spans is NOT NULL with no default: alter() only succeeds once
+# the table has no rows to violate that constraint, which the delete above
+# just guaranteed.
+ConcatenatedRecording().alter(context=ConcatenatedRecording.declaration_context)
 Recording().delete()
 
 Recording.populate()  # recompute every remaining selection's artifact
