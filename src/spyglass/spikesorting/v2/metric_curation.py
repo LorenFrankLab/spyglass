@@ -1378,6 +1378,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                             rule_rows=metric_inputs.rule_rows,
                             expected_unit_ids=sorting_inputs.expected_unit_ids,
                             observation_metrics=observation_metrics,
+                            statistics_spans=statistics_spans,
                         )
                     )
             else:
@@ -1444,6 +1445,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                             rule_rows=metric_inputs.rule_rows,
                             expected_unit_ids=sorting_inputs.expected_unit_ids,
                             observation_metrics=observation_metrics,
+                            statistics_spans=statistics_spans,
                         )
                     )
 
@@ -1666,6 +1668,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         rule_rows,
         expected_unit_ids,
         observation_metrics=None,
+        statistics_spans=None,
     ):
         """Compute metrics / labels / merge suggestions and enforce namespace.
 
@@ -1675,7 +1678,9 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         before the NWB write): the metric index must equal the curation's unit
         set, and every suggested merge member must be a unit in that set. This
         catches a stale temp analyzer, accidental raw-sort analyzer reuse, or a
-        preview row that slipped past selection.
+        preview row that slipped past selection. ``statistics_spans`` (the
+        sort's persisted spans; ``None`` = the whole recording) are forwarded
+        to ``_compute_metrics``.
         """
         metrics_df = self._compute_metrics(
             display_analyzer,
@@ -1685,6 +1690,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             skip_pc_metrics,
             metric_job_kwargs,
             template_metric_columns=template_metric_columns,
+            statistics_spans=statistics_spans,
         )
         self._assert_unit_namespace(metrics_df, expected_unit_ids)
         if observation_metrics is not None:
@@ -2159,6 +2165,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         skip_pc_metrics,
         job_kwargs=None,
         template_metric_columns=None,
+        statistics_spans=None,
     ):
         """Compute quality metrics, routing PC/NN metrics to the whitened one.
 
@@ -2178,6 +2185,12 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         columns are selected directly (config already holds column names, so no
         name->column mapping) and joined onto the result by unit id; they are
         exposed for downstream cell typing, never thresholded here.
+
+        ``statistics_spans`` are the sort's artifact-free, join-free frame
+        spans (``Sorting.get_statistics_spans``); ``nn_noise_overlap`` draws
+        its noise cluster only from inside them. They are set (via
+        ``noise_cluster_spans``) around the PC-metric compute only, which runs
+        in this process. ``None`` keeps SpikeInterface's whole-recording draw.
         """
         import numpy as np
         import pandas as pd
@@ -2253,6 +2266,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             # sparse fix. The PC compute below runs n_jobs=1 so the fix (a
             # main-process monkeypatch) is the code that actually runs.
             from spyglass.spikesorting.v2._si_metric_patches import (
+                noise_cluster_spans,
                 patch_nn_noise_overlap_sparsity,
             )
 
@@ -2294,23 +2308,27 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                     "principal_components": _PCA_EXTENSION_PARAMS
                 },
             )
-            pc_df = compute_quality_metrics(
-                metric_analyzer,
-                metric_names=pc_names,
-                metric_params={
-                    k: v for k, v in metric_kwargs.items() if k in pc_names
-                }
-                or None,
-                skip_pc_metrics=False,
-                # As above: compute only this row's PC metrics, never inherit a
-                # prior curation's stored quality_metrics on this analyzer.
-                delete_existing_metrics=True,
-                # nn_noise_overlap's sparse fix (patch_nn_noise_overlap_sparsity)
-                # is a main-process monkeypatch; SI parallelises nn_advanced with
-                # spawned workers that re-import SI and would not see it, so pin
-                # the PC/NN metric compute to the main process.
-                n_jobs=1,
-            )
+            with noise_cluster_spans(statistics_spans):
+                pc_df = compute_quality_metrics(
+                    metric_analyzer,
+                    metric_names=pc_names,
+                    metric_params={
+                        k: v for k, v in metric_kwargs.items() if k in pc_names
+                    }
+                    or None,
+                    skip_pc_metrics=False,
+                    # As above: compute only this row's PC metrics, never
+                    # inherit a prior curation's stored quality_metrics on this
+                    # analyzer.
+                    delete_existing_metrics=True,
+                    # nn_noise_overlap's sparse fix and its span-restricted
+                    # noise cluster (patch_nn_noise_overlap_sparsity /
+                    # noise_cluster_spans) are a main-process monkeypatch and a
+                    # ContextVar; SI parallelises nn_advanced with spawned
+                    # workers that re-import SI and would see neither, so pin
+                    # the PC/NN metric compute to the main process.
+                    n_jobs=1,
+                )
             pc_df.index = pc_df.index.astype(int)
             frames.append(pc_df)
 

@@ -601,6 +601,112 @@ def test_nn_noise_overlap_is_finite_not_silently_all_nan(
     )
 
 
+def _small_in_memory_analyzer():
+    """A sparse in-memory analyzer (10 s, 4 channels, 2 units) with waveforms."""
+    import spikeinterface as si
+
+    recording, sorting = si.generate_ground_truth_recording(
+        durations=[10.0],
+        sampling_frequency=30000.0,
+        num_channels=4,
+        num_units=2,
+        seed=0,
+    )
+    analyzer = si.create_sorting_analyzer(
+        sorting, recording, format="memory", sparse=True
+    )
+    analyzer.compute(["random_spikes", "waveforms", "templates"])
+    return analyzer
+
+
+@pytest.mark.db_unit
+@pytest.mark.parametrize("pc_compute_raises", [False, True])
+def test_compute_metrics_scopes_noise_cluster_spans_to_pc_compute(
+    dj_conn, monkeypatch, pc_compute_raises
+):
+    """The spans are visible to the PC-metric compute only, then reset.
+
+    The voltage-metric compute sees no spans; the PC-metric compute sees the
+    ones passed to ``_compute_metrics``; afterwards -- whether the PC compute
+    returned or raised -- the ContextVar is back to ``None``.
+    """
+    import spikeinterface.metrics.quality as sqm
+
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        _NOISE_CLUSTER_SPANS,
+    )
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+    analyzer = _small_in_memory_analyzer()
+    spans = [(0, 100_000), (100_000, analyzer.get_num_samples())]
+    real_compute = sqm.compute_quality_metrics
+    seen = []
+
+    def spy(sorting_analyzer, **kwargs):
+        seen.append((kwargs["skip_pc_metrics"], _NOISE_CLUSTER_SPANS.get()))
+        if pc_compute_raises and not kwargs["skip_pc_metrics"]:
+            raise RuntimeError("pc compute failed")
+        return real_compute(sorting_analyzer, **kwargs)
+
+    monkeypatch.setattr(sqm, "compute_quality_metrics", spy)
+
+    def compute():
+        return CurationEvaluation._compute_metrics(
+            analyzer,
+            analyzer,
+            ["firing_rate", "nn_advanced"],
+            {"nn_advanced": {"seed": 0}},
+            False,
+            {},
+            statistics_spans=spans,
+        )
+
+    if pc_compute_raises:
+        with pytest.raises(RuntimeError, match="pc compute failed"):
+            compute()
+    else:
+        metrics = compute()
+        assert metrics["nn_noise_overlap"].notna().all()
+    assert seen == [(True, None), (False, tuple(spans))]
+    assert _NOISE_CLUSTER_SPANS.get() is None
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_evaluation_passes_statistics_spans_to_metric_compute(
+    populated_sorting_with_curation, curation_evaluation_defaults, monkeypatch
+):
+    """``make_compute`` hands the sort's persisted statistics spans to the
+    metric compute, where they select the nn noise cluster's frames."""
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    real_compute_metrics = CurationEvaluation._compute_metrics
+    received = []
+
+    def spy(*args, **kwargs):
+        received.append(kwargs.get("statistics_spans"))
+        return real_compute_metrics(*args, **kwargs)
+
+    monkeypatch.setattr(
+        CurationEvaluation, "_compute_metrics", staticmethod(spy)
+    )
+    sel = CurationEvaluationSelection.insert_selection(
+        {
+            **populated_sorting_with_curation,
+            "metric_params_name": "franklab_default",
+            "auto_curation_rules_name": "none",
+        }
+    )
+    CurationEvaluation.populate(sel, reserve_jobs=False)
+    sorting_key = {"sorting_id": populated_sorting_with_curation["sorting_id"]}
+    expected = Sorting().get_statistics_spans(sorting_key)
+    assert received == [expected]
+
+
 def _two_distinct_template_inputs():
     """A 4-channel recording + two-unit and merged sortings, distinct templates.
 
