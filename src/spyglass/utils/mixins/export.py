@@ -255,7 +255,7 @@ class ExportMixin(FetchMixin):
         if set(banned) & self._called_funcs():
             return
 
-        restr = restriction or self.restriction or True
+        restr = self.restriction if restriction is None else restriction
         limit = kwargs.get("limit")
         offset = kwargs.get("offset")
         if limit or offset:  # Use result as restr if limit/offset
@@ -265,6 +265,8 @@ class ExportMixin(FetchMixin):
 
         restr_str = make_condition(self, restr, set())
 
+        if restr_str is False:
+            return  # An empty result has no rows to export.
         if restr_str is True:
             restr_str = "True"  # otherwise stored in table as '1'
 
@@ -294,7 +296,7 @@ class ExportMixin(FetchMixin):
         # get list of entry keys
         restricted_table = (
             self.restrict(restriction, log_export=False)
-            if restriction
+            if restriction is not None
             else self
         )
         if not bool(restricted_table):
@@ -529,7 +531,12 @@ class ExportMixin(FetchMixin):
 
     def is_restr(self, restr) -> bool:
         """Check if a restriction is actually restricting."""
-        return bool(restr) and not restr and not isinstance(restr, Top)
+        return (
+            restr is not None
+            and restr is not True
+            and not isinstance(restr, Top)
+            and not (isinstance(restr, AndList) and not restr)
+        )
 
     # -------------------------- Intercept DJ methods --------------------------
 
@@ -556,10 +563,14 @@ class ExportMixin(FetchMixin):
 
         if log_export is None:
             log_export = "fetch_nwb" not in self._called_funcs()
-        if self.is_restr(restriction) and self.is_restr(self.restriction):
+        if isinstance(restriction, Top):
+            combined = restriction
+        elif self.is_restr(restriction) and self.is_restr(self.restriction):
             combined = AndList([restriction, self.restriction])
-        else:  # Only combine if both are restricting
-            combined = restriction or self.restriction
+        elif self.is_restr(restriction):
+            combined = restriction
+        else:
+            combined = self.restriction
         return self._run_with_log(
             super().restrict, restriction=combined, log_export=log_export
         )

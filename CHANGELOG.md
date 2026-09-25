@@ -10,6 +10,11 @@
 ```
 -->
 
+### Fixed
+
+- Preserve existing table restrictions when export logging encounters a no-op
+  restriction, so packaging cannot expand a restricted fetch to a whole table.
+
 ### Documentation
 
 - Add LFP artifact detection to the LFP notebook #1641
