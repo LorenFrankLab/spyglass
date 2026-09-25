@@ -2194,7 +2194,9 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         spans (``Sorting.get_statistics_spans``); ``nn_noise_overlap`` draws
         its noise cluster only from inside them. They are set (via
         ``noise_cluster_spans``) around the PC-metric compute only, which runs
-        in this process. ``None`` keeps SpikeInterface's whole-recording draw.
+        in this process. ``sd_ratio``'s noise standard deviation is likewise
+        estimated from the span samples. ``None`` (or one span covering the
+        recording) keeps SpikeInterface's whole-recording estimates.
         """
         import numpy as np
         import pandas as pd
@@ -2238,6 +2240,24 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 list(_CURATION_EXTENSIONS) + extra_extensions,
                 job_kwargs=job_kwargs,
             )
+            if "sd_ratio" in voltage_names:
+                # SI's sd_ratio divides by get_noise_levels(method="std") on
+                # this analyzer's recording, which returns a cached
+                # noise_level_std_* property when present. Cache the std of
+                # the span samples there (same seed and budget as the
+                # analyzer's MAD), so masked zeros do not bias it low.
+                # Covering spans cache nothing and leave SI's estimator.
+                from spyglass.spikesorting.v2._sorting_dispatch import (
+                    cache_span_noise_levels,
+                )
+
+                cache_span_noise_levels(
+                    display_analyzer.recording,
+                    statistics_spans,
+                    return_in_uV=display_analyzer.return_in_uV,
+                    seed=(job_kwargs or {}).get("random_seed", 0),
+                    method="std",
+                )
             voltage_df = compute_quality_metrics(
                 display_analyzer,
                 metric_names=voltage_names,

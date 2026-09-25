@@ -448,23 +448,29 @@ def pinned_whiten(recording, *, random_seed: int = 0, spans=None):
     return sip.whiten(recording, dtype=np.float64, W=whitening, M=None)
 
 
-def cache_span_noise_levels(recording, spans, *, return_in_uV: bool, seed):
-    """Cache per-channel MAD noise levels estimated from ``spans`` only.
+def cache_span_noise_levels(
+    recording, spans, *, return_in_uV: bool, seed, method: str = "mad"
+):
+    """Cache per-channel noise levels estimated from ``spans`` only.
 
     SpikeInterface's ``get_noise_levels`` returns a cached
-    ``noise_level_mad_scaled`` (``return_in_uV=True``) or
-    ``noise_level_mad_raw`` (``False``) recording property whenever one is
-    present, whatever its other arguments. Setting that property here makes
-    every downstream SI noise estimate on this exact object -- the analyzer
-    ``noise_levels`` extension, ``detect_peaks``'s MAD threshold -- use
-    samples inside the statistics spans, so artifact-masked zeros do not
-    bias the noise low. Preprocessors drop the ``noise_level_*`` properties,
-    so call this on the final object the consumer receives.
+    ``noise_level_{method}_scaled`` (``return_in_uV=True``) or
+    ``noise_level_{method}_raw`` (``False``) recording property whenever one
+    is present, whatever its other arguments. Setting that property here
+    makes every downstream SI noise estimate of that method on this exact
+    object -- the analyzer ``noise_levels`` extension and ``detect_peaks``'s
+    MAD threshold (``"mad"``), the ``sd_ratio`` metric's noise (``"std"``)
+    -- use samples inside the statistics spans, so artifact-masked zeros do
+    not bias the noise low. Preprocessors drop the ``noise_level_*``
+    properties, so call this on the final object the consumer receives.
 
-    The estimate is the MAD of the pooled span samples
-    (``median(|x - median(x)|) / 0.6744897501960817``, SI's scale constant)
-    drawn with SI's default 20 x 500 ms budget; SI's own estimator instead
-    averages per-chunk MADs.
+    Samples are drawn with SI's default 20 x 500 ms budget. ``"mad"`` is the
+    MAD of the pooled span samples (``median(|x - median(x)|) /
+    0.6744897501960817``, SI's scale constant); SI's own estimator instead
+    averages per-chunk MADs. ``"std"`` is the population standard deviation
+    of the pooled span samples about their pooled mean; SI's own estimator
+    instead averages per-chunk standard deviations, each about its chunk's
+    own mean.
 
     Parameters
     ----------
@@ -480,6 +486,8 @@ def cache_span_noise_levels(recording, spans, *, return_in_uV: bool, seed):
         traces; selects the property key to match the consumer.
     seed : int
         Keyword-only. Seed of the span sampler.
+    method : {"mad", "std"}, optional
+        Keyword-only. The SI noise method to cache. Default ``"mad"``.
 
     Returns
     -------
@@ -493,15 +501,22 @@ def cache_span_noise_levels(recording, spans, *, return_in_uV: bool, seed):
         spans_cover_recording,
     )
 
+    if method not in ("mad", "std"):
+        raise ValueError(f"method must be 'mad' or 'std', got {method!r}")
     if spans_cover_recording(spans, recording.get_num_samples()):
         return None
     data = _sample_statistics_spans(
         recording, spans, seed=seed, return_in_uV=return_in_uV
     )
-    median = np.median(data, axis=0, keepdims=True)
-    noise_levels = np.median(np.abs(data - median), axis=0) / 0.6744897501960817
-    key = "noise_level_mad_scaled" if return_in_uV else "noise_level_mad_raw"
-    recording.set_property(key, noise_levels)
+    if method == "mad":
+        median = np.median(data, axis=0, keepdims=True)
+        noise_levels = (
+            np.median(np.abs(data - median), axis=0) / 0.6744897501960817
+        )
+    else:
+        noise_levels = np.std(data, axis=0)
+    suffix = "scaled" if return_in_uV else "raw"
+    recording.set_property(f"noise_level_{method}_{suffix}", noise_levels)
     return noise_levels
 
 

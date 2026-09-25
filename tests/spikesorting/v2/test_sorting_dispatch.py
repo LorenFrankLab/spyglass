@@ -928,6 +928,72 @@ def test_clusterless_non_mad_paths_ignore_statistics_spans(
 
 
 @pytest.mark.medium
+def test_span_std_noise_levels_are_the_std_of_span_samples(
+    clean_ground_truth,
+):
+    """``method="std"`` caches the per-channel std of the span samples.
+
+    It is stored under SI's ``noise_level_std_*`` key, which is what SI's
+    ``get_noise_levels(method="std")`` (the noise ``sd_ratio`` divides by)
+    then returns; the MAD key is left alone. The value is within 5% of the
+    clean twin's exact per-channel std, which zeros counted as data would
+    pull about 16% low at 30% masked. One span covering the recording caches
+    nothing.
+    """
+    import numpy as np
+    from spikeinterface.core import get_noise_levels
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        sample_span_data,
+    )
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        cache_span_noise_levels,
+    )
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        SAMPLING_FREQUENCY,
+        masked_twin,
+        numpy_recording,
+    )
+
+    traces, probe, _ = clean_ground_truth
+    masked, spans, _ = masked_twin(traces, probe, 0.30)
+    seed = 3
+
+    cached = cache_span_noise_levels(
+        masked, spans, return_in_uV=True, seed=seed, method="std"
+    )
+
+    chunk = int(0.5 * SAMPLING_FREQUENCY)
+    span_data = sample_span_data(
+        masked,
+        spans,
+        target_samples=20 * chunk,
+        max_piece=chunk,
+        seed=seed,
+        return_in_uV=True,
+    )
+    assert np.array_equal(cached, np.std(span_data, axis=0))
+    keys = masked.get_property_keys()
+    assert "noise_level_std_scaled" in keys
+    assert "noise_level_mad_scaled" not in keys
+    assert np.array_equal(
+        get_noise_levels(masked, return_in_uV=True, method="std"), cached
+    )
+    clean_std = traces.std(axis=0)
+    assert np.max(np.abs(cached - clean_std) / clean_std) < 0.05
+
+    unmasked = numpy_recording(traces, probe)
+    covering = [(0, unmasked.get_num_samples())]
+    assert (
+        cache_span_noise_levels(
+            unmasked, covering, return_in_uV=True, seed=seed, method="std"
+        )
+        is None
+    )
+    assert "noise_level_std_scaled" not in unmasked.get_property_keys()
+
+
+@pytest.mark.medium
 @pytest.mark.usefixtures("dj_conn")
 def test_sorting_wrappers_forward_statistics_spans(
     clean_ground_truth, monkeypatch, tmp_path

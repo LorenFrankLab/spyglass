@@ -671,6 +671,157 @@ def test_compute_metrics_scopes_noise_cluster_spans_to_pc_compute(
     assert _NOISE_CLUSTER_SPANS.get() is None
 
 
+def _sd_ratio_analyzer(fill):
+    """In-memory display analyzer over a 30%-masked 10 s, 4-channel recording.
+
+    The excluded frames hold ``fill`` (``"zeros"``, ``"10mV"`` or ``"nan"``).
+    Every spike sits at least 4 ms from an excluded frame, so its waveform
+    and amplitude read only retained frames: only a noise estimate that
+    reads excluded frames can depend on ``fill``. Returns
+    ``(analyzer, spans)``.
+    """
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        statistics_spans,
+    )
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        SAMPLING_FREQUENCY,
+        excluded_ranges,
+        numpy_recording,
+    )
+
+    recording, sorting = si.generate_ground_truth_recording(
+        durations=[10.0],
+        sampling_frequency=SAMPLING_FREQUENCY,
+        num_channels=4,
+        num_units=2,
+        seed=0,
+    )
+    traces = recording.get_traces()
+    n_samples = traces.shape[0]
+    ranges = excluded_ranges(n_samples, 0.30)
+    margin = int(0.004 * SAMPLING_FREQUENCY)
+    spike_vector = sorting.to_spike_vector()
+    frames = spike_vector["sample_index"]
+    keep = (frames >= margin) & (frames < n_samples - margin)
+    for start, end in ranges:
+        keep &= (frames + margin <= start) | (frames - margin >= end)
+    kept = si.NumpySorting.from_samples_and_labels(
+        [frames[keep]],
+        [spike_vector["unit_index"][keep]],
+        sampling_frequency=SAMPLING_FREQUENCY,
+    )
+
+    filled = traces.copy()
+    for start, end in ranges:
+        if fill == "zeros":
+            filled[start:end] = 0.0
+        elif fill == "10mV":
+            sign = np.where(np.arange(end - start) % 2 == 0, 1.0, -1.0)
+            filled[start:end] = (10_000.0 * sign)[:, None]
+        else:
+            filled[start:end] = np.nan
+    analyzer = si.create_sorting_analyzer(
+        kept, numpy_recording(filled, recording.get_probe()), format="memory"
+    )
+    analyzer.compute(["random_spikes", "waveforms", "templates"])
+    spans = statistics_spans(n_samples, ranges, [(0, n_samples)])
+    return analyzer, spans
+
+
+@pytest.mark.db_unit
+def test_compute_metrics_sd_ratio_ignores_excluded_samples(dj_conn):
+    """``sd_ratio``'s noise comes only from the statistics spans.
+
+    With the spans fixed, the excluded frames are filled with zeros, then
+    +/-10 mV, then NaN: ``sd_ratio`` from ``_compute_metrics`` must be
+    bit-identical and finite across the three. The std it divides by is
+    the per-channel std of the span samples (SI's default 20 x 500 ms budget,
+    the job's ``random_seed``), cached on the display analyzer's recording.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        sample_span_data,
+    )
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+    results = {}
+    for fill in ("zeros", "10mV", "nan"):
+        analyzer, spans = _sd_ratio_analyzer(fill)
+        metrics = CurationEvaluation._compute_metrics(
+            analyzer,
+            None,
+            ["sd_ratio"],
+            {},
+            True,
+            {"random_seed": 4},
+            statistics_spans=spans,
+        )
+        results[fill] = metrics["sd_ratio"].to_numpy()
+
+        chunk = int(0.5 * analyzer.sampling_frequency)
+        span_data = sample_span_data(
+            analyzer.recording,
+            spans,
+            target_samples=20 * chunk,
+            max_piece=chunk,
+            seed=4,
+            return_in_uV=True,
+        )
+        assert np.array_equal(
+            analyzer.recording.get_property("noise_level_std_scaled"),
+            np.std(span_data, axis=0),
+        ), fill
+
+    assert np.all(np.isfinite(results["zeros"])), results["zeros"]
+    for fill in ("10mV", "nan"):
+        assert np.array_equal(results[fill], results["zeros"]), (
+            f"sd_ratio changed when excluded samples were {fill}: "
+            f"{results[fill]} vs {results['zeros']}"
+        )
+
+
+@pytest.mark.db_unit
+def test_compute_metrics_sd_ratio_covering_spans_is_spikeinterface(dj_conn):
+    """No spans, or one span covering the recording, keeps SI's ``sd_ratio``.
+
+    Seeded through ``sd_ratio``'s own noise-sampling kwargs, the value equals
+    SpikeInterface's ``compute_quality_metrics`` on a twin analyzer, bit for
+    bit.
+    """
+    import numpy as np
+    from spikeinterface.metrics.quality import compute_quality_metrics
+
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+    seeded = {"sd_ratio": {"random_slices_kwargs": {"seed": 0}}}
+    reference_analyzer, _ = _sd_ratio_analyzer("zeros")
+    reference_analyzer.compute("spike_amplitudes")
+    expected = compute_quality_metrics(
+        reference_analyzer,
+        metric_names=["sd_ratio"],
+        metric_params=seeded,
+        skip_pc_metrics=True,
+    )["sd_ratio"].to_numpy()
+
+    n_samples = reference_analyzer.get_num_samples()
+    for spans in (None, [(0, n_samples)]):
+        analyzer, _ = _sd_ratio_analyzer("zeros")
+        metrics = CurationEvaluation._compute_metrics(
+            analyzer,
+            None,
+            ["sd_ratio"],
+            seeded,
+            True,
+            {"random_seed": 4},
+            statistics_spans=spans,
+        )
+        assert np.array_equal(metrics["sd_ratio"].to_numpy(), expected), spans
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_evaluation_passes_statistics_spans_to_metric_compute(

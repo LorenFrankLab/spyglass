@@ -301,14 +301,15 @@ peak and carried 58× its RMS.
 
 Whitening covariance (MS4/MS5 external whitening and the whitened metric
 analyzer), the analyzer's `noise_levels` extension, the clusterless
-thresholder's MAD threshold, and the `nn_noise_overlap` noise cluster are now
-estimated only from samples inside the sort's **statistics spans**:
+thresholder's MAD threshold, the `nn_noise_overlap` noise cluster, and the
+noise standard deviation behind `sd_ratio` are now estimated only from
+samples inside the sort's **statistics spans**:
 artifact-free frame ranges that never cross a selection-interval join, a
 concatenation member join, or a member-internal timestamp gap. A recording
 with no masking and a single continuous span keeps SpikeInterface's own
-estimators bit-identical to today. The masked-path noise estimator is a
-pooled MAD over the span samples, not SpikeInterface's own average of
-per-chunk MADs.
+estimators bit-identical to today. The masked-path noise estimators are a
+pooled MAD (and, for `sd_ratio`, a pooled standard deviation) over the span
+samples, not SpikeInterface's own average of per-chunk values.
 
 - **Magnitude, measured on a synthetic 16-channel/60 s benchmark:** at 5 /
   30 / 48% masked, `noise_levels` was biased −13.5 / −48.4 / −77.2% against
