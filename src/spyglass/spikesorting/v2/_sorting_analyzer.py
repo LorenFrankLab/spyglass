@@ -504,8 +504,10 @@ def reconstruct_recording_for_sorting_from_resolved(
 def reconstruct_recording_and_sorting(sorting_table, key):
     """Reconstruct the canonical (artifact-masked) recording + sorting for a sort.
 
-    Resolves the sort's source recording (single or concatenated), applies the
-    artifact mask when the sort is artifact-backed, and loads the canonical
+    Resolves the sort's effective traces
+    (``SortingSelection.resolve_effective_source``), rebuilds a missing traces
+    file, applies the artifact mask when the traces require it (an
+    artifact-backed single recording), and loads the canonical
     sorting from the units NWB -- exactly the ``(recording, sorting)`` pair
     ``build_analyzer`` starts from (it then 2D-projects + whitens per recipe).
     Touches NO analyzer cache, so the recompute audit can source sorting +
@@ -527,29 +529,20 @@ def reconstruct_recording_and_sorting(sorting_table, key):
         ``(recording, sorting)`` -- the artifact-masked SI recording and the
         canonical SI sorting.
     """
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        RecordingSelection,
+    from spyglass.spikesorting.v2._source_resolution import (
+        load_effective_recording,
     )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    # Resolve the artifact-detection id from the ArtifactDetectionSource part
-    # (the master has no artifact_detection_id FK); without it the mask gate
-    # below never fires and an artifact-backed sort's recording would omit the
-    # mask, diverging from what Sorting.make wrote.
-    artifact_detection_id = SortingSelection.resolve_artifact_detection(key)
-    source = SortingSelection.resolve_source(key)
-    if source.kind == "recording":
-        recording = Recording().get_recording(
-            {"recording_id": source.key["recording_id"]}
-        )
-    else:  # concatenated_recording: member masks are already in the concat cache
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecording,
-        )
-
-        recording = ConcatenatedRecording().get_recording(source.key)
-    if source.kind == "recording" and artifact_detection_id is not None:
+    # The effective source carries the artifact-detection id from the
+    # ArtifactDetectionSource part (the master has no artifact_detection_id
+    # FK); without it an artifact-backed sort's recording would omit the mask,
+    # diverging from what Sorting.make wrote. A concat cache already holds its
+    # member masks, so its traces are never masked again here.
+    lineage, traces = SortingSelection.resolve_effective_source(key)
+    valid_times = None
+    if traces.apply_artifact_mask:
         # Route the artifact mask through the ownership-validated helper -- the
         # same one Sorting.make_fetch uses -- NOT a direct IntervalList-by-name
         # fetch. The direct fetch would accept a partially-deleted artifact (no
@@ -560,27 +553,29 @@ def reconstruct_recording_and_sorting(sorting_table, key):
             read_artifact_removed_intervals,
         )
 
-        nwb_file_name = (
-            RecordingSelection & {"recording_id": source.key["recording_id"]}
-        ).fetch1("nwb_file_name")
+        nwb_file_name = (RecordingSelection & lineage.key).fetch1(
+            "nwb_file_name"
+        )
         intervals_by_nwb = read_artifact_removed_intervals(
-            {"artifact_detection_id": artifact_detection_id}, as_dict=True
+            {"artifact_detection_id": lineage.artifact_detection_id},
+            as_dict=True,
         )
         if nwb_file_name not in intervals_by_nwb:
             raise ValueError(
                 "reconstruct_recording_and_sorting: artifact-removed intervals "
                 f"for nwb_file_name={nwb_file_name!r} not found among "
                 f"{sorted(intervals_by_nwb)} for artifact_detection_id="
-                f"{artifact_detection_id!r}; the ArtifactDetection may be "
-                "partially deleted."
+                f"{lineage.artifact_detection_id!r}; the ArtifactDetection may "
+                "be partially deleted."
             )
         valid_times = intervals_by_nwb[nwb_file_name]
-        recording = sorting_table._apply_artifact_mask(
-            recording=recording,
-            valid_times=valid_times,
-            artifact_detection_id=artifact_detection_id,
-            recording_id=source.key["recording_id"],
-        )
+    SortingSelection.ensure_effective_traces(traces)
+    recording = load_effective_recording(
+        traces,
+        artifact_valid_times=valid_times,
+        artifact_detection_id=lineage.artifact_detection_id,
+        recording_id=lineage.key.get("recording_id"),
+    )
     return recording, sorting_table.get_sorting(key)
 
 

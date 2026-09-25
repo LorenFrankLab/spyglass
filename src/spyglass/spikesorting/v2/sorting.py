@@ -2964,9 +2964,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         """Zero out the complement of ``valid_times`` on the recording.
 
         Thin delegator to :func:`._sorting_artifact_mask.apply_artifact_mask`;
-        kept as a ``Sorting`` staticmethod because the analyzer
-        reconstruction paths call ``sorting_table._apply_artifact_mask(...)``
-        and the v2 tests call ``Sorting._apply_artifact_mask`` directly.
+        kept as a ``Sorting`` staticmethod because the v2 tests call
+        ``Sorting._apply_artifact_mask`` directly. The analyzer reconstruction
+        paths mask through
+        :func:`._source_resolution.load_effective_recording`.
         ``make_compute`` masks through ``artifact_frame_ranges`` /
         ``silence_frame_ranges`` itself so it keeps the excluded ranges for
         the statistics spans. The complement-walk
