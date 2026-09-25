@@ -310,12 +310,16 @@ estimators bit-identical to today. The masked-path noise estimator is a
 pooled MAD over the span samples, not SpikeInterface's own average of
 per-chunk MADs.
 
-- **Magnitude, measured on a synthetic 16-channel/60 s benchmark:** at 30%
-  masked, `noise_levels` was biased −48% against the clean target and the
-  whitened valid-sample std was ≈1.32; after this change both are within 1%
-  and ≈1.00. SNR from evaluations computed before this change is biased
-  upward roughly with the masked fraction (measured mean ratio ≈1.14 / 1.72
-  / 1.96 at 5 / 30 / 48% masked on that same benchmark).
+- **Magnitude, measured on a synthetic 16-channel/60 s benchmark:** at 5 /
+  30 / 48% masked, `noise_levels` was biased −13.5 / −48.4 / −77.2% against
+  the clean target (the bias grows faster than the masked fraction), and at
+  30% masked the whitened valid-sample std was ≈1.32; after this change the
+  noise bias is within 1% at every level and the whitened std is ≈1.00.
+  Through the noise denominator alone (a factor of 1 / (1 + bias)), that
+  bias inflates SNR from evaluations computed before this change by ≈1.16× /
+  1.94× / 4.4× at those masked fractions. On a real MountainSort5 sort with
+  ≈10% of the recording masked, the old estimate inflated SNR 1.27× against
+  the unmasked sort (1.02× after this change).
 - **Each sort persists its statistics spans** in the sorting NWB's
   provenance scratch; `Sorting().get_statistics_spans(key)` returns them, and
   every analyzer rebuild, curation evaluation, merged-curation analyzer, and
