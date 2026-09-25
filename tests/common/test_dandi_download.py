@@ -140,14 +140,10 @@ def test_raw_dandi_match_streams(
     """A raw-name DANDI match streams. It never replaces the tracked copy.
 
     DANDI publishes `X.nwb`; Spyglass tracks the smaller link copy `X_.nwb`.
-    Writing the former to the latter's path fails the DataJoint filepath check
-    on this fetch and on every later one, with or without the preference set.
+    Writing the former to the latter's path fails the DataJoint filepath
+    check on this fetch and every later one.
 
-    The parameter is the setting the backend must ignore here, so both values
-    assert the same outcome. `True` is the regression: without the
-    `will_stream` override it downloads and this fails. `False` is the default
-    path, and the only end-to-end check that a raw-name match reaches
-    `fetch_nwb` as a stream at all.
+    `True` is the regression; `False` pins the default path.
     """
     from spyglass.common import Session
     from spyglass.settings import sg_config

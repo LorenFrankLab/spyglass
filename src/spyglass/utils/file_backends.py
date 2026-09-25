@@ -181,6 +181,9 @@ class FileBackend(Protocol):
         prefers download but whose backend cannot download is served by
         streaming anyway: the setting is a preference, never a failure mode.
 
+        The preference is read per backend: `custom.backends.<name>` first,
+        then the instance-wide `custom.prefer_download`.
+
         Override to give per-file answers if the backend streams some files and
         downloads others.
 
@@ -198,7 +201,10 @@ class FileBackend(Protocol):
 
         if not self.supports_streaming:
             return False
-        return not (self.supports_download and sg_config.prefer_download)
+
+        prefers_download = sg_config.backend_prefers_download(self.name)
+
+        return not (self.supports_download and prefers_download)
 
     def open(self, nwb_file_path: str) -> Opened:
         """Open the file and report how it was read.
@@ -362,11 +368,9 @@ class DandiBackend(FileBackend):
         """Stream if DANDI holds the file only under its raw name.
 
         A raw session published as `X.nwb` is not the `X_.nwb` link copy
-        Spyglass tracks locally — the two differ in size. Writing the DANDI
-        bytes to the tracked path leaves a file that fails the DataJoint
-        filepath checksum on every later fetch, and keeps failing after the
-        preference is turned back off. So `prefer_download` does not apply to a
-        name-mismatched match: those are always streamed.
+        Spyglass tracks locally. Writing the DANDI bytes to the tracked path
+        leaves a file that fails the DataJoint filepath checksum on every
+        later fetch, so `prefer_download` does not apply to these.
 
         Parameters
         ----------
@@ -426,9 +430,289 @@ class DandiBackend(FileBackend):
         )
 
 
+class StoreBackend(FileBackend):
+    """Fetch files from a self-hosted shared-storage broker.
+
+    Sits directly after `LocalBackend`, so a copy already on disk still wins
+    and DANDI stays available as the fallback for published data.
+
+    Streams by default over HTTP range requests against the broker's *stable*
+    content URL. That URL is not itself signed: each request to it is answered
+    with a fresh redirect to a short-lived signed URL, which is what lets a
+    read of a multi-gigabyte file outlive any single signature.
+
+    Also implements `download`, so `prefer_download` behaves here as it does
+    for DANDI.
+    """
+
+    name = "store"
+    supports_streaming = True
+    supports_download = True
+
+    def __init__(self):
+        # Memo for one process, so `has` and the `open` that follows it do not
+        # each pay a round trip. Safe against a revoked share: a file id is
+        # not a capability, and the broker re-authorizes every content fetch.
+        self._resolved = {}
+
+    def _client(self):
+        """Return a broker client, or None if this instance has no broker.
+
+        Returns
+        -------
+        StoreClient or None
+            None when `store_url` is unset or the user has never logged in.
+            Both are ordinary states, not errors.
+        """
+        from spyglass.sharing.store_client import get_client
+
+        client = get_client()
+
+        if not client.configured:
+            return None
+
+        if not client.logged_in:
+            logger.debug(
+                "Shared store configured but not logged in; run "
+                + "`spyglass-store login` to read from it."
+            )
+            return None
+
+        return client
+
+    def _known_hash(self, name: str) -> Optional[str]:
+        """Return the digest this instance recorded for a file name, if any.
+
+        A name is not unique at the broker, so it can name a different
+        session held by another instance. A hash names the bytes.
+        `SharedFileSelection` is keyed on the file name, so within one
+        instance a name maps to exactly one upload and one digest.
+
+        Absent for a file shared from a different Spyglass instance, which is
+        the case that falls back to the name.
+
+        Parameters
+        ----------
+        name : str
+            Spyglass file name.
+
+        Returns
+        -------
+        str or None
+            Hex digest, or None if this instance has no record of the upload.
+        """
+        try:
+            from spyglass.sharing.sharing_store import (
+                SharedAnalysisFile,
+                SharedFile,
+            )
+
+            for table, attr in (
+                (SharedFile, "nwb_file_name"),
+                (SharedAnalysisFile, "analysis_file_name"),
+            ):
+                digests = (table & {attr: name}).fetch("sha256")
+                if len(digests):
+                    return digests[0]
+        except Exception as err:  # no schema, no grants, no connection
+            # An optimization, so a failure here falls back to the name
+            # rather than breaking resolution.
+            logger.debug(f"No local sharing record available: {err}")
+
+        return None
+
+    def _resolve(self, nwb_file_path: str) -> Optional[dict]:
+        """Return the broker's record for this file, or None.
+
+        The single lookup for this backend, so `has` and `open` cannot
+        disagree about what the broker holds.
+
+        Resolves by content hash where this instance recorded one, and by name
+        otherwise. See `_known_hash` for why that distinction matters.
+
+        A refusal and a miss both return None. That is what the resolution
+        chain needs — try the next backend either way — but it does mean a
+        file the user could read after linking their GitHub account looks
+        exactly like one that does not exist. `StoreClient.resolve` raises the
+        distinction for callers that need it.
+
+        Parameters
+        ----------
+        nwb_file_path : str
+            Absolute path of the file as Spyglass expects it locally.
+
+        Returns
+        -------
+        dict or None
+            Broker file record, or None if unavailable.
+
+        Raises
+        ------
+        StoreQuotaExceeded
+            If this read would exceed the tier's allowance. The one case this
+            backend does not turn into a `False`, and a deliberate exception
+            to the rule that `has` never raises: being throttled means the
+            file *is* there and *is* readable, just not yet. Answering "no"
+            would send `get_nwb_file` on to recompute an analysis the user
+            could have had by waiting, which is far more expensive than the
+            error.
+        """
+        name = Path(nwb_file_path).name
+
+        if name in self._resolved:
+            return self._resolved[name]
+
+        client = self._client()
+
+        if client is None:
+            # Nothing is cached here. The chain instance is built once at
+            # import, and the notebook's own instructions have the user set
+            # `store_url` or log in *mid-session* — caching "no" would make
+            # every file probed before that permanently unavailable.
+            return None
+
+        digest = self._known_hash(name)
+        record = (
+            client.find(sha256=digest) if digest else client.find(name=name)
+        )
+
+        # Only a hit is cached. `find` collapses a refusal, a miss and a
+        # broker outage into None, and this instance lives for the process —
+        # so caching one would strand a file that is shared moments later.
+        if record is not None:
+            self._resolved[name] = record
+
+        return record
+
+    def _resolved_with_client(self, nwb_file_path: str):
+        """Return the file record and a live client, or (None, None).
+
+        The record is memoized but the client is not, so a user who logged out
+        mid-session would otherwise reach a transfer holding a cached record
+        and no way to authorize it. Asking for both together means a transfer
+        either has everything it needs or declines.
+
+        Parameters
+        ----------
+        nwb_file_path : str
+            Absolute path of the file as Spyglass expects it locally.
+
+        Returns
+        -------
+        tuple of (dict or None, StoreClient or None)
+            The broker record and the client to fetch it with.
+        """
+        record = self._resolve(nwb_file_path)
+        client = self._client() if record is not None else None
+
+        return (record, client) if client is not None else (None, None)
+
+    def has(self, nwb_file_path: str) -> bool:
+        """Return True if the broker holds a file this user may read."""
+        return self._resolve(nwb_file_path) is not None
+
+    def stream(
+        self, nwb_file_path: str
+    ) -> Tuple[pynwb.NWBHDF5IO, pynwb.NWBFile]:
+        """Read the file over range requests, caching blocks locally.
+
+        Raises
+        ------
+        BackendUnavailable
+            If the broker holds no readable file under this name. `stream`
+            owes its caller an `(io, nwbfile)` pair and has no value with
+            which to say no.
+        """
+        import fsspec
+        import h5py
+        from fsspec.implementations.cached import CachingFileSystem
+
+        from spyglass.settings import temp_dir
+
+        record, client = self._resolved_with_client(nwb_file_path)
+        if record is None:
+            raise BackendUnavailable(
+                f"File not in the shared store: {Path(nwb_file_path).name}"
+            )
+
+        # The bearer header rides every range request, because every one of
+        # them is re-authorized and re-signed by the broker. It is dropped
+        # when the redirect crosses to the object store, which is required:
+        # an S3 endpoint that receives an Authorization header alongside a
+        # presigned URL leaves presigned mode and refuses the request.
+        fs = fsspec.filesystem(
+            "http", client_kwargs={"headers": client.auth_headers()}
+        )
+        cached = CachingFileSystem(
+            fs=fs, cache_storage=f"{temp_dir}/store-cache"
+        )
+
+        fs_file = cached.open(client.content_url(record["file_id"]), "rb")
+        io = pynwb.NWBHDF5IO(file=h5py.File(fs_file))
+
+        return io, io.read()
+
+    def download(self, nwb_file_path: str, dest: Optional[str] = None) -> bool:
+        """Fetch the whole file to local disk in one transfer.
+
+        Writes to a temporary sibling and renames on success, so an
+        interrupted transfer never leaves a partial file that the local
+        backend would then happily open. The staging name carries a random
+        token so two workers fetching the same missing file cannot overwrite
+        or unlink each other's partial copy.
+
+        Returns
+        -------
+        bool
+            True if the file is present locally after the call. False — not an
+            exception — when the broker holds nothing readable, since `open`
+            is what turns that into the one error the resolver looks for.
+
+        Raises
+        ------
+        requests.RequestException
+            If the transfer fails after the broker said it held the file.
+            That is a failed read, not a miss, and must not fall through.
+        """
+        from uuid import uuid4
+
+        import requests
+
+        record, client = self._resolved_with_client(nwb_file_path)
+        if record is None:
+            return False
+
+        target = Path(dest or nwb_file_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temp = target.with_suffix(f"{target.suffix}.{uuid4().hex[:8]}.part")
+
+        logger.info(f"Downloading {target.name} from the shared store.")
+
+        try:
+            with requests.get(
+                client.content_url(record["file_id"]),
+                headers=client.auth_headers(),
+                stream=True,
+                timeout=None,  # a whole-file transfer, not an API call
+            ) as response:
+                response.raise_for_status()
+                with temp.open("wb") as f:
+                    for chunk in response.iter_content(chunk_size=1024**2):
+                        f.write(chunk)
+            temp.replace(target)
+        finally:
+            # The broker held this file, so a transport failure is a failed
+            # read rather than a miss, and must not become the
+            # `BackendUnavailable` that sends `get_nwb_file` off to recompute.
+            temp.unlink(missing_ok=True)
+
+        return target.exists()
+
+
 # The resolution chain, in order. Local disk first, then remote sources.
 _BACKENDS: List[FileBackend] = [
     LocalBackend(),
+    StoreBackend(),
     KacheryBackend(),
     DandiBackend(),
 ]

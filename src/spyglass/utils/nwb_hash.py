@@ -1,9 +1,9 @@
 import atexit
 import json
 from functools import cached_property
-from hashlib import md5
+from hashlib import md5, sha256
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Dict, Iterable, Union
 
 import h5py
 import numpy as np
@@ -14,6 +14,7 @@ from pynwb.spec import NWBDatasetSpec, NWBGroupSpec, NWBNamespace
 from tqdm import tqdm
 
 DEFAULT_BATCH_SIZE = 32768
+SHA256_CHUNK_SIZE = 1024 * 1024
 IGNORED_KEYS = ["version", "source_script"]
 PRECISION_LOOKUP = dict(ProcessedElectricalSeries=4)
 
@@ -36,6 +37,113 @@ def get_file_namespaces(file_path: Union[str, Path]) -> dict:
         ns_name: name_cat.get_namespace(ns_name).get("version", None)
         for ns_name in name_cat.namespaces
     }
+
+
+DIGESTS = {"sha256": sha256, "md5": md5}
+#: What to compute when the broker cannot say which it enforces.
+UPLOAD_DIGESTS = ("sha256", "md5")
+
+
+def digest_file(
+    file_path: Union[str, Path],
+    algorithms: Iterable[str] = ("sha256",),
+    chunk_size: int = SHA256_CHUNK_SIZE,
+    show_progress: bool = False,
+) -> Dict[str, str]:
+    """Return the requested digests of a file's raw bytes, in one read.
+
+    Digests the raw bytes, unlike `NwbfileHasher`, which digests HDF5 datasets
+    and ignores parts carrying no scientific content.
+
+    Computes only what is asked for, since each digest over a multi-gigabyte
+    file is expensive; `StoreClient.upload_digests` says which the broker's
+    store enforces. Several digests share one read.
+
+    Parameters
+    ----------
+    file_path : Union[str, Path]
+        Path to any file. Not NWB-specific.
+    algorithms : iterable of str, optional
+        Names from `DIGESTS`. Defaults to SHA-256, the object store's address
+        for the file.
+    chunk_size : int, optional
+        Bytes read per iteration. Much larger than `DEFAULT_BATCH_SIZE`, which
+        sizes reads of individual datasets rather than whole files.
+    show_progress : bool, optional
+        Display a progress bar. Off by default.
+
+    Returns
+    -------
+    dict
+        Algorithm name to hex digest, for each requested.
+
+    Raises
+    ------
+    ValueError
+        If an algorithm is not one this supports.
+    """
+    path = Path(file_path)
+    algorithms = list(algorithms)  # may be a one-shot iterator
+    unknown = set(algorithms) - set(DIGESTS)
+
+    if unknown:
+        raise ValueError(
+            f"Unknown digest(s): {', '.join(sorted(unknown))}. "
+            + f"Pick from {', '.join(DIGESTS)}."
+        )
+
+    hashers = {name: DIGESTS[name]() for name in algorithms}
+
+    def _consume(chunk, bar=None):
+        for hasher in hashers.values():
+            hasher.update(chunk)
+        if bar is not None:
+            bar.update(len(chunk))
+
+    with path.open("rb") as f:
+        if show_progress:
+            with tqdm(
+                total=path.stat().st_size,
+                unit="B",
+                unit_scale=True,
+                desc=f"hashing {path.name}",
+            ) as bar:
+                for chunk in iter(lambda: f.read(chunk_size), b""):
+                    _consume(chunk, bar)
+        else:
+            for chunk in iter(lambda: f.read(chunk_size), b""):
+                _consume(chunk)
+
+    return {name: hasher.hexdigest() for name, hasher in hashers.items()}
+
+
+def sha256_file(
+    file_path: Union[str, Path],
+    chunk_size: int = SHA256_CHUNK_SIZE,
+    show_progress: bool = False,
+) -> str:
+    """Return the SHA-256 hex digest of a file's raw bytes.
+
+    A wrapper over `digest_file`. Callers wanting both digests should use that
+    directly rather than reading the file twice.
+
+    Parameters
+    ----------
+    file_path : Union[str, Path]
+        Path to any file. Not NWB-specific.
+    chunk_size : int, optional
+        Bytes read per iteration.
+    show_progress : bool, optional
+        Display a progress bar.
+
+    Returns
+    -------
+    str
+        64-character lowercase hex digest.
+    """
+    return digest_file(file_path, ("sha256",), chunk_size, show_progress)[
+        "sha256"
+    ]
 
 
 class DirectoryHasher:
