@@ -514,6 +514,57 @@ def zero_raw_electrode_geometry(nwb_path):
     return nwb_path
 
 
+def inject_raw_nan(
+    nwb_path,
+    *,
+    frame_index: int,
+    channel_index: int,
+    series_name: str = "e-series",
+):
+    """Overwrite one raw ``ElectricalSeries`` sample with NaN, in place.
+
+    Writes the corruption where it can actually arise on the real ingestion
+    path -- the raw acquisition data -- rather than editing an already
+    DataJoint-tracked (checksum-verified) artifact after the fact. The raw
+    ``data`` dataset is a plain HDF5 array of the acquisition's own dtype;
+    this only works when that dtype can represent NaN (a float dtype), which
+    the caller should check first (an integer raw dtype cannot hold NaN and
+    silently truncates/wraps instead).
+
+    Parameters
+    ----------
+    nwb_path : pathlib.Path or str
+        NWB file to edit IN PLACE. Must not yet be registered as a
+        DataJoint ``Nwbfile`` row -- edit a copy, then ingest the copy.
+    frame_index : int
+        Row (sample) index into ``data`` to corrupt.
+    channel_index : int
+        Column (channel) index into ``data`` to corrupt.
+    series_name : str
+        Acquisition ``ElectricalSeries`` name. Default ``"e-series"``, the
+        name the MEArec fixture generator (``_fixtures/mearec_to_nwb.py``)
+        writes.
+
+    Returns
+    -------
+    pathlib.Path
+        ``nwb_path``.
+    """
+    import h5py
+
+    nwb_path = Path(nwb_path)
+    with h5py.File(str(nwb_path), "a") as h5:
+        data = h5[f"acquisition/{series_name}/data"]
+        if not np.issubdtype(data.dtype, np.floating):
+            raise ValueError(
+                "inject_raw_nan: acquisition "
+                f"'{series_name}' data dtype is {data.dtype}, which cannot "
+                "represent NaN."
+            )
+        data[frame_index, channel_index] = np.nan
+    return nwb_path
+
+
 def rename_probe_type(nwb_path, new_probe_type: str):
     """Relabel every ``ndx_franklab_novela.Probe`` device in place.
 

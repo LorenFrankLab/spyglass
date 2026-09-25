@@ -1522,3 +1522,134 @@ def test_shared_artifact_group_multi_member_union(
         np.testing.assert_array_equal(shared[nwb_file_name], valid_times)
     finally:
         _clear_shared_group()
+
+
+# ---------- a raw NaN makes populate raise instead of inserting empty ------
+
+
+@pytest.mark.slow
+def test_recording_artifact_detection_raises_on_raw_nan(dj_conn, tmp_path):
+    """One raw NaN sample makes ``RecordingArtifactDetection.populate`` raise.
+
+    The corruption is written where it can really arise -- the raw
+    acquisition data, via a broken/saturated ADC channel -- into a COPY of
+    the fixture made BEFORE ingestion, never into an already-inserted,
+    checksum-verified DataJoint artifact. ``Recording`` has no finiteness
+    guard anywhere in its preprocessing path (no ``isfinite``/``isnan``
+    check in ``recording.py`` or ``_recording_preprocessing.py``), so
+    ``Recording.populate`` succeeds and bakes the (filtered) NaN into the
+    persisted analysis recording; ``RecordingArtifactDetection.populate``
+    is what actually reads it back and fails loudly instead of silently
+    reporting no artifacts. Empirically the zero-phase bandpass filter
+    smears the one bad sample across the ENTIRE channel (not just nearby
+    frames), so the scan raises on its first chunk, frames [0, 30000), with
+    only the corrupted channel named.
+    """
+    import shutil
+    from pathlib import Path
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.settings import raw_dir
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
+
+    from tests.spikesorting.v2._ingest_helpers import (
+        _clean_session_v2,
+        copy_and_insert_nwb,
+        inject_raw_nan,
+    )
+
+    source = (
+        Path(__file__).resolve().parent.parent
+        / "fixtures"
+        / "mearec_polymer_smoke.nwb"
+    )
+    if not source.exists():
+        pytest.skip(f"Fixture {source.name} not found.")
+
+    # Corrupt a COPY, off to the side in tmp_path -- the fixture on disk and
+    # any already-ingested Nwbfile row are untouched.
+    corrupted = tmp_path / "mearec_polymer_smoke_raw_nan.nwb"
+    shutil.copy2(source, corrupted)
+    # Channel 0 is a member of the lowest sort_group_id (shank 0, electrode
+    # ids 0-31); frame 45_000 sits mid-file (120_000 samples @ 30 kHz), well
+    # clear of any edge trimming. The exact frame does not determine which
+    # scan chunk raises: the bandpass filter smears it across the whole
+    # channel (see the docstring), so the scan always raises on its first
+    # chunk regardless of where in the file the raw sample sits.
+    inject_raw_nan(corrupted, frame_index=45_000, channel_index=0)
+
+    # Ingest under a name unique to this test, discarding any stale copy
+    # from a previous run (mirrors test_recording.py's ``_ingest_fresh``):
+    # otherwise ``copy_and_insert_nwb`` would skip the copy and ingest
+    # stale (possibly clean) bytes.
+    dest_name = "mearec_polymer_smoke_raw_nan.nwb"
+    Path(raw_dir, dest_name).unlink(missing_ok=True)
+    Path(raw_dir, get_nwb_copy_filename(dest_name)).unlink(missing_ok=True)
+    nwb_file_name = copy_and_insert_nwb(corrupted, dest_name=dest_name)
+    session_key = {"nwb_file_name": nwb_file_name}
+    try:
+        PreprocessingParameters.insert_default()
+        ArtifactDetectionParameters.insert_default()
+        LabTeam.insert1(
+            {
+                "team_name": "v2_test_team",
+                "team_description": "v2 pipeline tests",
+            },
+            skip_duplicates=True,
+        )
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+        sort_group_id = int(
+            sorted((SortGroupV2 & session_key).fetch("sort_group_id"))[0]
+        )
+        rec_pk = RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_id,
+                "interval_list_name": "raw data valid times",
+                "preprocessing_params_name": "default",
+                "team_name": "v2_test_team",
+            }
+        )
+        # Finding: Recording does not reject or fill the NaN -- it is not
+        # rejected by anything on this path, so this must SUCCEED.
+        Recording.populate(rec_pk, reserve_jobs=False)
+        assert Recording & rec_pk, "Recording.populate must have inserted a row"
+
+        art_pk = RecordingArtifactSelection.insert_selection(
+            {
+                "recording_id": rec_pk["recording_id"],
+                "artifact_detection_params_name": "default",
+            }
+        )
+        with pytest.raises(
+            ValueError,
+            match=(
+                r"non-finite \(NaN/Inf\) samples in segment \d+ frames "
+                r"\[\d+, \d+\): channel 0: \d+"
+            ),
+        ):
+            RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+        assert not (RecordingArtifactDetection & art_pk), (
+            "a raised populate must not leave a RecordingArtifactDetection "
+            "row behind"
+        )
+        assert not (RecordingArtifactDetection.RemovedInterval & art_pk), (
+            "a raised populate must not leave an artifact interval list "
+            "behind"
+        )
+    finally:
+        _clean_session_v2(session_key)
+        Path(raw_dir, dest_name).unlink(missing_ok=True)
+        Path(raw_dir, get_nwb_copy_filename(dest_name)).unlink(missing_ok=True)
