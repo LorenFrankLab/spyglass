@@ -351,6 +351,7 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         u0, u1 = state["u0"], state["u1"]
         samples = np.concatenate([u0, u1]).astype(np.int64)
@@ -789,6 +790,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         samples = np.concatenate([planted[u] for u in (0, 1, 2, 3)]).astype(
             np.int64
@@ -977,6 +979,7 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         samples = np.array([200, 400, 600, 800], dtype=np.int64)
         labels = np.array([0, 1, 0, 1], dtype=np.int32)

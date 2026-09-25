@@ -114,6 +114,7 @@ def test_boundary_spike_round_trip_does_not_raise(
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         import spikeinterface as si
 
@@ -286,6 +287,7 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         import spikeinterface as si
 
@@ -441,6 +443,7 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         import spikeinterface as si
 
@@ -473,6 +476,164 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
             f"obs_interval [{start}, {end}] spans the inter-chunk gap "
             f"(gap_mid={gap_mid}); the envelope fallback was used."
         )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_reloaded_two_interval_artifact_exposes_gap(
+    polymer_smoke_session, monkeypatch
+):
+    """The reloaded two-interval recording exposes its selection join, and the
+    sort persists statistics spans that never cross it.
+
+    The recording is selected over two disjoint intervals, so its persisted
+    timestamps jump at the join. ``boundary_spans_from_timestamps`` on the
+    reloaded artifact must split exactly there (frame count of the first
+    interval at the fixture's sampling rate). A manual artifact exclusion at
+    the start of the first interval is masked, and the persisted spans must
+    be: the rest of the first interval, then the whole second interval -- the
+    join is a boundary even though nothing is masked around it. The sorter
+    receives those same spans.
+    """
+    import uuid
+
+    import numpy as np
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        boundary_spans_from_timestamps,
+    )
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0 = float(raw_times[0][0])
+    t_end = float(raw_times[-1][-1])
+    assert (t_end - t0) >= 2.9, "smoke fixture too short for disjoint test"
+    chunk1_end, gap_end, chunk2_end = t0 + 1.2, t0 + 1.7, min(t0 + 2.9, t_end)
+    disjoint_name = f"v2_disjoint_spans_{uuid.uuid4().hex[:8]}"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": disjoint_name,
+            "valid_times": np.array([[t0, chunk1_end], [gap_end, chunk2_end]]),
+            "pipeline": "v2_disjoint_test",
+        }
+    )
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": disjoint_name,
+            "preprocessing_params_name": "default",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+
+    recording = Recording().get_recording(rec_pk)
+    fs = float(recording.get_sampling_frequency())
+    n_samples = int(recording.get_num_samples())
+    # The first interval [t0, chunk1_end] is closed, so it holds every sample
+    # t0 + k / fs with k <= 1.2 * fs.
+    join = int(np.floor((chunk1_end - t0) * fs + 1e-6)) + 1
+    assert boundary_spans_from_timestamps(recording) == [
+        (0, join),
+        (join, n_samples),
+    ]
+    times = np.asarray(recording.get_times())
+    assert times[join - 1] <= chunk1_end < gap_end <= times[join]
+
+    # Manually exclude the first 0.15 s. The "none" recipe drops kept
+    # intervals shorter than its 1 s ``min_length_s``, so the exclusion sits
+    # at an interval edge and leaves 1.05 s of the first interval.
+    excl_start, excl_stop = 0, int(0.15 * fs)
+    art_pk = RecordingArtifactSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_detection_params_name": "none",
+            "manual_excluded_times": [
+                [float(times[excl_start]), float(times[excl_stop])]
+            ],
+        }
+    )
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+            "artifact_detection_id": art_pk["artifact_detection_id"],
+        }
+    )
+    (Sorting & sort_pk).super_delete(warn=False)
+
+    received = {}
+
+    def _capturing_run_sorter(
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        *,
+        job_kwargs=None,
+        execution_params=None,
+        statistics_spans=None,
+    ):
+        import spikeinterface as si
+
+        received["spans"] = statistics_spans
+        received["traces"] = recording.get_traces()
+        samples = np.array([100, n_samples - 100], dtype=np.int64)
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[samples],
+            labels_list=[np.zeros(samples.size, dtype=np.int32)],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    monkeypatch.setattr(
+        Sorting, "_run_sorter", staticmethod(_capturing_run_sorter)
+    )
+    Sorting.populate(sort_pk, reserve_jobs=False)
+    assert Sorting & sort_pk, "disjoint Sorting.populate failed"
+
+    spans = Sorting().get_statistics_spans(sort_pk)
+    assert received["spans"] == spans
+    # The masked frames lead the first span; the join splits the rest.
+    masked_stop = spans[0][0]
+    assert abs(masked_stop - excl_stop) <= 1, spans
+    assert spans == [(masked_stop, join), (join, n_samples)]
+    np.testing.assert_array_equal(received["traces"][:masked_stop], 0)
+    assert np.any(received["traces"][masked_stop:join] != 0)
+    assert np.any(received["traces"][join:] != 0)
 
 
 @pytest.mark.slow
@@ -565,6 +726,7 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         import spikeinterface as si
 
@@ -989,6 +1151,7 @@ def test_disjoint_multi_gap_readback_and_artifact(
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         import spikeinterface as si
 

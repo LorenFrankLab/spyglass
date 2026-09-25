@@ -48,7 +48,15 @@ from spyglass.spikesorting.v2._sorting_analyzer import (
     load_or_rebuild_analyzer,
     rebuild_analyzer_folder,
 )
-from spyglass.spikesorting.v2._sorting_artifact_mask import apply_artifact_mask
+from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    apply_artifact_mask,
+    artifact_frame_ranges,
+    boundary_spans_from_timestamps,
+    silence_frame_ranges,
+)
+from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    statistics_spans as compute_statistics_spans,
+)
 from spyglass.spikesorting.v2._sorting_dispatch import (
     remove_excess_spikes,
     run_clusterless_thresholder,
@@ -57,11 +65,13 @@ from spyglass.spikesorting.v2._sorting_dispatch import (
 )
 from spyglass.spikesorting.v2._sorting_units import build_sorting_unit_rows
 from spyglass.spikesorting.v2._units_nwb import (
+    STATISTICS_SPANS_FIELD,
     abs_spike_times_dataframe,
     empty_spike_times_dataframe,
     numpysorting_from_abs_times,
     numpysorting_from_sample_indices,
     read_units_abs_spike_times,
+    read_sorting_statistics_spans,
     read_units_spike_sample_indices,
     recording_timestamps,
     write_sorting_units_nwb,
@@ -150,6 +160,10 @@ class SortingFetched(NamedTuple):
     sort_group_id: int
     electrode_by_id: dict
     region_by_electrode: dict
+    # A concat source's stored ``ConcatenatedRecording.statistics_spans``
+    # (``(n, 2)`` int64 concat frame ranges); ``None`` for a single-recording
+    # source, whose spans ``make_compute`` derives from the reloaded recording.
+    concat_statistics_spans: np.ndarray | None
 
 
 class SortingComputed(NamedTuple):
@@ -1482,6 +1496,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                 obs_intervals = intervals_by_nwb[nwb_file_name]
             else:
                 obs_intervals = None
+            concat_statistics_spans = None
         else:  # concatenated_recording
             # Concat artifacts are masked before motion correction and carry
             # their own member detection provenance and kept intervals.
@@ -1514,9 +1529,9 @@ class Sorting(SpyglassMixin, dj.Computed):
                 ConcatenatedRecording,
             )
 
-            obs_intervals = (ConcatenatedRecording & source.key).fetch1(
-                "obs_intervals"
-            )
+            obs_intervals, concat_statistics_spans = (
+                ConcatenatedRecording & source.key
+            ).fetch1("obs_intervals", "statistics_spans")
 
         # Resolve the DISPLAY analyzer recipe from the source preprocessing
         # recipe (region) -- hippocampus -> the 0.5/0.5 row, cortex -> the
@@ -1559,6 +1574,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             sort_group_id=sort_group_id,
             electrode_by_id=electrode_by_id,
             region_by_electrode=region_by_electrode,
+            concat_statistics_spans=concat_statistics_spans,
         )
 
     @staticmethod
@@ -1721,6 +1737,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         sort_group_id,
         electrode_by_id,
         region_by_electrode,
+        concat_statistics_spans,
     ):
         """Sort, build analyzer, stage Units NWB outside any DB transaction.
 
@@ -1728,6 +1745,8 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         - load the cached preprocessed recording,
         - apply the artifact mask if ``artifact_detection_id`` is set,
+        - resolve the statistics spans (artifact-free frame ranges that
+          never cross a selection or member join),
         - dispatch ``_run_sorter`` (clusterless thresholder or SI
           sorter; tempdir + Singularity + container carve-outs apply),
         - ``_remove_excess_spikes`` (boundary safety),
@@ -1772,6 +1791,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         execution_params : dict
             The validated sorter execution backend / container provenance from
             ``make_fetch``, passed to the sorter dispatch.
+        concat_statistics_spans : numpy.ndarray or None
+            A concat source's stored statistics spans, used as is; ``None``
+            for a single-recording source.
 
         Returns
         -------
@@ -1793,16 +1815,34 @@ class Sorting(SpyglassMixin, dj.Computed):
         else:  # concatenated_recording
             recording = ConcatenatedRecording().get_recording(source.key)
 
-        if (
-            sel_row.get("artifact_detection_id") is not None
-            and obs_intervals is not None
-        ):
-            recording = self._apply_artifact_mask(
-                recording=recording,
-                valid_times=obs_intervals,
-                artifact_detection_id=sel_row.get("artifact_detection_id"),
-                recording_id=recording_id,
+        # Statistics spans: the artifact-free frame ranges every noise and
+        # whitening estimate samples from, persisted with the sort so each
+        # later analyzer rebuild reuses them. Selection and member joins are
+        # boundaries even when nothing is masked.
+        if source.kind == "recording":
+            # Boundaries from the reloaded recording's persisted timestamps,
+            # read before masking (silencing keeps the same timestamps).
+            boundary_spans = boundary_spans_from_timestamps(recording)
+            excluded_ranges = []
+            if (
+                sel_row.get("artifact_detection_id") is not None
+                and obs_intervals is not None
+            ):
+                excluded_ranges = artifact_frame_ranges(
+                    recording,
+                    obs_intervals,
+                    artifact_detection_id=sel_row.get("artifact_detection_id"),
+                    recording_id=recording_id,
+                )
+                recording = silence_frame_ranges(recording, excluded_ranges)
+            statistics_spans = compute_statistics_spans(
+                recording.get_num_samples(), excluded_ranges, boundary_spans
             )
+        else:  # concat member masks and spans were materialized upstream
+            statistics_spans = [
+                (int(a), int(b))
+                for a, b in np.asarray(concat_statistics_spans).reshape(-1, 2)
+            ]
 
         sorter = sorter_row["sorter"]
         sorter_params = dict(sorter_row["params"])
@@ -1852,6 +1892,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             sorting_id=key["sorting_id"],
             job_kwargs=job_kwargs,
             execution_params=execution_params,
+            statistics_spans=statistics_spans,
         )
         sorting_obj = self._remove_excess_spikes(sorting_obj, recording)
 
@@ -1874,6 +1915,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                 job_kwargs=job_kwargs,
                 analyzer_folder=staged_analyzer.folder,
                 waveform_params=display_waveform_params,
+                statistics_spans=statistics_spans,
             )
             # Compute the per-unit rows ONCE here (from the analyzer just built) and
             # reuse them for BOTH the NWB unit columns and the Sorting.Unit insert in
@@ -1918,6 +1960,9 @@ class Sorting(SpyglassMixin, dj.Computed):
                 "effective_random_seed": effective_random_seed,
                 "spikeinterface_version": spikeinterface_version,
                 "sorter_version": sorter_version,
+                STATISTICS_SPANS_FIELD: [
+                    [int(a), int(b)] for a, b in statistics_spans
+                ],
             }
             analysis_file_name, units_object_id = self._stage_sorting_artifact(
                 sorting=sorting_obj,
@@ -2220,6 +2265,41 @@ class Sorting(SpyglassMixin, dj.Computed):
         module.
         """
         return recording_timestamps(recording_row)
+
+    def get_statistics_spans(self, key: dict) -> list[tuple[int, int]]:
+        """Return the statistics spans persisted with a sort.
+
+        The artifact-free half-open frame ranges of the sorted recording that
+        never cross a selection join, a member join, or a member-internal
+        timestamp gap. They were computed once when the sort ran; every
+        analyzer build for the sort (sort time, self-heal rebuild, curation
+        evaluation, merged-curation analyzers, the recompute audit) estimates
+        noise levels and whitening from samples inside them, so all builds
+        agree.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Sorting`` row.
+
+        Returns
+        -------
+        list[tuple[int, int]]
+            Sorted half-open frame spans.
+
+        Raises
+        ------
+        RuntimeError
+            If the sort's units NWB has no persisted spans; repopulate the
+            sort.
+        """
+        sorting_id, analysis_file_name = (self & key).fetch1(
+            "sorting_id", "analysis_file_name"
+        )
+        return read_sorting_statistics_spans(
+            AnalysisNwbfile.get_abs_path(analysis_file_name),
+            sorting_id=sorting_id,
+        )
 
     def get_analyzer(
         self,
@@ -2820,9 +2900,12 @@ class Sorting(SpyglassMixin, dj.Computed):
         """Zero out the complement of ``valid_times`` on the recording.
 
         Thin delegator to :func:`._sorting_artifact_mask.apply_artifact_mask`;
-        kept as a ``Sorting`` staticmethod because ``make_compute`` calls
-        ``self._apply_artifact_mask(...)`` and the v2 tests call
-        ``Sorting._apply_artifact_mask`` directly. The complement-walk
+        kept as a ``Sorting`` staticmethod because the analyzer
+        reconstruction paths call ``sorting_table._apply_artifact_mask(...)``
+        and the v2 tests call ``Sorting._apply_artifact_mask`` directly.
+        ``make_compute`` masks through ``artifact_frame_ranges`` /
+        ``silence_frame_ranges`` itself so it keeps the excluded ranges for
+        the statistics spans. The complement-walk
         masking + input validation (empty/shape/order checks, the
         disjoint-gap boundary carve-out) live in the service module.
         """

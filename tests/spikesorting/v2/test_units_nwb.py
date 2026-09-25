@@ -519,6 +519,67 @@ def test_base_intervals_from_recording_detects_gaps():
     assert rec.time_slice_calls == []
 
 
+def _write_sorting_provenance_nwb(path, provenance):
+    """Write a minimal units NWB, adding the sorting provenance scratch
+    table only when ``provenance`` is not ``None``."""
+    from datetime import datetime, timezone
+
+    import pynwb
+
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        SORTING_PROVENANCE,
+        build_provenance_table,
+    )
+
+    nwbfile = pynwb.NWBFile(
+        session_description="test",
+        identifier="test-sorting-provenance",
+        session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    )
+    if provenance is not None:
+        nwbfile.add_scratch(
+            build_provenance_table(SORTING_PROVENANCE, provenance)
+        )
+    with pynwb.NWBHDF5IO(path=str(path), mode="w") as io:
+        io.write(nwbfile)
+
+
+def test_read_sorting_statistics_spans_round_trips_int_pairs(tmp_path):
+    """Persisted spans read back as ``(start, end)`` int tuples, in order."""
+    from spyglass.spikesorting.v2._units_nwb import (
+        read_sorting_statistics_spans,
+    )
+
+    path = tmp_path / "units.nwb"
+    _write_sorting_provenance_nwb(
+        path,
+        {
+            "sorter": "x",
+            "statistics_spans": [[0, 500], [500, 900], [950, 1000]],
+        },
+    )
+    spans = read_sorting_statistics_spans(str(path), sorting_id="abc")
+    assert spans == [(0, 500), (500, 900), (950, 1000)]
+    assert all(type(v) is int for span in spans for v in span)
+
+
+@pytest.mark.parametrize(
+    "provenance", [{"sorter": "x"}, None], ids=["no_entry", "no_table"]
+)
+def test_read_sorting_statistics_spans_raises_when_absent(tmp_path, provenance):
+    """A sorting NWB without persisted spans raises, naming the sort and the
+    fix, instead of letting a caller fall back to whole-recording statistics.
+    """
+    from spyglass.spikesorting.v2._units_nwb import (
+        read_sorting_statistics_spans,
+    )
+
+    path = tmp_path / "units.nwb"
+    _write_sorting_provenance_nwb(path, provenance)
+    with pytest.raises(RuntimeError, match=r"sorting_id='abc'.*[Rr]epopulate"):
+        read_sorting_statistics_spans(str(path), sorting_id="abc")
+
+
 # ---------- staged-file cleanup on write failure ----------------------------
 
 

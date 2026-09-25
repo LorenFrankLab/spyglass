@@ -230,6 +230,7 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         import spikeinterface as si
 

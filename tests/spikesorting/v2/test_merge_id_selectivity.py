@@ -80,6 +80,7 @@ def _make_plant(unit_frames: dict[int, list[int]]):
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         import spikeinterface as si
 

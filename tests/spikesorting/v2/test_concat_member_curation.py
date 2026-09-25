@@ -79,6 +79,7 @@ def concat_member_curation(chronic_2_session_minirec):
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         del sorter, sorter_params, sorting_id, job_kwargs, execution_params
         frames = np.asarray(

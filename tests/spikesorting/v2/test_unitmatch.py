@@ -701,6 +701,7 @@ def _plant_single_unit(
     *,
     job_kwargs=None,
     execution_params=None,
+    statistics_spans=None,
 ):
     """Plant one deterministic sorted unit spread across the recording.
 
@@ -1072,6 +1073,7 @@ def _plant_two_unit_sort_on_first_member(grp):
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         samples = np.array([500, 1000, 1500, 600, 1100, 1600], dtype=np.int64)
         labels = np.array([0, 0, 0, 1, 1, 1], dtype=np.int32)

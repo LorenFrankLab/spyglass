@@ -1975,6 +1975,7 @@ def test_concat_applied_merge_through_curation_and_evaluation(
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         samples = np.array([500, 1000, 1500, 600, 1100, 1600], dtype=np.int64)
         labels = np.array([0, 0, 0, 1, 1, 1], dtype=np.int32)

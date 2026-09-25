@@ -563,6 +563,56 @@ def recording_timestamps(recording_row):
         return np.asarray(series.timestamps[:], dtype=np.float64)
 
 
+#: Sorting-provenance field holding the sort's statistics spans: the
+#: artifact-free half-open frame ranges of the sorted recording that never
+#: cross a selection or member join, as a JSON list of ``[start, end]`` pairs.
+STATISTICS_SPANS_FIELD = "statistics_spans"
+
+
+def read_sorting_statistics_spans(
+    abs_path, *, sorting_id
+) -> list[tuple[int, int]]:
+    """Read the statistics spans persisted in a sorting units NWB.
+
+    Parameters
+    ----------
+    abs_path : str or pathlib.Path
+        Absolute path to the sort's units NWB.
+    sorting_id : str
+        The sort, named in the error message.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Sorted half-open frame spans of the sorted recording.
+
+    Raises
+    ------
+    RuntimeError
+        If the file has no sorting provenance or no persisted spans. There
+        is no fallback: estimating over the whole recording would include
+        artifact-masked samples and cross joins.
+    """
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        SORTING_PROVENANCE,
+        read_provenance_values,
+    )
+
+    try:
+        values = read_provenance_values(str(abs_path), SORTING_PROVENANCE)
+    except KeyError:  # no sorting-provenance scratch table at all
+        values = {}
+    if STATISTICS_SPANS_FIELD not in values:
+        raise RuntimeError(
+            f"Sorting sorting_id={str(sorting_id)!r} has no persisted "
+            f"statistics spans in its units NWB {str(abs_path)!r}; it was "
+            "written before they were recorded. Delete and repopulate this "
+            "Sorting (and its downstream) so noise and whitening statistics "
+            "are estimated from its artifact-free spans."
+        )
+    return [(int(a), int(b)) for a, b in values[STATISTICS_SPANS_FIELD]]
+
+
 def write_sorting_units_nwb(
     sorting,
     recording,

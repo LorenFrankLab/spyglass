@@ -103,6 +103,7 @@ def planted_sort(dj_conn):
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         samples = np.array([500, 1500, 2500, 3500, 4500], dtype=np.int64)
         labels = np.zeros(samples.size, dtype=np.int32)

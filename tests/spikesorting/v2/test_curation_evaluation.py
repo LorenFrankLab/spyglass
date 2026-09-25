@@ -1031,6 +1031,7 @@ def planted_zero_unit_sort(dj_conn):
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         return si.NumpySorting.from_unit_dict(
             [{}], sampling_frequency=recording.get_sampling_frequency()
