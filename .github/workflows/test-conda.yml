@@ -214,6 +214,7 @@ jobs:
               tests/spikesorting/v2/test_fixture_ingestion.py
               tests/spikesorting/v2/test_brain_region_attribution.py
               tests/spikesorting/v2/test_recording_nwb.py
+              tests/spikesorting/v2/test_motion_correction.py
           - name: unit
             paths: >-
               tests/spikesorting/v2
@@ -229,6 +230,7 @@ jobs:
               --ignore=tests/spikesorting/v2/test_fixture_ingestion.py
               --ignore=tests/spikesorting/v2/test_brain_region_attribution.py
               --ignore=tests/spikesorting/v2/test_recording_nwb.py
+              --ignore=tests/spikesorting/v2/test_motion_correction.py
     runs-on: ubuntu-latest
     defaults:
       run:

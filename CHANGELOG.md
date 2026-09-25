@@ -157,6 +157,24 @@ DLCProject().alter()
 - Optional motion correction will be a separate stage. `DriftEstimate` is
   unchanged and stays QC-only.
 
+#### Spike Sorting v2: saved motion estimates (experimental)
+
+- New module `spyglass.spikesorting.v2.motion` with
+  `MotionEstimationParameters` (named SpikeInterface `dredge`, `dredge_fast`
+  or `rigid_fast` recipes; `dredge_v1` and `dredge_fast_v1` ship as rows),
+  `MotionEstimateSelection` (one `Recording` with an optional artifact
+  detection, or one `ConcatenatedRecording`) and `MotionEstimate`, which saves
+  the SpikeInterface `Motion` with the fully resolved configuration, the
+  frame spans it used and peak-count diagnostics. Nothing populates or
+  consumes these rows yet; applying an estimate comes later. No recipe is
+  validated for a probe.
+- The estimate uses only valid samples: noise levels come from the
+  artifact-free statistics spans, and peaks whose localization window touches
+  a masked sample are dropped. Recordings with acquisition gaps and
+  multi-member concatenations are refused for now.
+- Artifact detections referenced by a `MotionEstimateSelection` are protected
+  from deletion like those referenced by a `SortingSelection`.
+
 #### Spike Sorting v2 launch: configuration, resource use, and the curation-to-analysis workflow
 
 The supported v2 workflow is configure → sort → review → curate → **select

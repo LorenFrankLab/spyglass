@@ -180,3 +180,89 @@ def plant_artifact_bursts(
         parent_recording=recording,
     )
     return injected, ranges
+
+
+#: Probe type of the single-shank ingestible fixture. Distinct from the 4-shank
+#: polymer type so its one-shank ``Probe`` rows never collide with that probe's.
+SINGLE_SHANK_PROBE_TYPE = "polymer-1shank-32ch-26um-sim"
+
+
+def write_drifting_polymer_nwb(
+    out_path, *, session_start, fixture_name: str, seed: int, duration_s: float
+):
+    """Write an ingestible one-shank polymer session with planted rigid drift.
+
+    The raw (unfiltered) traces of :func:`rigid_drift_recordings`'s drifting
+    recording go into the Frank-lab NWB layout the MEArec fixtures use, so
+    ``insert_sessions`` and the v2 recording stage accept it.
+
+    Returns
+    -------
+    pathlib.Path
+        ``out_path``.
+    """
+    from pathlib import Path
+
+    import pynwb
+    from spikeinterface.generation import generate_drifting_recording
+
+    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+        ProbeContact,
+        ProbeLayout,
+        _add_probe_and_electrodes,
+        _add_raw_ephys,
+        _build_nwbfile,
+    )
+
+    layout = ProbeLayout(
+        probe_type=SINGLE_SHANK_PROBE_TYPE,
+        description="one 32-contact shank of a polymer probe, simulated",
+        contact_size_um=2 * CONTACT_RADIUS_UM,
+        contact_side_numbering=True,
+        contacts=tuple(
+            ProbeContact(
+                electrode_id=i,
+                shank_id=0,
+                rel_x=0.0,
+                rel_y=-PITCH_UM * i,
+                rel_z=0.0,
+            )
+            for i in range(N_CONTACTS)
+        ),
+    )
+    _static, drifting, _sorting, _extra = generate_drifting_recording(
+        num_units=NUM_UNITS,
+        duration=duration_s,
+        sampling_frequency=SAMPLING_FREQUENCY,
+        probe=polymer_shank_probe(),
+        extra_outputs=True,
+        seed=seed,
+        generate_displacement_vector_kwargs=dict(
+            displacement_sampling_frequency=DISPLACEMENT_SAMPLING_FREQUENCY,
+            drift_start_um=[0, RIGID_AMPLITUDE_UM],
+            drift_stop_um=[0, -RIGID_AMPLITUDE_UM],
+            drift_step_um=1,
+            motion_list=[
+                dict(
+                    drift_mode="zigzag",
+                    non_rigid_gradient=None,
+                    t_start_drift=0.0,
+                    t_end_drift=None,
+                    period_s=duration_s,
+                )
+            ],
+        ),
+    )
+    nwbfile = _build_nwbfile(
+        fixture_name=fixture_name, session_start=session_start
+    )
+    _add_probe_and_electrodes(nwbfile, layout=layout, targeted_location="CA1")
+    _add_raw_ephys(
+        nwbfile,
+        traces=drifting.get_traces(return_in_uV=True),
+        sampling_frequency=SAMPLING_FREQUENCY,
+    )
+    out_path = Path(out_path)
+    with pynwb.NWBHDF5IO(str(out_path), mode="w") as io:
+        io.write(nwbfile)
+    return out_path

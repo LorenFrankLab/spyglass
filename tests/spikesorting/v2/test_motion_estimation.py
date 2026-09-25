@@ -652,3 +652,76 @@ def test_non_finite_displacement_is_an_error():
     with mock.patch.object(si_motion, "estimate_motion", _nan_motion):
         with pytest.raises(ValueError, match="non-finite"):
             _estimate(recording)
+
+
+# ---- identity and legacy guard ----------------------------------------------
+
+
+def test_identity_omits_an_absent_artifact_detection():
+    import uuid
+
+    from spyglass.spikesorting.v2._motion import (
+        motion_estimate_identity_payload,
+    )
+    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+
+    common = dict(
+        source_kind="recording",
+        source_id=uuid.UUID(int=1),
+        source_content_hash="a" * 64,
+        motion_estimation_params_name="dredge_v1",
+        resolved_params_hash="b" * 64,
+        spikeinterface_version="0.104.3",
+        motion_algorithm_version=1,
+    )
+    unmasked = motion_estimate_identity_payload(
+        artifact_detection_id=None, **common
+    )
+    masked = motion_estimate_identity_payload(
+        artifact_detection_id=uuid.UUID(int=2), **common
+    )
+
+    assert "artifact_detection_id" not in unmasked
+    assert deterministic_id("motion_estimate", unmasked) != deterministic_id(
+        "motion_estimate", masked
+    )
+    for field, value in [
+        ("source_content_hash", "c" * 64),
+        ("resolved_params_hash", "d" * 64),
+        ("spikeinterface_version", "0.104.4"),
+        ("motion_algorithm_version", 2),
+    ]:
+        changed = motion_estimate_identity_payload(
+            artifact_detection_id=None, **{**common, field: value}
+        )
+        assert deterministic_id("motion_estimate", changed) != (
+            deterministic_id("motion_estimate", unmasked)
+        ), field
+
+
+@pytest.mark.parametrize(
+    "recording_heading, selection_heading",
+    [
+        (["concat_recording_id", "motion_preset"], ["concat_recording_id"]),
+        (
+            ["concat_recording_id"],
+            ["concat_recording_id", "motion_correction_params_name"],
+        ),
+    ],
+)
+def test_concat_heading_with_removed_motion_columns_is_refused(
+    recording_heading, selection_heading
+):
+    from spyglass.spikesorting.v2._motion import assert_concat_schema_current
+
+    with pytest.raises(ValueError, match="Recreate the v2 concat tables"):
+        assert_concat_schema_current(recording_heading, selection_heading)
+
+
+def test_current_concat_heading_passes():
+    from spyglass.spikesorting.v2._motion import assert_concat_schema_current
+
+    assert_concat_schema_current(
+        ["concat_recording_id", "content_hash", "statistics_spans"],
+        ["concat_recording_id", "member_set_hash"],
+    )

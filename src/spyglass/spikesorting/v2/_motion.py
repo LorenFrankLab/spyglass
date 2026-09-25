@@ -717,6 +717,32 @@ def estimation_noise_levels(
     return np.asarray(levels, dtype=np.float64)
 
 
+def use_estimation_clock(recording) -> None:
+    """Put a one-span recording on its estimation clock, in place.
+
+    Within a continuity span, estimation time advances at exactly ``1 / fs``
+    from the span's first timestamp. A recording without a time vector is
+    already on that clock. A recording with one (every v2 artifact read back
+    from NWB) has it replaced by ``t0 + i / fs``: by the continuity-span
+    definition no step between its consecutive timestamps exceeds ``1.5 / fs``
+    (``boundary_spans_from_timestamps``). Besides defining the
+    clock, this keeps ``dredge_ap``'s peak-time lookup working: it maps all
+    peak frames with one fancy index (``sortingcomponents/motion/dredge.py:
+    227``), which an HDF5-backed time vector refuses for repeated or
+    unordered frames.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        Single-segment recording; its time information is replaced.
+    """
+    if not recording.has_time_vector():
+        return
+    t0 = float(recording.sample_index_to_time(0))
+    recording.reset_times()
+    recording.shift_times(t0)
+
+
 def estimate_motion_in_spans(
     recording,
     *,
@@ -756,8 +782,9 @@ def estimate_motion_in_spans(
     ----------
     recording : si.BaseRecording
         Single-segment, unwhitened recording, already silenced over any masked
-        ranges. Mutated: its planar geometry is flattened and its
-        ``noise_level_mad_raw`` property set.
+        ranges. Mutated: its planar geometry is flattened, its time vector
+        replaced by the estimation clock (:func:`use_estimation_clock`), and
+        its ``noise_level_mad_raw`` property set.
     statistics_spans : array_like
         ``(n, 2)`` half-open frame ranges of valid samples, sorted and
         disjoint, each inside one continuity span.
@@ -807,6 +834,7 @@ def estimate_motion_in_spans(
     statistics = normalize_spans(statistics_spans)
     _check_estimation_spans(n_samples, continuity, statistics)
     check_estimation_eligibility(recording, resolved_params)
+    use_estimation_clock(recording)
 
     noise_levels = estimation_noise_levels(
         recording, statistics, resolved_params["noise_levels_kwargs"]
@@ -886,3 +914,137 @@ def estimate_motion_in_spans(
         peaks_per_temporal_bin=per_bin.astype(np.int64),
         noise_levels=noise_levels,
     )
+
+
+#: Columns the removed in-concat motion correction left on the concat tables.
+#: A live heading that still carries one belongs to an un-recreated schema
+#: whose cached traces may already be motion corrected.
+LEGACY_CONCAT_MOTION_ATTRIBUTES = frozenset(
+    {"motion_preset", "motion_correction_params_name"}
+)
+
+
+def assert_concat_schema_current(*heading_names) -> None:
+    """Refuse concat tables whose live heading predates motion's removal.
+
+    Parameters
+    ----------
+    *heading_names : iterable of str
+        The live ``heading.names`` of ``ConcatenatedRecording`` and
+        ``ConcatenatedRecordingSelection``.
+
+    Raises
+    ------
+    ValueError
+        If any heading still carries a removed motion attribute, naming the
+        recreation the user must run first.
+    """
+    present = set().union(*(set(names) for names in heading_names))
+    legacy = sorted(LEGACY_CONCAT_MOTION_ATTRIBUTES & present)
+    if legacy:
+        raise ValueError(
+            "The v2 concat tables still carry the removed motion-correction "
+            f"column(s) {legacy}: this database was not recreated after "
+            "motion correction moved out of concatenation, so a cached concat "
+            "artifact may already be motion corrected and must not be "
+            "estimated or corrected again. Recreate the v2 concat tables as "
+            "the CHANGELOG describes, then re-populate them."
+        )
+
+
+def motion_estimate_identity_payload(
+    *,
+    source_kind: str,
+    source_id,
+    source_content_hash: str,
+    artifact_detection_id,
+    motion_estimation_params_name: str,
+    resolved_params_hash: str,
+    spikeinterface_version: str,
+    motion_algorithm_version: int,
+) -> dict:
+    """The logical identity a ``motion_estimate_id`` is derived from.
+
+    ``artifact_detection_id`` is omitted (not encoded as ``null``) when there
+    is no artifact pass.
+
+    Parameters
+    ----------
+    source_kind : {"recording", "concatenated_recording"}
+    source_id : uuid.UUID or str
+        The ``recording_id`` or ``concat_recording_id``.
+    source_content_hash : str
+        The source artifact's persisted ``content_hash``.
+    artifact_detection_id : uuid.UUID, str or None
+    motion_estimation_params_name : str
+    resolved_params_hash : str
+        :func:`resolved_params_hash` of the resolved configuration.
+    spikeinterface_version : str
+    motion_algorithm_version : int
+
+    Returns
+    -------
+    dict
+        Payload for ``_selection_identity.deterministic_id``.
+    """
+    payload = {
+        "source_kind": source_kind,
+        "source_id": source_id,
+        "source_content_hash": source_content_hash,
+        "motion_estimation_params_name": motion_estimation_params_name,
+        "resolved_params_hash": resolved_params_hash,
+        "spikeinterface_version": spikeinterface_version,
+        "motion_algorithm_version": int(motion_algorithm_version),
+    }
+    if artifact_detection_id is not None:
+        payload["artifact_detection_id"] = artifact_detection_id
+    return payload
+
+
+def motion_input_fingerprint(
+    *,
+    source_content_hash: str,
+    artifact_detection_id,
+    n_samples: int,
+    sampling_frequency: float,
+    continuity_spans,
+    statistics_spans,
+    channel_ids,
+    channel_locations,
+    resolved_params_hash: str,
+) -> str:
+    """SHA-256 of everything an estimate was computed from.
+
+    The source content, mask choice, frame spans, estimation channels and
+    their positions, and the resolved configuration. Two estimates with the
+    same fingerprint read the same valid samples on the same geometry with
+    the same settings.
+
+    Returns
+    -------
+    str
+        64-character hex digest.
+    """
+    payload = {
+        "source_content_hash": str(source_content_hash),
+        "artifact_detection_id": (
+            None
+            if artifact_detection_id is None
+            else str(artifact_detection_id)
+        ),
+        "n_samples": int(n_samples),
+        "sampling_frequency": float(sampling_frequency),
+        "continuity_spans": [
+            list(span) for span in normalize_spans(continuity_spans)
+        ],
+        "statistics_spans": [
+            list(span) for span in normalize_spans(statistics_spans)
+        ],
+        "channel_ids": [str(c) for c in np.asarray(channel_ids).tolist()],
+        "channel_locations": np.asarray(
+            channel_locations, dtype=float
+        ).tolist(),
+        "resolved_params_hash": str(resolved_params_hash),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
