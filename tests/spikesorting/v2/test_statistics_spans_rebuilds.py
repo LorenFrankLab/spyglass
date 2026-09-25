@@ -383,3 +383,22 @@ def test_curation_recording_accessor_returns_unmasked_traces(
         np.testing.assert_array_equal(rebuilt.get_traces(**window), 0)
     finally:
         clear_curations_for(sort_key)
+
+
+@pytest.mark.slow
+def test_observed_duration_counts_only_unmasked_samples(masked_planted_sort):
+    """The firing-rate denominator is the sort's retained sample duration."""
+    from spyglass.spikesorting.v2._pipeline_reporting import (
+        _observed_duration_s,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    sort_key = masked_planted_sort["sort_key"]
+    fs = (Recording & SortingSelection.resolve_source(sort_key).key).fetch1(
+        "sampling_frequency"
+    )
+    retained = sum(b - a for a, b in Sorting().get_statistics_spans(sort_key))
+    assert _observed_duration_s(sort_key["sorting_id"]) == pytest.approx(
+        retained / fs
+    )
