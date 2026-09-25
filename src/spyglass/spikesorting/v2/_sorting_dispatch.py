@@ -331,7 +331,72 @@ def build_run_sorter_container_kwargs(execution_params: dict) -> dict:
     return kwargs
 
 
-def pinned_whiten(recording, *, random_seed: int = 0):
+def _sample_statistics_spans(recording, spans, *, seed, return_in_uV: bool):
+    """Random traces from inside ``spans`` with SI's default sample budget.
+
+    SpikeInterface's ``get_random_recording_slices`` defaults to 20 chunks of
+    500 ms per segment; the same total budget (``20 * int(0.5 * fs)`` rows) in
+    pieces of at most one such chunk is drawn here, so one full span
+    reproduces SI's ``get_random_data_chunks`` rows exactly.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_rows, n_channels)`` traces, ``n_rows`` at most the budget.
+    """
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        sample_span_data,
+    )
+
+    chunk = int(0.5 * recording.get_sampling_frequency())
+    return sample_span_data(
+        recording,
+        spans,
+        target_samples=20 * chunk,
+        max_piece=chunk,
+        seed=seed,
+        return_in_uV=return_in_uV,
+    )
+
+
+def _span_whitening_matrix(recording, spans, *, random_seed: int):
+    """SI's ``mode="global"`` whitening matrix from samples inside ``spans``.
+
+    Mirrors ``spikeinterface.preprocessing.whiten.compute_whitening_matrix``
+    with ``apply_mean=False`` / ``regularize=False`` / ``eps=None`` (the
+    ``sip.whiten`` defaults ``pinned_whiten`` relies on), replacing only the
+    sampler: float32 data, uncentered covariance ``data.T @ data / n_rows``,
+    SI's data-dependent ``eps``, and SI's own ZCA
+    ``compute_whitening_from_covariance``. On one span covering the recording
+    the result equals SI's ``W`` exactly.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_channels, n_channels)`` float32 whitening matrix.
+    """
+    import numpy as np
+    from spikeinterface.preprocessing.whiten import (
+        compute_whitening_from_covariance,
+    )
+
+    data = _sample_statistics_spans(
+        recording, spans, seed=random_seed, return_in_uV=False
+    ).astype(np.float32)
+    cov = data.T @ data
+    cov = cov / data.shape[0]
+    # SI 0.104.3 ``compute_whitening_matrix`` eps rule for ``eps=None``
+    # (spikeinterface/preprocessing/whiten.py:200-205; its docstring's 1e-8 is
+    # not what the code does).
+    median_data_sqr = np.median(data**2)
+    if 0 < median_data_sqr < 1:
+        eps = max(1e-16, median_data_sqr * 1e-3)
+    else:
+        eps = 1e-16
+    return compute_whitening_from_covariance(cov, eps)
+
+
+def pinned_whiten(recording, *, random_seed: int = 0, spans=None):
     """SI external float64 whitening with a pinned covariance seed.
 
     The single whitening implementation shared by the sorter's external-whiten
@@ -347,18 +412,40 @@ def pinned_whiten(recording, *, random_seed: int = 0):
     only the lab's "whiten for cluster-separation (PC/NN) metrics" applied
     consistently, with one seeded implementation rather than two.
 
+    ``spans`` are the statistics spans: half-open frame ranges of artifact-free
+    samples that never cross a recording join. Artifact-masked frames are
+    zeros, and zeros counted as data shrink the covariance and over-whiten the
+    retained signal, so the covariance is estimated only from samples inside
+    ``spans`` (same seed, same sample budget and same math as SI's
+    ``mode="global"`` whitening). When ``spans`` is ``None`` or one span
+    covering the whole recording, SpikeInterface's own whitening runs
+    unchanged, so an unmasked continuous recording whitens bit-identically to
+    SI.
+
     Parameters
     ----------
     recording : spikeinterface.BaseRecording
         The recording to whiten.
     random_seed : int, optional
-        Seed for SI's random-chunk covariance estimate. Default 0 (the
+        Seed for the random-chunk covariance estimate. Default 0 (the
         per-row ``job_kwargs={"random_seed": N}`` override flows in here).
+    spans : list[tuple[int, int]] or None, optional
+        Keyword-only. Statistics spans in ``recording``'s frame coordinates.
+        Default ``None`` (the whole recording).
     """
     import numpy as np
     import spikeinterface.preprocessing as sip
 
-    return sip.whiten(recording, dtype=np.float64, seed=random_seed)
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        spans_cover_recording,
+    )
+
+    if spans_cover_recording(spans, recording.get_num_samples()):
+        return sip.whiten(recording, dtype=np.float64, seed=random_seed)
+    whitening = _span_whitening_matrix(
+        recording, spans, random_seed=random_seed
+    )
+    return sip.whiten(recording, dtype=np.float64, W=whitening, M=None)
 
 
 def _clusterless_noise_levels(
@@ -601,6 +688,7 @@ def run_si_sorter(
     sorting_id,
     job_kwargs,
     execution_params=None,
+    statistics_spans=None,
 ):
     """Run an SI registered sorter under a managed scratch dir.
 
@@ -613,10 +701,13 @@ def run_si_sorter(
 
     External float64 whitening: if the sorter asks for whitening,
     run it externally at float64 and turn the sorter's internal
-    whitening off so we do not whiten twice. Runs AFTER the upstream
-    artifact mask was applied in ``Sorting.make_compute`` --
-    artifact-masked frames should not bias whitening's covariance
-    estimate.
+    whitening off so we do not whiten twice. It runs on the
+    artifact-masked recording, whose masked frames are zeros; the
+    covariance is estimated only from samples inside
+    ``statistics_spans`` (see ``pinned_whiten``), so those zeros never
+    enter it. An unmasked continuous recording (``statistics_spans``
+    ``None`` or one span covering it) uses SpikeInterface's sampler
+    unchanged.
 
     Container execution: the ``execution_params`` row selects the backend.
     ``backend="local"`` runs the sorter on the host (no container kwargs). A
@@ -648,6 +739,10 @@ def run_si_sorter(
     execution_params : dict or None, optional
         The validated ``SorterExecutionParamsSchema`` dump from
         ``Sorting.make_fetch``. ``None`` resolves to default local execution.
+    statistics_spans : list[tuple[int, int]] or None, optional
+        Artifact-free frame spans of ``recording`` that the external
+        whitening's covariance is estimated from. ``None`` (default) means
+        the whole recording.
 
     Returns
     -------
@@ -724,7 +819,11 @@ def run_si_sorter(
             # by default. Only the external-whitening sorters are intercepted;
             # ``config.si_sorter_params`` already carries ``whiten=False`` for
             # them and passes a generic sorter's ``whiten`` through unchanged.
-            recording = pinned_whiten(recording, random_seed=config.random_seed)
+            recording = pinned_whiten(
+                recording,
+                random_seed=config.random_seed,
+                spans=statistics_spans,
+            )
 
         # Resolved job_kwargs (n_jobs, chunk_duration, progress_bar,
         # etc.) install via ``si.set_global_job_kwargs`` and are

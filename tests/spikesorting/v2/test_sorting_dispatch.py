@@ -630,3 +630,177 @@ def test_remove_excess_spikes_drops_empty_units(caplog):
     )
     out_no_empty = remove_excess_spikes(sorting_no_empty, rec)
     assert list(out_no_empty.unit_ids) == [3, 7, 12]
+
+
+# ---------------------------------------------------------------------------
+# Whitening and clusterless noise levels from valid samples only.
+#
+# The sort stage silences artifact frames with zeros. The whitening covariance
+# and the clusterless MAD must draw only from samples inside the statistics
+# spans, while an unmasked continuous recording keeps SpikeInterface's own
+# path bit-for-bit. Targets come from the clean twin (see
+# ``_masked_statistics_helpers``).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def clean_ground_truth():
+    """(traces, probe, sorting) of the 60 s, 16-channel clean recording."""
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        clean_ground_truth as _clean_ground_truth,
+    )
+
+    return _clean_ground_truth()
+
+
+def _applied_whitening(whitened):
+    """(W, M) the WhitenRecording actually applies to its traces."""
+    segment = whitened._recording_segments[0]
+    return segment.W, segment.M
+
+
+@pytest.mark.medium
+def test_pinned_whiten_unmasked_is_bit_identical_to_previous(
+    clean_ground_truth,
+):
+    """No spans, or one span covering the recording, is SI's own whitening.
+
+    Both must equal ``sip.whiten(recording, dtype=float64, seed=s)`` exactly:
+    the same ``W`` (and ``M=None``) and the same whitened traces.
+    """
+    import numpy as np
+    import spikeinterface.preprocessing as sip
+
+    from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        numpy_recording,
+    )
+
+    traces, probe, _ = clean_ground_truth
+    recording = numpy_recording(traces, probe)
+    n_samples = recording.get_num_samples()
+    seed = 7
+    reference = sip.whiten(recording, dtype=np.float64, seed=seed)
+    w_ref, m_ref = _applied_whitening(reference)
+    assert m_ref is None
+    ref_slice = reference.get_traces(start_frame=1_000, end_frame=31_000)
+
+    for spans in (None, [(0, n_samples)]):
+        whitened = pinned_whiten(recording, random_seed=seed, spans=spans)
+        w, m = _applied_whitening(whitened)
+        assert m is None
+        assert w.dtype == w_ref.dtype
+        assert np.array_equal(w, w_ref), f"W differs for spans={spans}"
+        assert np.array_equal(
+            whitened.get_traces(start_frame=1_000, end_frame=31_000),
+            ref_slice,
+        ), f"whitened traces differ for spans={spans}"
+
+
+@pytest.mark.medium
+@pytest.mark.parametrize("scale", [1.0, 1e-3])
+def test_span_whitening_matrix_matches_spikeinterface_on_full_span(
+    clean_ground_truth, scale
+):
+    """The span-path W on one full span is exactly SI's ``mode="global"`` W.
+
+    ``scale=1e-3`` puts the median squared sample inside (0, 1), exercising
+    SI's data-dependent ``eps`` branch rather than its ``1e-16`` floor.
+    """
+    import numpy as np
+    from spikeinterface.preprocessing.whiten import compute_whitening_matrix
+
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        _span_whitening_matrix,
+    )
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        numpy_recording,
+    )
+
+    traces, probe, _ = clean_ground_truth
+    recording = numpy_recording((traces * scale).astype(np.float32), probe)
+    n_samples = recording.get_num_samples()
+    seed = 7
+
+    w_si, m_si = compute_whitening_matrix(
+        recording, "global", {"seed": seed}, apply_mean=False
+    )
+    assert m_si is None
+    w_span = _span_whitening_matrix(
+        recording, [(0, n_samples)], random_seed=seed
+    )
+    assert w_span.dtype == w_si.dtype
+    assert np.array_equal(w_span, w_si)
+
+
+@pytest.mark.medium
+def test_whitened_valid_samples_have_unit_variance_under_masking(
+    clean_ground_truth,
+):
+    """30% masked: whitened valid samples have unit standard deviation.
+
+    Measured over ALL valid samples (not the covariance sample), pooled
+    across channels. Zeros counted as data shrink the covariance and inflate
+    this std (about 1.1 on this recording). Pooled, not per channel: with
+    SI's 20 x 500 ms sample budget, per-channel std on this spiking recording
+    varies by a few percent with the seed even for SpikeInterface's own
+    whitening of the clean twin (0.96-1.02), so a per-channel 2% band is a
+    property of the budget, not of masking.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+    from tests.spikesorting.v2._masked_statistics_helpers import masked_twin
+
+    traces, probe, _ = clean_ground_truth
+    masked, spans, _ = masked_twin(traces, probe, 0.30)
+    whitened = pinned_whiten(masked, random_seed=0, spans=spans)
+    valid = np.concatenate(
+        [whitened.get_traces(start_frame=a, end_frame=b) for a, b in spans]
+    )
+    std = valid.std()
+    assert 0.98 <= std <= 1.02, std
+
+
+@pytest.mark.medium
+def test_run_si_sorter_whitens_from_statistics_spans(
+    clean_ground_truth, monkeypatch
+):
+    """The sorter receives a recording whitened from the span covariance.
+
+    ``run_sorter`` is replaced by a stub that records the recording it was
+    handed; the whitening itself is the real ``pinned_whiten``.
+    """
+    import uuid
+
+    import numpy as np
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        _span_whitening_matrix,
+        run_si_sorter,
+    )
+    from tests.spikesorting.v2._masked_statistics_helpers import masked_twin
+
+    traces, probe, _ = clean_ground_truth
+    masked, spans, _ = masked_twin(traces, probe, 0.30)
+    received = {}
+
+    def _record_run_sorter(**kwargs):
+        received["recording"] = kwargs["recording"]
+        return _tiny_numpy_sorting()
+
+    monkeypatch.setattr(sis, "run_sorter", _record_run_sorter)
+    run_si_sorter(
+        "mountainsort5",
+        {"whiten": True},
+        masked,
+        uuid.uuid4(),
+        {"random_seed": 5},
+        statistics_spans=spans,
+    )
+    w, m = _applied_whitening(received["recording"])
+    assert m is None
+    assert np.array_equal(
+        w, _span_whitening_matrix(masked, spans, random_seed=5)
+    )
