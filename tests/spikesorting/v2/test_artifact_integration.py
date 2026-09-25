@@ -121,7 +121,7 @@ def artifact_e2e_session(dj_conn):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_detected_artifact_is_masked_out_of_the_sorted_recording(
-    artifact_e2e_session, monkeypatch
+    artifact_e2e_session, monkeypatch, tmp_path
 ):
     """detect=True -> IntervalList gap -> masked frames in the sorter's input.
 
@@ -149,13 +149,21 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
     nwb_file_name = artifact_e2e_session["nwb_file_name"]
     recording_id = artifact_e2e_session["recording_id"]
 
+    import spikeinterface as si
+
     # Substitute the loaded preprocessed recording with the synthetic one
     # carrying a known transient. Both RecordingArtifactDetection and Sorting
     # load via Recording().get_recording, so one patch covers both populates.
+    # Save it to disk first: production recordings are file-backed, and the
+    # sorting analyzer stores a reloadable reference to its recording. An
+    # in-memory NumpyRecording is not pickle-serializable, so SI would build
+    # a recordingless analyzer that the cache loader rejects as invalid.
+    synthetic_folder = tmp_path / "synthetic_recording"
+    _synth_recording_with_transient().save(folder=synthetic_folder, n_jobs=1)
     monkeypatch.setattr(
         Recording,
         "get_recording",
-        lambda self, key: _synth_recording_with_transient(),
+        lambda self, key: si.load(synthetic_folder),
     )
 
     # A detect=True preset whose amplitude threshold sits between the
