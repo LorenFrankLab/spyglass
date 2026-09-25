@@ -1147,64 +1147,14 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         recording in the group. This keeps artifact masks from one recording
         in a session from being silently applied to a different recording.
         """
-        if artifact_detection_id is None:
-            return
-
         from spyglass.spikesorting.v2.artifact import (
-            RecordingArtifactDetection,
-            RecordingArtifactSelection,
-            SharedArtifactGroup,
-            SharedGroupArtifactDetection,
-            SharedGroupArtifactSelection,
+            assert_artifact_detection_covers_recording,
         )
 
-        artifact_detection_key = {
-            "artifact_detection_id": artifact_detection_id
-        }
-        target_recording_id = str(recording_id)
-        # Route by which split result table content-addresses the id (it lives
-        # in exactly one). Require the detection POPULATED: a detection must be
-        # materialized before it can be linked (it registers itself into
-        # ArtifactDetectionOutput at materialization).
-        if RecordingArtifactDetection & artifact_detection_key:
-            artifact_recording_id = str(
-                (RecordingArtifactSelection & artifact_detection_key).fetch1(
-                    "recording_id"
-                )
-            )
-            if artifact_recording_id != target_recording_id:
-                raise ValueError(
-                    "SortingSelection.insert_selection: artifact_detection_id "
-                    f"{artifact_detection_id!r} belongs to recording_id="
-                    f"{artifact_recording_id!r}, not the requested "
-                    f"recording_id={target_recording_id!r}."
-                )
-            return
-
-        if SharedGroupArtifactDetection & artifact_detection_key:
-            group_name = (
-                SharedGroupArtifactSelection & artifact_detection_key
-            ).fetch1("shared_artifact_group_name")
-            if not (
-                SharedArtifactGroup.Member
-                & {
-                    "shared_artifact_group_name": group_name,
-                    "recording_id": recording_id,
-                }
-            ):
-                raise ValueError(
-                    "SortingSelection.insert_selection: artifact_detection_id "
-                    f"{artifact_detection_id!r} belongs to shared artifact group "
-                    f"{group_name!r}, which does not include requested "
-                    f"recording_id={target_recording_id!r}."
-                )
-            return
-
-        raise ValueError(
-            "SortingSelection.insert_selection: artifact_detection_id "
-            f"{artifact_detection_id!r} is not in RecordingArtifactDetection or "
-            "SharedGroupArtifactDetection. Populate the artifact detection "
-            "before linking an artifact-detection pass to a sort."
+        assert_artifact_detection_covers_recording(
+            recording_id=recording_id,
+            artifact_detection_id=artifact_detection_id,
+            caller="SortingSelection.insert_selection",
         )
 
     @classmethod

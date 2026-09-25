@@ -1336,3 +1336,80 @@ class SharedGroupArtifactDetection(
             nwb_file_name=nwb_file_name,
             per_member_nwb_files=per_member_nwb_files,
         )
+
+
+def assert_artifact_detection_covers_recording(
+    *, recording_id, artifact_detection_id, caller: str
+) -> None:
+    """Ensure an artifact detection may mask a given ``Recording``.
+
+    A single-recording detection may mask only that exact ``recording_id``; a
+    shared-group detection may mask any member recording of its group. This
+    keeps the masks of one recording in a session from being applied to
+    another. The detection must be populated.
+
+    Parameters
+    ----------
+    recording_id : uuid.UUID or str
+        The recording the detection would mask.
+    artifact_detection_id : uuid.UUID, str or None
+        The detection; ``None`` (no artifact pass) always passes.
+    caller : str
+        Keyword-only. Prefix for the error messages (e.g.
+        ``"SortingSelection.insert_selection"``).
+
+    Raises
+    ------
+    ValueError
+        If the detection belongs to another recording or group, or is not
+        populated.
+    """
+    if artifact_detection_id is None:
+        return
+
+    artifact_detection_key = {"artifact_detection_id": artifact_detection_id}
+    target_recording_id = str(recording_id)
+    # Route by which split result table content-addresses the id (it lives
+    # in exactly one). Require the detection POPULATED: a detection must be
+    # materialized before it can be linked (it registers itself into
+    # ArtifactDetectionOutput at materialization).
+    if RecordingArtifactDetection & artifact_detection_key:
+        artifact_recording_id = str(
+            (RecordingArtifactSelection & artifact_detection_key).fetch1(
+                "recording_id"
+            )
+        )
+        if artifact_recording_id != target_recording_id:
+            raise ValueError(
+                f"{caller}: artifact_detection_id "
+                f"{artifact_detection_id!r} belongs to recording_id="
+                f"{artifact_recording_id!r}, not the requested "
+                f"recording_id={target_recording_id!r}."
+            )
+        return
+
+    if SharedGroupArtifactDetection & artifact_detection_key:
+        group_name = (
+            SharedGroupArtifactSelection & artifact_detection_key
+        ).fetch1("shared_artifact_group_name")
+        if not (
+            SharedArtifactGroup.Member
+            & {
+                "shared_artifact_group_name": group_name,
+                "recording_id": recording_id,
+            }
+        ):
+            raise ValueError(
+                f"{caller}: artifact_detection_id "
+                f"{artifact_detection_id!r} belongs to shared artifact group "
+                f"{group_name!r}, which does not include requested "
+                f"recording_id={target_recording_id!r}."
+            )
+        return
+
+    raise ValueError(
+        f"{caller}: artifact_detection_id "
+        f"{artifact_detection_id!r} is not in RecordingArtifactDetection or "
+        "SharedGroupArtifactDetection. Populate the artifact detection "
+        "before linking it."
+    )
