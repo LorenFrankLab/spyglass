@@ -2068,6 +2068,164 @@ def test_concat_applied_merge_through_curation_and_evaluation(
 
 
 @pytest.mark.slow
+def test_concat_analyzer_receives_statistics_spans_after_reload(
+    same_day_group, curation_evaluation_defaults
+):
+    """A concat sort persists span-split statistics spans and its analyzers
+    rebuild noise levels from them after reload.
+
+    The chronic members are unmasked, so the spans are just the member spans;
+    the discriminating facts are that they split at every member join (a
+    single ``[0, n)`` span would hand SpikeInterface its unchanged estimator
+    across the join), that the sort persisted exactly the concat's stored
+    column, and that the display analyzer ``CurationEvaluation`` rebuilds
+    after its folder is dropped carries the sort-time noise levels, which
+    are within 2% of the concatenated members' exact per-channel MAD.
+    """
+    import shutil
+
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        analyzer_path,
+        load_analyzer_folder,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+    from tests.spikesorting.v2._smoke_constants import SMOKE_CLUSTERLESS_PARAMS
+
+    grp = same_day_group
+    concat_pk = _populate_concat(
+        grp["group_key"], grp["preprocessing_params_name"]
+    )
+    params_name = "minirec_concat_statistics_spans"
+    SorterParameters.insert1(
+        {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": params_name,
+            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+        },
+        skip_duplicates=True,
+        allow_duplicate_params=True,
+    )
+    received = {}
+
+    def _plant(
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        *,
+        job_kwargs=None,
+        execution_params=None,
+        statistics_spans=None,
+    ):
+        received["spans"] = statistics_spans
+        n = int(recording.get_num_samples())
+        samples = np.arange(500, n - 500, 2000, dtype=np.int64)
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[samples],
+            labels_list=[np.zeros(samples.size, dtype=np.int32)],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "concat_recording_id": concat_pk["concat_recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": params_name,
+        }
+    )
+    mp = pytest.MonkeyPatch()
+    try:
+        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+        (Sorting & sort_pk).super_delete(warn=False)
+        Sorting.populate(sort_pk, reserve_jobs=False)
+    finally:
+        mp.undo()
+
+    try:
+        spans = Sorting().get_statistics_spans(sort_pk)
+        assert spans and received["spans"] == spans
+        stored = (ConcatenatedRecording & concat_pk).fetch1("statistics_spans")
+        assert [tuple(int(v) for v in row) for row in stored] == spans
+
+        n_total = int((ConcatenatedRecording & concat_pk).fetch1("n_samples"))
+        ends = [
+            int(e)
+            for e in (ConcatenatedRecording.MemberBoundary & concat_pk).fetch(
+                "end_sample", order_by="member_index"
+            )
+        ]
+        assert len(ends) == 2 and ends[-1] == n_total
+        for start, end in spans:
+            for join in ends[:-1]:
+                assert not (start < join < end), (spans, ends)
+        # Unmasked, single-interval members: exactly one span per member, so
+        # the spans split at the join and nowhere else.
+        assert spans == [(0, ends[0]), (ends[0], n_total)]
+
+        display_name = (Sorting & sort_pk).fetch1(
+            "display_waveform_params_name"
+        )
+        folder = analyzer_path(sort_pk["sorting_id"], display_name)
+        sort_time_noise = np.asarray(
+            load_analyzer_folder(folder)
+            .get_extension("noise_levels")
+            .get_data()
+        )
+        shutil.rmtree(folder)
+
+        clear_curations_for(sort_pk)
+        root = CurationV2.insert_curation(sorting_key=sort_pk)
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        CurationEvaluation.populate(sel, reserve_jobs=False)
+        assert CurationEvaluation & sel
+        rebuilt_noise = np.asarray(
+            load_analyzer_folder(folder)
+            .get_extension("noise_levels")
+            .get_data()
+        )
+        np.testing.assert_array_equal(rebuilt_noise, sort_time_noise)
+
+        traces = (
+            ConcatenatedRecording()
+            .get_recording(concat_pk)
+            .get_traces(return_in_uV=True)
+            .astype(np.float64)
+        )
+        exact_mad = (
+            np.median(np.abs(traces - np.median(traces, axis=0)), axis=0)
+            / 0.6744897501960817
+        )
+        np.testing.assert_allclose(rebuilt_noise, exact_mad, rtol=0.02)
+    finally:
+        clear_curations_for(sort_pk)
+        (Sorting & sort_pk).super_delete(warn=False)
+        (SortingSelection & sort_pk).super_delete(warn=False)
+        (SorterParameters & {"sorter_params_name": params_name}).super_delete(
+            warn=False
+        )
+
+
+@pytest.mark.slow
 def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     """run_v2_pipeline concat mode: member recordings -> concat -> sort -> curation.
 
