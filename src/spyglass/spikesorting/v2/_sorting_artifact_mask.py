@@ -530,3 +530,151 @@ def spans_cover_recording(spans, n_samples: int) -> bool:
     bit-identical to today's behavior.
     """
     return spans is None or list(spans) == [(0, int(n_samples))]
+
+
+def sample_span_data(
+    recording,
+    spans: list[tuple[int, int]],
+    *,
+    target_samples: int,
+    max_piece: int,
+    seed,
+    return_in_uV: bool,
+):
+    """Randomly sample traces from ``recording`` without crossing a span edge.
+
+    When ``target_samples`` covers every valid frame, every span is read
+    once, in span order, with no randomness. Otherwise each span's exact
+    quota of rows is apportioned by largest-remainder rounding of its
+    length share, then filled with randomly-placed contiguous pieces (each
+    at most ``max_piece`` frames and never longer than its own span); the
+    pieces are concatenated in sorted start-frame order (not draw order).
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+    spans : list[tuple[int, int]]
+        Half-open frame spans to sample from (e.g. ``statistics_spans``).
+    target_samples : int
+        Keyword-only. Requested row budget.
+    max_piece : int
+        Keyword-only. Maximum contiguous frames read per random draw.
+    seed : int
+        Keyword-only. Seeds ``numpy.random.default_rng``.
+    return_in_uV : bool
+        Keyword-only. Forwarded to ``recording.get_traces``.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(min(target_samples, total_valid), n_channels)`` traces.
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    lengths = np.array([b - a for a, b in spans], dtype=np.int64)
+    total_valid = int(lengths.sum())
+    effective_target = min(int(target_samples), total_valid)
+    if effective_target == total_valid:
+        # The budget covers every valid sample: read each span once, no
+        # overlapping draws.
+        data = np.concatenate(
+            [
+                recording.get_traces(
+                    start_frame=a, end_frame=b, return_in_uV=return_in_uV
+                )
+                for a, b in spans
+            ],
+            axis=0,
+        )
+        return data
+    # Largest-remainder apportionment: quotas sum to effective_target exactly
+    # and never exceed a span's length.
+    raw = effective_target * lengths / total_valid
+    quota = np.minimum(np.floor(raw).astype(np.int64), lengths)
+    for i in np.argsort(-(raw - np.floor(raw))):
+        if quota.sum() >= effective_target:
+            break
+        if quota[i] < lengths[i]:
+            quota[i] += 1
+    # (start_frame, piece) pairs, so the final concatenation can be ordered
+    # by start frame across all spans rather than by draw order.
+    pieces: list[tuple[int, np.ndarray]] = []
+    for (a, b), q in zip(spans, quota):
+        remaining = int(q)
+        while remaining > 0:
+            piece = min(max_piece, remaining, b - a)
+            s = int(rng.integers(a, b - piece + 1))
+            pieces.append(
+                (
+                    s,
+                    recording.get_traces(
+                        start_frame=s,
+                        end_frame=s + piece,
+                        return_in_uV=return_in_uV,
+                    ),
+                )
+            )
+            remaining -= piece
+    pieces.sort(key=lambda item: item[0])
+    data = np.concatenate([piece for _, piece in pieces], axis=0)
+    return data
+
+
+def sample_span_snippet_starts(
+    spans: list[tuple[int, int]],
+    *,
+    nsamples: int,
+    n_snippets: int,
+    seed,
+):
+    """Draw fixed-length snippet start frames from ``spans``.
+
+    Starts are drawn uniformly from the set of admissible positions ``s``
+    with ``a <= s`` and ``s + nsamples <= b`` across all spans, i.e. each
+    admissible position is equally likely regardless of which span holds
+    it (implemented as span selection weighted by each span's admissible-
+    position count, then a uniform draw within the chosen span). A span
+    shorter than ``nsamples`` admits no positions and is never chosen.
+
+    Parameters
+    ----------
+    spans : list[tuple[int, int]]
+        Half-open frame spans to draw snippet starts from.
+    nsamples : int
+        Keyword-only. Snippet length in frames.
+    n_snippets : int
+        Keyword-only. Number of starts to draw.
+    seed : int
+        Keyword-only. Seeds ``numpy.random.default_rng``.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_snippets,)`` int64 sorted start frames.
+
+    Raises
+    ------
+    ValueError
+        If no span admits a snippet of length ``nsamples``.
+    """
+    import numpy as np
+
+    nsamples = int(nsamples)
+    counts = np.array(
+        [max(0, (b - a) - nsamples + 1) for a, b in spans], dtype=np.int64
+    )
+    total = int(counts.sum())
+    if total == 0:
+        raise ValueError(
+            "sample_span_snippet_starts: no span admits a snippet of length "
+            f"{nsamples}; every span is shorter than nsamples."
+        )
+    rng = np.random.default_rng(seed)
+    n_snippets = int(n_snippets)
+    span_choices = rng.choice(len(spans), size=n_snippets, p=counts / total)
+    starts = np.empty(n_snippets, dtype=np.int64)
+    for k, i in enumerate(span_choices):
+        a, b = spans[i]
+        starts[k] = rng.integers(a, b - nsamples + 1)
+    return np.sort(starts)
