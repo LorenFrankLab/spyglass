@@ -779,16 +779,15 @@ def pipeline_preset_specs() -> dict[str, dict]:
         # path; its execution backend lives on the referenced
         # SorterParameters.execution_params row, not on this preset.
         MS4_SINGULARITY_30KHZ: _franklab_ms4_singularity_spec(),
-        # Same-day chronic sort: detect/mask each member before concatenation
-        # and motion correction; otherwise the single-session MS5 recipe.
-        "franklab_concat_hippocampus_30khz_ms5_2026_06": dict(
+        # Same-day chronic sort: detect/mask each member before concatenation;
+        # otherwise the single-session MS5 recipe.
+        "franklab_concat_hippocampus_30khz_ms5_2026_09": dict(
             preprocessing_params_name=HIPPOCAMPUS_PREPROC,
             artifact_detection_params_name=ARTIFACT_100UV,
             sorter="mountainsort5",
             sorter_params_name=MS5_30KHZ,
             metric_params_name="franklab_default",
             auto_curation_rules_name=FRANKLAB_CURATION_RULES,
-            motion_correction_params_name="auto_default",
             probe_type="probe",
             target_region="hippocampus",
             sampling_rate_hz=30000,
@@ -803,10 +802,8 @@ def pipeline_preset_specs() -> dict[str, dict]:
             ),
             threshold_units="sigma of the whitened signal (~5.5)",
             notes=(
-                "Detect and mask artifacts per member before concatenation and "
-                "motion correction. Motion correction is pinned "
-                "to the 'auto_default' row (preset 'auto', which resolves to "
-                "rigid_fast for a same-day group). Otherwise the same MS5 "
+                "Detect and mask artifacts per member before concatenation. "
+                "Otherwise the same MS5 "
                 "hippocampus recipe as the single-session default; MS5 runs "
                 "under the v2 numpy>=2 baseline. Run it via run_v2_pipeline's "
                 "concat mode (concat_session_group_owner / "

@@ -177,7 +177,6 @@ def test_pipeline_runner_applies_manual_exclusions(
         update={
             "artifact_detection_params_name": name if automatic else None,
             "sorter_params_name": name,
-            "motion_correction_params_name": "none" if concat else None,
         }
     )
     monkeypatch.setitem(presets._PIPELINE_PRESETS, name, preset)

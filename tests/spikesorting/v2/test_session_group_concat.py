@@ -198,7 +198,7 @@ def test_assert_concat_preflight_guards_members_and_auto_curate(
     gk = same_day_group["group_key"]
     owner = gk["session_group_owner"]
     name = gk["session_group_name"]
-    bundle = _PIPELINE_PRESETS["franklab_concat_hippocampus_30khz_ms5_2026_06"]
+    bundle = _PIPELINE_PRESETS["franklab_concat_hippocampus_30khz_ms5_2026_09"]
 
     # A valid, fully-ingested group passes every per-member prerequisite.
     assert assert_concat_preflight(owner, name, bundle) == []
@@ -2130,9 +2130,9 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     _ensure_clusterless_sorter_params()
     grp = same_day_group
     preset_name = "test_concat_clusterless_smoke"
-    # A concat preset (motion set -> concat-mode) using the default preproc +
-    # smoke clusterless sorter the chronic minirec is known to sort. The "none"
-    # motion row is a valid concat motion recipe (no correction).
+    # A preset (run in concat mode by the concat inputs below) using the
+    # default preproc + smoke clusterless sorter the chronic minirec is known to
+    # sort. It carries no motion recipe: concat mode does not require one.
     register_pipeline_preset(
         preset_name,
         {
@@ -2142,7 +2142,6 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
             "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
             "metric_params_name": "minimal",
             "auto_curation_rules_name": "none",
-            "motion_correction_params_name": "none",
         },
         validate_rows=False,
     )

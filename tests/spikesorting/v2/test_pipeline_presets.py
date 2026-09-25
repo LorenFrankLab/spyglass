@@ -71,7 +71,6 @@ _COLUMNS = [
     "sorter_params_name",
     "metric_params_name",
     "auto_curation_rules_name",
-    "motion_correction_params_name",
     "intended_use",
     "threshold_units",
     "notes",
@@ -185,13 +184,6 @@ def test_describe_pipeline_presets_matches_preset_objects():
         assert (
             row["auto_curation_rules_name"]
             == pipeline_preset.auto_curation_rules_name
-        )
-        # motion is optional (None for single-session presets); pandas coerces a
-        # None to NaN only in an all-numeric column, but this column is all
-        # strings/None, so compare directly.
-        assert (
-            row["motion_correction_params_name"]
-            == pipeline_preset.motion_correction_params_name
         )
         assert row["intended_use"] == pipeline_preset.intended_use
         assert row["threshold_units"] == pipeline_preset.threshold_units
@@ -494,8 +486,8 @@ def test_register_pipeline_preset_rejects_bad_name(monkeypatch):
 # (5.5), so it exercises both a nested preprocessing override and a flat sorter
 # override.
 _CLONE_BASE = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
-# The same-day concat preset: the one shipped no-artifact / motion-pinned preset.
-_CONCAT_PRESET = "franklab_concat_hippocampus_30khz_ms5_2026_06"
+# The same-day concat preset (labelled for concat mode; no motion pin).
+_CONCAT_PRESET = "franklab_concat_hippocampus_30khz_ms5_2026_09"
 
 
 @pytest.fixture
@@ -838,7 +830,7 @@ def test_clone_pipeline_preset_idempotent_rerun(dj_conn, clone_env):
 
 
 # --------------------------------------------------------------------------- #
-# preset curation fields (metric / auto-curation / motion)
+# preset curation fields (metric / auto-curation)
 # --------------------------------------------------------------------------- #
 
 
@@ -856,13 +848,9 @@ def test_every_preset_declares_curation_params():
         assert preset.metric_params_name.strip(), f"{name}.metric blank"
         assert preset.auto_curation_rules_name.strip(), f"{name}.rules blank"
 
-    # The single-session presets run an artifact stage and leave motion
-    # correction unset; the shipped concat preset also pins motion correction.
+    # Every shipped preset runs an artifact stage.
     for name, preset in _PIPELINE_PRESETS.items():
-        if name == _CONCAT_PRESET:
-            continue
         assert preset.artifact_detection_params_name is not None, name
-        assert preset.motion_correction_params_name is None, name
 
     clusterless = _PIPELINE_PRESETS["franklab_clusterless_2026_06"]
     assert clusterless.metric_params_name == "minimal"
@@ -887,8 +875,14 @@ def test_every_preset_declares_curation_params():
 
 
 def test_concat_preset_is_registered_and_shaped():
-    """The concat preset enables member artifacts before pinned motion."""
+    """The concat preset masks each member with the probe recipe's artifact
+    detector and pins no motion recipe; the previous motion-pinned name is
+    gone rather than aliased."""
     assert _CONCAT_PRESET in list_pipeline_presets()
+    assert (
+        "franklab_concat_hippocampus_30khz_ms5_2026_06"
+        not in list_pipeline_presets()
+    )
     preset = _PIPELINE_PRESETS[_CONCAT_PRESET]
     assert (
         preset.artifact_detection_params_name
@@ -896,7 +890,8 @@ def test_concat_preset_is_registered_and_shaped():
             "franklab_probe_hippocampus_30khz_ms5_2026_06"
         ].artifact_detection_params_name
     )
-    assert preset.motion_correction_params_name == "auto_default"
+    assert not any("motion" in field for field in type(preset).model_fields)
+    assert preset.recommendation_status == "experimental"
     assert preset.sorter == "mountainsort5"
     assert preset.metric_params_name == "franklab_default"
     assert (
@@ -905,76 +900,20 @@ def test_concat_preset_is_registered_and_shaped():
     )
 
 
-def test_run_v2_pipeline_rejects_motion_pinned_preset_without_db():
-    """A motion-pinned (concat) preset is rejected fail-fast, before any DB use.
-
-    ``run_v2_pipeline`` validates the preset (unknown / motion-pinned) BEFORE
-    importing its DataJoint table modules, so selecting the same-day concat
-    preset raises ``PipelineInputError`` even with no database connection -- this
-    test takes no ``dj_conn`` fixture and never reaches a populate.
-    """
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+def test_run_v2_pipeline_concat_mode_accepts_single_session_preset(dj_conn):
+    """Concat mode does not require a motion-pinned preset: the input fields
+    set the mode, so a single-session preset reaches the concat preflight,
+    which rejects only the absent session group."""
+    from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
+    from spyglass.spikesorting.v2.exceptions import PreflightError
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
 
-    with pytest.raises(PipelineInputError, match="concatenated session group"):
+    with pytest.raises(PreflightError, match="does not exist"):
         run_v2_pipeline(
-            nwb_file_name="dummy.nwb",
-            sort_group_id=0,
-            interval_list_name="dummy",
-            team_name="dummy",
-            pipeline_preset=_CONCAT_PRESET,
+            concat_session_group_owner="no_such_owner_xyz",
+            concat_session_group_name="no_such_group_xyz",
+            pipeline_preset=DEFAULT_PIPELINE_PRESET,
         )
-
-
-def test_preflight_rejects_motion_pinned_preset_without_db():
-    """Preflight flags a motion-pinned (concat) preset fail-fast, before any DB.
-
-    The ``single_session_preset`` check short-circuits before the
-    SpikeInterface / DB-touching checks, so preflighting the concat preset
-    returns a not-ok report (with empty ``expected_ids``) and no database
-    connection.
-    """
-    from spyglass.spikesorting.v2.pipeline import preflight_v2_pipeline
-
-    report = preflight_v2_pipeline(
-        nwb_file_name="dummy.nwb",
-        sort_group_id=0,
-        interval_list_name="dummy",
-        team_name="dummy",
-        pipeline_preset=_CONCAT_PRESET,
-    )
-    assert report.ok is False
-    failed = [c for c in report.checks if c.name == "single_session_preset"]
-    assert failed and not failed[0].ok
-    assert any("concatenated session group" in e for e in report.errors)
-    # Short-circuited before the DB checks: no expected ids were computed.
-    assert report.expected_ids == {}
-
-
-def test_session_runners_reject_motion_pinned_preset_without_db():
-    """The whole-session helpers also reject a concat preset fail-fast.
-
-    ``run_v2_pipeline_session`` / ``preflight_v2_pipeline_session`` validate the
-    preset (unknown / motion-pinned) before any ``SortGroupV2`` access, so
-    selecting the concat preset raises ``PipelineInputError`` with no database
-    connection -- this test takes no ``dj_conn`` fixture.
-    """
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
-    from spyglass.spikesorting.v2.pipeline import (
-        preflight_v2_pipeline_session,
-        run_v2_pipeline_session,
-    )
-
-    for fn in (run_v2_pipeline_session, preflight_v2_pipeline_session):
-        with pytest.raises(
-            PipelineInputError, match="concatenated session group"
-        ):
-            fn(
-                nwb_file_name="dummy.nwb",
-                interval_list_name="dummy",
-                team_name="dummy",
-                pipeline_preset=_CONCAT_PRESET,
-            )
 
 
 def test_run_v2_pipeline_requires_exactly_one_input_mode():
@@ -1170,12 +1109,12 @@ def test_run_v2_unit_match_unknown_matcher_raises(dj_conn):
         )
 
 
-def test_preset_model_artifact_optional_and_motion_field():
-    """``_PipelinePreset`` accepts a concat-shaped preset and forbids extras.
+def test_preset_model_artifact_optional_and_no_motion_field():
+    """``_PipelinePreset`` makes the artifact recipe optional and forbids extras.
 
-    ``artifact_detection_params_name`` is optional (``None`` for concat presets
-    that run no artifact detection) and ``motion_correction_params_name`` is an
-    optional field a concat preset sets; unknown fields are still rejected.
+    ``artifact_detection_params_name`` is optional (``None`` for presets that
+    run no artifact detection). Presets carry no motion recipe, so a
+    ``motion_correction_params_name`` is rejected like any unknown field.
     """
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
 
@@ -1186,11 +1125,18 @@ def test_preset_model_artifact_optional_and_motion_field():
         sorter_params_name="franklab_30khz_ms5_2026_06",
         metric_params_name="franklab_default",
         auto_curation_rules_name="v1_default_nn_noise_2026_09",
-        motion_correction_params_name="auto",
     )
     assert preset.artifact_detection_params_name is None
-    assert preset.motion_correction_params_name == "auto"
 
+    with pytest.raises(ValueError):
+        presets_mod._PipelinePreset(
+            preprocessing_params_name="franklab_hippocampus_2026_06",
+            sorter="mountainsort5",
+            sorter_params_name="franklab_30khz_ms5_2026_06",
+            metric_params_name="franklab_default",
+            auto_curation_rules_name="v1_default_nn_noise_2026_09",
+            motion_correction_params_name="auto_default",
+        )
     with pytest.raises(ValueError):
         presets_mod._PipelinePreset(
             preprocessing_params_name="franklab_hippocampus_2026_06",
@@ -1245,31 +1191,6 @@ def test_register_pipeline_preset_catches_missing_auto_curation_row(
     spec = _spec_with(auto_curation_rules_name="missing_rules_xyz")
     with pytest.raises(ValueError, match="not found in AutoCurationRules"):
         register_pipeline_preset("lab_missing_rules_2026_06", spec)
-
-
-def test_register_pipeline_preset_catches_missing_motion_row(
-    dj_conn, monkeypatch
-):
-    """A preset naming an absent motion-correction row fails clearly.
-
-    The motion row is only checked when the preset sets it (single-session
-    presets leave it None and skip the check).
-    """
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
-
-    from spyglass.spikesorting.v2 import initialize_v2_defaults
-
-    initialize_v2_defaults()
-    monkeypatch.setattr(
-        presets_mod,
-        "_PIPELINE_PRESETS",
-        dict(presets_mod._PIPELINE_PRESETS),
-    )
-    spec = _spec_with(motion_correction_params_name="missing_motion_xyz")
-    with pytest.raises(
-        ValueError, match="not found in MotionCorrectionParameters"
-    ):
-        register_pipeline_preset("lab_missing_motion_2026_06", spec)
 
 
 def test_describe_pipeline_preset_surfaces_curation_names(dj_conn, clone_env):
@@ -1357,7 +1278,6 @@ def test_clone_pipeline_preset_no_artifact_base(dj_conn, clone_env):
     clone = presets_mod._PIPELINE_PRESETS[new_name]
     assert clone.artifact_detection_params_name is None
     assert clone.sorter_params_name == new_name
-    assert clone.motion_correction_params_name == "auto_default"
 
     detail = describe_pipeline_preset(new_name)
     assert float(_stage_value(detail, "sorter", "detect_threshold")) == 4.0

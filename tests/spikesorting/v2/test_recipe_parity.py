@@ -121,9 +121,6 @@ def test_presets_reference_shipped_rows(dj_conn):
     )
     from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
-    from spyglass.spikesorting.v2.session_group import (
-        MotionCorrectionParameters,
-    )
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     preproc = {r[0] for r in PreprocessingParameters._DEFAULT_CONTENTS}
@@ -132,7 +129,6 @@ def test_presets_reference_shipped_rows(dj_conn):
     metric = {
         r["metric_params_name"] for r in QualityMetricParameters._default_rows()
     }
-    motion = {r[0] for r in MotionCorrectionParameters._DEFAULT_CONTENTS}
     rules = {
         master["auto_curation_rules_name"]
         for master, _ in AutoCurationRules._default_payloads()
@@ -159,10 +155,6 @@ def test_presets_reference_shipped_rows(dj_conn):
         assert (
             p.auto_curation_rules_name in rules
         ), f"{name}: rules {p.auto_curation_rules_name!r} not shipped"
-        if p.motion_correction_params_name is not None:
-            assert (
-                p.motion_correction_params_name in motion
-            ), f"{name}: motion {p.motion_correction_params_name!r} not shipped"
 
 
 @pytest.mark.database

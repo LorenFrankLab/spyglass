@@ -50,10 +50,6 @@ class _PipelinePreset(BaseModel):
     # artifact detection in either source mode. A non-None value names the
     # ArtifactDetectionParameters row (applied per member for concat).
     artifact_detection_params_name: "str | None" = None
-    # motion_correction_params_name is optional: None for ordinary single-
-    # session presets (motion is selected per recording); a concat preset sets
-    # it ("auto" resolves to rigid_fast for same-day session groups).
-    motion_correction_params_name: "str | None" = None
     # Discovery metadata (no runtime behavior) -- the axes a scientist picks a
     # preset by. probe_type is informational: the recipe is set by target
     # region (the preproc high-pass) and sampling rate (the sorter window),
@@ -174,7 +170,6 @@ def describe_pipeline_presets() -> "pd.DataFrame":
         "sorter_params_name",
         "metric_params_name",
         "auto_curation_rules_name",
-        "motion_correction_params_name",
         "intended_use",
         "threshold_units",
         "notes",
@@ -196,9 +191,6 @@ def describe_pipeline_presets() -> "pd.DataFrame":
             "sorter_params_name": preset.sorter_params_name,
             "metric_params_name": preset.metric_params_name,
             "auto_curation_rules_name": preset.auto_curation_rules_name,
-            "motion_correction_params_name": (
-                preset.motion_correction_params_name
-            ),
             "intended_use": preset.intended_use,
             "threshold_units": preset.threshold_units,
             "notes": preset.notes,
@@ -259,8 +251,8 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
     The singular companion to :func:`describe_pipeline_presets`: where the
     plural helper lists every preset and the parameter-row *names* each stage
     uses, this resolves ONE preset to the actual VALUES of its preprocessing,
-    artifact-detection, sorter, metric, auto-curation, and (for concat presets)
-    motion-correction parameter rows -- so you can see exactly what
+    artifact-detection, sorter, metric, and auto-curation parameter rows -- so
+    you can see exactly what
     ``run_v2_pipeline(..., pipeline_preset=name)`` will do before running it.
 
     Unlike the DB-free :func:`describe_pipeline_presets`, this reads the live
@@ -277,12 +269,10 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
     -------
     pandas.DataFrame
         Long-format, one row per parameter, columns ``stage`` (``"preset"`` /
-        ``"preprocessing"`` / ``"artifact_detection"`` / ``"motion_correction"``
-        / ``"sorter"`` / ``"sorter_execution"`` / ``"metric"`` /
-        ``"auto_curation"``), ``params_row_name``, ``key`` (dotted path into
-        the validated blob), and ``value``. The ``"motion_correction"`` stage is
-        present only for a concat preset (one that pins a motion row); the
-        ``"metric"`` rows unpack the ``QualityMetricParameters`` columns
+        ``"preprocessing"`` / ``"artifact_detection"`` / ``"sorter"`` /
+        ``"sorter_execution"`` / ``"metric"`` / ``"auto_curation"``),
+        ``params_row_name``, ``key`` (dotted path into the validated blob), and
+        ``value``. The ``"metric"`` rows unpack the ``QualityMetricParameters`` columns
         (``metric_names`` / ``metric_kwargs`` / ``template_metric_columns`` /
         ``skip_pc_metrics``) and the ``"auto_curation"`` rows carry the
         ``AutoCurationRules`` master fields plus one ``rule.<index>`` entry per
@@ -317,9 +307,6 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
         QualityMetricParameters,
     )
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
-    from spyglass.spikesorting.v2.session_group import (
-        MotionCorrectionParameters,
-    )
     from spyglass.spikesorting.v2.sorting import SorterParameters
     from spyglass.spikesorting.v2.utils import _jsonable_blob
 
@@ -381,10 +368,6 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
             ("recommendation_status", preset.recommendation_status),
             ("metric_params_name", preset.metric_params_name),
             ("auto_curation_rules_name", preset.auto_curation_rules_name),
-            (
-                "motion_correction_params_name",
-                preset.motion_correction_params_name,
-            ),
             ("threshold_units", preset.threshold_units),
             ("intended_use", preset.intended_use),
             ("notes", preset.notes),
@@ -416,25 +399,6 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
                         )
                     },
                     "ArtifactDetectionParameters",
-                ),
-            )
-        )
-    # Motion correction is optional: only a concat preset pins one. Its row has
-    # the same params / schema / job_kwargs shape as preprocessing, so it unpacks
-    # through the shared helper.
-    if preset.motion_correction_params_name is not None:
-        stage_specs.append(
-            (
-                "motion_correction",
-                preset.motion_correction_params_name,
-                _fetch_params(
-                    MotionCorrectionParameters,
-                    {
-                        "motion_correction_params_name": (
-                            preset.motion_correction_params_name
-                        )
-                    },
-                    "MotionCorrectionParameters",
                 ),
             )
         )
@@ -611,9 +575,6 @@ def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
         QualityMetricParameters,
     )
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
-    from spyglass.spikesorting.v2.session_group import (
-        MotionCorrectionParameters,
-    )
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     checks = [
@@ -658,21 +619,6 @@ def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
                 },
                 "ArtifactDetectionParameters",
                 preset.artifact_detection_params_name,
-            )
-        )
-    # motion correction is optional: only presets that pin one (e.g. concat
-    # presets) carry it.
-    if preset.motion_correction_params_name is not None:
-        checks.append(
-            (
-                MotionCorrectionParameters,
-                {
-                    "motion_correction_params_name": (
-                        preset.motion_correction_params_name
-                    )
-                },
-                "MotionCorrectionParameters",
-                preset.motion_correction_params_name,
             )
         )
     for table, restriction, label, row_name in checks:

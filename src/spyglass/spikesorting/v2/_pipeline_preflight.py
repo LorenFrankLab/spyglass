@@ -363,9 +363,19 @@ def _preflight_details(
 
 
 def describe_scientific_setup(
-    bundle, group_keys, effective_config=None, *, manual_excluded_times=None
+    bundle,
+    group_keys,
+    effective_config=None,
+    *,
+    manual_excluded_times=None,
+    concat: bool = False,
 ):
-    """Resolve the preprocessing and artifact rows execution uses for display."""
+    """Resolve the preprocessing and artifact rows execution uses for display.
+
+    ``concat=True`` (the caller's input mode, not a property of the preset)
+    adds where the artifact mask is applied: per member, before
+    concatenation.
+    """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -400,22 +410,15 @@ def describe_scientific_setup(
         ),
         "artifact_recipe": bundle.artifact_detection_params_name,
         "artifact_detection": dict(artifacts[0]) if len(artifacts) else None,
-        "motion": "No external correction; DriftEstimate is diagnostic only.",
+        "motion": (
+            "No motion correction is applied (concatenation does not correct "
+            "motion; optional motion correction is not yet available). "
+            "DriftEstimate is diagnostic only."
+        ),
     }
     if manual_excluded_times:
         result["manual_excluded_times"] = manual_excluded_times
-    if bundle.motion_correction_params_name is not None:
-        from spyglass.spikesorting.v2.session_group import (
-            MotionCorrectionParameters,
-        )
-
-        rows = (
-            MotionCorrectionParameters
-            & {
-                "motion_correction_params_name": bundle.motion_correction_params_name
-            }
-        ).fetch("params")
-        result["motion"] = dict(rows[0]) if len(rows) else None
+    if concat:
         result["artifact_application"] = (
             "No artifact masking selected."
             if not manual_excluded_times
@@ -423,9 +426,9 @@ def describe_scientific_setup(
                 bundle.artifact_detection_params_name is None
                 or (len(artifacts) and not artifacts[0].get("detect", True))
             )
-            else "Per member before concatenation and motion correction."
+            else "Per member before concatenation."
         )
-    elif bundle.sorter == "kilosort4":
+    if bundle.sorter == "kilosort4":
         params = (effective_config or {}).get("si_sorter_params", {})
         result["motion"] = {
             "sorter": "kilosort4",
@@ -615,8 +618,8 @@ def assert_concat_preflight(
     Concat counterpart of :func:`preflight_v2_pipeline`: the group, its members,
     and -- because each member is sorted through the same single-session
     ``Recording`` build -- the per-member ``Raw`` / ``'raw data valid times'`` /
-    sort-group-electrode / sampling-rate prerequisites, plus the preset's
-    motion-correction row, the ``auto_curate`` metric/rule/metric-waveform rows
+    sort-group-electrode / sampling-rate prerequisites, plus the
+    ``auto_curate`` metric/rule/metric-waveform rows
     (when opted in), and the compute-time param rows + sorter binary via
     :func:`assert_preset_compute_rows`, including member artifact parameters.
     Fails before member/concat populate. Returns advisory warnings (including
@@ -626,10 +629,7 @@ def assert_concat_preflight(
     from spyglass.common import IntervalList, Raw
     from spyglass.spikesorting.v2.exceptions import PreflightError
     from spyglass.spikesorting.v2.recording import SortGroupV2
-    from spyglass.spikesorting.v2.session_group import (
-        MotionCorrectionParameters,
-        SessionGroup,
-    )
+    from spyglass.spikesorting.v2.session_group import SessionGroup
 
     group_key = {
         "session_group_owner": concat_session_group_owner,
@@ -705,20 +705,6 @@ def assert_concat_preflight(
                     "detect_interval snippet window at that rate). Every member "
                     "must share the preset's acquisition rate."
                 )
-
-    if not (
-        MotionCorrectionParameters
-        & {
-            "motion_correction_params_name": (
-                bundle.motion_correction_params_name
-            )
-        }
-    ):
-        raise PreflightError(
-            "run_v2_pipeline: MotionCorrectionParameters row "
-            f"{bundle.motion_correction_params_name!r} (the concat preset's "
-            "motion recipe) is missing. Run initialize_v2_defaults()."
-        )
 
     # Auto-curation prerequisites (preset-level, same rows as single-session),
     # only when the caller opts into auto_curate -- so a concat auto-curate run
@@ -1012,11 +998,8 @@ def preflight_v2_pipeline(
 
     Every check is a read-only restriction (``& {...}``) or a pure call. Most
     checks run even after one fails, so the report lists every problem at once.
-    Two cases short-circuit before any database access, because the remaining
-    checks would be meaningless: an unknown ``pipeline_preset`` (the later
-    checks need the resolved param names), and a motion-pinned
-    (concatenated-group) preset, which ``run_v2_pipeline``'s single-session
-    inputs cannot run.
+    An unknown ``pipeline_preset`` short-circuits before any database access,
+    because the later checks need the resolved param names.
 
     Parameters
     ----------
@@ -1074,30 +1057,6 @@ def preflight_v2_pipeline(
     bundle = artifact_recipe_with_manual_exclusions(
         bundle, manual_excluded_times
     )
-
-    # A motion-pinned preset targets a concatenated session group (motion
-    # correction runs on the ConcatenatedRecording path, not single-session
-    # Recording), which run_v2_pipeline's single-session inputs cannot drive
-    # (concat mode handles it). Short-circuit BEFORE the SpikeInterface /
-    # DB-touching checks (like the unknown-preset case above) so this verdict
-    # stays database-free.
-    if not _check(
-        "single_session_preset",
-        bundle.motion_correction_params_name is None,
-        f"pipeline_preset {pipeline_preset!r} pins motion correction "
-        f"(motion_correction_params_name={bundle.motion_correction_params_name!r}), "
-        "so it targets a concatenated session group, not the single-session "
-        "inputs given. Run it in concat mode (concat_session_group_owner / "
-        "concat_session_group_name), or choose a non-concat preset.",
-    ):
-        return PreflightReport(
-            ok=False,
-            errors=[c.fix for c in checks if not c.ok],
-            warnings=warnings,
-            resolved_pipeline_preset=pipeline_preset,
-            expected_ids={},
-            checks=checks,
-        )
 
     import spikeinterface.sorters as sis
 
@@ -1700,23 +1659,6 @@ def _resolve_session_sort_group_ids(
             f"pipeline presets: {sorted(_PIPELINE_PRESETS)}. Call "
             "describe_pipeline_presets() to see what each preset does."
         )
-    # A motion-pinned preset targets a concatenated session group, which the
-    # single-session session runner cannot drive. Reject it here -- before the
-    # SortGroupV2 access below -- so the session helpers fail fast (database-free)
-    # with the concat-preset message, matching the single-group helpers.
-    bundle = _PIPELINE_PRESETS[pipeline_preset]
-    if bundle.motion_correction_params_name is not None:
-        raise PipelineInputError(
-            f"{caller}: pipeline_preset {pipeline_preset!r} pins motion "
-            "correction (motion_correction_params_name="
-            f"{bundle.motion_correction_params_name!r}), so it targets a "
-            "concatenated session group, not the single-session inputs the "
-            "session runner drives. Concatenated (same-day) sorting is not "
-            "available through the session runner; run it directly with "
-            "run_v2_pipeline concat mode (concat_session_group_owner / "
-            "concat_session_group_name), or choose a non-concat preset here."
-        )
-
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     available = sorted(

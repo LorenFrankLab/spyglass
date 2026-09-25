@@ -900,9 +900,31 @@ def test_preflight_skips_artifact_when_params_none(
     # No artifact id is expected.
     assert report.expected_ids["artifact_detection_id"]["id"] is None
     assert report.expected_ids["artifact_detection_id"]["exists"] is False
-    # The DB-free fail-fast rejection of a motion-pinned (concat) preset is
-    # regressed in tests/spikesorting/v2/test_pipeline_presets.py
-    # (test_preflight_rejects_motion_pinned_preset_without_db).
+
+
+@pytest.mark.database
+def test_concat_preset_preflights_in_single_session_mode(preflight_inputs):
+    """The input fields, not the preset, choose the mode: the shipped concat
+    preset runs every single-session check (no motion gate short-circuits it)
+    and passes, and so does the whole-session preflight."""
+    from spyglass.spikesorting.v2.pipeline import (
+        preflight_v2_pipeline_session,
+    )
+
+    report = preflight_v2_pipeline(
+        **{**preflight_inputs, "pipeline_preset": _CONCAT_PRESET}
+    )
+    assert report.ok is True, report.errors
+    assert "sorter_params_valid" in {c.name for c in report.checks}
+    assert report.expected_ids
+    session_report = preflight_v2_pipeline_session(
+        nwb_file_name=preflight_inputs["nwb_file_name"],
+        interval_list_name=preflight_inputs["interval_list_name"],
+        team_name=preflight_inputs["team_name"],
+        pipeline_preset=_CONCAT_PRESET,
+        sort_group_ids=[preflight_inputs["sort_group_id"]],
+    )
+    assert session_report.ok is True, session_report.errors
 
 
 @pytest.mark.database
@@ -1264,7 +1286,7 @@ def test_preflight_matlab_local_backend_errors(
 # checks the concat preflight reuses.
 # --------------------------------------------------------------------------- #
 
-_CONCAT_PRESET = "franklab_concat_hippocampus_30khz_ms5_2026_06"
+_CONCAT_PRESET = "franklab_concat_hippocampus_30khz_ms5_2026_09"
 
 
 @pytest.mark.database
@@ -1419,6 +1441,7 @@ def test_scientific_setup_uses_execution_rows(preflight_inputs):
     )
     assert setup["artifact_detection"] is None
     assert setup["motion"]["nblocks"] == 0
+    assert "artifact_application" not in setup
 
 
 @pytest.mark.database
@@ -1430,17 +1453,14 @@ def test_concat_scientific_setup_reports_explicit_no_mask(
     from spyglass.spikesorting.v2._pipeline_preflight import (
         describe_scientific_setup,
     )
-    from spyglass.spikesorting.v2.session_group import (
-        MotionCorrectionParameters,
-    )
 
-    MotionCorrectionParameters.insert_default()
     bundle = pl._PIPELINE_PRESETS[
-        "franklab_concat_hippocampus_30khz_ms5_2026_06"
+        "franklab_concat_hippocampus_30khz_ms5_2026_09"
     ].model_copy(update={"artifact_detection_params_name": artifact_recipe})
     group = {
         field: preflight_inputs[field]
         for field in ("nwb_file_name", "sort_group_id")
     }
-    setup = describe_scientific_setup(bundle, [group])
+    setup = describe_scientific_setup(bundle, [group], concat=True)
     assert setup["artifact_application"] == "No artifact masking selected."
+    assert setup["motion"].startswith("No motion correction is applied")

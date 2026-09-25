@@ -82,7 +82,7 @@ same_day_members = [
 concat_group_name = "day1_blocks"
 # A concat preset pins a motion-correction recipe (motion is estimated across the
 # joined blocks); a single-session preset does not.
-concat_preset = "franklab_concat_hippocampus_30khz_ms5_2026_06"
+concat_preset = "franklab_concat_hippocampus_30khz_ms5_2026_09"
 
 # Part B — sessions to sort INDEPENDENTLY and match, typically across days (same
 # animal + probe). The match group allows multiple days.

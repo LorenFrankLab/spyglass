@@ -422,7 +422,7 @@ def test_cross_session_notebook_runs(dj_conn):
         "session_group_owner": "notebook_xsession_team",
         "same_day_members": members,
         "concat_group_name": "notebook_concat",
-        "concat_preset": "franklab_concat_hippocampus_30khz_ms5_2026_06",
+        "concat_preset": "franklab_concat_hippocampus_30khz_ms5_2026_09",
         "match_members": members,
         "match_group_name": "notebook_match",
         "single_preset": "franklab_probe_hippocampus_30khz_ms5_2026_06",

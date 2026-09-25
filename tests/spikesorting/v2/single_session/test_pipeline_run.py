@@ -1097,9 +1097,6 @@ def test_stage_statuses_vocabulary_includes_skipped():
 
     assert "skipped" in _STAGE_STATUSES
     assert {"computed", "reused"} <= _STAGE_STATUSES
-    # The DB-free fail-fast rejection of a motion-pinned (concat) preset is
-    # regressed in tests/spikesorting/v2/test_pipeline_presets.py
-    # (test_run_v2_pipeline_rejects_motion_pinned_preset_without_db).
 
 
 def test_run_v2_pipeline_auto_curate_param_defaults_false():

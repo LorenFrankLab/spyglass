@@ -237,9 +237,9 @@ def run_v2_pipeline(
         single-session fields): the ``(session_group_owner, session_group_name)``
         of an existing ``SessionGroup``. The orchestrator populates each
         member's ``Recording``, concatenates them via ``ConcatenatedRecording``
-        (using the preset's motion-correction recipe), and sorts the result.
-        Requires a concat preset (one whose ``motion_correction_params_name`` is
-        set); the artifact recipe is applied independently to each member.
+        (no motion correction is applied), and sorts the result. Any preset
+        runs in either mode; the mode is set by which inputs are given. The
+        artifact recipe is applied independently to each member.
     pipeline_preset
         Pipeline-preset name from ``_PIPELINE_PRESETS``. The default is
         ``franklab_probe_hippocampus_30khz_ms5_2026_06`` (MountainSort5),
@@ -293,11 +293,11 @@ def run_v2_pipeline(
         - single-session: ``preflight_v2_pipeline`` -- the session / interval /
           team / sort-group rows, the preset's parameter rows, and the sorter
           binary.
-        - concat: ``assert_concat_preflight`` -- the ``SessionGroup``, its
-          members, and the preset's motion-correction row, plus the preset's
-          preprocessing / sorter / analyzer-waveform param rows and the sorter
-          binary/runtime (the compute-row checks shared with the single-session
-          preflight; concat applies it per member before motion correction).
+        - concat: ``assert_concat_preflight`` -- the ``SessionGroup`` and its
+          members, plus the preset's preprocessing / sorter / analyzer-waveform
+          param rows and the sorter binary/runtime (the compute-row checks
+          shared with the single-session preflight), including the member
+          artifact parameters.
 
         Pass ``preflight=False`` to skip the check and attempt the run directly
         (e.g. to see the raw underlying error).
@@ -432,7 +432,7 @@ def run_v2_pipeline(
     """
     # Validate the preset DB-free, BEFORE importing the DataJoint table modules
     # (importing them activates @schema and needs a live connection). An unknown
-    # or motion-pinned (concat) preset then fails fast with PipelineInputError
+    # preset then fails fast with PipelineInputError
     # even when the database is offline, rather than an opaque connection error.
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
@@ -506,26 +506,6 @@ def run_v2_pipeline(
         bundle, manual_excluded_times
     )
 
-    # The preset's motion field selects the mode it is built for: a motion-pinned
-    # preset is a concat preset (motion correction runs on the
-    # ConcatenatedRecording path), and a preset without it is single-session.
-    if is_single and bundle.motion_correction_params_name is not None:
-        raise PipelineInputError(
-            f"run_v2_pipeline: pipeline_preset {pipeline_preset!r} pins motion "
-            "correction (motion_correction_params_name="
-            f"{bundle.motion_correction_params_name!r}), so it targets a "
-            "concatenated session group, not the single-session inputs given. "
-            "Run it in concat mode (concat_session_group_owner / "
-            "concat_session_group_name), or choose a non-concat preset."
-        )
-    if is_concat and bundle.motion_correction_params_name is None:
-        raise PipelineInputError(
-            "run_v2_pipeline: concat mode requires a preset that pins motion "
-            f"correction, but pipeline_preset {pipeline_preset!r} has none. "
-            "Choose a concat preset (one whose motion_correction_params_name is "
-            "set; see describe_pipeline_presets())."
-        )
-
     # Fail fast (still DB-free, before the table imports) if a FigPack view was
     # requested without the optional packages installed -- otherwise the missing
     # install would surface only as an opaque import error after a full sort.
@@ -596,8 +576,8 @@ def run_v2_pipeline(
             logger.warning(f"run_v2_pipeline preflight: {warning}")
     elif preflight and is_concat:
         # Concat preflight: the SessionGroup + members + each member's
-        # raw/valid-times/sort-group/rate prerequisites + the preset's
-        # motion-correction row (+ auto-curation rows when opted in) + the
+        # raw/valid-times/sort-group/rate prerequisites (+ the preset's
+        # auto-curation rows when opted in) + the
         # compute-time param rows and sorter binary, all
         # BEFORE the heavy member / concat populate. Raises PreflightError with
         # the exact fix on the first missing prerequisite.
@@ -737,7 +717,7 @@ def run_v2_pipeline(
             }
         )
     else:
-        # Member detections are inputs to the masked, motion-corrected concat.
+        # Member detections are inputs to the masked concat.
         run_summary["source_mode"] = "concat"
         from spyglass.spikesorting.v2.session_group import (
             ConcatenatedRecording,
@@ -778,6 +758,7 @@ def run_v2_pipeline(
             ],
             run_summary["sorter_config"],
             manual_excluded_times=manual_excluded_times,
+            concat=True,
         )
         member_recording_keys = [
             RecordingSelection.insert_selection(

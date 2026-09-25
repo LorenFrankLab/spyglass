@@ -539,7 +539,6 @@ def test_member_artifact_failure_retry_and_reuse(
                     "preprocessing_params_name"
                 ],
                 "artifact_detection_params_name": name,
-                "motion_correction_params_name": "none",
                 "sorter": "clusterless_thresholder",
                 "sorter_params_name": name,
             }
