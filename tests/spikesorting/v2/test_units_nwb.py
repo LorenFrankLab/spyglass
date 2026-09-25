@@ -375,11 +375,24 @@ def test_curation_source_unit_ids_selects_kept_and_contributors():
     assert curation_source_unit_ids(kept, apply_merge=False) is None
 
 
+class _LazyTimeVector:
+    """Explicit time vector that records each read, like a lazy h5py dataset."""
+
+    def __init__(self, times):
+        self.times = times
+        self.reads = []
+
+    def __getitem__(self, key):
+        self.reads.append(key)
+        return self.times[key]
+
+
 class _FakeRecording:
     def __init__(self, times, fs=_FS, explicit=True):
         self.times = np.asarray(times, dtype=float)
         self.fs = fs
         self.explicit = explicit
+        self.time_vector = _LazyTimeVector(self.times) if explicit else None
         self.sample_calls = []
         self.time_slice_calls = []
 
@@ -387,7 +400,7 @@ class _FakeRecording:
         return self.fs
 
     def get_time_info(self, segment_index=0):
-        return {"time_vector": self.times if self.explicit else None}
+        return {"time_vector": self.time_vector}
 
     def get_start_time(self, segment_index=0):
         return float(self.times[0]) if self.times.size else 0.0
@@ -511,11 +524,12 @@ def test_base_intervals_from_recording_detects_gaps():
         [0.0, 0.004],
         [10.0, 10.003],
     ]
-    # One chunk (chunk_size == round(fs) == 1000) covers the 9 samples, mapped
-    # via sample_index_to_time over the frame range -- NOT frame-bounded
-    # get_times (which SI 0.104.3 does not support).
-    assert len(rec.sample_calls) == 1
-    assert rec.sample_calls[0].tolist() == list(range(9))
+    # One chunk (chunk_size == round(fs) == 1000) covers the 9 samples, read as
+    # one contiguous slice of the explicit time vector -- NOT frame-bounded
+    # get_times (which SI 0.104.3 does not support), a full get_times()
+    # materialization, or per-frame sample_index_to_time point reads.
+    assert rec.time_vector.reads == [slice(0, 9)]
+    assert rec.sample_calls == []
     assert rec.time_slice_calls == []
 
 
