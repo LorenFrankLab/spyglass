@@ -440,7 +440,9 @@ def pinned_whiten(recording, *, random_seed: int = 0, spans=None):
         spans_cover_recording,
     )
 
-    if spans_cover_recording(spans, recording.get_num_samples()):
+    if spans is None or spans_cover_recording(
+        spans, recording.get_num_samples()
+    ):
         return sip.whiten(recording, dtype=np.float64, seed=random_seed)
     whitening = _span_whitening_matrix(
         recording, spans, random_seed=random_seed
@@ -503,7 +505,9 @@ def cache_span_noise_levels(
 
     if method not in ("mad", "std"):
         raise ValueError(f"method must be 'mad' or 'std', got {method!r}")
-    if spans_cover_recording(spans, recording.get_num_samples()):
+    if spans is None or spans_cover_recording(
+        spans, recording.get_num_samples()
+    ):
         return None
     data = _sample_statistics_spans(
         recording, spans, seed=seed, return_in_uV=return_in_uV

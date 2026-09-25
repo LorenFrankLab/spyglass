@@ -993,6 +993,52 @@ def test_span_std_noise_levels_are_the_std_of_span_samples(
     assert "noise_level_std_scaled" not in unmasked.get_property_keys()
 
 
+@pytest.mark.unit
+def test_span_estimators_without_spans_accept_multi_segment_recordings():
+    """``spans=None`` never asks a multi-segment recording for its length.
+
+    SpikeInterface's ``get_num_samples()`` without a segment index raises on
+    a multi-segment recording, so both span estimators must hand such a
+    recording to SI's own path untouched: ``pinned_whiten`` applies SI's own
+    seeded whitening and ``cache_span_noise_levels`` caches nothing.
+    """
+    import numpy as np
+    import spikeinterface.preprocessing as sip
+    from spikeinterface.core import NumpyRecording
+
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        cache_span_noise_levels,
+        pinned_whiten,
+    )
+
+    rng = np.random.default_rng(0)
+    recording = NumpyRecording(
+        [
+            rng.normal(size=(40_000, 4)).astype(np.float32),
+            rng.normal(size=(30_000, 4)).astype(np.float32),
+        ],
+        sampling_frequency=30_000.0,
+    )
+    assert recording.get_num_segments() == 2
+
+    whitened = pinned_whiten(recording, random_seed=3, spans=None)
+    reference = sip.whiten(recording, dtype=np.float64, seed=3)
+    assert np.array_equal(
+        _applied_whitening(whitened)[0], _applied_whitening(reference)[0]
+    )
+
+    for method in ("mad", "std"):
+        assert (
+            cache_span_noise_levels(
+                recording, None, return_in_uV=False, seed=3, method=method
+            )
+            is None
+        )
+    assert not any(
+        key.startswith("noise_level_") for key in recording.get_property_keys()
+    )
+
+
 @pytest.mark.medium
 @pytest.mark.usefixtures("dj_conn")
 def test_sorting_wrappers_forward_statistics_spans(
