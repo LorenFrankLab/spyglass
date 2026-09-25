@@ -107,6 +107,31 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2: concatenation no longer applies motion correction
+
+- `ConcatenatedRecording` now stores the masked, unwhitened concatenation of
+  its members' traces and no longer runs SpikeInterface `correct_motion`.
+  Previously the concat preset applied SI's `rigid_fast` preset, which
+  estimates rigid motion with DREDge's AP registration (`dredge_ap`) and, by
+  default, removes channels at the probe border.
+- The `MotionCorrectionParameters` table and its `none` / `auto_default` /
+  `rigid_fast_default` rows are removed, along with the
+  `motion_correction_params_name` preset field and the `motion_preset` column
+  on `ConcatenatedRecording`.
+- The concat preset `franklab_concat_hippocampus_30khz_ms5_2026_06` is renamed
+  `franklab_concat_hippocampus_30khz_ms5_2026_09`. It no longer pins motion
+  correction and remains experimental. The inputs you pass to
+  `run_v2_pipeline` now set single-session or concat mode, so any preset runs
+  in either mode.
+- **Schema change: `concat_recording_id` values change.** Motion correction
+  is no longer part of the concat identity. Drop the old
+  `MotionCorrectionParameters` table. Then recreate your v2
+  `ConcatenatedRecordingSelection` / `ConcatenatedRecording` rows and the
+  sorts and curations built on them, following the
+  [preproduction database upgrade sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database).
+- Optional motion correction will be a separate stage. `DriftEstimate` is
+  unchanged and stays QC-only.
+
 #### Spike Sorting v2 launch: configuration, resource use, and the curation-to-analysis workflow
 
 The supported v2 workflow is configure → sort → review → curate → **select
