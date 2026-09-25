@@ -356,6 +356,7 @@ def load_or_rebuild_analyzer_from_resolved(
     sorting,
     sorter_row,
     job_kwargs,
+    statistics_spans,
     rebuild=True,
 ):
     """Load (or rebuild) a canonical analyzer folder from resolved inputs.
@@ -392,6 +393,10 @@ def load_or_rebuild_analyzer_from_resolved(
         The fetched ``SorterParameters`` row for the rebuild.
     job_kwargs : dict
         Resolved job kwargs for the rebuild.
+    statistics_spans : list[tuple[int, int]]
+        The sort's persisted statistics spans (``Sorting.get_statistics_spans``,
+        resolved by the caller), so a rebuild estimates noise and whitening
+        from the same samples as the sort-time build.
     rebuild : bool, optional
         ``True`` (default) rebuilds a missing/invalid folder; ``False`` raises
         (parity with ``load_or_rebuild_analyzer``).
@@ -420,6 +425,7 @@ def load_or_rebuild_analyzer_from_resolved(
             job_kwargs=job_kwargs,
             analyzer_folder=analyzer_folder,
             waveform_params=waveform_params,
+            statistics_spans=statistics_spans,
         ),
         recipe_label=analyzer_folder.name,
         sorting_id=sorting_id,

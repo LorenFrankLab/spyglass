@@ -213,6 +213,7 @@ def test_resolved_analyzer_loader_matches_get_analyzer(populated_sorting):
         sorting=raw_sorting,
         sorter_row=sorter_row,
         job_kwargs=_resolved_job_kwargs(sorter_row["job_kwargs"]),
+        statistics_spans=Sorting().get_statistics_spans(sorting_key),
     )
     assert sorted(int(u) for u in out.unit_ids) == ref_unit_ids
     np.testing.assert_allclose(

@@ -194,6 +194,10 @@ class EvaluationRecordingInputs(NamedTuple):
     artifact_valid_times: object  # np.ndarray | None (DeepHashed, not ==)
     recording_row: dict
     fs: float
+    # The sort's persisted statistics spans (``Sorting.get_statistics_spans``)
+    # as a tuple of ``(start, end)`` int frame pairs; every analyzer built or
+    # rebuilt here estimates noise and whitening from them.
+    statistics_spans: tuple[tuple[int, int], ...]
 
 
 class EvaluationSortingInputs(NamedTuple):
@@ -1129,6 +1133,9 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 artifact_valid_times=artifact_valid_times,
                 recording_row=recording_row,
                 fs=fs,
+                statistics_spans=tuple(
+                    Sorting().get_statistics_spans(sorting_key)
+                ),
             ),
             sorting_inputs=EvaluationSortingInputs(
                 sorting_id=sorting_id,
@@ -1304,6 +1311,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 artifact_detection_id=recording_inputs.artifact_detection_id,
                 recording_id=recording_inputs.recording_id,
             )
+            statistics_spans = list(recording_inputs.statistics_spans)
 
             from spyglass.spikesorting.v2._observation_io import (
                 observation_metrics_from_nwb,
@@ -1339,6 +1347,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                         sorting=raw_sorting,
                         sorter_row=analyzer_inputs.sorter_row,
                         job_kwargs=analyzer_inputs.analyzer_job_kwargs,
+                        statistics_spans=statistics_spans,
                     )
                     metric_analyzer = None
                     if wants_pc:
@@ -1353,6 +1362,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                             sorting=raw_sorting,
                             sorter_row=analyzer_inputs.sorter_row,
                             job_kwargs=analyzer_inputs.analyzer_job_kwargs,
+                            statistics_spans=statistics_spans,
                         )
                     metrics_df, labels_by_unit, merge_groups = (
                         self._evaluate_analyzers(
@@ -1401,6 +1411,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                         job_kwargs=analyzer_inputs.analyzer_job_kwargs,
                         analyzer_folder=display_folder,
                         waveform_params=analyzer_inputs.display_waveform_params,
+                        statistics_spans=statistics_spans,
                     )
                     display_analyzer = load_analyzer_folder(display_folder)
                     metric_analyzer = None
@@ -1416,6 +1427,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                             job_kwargs=analyzer_inputs.analyzer_job_kwargs,
                             analyzer_folder=metric_folder,
                             waveform_params=analyzer_inputs.metric_waveform_params,
+                            statistics_spans=statistics_spans,
                         )
                         metric_analyzer = load_analyzer_folder(metric_folder)
                     metrics_df, labels_by_unit, merge_groups = (
