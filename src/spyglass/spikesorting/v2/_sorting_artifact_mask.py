@@ -452,7 +452,7 @@ def concat_boundary_spans(
         inside a single span.
     """
     out: list[tuple[int, int]] = []
-    for rec, start in zip(member_recordings, member_starts):
+    for rec, start in zip(member_recordings, member_starts, strict=True):
         out.extend(
             (start + a, start + b)
             for a, b in boundary_spans_from_timestamps(rec)
@@ -525,9 +525,9 @@ def statistics_spans(
 def spans_cover_recording(spans, n_samples: int) -> bool:
     """True when ``spans`` is ``None`` or exactly ``[(0, n_samples)]``.
 
-    Later estimator code delegates to SpikeInterface's own unchanged path
-    in exactly this case, so an unmasked, unjoined recording stays
-    bit-identical to today's behavior.
+    The span estimators delegate to SpikeInterface's own unchanged path in
+    exactly this case, so an unmasked, unjoined recording gets
+    SpikeInterface's estimates bit for bit.
     """
     return spans is None or list(spans) == [(0, int(n_samples))]
 
