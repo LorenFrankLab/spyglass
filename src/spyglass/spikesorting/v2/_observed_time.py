@@ -70,10 +70,24 @@ def observed_intervals(recording, valid_times):
                 start,
             ].astype(np.int64)
             for first, end in pairwise(cuts):
-                t = float(_segment_times_at(recording, np.array([first]))[0])
-                kept.append((t, t + (end - first) / fs))
+                t0 = float(_segment_times_at(recording, np.array([first]))[0])
+                t1 = (
+                    float(_segment_times_at(recording, np.array([end - 1]))[0])
+                    + 1.0 / fs
+                )
+                kept.append((t0, t1))
         cursor = stop
-    return np.asarray(kept, dtype=float).reshape(-1, 2)
+    result = np.asarray(kept, dtype=float).reshape(-1, 2)
+    if len(result) > 1:
+        bad = np.flatnonzero(result[1:, 0] < result[:-1, 1])
+        if bad.size:
+            i = int(bad[0])
+            raise ValueError(
+                "observed_intervals: computed intervals are not sorted and "
+                f"disjoint; interval {result[i].tolist()} overlaps the next "
+                f"interval {result[i + 1].tolist()}."
+            )
+    return result
 
 
 def contains_times(intervals, times):

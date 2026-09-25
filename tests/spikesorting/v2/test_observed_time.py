@@ -12,6 +12,80 @@ from spyglass.spikesorting.v2._observed_time import (
 )
 
 
+def test_observed_intervals_end_from_timestamps():
+    """The interval end comes from the recording's own timestamps, not the
+    nominal sampling rate -- a clock that actually runs slower than its
+    declared rate must not drop real samples off the end of an interval."""
+    import spikeinterface.core as si
+
+    # A recording declared at 1000 Hz whose clock actually runs at 990 Hz.
+    # Under the old ``t + n/fs`` (declared-fs) arithmetic the computed end
+    # falls short of the recording's own last timestamp, excluding samples
+    # that were genuinely recorded.
+    n = 1000
+    actual_fs = 990.0
+    recording = si.NumpyRecording(np.zeros((n, 1)), 1000.0)
+    times = np.arange(n) / actual_fs
+    recording.set_times(times)
+    # ``detect_artifacts``'s no-detection fallback: valid_times is the
+    # recording's own actual envelope.
+    valid_times = [[float(times[0]), float(times[-1])]]
+
+    intervals = observed_intervals(recording, valid_times)
+    assert intervals.shape == (1, 2)
+    assert np.all(intervals[1:, 0] >= intervals[:-1, 1])
+    contained = contains_times(intervals, times)
+    assert contained.all(), f"{int((~contained).sum())} of {n} samples excluded"
+
+    # Regular-clock case: the new data-derived end equals the old
+    # nominal-rate ``t + n/fs`` exactly when the clock is regular.
+    fs = 1000.0
+    recording_regular = si.NumpyRecording(np.zeros((n, 1)), fs)
+    regular_times = np.arange(n) / fs
+    recording_regular.set_times(regular_times)
+    regular_valid = [[float(regular_times[0]), float(regular_times[-1])]]
+    regular_intervals = observed_intervals(recording_regular, regular_valid)
+    np.testing.assert_allclose(regular_intervals, [[0.0, n / fs]])
+
+    # Multi-interval case: a timestamp gap splits the recording into two
+    # recorded chunks; every sample of each chunk must be contained.
+    gapped_times = np.r_[np.arange(500) / fs, 100 + np.arange(500) / fs]
+    recording_gapped = si.NumpyRecording(np.zeros((1000, 1)), fs)
+    recording_gapped.set_times(gapped_times)
+    gapped_valid = [
+        [float(gapped_times[0]), float(gapped_times[499])],
+        [float(gapped_times[500]), float(gapped_times[-1])],
+    ]
+    gapped_intervals = observed_intervals(recording_gapped, gapped_valid)
+    assert gapped_intervals.shape == (2, 2)
+    assert np.all(gapped_intervals[1:, 0] >= gapped_intervals[:-1, 1])
+    assert contains_times(gapped_intervals, gapped_times).all()
+
+
+def test_observed_intervals_rejects_overlapping_output():
+    """A fast actual clock under a slower declared rate can make the
+    data-derived end of one kept interval overtake the next interval's
+    start; ``observed_intervals`` must raise instead of returning
+    overlapping output."""
+    import spikeinterface.core as si
+
+    n = 20
+    declared_fs = 1000.0
+    actual_fs = 4000.0
+    recording = si.NumpyRecording(np.zeros((n, 1)), declared_fs)
+    times = np.arange(n) / actual_fs
+    recording.set_times(times)
+    # Excludes exactly frame 10 (a single missing sample); the actual gap
+    # (2 sample periods at 4000 Hz) is smaller than the 1/1000s pad the
+    # nominal-rate arithmetic would add to the previous interval's end.
+    valid_times = [
+        [float(times[0]), float(times[10])],
+        [float(times[11]), float(times[-1])],
+    ]
+    with pytest.raises(ValueError, match="not sorted|overlap|disjoint"):
+        observed_intervals(recording, valid_times)
+
+
 def test_observed_duration_counts_final_samples_and_preserves_recording_gaps():
     import spikeinterface.core as si
 
