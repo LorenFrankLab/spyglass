@@ -93,6 +93,11 @@ The schema changes covered here are:
   targets `ArtifactDetectionOutput`; the script remaps the old references.
 - New review-profile, typed annotation, and `SortedSpikesGroup.UnitSelection`
   tables/parts are declared on import.
+- `ConcatenatedRecording.statistics_spans`: nullable frame-range blob. An
+  existing row has no value for it and must be recreated (see "Finally,
+  recreate every v2 `Recording` row and artifact" below) — noise, whitening,
+  and the nn-noise cluster now read this column for every concat-backed
+  sort.
 
 Run the following in order in the development environment, reviewing DataJoint's
 proposed DDL. In particular, assign distinct UUIDs **before** the final curation
@@ -115,6 +120,7 @@ from spyglass.spikesorting.v2.artifact import (
     RecordingArtifactSelection,
     SharedGroupArtifactSelection,
 )
+from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
 curation_table = CurationV2()
 if "curation_uuid" not in curation_table.heading.names:
@@ -151,6 +157,8 @@ for table in (
     CurationEvaluationSelection,  # old evaluations retain observation_version=0
     RecordingArtifactSelection,  # nullable manual_excluded_times
     SharedGroupArtifactSelection,  # nullable manual_excluded_times
+    ConcatenatedRecording,  # nullable statistics_spans; existing rows need it
+    # recomputed -- see "Finally, recreate every v2 Recording row" below
 ):
     table().alter(context=table.declaration_context)
 
@@ -226,6 +234,22 @@ members' `content_hash` values, so reusing one after the members are recreated
 raises `ConcatMemberDriftError`. Deleting a `Recording` cascades to the
 sortings and curations built on it, so preview the cascade and budget for
 re-running the pipeline on every selection you keep.
+
+This same recreation is also what gives every sort correct, artifact-aware
+noise and whitening: a fresh `Sorting.populate()` computes and persists the
+sort's **statistics spans** (the artifact-free frame ranges its noise,
+whitening, and nn-noise-cluster estimates now read from), and a fresh
+`ConcatenatedRecordingSelection.insert_selection(...)` (after the
+`ConcatenatedRecording` alter above) computes and persists the analogous
+concat-frame spans. In dependency order: `Recording` rows, then
+`ConcatenatedRecording` rows (for any concatenated session group), then the
+sort/curation pipeline, then evaluations. A sort or an evaluation selection
+you do **not** recreate is not silently stale — rebuilding that sort's
+analyzer (self-heal, a curation evaluation, a merged-curation analyzer, the
+recompute audit) raises, naming the sort and asking you to delete and
+repopulate it, and populating an evaluation selection stamped with the prior
+`observation_version` raises, asking you to recreate it via
+`insert_selection`.
 
 ```python
 from spyglass.spikesorting.v2.recording import Recording

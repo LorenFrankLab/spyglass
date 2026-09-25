@@ -10,7 +10,12 @@ import all foreign key references. For spike sorting v2, use the
 it includes curation identity, observed-time metrics, and manual exclusions.
 It now also requires recreating every v2 `Recording` row and its artifact,
 because this release changes both the preprocessed traces and the electrode
-geometry stored in the artifact.
+geometry stored in the artifact. It also requires recreating every
+`ConcatenatedRecording` row, repopulating any pre-existing sort whose
+analyzer needs rebuilding, and recreating any evaluation selection stamped
+with the prior observation version, because noise, whitening, and the
+nn-noise cluster are now estimated only from each sort's persisted
+statistics spans.
 
 Spike sorting v2 now keeps analyzer builds private until a successful Sorting
 insert establishes publication ownership. Duplicate workers cannot overwrite
@@ -291,6 +296,48 @@ peak and carried 58× its RMS.
   positioned ones — fails preflight, naming the electrodes and the missing
   `rel_*` columns, rather than clearing preflight and raising at
   `Recording.make`.
+
+#### Spike Sorting v2: noise, whitening, and the nn-noise cluster ignore masked samples
+
+Whitening covariance (MS4/MS5 external whitening and the whitened metric
+analyzer), the analyzer's `noise_levels` extension, the clusterless
+thresholder's MAD threshold, and the `nn_noise_overlap` noise cluster are now
+estimated only from samples inside the sort's **statistics spans**:
+artifact-free frame ranges that never cross a selection-interval join, a
+concatenation member join, or a member-internal timestamp gap. A recording
+with no masking and a single continuous span keeps SpikeInterface's own
+estimators bit-identical to today. The masked-path noise estimator is a
+pooled MAD over the span samples, not SpikeInterface's own average of
+per-chunk MADs.
+
+- **Magnitude, measured on a synthetic 16-channel/60 s benchmark:** at 30%
+  masked, `noise_levels` was biased −48% against the clean target and the
+  whitened valid-sample std was ≈1.32; after this change both are within 1%
+  and ≈1.00. SNR from evaluations computed before this change is biased
+  upward roughly with the masked fraction (measured mean ratio ≈1.14 / 1.72
+  / 1.96 at 5 / 30 / 48% masked on that same benchmark).
+- **Each sort persists its statistics spans** in the sorting NWB's
+  provenance scratch; `Sorting().get_statistics_spans(key)` returns them, and
+  every analyzer rebuild, curation evaluation, merged-curation analyzer, and
+  recompute audit uses them. **A sort populated before this change has no
+  stored spans:** rebuilding or evaluating its analyzer raises, naming the
+  sort and asking you to delete and repopulate it.
+- **`ConcatenatedRecording` gains a `statistics_spans` column (schema
+  change): recreate existing `ConcatenatedRecording` rows.**
+- Units left with zero spikes after excess-spike window trimming are now
+  dropped (`n_units` and the units NWB exclude them; a dropped unit id is
+  logged), instead of persisting an empty-spike-train unit.
+- Artifact detection now raises on a non-finite (NaN/Inf) trace chunk, naming
+  the segment, the chunk's frame range, and the per-channel non-finite
+  count, instead of silently returning "no artifacts".
+- `observed_intervals` now ends each interval at the last recorded sample's
+  timestamp + `1/fs`, not the nominal-rate extrapolation (which dropped
+  samples on a clock running slower than declared); interval sets are
+  validated and normalized as sorted and disjoint. `OBSERVATION_VERSION` is
+  now 2: an evaluation selection stamped with the prior version raises,
+  asking you to recreate it via `insert_selection`.
+- See the [preproduction database upgrade sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database)
+  for the recreation order.
 
 #### Spike Sorting v2 curation identity and review-profile foundation
 
