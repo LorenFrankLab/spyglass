@@ -925,3 +925,90 @@ def test_clusterless_non_mad_paths_ignore_statistics_spans(
         keys = recording.get_property_keys()
         assert "noise_level_mad_raw" not in keys
         assert "noise_level_mad_scaled" not in keys
+
+
+@pytest.mark.medium
+@pytest.mark.usefixtures("dj_conn")
+def test_sorting_wrappers_forward_statistics_spans(
+    clean_ground_truth, monkeypatch, tmp_path
+):
+    """``Sorting``'s dispatch and analyzer wrappers hand the statistics spans
+    to the estimators: the clusterless MAD, the SI sorter's external whitening
+    and the analyzer's noise levels all come from the span samples."""
+    import uuid
+
+    import numpy as np
+    import spikeinterface as si
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        _span_whitening_matrix,
+        cache_span_noise_levels,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._masked_statistics_helpers import masked_twin
+
+    traces, probe, sorting = clean_ground_truth
+    job_kwargs = {"random_seed": 2}
+
+    masked, spans, _ = masked_twin(traces, probe, 0.30)
+    Sorting._run_sorter(
+        "clusterless_thresholder",
+        _clusterless_mad_params(),
+        masked,
+        uuid.uuid4(),
+        job_kwargs=job_kwargs,
+        statistics_spans=spans,
+    )
+    reference, _, _ = masked_twin(traces, probe, 0.30)
+    expected_mad = cache_span_noise_levels(
+        reference, spans, return_in_uV=False, seed=2
+    )
+    assert np.array_equal(
+        masked.get_property("noise_level_mad_raw"), expected_mad
+    )
+
+    received = {}
+
+    def _record_run_sorter(**kwargs):
+        received["recording"] = kwargs["recording"]
+        return _tiny_numpy_sorting()
+
+    monkeypatch.setattr(sis, "run_sorter", _record_run_sorter)
+    Sorting._run_sorter(
+        "mountainsort5",
+        {"whiten": True},
+        masked,
+        uuid.uuid4(),
+        job_kwargs=job_kwargs,
+        statistics_spans=spans,
+    )
+    w, _ = _applied_whitening(received["recording"])
+    assert np.array_equal(
+        w, _span_whitening_matrix(masked, spans, random_seed=2)
+    )
+
+    folder = Sorting._build_analyzer(
+        sorting,
+        masked,
+        {"sorting_id": "wrapper-spans"},
+        sorter_row={"job_kwargs": {}},
+        job_kwargs=job_kwargs,
+        analyzer_folder=tmp_path / "display.analyzer",
+        waveform_params={
+            "ms_before": 1.0,
+            "ms_after": 2.0,
+            "max_spikes_per_unit": 50,
+            "whiten": False,
+        },
+        statistics_spans=spans,
+    )
+    noise_levels = (
+        si.load_sorting_analyzer(folder)
+        .get_extension("noise_levels")
+        .get_data()
+    )
+    assert np.array_equal(
+        noise_levels,
+        cache_span_noise_levels(reference, spans, return_in_uV=True, seed=2),
+    )

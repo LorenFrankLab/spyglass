@@ -2842,6 +2842,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         *,
         job_kwargs=None,
         execution_params=None,
+        statistics_spans=None,
     ):
         """Dispatch sort execution; clusterless_thresholder vs SI sorters.
 
@@ -2850,13 +2851,16 @@ class Sorting(SpyglassMixin, dj.Computed):
         ``execution_params`` does not apply to it. SI sorters get per-sort
         scratch, external whitening, and the tracked container-execution
         backend. The two paths share nothing but the signature; dispatch routes
-        each to its own helper.
+        each to its own helper. ``statistics_spans`` (artifact-free frame
+        spans of ``recording``; ``None`` means the whole recording) reach both:
+        the clusterless MAD and the external whitening estimate from them.
         """
         if sorter == "clusterless_thresholder":
             return Sorting._run_clusterless_thresholder(
                 sorter_params=sorter_params,
                 recording=recording,
                 job_kwargs=job_kwargs,
+                statistics_spans=statistics_spans,
             )
         return Sorting._run_si_sorter(
             sorter=sorter,
@@ -2865,6 +2869,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             sorting_id=sorting_id,
             job_kwargs=job_kwargs,
             execution_params=execution_params,
+            statistics_spans=statistics_spans,
         )
 
     @staticmethod
@@ -2872,6 +2877,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         sorter_params,
         recording,
         job_kwargs,
+        statistics_spans=None,
     ):
         """Run Spyglass's clusterless-thresholder peak-detection path.
 
@@ -2887,6 +2893,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             sorter_params=sorter_params,
             recording=recording,
             job_kwargs=job_kwargs,
+            statistics_spans=statistics_spans,
         )
 
     @staticmethod
@@ -2897,6 +2904,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         sorting_id,
         job_kwargs,
         execution_params=None,
+        statistics_spans=None,
     ):
         """Run an SI registered sorter under a managed scratch dir.
 
@@ -2917,6 +2925,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             sorting_id=sorting_id,
             job_kwargs=job_kwargs,
             execution_params=execution_params,
+            statistics_spans=statistics_spans,
         )
 
     @staticmethod
@@ -2939,6 +2948,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         job_kwargs=None,
         analyzer_folder=None,
         waveform_params=None,
+        statistics_spans=None,
     ):
         """Build the binary-folder SortingAnalyzer + base extensions.
 
@@ -2960,6 +2970,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             job_kwargs=job_kwargs,
             analyzer_folder=analyzer_folder,
             waveform_params=waveform_params,
+            statistics_spans=statistics_spans,
         )
 
     @staticmethod
