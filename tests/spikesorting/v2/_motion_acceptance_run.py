@@ -128,6 +128,8 @@ def _generate(manifest, scenario_name: str, seed: int, *, noise_free: bool):
     gen = manifest.generator
     probe = manifest.probe
     duration = gen.duration_s
+    if getattr(spec, "windows_s", None) is not None:
+        duration = float(spec.windows_s[-1][1])
     kwargs = dict(
         num_units=gen.num_units,
         sampling_frequency=gen.sampling_frequency,
@@ -140,8 +142,6 @@ def _generate(manifest, scenario_name: str, seed: int, *, noise_free: bool):
         seed=seed,
     )
     if spec.kind == "step":
-        if spec.windows_s is not None:
-            duration = float(spec.windows_s[-1][1])
         kwargs["displacement_data"] = _step_displacement_data(
             duration,
             spec.change_times_s,
@@ -236,7 +236,8 @@ def build_scenario(
         windows_frames = [
             (int(round(a * fs)), int(round(b * fs))) for a, b in windows
         ]
-        members = spec.members or [list(range(len(windows)))]
+        spec_members = getattr(spec, "members", None)
+        members = spec_members or [list(range(len(windows)))]
 
         def _join(recording):
             filtered = _filter(recording)
@@ -265,7 +266,7 @@ def build_scenario(
 
         member_recordings = _join(drifting)
         static_members = _join(static)
-        if spec.members is None:
+        if spec_members is None:
             joined, joined_static = member_recordings[0], static_members[0]
             continuity = continuity_from_timestamps(joined)
         else:

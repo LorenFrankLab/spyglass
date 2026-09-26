@@ -107,10 +107,25 @@ class ArtifactSpec(_Model):
 
 class StaticScenario(_Model):
     """No motion: the static twin of a rigid zigzag generated with
-    ``amplitude_um`` (so it shares the drifting cases' units and spikes)."""
+    ``amplitude_um`` (so it shares the drifting cases' units and spikes).
+
+    With ``windows_s`` a static twin lasting until the last window's end is
+    generated, bandpassed whole, and only the windows are kept, as for a
+    windowed step scenario: one recording whose acquisition gaps are the
+    removed time. SpikeInterface's static twin does not depend on the
+    displacement, so it equals the static twin of a step scenario with the
+    same windows and seed.
+    """
 
     kind: Literal["static"]
     amplitude_um: float = Field(gt=0)
+    windows_s: list[tuple[float, float]] | None = None
+
+    @model_validator(mode="after")
+    def _windows(self):
+        if self.windows_s is not None:
+            _check_windows(self.windows_s)
+        return self
 
 
 class ZigzagScenario(_Model):

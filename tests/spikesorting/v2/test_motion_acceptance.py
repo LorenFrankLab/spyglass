@@ -199,6 +199,10 @@ def _with(path: list, value) -> dict:
             "must be rigid",
         ),
         (
+            _with(["scenarios", "none", "windows_s"], [[5.0, 9.0], [0.0, 2.0]]),
+            "sorted, disjoint",
+        ),
+        (
             _with(
                 ["recipes", "dredge", "estimation"],
                 {"preset": "dredge", "max_gap_s": 30.0, "noise_levels_seed": 3},
@@ -232,6 +236,54 @@ def _with(path: list, value) -> dict:
 def test_invalid_manifest_is_rejected(data, match):
     with pytest.raises(ValueError, match=match):
         AcceptanceManifest.model_validate(data)
+
+
+def test_windowed_static_twin_is_the_step_scenarios_static_twin():
+    """A static scenario cut to windows is one recording with an acquisition
+    gap whose traces are the static twin of a step scenario with the same
+    windows and seed, and whose ground truth has no displacement."""
+    import numpy as np
+
+    from tests.spikesorting.v2._motion_acceptance_run import build_scenario
+
+    windows = [[0.0, 2.0], [5.0, 7.0]]
+    data = _dev_dict()
+    data["generator"]["duration_s"] = 3.0
+    data["scenarios"] = {
+        "none_gap": {
+            "kind": "static",
+            "amplitude_um": 25.0,
+            "windows_s": windows,
+        },
+        "gap_step": {
+            "kind": "step",
+            "change_times_s": [3.5],
+            "levels_um": [-15, 15],
+            "windows_s": windows,
+        },
+    }
+    data["cases"] = [
+        {"scenario": "none_gap", "recipes": ["off"]},
+        {"scenario": "gap_step", "recipes": ["off"]},
+    ]
+    manifest = AcceptanceManifest.model_validate(data)
+
+    static = build_scenario(manifest, "none_gap", 0, noise_free=False)
+    step = build_scenario(manifest, "gap_step", 0, noise_free=False)
+
+    fs = manifest.generator.sampling_frequency
+    assert static.recording.get_num_samples() == int(4.0 * fs)
+    assert static.continuity.spans == step.continuity.spans
+    assert len(static.continuity.spans) == 2
+    assert not np.any(static.displacement)
+    assert np.ptp(step.displacement) == 30.0
+    traces = static.recording.get_traces()
+    np.testing.assert_array_equal(traces, static.static.get_traces())
+    np.testing.assert_array_equal(traces, step.static.get_traces())
+    assert not np.array_equal(traces, step.recording.get_traces())
+    np.testing.assert_array_equal(
+        static.gt_sorting.to_spike_vector(), step.gt_sorting.to_spike_vector()
+    )
 
 
 def test_manifest_iterates_cases_seed_major():
