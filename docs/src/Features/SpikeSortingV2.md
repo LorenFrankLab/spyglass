@@ -1505,8 +1505,11 @@ summary = run_v2_pipeline(
 )
 print(summary["motion_estimate_id"], summary["motion_estimation_preset"])
 
-# Apply it: sort the motion-corrected recording. Works the same way on a
-# concat run (concat_session_group_owner / concat_session_group_name).
+# Apply it: sort the motion-corrected recording. The same source, mask and
+# recipe resolve to the same motion_estimate_id, so this reuses the estimate
+# saved above instead of computing a new one (a different recipe would select
+# a different estimate). Works the same way on a concat run
+# (concat_session_group_owner / concat_session_group_name).
 summary = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
     sort_group_id=sort_group_id,
@@ -1514,7 +1517,7 @@ summary = run_v2_pipeline(
     team_name="my_team",
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
     motion_mode="apply",
-    motion_correction_params_name="dredge_v1",
+    motion_correction_params_name="dredge_fast_v1",
 )
 print(
     summary["motion_corrected_recording_id"],
