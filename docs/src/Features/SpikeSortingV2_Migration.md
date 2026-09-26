@@ -235,8 +235,12 @@ were never reduced to one plane, and mint the concatenations again through
 `ConcatenatedRecordingSelection.insert_selection`: a selection freezes its
 members' `content_hash` values, so reusing one after the members are recreated
 raises `ConcatMemberDriftError`. Deleting a `Recording` cascades to the
-sortings and curations built on it, so preview the cascade and budget for
-re-running the pipeline on every selection you keep.
+sortings and curations built on it, and to any `MotionEstimate` /
+`MotionCorrectedRecording` estimated or applied on it (and their files) --
+including a `motion_mode="estimate"`-only run, which has no sort or curation
+of its own to make the loss visible -- so preview the cascade and budget for
+re-running the pipeline, and the motion stage if you use it, on every
+selection you keep.
 
 This same recreation is also what gives every sort correct, artifact-aware
 noise and whitening: a fresh `Sorting.populate()` computes and persists the

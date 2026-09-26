@@ -133,8 +133,11 @@ probe.**
   is no longer part of the concat identity. `alter()` cannot remove the
   foreign key, and `drop()` refuses to drop a part table alone. On an
   existing preproduction database, delete the concat selections, which
-  cascades to their sorts and curations. Then drop the emptied tables
-  leaves-first:
+  cascades to their sorts and curations -- and to any `MotionEstimate` /
+  `MotionCorrectedRecording` rows (and their files) estimated or applied on
+  those concats, including a `motion_mode="estimate"`-only run, which has no
+  sort or curation of its own to make the loss visible. Then drop the
+  emptied tables leaves-first:
 
   ```python
   import datajoint as dj
