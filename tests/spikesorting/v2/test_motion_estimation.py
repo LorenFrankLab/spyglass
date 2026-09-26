@@ -378,6 +378,97 @@ def test_unmasked_single_span_estimate_equals_compute_motion(preset):
     )
 
 
+@pytest.mark.parametrize("preset", ["rigid_fast", "dredge", "dredge_fast"])
+def test_written_out_defaults_equal_the_bare_preset(preset):
+    """``compute_motion(rec, preset=p)`` with no step kwargs at all (only the
+    same pre-seeded noise) gives the estimator's result: the resolved
+    configuration spells out exactly SpikeInterface's implicit defaults."""
+    import spikeinterface as si
+    import spikeinterface.preprocessing as sip
+
+    from tests.spikesorting.v2._motion_fixtures import (
+        JOB_KWARGS,
+        rigid_drift_recordings,
+    )
+
+    ours_rec, _, _ = rigid_drift_recordings(seed=0, duration_s=20.0)
+    motion, _ = _estimate(ours_rec, preset=preset)
+
+    oracle_rec, _, _ = rigid_drift_recordings(seed=0, duration_s=20.0)
+    si.get_noise_levels(
+        oracle_rec,
+        return_in_uV=False,
+        random_slices_kwargs={
+            "method": "full_random",
+            "num_chunks_per_segment": 20,
+            "chunk_duration": "500ms",
+            "seed": 0,
+        },
+        n_jobs=1,
+    )
+    oracle = sip.compute_motion(oracle_rec, preset=preset, **JOB_KWARGS)
+
+    np.testing.assert_array_equal(
+        motion.displacement[0], oracle.displacement[0]
+    )
+    np.testing.assert_array_equal(
+        motion.temporal_bins_s[0], oracle.temporal_bins_s[0]
+    )
+    np.testing.assert_array_equal(
+        motion.spatial_bins_um, oracle.spatial_bins_um
+    )
+
+
+def test_masked_noise_levels_come_from_the_statistics_spans():
+    """With masked frames the detection noise is the span MAD (the analyzer's
+    estimate), not SpikeInterface's random-chunk estimate, which averages in
+    the masked zeros and comes out lower."""
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        silence_frame_ranges,
+        statistics_spans,
+    )
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        cache_span_noise_levels,
+    )
+    from tests.spikesorting.v2._motion_fixtures import rigid_drift_recordings
+
+    def _masked():
+        recording, _, _ = rigid_drift_recordings(seed=0, duration_s=20.0)
+        fs = recording.get_sampling_frequency()
+        ranges = [(0, int(4 * fs)), (int(10 * fs), int(14 * fs))]
+        n = recording.get_num_samples()
+        return (
+            silence_frame_ranges(recording, ranges),
+            statistics_spans(n, ranges, [(0, n)]),
+        )
+
+    recording, spans = _masked()
+    _, diagnostics = _estimate(recording, spans=spans)
+
+    span_rec, _ = _masked()
+    span_mad = cache_span_noise_levels(
+        span_rec, spans, return_in_uV=False, seed=0, method="mad"
+    )
+    si_rec, _ = _masked()
+    contaminated = si.get_noise_levels(
+        si_rec,
+        return_in_uV=False,
+        method="mad",
+        random_slices_kwargs={
+            "method": "full_random",
+            "num_chunks_per_segment": 20,
+            "chunk_duration": "500ms",
+            "seed": 0,
+        },
+        n_jobs=1,
+    )
+
+    np.testing.assert_array_equal(diagnostics.noise_levels, span_mad)
+    assert np.mean(contaminated) < np.mean(diagnostics.noise_levels)
+
+
 def test_repeated_estimates_are_bit_identical():
     from tests.spikesorting.v2._motion_fixtures import rigid_drift_recordings
 
