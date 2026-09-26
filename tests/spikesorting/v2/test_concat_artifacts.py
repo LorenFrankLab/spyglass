@@ -123,6 +123,29 @@ def test_members_with_different_offsets_are_refused_before_conversion():
         mask_member_recordings([first, other_offset], [None, None])
 
 
+def test_members_with_nearly_equal_offsets_are_converted_together():
+    """Offsets 0 and 1e-9 pass the members' compatibility check (``allclose``)
+    but only the second is nonzero. Every member is then converted to
+    microvolts, so the concatenation never mixes dtypes."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        build_concatenated_recording,
+        mask_member_recordings,
+    )
+
+    first = _offset_member(10.0, offset=0.0)
+    second = _offset_member(100.0, offset=1e-9)
+    valid = [np.array([[10.0, 10.0995], [10.2, 10.999]]), None]
+    masked, ranges = mask_member_recordings([first, second], valid)
+
+    assert [m.get_dtype() for m in masked] == [np.dtype("float32")] * 2
+    concatenated = build_concatenated_recording(masked)
+    stored = concatenated.get_traces()
+    np.testing.assert_array_equal(stored[100:200], 0.0)
+    np.testing.assert_array_equal(
+        stored[1000:], second.get_traces(return_in_uV=True)
+    )
+
+
 @pytest.mark.parametrize(
     "dtype, gain", [("float32", 1.0), ("float64", 0.25)], ids=["uv", "counts"]
 )
