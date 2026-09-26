@@ -176,3 +176,46 @@ def test_drift_estimate_get_motion_round_trips(drift_recording_key):
     # The rehydrated displacement is finite (a usable QC object, not a stub).
     flat = np.concatenate([np.asarray(d).ravel() for d in motion.displacement])
     assert np.all(np.isfinite(flat))
+
+
+def test_drift_estimate_survives_peaks_sharing_a_frame(
+    dj_conn, tmp_path, monkeypatch
+):
+    """Two peaks on one frame over an HDF5-backed time vector (as the v2 NWB
+    reader returns it) used to fail inside DREDge's fancy-indexed time lookup
+    (``dredge.py:227``). The estimate now completes and stays on the
+    recording's real clock: its bins span the 30 s acquisition gap uncapped.
+    """
+    from spikeinterface.preprocessing.motion import motion_options_preset
+    from spikeinterface.sortingcomponents.peak_detection import detect_peaks
+
+    from spyglass.spikesorting.v2.recording import DriftEstimate, Recording
+    from tests.spikesorting.v2._motion_fixtures import (
+        hdf5_timed_recording_with_shared_peak_frame,
+    )
+
+    recording, timestamps = hdf5_timed_recording_with_shared_peak_frame(
+        tmp_path / "timestamps.h5", gap_s=30.0
+    )
+    detect = dict(motion_options_preset["dredge_fast"]["detect_kwargs"])
+    peaks = detect_peaks(
+        recording,
+        method=detect.pop("method"),
+        method_kwargs=detect,
+        job_kwargs={"n_jobs": 1, "progress_bar": False},
+    )
+    frames, counts = np.unique(peaks["sample_index"], return_counts=True)
+    shared = frames[counts > 1]
+    assert shared.size, "fixture must put two peaks on one frame"
+    with pytest.raises(TypeError, match="increasing order"):
+        recording.sample_index_to_time(np.repeat(shared[:1], 2))
+    monkeypatch.setattr(Recording, "get_recording", lambda self, key: recording)
+
+    computed = DriftEstimate().make_compute({}, "dredge_fast")
+
+    centers = computed.motion["temporal_bins_s"][0]
+    assert centers[0] == pytest.approx(timestamps[0] + 0.5)
+    assert centers[-1] > timestamps[-1] - 1.0
+    # 1 s + 30 s gap + 1 s at 1 s bins: the gap is kept at its real length.
+    assert computed.n_temporal_bins == 32
+    assert np.isfinite(computed.max_abs_displacement_um)

@@ -453,3 +453,56 @@ def write_drifting_polymer_nwb(
     with pynwb.NWBHDF5IO(str(out_path), mode="w") as io:
         io.write(nwbfile)
     return out_path
+
+
+def hdf5_timed_recording_with_shared_peak_frame(h5_path, *, gap_s: float):
+    """A 2 s, 32-contact recording whose two spikes share one frame.
+
+    Gaussian noise with a -60 unit spike every 50 ms on one contact; the
+    first spike fires on contacts 0 and 31 (806 um apart, far outside any
+    detection radius) at the same frame, so peak detection returns two peaks
+    with one ``sample_index``. The time vector is left as an open HDF5
+    dataset, as the v2 NWB reader leaves it: 1 s at ``100 s``, then
+    ``gap_s`` of no samples, then 1 s more.
+
+    Returns
+    -------
+    recording : si.BaseRecording
+    timestamps : numpy.ndarray
+        ``(n_samples,)`` the timestamps written to ``h5_path``.
+    """
+    import h5py
+    from spikeinterface.core import NumpyRecording
+
+    n_samples, n_channels = int(2 * SAMPLING_FREQUENCY), N_CONTACTS
+    traces = (
+        np.random.default_rng(0)
+        .normal(size=(n_samples, n_channels))
+        .astype("float32")
+    )
+    waveform = -60.0 * np.exp(-0.5 * (np.arange(-15, 16) / 4.0) ** 2)
+    frames = np.arange(3000, n_samples - 3000, 1500)
+    for i, frame in enumerate(frames):
+        for channel in (0, n_channels - 1) if i == 0 else (i % n_channels,):
+            traces[frame - 15 : frame + 16, channel] += waveform
+    recording = NumpyRecording([traces], SAMPLING_FREQUENCY)
+    recording.set_channel_locations(
+        np.column_stack(
+            [np.zeros(n_channels), -PITCH_UM * np.arange(n_channels)]
+        )
+    )
+    half = n_samples // 2
+    timestamps = (
+        100.0
+        + np.r_[
+            np.arange(half),
+            np.arange(half, n_samples) + gap_s * SAMPLING_FREQUENCY,
+        ]
+        / SAMPLING_FREQUENCY
+    )
+    with h5py.File(h5_path, "w") as h5:
+        h5.create_dataset("timestamps", data=timestamps)
+    recording._recording_segments[0].time_vector = h5py.File(h5_path, "r")[
+        "timestamps"
+    ]
+    return recording, timestamps
