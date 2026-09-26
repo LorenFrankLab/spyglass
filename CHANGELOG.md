@@ -240,7 +240,11 @@ available.
 - The estimate uses only valid samples: noise levels come from the
   artifact-free statistics spans, and peaks whose localization window touches
   a masked sample, or whose detection window (`exclude_sweep_ms` plus one
-  frame) crosses an acquisition gap or member join, are dropped.
+  frame) crosses an acquisition gap or member join, are dropped. Noise,
+  detection and localization read float32 microvolts: a source that is not
+  already float microvolts (gain 1, offset 0), such as an integer `no_filter`
+  recording with an offset, is scaled first and its masked samples are
+  silenced after scaling (0 µV).
 - Recordings with acquisition gaps and multi-member concatenations are
   estimated once, on an estimation clock: each uninterrupted span keeps its
   own timing, and the gap between spans (measured on the real timestamps)
