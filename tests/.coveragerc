@@ -13,9 +13,9 @@ omit =
     # */lfp/*
     # */linearization/*
     */lock/*
-    */mua/*
+    # */mua/*
     */position/* # gh-action differs from local run
-    */ripple/*
+    # */ripple/*
     */sharing/*
     # */spikesorting/*
     # */utils/*
