@@ -344,6 +344,70 @@ def test_motion_geometry_eligibility_from_registered_contacts(case, match):
         assert match in problem
 
 
+def _catalog_motion_recipe(interpolation_name="kriging_force_extrapolate_v1"):
+    """A ``MotionRecipe`` built from the shipped rows, without the DB."""
+    from spyglass.spikesorting.v2._pipeline_preflight import MotionRecipe
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        motion_estimation_default_contents,
+        motion_interpolation_default_contents,
+    )
+
+    (estimation,) = [
+        row[1]
+        for row in motion_estimation_default_contents()
+        if row[0] == "dredge_fast_v1"
+    ]
+    (interpolation,) = [
+        row[1]
+        for row in motion_interpolation_default_contents()
+        if row[0] == interpolation_name
+    ]
+    return MotionRecipe(
+        recipe={
+            "motion_correction_params_name": "dredge_fast_v1",
+            "motion_estimation_params_name": "dredge_fast_v1",
+            "motion_interpolation_params_name": interpolation_name,
+        },
+        estimation_params=estimation,
+        interpolation_params=interpolation,
+        resolved_estimation=_resolved_motion_recipe("dredge_fast_v1"),
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("concat", [False, True])
+def test_motion_setup_states_mode_recipe_preset_border_and_status(concat):
+    """The scientific setup names the selected motion mode, recipe, resolved
+    estimation preset, applied border mode and experimental status, in both
+    run shapes; ``off`` says the sort reads the uncorrected source."""
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        MOTION_RECIPE_STATUS,
+        _describe_motion,
+    )
+
+    off = _describe_motion("off", None, concat=concat)
+    assert off["mode"] == "off"
+    assert "uncorrected" in off["description"]
+    assert "not yet available" not in off["description"]
+
+    recipe = _catalog_motion_recipe("kriging_remove_channels_v1")
+    estimate = _describe_motion("estimate", recipe, concat=concat)
+    assert estimate["mode"] == "estimate"
+    assert estimate["recipe"] == "dredge_fast_v1"
+    assert estimate["estimation_preset"] == "dredge_fast"
+    assert estimate["status"] == MOTION_RECIPE_STATUS
+    assert "border_mode" not in estimate
+    assert "same sort as 'off'" in estimate["description"]
+
+    applied = _describe_motion("apply", recipe, concat=concat)
+    assert applied["border_mode"] == "remove_channels"
+    assert applied["interpolation_recipe"] == "kriging_remove_channels_v1"
+    assert applied["estimation_preset"] == "dredge_fast"
+    assert "motion-corrected recording" in applied["description"]
+    source = "concatenation" if concat else "recording under its mask"
+    assert source in applied["description"]
+
+
 # ---------------------------------------------------------------------------
 # database tier — fixtures
 # ---------------------------------------------------------------------------
@@ -1586,7 +1650,11 @@ def test_scientific_setup_uses_execution_rows(preflight_inputs):
         no_mask, [group], {"si_sorter_params": {"nblocks": 0}}
     )
     assert setup["artifact_detection"] is None
-    assert setup["motion"]["nblocks"] == 0
+    assert setup["motion"]["mode"] == "off"
+    assert setup["motion"]["sorter_correction"] == {
+        "sorter": "kilosort4",
+        "nblocks": 0,
+    }
     assert "artifact_application" not in setup
 
 
@@ -1609,4 +1677,5 @@ def test_concat_scientific_setup_reports_explicit_no_mask(
     }
     setup = describe_scientific_setup(bundle, [group], concat=True)
     assert setup["artifact_application"] == "No artifact masking selected."
-    assert setup["motion"].startswith("No motion correction is applied")
+    assert setup["motion"]["mode"] == "off"
+    assert "not yet available" not in str(setup["motion"])

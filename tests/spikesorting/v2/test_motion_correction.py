@@ -2117,6 +2117,7 @@ def test_pipeline_motion_modes_on_one_recording(drift_recording):
         assert not {"motion_estimate", "motion_corrected_recording"} & set(
             off["stage_seconds"]
         )
+        assert off["scientific_config"]["motion"]["mode"] == "off"
 
         estimate = run_v2_pipeline(**inputs, motion_mode="estimate", **motion)
         # Same sort as off: the id, and the stage is a reuse.
@@ -2155,6 +2156,10 @@ def test_pipeline_motion_modes_on_one_recording(drift_recording):
         assert estimate["motion_corrected_recording_id"] is None
         assert estimate["motion_removed_channel_ids"] is None
         assert estimate["motion_estimate_status"] == "computed"
+        assert estimate["scientific_config"]["motion"]["mode"] == "estimate"
+        assert estimate["scientific_config"]["motion"]["recipe"] == (
+            MOTION_RECIPE
+        )
         assert "motion_corrected_recording" not in estimate["stage_seconds"]
 
         applied = run_v2_pipeline(**inputs, motion_mode="apply", **motion)
@@ -2180,6 +2185,12 @@ def test_pipeline_motion_modes_on_one_recording(drift_recording):
         assert applied["motion_removed_channel_ids"] == []
         assert list(corrected_row["removed_channel_ids"]) == []
         assert applied["motion_estimation_preset"] == "dredge_fast"
+        setup = applied["scientific_config"]["motion"]
+        assert (setup["mode"], setup["estimation_preset"]) == (
+            "apply",
+            "dredge_fast",
+        )
+        assert setup["border_mode"] == "force_extrapolate"
 
         rerun = run_v2_pipeline(**inputs, motion_mode="apply", **motion)
         for field in (
@@ -2247,6 +2258,9 @@ def test_pipeline_motion_apply_on_a_concatenation(discontinuous_sources):
         assert summary["motion_removed_channel_ids"] == []
         assert summary["motion_estimate_status"] == "computed"
         assert set(summary["member_merge_ids"]) == {0, 1}
+        setup = summary["scientific_config"]["motion"]
+        assert (setup["mode"], setup["recipe"]) == ("apply", MOTION_RECIPE)
+        assert "concatenation" in setup["description"]
     finally:
         if summary is not None:
             _drop_pipeline_sorts([summary["sorting_id"]])

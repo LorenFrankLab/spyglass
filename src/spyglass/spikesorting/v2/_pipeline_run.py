@@ -658,7 +658,7 @@ def run_v2_pipeline(
     motion_recipe = (
         None
         if motion_mode == "off"
-        else resolve_motion_recipe(motion_correction_params_name).recipe
+        else resolve_motion_recipe(motion_correction_params_name)
     )
     # Capture what the sort stage executes ONCE, up front, from the same
     # resolver the dispatcher uses (``resolve_sort_config``): the receipt then
@@ -677,6 +677,8 @@ def run_v2_pipeline(
             [{"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}],
             run_summary["sorter_config"],
             manual_excluded_times=manual_excluded_times,
+            motion_mode=motion_mode,
+            motion_recipe=motion_recipe,
         )
     stage_seconds: dict[str, float] = {}
     # Point the run summary at the live stage_seconds dict NOW (not only at the
@@ -739,7 +741,7 @@ def run_v2_pipeline(
         estimate_key = MotionEstimateSelection.insert_selection(
             {
                 **source,
-                "motion_estimation_params_name": motion_recipe[
+                "motion_estimation_params_name": motion_recipe.recipe[
                     "motion_estimation_params_name"
                 ],
             }
@@ -764,7 +766,7 @@ def run_v2_pipeline(
         corrected_key = MotionCorrectedRecordingSelection.insert_selection(
             {
                 "motion_estimate_id": estimate_key["motion_estimate_id"],
-                "motion_interpolation_params_name": motion_recipe[
+                "motion_interpolation_params_name": motion_recipe.recipe[
                     "motion_interpolation_params_name"
                 ],
             }
@@ -903,6 +905,8 @@ def run_v2_pipeline(
             run_summary["sorter_config"],
             manual_excluded_times=manual_excluded_times,
             concat=True,
+            motion_mode=motion_mode,
+            motion_recipe=motion_recipe,
         )
         member_recording_keys = [
             RecordingSelection.insert_selection(
