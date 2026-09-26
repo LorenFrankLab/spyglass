@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import subprocess
 from pathlib import Path
 from typing import Annotated, Literal, NamedTuple, Union
 
@@ -518,6 +519,62 @@ def load_manifest(path) -> AcceptanceManifest:
 def manifest_sha256(path) -> str:
     """SHA-256 of a manifest file's bytes (recorded in every case result)."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+#: Test-helper files whose code produces a case result (with ``src`` at the
+#: recorded commit); their SHA-256 is part of every result's reuse key.
+HARNESS_FILES = (
+    "_motion_acceptance.py",
+    "_motion_acceptance_run.py",
+    "_motion_fixtures.py",
+)
+
+
+def harness_fingerprint() -> dict:
+    """The code a case result is produced with.
+
+    Returns
+    -------
+    dict
+        ``git_commit``: the checkout's ``HEAD`` (``None`` outside a git
+        checkout); ``files``: SHA-256 of each of :data:`HARNESS_FILES` as on
+        disk, so uncommitted edits to the harness change it too. Uncommitted
+        edits under ``src`` are not covered.
+    """
+    here = Path(__file__).parent
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=here,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        commit = None
+    return {
+        "git_commit": commit,
+        "files": {
+            name: hashlib.sha256((here / name).read_bytes()).hexdigest()
+            for name in HARNESS_FILES
+        },
+    }
+
+
+def result_is_reusable(
+    result: dict, *, manifest_sha: str, fingerprint: dict
+) -> bool:
+    """Whether a stored case result may stand in for a rerun.
+
+    Only when it was produced from the same manifest bytes, at the same
+    commit, with the same harness files (:func:`harness_fingerprint`); never
+    when the commit is unknown.
+    """
+    return (
+        fingerprint.get("git_commit") is not None
+        and result.get("manifest_sha256") == manifest_sha
+        and result.get("harness") == fingerprint
+    )
 
 
 def case_tag(scenario: str, seed: int, recipe: str) -> str:

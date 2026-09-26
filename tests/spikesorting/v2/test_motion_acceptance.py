@@ -10,7 +10,8 @@ the representative polymer-fixture run are opt-in:
   development manifest, seeds 0-2, no gates).
 - ``SPYGLASS_V2_MOTION_BENCHMARK_OUT`` names the result directory (default: a
   pytest temporary directory). A result already there that was produced
-  from the same manifest bytes is reused, so an interrupted run resumes.
+  from the same manifest bytes, at the same commit and with the same harness
+  files is reused, so an interrupted run resumes.
 
 A development manifest carries no gates, so its benchmark run asserts only
 structural facts and writes the metric evidence; a held-out manifest's gates
@@ -37,9 +38,11 @@ from tests.spikesorting.v2._motion_acceptance import (
     case_tag,
     check_gates,
     check_manifest_gates,
+    harness_fingerprint,
     load_manifest,
     manifest_sha256,
     pooled_residual,
+    result_is_reusable,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -561,6 +564,54 @@ def test_case_metrics_reads_a_case_result():
     assert pooled_residual(row) == pytest.approx(math.sqrt(0.3 / 3.0))
 
 
+def test_harness_fingerprint_names_the_commit_and_harness_files():
+    import hashlib
+
+    from tests.spikesorting.v2._motion_acceptance import HARNESS_FILES
+
+    fingerprint = harness_fingerprint()
+    here = Path(__file__).parent
+
+    assert fingerprint["git_commit"] == (
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=here,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    )
+    assert fingerprint["files"] == {
+        name: hashlib.sha256((here / name).read_bytes()).hexdigest()
+        for name in HARNESS_FILES
+    }
+
+
+def test_result_reuse_needs_same_manifest_commit_and_harness():
+    fingerprint = {"git_commit": "abc", "files": {"a.py": "1", "b.py": "2"}}
+    result = {"manifest_sha256": "m", "harness": fingerprint}
+
+    def reusable(result, fingerprint=fingerprint):
+        return result_is_reusable(
+            result, manifest_sha="m", fingerprint=fingerprint
+        )
+
+    assert reusable(result)
+    assert not reusable({**result, "manifest_sha256": "other"})
+    assert not reusable({"manifest_sha256": "m"})
+    assert not reusable(
+        {**result, "harness": {**fingerprint, "git_commit": "def"}}
+    )
+    assert not reusable(
+        {
+            **result,
+            "harness": {**fingerprint, "files": {"a.py": "1", "b.py": "3"}},
+        }
+    )
+    unknown = {**fingerprint, "git_commit": None}
+    assert not reusable({**result, "harness": unknown}, unknown)
+
+
 # ---- opt-in benchmark -------------------------------------------------------
 
 
@@ -603,7 +654,10 @@ def _result(out: Path, case, sha: str) -> dict | None:
     if not path.exists():
         return None
     result = json.loads(path.read_text())
-    return result if result.get("manifest_sha256") == sha else None
+    reusable = result_is_reusable(
+        result, manifest_sha=sha, fingerprint=harness_fingerprint()
+    )
+    return result if reusable else None
 
 
 @pytest.mark.parametrize("case", _benchmark_params())

@@ -565,6 +565,7 @@ def run_case(
     from tests.spikesorting.v2._motion_acceptance import (
         HELD_OUT_SEED_MIN,
         case_tag,
+        harness_fingerprint,
         manifest_sha256,
     )
 
@@ -607,6 +608,7 @@ def run_case(
         recipe=recipe,
         manifest=manifest.name,
         manifest_sha256=manifest_sha256(manifest_path),
+        harness=harness_fingerprint(),
         spikeinterface_version=si.__version__,
         n_samples=int(n_samples),
         continuity_spans=[list(s) for s in continuity.spans],
