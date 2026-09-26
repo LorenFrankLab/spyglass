@@ -122,7 +122,10 @@ also failed the corrected-trace residual limit, 0.0057 and 0.0054 vs 0.005;
 one seed over the rigid / concatenation-member / masked-drift motion-error
 limits; and nonrigid sorting checks). Both passed every border, cost, sign,
 mean-gain and no-motion sorting check, and the fidelity checks against the
-oracle-motion correction and against the uncorrected recording. All
+oracle-motion correction and against the uncorrected recording. The
+estimator's gap/join peak filter and its microvolt calibration postdate that
+run, so its results do not validate the current estimator on discontinuous
+inputs or on sources that are not unit-calibrated float microvolts. All
 recipes remain experimental; no real lab polymer recording with drift was
 available.
 

@@ -1719,7 +1719,13 @@ with MountainSort5:
 These verdicts come from the harness version pinned in that manifest. A later
 harness fix (the uncorrected fidelity baseline is now measured on the
 corrected recording's output channels) changes results only for recipes that
-remove channels, which no gate covered.
+remove channels, which no gate covered. The estimator has also changed since
+the run: it now drops peaks whose detection window crosses an acquisition gap
+or concatenation member join, and it now estimates on microvolts (a source
+that is not float microvolts with gain 1 and offset 0 used to be estimated on
+its raw values). The benchmark's results therefore do not validate the
+current estimator on discontinuous inputs (acquisition gaps, concatenations)
+or on sources that are not unit-calibrated float microvolts.
 
 No real lab polymer recording with drift was available to test on.
 
