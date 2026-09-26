@@ -117,9 +117,12 @@ single-column polymer shank, seeds 1000-1004, MountainSort5;
 `tests/spikesorting/v2/motion_acceptance_held_out.json`) **failed** its gates
 for both shipped recipes: `dredge_fast` failed 3 checks, all on nonrigid drift
 (oracle gap and false positives); `dredge` failed 19 (spurious displacement on
-static recordings, one seed over the rigid / concatenation-member /
-masked-drift motion-error limits, and nonrigid sorting checks). Both passed
-every border, cost, sign, fidelity, mean-gain and no-motion sorting check. All
+static recordings, which on two static recordings across an acquisition gap
+also failed the corrected-trace residual limit, 0.0057 and 0.0054 vs 0.005;
+one seed over the rigid / concatenation-member / masked-drift motion-error
+limits; and nonrigid sorting checks). Both passed every border, cost, sign,
+mean-gain and no-motion sorting check, and the fidelity checks against the
+oracle-motion correction and against the uncorrected recording. All
 recipes remain experimental; no real lab polymer recording with drift was
 available.
 

@@ -1695,11 +1695,14 @@ with MountainSort5:
 - `dredge_fast` failed 3 checks, all on nonrigid drift (sorting accuracy too
   far below the oracle-motion correction, and too many false-positive units).
 - `dredge` failed 19: it reported spurious displacement on static (no-motion)
-  recordings, one seed exceeded the motion-error limits on the rigid,
-  concatenation-member and masked-drift scenarios, and it failed nonrigid
-  sorting checks.
-- Both passed every border, cost, sign, fidelity, mean-gain and no-motion
-  sorting check.
+  recordings, and on two static recordings across an acquisition gap that
+  displacement also pushed the corrected-trace residual over its limit
+  (0.0057 and 0.0054 vs 0.005); one seed exceeded the motion-error limits on
+  the rigid, concatenation-member and masked-drift scenarios, and it failed
+  nonrigid sorting checks.
+- Both passed every border, cost, sign, mean-gain and no-motion sorting check,
+  and the fidelity checks against the oracle-motion correction and against the
+  uncorrected recording.
 
 No real lab polymer recording with drift was available to test on.
 
