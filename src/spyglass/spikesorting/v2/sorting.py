@@ -5,6 +5,9 @@ Tables:
     SortingSelection          -- Source-polymorphic sorting request.
         .RecordingSource          -- single-session source.
         .ConcatenatedRecordingSource -- concat source (same-day chronic).
+        .ArtifactDetectionSource  -- optional artifact mask (single source).
+        .MotionCorrectionSource   -- optional motion-corrected recording of
+                                     the source, sorted in its place.
     Sorting (+ Unit)          -- Sorted units NWB + SortingAnalyzer folder.
 
 ``SorterParameters.insert1`` dispatches to the per-sorter Pydantic
@@ -68,7 +71,9 @@ from spyglass.spikesorting.v2._source_resolution import (
     EffectiveSource,
     EffectiveTraces,
     SourceLineage,
+    correction_lineage_mismatch,
     effective_source_from_base,
+    effective_source_from_correction,
     load_effective_recording,
 )
 from spyglass.spikesorting.v2._units_nwb import (
@@ -85,6 +90,10 @@ from spyglass.spikesorting.v2._units_nwb import (
 )
 from spyglass.spikesorting.v2.artifact_output import (
     ArtifactDetectionOutput,
+)
+from spyglass.spikesorting.v2.motion import (
+    MotionCorrectedRecording,
+    MotionCorrectedRecordingSelection,
 )
 from spyglass.spikesorting.v2.recording import Recording  # noqa: F401
 from spyglass.spikesorting.v2.session_group import (
@@ -111,13 +120,11 @@ if TYPE_CHECKING:
 
     from spyglass.spikesorting.v2._analyzer_cache import StagedAnalyzer
 
-#: The table owning each base effective-traces kind's cached NWB artifact.
-#: ``ensure_effective_traces`` imports ``MotionCorrectedRecording`` for the
-#: ``"motion_corrected_recording"`` kind on demand, so importing this module
-#: does not declare the motion schema.
+#: The table owning each effective-traces kind's cached NWB artifact.
 _TRACE_TABLES = {
     "recording": Recording,
     "concatenated_recording": ConcatenatedRecording,
+    "motion_corrected_recording": MotionCorrectedRecording,
 }
 
 
@@ -184,6 +191,11 @@ class SortingFetched(NamedTuple):
     # ``SortingSelection.resolve_effective_source``: the cached artifact
     # ``make_compute`` loads as the sorter input.
     traces: EffectiveTraces
+    # For a sort of a motion-corrected recording: the correction's ids and
+    # recipe names written to the units NWB provenance, and the source's frame
+    # count the corrected traces must keep. ``None`` for an uncorrected sort.
+    motion_correction_provenance: dict | None
+    source_n_samples: int | None
 
 
 class SortingComputed(NamedTuple):
@@ -787,6 +799,12 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     recording-source parts -- it is NOT counted by ``resolve_source``
     (a sort still has exactly one *recording* source) nor by
     ``prune_orphaned_selections``.
+
+    A ``MotionCorrectionSource`` part (zero-or-one) makes the sort read a
+    ``MotionCorrectedRecording`` of its source instead of the source's own
+    traces. The source parts still record the lineage; the corrected
+    recording must have been estimated on that source under the sort's
+    artifact mask, and its id is part of ``sorting_id``.
     """
 
     definition = """
@@ -829,6 +847,21 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         -> ArtifactDetectionOutput.proj(artifact_detection_merge_id='merge_id')
         """
 
+    class MotionCorrectionSource(SpyglassMixinPart):
+        """Optional motion-corrected recording a sort reads.
+
+        Present iff the sort reads a ``MotionCorrectedRecording`` of its
+        source instead of the source's own traces. Separate from the source
+        parts, which keep recording the sort's lineage; read it through
+        :meth:`SortingSelection.resolve_motion_correction`.
+        """
+
+        definition = """
+        -> master
+        ---
+        -> MotionCorrectedRecording
+        """
+
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
         """Insert master + exactly one source part; return PK-only dict.
@@ -844,15 +877,21 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         of that part row, so an artifact-backed and an artifact-free
         selection for the same ``(recording_id, sorter,
         sorter_params_name)`` are distinct, idempotent rows.
+        ``motion_corrected_recording_id`` is optional too: when supplied, a
+        ``MotionCorrectionSource`` part row makes the sort read that
+        populated ``MotionCorrectedRecording``, which must have been
+        estimated on this source under this artifact detection, and the
+        sorter must not correct motion itself.
 
         Parameters
         ----------
         key : dict
             Selection request. Must carry exactly one of ``recording_id`` or
             ``concat_recording_id``, plus ``sorter`` and
-            ``sorter_params_name``. ``artifact_detection_id`` is optional;
-            an explicit ``sorting_id`` is cross-checked against the derived
-            deterministic id.
+            ``sorter_params_name``. ``artifact_detection_id`` and
+            ``motion_corrected_recording_id`` are optional; an explicit
+            ``sorting_id`` is cross-checked against the derived deterministic
+            id.
 
         Returns
         -------
@@ -863,9 +902,12 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         Raises
         ------
         ValueError
-            If zero or both source keys are supplied, or if a concat source
+            If zero or both source keys are supplied, if a concat source
             also supplies an ``artifact_detection_id`` (concat member masks
-            are configured on ``ConcatenatedRecordingSelection``).
+            are configured on ``ConcatenatedRecordingSelection``), or if a
+            motion-corrected recording is not populated, was estimated on
+            another source or mask, or is paired with a sorter that corrects
+            motion itself.
         DuplicateSelectionError
             If any matching master has a non-deterministic ``sorting_id``
             (a raw ``insert`` bypass or a pre-determinism legacy row) --
@@ -899,6 +941,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             plan.artifact_detection_id,
             plan.sorting_id,
             source_part,
+            plan.motion_corrected_recording_id,
         )
         if existing is not None:
             return existing
@@ -947,6 +990,8 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 "ConcatenatedRecording. Populate the ConcatenatedRecording "
                 "before selecting a sort on it."
             )
+        if plan.motion_corrected_recording_id is not None:
+            cls._validate_motion_correction_source(plan)
 
         # Fail fast: an artifact-bound selection cannot be safely linked inside a
         # CALLER-owned transaction. The delete-vs-select advisory lock below is
@@ -1041,6 +1086,15 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                                 "artifact_detection_merge_id": art_merge_id,
                             }
                         )
+                    if plan.motion_corrected_recording_id is not None:
+                        cls.MotionCorrectionSource.insert1(
+                            {
+                                "sorting_id": plan.master_row["sorting_id"],
+                                "motion_corrected_recording_id": (
+                                    plan.motion_corrected_recording_id
+                                ),
+                            }
+                        )
                 return {k: plan.master_row[k] for k in cls.primary_key}
             except dj.errors.DuplicateError as exc:
                 # A concurrent caller may have inserted the same selection.
@@ -1050,6 +1104,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                     plan.artifact_detection_id,
                     plan.sorting_id,
                     source_part,
+                    plan.motion_corrected_recording_id,
                 )
                 if existing is not None:
                     return existing
@@ -1064,9 +1119,11 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 raise SchemaBypassError(
                     "SortingSelection: an input foreign key is unsatisfied "
                     f"for source {plan.source_restriction} / "
-                    f"artifact_detection_id={plan.artifact_detection_id} -- "
-                    "the referenced Recording / ConcatenatedRecording or "
-                    "ArtifactDetectionOutput row is missing (a raw insert "
+                    f"artifact_detection_id={plan.artifact_detection_id} / "
+                    "motion_corrected_recording_id="
+                    f"{plan.motion_corrected_recording_id} -- the referenced "
+                    "Recording / ConcatenatedRecording, ArtifactDetectionOutput "
+                    "or MotionCorrectedRecording row is missing (a raw insert "
                     "bypassing insert_selection, or a concurrent delete "
                     "mid-insert). Populate the input, or retry if a "
                     "transient race."
@@ -1080,6 +1137,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         artifact_detection_id,
         deterministic_id,
         source_part,
+        motion_corrected_recording_id=None,
     ) -> dict | None:
         """Return the canonical master PK for this sort selection, or None.
 
@@ -1093,8 +1151,11 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         artifact-detection-source state
         (present-with-this-``artifact_detection_id`` vs absent -- a concat
         source has no additional sorting-stage artifact pass), so an artifact-detection-backed
-        and an artifact-detection-free selection never alias. Splits the
-        matches by primary key:
+        and an artifact-detection-free selection never alias. The
+        motion-correction state (present-with-this-
+        ``motion_corrected_recording_id`` vs absent) is matched the same way,
+        so a corrected and an uncorrected sort of one source never alias.
+        Splits the matches by primary key:
 
         * the master at ``deterministic_id`` is the canonical, content-
           addressed selection -> return ``{"sorting_id": ...}``;
@@ -1121,14 +1182,19 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 {"sorting_id": cand["sorting_id"]}
             )
             == artifact_detection_id
+            and cls.resolve_motion_correction(
+                {"sorting_id": cand["sorting_id"]}
+            )
+            == motion_corrected_recording_id
         }
         bypassed = [sid for sid in master_ids if sid != deterministic_id]
         if bypassed:
             raise DuplicateSelectionError(
                 f"SortingSelection has {len(master_ids)} master rows for "
                 f"{master_restriction | source_restriction} with "
-                f"artifact_detection_id={artifact_detection_id} whose sorting_id "
-                "is not the "
+                f"artifact_detection_id={artifact_detection_id} and "
+                f"motion_corrected_recording_id={motion_corrected_recording_id} "
+                "whose sorting_id is not the "
                 f"deterministic id {deterministic_id}: {bypassed}. This is a "
                 "non-deterministic selection row (a raw insert or pre-"
                 "determinism legacy row); drop it and re-insert via "
@@ -1161,13 +1227,72 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         )
 
     @classmethod
+    def _validate_motion_correction_source(cls, plan) -> None:
+        """Check a requested corrected recording against the sort request.
+
+        Parameters
+        ----------
+        plan : SortingSelectionPlan
+            The validated request, with ``motion_corrected_recording_id``.
+
+        Raises
+        ------
+        ValueError
+            If the corrected recording is not populated, its motion was
+            estimated on another source or under another artifact detection,
+            or the sorter params row would correct motion again.
+        """
+        from spyglass.spikesorting.v2._params.sorter import (
+            reject_internal_motion_correction,
+        )
+
+        caller = "SortingSelection.insert_selection"
+        corrected_key = {
+            "motion_corrected_recording_id": plan.motion_corrected_recording_id
+        }
+        if not (MotionCorrectedRecording & corrected_key):
+            raise ValueError(
+                f"{caller}: motion_corrected_recording_id "
+                f"{plan.motion_corrected_recording_id} is not in "
+                "MotionCorrectedRecording. Populate the corrected recording "
+                "before selecting a sort on it."
+            )
+        mismatches = correction_lineage_mismatch(
+            SourceLineage(
+                kind=(
+                    "recording"
+                    if plan.source_kind == "recording"
+                    else "concatenated_recording"
+                ),
+                key=plan.source_restriction,
+                artifact_detection_id=plan.artifact_detection_id,
+            ),
+            MotionCorrectedRecordingSelection.resolve_source(corrected_key),
+        )
+        if mismatches:
+            raise ValueError(
+                f"{caller}: motion-corrected recording "
+                f"{plan.motion_corrected_recording_id} was not made from this "
+                f"sort's source and mask ({'; '.join(mismatches)}). Select a "
+                "corrected recording estimated on the same source with the "
+                "same artifact detection."
+            )
+        reject_internal_motion_correction(
+            plan.master_restriction["sorter"],
+            (SorterParameters & plan.master_restriction).fetch1("params"),
+            sorter_params_name=plan.master_restriction["sorter_params_name"],
+        )
+
+    @classmethod
     def prune_orphaned_selections(cls, dry_run: bool = True) -> list[dict]:
         """Find or delete master rows that have no source-part row.
 
         DataJoint cannot enforce "exactly one recording source per master"
         across the two XOR source parts, so an upstream cascade-delete from
         ``Recording`` / ``ConcatenatedRecording`` can leave a master row with no
-        source child. Dry-run by default; with ``dry_run=False`` runs
+        source child. The optional ``ArtifactDetectionSource`` and
+        ``MotionCorrectionSource`` parts are not sources: a master left with
+        only those is an orphan too, and deleting it removes them. Dry-run by default; with ``dry_run=False`` runs
         cautious_delete on each orphan so the cascade preview shows downstream
         ``Sorting`` / ``CurationV2`` / ``SpikeSortingOutput.CurationV2`` impact.
         """
@@ -1259,6 +1384,31 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         return ArtifactDetectionOutput.resolve_artifact_detection_id(rows[0])
 
     @classmethod
+    def resolve_motion_correction(cls, key: dict):
+        """Return the sort's ``motion_corrected_recording_id``, or ``None``.
+
+        Reads the optional ``MotionCorrectionSource`` part; ``None`` means the
+        sort reads its source's own traces.
+
+        Raises
+        ------
+        SchemaBypassError
+            If more than one ``MotionCorrectionSource`` row exists for ``key``.
+        """
+        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
+        master_key = {k: v for k, v in key.items() if k in cls.primary_key}
+        rows = (cls.MotionCorrectionSource & master_key).fetch(
+            "motion_corrected_recording_id"
+        )
+        if len(rows) > 1:
+            raise SchemaBypassError(
+                f"SortingSelection {master_key} has {len(rows)} "
+                "MotionCorrectionSource rows; expected zero or one."
+            )
+        return rows[0] if len(rows) else None
+
+    @classmethod
     def resolve_effective_source(cls, key: dict) -> EffectiveSource:
         """Return a sort's lineage and the traces its consumers must read.
 
@@ -1267,7 +1417,8 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         analyzer builds and rebuilds, metric curation, the recompute audit,
         the curation recording accessor) reads ``traces``; metadata consumers
         keep using :meth:`resolve_source`. The effective traces are the lineage
-        source's own cached artifact, fetched here; no trace file is opened.
+        source's own cached artifact, or the ``MotionCorrectedRecording`` the
+        sort selected, fetched here; no trace file is opened.
 
         Parameters
         ----------
@@ -1280,6 +1431,13 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             ``lineage`` (source kind, source key, pinned artifact detection)
             and ``traces`` (owning table, key, fetched row, whether the loaded
             traces must still be artifact-masked).
+
+        Raises
+        ------
+        SchemaBypassError
+            If the selected corrected recording was not made from the sort's
+            source and artifact mask (a part row inserted without
+            :meth:`insert_selection`).
         """
         source = cls.resolve_source(key)
         lineage = SourceLineage(
@@ -1287,8 +1445,29 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             key=source.key,
             artifact_detection_id=cls.resolve_artifact_detection(key),
         )
-        row = (_TRACE_TABLES[source.kind] & source.key).fetch1()
-        return effective_source_from_base(lineage, row)
+        corrected_id = cls.resolve_motion_correction(key)
+        if corrected_id is None:
+            row = (_TRACE_TABLES[source.kind] & source.key).fetch1()
+            return effective_source_from_base(lineage, row)
+
+        corrected_key = {"motion_corrected_recording_id": corrected_id}
+        mismatches = correction_lineage_mismatch(
+            lineage,
+            MotionCorrectedRecordingSelection.resolve_source(corrected_key),
+        )
+        if mismatches:
+            from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
+            raise SchemaBypassError(
+                f"SortingSelection {dict(key)} reads motion-corrected "
+                f"recording {corrected_id}, which was not made from its "
+                f"source and mask ({'; '.join(mismatches)}). The "
+                "MotionCorrectionSource part was inserted without "
+                "SortingSelection.insert_selection; drop the selection and "
+                "re-insert it."
+            )
+        row = (MotionCorrectedRecording & corrected_key).fetch1()
+        return effective_source_from_correction(lineage, corrected_key, row)
 
     @staticmethod
     def ensure_effective_traces(traces: EffectiveTraces) -> None:
@@ -1309,14 +1488,10 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             ensure_artifact_file,
         )
 
-        if traces.kind == "motion_corrected_recording":
-            from spyglass.spikesorting.v2.motion import (
-                MotionCorrectedRecording as table,
-            )
-        else:
-            table = _TRACE_TABLES[traces.kind]
         ensure_artifact_file(
-            table, traces.key, traces.row["analysis_file_name"]
+            _TRACE_TABLES[traces.kind],
+            traces.key,
+            traces.row["analysis_file_name"],
         )
 
     @classmethod
@@ -1437,7 +1612,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         anchors to its own ``RecordingSelection``; a concat source anchors
         deterministically to the FIRST frozen ``MemberSnapshot`` member (so the
         per-unit ``Electrode`` FK and the analysis-NWB parent both resolve to the
-        anchor member) and reads the concat-owned observation intervals. All returned values are
+        anchor member) and reads the concat-owned observation intervals. A sort
+        of a motion-corrected recording also resolves the correction's
+        provenance and its source's frame count. All returned values are
         deterministic bytes (DataJoint fetches inline dicts) so DataJoint's
         tri-part DeepHash integrity check across the two fetches stays stable.
 
@@ -1592,6 +1769,15 @@ class Sorting(SpyglassMixin, dj.Computed):
             self._fetch_unit_electrode_metadata(recording_id, nwb_file_name)
         )
 
+        # Resolved after the concat schema-bypass check above, which must fire
+        # before any source-row fetch.
+        traces = SortingSelection.resolve_effective_source(key).traces
+        motion_correction_provenance = source_n_samples = None
+        if traces.kind == "motion_corrected_recording":
+            motion_correction_provenance, source_n_samples = (
+                self._fetch_motion_correction(traces.key, sorter_row, source)
+            )
+
         return SortingFetched(
             source=source,
             recording_id=recording_id,
@@ -1606,10 +1792,71 @@ class Sorting(SpyglassMixin, dj.Computed):
             electrode_by_id=electrode_by_id,
             region_by_electrode=region_by_electrode,
             concat_statistics_spans=concat_statistics_spans,
-            # Resolved after the concat schema-bypass check above, which must
-            # fire before any source-row fetch.
-            traces=SortingSelection.resolve_effective_source(key).traces,
+            traces=traces,
+            motion_correction_provenance=motion_correction_provenance,
+            source_n_samples=source_n_samples,
         )
+
+    @staticmethod
+    def _fetch_motion_correction(corrected_key, sorter_row, source):
+        """DB inputs of a sort that reads a motion-corrected recording.
+
+        Re-checks that the sorter does not correct motion itself (the params
+        row or SpikeInterface's defaults may differ from when the selection
+        was inserted).
+
+        Parameters
+        ----------
+        corrected_key : dict
+            ``{"motion_corrected_recording_id": ...}``.
+        sorter_row : dict
+            The sort's ``SorterParameters`` row.
+        source : SourceResolution
+            The sort's source.
+
+        Returns
+        -------
+        tuple[dict, int]
+            The provenance ids and recipe names, and the source's frame
+            count (the concatenation's, or the one the estimate read from
+            the recording).
+        """
+        from spyglass.spikesorting.v2._params.sorter import (
+            reject_internal_motion_correction,
+        )
+        from spyglass.spikesorting.v2.motion import (
+            MotionEstimate,
+            MotionEstimateSelection,
+        )
+
+        reject_internal_motion_correction(
+            sorter_row["sorter"],
+            sorter_row["params"],
+            sorter_params_name=sorter_row["sorter_params_name"],
+        )
+        selection = (MotionCorrectedRecordingSelection & corrected_key).fetch1()
+        estimate_key = {"motion_estimate_id": selection["motion_estimate_id"]}
+        if source.kind == "concatenated_recording":
+            source_n_samples = (ConcatenatedRecording & source.key).fetch1(
+                "n_samples"
+            )
+        else:
+            source_n_samples = (MotionEstimate & estimate_key).fetch1(
+                "n_samples"
+            )
+        provenance = {
+            "motion_corrected_recording_id": str(
+                corrected_key["motion_corrected_recording_id"]
+            ),
+            "motion_estimate_id": str(selection["motion_estimate_id"]),
+            "motion_estimation_params_name": (
+                MotionEstimateSelection & estimate_key
+            ).fetch1("motion_estimation_params_name"),
+            "motion_interpolation_params_name": selection[
+                "motion_interpolation_params_name"
+            ],
+        }
+        return provenance, int(source_n_samples)
 
     @staticmethod
     def _fetch_unit_electrode_metadata(recording_id, nwb_file_name):
@@ -1773,6 +2020,8 @@ class Sorting(SpyglassMixin, dj.Computed):
         region_by_electrode,
         concat_statistics_spans,
         traces,
+        motion_correction_provenance,
+        source_n_samples,
     ):
         """Sort, build analyzer, stage Units NWB outside any DB transaction.
 
@@ -1832,6 +2081,13 @@ class Sorting(SpyglassMixin, dj.Computed):
         traces : EffectiveTraces
             The sort's effective traces from ``make_fetch``: the cached
             artifact loaded as the sorter input.
+        motion_correction_provenance : dict or None
+            For a sort of a motion-corrected recording, the correction's ids
+            and recipe names, written to the units NWB provenance; ``None``
+            otherwise.
+        source_n_samples : int or None
+            The source's frame count a corrected recording must keep;
+            ``None`` for an uncorrected sort.
 
         Returns
         -------
@@ -1857,7 +2113,20 @@ class Sorting(SpyglassMixin, dj.Computed):
         # whitening estimate samples from, persisted with the sort so each
         # later analyzer rebuild reuses them. Selection and member joins are
         # boundaries even when nothing is masked.
-        if source.kind == "recording":
+        if traces.kind == "motion_corrected_recording":
+            # Persisted masked, with the source's spans copied onto its row.
+            statistics_spans = self._corrected_statistics_spans(
+                recording,
+                traces.row,
+                source_n_samples=source_n_samples,
+                concat_statistics_spans=concat_statistics_spans,
+                obs_intervals=obs_intervals,
+                artifact_detection_id=sel_row.get("artifact_detection_id"),
+                recording_id=(
+                    recording_id if source.kind == "recording" else None
+                ),
+            )
+        elif source.kind == "recording":
             # Boundaries from the reloaded recording's persisted timestamps,
             # read before masking (silencing keeps the same timestamps).
             boundary_spans = boundary_spans_from_timestamps(recording)
@@ -1999,6 +2268,8 @@ class Sorting(SpyglassMixin, dj.Computed):
                     [int(a), int(b)] for a, b in statistics_spans
                 ],
             }
+            if motion_correction_provenance is not None:
+                source_provenance.update(motion_correction_provenance)
             analysis_file_name, units_object_id = self._stage_sorting_artifact(
                 sorting=sorting_obj,
                 recording=recording,
@@ -2023,6 +2294,97 @@ class Sorting(SpyglassMixin, dj.Computed):
         except BaseException:
             staged_analyzer.close()
             raise
+
+    @staticmethod
+    def _corrected_statistics_spans(
+        recording,
+        row: dict,
+        *,
+        source_n_samples: int,
+        concat_statistics_spans,
+        obs_intervals,
+        artifact_detection_id,
+        recording_id,
+    ) -> list[tuple[int, int]]:
+        """Return a corrected recording's statistics spans after checking them.
+
+        The corrected row carries a copy of its source's spans; they are used
+        as is. The corrected traces must keep the source's frame count. For a
+        single recording the copied spans must equal those the sort derives
+        from the corrected traces' own timestamps and the sort's pinned mask;
+        for a concatenation they must equal the concatenation's stored spans.
+
+        Parameters
+        ----------
+        recording : si.BaseRecording
+            The loaded corrected recording.
+        row : dict
+            Its ``MotionCorrectedRecording`` row.
+        source_n_samples : int
+            The source's frame count.
+        concat_statistics_spans : numpy.ndarray or None
+            A concat source's stored ``(n, 2)`` spans; ``None`` for a single
+            recording.
+        obs_intervals : numpy.ndarray or None
+            The sort's artifact-removed valid times, ``(n_intervals, 2)`` in
+            seconds, or ``None`` without an artifact detection.
+        artifact_detection_id : uuid.UUID or None
+            The sort's pinned detection (single recording only).
+        recording_id : uuid.UUID or None
+            The single-recording source, for error messages.
+
+        Returns
+        -------
+        list[tuple[int, int]]
+            The half-open frame spans.
+
+        Raises
+        ------
+        ValueError
+            If the frame count or the spans disagree with the source's.
+        """
+
+        def as_spans(spans) -> list[tuple[int, int]]:
+            return [
+                (int(a), int(b))
+                for a, b in np.asarray(spans, dtype=np.int64).reshape(-1, 2)
+            ]
+
+        n_samples = int(recording.get_num_samples())
+        if not n_samples == int(row["n_samples"]) == int(source_n_samples):
+            raise ValueError(
+                "Sorting: motion-corrected recording "
+                f"{row['motion_corrected_recording_id']} has {n_samples} "
+                f"frames (row: {int(row['n_samples'])}); its source has "
+                f"{int(source_n_samples)}."
+            )
+        spans = as_spans(row["statistics_spans"])
+        if concat_statistics_spans is None:
+            excluded = []
+            if artifact_detection_id is not None:
+                excluded = artifact_frame_ranges(
+                    recording,
+                    obs_intervals,
+                    artifact_detection_id=artifact_detection_id,
+                    recording_id=recording_id,
+                )
+            expected = as_spans(
+                compute_statistics_spans(
+                    n_samples,
+                    excluded,
+                    boundary_spans_from_timestamps(recording),
+                )
+            )
+        else:
+            expected = as_spans(concat_statistics_spans)
+        if spans != expected:
+            raise ValueError(
+                "Sorting: motion-corrected recording "
+                f"{row['motion_corrected_recording_id']} carries statistics "
+                f"spans {spans}, but its source and the sort's mask give "
+                f"{expected}."
+            )
+        return spans
 
     def make_insert(
         self,
@@ -2255,7 +2617,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         # a single-recording sort reads its Recording row, a concat-backed sort
         # reads its ConcatenatedRecording row. Both carry analysis_file_name /
         # electrical_series_path / sampling_frequency, which is all the
-        # absolute-time -> frame mapping below needs.
+        # absolute-time -> frame mapping below needs. A motion-corrected
+        # recording keeps its source's frames and timestamps, so the source
+        # row serves a corrected sort too.
         source = SortingSelection.resolve_source(key)
         if source.kind == "recording":
             rec_row = (

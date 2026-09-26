@@ -20,7 +20,8 @@ Tables:
     MotionCorrectedRecording   -- The corrected, masked, unwhitened traces
                                   written with the source's own timestamps.
 
-No existing table populates or reads these rows yet. The DB-free computation
+``SortingSelection.MotionCorrectionSource`` selects a corrected recording as
+a sort's input. The DB-free computation
 (parameter resolution, the estimation adapter, the ``Motion`` serialization,
 applying a saved estimate) lives in ``_motion``.
 """
@@ -1282,6 +1283,27 @@ class MotionCorrectedRecordingSelection(
                 raise
             return existing
         return {"motion_corrected_recording_id": corrected_id}
+
+    @classmethod
+    def resolve_source(cls, key: dict) -> SourceLineage:
+        """Return the source and artifact mask the corrected recording is of.
+
+        The lineage of its motion estimate
+        (:meth:`MotionEstimateSelection.resolve_source`).
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting one selection row.
+
+        Returns
+        -------
+        SourceLineage
+        """
+        motion_estimate_id = (cls & key).fetch1("motion_estimate_id")
+        return MotionEstimateSelection.resolve_source(
+            {"motion_estimate_id": motion_estimate_id}
+        )
 
     @classmethod
     def _find_existing_pk(

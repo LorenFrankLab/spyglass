@@ -329,3 +329,132 @@ def test_sorting_plan_supplied_id_mismatch_raises_but_match_ok():
     # A wrong id is rejected.
     with pytest.raises(ValueError, match="sorting_id"):
         build_sorting_selection_plan({**key, "sorting_id": _ART})
+
+
+# ---------- motion-corrected sort identity ---------------------------------
+
+# Sorting ids and canonical identities recorded before corrected sorts
+# existed, for the smoke session's shank-0 recording (MS5 franklab row). An
+# uncorrected sort (no motion correction, or only a saved estimate) must keep
+# exactly these.
+_BASE_RECORDING_ID = "7ec72a85-b8cd-5a57-8977-710fc5b429fe"
+_BASE_ARTIFACT_ID = "33c83cb3-6338-50d3-81b7-41e6dc14fc92"
+_BASE_CONCAT_ID = "84ff3d7f-4bca-5755-8262-f7bc11c7921f"
+_BASE_SORTER = {
+    "sorter": "mountainsort5",
+    "sorter_params_name": "franklab_30khz_ms5_2026_06",
+}
+_BASE_SORTS = [
+    (
+        {
+            "recording_id": _BASE_RECORDING_ID,
+            "artifact_detection_id": _BASE_ARTIFACT_ID,
+        },
+        "03a2de42-5552-5fc3-a7a5-bda364732f57",
+        '{"artifact_detection_id":"33c83cb3-6338-50d3-81b7-41e6dc14fc92",'
+        '"recording_id":"7ec72a85-b8cd-5a57-8977-710fc5b429fe",'
+        '"sorter":"mountainsort5",'
+        '"sorter_params_name":"franklab_30khz_ms5_2026_06",'
+        '"source_kind":"recording"}',
+    ),
+    (
+        {"recording_id": _BASE_RECORDING_ID},
+        "f90892e2-4ed3-5c7d-b671-5e3df848778e",
+        '{"artifact_detection_id":null,'
+        '"recording_id":"7ec72a85-b8cd-5a57-8977-710fc5b429fe",'
+        '"sorter":"mountainsort5",'
+        '"sorter_params_name":"franklab_30khz_ms5_2026_06",'
+        '"source_kind":"recording"}',
+    ),
+    (
+        {"concat_recording_id": _BASE_CONCAT_ID},
+        "09f9bdd4-f90c-5c8f-b64d-18c3ea2a66a8",
+        '{"concat_recording_id":"84ff3d7f-4bca-5755-8262-f7bc11c7921f",'
+        '"sorter":"mountainsort5",'
+        '"sorter_params_name":"franklab_30khz_ms5_2026_06",'
+        '"source_kind":"concat"}',
+    ),
+]
+_CORRECTED = "44444444-4444-4444-4444-444444444444"
+_CORRECTED_2 = "55555555-5555-5555-5555-555555555555"
+
+
+@pytest.mark.parametrize(("source", "sorting_id", "canonical"), _BASE_SORTS)
+def test_off_and_estimate_preserve_sort_input(source, sorting_id, canonical):
+    """Without a corrected recording the payload has no motion term and the
+    ids equal the recorded ones; an explicit ``None`` is the same request."""
+    from spyglass.spikesorting.v2._selection_identity import (
+        canonical_identity,
+        sorting_identity_payload,
+    )
+
+    payload = sorting_identity_payload(**_BASE_SORTER, **source)
+    assert "motion_corrected_recording_id" not in payload
+    assert canonical_identity(payload) == canonical
+    assert (
+        canonical_identity(
+            sorting_identity_payload(
+                **_BASE_SORTER, **source, motion_corrected_recording_id=None
+            )
+        )
+        == canonical
+    )
+    for key in (
+        {**_BASE_SORTER, **source},
+        {**_BASE_SORTER, **source, "motion_corrected_recording_id": None},
+    ):
+        plan = build_sorting_selection_plan(key)
+        assert plan.sorting_id == uuid.UUID(sorting_id)
+        assert plan.motion_corrected_recording_id is None
+
+
+@pytest.mark.parametrize(("source", "sorting_id", "canonical"), _BASE_SORTS)
+def test_corrected_recording_enters_sort_identity(
+    source, sorting_id, canonical
+):
+    """A corrected recording adds one normalized term to either source kind:
+    a new id, distinct per corrected recording, shared by str and UUID."""
+    from spyglass.spikesorting.v2._selection_identity import (
+        sorting_identity_payload,
+    )
+
+    key = {**_BASE_SORTER, **source}
+    corrected = build_sorting_selection_plan(
+        {**key, "motion_corrected_recording_id": _CORRECTED}
+    )
+    assert corrected.motion_corrected_recording_id == uuid.UUID(_CORRECTED)
+    assert corrected.sorting_id != uuid.UUID(sorting_id)
+    assert (
+        corrected.source_kind == build_sorting_selection_plan(key).source_kind
+    )
+    assert (
+        build_sorting_selection_plan(
+            {**key, "motion_corrected_recording_id": uuid.UUID(_CORRECTED)}
+        ).sorting_id
+        == corrected.sorting_id
+    )
+    assert (
+        build_sorting_selection_plan(
+            {**key, "motion_corrected_recording_id": _CORRECTED_2}
+        ).sorting_id
+        != corrected.sorting_id
+    )
+    payload = sorting_identity_payload(
+        **key, motion_corrected_recording_id=_CORRECTED
+    )
+    assert payload == {
+        **sorting_identity_payload(**key),
+        "motion_corrected_recording_id": uuid.UUID(_CORRECTED),
+    }
+
+
+def test_corrected_concat_sort_still_rejects_an_artifact():
+    with pytest.raises(ValueError, match="artifact"):
+        build_sorting_selection_plan(
+            {
+                **_BASE_SORTER,
+                "concat_recording_id": _BASE_CONCAT_ID,
+                "artifact_detection_id": _BASE_ARTIFACT_ID,
+                "motion_corrected_recording_id": _CORRECTED,
+            }
+        )

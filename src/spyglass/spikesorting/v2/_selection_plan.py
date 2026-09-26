@@ -67,6 +67,11 @@ class SortingSelectionPlan(NamedTuple):
     ``insert_selection`` (it carries the merge id resolved DB-side after the
     detection is registered into ``ArtifactDetectionOutput``), not here.
 
+    ``motion_corrected_recording_id`` is the normalized (``uuid.UUID``) id
+    of the motion-corrected recording the sort reads, or ``None`` for a sort
+    of the source's own traces; ``insert_selection`` writes it as the
+    ``MotionCorrectionSource`` part.
+
     Note: ``source_kind`` here is ``"concat"`` (the plan/identity vocabulary),
     which deliberately differs from ``utils.SourceResolution.kind``'s
     ``"concatenated_recording"`` (the post-insert resolution vocabulary); the
@@ -81,6 +86,7 @@ class SortingSelectionPlan(NamedTuple):
     recording_source_row: dict | None
     concat_source_row: dict | None
     artifact_detection_id: uuid.UUID | None
+    motion_corrected_recording_id: uuid.UUID | None
 
 
 def build_recording_selection_plan(
@@ -143,7 +149,10 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
     stored value. A concat source must NOT carry an ``artifact_detection_id``:
     concat member masks are already materialized in the source and frozen by
     ``ConcatenatedRecordingSelection``, so there is no additional
-    ``ArtifactDetectionSource`` row at the sorting stage.
+    ``ArtifactDetectionSource`` row at the sorting stage. An optional
+    ``motion_corrected_recording_id`` (either source kind) selects a
+    motion-corrected recording of the source and enters the identity; its
+    agreement with the source is checked DB-side by ``insert_selection``.
 
     Raises
     ------
@@ -182,6 +191,11 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
     # would miss its match and create a duplicate sort.
     if artifact_detection_id is not None:
         artifact_detection_id = uuid.UUID(str(artifact_detection_id))
+    motion_corrected_recording_id = key.get("motion_corrected_recording_id")
+    if motion_corrected_recording_id is not None:
+        motion_corrected_recording_id = uuid.UUID(
+            str(motion_corrected_recording_id)
+        )
 
     if has_concat:
         # A concat already owns frozen member masks. A single detection here
@@ -199,6 +213,7 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
             concat_recording_id=key["concat_recording_id"],
             sorter=key["sorter"],
             sorter_params_name=key["sorter_params_name"],
+            motion_corrected_recording_id=motion_corrected_recording_id,
         )
         sorting_id = deterministic_id("sorting", identity)
         assert_supplied_id_matches(
@@ -215,6 +230,7 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
             recording_source_row=None,
             concat_source_row=concat_source_row,
             artifact_detection_id=None,
+            motion_corrected_recording_id=motion_corrected_recording_id,
         )
 
     source_restriction = {"recording_id": key["recording_id"]}
@@ -229,6 +245,7 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
         sorter=key["sorter"],
         sorter_params_name=key["sorter_params_name"],
         artifact_detection_id=artifact_detection_id,
+        motion_corrected_recording_id=motion_corrected_recording_id,
     )
     sorting_id = deterministic_id("sorting", identity)
     assert_supplied_id_matches(
@@ -246,4 +263,5 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
         recording_source_row=recording_source_row,
         concat_source_row=None,
         artifact_detection_id=artifact_detection_id,
+        motion_corrected_recording_id=motion_corrected_recording_id,
     )

@@ -1572,3 +1572,357 @@ def test_effective_traces_resolve_a_corrected_recording(discontinuous_sources):
     np.testing.assert_array_equal(
         read_effective_recording(abs_path, traces).get_traces(), expected
     )
+
+
+# ---- sorts of motion-corrected recordings ------------------------------------
+
+
+def _sorter_key() -> dict:
+    """The smoke clusterless row: a fast real sorter with no own correction."""
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAM_NAME,
+        SMOKE_CLUSTERLESS_PARAMS,
+    )
+
+    SorterParameters().insert1(
+        {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
+            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+            "params_schema_version": 4,
+            "job_kwargs": None,
+        },
+        skip_duplicates=True,
+    )
+    return {
+        "sorter": "clusterless_thresholder",
+        "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
+    }
+
+
+def _masked_artifact(recording_key, excluded_s) -> dict:
+    """A populated manual-exclusion artifact detection on a recording."""
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+
+    artifact_key = RecordingArtifactSelection.insert_selection(
+        {
+            "recording_id": recording_key["recording_id"],
+            "artifact_detection_params_name": "none",
+            "manual_excluded_times": np.array([excluded_s]),
+        }
+    )
+    RecordingArtifactDetection.populate(artifact_key, reserve_jobs=False)
+    return artifact_key
+
+
+def _drop_sorts(sort_keys) -> None:
+    """Delete sorts (analyzer folders included) and their selections."""
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    sort_keys = [key for key in sort_keys if key]
+    if not sort_keys:
+        return
+    if Sorting & sort_keys:
+        (Sorting & sort_keys).delete(safemode=False)
+    (SortingSelection & sort_keys).super_delete(warn=False, safemode=False)
+
+
+def test_off_and_estimate_preserve_sort_input(drift_recording):
+    """Saving a motion estimate of a sort's source (under the sort's own
+    mask) changes neither the sort's id nor the traces its sorter reads."""
+    from spyglass.spikesorting.v2._selection_plan import (
+        build_sorting_selection_plan,
+    )
+    from spyglass.spikesorting.v2._source_resolution import (
+        load_effective_recording,
+    )
+    from spyglass.spikesorting.v2.motion import MotionEstimate
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    recording_key = drift_recording["recording_key"]
+    artifact_key = _masked_artifact(recording_key, [5.0, 6.0])
+    request = {
+        "recording_id": recording_key["recording_id"],
+        **artifact_key,
+        **_sorter_key(),
+    }
+    sort_key = SortingSelection.insert_selection(request)
+    try:
+        assert sort_key["sorting_id"] == (
+            build_sorting_selection_plan(request).sorting_id
+        )
+
+        def sorter_input():
+            fetched = Sorting().make_fetch(sort_key)
+            assert fetched.traces.kind == "recording"
+            assert fetched.motion_correction_provenance is None
+            assert fetched.source_n_samples is None
+            return load_effective_recording(
+                fetched.traces._replace(apply_artifact_mask=False)
+            ).get_traces()
+
+        before = sorter_input()
+        np.testing.assert_array_equal(
+            before, Recording().get_recording(recording_key).get_traces()
+        )
+        estimate = _populated_estimate(
+            recording_id=recording_key["recording_id"], **artifact_key
+        )
+        assert MotionEstimate & estimate
+        assert SortingSelection.insert_selection(request) == sort_key
+        assert SortingSelection.resolve_motion_correction(sort_key) is None
+        np.testing.assert_array_equal(sorter_input(), before)
+    finally:
+        _drop_sorts([sort_key])
+
+
+def test_correction_identity_pins_source_masks_and_recipe(
+    discontinuous_sources,
+):
+    """A sort may read only a corrected recording of its own source under
+    its own mask; each corrected recording is its own idempotent sort
+    identity, distinct from the uncorrected sort; a part row inserted
+    around that check is refused before sorting."""
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    source_key = discontinuous_sources["member_b"]
+    other_key = discontinuous_sources["member_a"]
+    concat_key = discontinuous_sources["concat_key"]
+    sorter = _sorter_key()
+    estimate = _populated_estimate(recording_id=source_key["recording_id"])
+    extrapolated = _populated_corrected(estimate)
+    removed = _populated_corrected(estimate, "kriging_remove_channels_v1")
+    concat_corrected = _populated_corrected(
+        _populated_estimate(
+            concat_recording_id=concat_key["concat_recording_id"]
+        )
+    )
+    t0 = discontinuous_sources["t0"]
+    artifact_key = _masked_artifact(source_key, [t0 + 24.0, t0 + 24.5])
+    base = {"recording_id": source_key["recording_id"], **sorter}
+
+    sort_keys = []
+    try:
+        uncorrected = SortingSelection.insert_selection(base)
+        sort_keys.append(uncorrected)
+        first = SortingSelection.insert_selection({**base, **extrapolated})
+        sort_keys.append(first)
+        second = SortingSelection.insert_selection({**base, **removed})
+        sort_keys.append(second)
+        assert len({str(k["sorting_id"]) for k in sort_keys}) == 3
+        n_selections = len(SortingSelection())
+        assert SortingSelection.insert_selection({**base, **extrapolated}) == (
+            first
+        )
+        assert len(SortingSelection()) == n_selections
+        assert SortingSelection.resolve_motion_correction(first) == (
+            extrapolated["motion_corrected_recording_id"]
+        )
+        effective = SortingSelection.resolve_effective_source(first)
+        assert effective.lineage.kind == "recording"
+        assert effective.lineage.key == {
+            "recording_id": source_key["recording_id"]
+        }
+        assert effective.traces.kind == "motion_corrected_recording"
+        assert effective.traces.key == extrapolated
+        assert effective.traces.apply_artifact_mask is False
+
+        concat_sort = SortingSelection.insert_selection(
+            {**concat_key, **sorter, **concat_corrected}
+        )
+        sort_keys.append(concat_sort)
+        concat_effective = SortingSelection.resolve_effective_source(
+            concat_sort
+        )
+        assert concat_effective.lineage.kind == "concatenated_recording"
+        assert concat_effective.traces.key == concat_corrected
+
+        rejected = [
+            # corrected recording of another recording
+            {"recording_id": other_key["recording_id"], **extrapolated},
+            # of a concatenation, for a recording sort
+            {**base, **concat_corrected},
+            # of a recording, for a concatenation sort
+            {**concat_key, **extrapolated},
+            # estimated without the sort's mask
+            {**base, **artifact_key, **extrapolated},
+        ]
+        for request in rejected:
+            with pytest.raises(ValueError, match="not made from this sort"):
+                SortingSelection.insert_selection({**sorter, **request})
+        assert len(SortingSelection()) == n_selections + 1
+
+        SortingSelection.MotionCorrectionSource.insert1(
+            {**uncorrected, **concat_corrected}
+        )
+        with pytest.raises(SchemaBypassError, match="not made from its"):
+            Sorting().make_fetch(uncorrected)
+        assert not (Sorting & uncorrected)
+    finally:
+        _drop_sorts(sort_keys)
+
+
+def test_sorter_correcting_motion_itself_is_rejected_for_a_corrected_source(
+    discontinuous_sources,
+):
+    """Spykingcircus2's shipped row corrects motion by default: selecting it
+    on a corrected recording is refused and nothing is inserted."""
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        SortingSelection,
+    )
+
+    SorterParameters.insert_default()
+    sc2 = {"sorter": "spykingcircus2", "sorter_params_name": "default"}
+    assert "apply_motion_correction" not in (SorterParameters & sc2).fetch1(
+        "params"
+    )
+    source_key = discontinuous_sources["member_b"]
+    corrected = _populated_corrected(
+        _populated_estimate(recording_id=source_key["recording_id"])
+    )
+    n_selections = len(SortingSelection())
+    with pytest.raises(ValueError, match="apply_motion_correction=False"):
+        SortingSelection.insert_selection(
+            {"recording_id": source_key["recording_id"], **sc2, **corrected}
+        )
+    assert len(SortingSelection()) == n_selections
+
+
+def test_corrected_recording_referenced_by_a_sort_is_protected(
+    discontinuous_sources,
+):
+    """A corrected recording a sort selected cannot be deleted from under
+    it: a quick delete fails on the foreign key and a cascade that would
+    leave the sort without its correction part is refused; a master left
+    with only a correction part is an orphan the prune removes."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    source_key = discontinuous_sources["member_b"]
+    sorter = _sorter_key()
+    corrected = _populated_corrected(
+        _populated_estimate(recording_id=source_key["recording_id"])
+    )
+    sort_key = SortingSelection.insert_selection(
+        {"recording_id": source_key["recording_id"], **sorter, **corrected}
+    )
+    orphan = {"sorting_id": uuid.uuid4()}
+    try:
+        with pytest.raises(dj.errors.IntegrityError):
+            (MotionCorrectedRecording & corrected).delete_quick()
+        with pytest.raises(dj.errors.DataJointError, match="master"):
+            (MotionCorrectedRecording & corrected).super_delete(
+                warn=False, safemode=False
+            )
+        assert MotionCorrectedRecording & corrected
+        assert SortingSelection.resolve_motion_correction(sort_key) == (
+            corrected["motion_corrected_recording_id"]
+        )
+        assert sort_key not in SortingSelection.prune_orphaned_selections()
+
+        SortingSelection().insert1(
+            {**orphan, **sorter}, allow_direct_insert=True
+        )
+        SortingSelection.MotionCorrectionSource.insert1({**orphan, **corrected})
+        assert orphan in SortingSelection.prune_orphaned_selections()
+        SortingSelection.prune_orphaned_selections(dry_run=False)
+        assert not (SortingSelection & orphan)
+        assert not (SortingSelection.MotionCorrectionSource & orphan)
+        assert SortingSelection & sort_key
+    finally:
+        _drop_sorts([sort_key, orphan])
+
+
+def test_corrected_sort_reads_the_corrected_traces(
+    drift_recording, monkeypatch
+):
+    """A masked, corrected sort hands its sorter the corrected recording's
+    persisted traces (not the source's), persists the corrected recording's
+    statistics spans, and records the correction in its units NWB."""
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        SORTING_PROVENANCE,
+        read_provenance_values,
+    )
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionCorrectedRecordingSelection,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    recording_key = drift_recording["recording_key"]
+    artifact_key = _masked_artifact(recording_key, [20.0, 21.0])
+    estimate = _populated_estimate(
+        recording_id=recording_key["recording_id"], **artifact_key
+    )
+    corrected = _populated_corrected(estimate)
+    corrected_row = (MotionCorrectedRecording & corrected).fetch1()
+    corrected_traces = (
+        MotionCorrectedRecording().get_recording(corrected).get_traces()
+    )
+    spans = [(int(a), int(b)) for a, b in corrected_row["statistics_spans"]]
+    assert len(spans) == 2
+    source_traces = Recording().get_recording(recording_key).get_traces()
+    inside = slice(*spans[0])
+    assert (
+        np.max(np.abs(corrected_traces[inside] - source_traces[inside])) > 10.0
+    )
+
+    sort_key = SortingSelection.insert_selection(
+        {
+            "recording_id": recording_key["recording_id"],
+            **artifact_key,
+            **_sorter_key(),
+            **corrected,
+        }
+    )
+    captured = {}
+    run_sorter = Sorting._run_sorter
+
+    def _observe(*args, **kwargs):
+        captured["traces"] = kwargs["recording"].get_traces()
+        captured["spans"] = kwargs["statistics_spans"]
+        return run_sorter(*args, **kwargs)
+
+    try:
+        monkeypatch.setattr(Sorting, "_run_sorter", staticmethod(_observe))
+        Sorting.populate(sort_key, reserve_jobs=False)
+        monkeypatch.undo()
+
+        np.testing.assert_array_equal(captured["traces"], corrected_traces)
+        assert list(captured["spans"]) == spans
+        assert Sorting().get_statistics_spans(sort_key) == spans
+        assert (Sorting & sort_key).fetch1("n_units") > 0
+
+        abs_path = AnalysisNwbfile.get_abs_path(
+            (Sorting & sort_key).fetch1("analysis_file_name")
+        )
+        provenance = read_provenance_values(abs_path, SORTING_PROVENANCE)
+        selection = (MotionCorrectedRecordingSelection & corrected).fetch1()
+        assert provenance["motion_corrected_recording_id"] == str(
+            corrected["motion_corrected_recording_id"]
+        )
+        assert provenance["motion_estimate_id"] == str(
+            estimate["motion_estimate_id"]
+        )
+        assert provenance["motion_estimation_params_name"] == "dredge_fast_v1"
+        assert provenance["motion_interpolation_params_name"] == (
+            selection["motion_interpolation_params_name"]
+        )
+        assert provenance["artifact_detection_id"] == str(
+            artifact_key["artifact_detection_id"]
+        )
+        assert provenance["recording_id"] == str(recording_key["recording_id"])
+    finally:
+        monkeypatch.undo()
+        _drop_sorts([sort_key])

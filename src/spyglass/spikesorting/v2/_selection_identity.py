@@ -387,6 +387,7 @@ def sorting_identity_payload(
     recording_id=None,
     concat_recording_id=None,
     artifact_detection_id=None,
+    motion_corrected_recording_id=None,
 ) -> dict:
     """Build a ``SortingSelection`` logical-identity payload.
 
@@ -407,6 +408,11 @@ def sorting_identity_payload(
     ``artifact_detection_id``. Single source of truth shared by
     ``SortingSelection.insert_selection`` and ``preflight_v2_pipeline``.
 
+    A sort that reads a motion-corrected recording of its source adds
+    ``motion_corrected_recording_id`` (normalized to a ``uuid.UUID``). The
+    term is omitted, not stored as ``None``, for an uncorrected sort, so an
+    uncorrected sort keeps the id it had before corrected sorts existed.
+
     Parameters
     ----------
     sorter : str
@@ -423,6 +429,10 @@ def sorting_identity_payload(
         The optional artifact-detection pass id (recording source only),
         normalized to a ``uuid.UUID``; ``None`` is the "no artifact-detection
         pass" form. Default ``None``.
+    motion_corrected_recording_id : optional
+        The ``MotionCorrectedRecording`` the sort reads instead of its
+        source's own traces, for either source kind; ``None`` (the default)
+        means the sort reads the source's traces.
 
     Returns
     -------
@@ -448,21 +458,27 @@ def sorting_identity_payload(
                 "sorting_identity_payload: a concat source cannot carry an "
                 "artifact_detection_id; configure member masks on the concat selection."
             )
-        return {
+        payload = {
             "source_kind": "concat",
             "concat_recording_id": concat_recording_id,
             "sorter": sorter,
             "sorter_params_name": sorter_params_name,
         }
-    if artifact_detection_id is not None:
-        artifact_detection_id = uuid.UUID(str(artifact_detection_id))
-    return {
-        "source_kind": "recording",
-        "recording_id": recording_id,
-        "sorter": sorter,
-        "sorter_params_name": sorter_params_name,
-        "artifact_detection_id": artifact_detection_id,
-    }
+    else:
+        if artifact_detection_id is not None:
+            artifact_detection_id = uuid.UUID(str(artifact_detection_id))
+        payload = {
+            "source_kind": "recording",
+            "recording_id": recording_id,
+            "sorter": sorter,
+            "sorter_params_name": sorter_params_name,
+            "artifact_detection_id": artifact_detection_id,
+        }
+    if motion_corrected_recording_id is not None:
+        payload["motion_corrected_recording_id"] = uuid.UUID(
+            str(motion_corrected_recording_id)
+        )
+    return payload
 
 
 def assert_supplied_id_matches(supplied, deterministic, *, field: str) -> None:
