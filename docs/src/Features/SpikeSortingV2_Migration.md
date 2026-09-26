@@ -627,10 +627,20 @@ remain unsupported.
 
 Concat selections now require explicit per-member artifact detection IDs (or
 explicit `None` values). The standard runner resolves these automatically from
-the preset. Masks precede motion correction, participate in concat identity, and
-survive rebuilds and per-session exports as `obs_intervals`. Old concat materializations cannot satisfy the new selection; follow the
-[preproduction database sequence](#upgrading-a-preproduction-v2-database) and rerun
-them. Raw SI duration metrics retain SI definitions. V2 `observed_*` metrics and
+the preset. Masks precede concatenation, participate in concat identity, and
+survive rebuilds and per-session exports as `obs_intervals`. Concatenation
+itself no longer corrects motion -- that is a separate, optional stage (see
+[Optional motion correction](./SpikeSortingV2.md#optional-motion-correction))
+that can layer on top of either a single-session `Recording` or a
+`ConcatenatedRecording`; if you apply it to a concat, its estimate/correction
+reads the same masks. Old concat materializations cannot satisfy the new
+selection; follow the
+[preproduction database sequence](#upgrading-a-preproduction-v2-database) and
+rerun them, then, if the database still has a pre-motion-removal
+`ConcatenatedRecording` heading (a `motion_preset` column), follow the
+CHANGELOG's separate "Spike Sorting v2: optional motion correction" recreation
+sequence to drop and redeclare the concat tables. Raw SI duration metrics
+retain SI definitions. V2 `observed_*` metrics and
 sorted-spikes decoding through populations with observation snapshots honor
 usable time; legacy populations without snapshots report unknown coverage.
 Custom downstream analyses must use the exposed observation intervals explicitly.
