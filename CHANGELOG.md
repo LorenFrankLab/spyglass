@@ -257,7 +257,9 @@ available.
   own timestamps, together with the output channels, any removed channels, the
   unmoved contact positions and the estimate's spans. Changing only the
   interpolation reuses the estimate. A missing file is rebuilt from the saved
-  motion, never by estimating again. The tables are new, so no recreation is
+  motion, never by estimating again, and installed only if it reproduces the
+  stored content hash (even under another SpikeInterface version, which a
+  new compute refuses). The tables are new, so no recreation is
   needed.
 - A sort can read a corrected recording:
   `SortingSelection.insert_selection(..., motion_corrected_recording_id=...)`

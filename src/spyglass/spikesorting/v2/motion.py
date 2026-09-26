@@ -1463,19 +1463,30 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
         source_path,
         source_electrical_series_path,
         nwb_file_name,
+        *,
+        allow_spikeinterface_version_change: bool = False,
     ) -> MotionCorrectedComputed:
         """Apply the saved motion and write the staged artifact; no DB reads.
 
         The artifact file is created through ``write_nwb_artifact`` (as every
         v2 trace writer does) and registered only by :meth:`make_insert`.
 
+        Parameters
+        ----------
+        allow_spikeinterface_version_change : bool, optional
+            Skip only the SpikeInterface-version staleness check. Set by
+            :meth:`_rebuild_nwb_artifact`, which installs the result only when
+            its content hash equals the stored one; a new compute keeps the
+            check (default ``False``).
+
         Raises
         ------
         ValueError
             On a stale selection (interpolation recipe resolution,
-            SpikeInterface version or application algorithm changed), a source whose frames, rate or
-            channels differ from the estimate's, or an application failure
-            (see ``_motion.apply_motion_on_estimation_clock``).
+            SpikeInterface version or application algorithm changed), a
+            source whose frames, rate or channels differ from the estimate's,
+            or an application failure (see
+            ``_motion.apply_motion_on_estimation_clock``).
         """
         import spikeinterface as si
 
@@ -1506,7 +1517,11 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
                 ),
                 (
                     "SpikeInterface version",
-                    si.__version__,
+                    (
+                        selection["spikeinterface_version"]
+                        if allow_spikeinterface_version_change
+                        else si.__version__
+                    ),
                     selection["spikeinterface_version"],
                 ),
                 (
@@ -1717,7 +1732,9 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
 
         Locked on the corrected recording, double-checked under the lock,
         then ``make_fetch`` / ``make_compute`` write a fresh temp artifact:
-        the saved estimate is reapplied, never estimated again. Only a temp
+        the saved estimate is reapplied, never estimated again, under the
+        installed SpikeInterface even if it differs from the one the
+        selection was made with. Only a temp
         whose ``content_hash`` equals the stored one is installed
         (``install_rebuilt_recording``); otherwise it is removed,
         ``RecordingContentDriftError`` is raised and the canonical slot is
@@ -1756,8 +1773,13 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
                     "motion_corrected_recording_id"
                 ]
             }
+            # The content hash is the guard (as for Recording), so a rebuild
+            # under another SpikeInterface version is allowed and installed
+            # only if it reproduces the stored traces.
             computed = self.make_compute(
-                master_key, *self.make_fetch(master_key)
+                master_key,
+                *self.make_fetch(master_key),
+                allow_spikeinterface_version_change=True,
             )
             if computed.content_hash != row["content_hash"]:
                 _unlink_staged_analysis_file(

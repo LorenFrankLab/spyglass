@@ -1421,6 +1421,72 @@ def test_motion_failure_cleanup_and_cache_rebuild(
     assert _file_hash(str(abs_path)) == row["content_hash"]
 
 
+def test_corrected_rebuild_is_guarded_by_content_not_spikeinterface_version(
+    discontinuous_sources, monkeypatch
+):
+    """Under another SpikeInterface version a new corrected compute is
+    refused as stale, but a missing artifact is still rebuilt from the saved
+    motion when it reproduces the stored content hash; a rebuild that does
+    not is still refused and leaves nothing installed."""
+    from pathlib import Path
+
+    import spikeinterface
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2.exceptions import (
+        RecordingContentDriftError,
+    )
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionCorrectedRecordingSelection,
+    )
+
+    estimate = populated_estimate(
+        recording_id=discontinuous_sources["member_b"]["recording_id"]
+    )
+    key = populated_corrected(estimate)
+    row = (MotionCorrectedRecording & key).fetch1()
+    selected_version = (MotionCorrectedRecordingSelection & key).fetch1(
+        "spikeinterface_version"
+    )
+    abs_path = Path(AnalysisNwbfile.get_abs_path(row["analysis_file_name"]))
+    traces = MotionCorrectedRecording().get_recording(key).get_traces()
+
+    monkeypatch.setattr(spikeinterface, "__version__", "0.0.0+other")
+    assert spikeinterface.__version__ != selected_version
+    table = MotionCorrectedRecording()
+    with pytest.raises(ValueError, match="SpikeInterface version"):
+        table.make_compute(key, *table.make_fetch(key))
+
+    monkeypatch.setattr(_motion, "estimate_motion_in_spans", _no_estimation)
+    abs_path.unlink()
+    rebuilt = MotionCorrectedRecording().get_recording(key)
+    assert _file_hash(str(abs_path)) == row["content_hash"]
+    np.testing.assert_array_equal(rebuilt.get_traces(), traces)
+
+    apply = _motion.apply_motion_on_estimation_clock
+
+    def _drifted(*args, **kwargs):
+        import spikeinterface.preprocessing as sip
+
+        applied = apply(*args, **kwargs)
+        return applied._replace(
+            recording=sip.scale(applied.recording, gain=1.5)
+        )
+
+    monkeypatch.setattr(_motion, "apply_motion_on_estimation_clock", _drifted)
+    abs_path.unlink()
+    try:
+        with pytest.raises(RecordingContentDriftError, match="does not match"):
+            MotionCorrectedRecording().get_recording(key)
+        assert not abs_path.exists()
+    finally:
+        monkeypatch.undo()
+        MotionCorrectedRecording().get_recording(key)
+    assert _file_hash(str(abs_path)) == row["content_hash"]
+
+
 def test_effective_traces_resolve_a_corrected_recording(discontinuous_sources):
     """``ensure_effective_traces`` self-heals a missing corrected artifact
     through its own table, and ``read_effective_recording`` then reads the

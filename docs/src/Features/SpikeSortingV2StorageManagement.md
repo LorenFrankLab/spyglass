@@ -320,7 +320,10 @@ passes `motion_mode="estimate"` or `"apply"`.
     (never by estimating again), through the same locked, atomic,
     content-hash-verified path as `Recording`/`ConcatenatedRecording`; a
     fingerprint mismatch raises `RecordingContentDriftError` and never
-    installs drifted bytes.
+    installs drifted bytes. The content hash is the guard: a rebuild under a
+    SpikeInterface version other than the selection's is
+    installed when it reproduces the stored hash (a new compute still
+    refuses a SpikeInterface version change).
 - **Deletion protection.** `SortingSelection.MotionCorrectionSource` is a
     foreign key onto `MotionCorrectedRecording`: `delete_quick` on a
     referenced `MotionCorrectedRecording` fails on the constraint, and an
