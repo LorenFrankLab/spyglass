@@ -36,9 +36,16 @@ Single-recording path:
 Concat path:
   Member Recordings + explicit per-member RecordingArtifactDetection choices
     -> ConcatenatedRecordingSelection.MemberSnapshot
-    -> ConcatenatedRecording (mask -> concatenate -> motion correction)
+    -> ConcatenatedRecording (mask -> concatenate; no motion correction)
     -> SortingSelection (concat source) -> Sorting -> CurationV2
     -> ConcatMemberCuration (original session timestamps) -> SpikeSortingOutput
+
+Optional motion stage (either path's Recording or ConcatenatedRecording; see
+"Optional motion correction" below):
+  Recording | ConcatenatedRecording [+ ArtifactDetectionOutput, single source only]
+    -> MotionEstimateSelection -> MotionEstimate
+    -> MotionCorrectedRecordingSelection -> MotionCorrectedRecording
+    -> SortingSelection.MotionCorrectionSource
 
 Both curation paths:
   CurationV2 -> CurationEvaluationSelection -> CurationEvaluation
@@ -50,11 +57,14 @@ mutually-exclusive source part tables -- `RecordingSource` (a single-session
 `ConcatenatedRecording`). Single-recording sorts can add an artifact-detection
 pass through the internal `ArtifactDetectionOutput` merge (a
 `RecordingArtifactDetection` or `SharedGroupArtifactDetection`). Concat sources
-already contain their frozen member masks, applied before motion correction;
-they accept no additional sorting-stage artifact input. The artifact merge is
-internal -- user workflows never import it. Recording access stays
-`SpikeSortingOutput.get_recording`; use the selected curation's analyzer for the
-masked, sorting-aligned traces used by QC.
+already contain their frozen member masks; concatenation itself no longer
+corrects motion, so they accept no additional sorting-stage artifact input.
+The artifact merge is internal -- user workflows never import it. A sort can
+optionally add a third source part, `MotionCorrectionSource`, pointing at a
+`MotionCorrectedRecording` computed from the same base source and mask -- see
+[Optional motion correction](#optional-motion-correction) below. Recording
+access stays `SpikeSortingOutput.get_recording`; use the selected curation's
+analyzer for the masked, sorting-aligned traces used by QC.
 
 All v2 tables live in dedicated DataJoint schemas (`spikesorting_v2_recording`,
 `spikesorting_v2_artifact`, `spikesorting_v2_artifact_output`,
@@ -135,6 +145,14 @@ coexist under one merge surface.
     registry (`mountainsort4`, `mountainsort5`, ...). The Unit part table stores
     per-unit summary stats (n_spikes, peak_amplitude_uv) so quick filtering does
     not require loading the NWB.
+- **`MotionEstimationParameters` / `MotionInterpolationParameters` /
+    `MotionCorrectionParameters`, `MotionEstimateSelection` / `MotionEstimate`,
+    `MotionCorrectedRecordingSelection` / `MotionCorrectedRecording`**
+    (`spyglass.spikesorting.v2.motion`) -- the optional motion stage: a saved,
+    masked, spans-aware displacement estimate on a `Recording` or
+    `ConcatenatedRecording`, and an optional corrected recording a sort can read
+    through `SortingSelection.MotionCorrectionSource`. See
+    [Optional motion correction](#optional-motion-correction) below.
 - **`CurationV2`** -- versioned curation rows (labels + merge groups) chained by
     `parent_curation_id`. `insert_curation` is the single entry point; each
     inserted generation has an immutable, database-unique `curation_uuid` (the
@@ -1421,13 +1439,23 @@ To be explicit: populating `DriftEstimate` leaves the upstream `Recording`
 untouched — its `content_hash` and the traces from `get_recording` are
 unchanged. Applying motion correction is out of scope by design.
 
+`DriftEstimate` applies **no artifact mask** (it estimates across masked
+samples and acquisition gaps on the recording's real clock) and always uses
+`dredge_fast` with no persisted parameters. Its numbers are **not comparable**
+to [the masked, spans-aware motion estimate](#optional-motion-correction)
+below -- use `DriftEstimate` only to flag high-drift sessions, and the motion
+stage's `MotionEstimate` to inspect or apply a correction.
+
 ### Chronic same-day recordings
 
 When a chronic implant is recorded across several files on the **same day**
 (e.g. a run split into multiple epochs, or several short sessions), you can
-concatenate the per-member recordings into one continuous, motion-corrected
-recording and sort them together. This recovers units that a per-file sort would
-split, and it is the default chronic path. For **days/weeks-apart** sessions the
+concatenate the per-member recordings into one continuous, masked recording and
+sort them together. Concatenation itself never corrects motion; apply the
+[optional motion stage](#optional-motion-correction) to the resulting
+`ConcatenatedRecording` if you want a corrected sort. Concatenating recovers
+units that a per-file sort would split, and it is the default chronic path.
+For **days/weeks-apart** sessions the
 recommended path is *sort-then-match* (sort each session independently, then
 match units across them) rather than concatenation; multi-day concatenation is
 supported but experimental and gated behind an explicit opt-in.
@@ -1492,15 +1520,14 @@ for member_index, m in enumerate(members):
 #    Session.session_start_time, never stored).
 SessionGroup.create_group("my_team", "day1", members)
 
-# 3. Materialize the motion-corrected, unwhitened concat cache. preset="auto"
-#    maps to rigid_fast for same-day groups; for multi-day it is rejected and
-#    you must pick an explicit preset (e.g. dredge_fast).
+# 3. Materialize the masked, unwhitened concat cache. Concatenation itself
+#    never corrects motion (see "Optional motion correction" below for an
+#    opt-in estimate/apply stage on this same concat_key).
 concat_key = ConcatenatedRecordingSelection.insert_selection(
     {
         "session_group_owner": "my_team",
         "session_group_name": "day1",
         "preprocessing_params_name": "default",
-        "motion_correction_params_name": "auto_default",
     },
     artifact_detection_ids=artifact_ids,
 )
@@ -1534,9 +1561,9 @@ member_merge_ids = {
 Key behaviors and caveats:
 
 - **Whitening stays at the sorter/analyzer boundary.** The concat cache is
-    motion-corrected but *unwhitened*, exactly like a single-session
-    `Recording`; MS4/MS5 external whitening and analyzer whitening are
-    unchanged.
+    masked but *unwhitened*, exactly like a single-session `Recording`
+    (motion correction, if applied, is a separate stage on top of it); MS4/MS5
+    external whitening and analyzer whitening are unchanged.
 - **Parent anchoring.** A concat sort's analysis NWB and each unit's `Electrode`
     FK anchor to the **first** `SessionGroup.Member`. Because of that,
     `get_unit_brain_regions` on a concat sort raises
@@ -1549,16 +1576,16 @@ Key behaviors and caveats:
     `SpikeSortingOutput.get_sort_group_info`, and the `(sorter, nwb_file_name)`
     decoding metadata from `CurationV2.get_sort_metadata` — resolves through the
     same anchor member rather than raising.
-- **Artifacts are detected and masked per member before motion correction.** The
+- **Artifacts are detected and masked per member before concatenation.** The
     shipped concat preset enables amplitude detection. The selection freezes
     each detection with a foreign key and includes it in its identity; changing
     a mask creates a new concat and sort. No mask is inherited implicitly from
     an earlier standalone sort. Direct callers must supply every member index in
     `artifact_detection_ids`; an explicit `None` means no mask for that member.
     A concat `SortingSelection` has no separate artifact input because masking
-    already happened in its source. Corrected traces are masked again to
-    preserve exclusions after interpolation. Sample counts and boundaries never
-    change.
+    already happened in its source. If you apply the optional motion stage to
+    the concat, its corrected recording re-applies the same mask after
+    interpolation. Sample counts and boundaries never change.
 - **Observation intervals survive curation and member export.** The concat NWB
     stores kept intervals in synthetic seconds; each exported member carries its
     kept intervals in original session time, including disjoint recordings.
@@ -1841,7 +1868,8 @@ DB-derivable; only the producing params are written.
 | Concat member curated units | `spyglass_v2_curation_provenance` + `spyglass_v2_curation_merge_lineage` | the chosen concat curation provenance plus `member_index` / member `nwb_file_name`; wall-clock times and local sample frames, with curated unit IDs preserved across members                                                                                      |
 | UnitMatch                   | `spyglass_v2_unitmatch_provenance` + `spyglass_v2_unitmatch_members`     | run/group/matcher header (matcher backend + versions) and the per-member `(sorting_id, curation_id, session_start_time)` map                                                                                                                                      |
 | CurationEvaluation          | `spyglass_v2_curation_evaluation_provenance`                             | metric set + recipe names, auto-merge preset/rules, evaluated curation, the `source_analyzer_hashes` manifest, SI version, upstream recording/concat `content_hash`                                                                                               |
-| ConcatenatedRecording       | `spyglass_v2_concat_provenance` + `spyglass_v2_concat_members`           | resolved motion preset **+ kwargs**, member artifact detection IDs, excluded frame ranges, valid observation intervals, and the ordered member frame boundaries used for session mapping                                                                          |
+| ConcatenatedRecording       | `spyglass_v2_concat_provenance` + `spyglass_v2_concat_members`           | member artifact detection IDs, excluded frame ranges, valid observation intervals, and the ordered member frame boundaries used for session mapping (no motion: concatenation itself never corrects motion)                                                        |
+| MotionCorrectedRecording    | `spyglass_v2_motion_correction_provenance`                              | estimation + interpolation recipe names, the resolved interpolation config, SpikeInterface version, the estimate and corrected-recording ids, the application algorithm version, the source's `content_hash`, and any `remove_channels`-dropped channel ids       |
 
 ```python
 import pynwb
@@ -2168,8 +2196,10 @@ The session runner applies the supplied intervals to each requested sort group.
 
 For concatenated sorting, pass `manual_excluded_times={member_index:
 [[start, stop], ...]}`. Each member's exclusions use that member's original
-session timestamps. Automatic and manual masks are composed before motion
-correction and survive reconstruction and member export. No per-spike editing is
+session timestamps. Automatic and manual masks are composed before
+concatenation and survive reconstruction and member export; if you apply the
+optional motion stage afterward, its estimate excludes the same masked samples
+and its corrected recording re-applies the mask. No per-spike editing is
 introduced.
 
 For existing development databases, follow the
