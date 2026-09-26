@@ -95,8 +95,9 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         time = speed.index.to_numpy()
         speed = speed.to_numpy()
 
+        # Per-unit counts: the detector sums them into the population rate,
+        # and counts the units active in each event (n_active_units).
         spike_indicator = SortedSpikesGroup.get_spike_indicator(key, time)
-        spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
 
         sampling_frequency = 1 / np.median(np.diff(time))
 
