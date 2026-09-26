@@ -282,15 +282,27 @@ DEV_RIGID_MAX_ABS_SPREAD_UM = 1.175 - 0.985
 KNOWN_ANSWER_DURATION_S = 90.0
 
 
-def _estimate(recording, spans=None, preset="dredge_fast"):
+def _one_span_clock(recording):
+    """The estimation clock of a gap-free recording: its own ``t0 + i / fs``."""
+    from spyglass.spikesorting.v2._motion import build_estimation_clock
+
+    return build_estimation_clock(
+        [(0, recording.get_num_samples())],
+        [float(recording.sample_index_to_time(0))],
+        recording.get_sampling_frequency(),
+        max_gap_s=30.0,
+    )
+
+
+def _estimate(recording, spans=None, preset="dredge_fast", clock=None):
     from spyglass.spikesorting.v2._motion import estimate_motion_in_spans
     from tests.spikesorting.v2._motion_fixtures import JOB_KWARGS
 
-    n = recording.get_num_samples()
+    clock = _one_span_clock(recording) if clock is None else clock
     return estimate_motion_in_spans(
         recording,
-        statistics_spans=[(0, n)] if spans is None else spans,
-        continuity_spans=[(0, n)],
+        statistics_spans=clock.spans if spans is None else spans,
+        clock=clock,
         resolved_params=_resolve({"preset": preset}),
         job_kwargs=JOB_KWARGS,
     )
@@ -517,6 +529,411 @@ def test_masked_artifacts_do_not_reach_the_estimate(rigid_drift_90s):
     assert clean_rms <= DEV_RIGID_RMS_UM
 
 
+# ---- estimation clock and discontinuous inputs ------------------------------
+#
+# Gap tolerances: development measurement on this fixture family (two 30 s
+# spans of one 32-contact polymer shank recording, 30 units, a 30 um rigid step
+# in the middle of a 600 s removed gap, dredge_fast, 30 s gap cap, seeds 0-2).
+# The common-frame error on bins holding data, after one global offset, was
+# RMS 0.010 / 0.111 / 0.070 um and max |error| 0.067 / 0.337 / 0.335 um; the
+# bounds are those maxima rounded up. The static twin across the same gap
+# estimated exactly 0 for every seed; its bound is the dredge-family static
+# maximum above (DEV_STATIC_MAX_ABS_UM).
+DEV_GAP_JUMP_RMS_UM = 0.111
+DEV_GAP_JUMP_MAX_ABS_UM = 0.338
+GAP_SPAN_S = 30.0
+GAP_REAL_S = 600.0
+# Two concatenation members: [0, 20) s, then [30, 40) s and [45, 60) s of one
+# recording, with rigid steps -15 -> +15 um at 25 s (between the members) and
+# +15 -> 0 um at 42.5 s (inside the second member's gap). Same development
+# measurement (dredge_fast, 30 s cap, seeds 0-2), common-frame error on bins
+# holding data: RMS 0.047 / 0.344 / 0.363 um and max |error| 0.315 / 0.679 /
+# 0.594 um; the bounds are the maxima rounded up.
+MEMBER_WINDOWS_S = [(0.0, 20.0), (30.0, 40.0), (45.0, 60.0)]
+DEV_MEMBERS_RMS_UM = 0.363
+DEV_MEMBERS_MAX_ABS_UM = 0.679
+
+
+def test_estimation_clock_caps_only_long_gaps():
+    """``e_{i+1} = e_i + (b_i - a_i) / fs + min(g_i, max_gap_s)``: a gap
+    below the cap keeps its real length, a longer one is capped, a zero gap
+    stays zero. Every value is exact in binary floating point."""
+    from spyglass.spikesorting.v2._motion import build_estimation_clock
+
+    spans = [(0, 1000), (1000, 3000), (3000, 3500), (3500, 4000)]
+    # Span lengths 1.0 / 2.0 / 0.5 / 0.5 s; real gaps 0.25 s (below the
+    # 5 s cap), 100 s (above it) and 0 s.
+    starts = [10.0, 11.25, 113.25, 113.75]
+
+    clock = build_estimation_clock(spans, starts, 1000.0, max_gap_s=5.0)
+
+    np.testing.assert_array_equal(clock.spans, spans)
+    np.testing.assert_array_equal(clock.source_start_s, starts)
+    np.testing.assert_array_equal(
+        clock.estimation_start_s, [10.0, 11.25, 18.25, 18.75]
+    )
+    assert clock.sampling_frequency == 1000.0
+    uncapped = build_estimation_clock(spans, starts, 1000.0, max_gap_s=1e6)
+    np.testing.assert_array_equal(uncapped.estimation_start_s, starts)
+    squeezed = build_estimation_clock(spans, starts, 1000.0, max_gap_s=0.0)
+    np.testing.assert_array_equal(
+        squeezed.estimation_start_s, [10.0, 11.0, 13.0, 13.5]
+    )
+
+
+@pytest.mark.parametrize(
+    "spans, starts, cap, match",
+    [
+        ([(0, 1000), (1000, 2000)], [10.0, 10.5], 5.0, "0.5 s before span 0"),
+        ([(0, 1000), (1000, 2000)], [20.0, 10.0], 5.0, "before span 0"),
+        ([(0, 1000), (1500, 2000)], [0.0, 5.0], 5.0, "contiguous"),
+        ([(10, 1000)], [0.0], 5.0, "contiguous"),
+        ([(0, 1000), (1000, 1000)], [0.0, 5.0], 5.0, "non-empty"),
+        ([(0, 1000)], [0.0, 5.0], 5.0, "start times"),
+        ([(0, 1000)], [np.nan], 5.0, "finite"),
+        ([(0, 1000)], [0.0], -1.0, "max_gap_s"),
+        ([], [], 5.0, "no continuity spans"),
+    ],
+    ids=[
+        "overlap",
+        "out-of-order",
+        "hole",
+        "not-from-zero",
+        "empty-span",
+        "start-count",
+        "nan-start",
+        "negative-cap",
+        "no-spans",
+    ],
+)
+def test_estimation_clock_rejects_invalid_input(spans, starts, cap, match):
+    from spyglass.spikesorting.v2._motion import build_estimation_clock
+
+    with pytest.raises(ValueError, match=match):
+        build_estimation_clock(spans, starts, 1000.0, max_gap_s=cap)
+
+
+def test_clock_view_presents_the_estimation_clock():
+    """The view keeps the parent's traces and geometry and answers every time
+    lookup on the estimation clock, without a time vector, and survives a
+    SpikeInterface round trip (pickle rebuilds it from its kwargs)."""
+    import pickle
+
+    from spyglass.spikesorting.v2._motion import (
+        EstimationClockRecording,
+        build_estimation_clock,
+        estimation_times,
+    )
+
+    parent = _bare_recording(_column(32), duration_s=0.2)
+    parent.set_times(
+        np.r_[5.0 + np.arange(2000) / 3e4, 400.0 + np.arange(4000) / 3e4],
+        with_warning=False,
+    )
+    clock = build_estimation_clock(
+        [(0, 2000), (2000, 6000)], [5.0, 400.0], 3e4, max_gap_s=30.0
+    )
+    view = EstimationClockRecording(parent, clock)
+
+    frames = np.array([0, 1, 1999, 2000, 2001, 5999])
+    expected = np.r_[
+        5.0 + frames[:3] / 3e4, 35.0 + 2000 / 3e4 + (frames[3:] - 2000) / 3e4
+    ]
+    np.testing.assert_allclose(
+        view.sample_index_to_time(frames), expected, rtol=0, atol=1e-12
+    )
+    np.testing.assert_array_equal(
+        view.sample_index_to_time(frames), estimation_times(clock, frames)
+    )
+    assert not view.has_time_vector()
+    np.testing.assert_array_equal(
+        view.get_times(), estimation_times(clock, np.arange(6000))
+    )
+    assert view.get_start_time() == 5.0
+    assert view.get_end_time() == view.sample_index_to_time(5999)
+    np.testing.assert_array_equal(
+        view.time_to_sample_index(view.sample_index_to_time(frames)), frames
+    )
+    # A time inside the capped gap maps to the last frame before it.
+    assert view.time_to_sample_index(20.0) == 1999
+    np.testing.assert_array_equal(view.get_traces(), parent.get_traces())
+    np.testing.assert_array_equal(
+        view.get_channel_locations(), parent.get_channel_locations()
+    )
+    rebuilt = pickle.loads(pickle.dumps(view))
+    np.testing.assert_array_equal(
+        rebuilt.sample_index_to_time(frames), view.sample_index_to_time(frames)
+    )
+
+    short = build_estimation_clock([(0, 5000)], [0.0], 3e4, max_gap_s=30.0)
+    with pytest.raises(ValueError, match="6000 samples"):
+        EstimationClockRecording(parent, short)
+    other_rate = build_estimation_clock([(0, 6000)], [0.0], 2e4, max_gap_s=30.0)
+    with pytest.raises(ValueError, match="sampling frequency"):
+        EstimationClockRecording(parent, other_rate)
+
+
+def test_source_clock_mapping_flags_bins_inside_a_capped_gap():
+    from spikeinterface.core.motion import Motion
+
+    from spyglass.spikesorting.v2._motion import (
+        build_estimation_clock,
+        displacement_on_source_clock,
+    )
+
+    # Spans of 3 s and 2 s at fs = 10 Hz; a 100 s real gap capped to 2 s.
+    clock = build_estimation_clock(
+        [(0, 30), (30, 50)], [50.0, 153.0], 10.0, max_gap_s=2.0
+    )
+    centers = np.arange(7) + 50.5  # estimation clock: span 0 is [50, 53),
+    # the capped gap [53, 55), span 1 [55, 57).
+    motion = Motion([np.arange(7.0)[:, None]], [centers], np.array([0.0]))
+
+    mapped = displacement_on_source_clock(motion, clock)
+
+    np.testing.assert_array_equal(
+        mapped.continuity_span, [0, 0, 0, -1, -1, 1, 1]
+    )
+    np.testing.assert_array_equal(mapped.in_gap, mapped.continuity_span == -1)
+    np.testing.assert_array_equal(
+        mapped.source_time_s,
+        [50.5, 51.5, 52.5, np.nan, np.nan, 153.5, 154.5],
+    )
+    np.testing.assert_array_equal(
+        mapped.displacement_um, motion.displacement[0]
+    )
+
+
+def _clock_for(spans, starts):
+    from spyglass.spikesorting.v2._motion import build_estimation_clock
+    from spyglass.spikesorting.v2._recipe_catalog import MOTION_MAX_GAP_S
+    from tests.spikesorting.v2._motion_fixtures import SAMPLING_FREQUENCY
+
+    return build_estimation_clock(
+        spans, starts, SAMPLING_FREQUENCY, max_gap_s=MOTION_MAX_GAP_S
+    )
+
+
+def test_single_span_clock_is_the_source_clock():
+    """A gap-free source is estimated on its own ``t0 + i / fs`` clock: the
+    estimate equals ``compute_motion`` on the same recording with that clock
+    (``shift_times``), although the source carries a time vector."""
+    import spikeinterface as si
+    import spikeinterface.preprocessing as sip
+
+    from spyglass.spikesorting.v2._motion import spikeinterface_step_kwargs
+    from tests.spikesorting.v2._motion_fixtures import (
+        JOB_KWARGS,
+        SAMPLING_FREQUENCY,
+        rigid_drift_recordings,
+    )
+
+    t0 = 1234.5
+    ours_rec, _, _ = rigid_drift_recordings(seed=0, duration_s=20.0)
+    n = ours_rec.get_num_samples()
+    ours_rec.set_times(
+        t0 + np.arange(n) / SAMPLING_FREQUENCY, with_warning=False
+    )
+    clock = _clock_for([(0, n)], [t0])
+    np.testing.assert_array_equal(clock.estimation_start_s, [t0])
+    motion, diagnostics = _estimate(ours_rec, clock=clock)
+
+    oracle_rec, _, _ = rigid_drift_recordings(seed=0, duration_s=20.0)
+    oracle_rec.shift_times(t0)
+    si.get_noise_levels(
+        oracle_rec,
+        return_in_uV=False,
+        random_slices_kwargs={
+            "method": "full_random",
+            "num_chunks_per_segment": 20,
+            "chunk_duration": "500ms",
+            "seed": 0,
+        },
+        n_jobs=1,
+    )
+    detect, localize, estimate = spikeinterface_step_kwargs(
+        _resolve({"preset": "dredge_fast"})
+    )
+    oracle = sip.compute_motion(
+        oracle_rec,
+        preset="dredge_fast",
+        detect_kwargs=detect,
+        localize_peaks_kwargs=localize,
+        estimate_motion_kwargs=estimate,
+        **JOB_KWARGS,
+    )
+
+    np.testing.assert_array_equal(
+        motion.displacement[0], oracle.displacement[0]
+    )
+    np.testing.assert_array_equal(
+        motion.temporal_bins_s[0], oracle.temporal_bins_s[0]
+    )
+    assert motion.temporal_bins_s[0][0] == t0 + 0.5
+    np.testing.assert_array_equal(
+        diagnostics.peaks_per_continuity_span, [diagnostics.n_peaks_kept]
+    )
+
+
+@pytest.fixture(scope="module")
+def jump_across_gap():
+    """Seed-0 two-span recording with a 30 um jump inside a 600 s gap."""
+    from tests.spikesorting.v2._motion_fixtures import (
+        jump_across_gap_recordings,
+    )
+
+    drifting, static, spans, starts, displacement = jump_across_gap_recordings(
+        seed=0, span_s=GAP_SPAN_S, gap_s=GAP_REAL_S
+    )
+    return {
+        "drifting": drifting,
+        "static": static,
+        "spans": spans,
+        "starts": starts,
+        "displacement": displacement,
+        "clock": _clock_for(spans, starts),
+        "depths": drifting.get_channel_locations()[:, 1],
+    }
+
+
+def test_jump_inside_a_gap_is_recovered_in_one_reference_frame(
+    jump_across_gap,
+):
+    """Both spans estimated together recover a jump that happened while
+    nothing was recorded: after ONE global offset the estimate matches the
+    truth on both sides. Estimating each span on its own resets each span's
+    reference and fails the same check by the full 15 um half-jump."""
+    from tests.spikesorting.v2._motion_fixtures import (
+        common_frame_error_on_source_clock,
+    )
+
+    case = jump_across_gap
+    clock = case["clock"]
+    np.testing.assert_array_equal(
+        clock.estimation_start_s, [0.0, GAP_SPAN_S + 30.0]
+    )
+    motion, diagnostics = _estimate(
+        case["drifting"], spans=case["spans"], clock=clock
+    )
+    rms, max_abs = common_frame_error_on_source_clock(
+        motion, clock, case["displacement"], case["depths"]
+    )
+    assert rms <= DEV_GAP_JUMP_RMS_UM
+    assert max_abs <= DEV_GAP_JUMP_MAX_ABS_UM
+    assert (diagnostics.peaks_per_continuity_span > 0).all()
+    assert diagnostics.peaks_per_continuity_span.sum() == (
+        diagnostics.n_peaks_kept
+    )
+    # The capped gap is 30 bins of the 1 s dredge_fast grid.
+    assert motion.displacement[0].shape[0] == 2 * GAP_SPAN_S + 30
+
+    # Discriminating control: each span alone, its own reference frame.
+    rows, truths = [], []
+    sample_times = (np.arange(case["displacement"].size) + 0.5) / 5.0
+    for (a, b), start in zip(case["spans"], case["starts"]):
+        part = case["drifting"].frame_slice(a, b)
+        alone, _ = _estimate(part, clock=_clock_for([(0, b - a)], [start]))
+        for center in alone.temporal_bins_s[0]:
+            inside = (sample_times >= max(center - 0.5, start)) & (
+                sample_times < min(center + 0.5, start + GAP_SPAN_S)
+            )
+            truths.append(case["displacement"][inside].mean())
+            rows.append(
+                alone.get_displacement_at_time_and_depth(
+                    np.full(case["depths"].size, center), case["depths"]
+                )
+            )
+    diff = np.stack(rows) - np.asarray(truths)[:, None]
+    diff -= diff.mean()
+    assert np.sqrt(np.mean(diff**2)) > DEV_GAP_JUMP_RMS_UM
+    assert np.abs(diff).max() > DEV_GAP_JUMP_MAX_ABS_UM
+
+
+def test_no_motion_across_a_gap_estimates_no_jump(jump_across_gap):
+    case = jump_across_gap
+    motion, _ = _estimate(
+        case["static"], spans=case["spans"], clock=case["clock"]
+    )
+
+    assert np.max(np.abs(motion.displacement[0])) <= DEV_STATIC_MAX_ABS_UM
+
+
+def test_unequal_members_with_a_join_and_an_internal_gap():
+    """A two-member concatenation (20 s; then 10 s + 15 s around an internal
+    gap) is estimated on one clock built from the members' own timestamps:
+    every member join and internal gap is a continuity span edge, and rigid
+    jumps planted in both gaps are recovered in one reference frame."""
+    from spikeinterface.core import concatenate_recordings
+
+    from spyglass.spikesorting.v2._concat_recording import concat_continuity
+    from tests.spikesorting.v2._motion_fixtures import (
+        SAMPLING_FREQUENCY,
+        common_frame_error_on_source_clock,
+        stepped_recordings_in_windows,
+    )
+
+    pieces, _, displacement = stepped_recordings_in_windows(
+        seed=0,
+        windows_s=MEMBER_WINDOWS_S,
+        change_times_s=[25.0, 42.5],
+        levels_um=[-15.0, 15.0, 0.0],
+    )
+    first = pieces[0]
+    second = concatenate_recordings(pieces[1:], ignore_times=True)
+    second.set_times(
+        np.concatenate([piece.get_times() for piece in pieces[1:]]),
+        with_warning=False,
+    )
+    counts = [first.get_num_samples(), second.get_num_samples()]
+    continuity = concat_continuity([first, second], counts)
+    concatenated = concatenate_recordings([first, second], ignore_times=True)
+    fs = SAMPLING_FREQUENCY
+    assert continuity.spans == [
+        (0, int(20 * fs)),
+        (int(20 * fs), int(30 * fs)),
+        (int(30 * fs), int(45 * fs)),
+    ]
+    assert continuity.start_s == [0.0, 30.0, 45.0]
+    clock = _clock_for(continuity.spans, continuity.start_s)
+    # Real gaps of 10 s and 5 s, both below the 30 s cap.
+    np.testing.assert_array_equal(clock.estimation_start_s, [0.0, 30.0, 45.0])
+
+    motion, diagnostics = _estimate(
+        concatenated, spans=continuity.spans, clock=clock
+    )
+    rms, max_abs = common_frame_error_on_source_clock(
+        motion,
+        clock,
+        displacement,
+        concatenated.get_channel_locations()[:, 1],
+    )
+
+    assert (diagnostics.peaks_per_continuity_span > 0).all()
+    assert rms <= DEV_MEMBERS_RMS_UM
+    assert max_abs <= DEV_MEMBERS_MAX_ABS_UM
+
+
+def test_span_without_peaks_is_reported_not_fatal(caplog):
+    """A continuity span too short to hold a localization window keeps no
+    peak: it is counted as such and logged, and the estimate is still made
+    from the other span."""
+    import logging
+
+    from tests.spikesorting.v2._motion_fixtures import rigid_drift_recordings
+
+    recording, _, _ = rigid_drift_recordings(seed=0, duration_s=5.0)
+    n = recording.get_num_samples()
+    clock = _clock_for([(0, n - 5), (n - 5, n)], [0.0, (n - 5) / 3e4 + 1.0])
+
+    with caplog.at_level(logging.WARNING):
+        motion, diagnostics = _estimate(recording, clock=clock)
+
+    assert diagnostics.peaks_per_continuity_span[0] > 0
+    assert diagnostics.peaks_per_continuity_span[1] == 0
+    assert "kept no peaks" in caplog.text
+    assert np.isfinite(motion.displacement[0]).all()
+
+
 # ---- span filter and failures -----------------------------------------------
 
 
@@ -627,7 +1044,7 @@ def test_ineligible_geometry_fails_before_estimation():
         estimate_motion_in_spans(
             recording,
             statistics_spans=[(0, n)],
-            continuity_spans=[(0, n)],
+            clock=_one_span_clock(recording),
             resolved_params=_resolve({"preset": "dredge_fast"}),
         )
 
@@ -635,23 +1052,36 @@ def test_ineligible_geometry_fails_before_estimation():
 @pytest.mark.parametrize(
     "continuity, statistics, match",
     [
-        ([(0, 3000), (3000, 6000)], [(0, 3000)], "not supported yet"),
-        ([(0, 5000)], [(0, 5000)], "does not cover"),
+        ([(0, 5000)], [(0, 5000)], "do not cover"),
         ([(0, 6000)], [(100, 50)], "sorted, disjoint"),
         ([(0, 6000)], [(0, 3000), (2000, 4000)], "sorted, disjoint"),
         ([(0, 6000)], [], "no statistics spans"),
+        (
+            [(0, 3000), (3000, 6000)],
+            [(0, 2000), (2500, 3500)],
+            "cross a continuity span edge",
+        ),
     ],
 )
 def test_invalid_spans_are_rejected(continuity, statistics, match):
-    from spyglass.spikesorting.v2._motion import estimate_motion_in_spans
+    from spyglass.spikesorting.v2._motion import (
+        build_estimation_clock,
+        estimate_motion_in_spans,
+    )
 
     recording = _bare_recording(_column(32))
     assert recording.get_num_samples() == 6000
+    clock = build_estimation_clock(
+        continuity,
+        [3.0 * i for i in range(len(continuity))],
+        30_000.0,
+        max_gap_s=30.0,
+    )
     with pytest.raises(ValueError, match=match):
         estimate_motion_in_spans(
             recording,
             statistics_spans=statistics,
-            continuity_spans=continuity,
+            clock=clock,
             resolved_params=_resolve({"preset": "dredge_fast"}),
         )
 

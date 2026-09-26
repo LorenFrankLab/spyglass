@@ -95,6 +95,193 @@ def rigid_drift_recordings(*, seed: int, duration_s: float):
     return bandpass(drifting), bandpass(static), displacement
 
 
+def _step_displacement_data(
+    duration_s: float, change_times_s, levels_um, num_units: int
+):
+    """``generate_drifting_recording`` displacement data for rigid steps.
+
+    Displacement is ``levels_um[0]`` until ``change_times_s[0]``, then
+    ``levels_um[1]`` until ``change_times_s[1]``, and so on, for every unit
+    (rigid). Levels must lie within +/-15 um.
+    """
+    from spikeinterface.generation.drift_tools import make_linear_displacement
+
+    n_t = int(np.ceil(DISPLACEMENT_SAMPLING_FREQUENCY * duration_s))
+    times = np.arange(n_t) / DISPLACEMENT_SAMPLING_FREQUENCY
+    vector = np.asarray(levels_um, dtype=float)[
+        np.searchsorted(np.asarray(change_times_s), times, side="right")
+    ]
+    displacement_vectors = np.zeros((n_t, 2, 1))
+    displacement_vectors[:, 1, 0] = vector
+    unit_displacements = np.zeros((n_t, num_units, 2))
+    unit_displacements[:, :, 1] = vector[:, None]
+    steps = make_linear_displacement(
+        np.array([0.0, 15.0]), np.array([0.0, -15.0]), num_step=31
+    )
+    return (
+        unit_displacements,
+        displacement_vectors,
+        np.ones((num_units, 1)),
+        DISPLACEMENT_SAMPLING_FREQUENCY,
+        steps,
+    )
+
+
+def stepped_recordings_in_windows(
+    *, seed: int, windows_s, change_times_s, levels_um
+):
+    """Keep only some windows of one recording with planted rigid steps.
+
+    One recording lasting until the last window's end is generated with
+    rigid steps (:func:`_step_displacement_data`), bandpassed as a whole (the
+    v2 recording stage filters before it restricts to the selected
+    intervals), and cut to ``windows_s``. Steps placed between two windows
+    happen where no sample was kept. The static twin is cut the same way.
+
+    Returns
+    -------
+    drifting, static : list[si.BaseRecording]
+        One bandpassed recording per window, each with the time vector of
+        its frames on the generated recording's clock.
+    displacement : numpy.ndarray
+        ``(n_t,)`` ground-truth rigid displacement (um) over the whole
+        generated recording, sampled at ``DISPLACEMENT_SAMPLING_FREQUENCY``.
+    """
+    from spikeinterface.generation import generate_drifting_recording
+
+    duration_s = float(windows_s[-1][1])
+    displacement_data = _step_displacement_data(
+        duration_s, change_times_s, levels_um, NUM_UNITS
+    )
+    static, drifting, _sorting, _extra = generate_drifting_recording(
+        num_units=NUM_UNITS,
+        duration=duration_s,
+        sampling_frequency=SAMPLING_FREQUENCY,
+        probe=polymer_shank_probe(),
+        displacement_data=displacement_data,
+        extra_outputs=True,
+        seed=seed,
+    )
+
+    def _cut(recording):
+        filtered = bandpass(recording)
+        pieces = []
+        for start_s, end_s in windows_s:
+            start = int(round(start_s * SAMPLING_FREQUENCY))
+            end = int(round(end_s * SAMPLING_FREQUENCY))
+            piece = filtered.frame_slice(start, end)
+            piece.set_times(
+                np.arange(start, end) / SAMPLING_FREQUENCY, with_warning=False
+            )
+            pieces.append(piece)
+        return pieces
+
+    return (
+        _cut(drifting),
+        _cut(static),
+        displacement_data[1][:, 1, 0].astype(float),
+    )
+
+
+def join_windows(pieces):
+    """Join per-window recordings into one continuous-frame recording.
+
+    Returns
+    -------
+    joined : si.BaseRecording
+        The windows' frames back to back, on a synthetic clock.
+    spans : list[tuple[int, int]]
+        One continuity span per window.
+    source_start_s : list[float]
+        Each window's first timestamp.
+    """
+    from spikeinterface.core import concatenate_recordings
+
+    ends = np.cumsum([piece.get_num_samples() for piece in pieces])
+    spans = [(int(a), int(b)) for a, b in zip([0, *ends[:-1]], ends)]
+    starts = [float(piece.sample_index_to_time(0)) for piece in pieces]
+    return concatenate_recordings(pieces, ignore_times=True), spans, starts
+
+
+def jump_across_gap_recordings(
+    *, seed: int, span_s: float, gap_s: float, jump_um: float = 30.0
+):
+    """Two equal spans of one recording with a rigid jump inside the gap.
+
+    ``[0, span_s)`` and ``[span_s + gap_s, 2 * span_s + gap_s)`` of one
+    generated recording, with a ``jump_um`` rigid step at the middle of the
+    removed gap (:func:`stepped_recordings_in_windows`).
+
+    Returns
+    -------
+    drifting, static : si.BaseRecording
+        The two spans joined (``2 * span_s`` seconds of frames).
+    spans : list[tuple[int, int]]
+        The two continuity spans in frames.
+    source_start_s : list[float]
+        Each span's start on the generated recording's clock (s).
+    displacement : numpy.ndarray
+        ``(n_t,)`` ground-truth rigid displacement (um).
+    """
+    drifting, static, displacement = stepped_recordings_in_windows(
+        seed=seed,
+        windows_s=[(0.0, span_s), (span_s + gap_s, 2 * span_s + gap_s)],
+        change_times_s=[span_s + gap_s / 2],
+        levels_um=[-jump_um / 2, jump_um / 2],
+    )
+    joined, spans, starts = join_windows(drifting)
+    joined_static, _, _ = join_windows(static)
+    return joined, joined_static, spans, starts, displacement
+
+
+def common_frame_error_on_source_clock(
+    motion, clock, displacement, channel_depths
+):
+    """Common-frame error of a gapped estimate, on bins holding data (um).
+
+    Each temporal bin is mapped to source time
+    (``_motion.displacement_on_source_clock``); bins inside a capped gap are
+    skipped. The truth of a bin is the mean ground-truth displacement over its
+    width on the source clock, clipped to its span. One offset over all kept
+    bins and depths is removed before the error is summarized, as in
+    :func:`common_frame_error`.
+
+    Returns
+    -------
+    rms, max_abs : float
+    """
+    from spyglass.spikesorting.v2._motion import displacement_on_source_clock
+
+    mapped = displacement_on_source_clock(motion, clock)
+    half_bin = float(np.diff(motion.temporal_bins_s[0][:2])[0]) / 2
+    fs = clock.sampling_frequency
+    span_start = clock.source_start_s
+    span_end = span_start + (clock.spans[:, 1] - clock.spans[:, 0]) / fs
+    sample_times = (
+        np.arange(displacement.size) + 0.5
+    ) / DISPLACEMENT_SAMPLING_FREQUENCY
+    rows = []
+    truths = []
+    for b in np.flatnonzero(~mapped.in_gap):
+        span = mapped.continuity_span[b]
+        center = mapped.source_time_s[b]
+        lo = max(center - half_bin, span_start[span])
+        hi = min(center + half_bin, span_end[span])
+        inside = (sample_times >= lo) & (sample_times < hi)
+        if not inside.any():
+            continue
+        truths.append(displacement[inside].mean())
+        rows.append(
+            motion.get_displacement_at_time_and_depth(
+                np.full(channel_depths.size, motion.temporal_bins_s[0][b]),
+                channel_depths,
+            )
+        )
+    diff = np.stack(rows) - np.asarray(truths)[:, None]
+    diff -= diff.mean()
+    return float(np.sqrt(np.mean(diff**2))), float(np.max(np.abs(diff)))
+
+
 def common_frame_error(motion, displacement, channel_depths):
     """Estimate-minus-truth error after removing one global offset (um).
 

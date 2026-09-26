@@ -8,8 +8,9 @@ Tables:
         .RecordingSource             -- single-recording source.
         .ConcatenatedRecordingSource -- concatenated-recording source.
         .ArtifactDetectionSource     -- optional mask (single recording only).
-    MotionEstimate             -- The saved SpikeInterface ``Motion`` with its
-                                  resolved configuration and diagnostics.
+    MotionEstimate             -- The saved SpikeInterface ``Motion`` (on the
+                                  source's estimation clock) with that clock,
+                                  its resolved configuration and diagnostics.
 
 Estimating motion changes nothing downstream: no existing table populates or
 reads these rows. The DB-free computation (parameter resolution, the
@@ -581,11 +582,6 @@ class MotionEstimateFetched(NamedTuple):
     artifact_valid_times : numpy.ndarray or None
         ``(n_intervals, 2)`` artifact-removed valid times in seconds, for a
         masked single-recording source.
-    member_paths : tuple
-        Concat source only: ``(abs_path, electrical_series_path)`` of each
-        member ``Recording``, in member order.
-    member_end_samples : tuple
-        Concat source only: each member's end sample in the concat frames.
     """
 
     lineage: SourceLineage
@@ -595,8 +591,6 @@ class MotionEstimateFetched(NamedTuple):
     source_row: dict
     source_path: str
     artifact_valid_times: np.ndarray | None
-    member_paths: tuple
-    member_end_samples: tuple
 
 
 class MotionEstimateComputed(NamedTuple):
@@ -608,6 +602,8 @@ class MotionEstimateComputed(NamedTuple):
     n_samples: int
     sampling_frequency: float
     continuity_spans: np.ndarray
+    continuity_start_s: np.ndarray
+    estimation_start_s: np.ndarray
     statistics_spans: np.ndarray
     channel_ids: list
     channel_locations: np.ndarray
@@ -616,6 +612,7 @@ class MotionEstimateComputed(NamedTuple):
     n_peaks_detected: int
     n_peaks_kept: int
     peaks_per_temporal_bin: np.ndarray
+    peaks_per_continuity_span: np.ndarray
     noise_levels: np.ndarray
     input_fingerprint: str
 
@@ -639,6 +636,16 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     acquisition and which samples were valid evidence; the diagnostics are
     counts, never peak arrays.
 
+    Every source is estimated once, on its *estimation clock*: within each
+    continuity span time advances by ``1 / fs`` per frame from the span's
+    ``estimation_start_s``, and the real gap between two spans (an
+    acquisition gap or a concatenation member join) is kept up to the
+    recipe's ``max_gap_s`` (``_motion.build_estimation_clock``). All spans
+    therefore share one reference frame. The ``motion`` bins are on that
+    clock; :meth:`get_estimation_clock` returns the time map and
+    :meth:`get_displacement_on_source_clock` maps the bins back to source
+    time for inspection.
+
     Populated explicitly (``MotionEstimate.populate(selection_key)``); no
     other table populates or reads it. Estimation runs outside the DB
     transaction (``make_fetch`` / ``make_compute`` / ``make_insert``), and
@@ -650,11 +657,13 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     definition = """
     -> MotionEstimateSelection
     ---
-    motion: longblob                  # SpikeInterface Motion as a blob dict; read with get_motion
+    motion: longblob                  # SpikeInterface Motion as a blob dict, temporal bins on the estimation clock; read with get_motion
     resolved_params: longblob         # the resolved estimation configuration passed to SpikeInterface
     n_samples: bigint                 # frames of the estimated recording
     sampling_frequency: double        # Hz
     continuity_spans: longblob        # (n, 2) int64 half-open frame ranges of uninterrupted acquisition
+    continuity_start_s: longblob      # (n,) float64 first timestamp of each continuity span on the source's own clock, in seconds
+    estimation_start_s: longblob      # (n,) float64 start of each continuity span on the estimation clock, in seconds
     statistics_spans: longblob        # (n, 2) int64 half-open frame ranges of the valid samples used
     channel_ids: longblob             # estimation channel ids in recording order
     channel_locations: longblob       # (n_channels, 2) float64 contact positions in um
@@ -663,6 +672,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     n_peaks_detected: int             # peaks detected on the masked recording
     n_peaks_kept: int                 # peaks whose localization window lies in one statistics span
     peaks_per_temporal_bin: longblob  # (n_temporal_bins,) int64 kept peaks per temporal bin
+    peaks_per_continuity_span: longblob  # (n_spans,) int64 kept peaks per continuity span; 0 marks a span with no evidence
     noise_levels: longblob            # (n_channels,) float64 detection noise in recording units
     input_fingerprint: char(64)       # SHA-256 of source content, spans, channels and configuration
     """
@@ -673,7 +683,8 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         Rebuilds a missing source NWB through the owning table's own verified
         self-heal. Refuses a source whose ``content_hash`` changed since
         selection, and concat tables that predate motion's removal from
-        concatenation.
+        concatenation. A concat source's continuity spans and their start
+        times come from its row.
         """
         from spyglass.spikesorting.v2._artifact_intervals import (
             read_artifact_removed_intervals,
@@ -705,7 +716,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         source_path = _artifact_path(table, lineage.key, source_row)
 
         artifact_valid_times = None
-        member_paths, member_end_samples = (), ()
         if lineage.artifact_detection_id is not None:
             nwb_file_name = (RecordingSelection & lineage.key).fetch1(
                 "nwb_file_name"
@@ -722,31 +732,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
                     "partially deleted."
                 )
             artifact_valid_times = by_nwb[nwb_file_name]
-        if lineage.kind == "concatenated_recording":
-            snapshots = (
-                ConcatenatedRecordingSelection.MemberSnapshot & lineage.key
-            ).fetch("member_index", "recording_id", order_by="member_index")
-            indices, ends = (
-                ConcatenatedRecording.MemberBoundary & lineage.key
-            ).fetch("member_index", "end_sample", order_by="member_index")
-            if list(indices) != list(snapshots[0]):
-                raise ValueError(
-                    f"MotionEstimate: concat {lineage.key} member boundaries "
-                    f"{list(indices)} do not match its frozen members "
-                    f"{list(snapshots[0])}."
-                )
-            paths = []
-            for recording_id in snapshots[1]:
-                member_key = {"recording_id": recording_id}
-                row = (Recording & member_key).fetch1()
-                paths.append(
-                    (
-                        _artifact_path(Recording, member_key, row),
-                        row["electrical_series_path"],
-                    )
-                )
-            member_paths = tuple(paths)
-            member_end_samples = tuple(int(end) for end in ends)
 
         return MotionEstimateFetched(
             lineage=lineage,
@@ -756,8 +741,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             source_row=source_row,
             source_path=source_path,
             artifact_valid_times=artifact_valid_times,
-            member_paths=member_paths,
-            member_end_samples=member_end_samples,
         )
 
     def make_compute(
@@ -770,25 +753,23 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         source_row,
         source_path,
         artifact_valid_times,
-        member_paths,
-        member_end_samples,
     ) -> MotionEstimateComputed:
         """Estimate motion from the resolved files; no DB access.
 
         Re-resolves the recipe and requires its hash, the SpikeInterface
         version and the algorithm version to equal the selection's. Reads the
         source traces; for a single recording derives the continuity spans
-        from its timestamps, silences the artifact ranges and computes the
-        statistics spans as the sort stage does; for a concat reads its
-        persisted statistics spans and derives the continuity spans from the
-        members' timestamps and boundaries. Then runs
-        ``_motion.estimate_motion_in_spans``.
+        and their start times from its timestamps, silences the artifact
+        ranges and computes the statistics spans as the sort stage does; for a
+        concat reads its persisted continuity spans, start times and
+        statistics spans. Builds the estimation clock with the recipe's
+        ``max_gap_s`` and runs ``_motion.estimate_motion_in_spans`` once.
 
         Raises
         ------
         ValueError
-            On a stale selection, a concat whose members do not add up to it,
-            or any estimation failure (see ``estimate_motion_in_spans``).
+            On a stale selection, spans out of acquisition order, or any
+            estimation failure (see ``estimate_motion_in_spans``).
         """
         import spikeinterface as si
 
@@ -797,7 +778,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._sorting_artifact_mask import (
             artifact_frame_ranges,
             boundary_spans_from_timestamps,
-            concat_boundary_spans,
             silence_frame_ranges,
             statistics_spans,
         )
@@ -840,6 +820,10 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         n_samples = int(recording.get_num_samples())
         if lineage.kind == "recording":
             continuity = boundary_spans_from_timestamps(recording)
+            continuity_start_s = [
+                float(recording.sample_index_to_time(start))
+                for start, _ in continuity
+            ]
             excluded = []
             if artifact_valid_times is not None:
                 excluded = artifact_frame_ranges(
@@ -852,32 +836,21 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
                     recording = silence_frame_ranges(recording, excluded)
             statistics = statistics_spans(n_samples, excluded, continuity)
         else:
-            members = [
-                read_recording_nwb(path, electrical_series_path=series)
-                for path, series in member_paths
-            ]
-            starts = [0, *member_end_samples[:-1]]
-            member_lengths = [m.get_num_samples() for m in members]
-            if (
-                member_lengths
-                != [
-                    end - start
-                    for start, end in zip(starts, member_end_samples)
-                ]
-                or member_end_samples[-1] != n_samples
-            ):
-                raise ValueError(
-                    f"MotionEstimate: concat {lineage.key} has {n_samples} "
-                    f"samples, but its member boundaries {member_end_samples} "
-                    f"and member lengths {member_lengths} do not add up to it."
-                )
-            continuity = concat_boundary_spans(members, starts)
+            continuity = _motion.normalize_spans(source_row["continuity_spans"])
+            continuity_start_s = source_row["continuity_start_s"]
             statistics = _motion.normalize_spans(source_row["statistics_spans"])
 
+        sampling_frequency = float(recording.get_sampling_frequency())
+        clock = _motion.build_estimation_clock(
+            continuity,
+            continuity_start_s,
+            sampling_frequency,
+            resolved["max_gap_s"],
+        )
         motion, diagnostics = _motion.estimate_motion_in_spans(
             recording,
             statistics_spans=statistics,
-            continuity_spans=continuity,
+            clock=clock,
             resolved_params=resolved,
             job_kwargs=job_kwargs,
         )
@@ -885,15 +858,15 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         channel_locations = np.asarray(
             recording.get_channel_locations(), dtype=np.float64
         )
-        continuity_arr = np.asarray(continuity, dtype=np.int64).reshape(-1, 2)
         statistics_arr = np.asarray(statistics, dtype=np.int64).reshape(-1, 2)
-        sampling_frequency = float(recording.get_sampling_frequency())
         return MotionEstimateComputed(
             motion=_motion.motion_to_storage_dict(motion),
             resolved_params=resolved,
             n_samples=n_samples,
             sampling_frequency=sampling_frequency,
-            continuity_spans=continuity_arr,
+            continuity_spans=clock.spans,
+            continuity_start_s=clock.source_start_s,
+            estimation_start_s=clock.estimation_start_s,
             statistics_spans=statistics_arr,
             channel_ids=channel_ids,
             channel_locations=channel_locations,
@@ -904,13 +877,15 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             n_peaks_detected=diagnostics.n_peaks_detected,
             n_peaks_kept=diagnostics.n_peaks_kept,
             peaks_per_temporal_bin=diagnostics.peaks_per_temporal_bin,
+            peaks_per_continuity_span=diagnostics.peaks_per_continuity_span,
             noise_levels=diagnostics.noise_levels,
             input_fingerprint=_motion.motion_input_fingerprint(
                 source_content_hash=selection["source_content_hash"],
                 artifact_detection_id=lineage.artifact_detection_id,
                 n_samples=n_samples,
                 sampling_frequency=sampling_frequency,
-                continuity_spans=continuity_arr,
+                continuity_spans=clock.spans,
+                continuity_start_s=clock.source_start_s,
                 statistics_spans=statistics_arr,
                 channel_ids=channel_ids,
                 channel_locations=channel_locations,
@@ -925,6 +900,10 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     def get_motion(self, key: dict):
         """Rebuild the saved SpikeInterface ``Motion`` for one estimate.
 
+        Its temporal bins are on the source's estimation clock, not the
+        source's own clock: see :meth:`get_estimation_clock` and
+        :meth:`get_displacement_on_source_clock`.
+
         Parameters
         ----------
         key : dict
@@ -937,3 +916,58 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._motion import motion_from_storage_dict
 
         return motion_from_storage_dict((self & key).fetch1("motion"))
+
+    def get_estimation_clock(self, key: dict):
+        """The time map one estimate's bins are on.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting one ``MotionEstimate`` row.
+
+        Returns
+        -------
+        _motion.EstimationClock
+            The continuity spans in frames, each span's start on the source
+            clock and on the estimation clock, and the sampling frequency.
+        """
+        from spyglass.spikesorting.v2._motion import estimation_clock_from_blob
+
+        spans, source_start, estimation_start, fs = (self & key).fetch1(
+            "continuity_spans",
+            "continuity_start_s",
+            "estimation_start_s",
+            "sampling_frequency",
+        )
+        return estimation_clock_from_blob(
+            {
+                "spans": spans,
+                "source_start_s": source_start,
+                "estimation_start_s": estimation_start,
+                "sampling_frequency": fs,
+            }
+        )
+
+    def get_displacement_on_source_clock(self, key: dict):
+        """One estimate's displacement with its bins in source time.
+
+        For inspection only: a bin whose center lies in a capped gap between
+        two continuity spans is reported as such (NaN time, span ``-1``)
+        rather than assigned to a span.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting one ``MotionEstimate`` row.
+
+        Returns
+        -------
+        _motion.SourceClockDisplacement
+        """
+        from spyglass.spikesorting.v2._motion import (
+            displacement_on_source_clock,
+        )
+
+        return displacement_on_source_clock(
+            self.get_motion(key), self.get_estimation_clock(key)
+        )

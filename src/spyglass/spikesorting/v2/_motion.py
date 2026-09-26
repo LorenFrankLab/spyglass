@@ -8,14 +8,20 @@ and ``motion_n_temporal_bins`` summarize one for a stored row.
 the fully resolved configuration the estimator passes to SpikeInterface, and
 ``resolved_params_hash`` content-addresses it.
 
+``build_estimation_clock`` places a source's continuity spans on one
+*estimation clock* (real gaps between spans kept up to a cap), and
+``EstimationClockRecording`` presents a recording on that clock, so one
+estimation covers every span in a single reference frame.
+
 ``estimate_motion_in_spans`` estimates motion from the valid samples of one
 recording: it reproduces SpikeInterface's ``compute_motion`` with explicit
 noise levels from the statistics spans and keeps only peaks whose localization
 window lies inside one statistics span.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection; SpikeInterface is imported lazily inside the functions that need
-it.
+connection. Only ``spikeinterface.core`` is imported at module level (the
+clock view subclasses its recording classes); the rest of SpikeInterface is
+imported inside the functions that need it.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ import json
 from typing import NamedTuple
 
 import numpy as np
+from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
 #: Version of the motion-estimation algorithm this module implements (the
 #: SpikeInterface call sequence, peak filter, noise estimate and resolution
@@ -258,7 +265,8 @@ def resolve_estimation_params(params: dict) -> dict:
       ``dredge.py:984-985``).
     - ``localization_window_ms``: the fixed peak waveform window.
     - ``noise_levels_kwargs``: the noise estimator and its seeded chunk budget.
-    - ``max_gap_s``: the cap on unobserved time kept between continuity spans.
+    - ``max_gap_s``: the estimation clock's cap on the time between continuity
+      spans (:func:`build_estimation_clock`).
 
     Values are canonical (plain Python numbers, lists, ``None``; ``post_transform``
     as ``"numpy.log1p"``), so :func:`resolved_params_hash` is stable.
@@ -422,6 +430,9 @@ class MotionDiagnostics(NamedTuple):
     peaks_per_temporal_bin : numpy.ndarray
         ``(n_temporal_bins,)`` int64 count of kept peaks in each of the
         estimate's temporal bins.
+    peaks_per_continuity_span : numpy.ndarray
+        ``(n_spans,)`` int64 count of kept peaks in each continuity span; a
+        zero marks a span that contributed no evidence.
     noise_levels : numpy.ndarray
         ``(n_channels,)`` float64 per-channel noise (recording units) the
         detection threshold was scaled by.
@@ -430,6 +441,7 @@ class MotionDiagnostics(NamedTuple):
     n_peaks_detected: int
     n_peaks_kept: int
     peaks_per_temporal_bin: np.ndarray
+    peaks_per_continuity_span: np.ndarray
     noise_levels: np.ndarray
 
 
@@ -443,7 +455,7 @@ def normalize_spans(spans) -> list[tuple[int, int]]:
 
 def _check_estimation_spans(
     n_samples: int,
-    continuity_spans: list[tuple[int, int]],
+    clock: EstimationClock,
     statistics_spans: list[tuple[int, int]],
 ) -> None:
     """Validate the span inputs of :func:`estimate_motion_in_spans`.
@@ -451,21 +463,14 @@ def _check_estimation_spans(
     Raises
     ------
     ValueError
-        If the input has more than one continuity span (not supported yet),
-        the continuity span does not cover the recording, or the statistics
-        spans are empty, unsorted, overlapping or outside the recording.
+        If the clock's continuity spans do not cover the recording, or the
+        statistics spans are empty, unsorted, overlapping, outside the
+        recording or cross a continuity-span edge.
     """
-    if len(continuity_spans) != 1:
+    if int(clock.spans[-1, 1]) != int(n_samples):
         raise ValueError(
-            f"Motion estimation: the input has {len(continuity_spans)} "
-            "continuity spans (acquisition gaps or member joins); "
-            "discontinuous inputs are not supported yet. Estimate each "
-            "gap-free recording separately."
-        )
-    if continuity_spans != [(0, int(n_samples))]:
-        raise ValueError(
-            f"Motion estimation: continuity span {continuity_spans[0]} does "
-            f"not cover the recording's {n_samples} samples."
+            f"Motion estimation: the continuity spans {clock.spans.tolist()} "
+            f"do not cover the recording's {n_samples} samples."
         )
     if not statistics_spans:
         raise ValueError("Motion estimation: no statistics spans were given.")
@@ -478,6 +483,16 @@ def _check_estimation_spans(
                 f"{statistics_spans}."
             )
         previous_end = end
+    starts = [a for a, _ in statistics_spans]
+    span = np.searchsorted(clock.spans[:, 0], starts, side="right") - 1
+    ends = np.array([b for _, b in statistics_spans])
+    crossing = np.flatnonzero(ends > clock.spans[span, 1])
+    if crossing.size:
+        raise ValueError(
+            "Motion estimation: statistics spans "
+            f"{[statistics_spans[i] for i in crossing]} cross a continuity "
+            f"span edge ({clock.spans.tolist()})."
+        )
 
 
 def peaks_within_spans(
@@ -719,44 +734,377 @@ def estimation_noise_levels(
     return np.asarray(levels, dtype=np.float64)
 
 
-def use_estimation_clock(recording) -> None:
-    """Put a one-span recording on its estimation clock, in place.
+class EstimationClock(NamedTuple):
+    """Map from a source's frames to its motion-estimation clock.
 
-    Within a continuity span, estimation time advances at exactly ``1 / fs``
-    from the span's first timestamp. A recording without a time vector is
-    already on that clock. A recording with one (every v2 artifact read back
-    from NWB) has it replaced by ``t0 + i / fs``: by the continuity-span
-    definition no step between its consecutive timestamps exceeds ``1.5 / fs``
-    (``boundary_spans_from_timestamps``). Besides defining the
-    clock, this keeps ``dredge_ap``'s peak-time lookup working: it maps all
-    peak frames with one fancy index (``sortingcomponents/motion/dredge.py:
-    227``), which an HDF5-backed time vector refuses for repeated or
-    unordered frames.
+    Within continuity span ``i`` (frames ``[a_i, b_i)``), estimation time
+    advances by exactly ``1 / fs`` per frame from ``e_i``:
+    ``time(s) = e_i + (s - a_i) / fs``. ``e_0 = t_0``, and each later span
+    starts after the previous one's nominal duration plus the real gap
+    between them, capped (:func:`build_estimation_clock`).
+
+    Attributes
+    ----------
+    spans : numpy.ndarray
+        ``(n_spans, 2)`` int64 half-open continuity spans ``[a_i, b_i)``,
+        contiguous and covering the recording from frame 0.
+    source_start_s : numpy.ndarray
+        ``(n_spans,)`` float64 ``t_i``: each span's first timestamp on the
+        source's own acquisition clock (s).
+    estimation_start_s : numpy.ndarray
+        ``(n_spans,)`` float64 ``e_i``: each span's start on the estimation
+        clock (s).
+    sampling_frequency : float
+        ``fs`` (Hz).
+    """
+
+    spans: np.ndarray
+    source_start_s: np.ndarray
+    estimation_start_s: np.ndarray
+    sampling_frequency: float
+
+
+def build_estimation_clock(
+    spans, source_start_s, sampling_frequency: float, max_gap_s: float
+) -> EstimationClock:
+    """Place continuity spans on one estimation clock.
+
+    ``e_0 = t_0`` and ``e_{i+1} = e_i + (b_i - a_i) / fs + min(g_i,
+    max_gap_s)``, where ``g_i = t_{i+1} - (t_i + (b_i - a_i) / fs)`` is the
+    real gap after span ``i``. A gap longer than ``max_gap_s`` is shortened to
+    it; a shorter gap keeps its real length. Every span thus shares one clock
+    (and one estimation), while the unobserved time between spans stays
+    bounded: the estimator's temporal bins, and its dense bin-by-bin
+    correlation matrices, grow with the clock's total length.
+
+    Parameters
+    ----------
+    spans : array_like
+        ``(n_spans, 2)`` half-open continuity spans in frames, contiguous and
+        starting at frame 0.
+    source_start_s : array_like
+        ``(n_spans,)`` real start time ``t_i`` of each span (s).
+    sampling_frequency : float
+        ``fs`` (Hz).
+    max_gap_s : float
+        The cap on each gap (s), ``>= 0``.
+
+    Returns
+    -------
+    EstimationClock
+
+    Raises
+    ------
+    ValueError
+        If the spans are empty, not contiguous from frame 0, or empty spans;
+        if a start time or the cap is not finite (or the cap is negative); or
+        if a span starts before the previous one ends on the source clock
+        (a negative gap: overlapping or out-of-order spans).
+    """
+    spans = np.asarray(spans, dtype=np.int64).reshape(-1, 2)
+    starts = np.asarray(source_start_s, dtype=np.float64).reshape(-1)
+    fs = float(sampling_frequency)
+    max_gap_s = float(max_gap_s)
+    if len(spans) == 0:
+        raise ValueError("Estimation clock: no continuity spans were given.")
+    if len(starts) != len(spans):
+        raise ValueError(
+            f"Estimation clock: {len(spans)} continuity spans but "
+            f"{len(starts)} start times."
+        )
+    if (
+        spans[0, 0] != 0
+        or np.any(spans[:, 1] <= spans[:, 0])
+        or np.any(spans[1:, 0] != spans[:-1, 1])
+    ):
+        raise ValueError(
+            "Estimation clock: continuity spans must be non-empty and "
+            f"contiguous from frame 0; got {spans.tolist()}."
+        )
+    if not np.isfinite(starts).all():
+        raise ValueError(
+            f"Estimation clock: span start times must be finite; got "
+            f"{starts.tolist()}."
+        )
+    if not (np.isfinite(fs) and fs > 0):
+        raise ValueError(
+            f"Estimation clock: sampling_frequency must be positive; got {fs}."
+        )
+    if not (np.isfinite(max_gap_s) and max_gap_s >= 0):
+        raise ValueError(
+            f"Estimation clock: max_gap_s must be finite and >= 0; got "
+            f"{max_gap_s}."
+        )
+    estimation = [float(starts[0])]
+    for i in range(len(spans) - 1):
+        duration = (spans[i, 1] - spans[i, 0]) / fs
+        gap = starts[i + 1] - (starts[i] + duration)
+        if gap < 0:
+            raise ValueError(
+                f"Estimation clock: continuity span {i + 1} (frames "
+                f"{spans[i + 1].tolist()}) starts at {starts[i + 1]!r} s, "
+                f"{-gap:.6g} s before span {i} (frames {spans[i].tolist()}, "
+                f"{starts[i]!r} s + {duration!r} s) ends on the source clock. "
+                "Spans must be in acquisition order without overlap; for a "
+                "concatenation, order the members by acquisition time."
+            )
+        estimation.append(estimation[-1] + duration + min(gap, max_gap_s))
+    return EstimationClock(
+        spans=spans,
+        source_start_s=starts,
+        estimation_start_s=np.asarray(estimation, dtype=np.float64),
+        sampling_frequency=fs,
+    )
+
+
+def estimation_clock_from_blob(blob: dict) -> EstimationClock:
+    """Rebuild an :class:`EstimationClock` from its stored ``_asdict()``."""
+    return EstimationClock(
+        spans=np.asarray(blob["spans"], dtype=np.int64).reshape(-1, 2),
+        source_start_s=np.asarray(
+            blob["source_start_s"], dtype=np.float64
+        ).reshape(-1),
+        estimation_start_s=np.asarray(
+            blob["estimation_start_s"], dtype=np.float64
+        ).reshape(-1),
+        sampling_frequency=float(blob["sampling_frequency"]),
+    )
+
+
+def estimation_times(clock: EstimationClock, sample_index):
+    """Estimation-clock times (s) of source frames.
+
+    ``e_i + (s - a_i) / fs`` for the span ``i`` holding frame ``s``. With one
+    span starting at frame 0 this is ``s / fs + t_0``, the arithmetic
+    SpikeInterface's own time-vector-free clock uses
+    (``core/baserecording.py:975-985``). Frames before 0 or past the end are
+    extrapolated from the first / last span.
+
+    Parameters
+    ----------
+    clock : EstimationClock
+    sample_index : int or array_like of int
+        Source frame(s).
+
+    Returns
+    -------
+    float or numpy.ndarray
+        Time(s) in seconds, the shape of ``sample_index``.
+    """
+    sample_index = np.asarray(sample_index)
+    starts = clock.spans[:, 0]
+    span = np.clip(
+        np.searchsorted(starts, sample_index, side="right") - 1, 0, None
+    )
+    return (sample_index - starts[span]) / clock.sampling_frequency + (
+        clock.estimation_start_s[span]
+    )
+
+
+class SourceClockDisplacement(NamedTuple):
+    """A motion estimate's temporal bins mapped back to the source clock.
+
+    Attributes
+    ----------
+    source_time_s : numpy.ndarray
+        ``(n_temporal_bins,)`` float64 source-clock time of each bin center
+        (``t_i + (c - e_i)`` for a center ``c`` in span ``i``); NaN for a bin
+        whose center lies in a capped gap.
+    continuity_span : numpy.ndarray
+        ``(n_temporal_bins,)`` int64 continuity span holding each bin center;
+        ``-1`` for a bin inside a capped gap.
+    in_gap : numpy.ndarray
+        ``(n_temporal_bins,)`` bool, ``continuity_span == -1``.
+    displacement_um : numpy.ndarray
+        ``(n_temporal_bins, n_spatial_bins)`` estimated displacement (um).
+    spatial_bins_um : numpy.ndarray
+        ``(n_spatial_bins,)`` window centers (um).
+    """
+
+    source_time_s: np.ndarray
+    continuity_span: np.ndarray
+    in_gap: np.ndarray
+    displacement_um: np.ndarray
+    spatial_bins_um: np.ndarray
+
+
+def displacement_on_source_clock(
+    motion, clock: EstimationClock
+) -> SourceClockDisplacement:
+    """Map a single-segment estimate's temporal bins to source time.
+
+    A bin belongs to the continuity span whose estimation-clock interval
+    ``[e_i, e_i + (b_i - a_i) / fs)`` holds its center; its source time is
+    ``t_i + (center - e_i)``. A center between two spans lies in a capped gap
+    and is reported there, not assigned to a span. A center before the first
+    span or past the last span's end belongs to that span: those are the
+    outer histogram bins that hold its first / final samples.
+
+    Parameters
+    ----------
+    motion : spikeinterface.core.motion.Motion
+        A single-segment estimate whose bins are on ``clock``.
+    clock : EstimationClock
+
+    Returns
+    -------
+    SourceClockDisplacement
+    """
+    centers = np.asarray(motion.temporal_bins_s[0], dtype=np.float64)
+    fs = clock.sampling_frequency
+    starts = clock.estimation_start_s
+    ends = starts + (clock.spans[:, 1] - clock.spans[:, 0]) / fs
+    span = np.clip(np.searchsorted(starts, centers, side="right") - 1, 0, None)
+    in_gap = (centers >= ends[span]) & (span < len(starts) - 1)
+    source = clock.source_start_s[span] + (centers - starts[span])
+    source[in_gap] = np.nan
+    return SourceClockDisplacement(
+        source_time_s=source,
+        continuity_span=np.where(in_gap, -1, span).astype(np.int64),
+        in_gap=in_gap,
+        displacement_um=np.asarray(motion.displacement[0]),
+        spatial_bins_um=np.asarray(motion.spatial_bins_um),
+    )
+
+
+class EstimationClockRecordingSegment(BaseRecordingSegment):
+    """One recording segment presented on an estimation clock."""
+
+    def __init__(self, parent_segment, clock: EstimationClock):
+        BaseRecordingSegment.__init__(
+            self, sampling_frequency=clock.sampling_frequency
+        )
+        self._parent_segment = parent_segment
+        self._clock = clock
+
+    def get_num_samples(self) -> int:
+        return self._parent_segment.get_num_samples()
+
+    def get_traces(self, start_frame, end_frame, channel_indices):
+        return self._parent_segment.get_traces(
+            start_frame, end_frame, channel_indices
+        )
+
+    def sample_index_to_time(self, sample_ind):
+        return estimation_times(self._clock, sample_ind)
+
+    def time_to_sample_index(self, time_s):
+        """The frame nearest ``time_s`` within its span on the estimation clock.
+
+        Within a span this rounds like SpikeInterface's time-vector-free
+        lookup (``core/baserecording.py:987-993``); a time inside a capped gap
+        maps to the last frame of the span before it.
+        """
+        time_s = np.asarray(time_s, dtype=np.float64)
+        clock = self._clock
+        span = np.clip(
+            np.searchsorted(clock.estimation_start_s, time_s, side="right") - 1,
+            0,
+            None,
+        )
+        frame = clock.spans[span, 0] + np.round(
+            (time_s - clock.estimation_start_s[span]) * clock.sampling_frequency
+        ).astype(np.int64)
+        return np.minimum(frame, clock.spans[span, 1] - 1)
+
+    def get_times(self) -> np.ndarray:
+        return estimation_times(
+            self._clock, np.arange(self.get_num_samples(), dtype=np.int64)
+        )
+
+    def get_start_time(self) -> float:
+        return float(self._clock.estimation_start_s[0])
+
+    def get_end_time(self) -> float:
+        return float(estimation_times(self._clock, self.get_num_samples() - 1))
+
+
+class EstimationClockRecording(BaseRecording):
+    """A single-segment recording presented on its estimation clock.
+
+    Traces, channels, properties and probe are the parent's; only the time
+    lookups follow the :class:`EstimationClock`, computed per call from the
+    span table, so no ``n_samples`` time vector is materialized (a float64
+    vector would cost 8 bytes per frame, about 0.86 GB per hour at 30 kHz).
+    SpikeInterface's motion estimator reads peak times through
+    ``recording.sample_index_to_time`` (``sortingcomponents/motion/dredge.py:
+    227``, ``motion_utils.py:230-236``), and the parent's HDF5-backed NWB time
+    vector is never indexed, so repeated peak frames are safe.
+
+    Preprocessors built on top of this view see a plain ``1 / fs`` clock of
+    their own; only code that asks this view (or its segment) for times sees
+    the estimation clock.
 
     Parameters
     ----------
     recording : si.BaseRecording
-        Single-segment recording; its time information is replaced.
+        Single-segment parent recording.
+    clock : EstimationClock or dict
+        Its clock (or the clock's ``_asdict()``, as SpikeInterface passes it
+        back when it rebuilds the view from its kwargs); the spans must cover
+        the recording and ``fs`` must equal the recording's.
     """
-    if not recording.has_time_vector():
-        return
-    t0 = float(recording.sample_index_to_time(0))
-    recording.reset_times()
-    recording.shift_times(t0)
+
+    def __init__(self, recording, clock: EstimationClock | dict):
+        if not isinstance(clock, EstimationClock):
+            clock = estimation_clock_from_blob(clock)
+        if recording.get_num_segments() != 1:
+            raise ValueError(
+                "EstimationClockRecording: expected a single-segment "
+                f"recording; got {recording.get_num_segments()} segments."
+            )
+        n_samples = int(recording.get_num_samples())
+        if int(clock.spans[-1, 1]) != n_samples:
+            raise ValueError(
+                f"EstimationClockRecording: the clock's spans end at frame "
+                f"{int(clock.spans[-1, 1])}, but the recording has "
+                f"{n_samples} samples."
+            )
+        if float(clock.sampling_frequency) != float(
+            recording.get_sampling_frequency()
+        ):
+            raise ValueError(
+                "EstimationClockRecording: the clock's sampling frequency "
+                f"{clock.sampling_frequency!r} differs from the recording's "
+                f"{recording.get_sampling_frequency()!r}."
+            )
+        BaseRecording.__init__(
+            self,
+            recording.get_sampling_frequency(),
+            recording.channel_ids,
+            recording.get_dtype(),
+        )
+        recording.copy_metadata(self, only_main=False)
+        self.add_recording_segment(
+            EstimationClockRecordingSegment(
+                recording._recording_segments[0], clock
+            )
+        )
+        self._parent = recording
+        self._serializability["json"] = False
+        self._kwargs = {
+            "recording": recording,
+            "clock": {
+                key: (
+                    value.tolist() if isinstance(value, np.ndarray) else value
+                )
+                for key, value in clock._asdict().items()
+            },
+        }
 
 
 def estimate_motion_in_spans(
     recording,
     *,
     statistics_spans,
-    continuity_spans,
+    clock: EstimationClock,
     resolved_params: dict,
     job_kwargs: dict | None = None,
 ):
-    """Estimate motion from the valid samples of one continuous recording.
+    """Estimate motion from the valid samples of one recording, once.
 
     Reproduces SpikeInterface 0.104.3's ``compute_motion``
-    (``preprocessing/motion.py:279-461``) step by step with two changes:
+    (``preprocessing/motion.py:279-461``) step by step with three changes:
 
     1. ``noise_levels`` is passed explicitly (:func:`estimation_noise_levels`)
        instead of ``compute_motion``'s unseeded ``get_noise_levels`` call
@@ -764,11 +1112,18 @@ def estimate_motion_in_spans(
     2. Between localization and estimation, only peaks whose localization
        window lies inside one statistics span are kept
        (:func:`peaks_within_spans`).
+    3. ``estimate_motion`` reads peak times on the estimation clock
+       (:class:`EstimationClockRecording`), so every continuity span is
+       estimated in one call and shares one reference frame. DREDge centres
+       its displacement on the bins that hold data (``sortingcomponents/
+       motion/dredge.py:853-870``), so estimating spans separately would give
+       each span its own arbitrary offset.
 
     Detection and localization run as ``compute_motion``'s own pipeline for an
     empty ``select_kwargs`` (``motion.py:373-412``): the detector node, an
     ``ExtractDenseWaveforms`` node with the 0.1/0.3 ms window (``motion.py:
-    387``) and the localization node, in one ``run_node_pipeline`` pass.
+    387``) and the localization node, in one ``run_node_pipeline`` pass on
+    ``recording`` itself (these steps read traces, never times).
     ``compute_motion``'s other branch (``motion.py:413-432``) is not used: its
     ``localize_peaks`` defaults to a 0.5/0.5 ms window and, for
     ``grid_convolution``, replaces the Gaussian prototype with one built from
@@ -778,21 +1133,20 @@ def estimate_motion_in_spans(
     other peaks' locations unchanged. ``estimate_motion`` then receives every
     resolved argument explicitly. On one span covering the recording with no
     peak dropped, the result equals ``compute_motion`` run with the same
-    seeded noise levels.
+    seeded noise levels on a recording whose clock is ``t_0 + i / fs``.
 
     Parameters
     ----------
     recording : si.BaseRecording
         Single-segment, unwhitened recording, already silenced over any masked
-        ranges. Mutated: its planar geometry is flattened, its time vector
-        replaced by the estimation clock (:func:`use_estimation_clock`), and
-        its ``noise_level_mad_raw`` property set.
+        ranges. Mutated: its planar geometry is flattened and its
+        ``noise_level_mad_raw`` property set. Its own time vector is not read.
     statistics_spans : array_like
         ``(n, 2)`` half-open frame ranges of valid samples, sorted and
         disjoint, each inside one continuity span.
-    continuity_spans : array_like
-        ``(m, 2)`` half-open frame ranges of uninterrupted acquisition covering
-        the recording. Only ``m == 1`` is supported.
+    clock : EstimationClock
+        The recording's continuity spans on the estimation clock
+        (:func:`build_estimation_clock`).
     resolved_params : dict
         Output of :func:`resolve_estimation_params`.
     job_kwargs : dict, optional
@@ -802,16 +1156,18 @@ def estimate_motion_in_spans(
     Returns
     -------
     motion : spikeinterface.core.motion.Motion
-        The single-segment estimate.
+        The single-segment estimate, its temporal bins on the estimation
+        clock.
     diagnostics : MotionDiagnostics
         Peak counts and noise levels.
 
     Raises
     ------
     ValueError
-        If the input has more than one continuity span, invalid spans, an
-        ineligible geometry (:func:`check_estimation_eligibility`), no kept
-        peaks, or a non-finite displacement.
+        If the spans are invalid, the geometry is ineligible
+        (:func:`check_estimation_eligibility`), no continuity span keeps a
+        peak, or the displacement is non-finite. A continuity span without
+        kept peaks is only logged and counted in the diagnostics.
     """
     from spikeinterface.core.job_tools import fix_job_kwargs
     from spikeinterface.core.node_pipeline import (
@@ -826,17 +1182,18 @@ def estimate_motion_in_spans(
         peak_localization_methods,
     )
 
+    from spyglass.utils import logger
+
     if recording.get_num_segments() != 1:
         raise ValueError(
             "Motion estimation: expected a single-segment recording; got "
             f"{recording.get_num_segments()} segments."
         )
     n_samples = int(recording.get_num_samples())
-    continuity = normalize_spans(continuity_spans)
     statistics = normalize_spans(statistics_spans)
-    _check_estimation_spans(n_samples, continuity, statistics)
+    _check_estimation_spans(n_samples, clock, statistics)
     check_estimation_eligibility(recording, resolved_params)
-    use_estimation_clock(recording)
+    clocked = EstimationClockRecording(recording, clock)
 
     noise_levels = estimation_noise_levels(
         recording, statistics, resolved_params["noise_levels_kwargs"]
@@ -888,8 +1245,23 @@ def estimate_motion_in_spans(
             "no valid evidence to estimate motion from."
         )
     kept_peaks = peaks[keep]
+    per_span = np.bincount(
+        np.searchsorted(
+            clock.spans[:, 0], kept_peaks["sample_index"], side="right"
+        )
+        - 1,
+        minlength=len(clock.spans),
+    ).astype(np.int64)
+    empty = np.flatnonzero(per_span == 0)
+    if empty.size:
+        logger.warning(
+            "Motion estimation: continuity span(s) %s (frames %s) kept no "
+            "peaks; the estimate there rests on the temporal prior only.",
+            empty.tolist(),
+            clock.spans[empty].tolist(),
+        )
     motion = estimate_motion(
-        recording,
+        clocked,
         kept_peaks,
         peak_locations[keep],
         progress_bar=False,
@@ -908,12 +1280,13 @@ def estimate_motion_in_spans(
     centers = np.asarray(motion.temporal_bins_s[0], dtype=float)
     half_bin = float(estimate["bin_s"]) / 2.0
     edges = np.append(centers - half_bin, centers[-1] + half_bin)
-    times = recording.sample_index_to_time(kept_peaks["sample_index"])
+    times = clocked.sample_index_to_time(kept_peaks["sample_index"])
     per_bin, _ = np.histogram(times, bins=edges)
     return motion, MotionDiagnostics(
         n_peaks_detected=int(len(peaks)),
         n_peaks_kept=n_kept,
         peaks_per_temporal_bin=per_bin.astype(np.int64),
+        peaks_per_continuity_span=per_span,
         noise_levels=noise_levels,
     )
 
@@ -1010,6 +1383,7 @@ def motion_input_fingerprint(
     n_samples: int,
     sampling_frequency: float,
     continuity_spans,
+    continuity_start_s,
     statistics_spans,
     channel_ids,
     channel_locations,
@@ -1017,10 +1391,11 @@ def motion_input_fingerprint(
 ) -> str:
     """SHA-256 of everything an estimate was computed from.
 
-    The source content, mask choice, frame spans, estimation channels and
-    their positions, and the resolved configuration. Two estimates with the
-    same fingerprint read the same valid samples on the same geometry with
-    the same settings.
+    The source content, mask choice, frame spans and the continuity spans'
+    start times, estimation channels and their positions, and the resolved
+    configuration (which holds the gap cap). Two estimates with the same
+    fingerprint read the same valid samples on the same estimation clock and
+    geometry with the same settings.
 
     Returns
     -------
@@ -1039,6 +1414,9 @@ def motion_input_fingerprint(
         "continuity_spans": [
             list(span) for span in normalize_spans(continuity_spans)
         ],
+        "continuity_start_s": np.asarray(
+            continuity_start_s, dtype=np.float64
+        ).tolist(),
         "statistics_spans": [
             list(span) for span in normalize_spans(statistics_spans)
         ],

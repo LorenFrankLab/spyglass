@@ -306,6 +306,7 @@ def test_estimate_round_trip(drift_recording):
         MotionEstimateSelection,
         MotionEstimationParameters,
     )
+    from spyglass.spikesorting.v2.recording import Recording
 
     key = _select(drift_recording["recording_key"])
     computed = {}
@@ -356,6 +357,25 @@ def test_estimate_round_trip(drift_recording):
     assert row["sampling_frequency"] == pytest.approx(30_000.0, rel=1e-12)
     np.testing.assert_array_equal(row["continuity_spans"], [[0, n]])
     np.testing.assert_array_equal(row["statistics_spans"], [[0, n]])
+    # One span: the estimation clock is the source's own first timestamp on.
+    first_timestamp = float(
+        Recording()
+        .get_recording(drift_recording["recording_key"])
+        .sample_index_to_time(0)
+    )
+    np.testing.assert_array_equal(row["continuity_start_s"], [first_timestamp])
+    np.testing.assert_array_equal(row["estimation_start_s"], [first_timestamp])
+    np.testing.assert_array_equal(
+        row["peaks_per_continuity_span"], [row["n_peaks_kept"]]
+    )
+    clock = MotionEstimate().get_estimation_clock(key)
+    np.testing.assert_array_equal(clock.spans, row["continuity_spans"])
+    assert clock.sampling_frequency == row["sampling_frequency"]
+    mapped = MotionEstimate().get_displacement_on_source_clock(key)
+    assert not mapped.in_gap.any()
+    np.testing.assert_allclose(
+        mapped.source_time_s, stored.temporal_bins_s[0], rtol=0, atol=1e-9
+    )
     assert len(row["channel_ids"]) == 32
     np.testing.assert_array_equal(
         row["channel_locations"], computed["locations"]
@@ -378,6 +398,7 @@ def test_estimate_round_trip(drift_recording):
         n_samples=n,
         sampling_frequency=row["sampling_frequency"],
         continuity_spans=row["continuity_spans"],
+        continuity_start_s=row["continuity_start_s"],
         statistics_spans=row["statistics_spans"],
         channel_ids=row["channel_ids"],
         channel_locations=row["channel_locations"],
@@ -454,3 +475,312 @@ def test_stale_selection_is_refused_at_compute(drift_recording, monkeypatch):
     with pytest.raises(ValueError, match="resolved configuration hash"):
         MotionEstimate.populate(key, reserve_jobs=False)
     assert not (MotionEstimate & key)
+
+
+# ---- discontinuous sources ---------------------------------------------------
+#
+# Two more recordings of the planted-drift session: member A keeps [16, 20) s;
+# member B keeps [23, 26) s and [27, end) s, so it has an acquisition gap of
+# its own. B alone is the gapped single-recording source; A then B is a
+# two-member concatenation with a 3 s wall-clock gap at the join. Both members
+# start in the same power-of-two range of timestamps: SpikeInterface derives a
+# timestamped series' rate from its first 1000 timestamp steps
+# (``extractors/nwbextractors.py:369``), whose float rounding changes between
+# such ranges, and concatenation requires the members' rates to agree within
+# 1e-9 Hz.
+MEMBER_A_INTERVAL = "motion member a"
+MEMBER_B_INTERVAL = "motion member b"
+CONCAT_GROUP = "motion_concat"
+
+
+def _drop_concat_motion_selections(concat_key) -> None:
+    from spyglass.spikesorting.v2.motion import MotionEstimateSelection
+
+    keys = (
+        MotionEstimateSelection.ConcatenatedRecordingSource & concat_key
+    ).fetch("KEY", as_dict=True)
+    if keys:
+        (MotionEstimateSelection & keys).super_delete(
+            warn=False, safemode=False
+        )
+
+
+@pytest.fixture(scope="module")
+def discontinuous_sources(drift_recording):
+    """A gapped ``Recording`` and a two-member ``ConcatenatedRecording``."""
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        SessionGroup,
+    )
+    from tests.spikesorting.v2._concat_helpers import select_unmasked_concat
+    from tests.spikesorting.v2._ingest_helpers import (
+        clean_session_groups_for_owner,
+        configure_v2_run_inputs,
+    )
+
+    nwb_file_name = drift_recording["nwb_file_name"]
+    valid = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0, t_end = float(valid[0][0]), float(valid[-1][1])
+    intervals = {
+        MEMBER_A_INTERVAL: [[t0 + 16.0, t0 + 20.0]],
+        MEMBER_B_INTERVAL: [[t0 + 23.0, t0 + 26.0], [t0 + 27.0, t_end]],
+    }
+    recording_keys = {}
+    members = []
+    for name, times in intervals.items():
+        IntervalList.insert1(
+            {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": name,
+                "valid_times": np.asarray(times, dtype=float),
+                "pipeline": "motion_estimate_test",
+            },
+            skip_duplicates=True,
+        )
+        run = configure_v2_run_inputs(
+            nwb_file_name, MOTION_TEAM, interval_list_name=name
+        )
+        members.append(run)
+        recording_keys[name] = RecordingSelection.insert_selection(
+            {**run, "preprocessing_params_name": "default"}
+        )
+        _drop_motion_selections(recording_keys[name])
+        if not (Recording & recording_keys[name]):
+            Recording.populate(recording_keys[name], reserve_jobs=False)
+
+    clean_session_groups_for_owner(MOTION_TEAM)
+    SessionGroup.create_group(MOTION_TEAM, CONCAT_GROUP, members)
+    concat_key = select_unmasked_concat(
+        {
+            "session_group_owner": MOTION_TEAM,
+            "session_group_name": CONCAT_GROUP,
+            "preprocessing_params_name": "default",
+        }
+    )
+    ConcatenatedRecording.populate(concat_key, reserve_jobs=False)
+
+    yield {
+        "t0": t0,
+        "member_a": recording_keys[MEMBER_A_INTERVAL],
+        "member_b": recording_keys[MEMBER_B_INTERVAL],
+        "concat_key": concat_key,
+    }
+
+    _drop_concat_motion_selections(concat_key)
+    for key in recording_keys.values():
+        _drop_motion_selections(key)
+    clean_session_groups_for_owner(MOTION_TEAM)
+
+
+def _timestamps_at(recording_key, frames):
+    from spyglass.spikesorting.v2.recording import Recording
+
+    recording = Recording().get_recording(recording_key)
+    return [float(recording.sample_index_to_time(int(f))) for f in frames]
+
+
+def _assert_time_map(row, spans, starts):
+    """The row persists ``spans``/``starts`` and the recipe's clock on them."""
+    from spyglass.spikesorting.v2._motion import build_estimation_clock
+
+    np.testing.assert_array_equal(row["continuity_spans"], spans)
+    np.testing.assert_array_equal(row["continuity_start_s"], starts)
+    expected = build_estimation_clock(
+        spans,
+        starts,
+        row["sampling_frequency"],
+        row["resolved_params"]["max_gap_s"],
+    )
+    np.testing.assert_array_equal(
+        row["estimation_start_s"], expected.estimation_start_s
+    )
+
+
+def test_gapped_recording_is_estimated_on_one_clock(discontinuous_sources):
+    """A Recording with two disjoint selected intervals is estimated once:
+    both spans kept peaks, the time map is persisted, and the bins cover the
+    whole estimation clock, the capped gap included."""
+    from spyglass.spikesorting.v2.motion import MotionEstimate
+    from spyglass.spikesorting.v2.recording import Recording
+
+    recording_key = discontinuous_sources["member_b"]
+    recording = Recording().get_recording(recording_key)
+    n = recording.get_num_samples()
+    key = _select(recording_key)
+    MotionEstimate.populate(key, reserve_jobs=False)
+
+    row = (MotionEstimate & key).fetch1()
+    spans = row["continuity_spans"]
+    assert spans.shape == (2, 2) and spans[0, 0] == 0 and spans[1, 1] == n
+    starts = _timestamps_at(recording_key, spans[:, 0])
+    t0 = discontinuous_sources["t0"]
+    assert starts == pytest.approx([t0 + 23.0, t0 + 27.0], abs=1e-3)
+    _assert_time_map(row, spans, starts)
+    # The 1 s gap is below the 30 s cap, so it keeps its real length.
+    assert row["estimation_start_s"][1] - row["estimation_start_s"][0] == (
+        pytest.approx(4.0, abs=1e-3)
+    )
+    assert (row["peaks_per_continuity_span"] > 0).all()
+    np.testing.assert_array_equal(row["statistics_spans"], spans)
+
+    motion = MotionEstimate().get_motion(key)
+    assert len(motion.displacement) == 1
+    bins = motion.temporal_bins_s[0]
+    assert bins[0] < row["estimation_start_s"][0] + 1.0
+    assert (
+        bins[-1]
+        > row["estimation_start_s"][1]
+        + (spans[1, 1] - spans[1, 0]) / row["sampling_frequency"]
+        - 1.0
+    )
+    mapped = MotionEstimate().get_displacement_on_source_clock(key)
+    assert int(mapped.in_gap.sum()) == 1
+    assert np.isnan(mapped.source_time_s[mapped.in_gap]).all()
+    assert set(mapped.continuity_span[~mapped.in_gap]) == {0, 1}
+
+
+def test_concat_persists_its_continuity_and_rebuild_verifies_it(
+    discontinuous_sources, monkeypatch
+):
+    """The concat row stores one continuity span per member span (the join
+    and member B's internal gap are both edges) with each span's real start
+    time; a rebuild reproducing different start times is refused."""
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import _concat_recording
+    from spyglass.spikesorting.v2.exceptions import (
+        RecordingContentDriftError,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    concat_key = discontinuous_sources["concat_key"]
+    row = (ConcatenatedRecording & concat_key).fetch1()
+    n_a = (
+        Recording()
+        .get_recording(discontinuous_sources["member_a"])
+        .get_num_samples()
+    )
+    b_spans = _motion_spans_of(discontinuous_sources["member_b"])
+    expected_spans = [[0, n_a]] + [[n_a + a, n_a + b] for a, b in b_spans]
+    np.testing.assert_array_equal(row["continuity_spans"], expected_spans)
+    expected_starts = _timestamps_at(
+        discontinuous_sources["member_a"], [0]
+    ) + _timestamps_at(
+        discontinuous_sources["member_b"], [a for a, _ in b_spans]
+    )
+    np.testing.assert_array_equal(row["continuity_start_s"], expected_starts)
+    np.testing.assert_array_equal(row["statistics_spans"], expected_spans)
+
+    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+    Path(abs_path).unlink()
+    ConcatenatedRecording().get_recording(concat_key)
+    assert Path(abs_path).exists()
+
+    real = _concat_recording.concat_continuity
+
+    def _shifted(*args, **kwargs):
+        continuity = real(*args, **kwargs)
+        return continuity._replace(
+            start_s=[t + 1.0 for t in continuity.start_s]
+        )
+
+    monkeypatch.setattr(_concat_recording, "concat_continuity", _shifted)
+    Path(abs_path).unlink()
+    with pytest.raises(RecordingContentDriftError, match="continuity_start_s"):
+        ConcatenatedRecording()._rebuild_nwb_artifact(concat_key)
+    monkeypatch.undo()
+    ConcatenatedRecording().get_recording(concat_key)
+
+
+def _motion_spans_of(recording_key):
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        boundary_spans_from_timestamps,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+
+    return boundary_spans_from_timestamps(
+        Recording().get_recording(recording_key)
+    )
+
+
+def test_concat_source_is_estimated_end_to_end(discontinuous_sources):
+    """A two-member concat populates end to end: one estimate over the
+    persisted continuity spans (a 3 s member join and a 1 s internal gap),
+    every span contributing peaks, on one estimation clock."""
+    from spyglass.spikesorting.v2.motion import (
+        MotionEstimate,
+        MotionEstimateSelection,
+    )
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    concat_key = discontinuous_sources["concat_key"]
+    key = MotionEstimateSelection.insert_selection(
+        {
+            "concat_recording_id": concat_key["concat_recording_id"],
+            "motion_estimation_params_name": "dredge_fast_v1",
+        }
+    )
+    lineage = MotionEstimateSelection.resolve_source(key)
+    assert lineage.kind == "concatenated_recording"
+    MotionEstimate.populate(key, reserve_jobs=False)
+
+    row = (MotionEstimate & key).fetch1()
+    concat = (ConcatenatedRecording & concat_key).fetch1()
+    assert row["n_samples"] == concat["n_samples"]
+    _assert_time_map(
+        row, concat["continuity_spans"], concat["continuity_start_s"]
+    )
+    np.testing.assert_array_equal(
+        row["statistics_spans"], concat["statistics_spans"]
+    )
+    assert len(row["continuity_spans"]) == 3
+    assert (row["peaks_per_continuity_span"] > 0).all()
+    # The 3 s join and 1 s gap keep their real length under the cap.
+    np.testing.assert_allclose(
+        np.diff(row["estimation_start_s"]),
+        np.diff(concat["continuity_start_s"]),
+        rtol=0,
+        atol=1e-3,
+    )
+    mapped = MotionEstimate().get_displacement_on_source_clock(key)
+    assert set(mapped.continuity_span[~mapped.in_gap]) == {0, 1, 2}
+
+    # The planted drift is recovered in one frame across all three spans: the
+    # common-frame error on bins holding data is under half that of a zero
+    # estimate (the drift's own spread over those bins). Re-centering each
+    # span on its own data would leave errors of the order of the spans'
+    # different mean displacements (-10, -19 and -5 um here).
+    from spikeinterface.core.motion import Motion
+
+    from tests.spikesorting.v2._motion_fixtures import (
+        common_frame_error_on_source_clock,
+        rigid_drift_recordings,
+    )
+
+    _, _, truth = rigid_drift_recordings(seed=0, duration_s=DRIFT_DURATION_S)
+    motion = MotionEstimate().get_motion(key)
+    clock = MotionEstimate().get_estimation_clock(key)
+    depths = row["channel_locations"][:, 1]
+    error_rms, _ = common_frame_error_on_source_clock(
+        motion, clock, truth, depths
+    )
+    zero = Motion(
+        [np.zeros_like(motion.displacement[0])],
+        motion.temporal_bins_s,
+        motion.spatial_bins_um,
+    )
+    zero_rms, _ = common_frame_error_on_source_clock(zero, clock, truth, depths)
+    assert error_rms < 0.5 * zero_rms
