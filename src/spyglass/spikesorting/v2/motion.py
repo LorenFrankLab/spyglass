@@ -33,7 +33,7 @@ from typing import NamedTuple
 import datajoint as dj
 import numpy as np
 
-from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
+from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v2._params.motion_estimation import (
     MOTION_ESTIMATION_SCHEMA_VERSION,
     MotionEstimationParamsSchema,
