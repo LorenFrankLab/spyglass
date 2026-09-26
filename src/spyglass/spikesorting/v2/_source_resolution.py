@@ -18,7 +18,9 @@ is persisted already masked. Keeping the two apart lets metadata consumers
 read the original source without inferring it from the derived artifact.
 
 ``SortingSelection.resolve_effective_source`` performs the DB reads and builds
-the result with :func:`effective_source_from_base`.
+the result with :func:`effective_source_from_base` or
+:func:`effective_source_from_correction`; :func:`correction_lineage_mismatch`
+checks that a corrected recording was made from the sort's own source and mask.
 :func:`load_effective_recording` opens the traces, and
 :func:`read_effective_recording` does the same from an already-resolved path.
 
@@ -128,6 +130,84 @@ def effective_source_from_base(
         ),
     )
     return EffectiveSource(lineage=lineage, traces=traces)
+
+
+def effective_source_from_correction(
+    lineage: SourceLineage, key: dict, row: dict
+) -> EffectiveSource:
+    """Build the effective source for a sort that reads a corrected recording.
+
+    Parameters
+    ----------
+    lineage : SourceLineage
+        The sort's resolved lineage (unchanged by the correction).
+    key : dict
+        ``{"motion_corrected_recording_id": ...}``.
+    row : dict
+        The fetched ``MotionCorrectedRecording`` row.
+
+    Returns
+    -------
+    EffectiveSource
+        ``traces`` names the corrected recording, never masked at load: it is
+        persisted with the sort's mask already applied.
+    """
+    traces = EffectiveTraces(
+        kind="motion_corrected_recording",
+        key=key,
+        row=row,
+        apply_artifact_mask=False,
+    )
+    return EffectiveSource(lineage=lineage, traces=traces)
+
+
+def correction_lineage_mismatch(
+    sort_lineage: SourceLineage, correction_lineage: SourceLineage
+) -> list[str]:
+    """Describe how a corrected recording's source differs from a sort's.
+
+    A sort may read a motion-corrected recording only if its motion was
+    estimated on the sort's own source (same kind and key) under the same
+    artifact mask (both ``None`` for a concatenated recording, which carries
+    its member masks).
+
+    Parameters
+    ----------
+    sort_lineage : SourceLineage
+        The sort's source and pinned artifact detection.
+    correction_lineage : SourceLineage
+        The source and artifact detection of the corrected recording's
+        motion estimate.
+
+    Returns
+    -------
+    list of str
+        One description per differing field; empty when they agree.
+    """
+
+    def normalized(lineage: SourceLineage) -> tuple:
+        detection = lineage.artifact_detection_id
+        return (
+            lineage.kind,
+            {
+                name: uuid.UUID(str(value))
+                for name, value in lineage.key.items()
+            },
+            None if detection is None else uuid.UUID(str(detection)),
+        )
+
+    sort_kind, sort_key, sort_detection = normalized(sort_lineage)
+    kind, key, detection = normalized(correction_lineage)
+    mismatches = []
+    if (kind, key) != (sort_kind, sort_key):
+        mismatches.append(
+            f"source {kind} {key} != the sort's {sort_kind} {sort_key}"
+        )
+    if detection != sort_detection:
+        mismatches.append(
+            f"artifact_detection_id {detection} != the sort's {sort_detection}"
+        )
+    return mismatches
 
 
 def read_effective_recording(

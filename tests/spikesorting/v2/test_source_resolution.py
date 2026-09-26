@@ -226,3 +226,68 @@ def test_motion_corrected_traces_are_never_masked_again(written_traces):
         read_effective_recording(
             abs_path, traces._replace(apply_artifact_mask=True)
         )
+
+
+@pytest.mark.parametrize(
+    "artifact_detection_id", [uuid.UUID(int=2), None], ids=["masked", "plain"]
+)
+def test_corrected_effective_source_keeps_lineage(artifact_detection_id):
+    """A sort of a corrected recording reads the corrected artifact, never
+    masked at load, while its lineage stays the original source."""
+    from spyglass.spikesorting.v2._source_resolution import (
+        effective_source_from_correction,
+    )
+
+    lineage = _lineage("recording", artifact_detection_id)
+    key = {"motion_corrected_recording_id": uuid.UUID(int=4)}
+    row = {"analysis_file_name": "c.nwb", "electrical_series_path": "a/b"}
+    effective = effective_source_from_correction(lineage, key, row)
+
+    assert effective.lineage is lineage
+    assert effective.traces.kind == "motion_corrected_recording"
+    assert effective.traces.key == key
+    assert effective.traces.row is row
+    assert effective.traces.apply_artifact_mask is False
+
+
+def test_correction_lineage_mismatch_names_each_difference():
+    """Source kind, source id and artifact detection must all agree; ids
+    compare as UUIDs whether given as ``str`` or ``uuid.UUID``."""
+    from spyglass.spikesorting.v2._source_resolution import (
+        SourceLineage,
+        correction_lineage_mismatch,
+    )
+
+    sort = _lineage("recording", uuid.UUID(int=2))
+    same = SourceLineage(
+        kind="recording",
+        key={"recording_id": str(uuid.UUID(int=1))},
+        artifact_detection_id=str(uuid.UUID(int=2)),
+    )
+    assert correction_lineage_mismatch(sort, same) == []
+    assert (
+        correction_lineage_mismatch(
+            _lineage("concatenated_recording"),
+            _lineage("concatenated_recording"),
+        )
+        == []
+    )
+
+    other_source = sort._replace(key={"recording_id": uuid.UUID(int=9)})
+    other_mask = sort._replace(artifact_detection_id=None)
+    other_kind = _lineage("concatenated_recording", uuid.UUID(int=2))
+    for other, field in (
+        (other_source, "source"),
+        (other_mask, "artifact_detection_id"),
+        (other_kind, "source"),
+    ):
+        (mismatch,) = correction_lineage_mismatch(sort, other)
+        assert mismatch.startswith(field)
+    assert (
+        len(
+            correction_lineage_mismatch(
+                sort, other_kind._replace(artifact_detection_id=None)
+            )
+        )
+        == 2
+    )
