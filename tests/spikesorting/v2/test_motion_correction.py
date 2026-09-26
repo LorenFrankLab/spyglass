@@ -14,9 +14,24 @@ import uuid
 import numpy as np
 import pytest
 
-MOTION_TEAM = "motion_estimate_team"
-DRIFT_NWB = "motion_drift_polymer.nwb"
-DRIFT_DURATION_S = 30.0
+from tests.spikesorting.v2._motion_db_helpers import (
+    CONCAT_GROUP,
+    DRIFT_DURATION_S,
+    DRIFT_NWB,
+    MEMBER_A_INTERVAL,
+    MEMBER_B_INTERVAL,
+    MOTION_TEAM,
+    drop_concat_motion_selections,
+    drop_corrected,
+    drop_motion_selections,
+    drop_pipeline_sorts,
+    drop_sorts,
+    masked_artifact,
+    populated_corrected,
+    populated_estimate,
+    select_corrected,
+    sorter_key,
+)
 
 
 @pytest.fixture
@@ -92,61 +107,6 @@ def test_estimation_row_duplicating_a_default_is_rejected(motion_params):
                 ).model_dump(),
             }
         )
-
-
-def _drop_motion_selections(recording_key) -> None:
-    """Delete every motion-estimate selection on a recording (masters first)."""
-    from spyglass.spikesorting.v2.motion import MotionEstimateSelection
-
-    keys = (MotionEstimateSelection.RecordingSource & recording_key).fetch(
-        "KEY", as_dict=True
-    )
-    if keys:
-        (MotionEstimateSelection & keys).super_delete(
-            warn=False, safemode=False
-        )
-
-
-@pytest.fixture(scope="module")
-def drift_recording(dj_conn, tmp_path_factory):
-    """A populated ``Recording`` of the planted-drift polymer session."""
-    import datetime as dt
-
-    from spyglass.spikesorting.v2.motion import MotionEstimationParameters
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        RecordingSelection,
-    )
-    from tests.spikesorting.v2._ingest_helpers import (
-        _clean_session_v2,
-        configure_v2_run_inputs,
-        copy_and_insert_nwb,
-    )
-    from tests.spikesorting.v2._motion_fixtures import (
-        write_drifting_polymer_nwb,
-    )
-
-    src = write_drifting_polymer_nwb(
-        tmp_path_factory.mktemp("motion") / DRIFT_NWB,
-        session_start=dt.datetime(2023, 6, 22, 12, tzinfo=dt.timezone.utc),
-        fixture_name="motion_drift_polymer",
-        seed=0,
-        duration_s=DRIFT_DURATION_S,
-    )
-    nwb_file_name = copy_and_insert_nwb(src, dest_name=DRIFT_NWB)
-    run = configure_v2_run_inputs(nwb_file_name, MOTION_TEAM)
-    recording_key = RecordingSelection.insert_selection(
-        {**run, "preprocessing_params_name": "default"}
-    )
-    _drop_motion_selections(recording_key)
-    if not (Recording & recording_key):
-        Recording.populate(recording_key, reserve_jobs=False)
-    MotionEstimationParameters.insert_default()
-
-    yield {"recording_key": recording_key, "nwb_file_name": nwb_file_name}
-
-    _drop_motion_selections(recording_key)
-    _clean_session_v2({"nwb_file_name": nwb_file_name})
 
 
 def _select(recording_key, params_name="dredge_fast_v1", **extra):
@@ -533,99 +493,6 @@ def test_stale_selection_is_refused_at_compute(drift_recording, monkeypatch):
 # (``extractors/nwbextractors.py:369``), whose float rounding changes between
 # such ranges, and concatenation requires the members' rates to agree within
 # 1e-9 Hz.
-MEMBER_A_INTERVAL = "motion member a"
-MEMBER_B_INTERVAL = "motion member b"
-CONCAT_GROUP = "motion_concat"
-
-
-def _drop_concat_motion_selections(concat_key) -> None:
-    from spyglass.spikesorting.v2.motion import MotionEstimateSelection
-
-    keys = (
-        MotionEstimateSelection.ConcatenatedRecordingSource & concat_key
-    ).fetch("KEY", as_dict=True)
-    if keys:
-        (MotionEstimateSelection & keys).super_delete(
-            warn=False, safemode=False
-        )
-
-
-@pytest.fixture(scope="module")
-def discontinuous_sources(drift_recording):
-    """A gapped ``Recording`` and a two-member ``ConcatenatedRecording``."""
-    from spyglass.common import IntervalList
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        RecordingSelection,
-    )
-    from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecording,
-        SessionGroup,
-    )
-    from tests.spikesorting.v2._concat_helpers import select_unmasked_concat
-    from tests.spikesorting.v2._ingest_helpers import (
-        clean_session_groups_for_owner,
-        configure_v2_run_inputs,
-    )
-
-    nwb_file_name = drift_recording["nwb_file_name"]
-    valid = (
-        IntervalList
-        & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": "raw data valid times",
-        }
-    ).fetch1("valid_times")
-    t0, t_end = float(valid[0][0]), float(valid[-1][1])
-    intervals = {
-        MEMBER_A_INTERVAL: [[t0 + 16.0, t0 + 20.0]],
-        MEMBER_B_INTERVAL: [[t0 + 23.0, t0 + 26.0], [t0 + 27.0, t_end]],
-    }
-    recording_keys = {}
-    members = []
-    for name, times in intervals.items():
-        IntervalList.insert1(
-            {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": name,
-                "valid_times": np.asarray(times, dtype=float),
-                "pipeline": "motion_estimate_test",
-            },
-            skip_duplicates=True,
-        )
-        run = configure_v2_run_inputs(
-            nwb_file_name, MOTION_TEAM, interval_list_name=name
-        )
-        members.append(run)
-        recording_keys[name] = RecordingSelection.insert_selection(
-            {**run, "preprocessing_params_name": "default"}
-        )
-        _drop_motion_selections(recording_keys[name])
-        if not (Recording & recording_keys[name]):
-            Recording.populate(recording_keys[name], reserve_jobs=False)
-
-    clean_session_groups_for_owner(MOTION_TEAM)
-    SessionGroup.create_group(MOTION_TEAM, CONCAT_GROUP, members)
-    concat_key = select_unmasked_concat(
-        {
-            "session_group_owner": MOTION_TEAM,
-            "session_group_name": CONCAT_GROUP,
-            "preprocessing_params_name": "default",
-        }
-    )
-    ConcatenatedRecording.populate(concat_key, reserve_jobs=False)
-
-    yield {
-        "t0": t0,
-        "member_a": recording_keys[MEMBER_A_INTERVAL],
-        "member_b": recording_keys[MEMBER_B_INTERVAL],
-        "concat_key": concat_key,
-    }
-
-    _drop_concat_motion_selections(concat_key)
-    for key in recording_keys.values():
-        _drop_motion_selections(key)
-    clean_session_groups_for_owner(MOTION_TEAM)
 
 
 def _timestamps_at(recording_key, frames):
@@ -915,68 +782,6 @@ def test_orphan_and_bypassed_source_parts_are_refused(
 # ---- motion-corrected recordings ---------------------------------------------
 
 
-def _populated_estimate(**source) -> dict:
-    """The ``dredge_fast_v1`` estimate of a source, populated if missing."""
-    from spyglass.spikesorting.v2.motion import (
-        MotionEstimate,
-        MotionEstimateSelection,
-    )
-
-    key = MotionEstimateSelection.insert_selection(
-        {"motion_estimation_params_name": "dredge_fast_v1", **source}
-    )
-    if not (MotionEstimate & key):
-        MotionEstimate.populate(key, reserve_jobs=False)
-    return key
-
-
-def _select_corrected(
-    estimate_key, interpolation="kriging_force_extrapolate_v1"
-) -> dict:
-    from spyglass.spikesorting.v2.motion import (
-        MotionCorrectedRecordingSelection,
-        MotionInterpolationParameters,
-    )
-
-    MotionInterpolationParameters.insert_default()
-    return MotionCorrectedRecordingSelection.insert_selection(
-        {
-            "motion_estimate_id": estimate_key["motion_estimate_id"],
-            "motion_interpolation_params_name": interpolation,
-        }
-    )
-
-
-def _populated_corrected(estimate_key, interpolation=None) -> dict:
-    from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
-
-    key = _select_corrected(
-        estimate_key, *(() if interpolation is None else (interpolation,))
-    )
-    if not (MotionCorrectedRecording & key):
-        MotionCorrectedRecording.populate(key, reserve_jobs=False)
-    return key
-
-
-def _drop_corrected(key) -> None:
-    """Delete a corrected recording row with its analysis file row and file.
-
-    Leaves no orphaned ``AnalysisNwbfile`` row or file behind, so a test can
-    repopulate the same selection.
-    """
-    from pathlib import Path
-
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
-
-    names = (MotionCorrectedRecording & key).fetch("analysis_file_name")
-    paths = [AnalysisNwbfile.get_abs_path(name) for name in names]
-    (MotionCorrectedRecording & key).delete_quick()
-    for name, path in zip(names, paths):
-        (AnalysisNwbfile & {"analysis_file_name": name}).delete_quick()
-        Path(path).unlink(missing_ok=True)
-
-
 def _no_estimation(*_args, **_kwargs):
     raise AssertionError("motion was estimated again")
 
@@ -1097,13 +902,13 @@ def test_interpolation_only_change_reuses_the_estimate(
         MotionInterpolationParameters,
     )
 
-    estimate = _populated_estimate(
+    estimate = populated_estimate(
         recording_id=discontinuous_sources["member_b"]["recording_id"]
     )
-    extrapolate = _select_corrected(estimate)
-    removal = _select_corrected(estimate, "kriging_remove_channels_v1")
+    extrapolate = select_corrected(estimate)
+    removal = select_corrected(estimate, "kriging_remove_channels_v1")
     assert extrapolate != removal
-    assert _select_corrected(estimate) == extrapolate
+    assert select_corrected(estimate) == extrapolate
     rows = (MotionCorrectedRecordingSelection & [extrapolate, removal]).fetch(
         as_dict=True
     )
@@ -1170,7 +975,7 @@ def test_interpolation_only_change_reuses_the_estimate(
         )
     unpopulated = _select(discontinuous_sources["member_b"], "dredge_v1")
     with pytest.raises(ValueError, match="not populated"):
-        _select_corrected(unpopulated)
+        select_corrected(unpopulated)
 
 
 def test_stale_corrected_selection_is_refused_at_compute(
@@ -1201,10 +1006,10 @@ def test_stale_corrected_selection_is_refused_at_compute(
         },
         skip_duplicates=True,
     )
-    estimate = _populated_estimate(
+    estimate = populated_estimate(
         recording_id=discontinuous_sources["member_b"]["recording_id"]
     )
-    key = _select_corrected(estimate, "stale_test_idw")
+    key = select_corrected(estimate, "stale_test_idw")
     try:
         monkeypatch.setattr(spikeinterface, "__version__", "0.0.0")
         with pytest.raises(ValueError, match="SpikeInterface version"):
@@ -1253,15 +1058,15 @@ def test_estimate_and_corrected_recording_round_trip(
     if source == "concat":
         source_key = discontinuous_sources["concat_key"]
         table = ConcatenatedRecording
-        estimate = _populated_estimate(
+        estimate = populated_estimate(
             concat_recording_id=source_key["concat_recording_id"]
         )
     else:
         source_key = discontinuous_sources["member_b"]
         table = Recording
-        estimate = _populated_estimate(recording_id=source_key["recording_id"])
-    key = _select_corrected(estimate)
-    _drop_corrected(key)
+        estimate = populated_estimate(recording_id=source_key["recording_id"])
+    key = select_corrected(estimate)
+    drop_corrected(key)
 
     captured = {}
     apply = _motion.apply_motion_on_estimation_clock
@@ -1422,7 +1227,7 @@ def test_persisted_corrected_traces_match_the_interpolation_oracle(
     )
     if not (MotionEstimate & estimate):
         MotionEstimate.populate(estimate, reserve_jobs=False)
-    key = _populated_corrected(estimate)
+    key = populated_corrected(estimate)
 
     clock = MotionEstimate().get_estimation_clock(estimate)
     assert len(clock.spans) == 2
@@ -1473,8 +1278,8 @@ def test_remove_channels_records_the_removed_contacts(discontinuous_sources):
     from spyglass.spikesorting.v2.recording import Recording
 
     recording_key = discontinuous_sources["member_b"]
-    estimate = _populated_estimate(recording_id=recording_key["recording_id"])
-    key = _populated_corrected(estimate, "kriging_remove_channels_v1")
+    estimate = populated_estimate(recording_id=recording_key["recording_id"])
+    key = populated_corrected(estimate, "kriging_remove_channels_v1")
 
     row = (MotionCorrectedRecording & key).fetch1()
     source_ids = Recording().get_recording(recording_key).channel_ids.tolist()
@@ -1510,10 +1315,10 @@ def test_masked_frames_of_the_corrected_recording_are_zero(drift_recording):
         }
     )
     RecordingArtifactDetection.populate(artifact_key, reserve_jobs=False)
-    estimate = _populated_estimate(
+    estimate = populated_estimate(
         recording_id=recording_key["recording_id"], **artifact_key
     )
-    key = _populated_corrected(estimate)
+    key = populated_corrected(estimate)
 
     spans = (MotionCorrectedRecording & key).fetch1("statistics_spans")
     assert spans.shape == (2, 2)
@@ -1545,9 +1350,9 @@ def test_motion_failure_cleanup_and_cache_rebuild(
     from spyglass.spikesorting.v2.recording import Recording
 
     recording_key = discontinuous_sources["member_b"]
-    estimate = _populated_estimate(recording_id=recording_key["recording_id"])
-    key = _select_corrected(estimate)
-    _drop_corrected(key)
+    estimate = populated_estimate(recording_id=recording_key["recording_id"])
+    key = select_corrected(estimate)
+    drop_corrected(key)
     source_file = (Recording & recording_key).fetch1("analysis_file_name")
     folder = Path(AnalysisNwbfile.get_abs_path(source_file)).parent
     nwb_file_name = (
@@ -1630,10 +1435,10 @@ def test_effective_traces_resolve_a_corrected_recording(discontinuous_sources):
     from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    estimate = _populated_estimate(
+    estimate = populated_estimate(
         recording_id=discontinuous_sources["member_b"]["recording_id"]
     )
-    key = _populated_corrected(estimate)
+    key = populated_corrected(estimate)
     row = (MotionCorrectedRecording & key).fetch1()
     expected = MotionCorrectedRecording().get_recording(key).get_traces()
     abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
@@ -1655,60 +1460,6 @@ def test_effective_traces_resolve_a_corrected_recording(discontinuous_sources):
 # ---- sorts of motion-corrected recordings ------------------------------------
 
 
-def _sorter_key() -> dict:
-    """The smoke clusterless row: a fast real sorter with no own correction."""
-    from spyglass.spikesorting.v2.sorting import SorterParameters
-    from tests.spikesorting.v2._smoke_constants import (
-        SMOKE_CLUSTERLESS_PARAM_NAME,
-        SMOKE_CLUSTERLESS_PARAMS,
-    )
-
-    SorterParameters().insert1(
-        {
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
-            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
-            "params_schema_version": 4,
-            "job_kwargs": None,
-        },
-        skip_duplicates=True,
-    )
-    return {
-        "sorter": "clusterless_thresholder",
-        "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
-    }
-
-
-def _masked_artifact(recording_key, excluded_s) -> dict:
-    """A populated manual-exclusion artifact detection on a recording."""
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-        RecordingArtifactSelection,
-    )
-
-    artifact_key = RecordingArtifactSelection.insert_selection(
-        {
-            "recording_id": recording_key["recording_id"],
-            "artifact_detection_params_name": "none",
-            "manual_excluded_times": np.array([excluded_s]),
-        }
-    )
-    RecordingArtifactDetection.populate(artifact_key, reserve_jobs=False)
-    return artifact_key
-
-
-def _drop_sorts(sort_keys) -> None:
-    """Delete sorts (analyzer folders included) and their selections."""
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-
-    sort_keys = [key for key in sort_keys if key]
-    if not sort_keys:
-        return
-    if Sorting & sort_keys:
-        (Sorting & sort_keys).delete(safemode=False)
-    (SortingSelection & sort_keys).super_delete(warn=False, safemode=False)
-
-
 def test_off_and_estimate_preserve_sort_input(drift_recording):
     """Saving a motion estimate of a sort's source (under the sort's own
     mask) changes neither the sort's id nor the traces its sorter reads."""
@@ -1723,11 +1474,11 @@ def test_off_and_estimate_preserve_sort_input(drift_recording):
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     recording_key = drift_recording["recording_key"]
-    artifact_key = _masked_artifact(recording_key, [5.0, 6.0])
+    artifact_key = masked_artifact(recording_key, [5.0, 6.0])
     request = {
         "recording_id": recording_key["recording_id"],
         **artifact_key,
-        **_sorter_key(),
+        **sorter_key(),
     }
     sort_key = SortingSelection.insert_selection(request)
     try:
@@ -1748,7 +1499,7 @@ def test_off_and_estimate_preserve_sort_input(drift_recording):
         np.testing.assert_array_equal(
             before, Recording().get_recording(recording_key).get_traces()
         )
-        estimate = _populated_estimate(
+        estimate = populated_estimate(
             recording_id=recording_key["recording_id"], **artifact_key
         )
         assert MotionEstimate & estimate
@@ -1756,7 +1507,7 @@ def test_off_and_estimate_preserve_sort_input(drift_recording):
         assert SortingSelection.resolve_motion_correction(sort_key) is None
         np.testing.assert_array_equal(sorter_input(), before)
     finally:
-        _drop_sorts([sort_key])
+        drop_sorts([sort_key])
 
 
 def test_correction_identity_pins_source_masks_and_recipe(
@@ -1772,17 +1523,17 @@ def test_correction_identity_pins_source_masks_and_recipe(
     source_key = discontinuous_sources["member_b"]
     other_key = discontinuous_sources["member_a"]
     concat_key = discontinuous_sources["concat_key"]
-    sorter = _sorter_key()
-    estimate = _populated_estimate(recording_id=source_key["recording_id"])
-    extrapolated = _populated_corrected(estimate)
-    removed = _populated_corrected(estimate, "kriging_remove_channels_v1")
-    concat_corrected = _populated_corrected(
-        _populated_estimate(
+    sorter = sorter_key()
+    estimate = populated_estimate(recording_id=source_key["recording_id"])
+    extrapolated = populated_corrected(estimate)
+    removed = populated_corrected(estimate, "kriging_remove_channels_v1")
+    concat_corrected = populated_corrected(
+        populated_estimate(
             concat_recording_id=concat_key["concat_recording_id"]
         )
     )
     t0 = discontinuous_sources["t0"]
-    artifact_key = _masked_artifact(source_key, [t0 + 24.0, t0 + 24.5])
+    artifact_key = masked_artifact(source_key, [t0 + 24.0, t0 + 24.5])
     base = {"recording_id": source_key["recording_id"], **sorter}
 
     sort_keys = []
@@ -1843,7 +1594,7 @@ def test_correction_identity_pins_source_masks_and_recipe(
             Sorting().make_fetch(uncorrected)
         assert not (Sorting & uncorrected)
     finally:
-        _drop_sorts(sort_keys)
+        drop_sorts(sort_keys)
 
 
 def test_sorter_correcting_motion_itself_is_rejected_for_a_corrected_source(
@@ -1862,8 +1613,8 @@ def test_sorter_correcting_motion_itself_is_rejected_for_a_corrected_source(
         "params"
     )
     source_key = discontinuous_sources["member_b"]
-    corrected = _populated_corrected(
-        _populated_estimate(recording_id=source_key["recording_id"])
+    corrected = populated_corrected(
+        populated_estimate(recording_id=source_key["recording_id"])
     )
     n_selections = len(SortingSelection())
     with pytest.raises(ValueError, match="apply_motion_correction=False"):
@@ -1886,9 +1637,9 @@ def test_corrected_recording_referenced_by_a_sort_is_protected(
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     source_key = discontinuous_sources["member_b"]
-    sorter = _sorter_key()
-    corrected = _populated_corrected(
-        _populated_estimate(recording_id=source_key["recording_id"])
+    sorter = sorter_key()
+    corrected = populated_corrected(
+        populated_estimate(recording_id=source_key["recording_id"])
     )
     sort_key = SortingSelection.insert_selection(
         {"recording_id": source_key["recording_id"], **sorter, **corrected}
@@ -1917,7 +1668,7 @@ def test_corrected_recording_referenced_by_a_sort_is_protected(
         assert not (SortingSelection.MotionCorrectionSource & orphan)
         assert SortingSelection & sort_key
     finally:
-        _drop_sorts([sort_key, orphan])
+        drop_sorts([sort_key, orphan])
 
 
 def test_corrected_sort_reads_the_corrected_traces(
@@ -1939,11 +1690,11 @@ def test_corrected_sort_reads_the_corrected_traces(
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     recording_key = drift_recording["recording_key"]
-    artifact_key = _masked_artifact(recording_key, [20.0, 21.0])
-    estimate = _populated_estimate(
+    artifact_key = masked_artifact(recording_key, [20.0, 21.0])
+    estimate = populated_estimate(
         recording_id=recording_key["recording_id"], **artifact_key
     )
-    corrected = _populated_corrected(estimate)
+    corrected = populated_corrected(estimate)
     corrected_row = (MotionCorrectedRecording & corrected).fetch1()
     corrected_traces = (
         MotionCorrectedRecording().get_recording(corrected).get_traces()
@@ -1960,7 +1711,7 @@ def test_corrected_sort_reads_the_corrected_traces(
         {
             "recording_id": recording_key["recording_id"],
             **artifact_key,
-            **_sorter_key(),
+            **sorter_key(),
             **corrected,
         }
     )
@@ -2003,7 +1754,7 @@ def test_corrected_sort_reads_the_corrected_traces(
         assert provenance["recording_id"] == str(recording_key["recording_id"])
     finally:
         monkeypatch.undo()
-        _drop_sorts([sort_key])
+        drop_sorts([sort_key])
 
 
 # ---- pipeline motion modes ----------------------------------------------------
@@ -2036,31 +1787,6 @@ def _session_start_s(nwb_file_name) -> float:
         }
     ).fetch1("valid_times")
     return float(valid[0][0])
-
-
-def _drop_pipeline_sorts(sorting_ids) -> None:
-    """Delete run_v2_pipeline sorts leaves-first: member and root merges,
-    curations, sorts, then the selections (so no part outlives its master)."""
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
-    )
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-
-    keys = [{"sorting_id": sid} for sid in set(sorting_ids) if sid]
-    if not keys:
-        return
-    for part in (
-        SpikeSortingOutput.ConcatMemberCuration,
-        SpikeSortingOutput.CurationV2,
-    ):
-        for merge_id in (part & keys).fetch("merge_id"):
-            (SpikeSortingOutput & {"merge_id": merge_id}).super_delete(
-                warn=False, safemode=False
-            )
-    for table in (ConcatMemberCuration, CurationV2, Sorting, SortingSelection):
-        (table & keys).super_delete(warn=False, safemode=False)
 
 
 def _row_counts() -> dict:
@@ -2208,7 +1934,7 @@ def test_pipeline_motion_modes_on_one_recording(drift_recording):
             )
         } == {"reused"}
     finally:
-        _drop_pipeline_sorts(sorting_ids)
+        drop_pipeline_sorts(sorting_ids)
 
 
 def test_pipeline_motion_apply_on_a_concatenation(discontinuous_sources):
@@ -2263,8 +1989,8 @@ def test_pipeline_motion_apply_on_a_concatenation(discontinuous_sources):
         assert "concatenation" in setup["description"]
     finally:
         if summary is not None:
-            _drop_pipeline_sorts([summary["sorting_id"]])
-            _drop_concat_motion_selections(
+            drop_pipeline_sorts([summary["sorting_id"]])
+            drop_concat_motion_selections(
                 {"concat_recording_id": summary["concat_recording_id"]}
             )
 
@@ -2362,7 +2088,7 @@ def test_preflight_previews_the_motion_ids_the_run_mints(drift_recording):
             assert ids[name]["id"] == summary[name]
     finally:
         if summary is not None:
-            _drop_pipeline_sorts([summary["sorting_id"]])
+            drop_pipeline_sorts([summary["sorting_id"]])
 
 
 @pytest.fixture

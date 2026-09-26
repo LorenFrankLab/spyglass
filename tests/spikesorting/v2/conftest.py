@@ -23,6 +23,16 @@ import pytest
 from tests.spikesorting.v2._ingest_helpers import (
     clear_curations_for as _clear_curations_for,
 )
+from tests.spikesorting.v2._motion_db_helpers import (
+    CONCAT_GROUP,
+    DRIFT_DURATION_S,
+    DRIFT_NWB,
+    MEMBER_A_INTERVAL,
+    MEMBER_B_INTERVAL,
+    MOTION_TEAM,
+    drop_concat_motion_selections,
+    drop_motion_selections,
+)
 
 # These files are scripts and helper modules, not pytest test modules; the
 # leading ``test_`` is part of the component name (the standalone test
@@ -748,6 +758,131 @@ def chronic_2_session_minirec(dj_conn, tmp_path_factory):
     clean_session_groups_for_owner(CHRONIC_OWNER_TEAM)
     for nwb_file_name in nwb_file_names:
         _clean_session_v2({"nwb_file_name": nwb_file_name})
+
+
+# ---- motion correction: the planted-drift polymer session -------------------
+
+
+@pytest.fixture(scope="module")
+def drift_recording(dj_conn, tmp_path_factory):
+    """A populated ``Recording`` of the planted-drift polymer session."""
+    import datetime as dt
+
+    from spyglass.spikesorting.v2.motion import MotionEstimationParameters
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from tests.spikesorting.v2._ingest_helpers import (
+        _clean_session_v2,
+        configure_v2_run_inputs,
+        copy_and_insert_nwb,
+    )
+    from tests.spikesorting.v2._motion_fixtures import (
+        write_drifting_polymer_nwb,
+    )
+
+    src = write_drifting_polymer_nwb(
+        tmp_path_factory.mktemp("motion") / DRIFT_NWB,
+        session_start=dt.datetime(2023, 6, 22, 12, tzinfo=dt.timezone.utc),
+        fixture_name="motion_drift_polymer",
+        seed=0,
+        duration_s=DRIFT_DURATION_S,
+    )
+    nwb_file_name = copy_and_insert_nwb(src, dest_name=DRIFT_NWB)
+    run = configure_v2_run_inputs(nwb_file_name, MOTION_TEAM)
+    recording_key = RecordingSelection.insert_selection(
+        {**run, "preprocessing_params_name": "default"}
+    )
+    drop_motion_selections(recording_key)
+    if not (Recording & recording_key):
+        Recording.populate(recording_key, reserve_jobs=False)
+    MotionEstimationParameters.insert_default()
+
+    yield {"recording_key": recording_key, "nwb_file_name": nwb_file_name}
+
+    drop_motion_selections(recording_key)
+    _clean_session_v2({"nwb_file_name": nwb_file_name})
+
+
+@pytest.fixture(scope="module")
+def discontinuous_sources(drift_recording):
+    """A gapped ``Recording`` and a two-member ``ConcatenatedRecording``."""
+    import numpy as np
+
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        SessionGroup,
+    )
+    from tests.spikesorting.v2._concat_helpers import select_unmasked_concat
+    from tests.spikesorting.v2._ingest_helpers import (
+        clean_session_groups_for_owner,
+        configure_v2_run_inputs,
+    )
+
+    nwb_file_name = drift_recording["nwb_file_name"]
+    valid = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0, t_end = float(valid[0][0]), float(valid[-1][1])
+    intervals = {
+        MEMBER_A_INTERVAL: [[t0 + 16.0, t0 + 20.0]],
+        MEMBER_B_INTERVAL: [[t0 + 23.0, t0 + 26.0], [t0 + 27.0, t_end]],
+    }
+    recording_keys = {}
+    members = []
+    for name, times in intervals.items():
+        IntervalList.insert1(
+            {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": name,
+                "valid_times": np.asarray(times, dtype=float),
+                "pipeline": "motion_estimate_test",
+            },
+            skip_duplicates=True,
+        )
+        run = configure_v2_run_inputs(
+            nwb_file_name, MOTION_TEAM, interval_list_name=name
+        )
+        members.append(run)
+        recording_keys[name] = RecordingSelection.insert_selection(
+            {**run, "preprocessing_params_name": "default"}
+        )
+        drop_motion_selections(recording_keys[name])
+        if not (Recording & recording_keys[name]):
+            Recording.populate(recording_keys[name], reserve_jobs=False)
+
+    clean_session_groups_for_owner(MOTION_TEAM)
+    SessionGroup.create_group(MOTION_TEAM, CONCAT_GROUP, members)
+    concat_key = select_unmasked_concat(
+        {
+            "session_group_owner": MOTION_TEAM,
+            "session_group_name": CONCAT_GROUP,
+            "preprocessing_params_name": "default",
+        }
+    )
+    ConcatenatedRecording.populate(concat_key, reserve_jobs=False)
+
+    yield {
+        "t0": t0,
+        "member_a": recording_keys[MEMBER_A_INTERVAL],
+        "member_b": recording_keys[MEMBER_B_INTERVAL],
+        "concat_key": concat_key,
+    }
+
+    drop_concat_motion_selections(concat_key)
+    for key in recording_keys.values():
+        drop_motion_selections(key)
+    clean_session_groups_for_owner(MOTION_TEAM)
 
 
 @pytest.fixture
