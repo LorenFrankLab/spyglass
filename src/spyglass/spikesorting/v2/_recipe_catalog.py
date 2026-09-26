@@ -303,7 +303,7 @@ def motion_estimation_default_contents() -> tuple:
 #: apply (``preprocessing/motion.py:41-43, 78-80``: ``force_extrapolate``,
 #: kriging, ``sigma_um=20``, ``p=2``); the presets leave ``num_closest`` to
 #: ``interpolate_motion``'s default of 3
-#: (``sortingcomponents/motion/motion_interpolation.py:348``).
+#: (``sortingcomponents/motion/motion_interpolation.py:347``).
 #: ``kriging_remove_channels_v1`` is the same kernel with ``remove_channels``.
 KRIGING_FORCE_EXTRAPOLATE = "kriging_force_extrapolate_v1"
 KRIGING_REMOVE_CHANNELS = "kriging_remove_channels_v1"
