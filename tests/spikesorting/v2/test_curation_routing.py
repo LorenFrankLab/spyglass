@@ -26,6 +26,7 @@ from spyglass.spikesorting.v2._artifact_naming import (
 )
 from spyglass.spikesorting.v2._curation_routing import (
     NO_ARTIFACT_RESTRICTION,
+    NO_MOTION_CORRECTION_RESTRICTION,
     classify_and_normalize_restriction,
 )
 
@@ -192,7 +193,8 @@ def test_classify_leaves_interval_name_as_recording_key_when_not_restricting():
 
 def test_classify_does_not_emit_include_exclude_directive():
     """The plan carries only normalized restrictions + an artifact id + a
-    warning flag -- no invented exclude/include vocabulary."""
+    motion-correction id + a warning flag -- no invented exclude/include
+    vocabulary."""
     plan = _classify({"sorting_id": "s"})
     assert set(plan._fields) == {
         "rec_restriction",
@@ -201,6 +203,44 @@ def test_classify_does_not_emit_include_exclude_directive():
         "sort_restriction",
         "curation_restriction",
         "artifact_detection_id",
+        "motion_corrected_recording_id",
         "restrict_by_artifact",
         "unresolved_name_warning",
     }
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (str(uuid.UUID(int=7)), uuid.UUID(int=7)),
+        (uuid.UUID(int=7), uuid.UUID(int=7)),
+        (None, None),
+    ],
+    ids=["str", "uuid", "none"],
+)
+def test_classify_motion_correction_is_a_part_resolved_sort_key(
+    value, expected
+):
+    """``motion_corrected_recording_id`` is a recognized key resolved through
+    the sort's correction part: normalized to a UUID, ``None`` kept as the
+    uncorrected-only restriction, and never applied to the master row."""
+    plan = _classify(
+        {
+            "recording_id": "r",
+            "sorter": "mountainsort5",
+            "motion_corrected_recording_id": value,
+        }
+    )
+    assert plan.motion_corrected_recording_id == expected
+    assert plan.sort_restriction == {"sorter": "mountainsort5"}
+    assert plan.rec_restriction == {"recording_id": "r"}
+    assert plan.artifact_detection_id is NO_ARTIFACT_RESTRICTION
+
+
+def test_classify_absent_motion_correction_is_a_wildcard():
+    plan = _classify({"recording_id": "r"})
+    assert plan.motion_corrected_recording_id is (
+        NO_MOTION_CORRECTION_RESTRICTION
+    )
+    with pytest.raises(ValueError):
+        _classify({"motion_corrected_recording_id": "not-a-uuid"})

@@ -2324,8 +2324,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         ``interval_list_name``, ``recording_id``, ``artifact_detection_id``), the
         cross-source ``preprocessing_params_name``, the concat keys above, and
         the shared sort / curation keys (``sorter``, ``sorter_params_name``,
-        ``sorting_id``, ``curation_id``) -- resolves to the ``CurationV2`` rows
-        it selects. Mixing recording and concat source keys is rejected (a sort
+        ``sorting_id``, ``motion_corrected_recording_id``, ``curation_id``) --
+        resolves to the ``CurationV2`` rows it selects. Mixing recording and concat source keys is rejected (a sort
         has exactly one input source); ``preprocessing_params_name`` may combine
         with either.
 
@@ -2353,7 +2353,12 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         ``artifact_detection_id=None`` means "no artifact-detection pass"
         (no standalone or concat-member detection selected), NOT "match
         anything" -- only an absent key is a wildcard. A detection ID matches
-        a concat if any frozen member uses it.
+        a concat if any frozen member uses it. ``motion_corrected_recording_id``
+        follows the same convention: ``None`` matches only sorts that read
+        their source's own traces, an id matches only sorts of that
+        ``MotionCorrectedRecording``, and an absent key matches corrected and
+        uncorrected sorts of the same source alike, so pass it to tell them
+        apart.
 
         Parameters
         ----------
@@ -2386,6 +2391,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         """
         from spyglass.spikesorting.v2._curation_routing import (
             NO_ARTIFACT_RESTRICTION,
+            NO_MOTION_CORRECTION_RESTRICTION,
             classify_and_normalize_restriction,
         )
         from spyglass.spikesorting.v2.recording import RecordingSelection
@@ -2512,6 +2518,23 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                     artifact_detection_source.proj(),
                     concat_match.proj(),
                 ]
+        # A sort reads motion-corrected traces only through its optional
+        # MotionCorrectionSource part. None keeps sorts of their source's own
+        # traces, an id keeps sorts of that corrected recording, and an absent
+        # key keeps both.
+        corrected_id = plan.motion_corrected_recording_id
+        if corrected_id is not NO_MOTION_CORRECTION_RESTRICTION:
+            correction_source = SortingSelection.MotionCorrectionSource
+            if corrected_id is None:
+                sort_master = sort_master - correction_source.proj()
+            else:
+                sort_master = (
+                    sort_master
+                    & (
+                        correction_source
+                        & {"motion_corrected_recording_id": corrected_id}
+                    ).proj()
+                )
 
         return (
             cls * sort_master.proj("sorting_id")

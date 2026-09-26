@@ -57,13 +57,19 @@ _CONCAT_KEYS = (
 # concat-vs-recording contradiction, since it is not exclusive to either.
 _SHARED_SOURCE_KEYS = ("preprocessing_params_name",)
 # Sort-level keys. Artifact dependencies live on the standalone sort's optional
-# part or its concat source's frozen members, so the join assembly resolves them
-# separately from the other sort keys.
+# part or its concat source's frozen members, and a motion correction on the
+# sort's optional ``MotionCorrectionSource`` part, so the join assembly resolves
+# both separately from the other sort keys.
 _SORT_KEYS = (
     "sorter",
     "sorter_params_name",
     "sorting_id",
     "artifact_detection_id",
+    "motion_corrected_recording_id",
+)
+_PART_RESOLVED_SORT_KEYS = (
+    "artifact_detection_id",
+    "motion_corrected_recording_id",
 )
 _CURATION_KEYS = ("curation_id",)
 _ALLOWED_KEYS = frozenset(
@@ -76,6 +82,12 @@ _ALLOWED_KEYS = frozenset(
 # A bare ``None`` is already taken for the
 # anti-join, so absence needs its own marker; only an absent key is a wildcard.
 NO_ARTIFACT_RESTRICTION = object()
+
+# The same distinction for ``motion_corrected_recording_id``: absent is a
+# wildcard (corrected and uncorrected sorts both match); ``None`` matches only
+# sorts of their source's own traces; an id matches only sorts of that
+# corrected recording.
+NO_MOTION_CORRECTION_RESTRICTION = object()
 
 
 class RestrictionPlan(NamedTuple):
@@ -90,7 +102,11 @@ class RestrictionPlan(NamedTuple):
     detections: a ``uuid.UUID`` matches either dependency, ``None`` excludes both,
     and the :data:`NO_ARTIFACT_RESTRICTION` sentinel
     means the restriction named no artifact id at all (a wildcard -- no
-    artifact restriction). ``restrict_by_artifact`` is the caller's flag,
+    artifact restriction). ``motion_corrected_recording_id`` restricts the
+    sort's motion correction the same way: a ``uuid.UUID`` matches sorts of
+    that corrected recording, ``None`` matches sorts that read their source's
+    own traces, and :data:`NO_MOTION_CORRECTION_RESTRICTION` matches both.
+    ``restrict_by_artifact`` is the caller's flag,
     threaded through unchanged. ``unresolved_name_warning`` is the message the
     table method emits via ``logger.warning`` when ``restrict_by_artifact`` was
     requested but the interval name carried no artifact id (``None`` when there
@@ -103,6 +119,7 @@ class RestrictionPlan(NamedTuple):
     sort_restriction: dict
     curation_restriction: dict
     artifact_detection_id: object
+    motion_corrected_recording_id: object
     restrict_by_artifact: bool
     unresolved_name_warning: "str | None"
 
@@ -178,6 +195,10 @@ def classify_and_normalize_restriction(
         key["artifact_detection_id"] = uuid.UUID(
             str(key["artifact_detection_id"])
         )
+    if key.get("motion_corrected_recording_id") is not None:
+        key["motion_corrected_recording_id"] = uuid.UUID(
+            str(key["motion_corrected_recording_id"])
+        )
 
     # Route through the input source the restriction names. A concat
     # restriction (concat_recording_id / session group) and a
@@ -204,11 +225,12 @@ def classify_and_normalize_restriction(
         )
 
     # Artifact restrictions resolve through standalone or concat-member
-    # dependencies; only the other sort keys apply directly to the master.
+    # dependencies and motion restrictions through the correction part; only
+    # the other sort keys apply directly to the master.
     sort_restriction = {
         k: key[k]
         for k in _SORT_KEYS
-        if k in key and k != "artifact_detection_id"
+        if k in key and k not in _PART_RESOLVED_SORT_KEYS
     }
     curation_restriction = {k: key[k] for k in _CURATION_KEYS if k in key}
 
@@ -218,6 +240,9 @@ def classify_and_normalize_restriction(
         artifact_detection_id = key["artifact_detection_id"]
     else:
         artifact_detection_id = NO_ARTIFACT_RESTRICTION
+    motion_corrected_recording_id = key.get(
+        "motion_corrected_recording_id", NO_MOTION_CORRECTION_RESTRICTION
+    )
 
     return RestrictionPlan(
         rec_restriction=rec_restriction,
@@ -226,6 +251,7 @@ def classify_and_normalize_restriction(
         sort_restriction=sort_restriction,
         curation_restriction=curation_restriction,
         artifact_detection_id=artifact_detection_id,
+        motion_corrected_recording_id=motion_corrected_recording_id,
         restrict_by_artifact=restrict_by_artifact,
         unresolved_name_warning=unresolved_name_warning,
     )
