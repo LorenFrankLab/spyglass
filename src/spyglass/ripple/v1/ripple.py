@@ -17,6 +17,9 @@ from spyglass.lfp.lfp_merge import LFPOutput
 from spyglass.position import PositionOutput
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
+from spyglass.utils.ripple_detection_params import (
+    detection_kwargs_from_params,
+)
 
 schema = dj.schema("ripple_v1")
 
@@ -121,18 +124,22 @@ class RippleParameters(SpyglassMixin, dj.Lookup):
         ripple_detection_algorithm : str
             Name of the ripple detection algorithm to use
         ripple_detection_params : dict
-            Dictionary of parameters for the ripple detection algorithm, which
-            may include...
+            Keyword arguments for the ripple detection algorithm
+            (ripple-detection>=2.0), which may include...
             speed_threshold : float
                 Speed threshold for ripple detection (cm/s)
             minimum_duration : float
-                Minimum duration for ripple detection (sec)
+                Minimum duration for ripple detection (sec). The trace must
+                stay above threshold for round(minimum_duration * sampling
+                rate) samples.
             zscore_threshold : float
                 Z-score threshold for ripple detection (std)
             smoothing_sigma : float
                 Smoothing sigma for ripple detection (sec)
             close_ripple_threshold : float
                 Close ripple threshold for ripple detection (sec)
+            A `normalization_time_range` stored for ripple-detection 1.x is
+            applied as the equivalent `normalization_mask`.
     """
 
     definition = """
@@ -216,12 +223,16 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
             interval_ripple_lfps,
             sampling_frequency,
         ) = self.get_ripple_lfps_and_position_info(key)
+        time = np.asarray(interval_ripple_lfps.index)
+        speed = np.asarray(speed)
         ripple_times = RIPPLE_DETECTION_ALGORITHMS[ripple_detection_algorithm](
-            time=np.asarray(interval_ripple_lfps.index),
+            time=time,
             filtered_lfps=np.asarray(interval_ripple_lfps),
-            speed=np.asarray(speed),
+            speed=speed,
             sampling_frequency=sampling_frequency,
-            **ripple_detection_params,
+            **detection_kwargs_from_params(
+                ripple_detection_params, time, speed
+            ),
         )
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
