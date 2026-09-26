@@ -26,8 +26,30 @@ from spyglass.spikesorting.v2._recipe_catalog import (
 )
 
 
+def _stub_row(table, id_attr, id_value, **fixed):
+    """Build a row of ``table`` from its live heading.
+
+    The ``id_attr`` PK is ``id_value``, columns named in ``fixed`` take their
+    given values, numeric columns -> 0 and the rest -> "bypass".
+    """
+    heading = table().heading
+    row = {}
+    for name in heading.names:
+        if name == id_attr:
+            row[name] = id_value
+        elif name in fixed:
+            row[name] = fixed[name]
+        elif heading.attributes[name].numeric:
+            row[name] = 0
+        else:
+            row[name] = "bypass"
+    return row
+
+
 @contextlib.contextmanager
-def _planted_source_sort(selection_table, id_attr, source_part, preproc_name):
+def _planted_source_sort(
+    selection_table, id_attr, source_part, preproc_name, trace_table=None
+):
     """Plant a SortingSelection + source-part + stub upstream selection row.
 
     Resolver / make_fetch tests need a sort whose source carries a given
@@ -39,33 +61,52 @@ def _planted_source_sort(selection_table, id_attr, source_part, preproc_name):
     on exit. Works for both source kinds via (``selection_table``, ``id_attr``,
     ``source_part``): RecordingSelection/recording_id/RecordingSource or
     ConcatenatedRecordingSelection/concat_recording_id/ConcatenatedRecordingSource.
+
+    The ``sorting_id`` is the one ``SortingSelection.insert_selection`` derives
+    from these parts, so the selection passes the part-consistency check
+    ``SortingSelection.resolve_effective_source`` makes. ``trace_table``
+    (``Recording`` or ``ConcatenatedRecording``), when given, also gets a stub
+    row for the source, for callers that resolve the source's traces row.
     """
     import datajoint as dj
 
+    from spyglass.spikesorting.v2._selection_identity import (
+        deterministic_id,
+        sorting_identity_payload,
+    )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
+    sorter = "mountainsort5"
+    sorter_params_name = "franklab_30khz_ms5_2026_06"
     id_value = uuid.uuid4()
-    sid = uuid.uuid4()
-    heading = selection_table().heading
-    row = {}
-    for name in heading.names:
-        if name == id_attr:
-            row[name] = id_value
-        elif name == "preprocessing_params_name":
-            row[name] = preproc_name
-        elif heading.attributes[name].numeric:
-            row[name] = 0
-        else:
-            row[name] = "bypass"
+    sid = deterministic_id(
+        "sorting",
+        sorting_identity_payload(
+            sorter=sorter,
+            sorter_params_name=sorter_params_name,
+            **{id_attr: id_value},
+        ),
+    )
+    row = _stub_row(
+        selection_table,
+        id_attr,
+        id_value,
+        preprocessing_params_name=preproc_name,
+    )
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
         selection_table.insert1(row, allow_direct_insert=True)
+        if trace_table is not None:
+            trace_table.insert1(
+                _stub_row(trace_table, id_attr, id_value),
+                allow_direct_insert=True,
+            )
         SortingSelection.insert1(
             {
                 "sorting_id": sid,
-                "sorter": "mountainsort5",
-                "sorter_params_name": "franklab_30khz_ms5_2026_06",
+                "sorter": sorter,
+                "sorter_params_name": sorter_params_name,
             },
             allow_direct_insert=True,
         )
@@ -80,6 +121,8 @@ def _planted_source_sort(selection_table, id_attr, source_part, preproc_name):
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             (SortingSelection & {"sorting_id": sid}).delete_quick()
+            if trace_table is not None:
+                (trace_table & {id_attr: id_value}).delete_quick()
             (selection_table & {id_attr: id_value}).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
@@ -376,6 +419,7 @@ def test_make_fetch_resolves_hippocampus_display_blob(dj_conn):
     """
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
+        Recording,
         RecordingSelection,
     )
     from spyglass.spikesorting.v2.sorting import (
@@ -393,6 +437,7 @@ def test_make_fetch_resolves_hippocampus_display_blob(dj_conn):
         "recording_id",
         SortingSelection.RecordingSource,
         HIPPOCAMPUS_PREPROC,
+        trace_table=Recording,
     ) as sid:
         fetched = Sorting().make_fetch({"sorting_id": sid})
         assert (
