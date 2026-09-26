@@ -349,8 +349,12 @@ def run_v2_pipeline(
         The ``MotionCorrectionParameters`` recipe (an estimation recipe plus
         an interpolation recipe; ``initialize_v2_defaults`` ships
         ``dredge_v1`` and ``dredge_fast_v1``). Required iff ``motion_mode``
-        is not ``"off"``; a recipe with ``"off"``, a missing recipe, or an
-        unknown mode raises ``PipelineInputError`` before any database access.
+        is not ``"off"``. A recipe with ``"off"``, no recipe with
+        ``"estimate"`` / ``"apply"``, or an unknown mode raises
+        ``PipelineInputError`` before any database access. A recipe name with
+        no ``MotionCorrectionParameters`` row fails preflight
+        (``PreflightError``); with ``preflight=False`` it raises
+        ``ValueError`` (like any missing parameter row) before any populate.
 
     Returns
     -------
@@ -463,7 +467,8 @@ def run_v2_pipeline(
     ValueError
         If a required parameter Lookup row is missing (e.g.
         ``PreprocessingParameters`` / ``SorterParameters`` defaults not
-        installed); the insert helpers translate the would-be
+        installed, or the ``MotionCorrectionParameters`` recipe when
+        ``preflight=False``); the insert helpers translate the would-be
         foreign-key error into this clear message. Run
         ``initialize_v2_defaults()`` first.
     datajoint.errors.IntegrityError
