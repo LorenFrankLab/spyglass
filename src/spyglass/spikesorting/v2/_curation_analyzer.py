@@ -208,19 +208,29 @@ def curation_analyzer_cache_path(
 
 
 def _source_artifact_hashes(sorting_id) -> dict[str, str]:
-    """Resolve the current recording artifact hash behind one sort."""
+    """Resolve the current trace artifact hashes behind one sort.
+
+    Keyed by artifact kind: the lineage source's ``content_hash`` always, plus
+    the ``MotionCorrectedRecording``'s for a sort of corrected traces, so a
+    cache built from other effective traces never validates.
+    """
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    source = SortingSelection.resolve_source({"sorting_id": sorting_id})
-    if source.kind == "recording":
-        content_hash = (Recording & source.key).fetch1("content_hash")
+    lineage, traces = SortingSelection.resolve_effective_source(
+        {"sorting_id": sorting_id}
+    )
+    if lineage.kind == "recording":
+        content_hash = (Recording & lineage.key).fetch1("content_hash")
     else:
-        content_hash = (ConcatenatedRecording & source.key).fetch1(
+        content_hash = (ConcatenatedRecording & lineage.key).fetch1(
             "content_hash"
         )
-    return {source.kind: str(content_hash)}
+    hashes = {lineage.kind: str(content_hash)}
+    if traces.kind != lineage.kind:
+        hashes[traces.kind] = str(traces.row["content_hash"])
+    return hashes
 
 
 def _raw_contributor_map(key) -> dict[str, list[int]]:
