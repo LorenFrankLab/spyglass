@@ -23,25 +23,25 @@
     #1662
 - Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
 - Add `prefer_download` custom config for stream-capable backends #1662
-- Require `ripple-detection>=2.0,<3` #XXXX
+- Require `ripple-detection>=2.0,<3` #1690
 
 ### Pipelines
 
 - MUA
 
     - Pass per-unit spike counts to `multiunit_HSE_detector`, so the new
-        `n_active_units` column counts units; events are unchanged #XXXX
+        `n_active_units` column counts units; events are unchanged #1690
     - Apply stored `use_speed_threshold_for_zscore` and `normalization_time_range`
         keys, removed in ripple-detection 2.0, as the equivalent
-        `normalization_mask` #XXXX
+        `normalization_mask` #1690
 
 - Ripple
 
     - Apply a stored `normalization_time_range` key, removed in ripple-detection
-        2.0, as the equivalent `normalization_mask` #XXXX
+        2.0, as the equivalent `normalization_mask` #1690
     - `RippleTimesV1.get_Kay_ripple_consensus_trace` uses ripple-detection's
         public function, so the plotted trace is computed within each contiguous
-        block, as the detector's is #XXXX
+        block, as the detector's is #1690
 
 - Spike Sorting
 
@@ -54,7 +54,7 @@
 
 ### Breaking Changes
 
-#### ripple-detection 2.0 (#XXXX)
+#### ripple-detection 2.0 (#1690)
 
 `RippleTimesV1` and `MuaEventsV1` now run on ripple-detection 2.0, which changes
 results as well as calls. Rows populated before the upgrade are not recomputed
