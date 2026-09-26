@@ -786,8 +786,11 @@ def build_estimation_clock(
     derives ``fs`` from a timestamped series' first 1000 steps,
     ``extractors/nwbextractors.py:369``) drifts from its nominal end by
     ``ppm * duration``, which would otherwise swamp a gap of a few dropped
-    frames. A gap longer than ``max_gap_s`` is shortened to it; a shorter gap
-    keeps its real length. Every span thus shares one clock (and one
+    frames. A next span starting after the last timestamp but less than one
+    sample after it is adjacent (``g_i`` is clamped to 0): float rounding of
+    the timestamps and of ``fs`` makes a true zero gap come out slightly
+    negative. A gap longer than ``max_gap_s`` is shortened to it; a shorter
+    gap keeps its real length. Every span thus shares one clock (and one
     estimation), while the unobserved time between spans stays bounded: the
     estimator's temporal bins, and its dense bin-by-bin correlation matrices,
     grow with the clock's total length.
@@ -815,9 +818,8 @@ def build_estimation_clock(
     ValueError
         If the spans are empty, not contiguous from frame 0, or empty spans;
         if a timestamp or the cap is not finite (or the cap is negative); if a
-        span ends before it starts; or if a span starts before one sample
-        after the previous span's last timestamp (a negative gap: overlapping
-        or out-of-order spans).
+        span ends before it starts; or if a span starts at or before the
+        previous span's last timestamp (overlapping or out-of-order spans).
     """
     spans = np.asarray(spans, dtype=np.int64).reshape(-1, 2)
     starts = np.asarray(source_start_s, dtype=np.float64).reshape(-1)
@@ -863,15 +865,20 @@ def build_estimation_clock(
     for i in range(len(spans) - 1):
         duration = (spans[i, 1] - spans[i, 0]) / fs
         gap = starts[i + 1] - (ends[i] + 1.0 / fs)
-        if gap < 0:
+        # Adjacent spans (a member join with no real gap) can compute a gap a
+        # rounding error below zero: the timestamps, and fs itself, are
+        # floats. Only a next start at or before the last timestamp is an
+        # overlap; anything between is a zero gap.
+        if starts[i + 1] <= ends[i]:
             raise ValueError(
                 f"Estimation clock: continuity span {i + 1} (frames "
                 f"{spans[i + 1].tolist()}) starts at {starts[i + 1]!r} s, "
-                f"{-gap:.6g} s before one sample after span {i}'s last "
-                f"timestamp ({ends[i]!r} s; frames {spans[i].tolist()}). "
-                "Spans must be in acquisition order without overlap; for a "
-                "concatenation, order the members by acquisition time."
+                f"at or before span {i}'s last timestamp ({ends[i]!r} s; "
+                f"frames {spans[i].tolist()}). Spans must be in acquisition "
+                "order without overlap; for a concatenation, order the "
+                "members by acquisition time."
             )
+        gap = max(gap, 0.0)
         estimation.append(estimation[-1] + duration + min(gap, max_gap_s))
     return EstimationClock(
         spans=spans,

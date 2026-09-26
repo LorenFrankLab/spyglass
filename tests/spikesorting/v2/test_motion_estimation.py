@@ -677,6 +677,53 @@ def test_estimation_clock_caps_only_long_gaps():
     )
 
 
+ADJACENT_ORIGINS_S = (0.0, 16.0, 1000.123, 1.7e9)
+
+
+def _adjacent_splits(origin_s):
+    """One continuous 30 kHz timestamp vector starting at ``origin_s``, the
+    rate SpikeInterface derives from it (``1 / median(diff(t[:1000]))``,
+    ``extractors/nwbextractors.py:369``), and 58 split frames."""
+    timestamps = origin_s + np.arange(60_000) / 30_000.0
+    fs = 1.0 / np.median(np.diff(timestamps[:1000]))
+    return timestamps, fs, range(1_000, 59_000, 1_000)
+
+
+@pytest.mark.parametrize("origin_s", ADJACENT_ORIGINS_S)
+def test_adjacent_spans_join_with_a_zero_gap(origin_s):
+    """Two members split out of one continuous timestamp vector are
+    adjacent: whatever the timestamps' magnitude, float rounding of the
+    timestamps and of the derived rate must not turn the zero gap into an
+    overlap, and the clock keeps (at most) a sub-sample gap."""
+    from spyglass.spikesorting.v2._motion import build_estimation_clock
+
+    timestamps, fs, splits = _adjacent_splits(origin_s)
+    n = timestamps.size
+    for split in splits:
+        clock = build_estimation_clock(
+            [(0, split), (split, n)],
+            [timestamps[0], timestamps[split]],
+            [timestamps[split - 1], timestamps[-1]],
+            fs,
+            max_gap_s=30.0,
+        )
+        gap = clock.estimation_start_s[1] - (
+            clock.estimation_start_s[0] + split / fs
+        )
+        assert 0.0 <= gap < 0.5 / fs
+
+
+def test_adjacent_join_rounding_exercises_the_clamp():
+    """The splits above include raw gaps that round below zero, so the
+    zero-gap test would fail under a plain ``gap < 0`` rule."""
+    raw = [
+        timestamps[split] - (timestamps[split - 1] + 1 / fs)
+        for timestamps, fs, splits in map(_adjacent_splits, ADJACENT_ORIGINS_S)
+        for split in splits
+    ]
+    assert min(raw) < 0.0
+
+
 def test_gap_is_measured_from_the_real_last_timestamp():
     """A long span whose timestamps run 20 ppm faster than the nominal fs,
     then three dropped frames: the real gap (3 frames) is kept, although the
@@ -733,14 +780,14 @@ def test_gap_is_measured_from_the_real_last_timestamp():
             [10.0, 10.5],
             [10.999, 11.499],
             5.0,
-            "0.5 s before one sample after span 0",
+            "at or before span 0's last timestamp",
         ),
         (
             [(0, 1000), (1000, 2000)],
             [20.0, 10.0],
             [20.999, 10.999],
             5.0,
-            "before one sample after span 0",
+            "at or before span 0's last timestamp",
         ),
         ([(0, 1000), (1500, 2000)], [0.0, 5.0], [1.0, 6.0], 5.0, "contiguous"),
         ([(10, 1000)], [0.0], [1.0], 5.0, "contiguous"),
