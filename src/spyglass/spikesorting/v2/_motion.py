@@ -40,6 +40,11 @@ from typing import NamedTuple
 import numpy as np
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
+from spyglass.spikesorting.v2._sorting_dispatch import (
+    STATISTICS_SAMPLE_CHUNK_MS,
+    STATISTICS_SAMPLE_NUM_CHUNKS,
+)
+
 #: Version of the motion-estimation algorithm this module implements (the
 #: SpikeInterface call sequence, peak filter, noise estimate and resolution
 #: rules). Part of every estimate's identity; bump it when any of those change
@@ -93,13 +98,13 @@ _ESTIMATE_BOUND = frozenset(
 #: ``dredge_ap``'s ``post_transform`` defaults to ``numpy.log1p``.
 _NAMED_CALLABLES = {"numpy.log1p": np.log1p}
 
-#: Random-chunk budget of the noise estimate: SpikeInterface's
-#: ``get_random_recording_slices`` defaults (``core/recording_tools.py:461-468``),
-#: which the span sampler (``_sorting_dispatch._sample_statistics_spans``) also
-#: uses.
+#: Random-chunk budget of the noise estimate, taken from the span sampler
+#: (``_sorting_dispatch._sample_statistics_spans``) so the resolved
+#: configuration -- and hence the estimate's identity -- follows any change
+#: to that sampler.
 _NOISE_METHOD = "mad"
-_NOISE_NUM_CHUNKS = 20
-_NOISE_CHUNK_DURATION = "500ms"
+_NOISE_NUM_CHUNKS = STATISTICS_SAMPLE_NUM_CHUNKS
+_NOISE_CHUNK_DURATION = f"{STATISTICS_SAMPLE_CHUNK_MS}ms"
 
 
 def motion_to_storage_dict(motion) -> dict:

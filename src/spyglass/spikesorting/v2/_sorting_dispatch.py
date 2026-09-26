@@ -331,13 +331,23 @@ def build_run_sorter_container_kwargs(execution_params: dict) -> dict:
     return kwargs
 
 
+#: Random-chunk budget of the span sampler: SpikeInterface's
+#: ``get_random_recording_slices`` defaults, 20 chunks of 500 ms per segment
+#: (``spikeinterface/core/recording_tools.py:460-468``). The motion estimate
+#: records this budget in its resolved configuration.
+STATISTICS_SAMPLE_NUM_CHUNKS = 20
+STATISTICS_SAMPLE_CHUNK_MS = 500
+
+
 def _sample_statistics_spans(recording, spans, *, seed, return_in_uV: bool):
     """Random traces from inside ``spans`` with SI's default sample budget.
 
-    SpikeInterface's ``get_random_recording_slices`` defaults to 20 chunks of
-    500 ms per segment; the same total budget (``20 * int(0.5 * fs)`` rows) in
-    pieces of at most one such chunk is drawn here, so one full span
-    reproduces SI's ``get_random_data_chunks`` rows exactly.
+    SpikeInterface's ``get_random_recording_slices`` defaults to
+    :data:`STATISTICS_SAMPLE_NUM_CHUNKS` chunks of
+    :data:`STATISTICS_SAMPLE_CHUNK_MS` per segment; the same total budget
+    (``20 * int(0.5 * fs)`` rows) in pieces of at most one such chunk is drawn
+    here, so one full span reproduces SI's ``get_random_data_chunks`` rows
+    exactly.
 
     Returns
     -------
@@ -348,11 +358,13 @@ def _sample_statistics_spans(recording, spans, *, seed, return_in_uV: bool):
         sample_span_data,
     )
 
-    chunk = int(0.5 * recording.get_sampling_frequency())
+    chunk = int(
+        STATISTICS_SAMPLE_CHUNK_MS / 1000 * recording.get_sampling_frequency()
+    )
     return sample_span_data(
         recording,
         spans,
-        target_samples=20 * chunk,
+        target_samples=STATISTICS_SAMPLE_NUM_CHUNKS * chunk,
         max_piece=chunk,
         seed=seed,
         return_in_uV=return_in_uV,

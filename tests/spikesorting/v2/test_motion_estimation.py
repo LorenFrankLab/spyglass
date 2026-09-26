@@ -163,6 +163,48 @@ def test_noise_seed_is_part_of_the_resolved_configuration():
     assert _hash(seeded) != _hash(_resolve({"preset": "dredge"}))
 
 
+def test_recorded_noise_budget_is_the_span_samplers():
+    """The noise budget a resolved configuration records is the one the span
+    sampler draws (and SpikeInterface's own random-slice defaults), so the
+    recorded value cannot drift from the samples actually used."""
+    from spikeinterface.core import generate_recording
+    from spikeinterface.core.recording_tools import (
+        get_random_recording_slices,
+    )
+
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        STATISTICS_SAMPLE_CHUNK_MS,
+        STATISTICS_SAMPLE_NUM_CHUNKS,
+        _sample_statistics_spans,
+    )
+
+    recorded = _resolve({"preset": "dredge"})["noise_levels_kwargs"]
+    assert recorded["num_chunks_per_segment"] == STATISTICS_SAMPLE_NUM_CHUNKS
+    assert recorded["chunk_duration"] == f"{STATISTICS_SAMPLE_CHUNK_MS}ms"
+    si_defaults = inspect.signature(get_random_recording_slices).parameters
+    assert (
+        recorded["num_chunks_per_segment"]
+        == si_defaults["num_chunks_per_segment"].default
+    )
+    assert recorded["chunk_duration"] == si_defaults["chunk_duration"].default
+
+    fs = 1000.0
+    recording = generate_recording(
+        num_channels=2, durations=[12.0], sampling_frequency=fs, seed=0
+    )
+    rows = _sample_statistics_spans(
+        recording,
+        [(0, recording.get_num_samples())],
+        seed=0,
+        return_in_uV=False,
+    )
+    assert rows.shape == (
+        STATISTICS_SAMPLE_NUM_CHUNKS
+        * int(STATISTICS_SAMPLE_CHUNK_MS / 1000 * fs),
+        2,
+    )
+
+
 def test_gap_cap_is_required_and_part_of_the_resolved_configuration():
     from pydantic import ValidationError
 
