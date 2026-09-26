@@ -513,6 +513,79 @@ def test_masked_noise_levels_come_from_the_statistics_spans():
     assert np.mean(contaminated) < np.mean(diagnostics.noise_levels)
 
 
+@pytest.mark.parametrize("preset", ["rigid_fast", "dredge_fast"])
+def test_integer_calibrations_of_one_voltage_estimate_identically(preset):
+    """Two int16 encodings of the same microvolts (0.25 uV per count with
+    offset 0, and the counts shifted by 10000 with offset -2500 uV) estimate
+    exactly what the float microvolt recording of those values estimates.
+    Each source arrives already silenced over a masked range in its own
+    stored units, so the shifted encoding's masked samples read -2500 uV
+    until the estimator silences them again after scaling."""
+    from unittest import mock
+
+    import spikeinterface.sortingcomponents.motion as si_motion
+    from spikeinterface.core import NumpyRecording
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        silence_frame_ranges,
+        statistics_spans,
+    )
+    from tests.spikesorting.v2._motion_fixtures import (
+        polymer_shank_probe,
+        rigid_drift_recordings,
+    )
+
+    drifting, _, _ = rigid_drift_recordings(seed=0, duration_s=20.0)
+    fs = drifting.get_sampling_frequency()
+    counts = np.round(drifting.get_traces() / 0.25).astype(np.int32)
+    n = counts.shape[0]
+    masked_range = (int(8 * fs), int(10 * fs))
+    spans = statistics_spans(n, [masked_range], [(0, n)])
+
+    def _source(traces, gain=None, offset=None):
+        recording = NumpyRecording([traces], fs)
+        recording.set_probe(polymer_shank_probe(), in_place=True)
+        if gain is not None:
+            recording.set_channel_gains(gain)
+            recording.set_channel_offsets(offset)
+        return silence_frame_ranges(recording, [masked_range])
+
+    sources = {
+        "float_uv": _source((counts * 0.25).astype(np.float32)),
+        "int16": _source(counts.astype(np.int16), 0.25, 0.0),
+        "int16_offset": _source(
+            (counts + 10_000).astype(np.int16), 0.25, -2500.0
+        ),
+    }
+    estimate_motion = si_motion.estimate_motion
+    results = {}
+    for name, source in sources.items():
+        seen = {}
+
+        def _spy(recording, peaks, peak_locations, **kwargs):
+            seen["masked"] = recording.get_traces(
+                start_frame=masked_range[0], end_frame=masked_range[1]
+            )
+            return estimate_motion(recording, peaks, peak_locations, **kwargs)
+
+        with mock.patch.object(si_motion, "estimate_motion", _spy):
+            results[name] = _estimate(source, spans=spans, preset=preset)
+        assert np.all(seen["masked"] == 0), name
+
+    reference, reference_diag = results["float_uv"]
+    assert reference_diag.n_peaks_kept > 0
+    for name in ("int16", "int16_offset"):
+        motion, diagnostics = results[name]
+        np.testing.assert_array_equal(
+            diagnostics.noise_levels, reference_diag.noise_levels
+        )
+        assert diagnostics.n_peaks_detected == reference_diag.n_peaks_detected
+        assert diagnostics.n_peaks_kept == reference_diag.n_peaks_kept
+        np.testing.assert_array_equal(
+            motion.displacement[0], reference.displacement[0]
+        )
+
+
 def test_repeated_estimates_are_bit_identical():
     from tests.spikesorting.v2._motion_fixtures import rigid_drift_recordings
 

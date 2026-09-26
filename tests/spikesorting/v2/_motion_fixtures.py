@@ -463,13 +463,26 @@ SINGLE_SHANK_PROBE_TYPE = "polymer-1shank-32ch-26um-sim"
 
 
 def write_drifting_polymer_nwb(
-    out_path, *, session_start, fixture_name: str, seed: int, duration_s: float
+    out_path,
+    *,
+    session_start,
+    fixture_name: str,
+    seed: int,
+    duration_s: float,
+    int16_offset_counts: int | None = None,
 ):
     """Write an ingestible one-shank polymer session with planted rigid drift.
 
     The raw (unfiltered) traces of :func:`rigid_drift_recordings`'s drifting
     recording go into the Frank-lab NWB layout the MEArec fixtures use, so
     ``insert_sessions`` and the v2 recording stage accept it.
+
+    Parameters
+    ----------
+    int16_offset_counts : int, optional
+        Store the traces as int16 counts of 0.25 uV shifted by this many
+        counts, with the NWB ``offset`` that cancels the shift, instead of
+        float microvolts. Different shifts encode the same voltages.
 
     Returns
     -------
@@ -532,11 +545,27 @@ def write_drifting_polymer_nwb(
         fixture_name=fixture_name, session_start=session_start
     )
     _add_probe_and_electrodes(nwbfile, layout=layout, targeted_location="CA1")
-    _add_raw_ephys(
-        nwbfile,
-        traces=drifting.get_traces(return_in_uV=True),
-        sampling_frequency=SAMPLING_FREQUENCY,
-    )
+    traces = drifting.get_traces(return_in_uV=True)
+    if int16_offset_counts is None:
+        _add_raw_ephys(
+            nwbfile, traces=traces, sampling_frequency=SAMPLING_FREQUENCY
+        )
+    else:
+        counts = np.round(traces / 0.25).astype(np.int32) + int16_offset_counts
+        nwbfile.add_acquisition(
+            pynwb.ecephys.ElectricalSeries(
+                name="e-series",
+                data=counts.astype(np.int16),
+                electrodes=nwbfile.create_electrode_table_region(
+                    region=list(range(N_CONTACTS)),
+                    description="electrodes used in raw e-series recording",
+                ),
+                starting_time=0.0,
+                rate=SAMPLING_FREQUENCY,
+                conversion=0.25e-6,
+                offset=-int16_offset_counts * 0.25e-6,
+            )
+        )
     out_path = Path(out_path)
     with pynwb.NWBHDF5IO(str(out_path), mode="w") as io:
         io.write(nwbfile)

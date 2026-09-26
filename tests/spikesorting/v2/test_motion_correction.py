@@ -454,6 +454,106 @@ def test_masked_estimate_uses_the_pinned_artifact_mask(drift_recording):
     assert RecordingArtifactDetection & artifact_key
 
 
+def test_integer_source_offset_does_not_change_the_estimate(dj_conn, tmp_path):
+    """Two unfiltered, unreferenced int16 sessions encode the same voltages
+    as 0.25 uV counts, one with offset 0 and one shifted by 10000 counts
+    with offset -2500 uV. With the same masked period, both estimate the
+    same motion from the same peaks and microvolt noise levels."""
+    import datetime as dt
+
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.motion import (
+        MotionEstimate,
+        MotionEstimationParameters,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from tests.spikesorting.v2._ingest_helpers import (
+        _clean_session_v2,
+        configure_v2_run_inputs,
+        copy_and_insert_nwb,
+    )
+    from tests.spikesorting.v2._motion_fixtures import (
+        write_drifting_polymer_nwb,
+    )
+
+    MotionEstimationParameters.insert_default()
+    rows, gains, offsets, sessions, recording_keys = {}, {}, {}, [], []
+    try:
+        for shift in (0, 10_000):
+            name = f"motion_int16_shift{shift}"
+            src = write_drifting_polymer_nwb(
+                tmp_path / f"{name}.nwb",
+                session_start=dt.datetime(
+                    2023, 7, 22, 12, tzinfo=dt.timezone.utc
+                ),
+                fixture_name=name,
+                seed=0,
+                duration_s=10.0,
+                int16_offset_counts=shift,
+            )
+            nwb_file_name = copy_and_insert_nwb(src, dest_name=f"{name}.nwb")
+            sessions.append(nwb_file_name)
+            SortGroupV2.set_group_by_shank(
+                nwb_file_name=nwb_file_name, reference_mode="none"
+            )
+            run = configure_v2_run_inputs(nwb_file_name, MOTION_TEAM)
+            recording_key = RecordingSelection.insert_selection(
+                {**run, "preprocessing_params_name": "no_filter"}
+            )
+            recording_keys.append(recording_key)
+            Recording.populate(recording_key, reserve_jobs=False)
+            recording = Recording().get_recording(recording_key)
+            assert recording.get_dtype() == np.dtype("int16")
+            gains[shift] = recording.get_channel_gains()
+            offsets[shift] = recording.get_channel_offsets()
+            t0 = float(recording.sample_index_to_time(0))
+            artifact_key = RecordingArtifactSelection.insert_selection(
+                {
+                    "recording_id": recording_key["recording_id"],
+                    "artifact_detection_params_name": "none",
+                    "manual_excluded_times": np.array([[t0 + 4.0, t0 + 5.0]]),
+                }
+            )
+            RecordingArtifactDetection.populate(
+                artifact_key, reserve_jobs=False
+            )
+            key = _select(recording_key, **artifact_key)
+            MotionEstimate.populate(key, reserve_jobs=False)
+            rows[shift] = ((MotionEstimate & key).fetch1(), key)
+
+        np.testing.assert_allclose(gains[0], 0.25)
+        np.testing.assert_allclose(gains[10_000], 0.25)
+        np.testing.assert_allclose(offsets[0], 0.0)
+        np.testing.assert_allclose(offsets[10_000], -2500.0)
+        (plain, plain_key), (shifted, shifted_key) = rows[0], rows[10_000]
+        assert plain["n_peaks_kept"] > 0
+        np.testing.assert_array_equal(
+            shifted["statistics_spans"], plain["statistics_spans"]
+        )
+        assert len(plain["statistics_spans"]) == 2
+        for field in ("n_peaks_detected", "n_peaks_kept"):
+            assert shifted[field] == plain[field], field
+        np.testing.assert_array_equal(
+            shifted["noise_levels"], plain["noise_levels"]
+        )
+        np.testing.assert_array_equal(
+            MotionEstimate().get_motion(shifted_key).displacement[0],
+            MotionEstimate().get_motion(plain_key).displacement[0],
+        )
+    finally:
+        for recording_key in recording_keys:
+            drop_motion_selections(recording_key)
+        for nwb_file_name in sessions:
+            _clean_session_v2({"nwb_file_name": nwb_file_name})
+
+
 def test_stale_selection_is_refused_at_compute(drift_recording, monkeypatch):
     import spikeinterface
 

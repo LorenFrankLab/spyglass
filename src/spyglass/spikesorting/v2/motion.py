@@ -901,12 +901,13 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         Re-resolves the recipe and requires its hash, the SpikeInterface
         version and the algorithm version to equal the selection's. Reads the
         source traces. For a single recording, reads the continuity spans and
-        each span's first and last timestamp from the persisted timestamps,
-        silences the artifact ranges and computes the statistics spans as the
+        each span's first and last timestamp from the persisted timestamps
+        and computes the statistics spans from the artifact ranges as the
         sort stage does; for a concat, reads the same spans, timestamps and
         statistics spans from its row. Builds the estimation clock with the
         recipe's ``max_gap_s`` and runs ``_motion.estimate_motion_in_spans``
-        once.
+        once, which silences every frame outside the statistics spans after
+        converting the traces to microvolts.
 
         Raises
         ------
@@ -921,7 +922,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._sorting_artifact_mask import (
             artifact_frame_ranges,
             continuity_from_timestamps,
-            silence_frame_ranges,
             statistics_spans,
         )
 
@@ -973,8 +973,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
                     artifact_detection_id=lineage.artifact_detection_id,
                     recording_id=lineage.key["recording_id"],
                 )
-                if excluded:
-                    recording = silence_frame_ranges(recording, excluded)
             statistics = statistics_spans(n_samples, excluded, continuity)
         else:
             continuity = _motion.normalize_spans(source_row["continuity_spans"])

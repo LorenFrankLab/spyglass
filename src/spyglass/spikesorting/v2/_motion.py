@@ -46,10 +46,11 @@ from spyglass.spikesorting.v2._sorting_dispatch import (
 )
 
 #: Version of the motion-estimation algorithm this module implements (the
-#: SpikeInterface call sequence, peak filter, noise estimate and resolution
-#: rules). Part of every estimate's identity; bump it when any of those change
-#: in a way that can change a stored estimate.
-MOTION_ALGORITHM_VERSION = 2
+#: input calibration and masking, SpikeInterface call sequence, peak filter,
+#: noise estimate and resolution rules). Part of every estimate's identity;
+#: bump it when any of those change in a way that can change a stored
+#: estimate.
+MOTION_ALGORITHM_VERSION = 3
 
 #: Version of the motion-application algorithm
 #: (:func:`apply_motion_on_estimation_clock`: masking, clock, interpolation
@@ -749,7 +750,8 @@ def estimation_noise_levels(
     Parameters
     ----------
     recording : si.BaseRecording
-        The masked recording. Its ``noise_level_mad_raw`` property is set.
+        The masked microvolt recording. Its ``noise_level_mad_raw`` property
+        is set.
     statistics_spans : list[tuple[int, int]]
         Half-open frame spans of valid samples.
     noise_kwargs : dict
@@ -758,7 +760,8 @@ def estimation_noise_levels(
     Returns
     -------
     numpy.ndarray
-        ``(n_channels,)`` float64 noise levels in recording units.
+        ``(n_channels,)`` float64 noise levels in the units of
+        ``recording``'s traces.
     """
     from spikeinterface.core import get_noise_levels
 
@@ -1212,16 +1215,22 @@ def estimate_motion_in_spans(
     """Estimate motion from the valid samples of one recording, once.
 
     Reproduces SpikeInterface 0.104.3's ``compute_motion``
-    (``preprocessing/motion.py:279-461``) step by step with three changes:
+    (``preprocessing/motion.py:279-461``) step by step with four changes:
 
-    1. ``noise_levels`` is passed explicitly (:func:`estimation_noise_levels`)
+    1. Every step reads the recording as float microvolts
+       (:func:`recording_in_microvolts`) silenced outside the statistics
+       spans, so the detection threshold and the masked zeros are the same
+       physical voltages whatever the source's dtype, gains and offsets. A
+       unit-calibrated float recording with one span covering it is used
+       as is.
+    2. ``noise_levels`` is passed explicitly (:func:`estimation_noise_levels`)
        instead of ``compute_motion``'s unseeded ``get_noise_levels`` call
        (``motion.py:359``).
-    2. Between localization and estimation, only peaks whose localization
+    3. Between localization and estimation, only peaks whose localization
        window lies inside one statistics span (:func:`peaks_within_spans`)
        and whose detection did not read across a join between continuity
        spans (:func:`peaks_clear_of_joins`) are kept.
-    3. ``estimate_motion`` reads peak times on the estimation clock
+    4. ``estimate_motion`` reads peak times on the estimation clock
        (:class:`EstimationClockRecording`), so every continuity span is
        estimated in one call and shares one reference frame. DREDge centres
        its displacement on the bins that hold data (``sortingcomponents/
@@ -1232,7 +1241,7 @@ def estimate_motion_in_spans(
     empty ``select_kwargs`` (``motion.py:373-412``): the detector node, an
     ``ExtractDenseWaveforms`` node with the 0.1/0.3 ms window (``motion.py:
     387``) and the localization node, in one ``run_node_pipeline`` pass on
-    ``recording`` itself (these steps read traces, never times).
+    the microvolt view itself (these steps read traces, never times).
     ``compute_motion``'s other branch (``motion.py:413-432``) is not used: its
     ``localize_peaks`` defaults to a 0.5/0.5 ms window and, for
     ``grid_convolution``, replaces the Gaussian prototype with one built from
@@ -1247,9 +1256,11 @@ def estimate_motion_in_spans(
     Parameters
     ----------
     recording : si.BaseRecording
-        Single-segment, unwhitened recording, already silenced over any masked
-        ranges. Mutated: its planar geometry is flattened and its
-        ``noise_level_mad_raw`` property set. Its own time vector is not read.
+        Single-segment, unwhitened recording. Samples outside
+        ``statistics_spans`` are silenced here, after conversion to
+        microvolts. Mutated: its planar geometry is flattened, and its
+        ``noise_level_mad_raw`` property is set when it is used as is. Its own
+        time vector is not read.
     statistics_spans : array_like
         ``(n, 2)`` half-open frame ranges of valid samples, sorted and
         disjoint, each inside one continuity span.
@@ -1291,6 +1302,10 @@ def estimate_motion_in_spans(
         peak_localization_methods,
     )
 
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        complement_frame_ranges,
+        silence_frame_ranges,
+    )
     from spyglass.utils import logger
 
     if recording.get_num_segments() != 1:
@@ -1302,6 +1317,13 @@ def estimate_motion_in_spans(
     statistics = normalize_spans(statistics_spans)
     _check_estimation_spans(n_samples, clock, statistics)
     check_estimation_eligibility(recording, resolved_params)
+    # Detection thresholds traces against a multiple of their noise and
+    # silenced samples are zeros: both are physical only on microvolts with
+    # zero offset, so calibrate first and silence the calibrated traces.
+    recording = silence_frame_ranges(
+        recording_in_microvolts(recording),
+        complement_frame_ranges(statistics, n_samples),
+    )
     clocked = EstimationClockRecording(recording, clock)
 
     noise_levels = estimation_noise_levels(
@@ -1463,6 +1485,12 @@ class AppliedMotion(NamedTuple):
 
 def recording_in_microvolts(recording):
     """Present a recording as float microvolts with a unit calibration.
+
+    Estimation thresholds each trace against a multiple of its noise and
+    treats silenced samples as zeros, which is physical only for traces in
+    microvolts with zero offset: on raw counts with a nonzero offset, the
+    offset moves every sample away from the threshold's zero and a silenced
+    sample reads as the offset voltage.
 
     Interpolation mixes channels with weights that need not sum to 1 (the
     extrapolated contacts at the probe's ends), so it must act on physical
