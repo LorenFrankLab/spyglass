@@ -114,7 +114,13 @@ _GATES = {
     "recipes": ["dredge_fast"],
     "motion": {"rigid": {"rms_um": 1.5, "p95_um": 2.5}},
     "min_sign_corr": {"rigid": 0.95},
-    "fidelity": {"rigid": {"max_excess_over_oracle": 0.01}},
+    "fidelity": {
+        "none": {"max_residual": 0.005},
+        "rigid": {
+            "max_excess_over_oracle": 0.01,
+            "max_ratio_to_uncorrected": 0.6,
+        },
+    },
     "sorting": {
         "no_motion": {
             "none": {
@@ -263,6 +269,9 @@ def _row(scenario, seed, recipe, **changes) -> CaseMetrics:
     )
     if recipe == "oracle":
         base.update(mean_accuracy=0.65, fidelity_num=(0.009,) * 3)
+    if scenario == "none":
+        # Near-identity interpolation of the static twin: residual 0.001.
+        base.update(fidelity_num=(1e-6,) * 3)
     base.update(changes)
     return CaseMetrics(**base)
 
@@ -306,6 +315,8 @@ def test_passing_table_passes_every_gate():
         "border_keeps_all_channels",
         "sign_corr",
         "fidelity_excess_over_oracle",
+        "fidelity_residual",
+        "fidelity_ratio_to_uncorrected",
         "no_motion_accuracy_drop",
         "no_motion_well_detected_drop",
         "no_motion_false_positive_increase",
@@ -343,6 +354,34 @@ N0 = ("none", 0, "dredge_fast")
         (
             {R0: dict(fidelity_num=(0.0113,) * 3)},
             {"fidelity_excess_over_oracle"},
+        ),
+        # Static twin residual 0.01 over the 0.005 bound.
+        ({N0: dict(fidelity_num=(1e-4,) * 3)}, {"fidelity_residual"}),
+        # Residual 0.1 over an uncorrected 0.15: ratio 0.67 > 0.6.
+        (
+            {R0: dict(uncorrected_residual=0.15)},
+            {"fidelity_ratio_to_uncorrected"},
+        ),
+        # remove_channels keeps two of three contacts; its residual is pooled
+        # over those two (ratio 0.62, fails). Normalizing by all three
+        # contacts instead would give 0.62 * sqrt(2 / 3) = 0.51 and pass. The
+        # oracle matches it on the same channels, so only the ratio fails.
+        (
+            {
+                R0: dict(
+                    border_mode="remove_channels",
+                    n_out_channels=2,
+                    removed_channel_ids=("0",),
+                    predicted_removed_channel_ids=("0",),
+                    fidelity_channel_ids=("1", "2"),
+                    fidelity_num=((0.62 * 0.4) ** 2,) * 2,
+                    fidelity_den=(1.0, 1.0),
+                ),
+                ("rigid", 0, "oracle"): dict(
+                    fidelity_num=((0.62 * 0.4) ** 2,) * 3
+                ),
+            },
+            {"fidelity_ratio_to_uncorrected"},
         ),
         (
             {N0: dict(mean_accuracy=0.56)},
