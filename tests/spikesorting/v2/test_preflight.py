@@ -344,6 +344,28 @@ def test_motion_geometry_eligibility_from_registered_contacts(case, match):
         assert match in problem
 
 
+@pytest.mark.parametrize(
+    "name, refused", [("no_filter", True), ("default", False)]
+)
+def test_motion_needs_a_filtering_preprocessing_recipe(name, refused):
+    """Motion is estimated on filtered traces: a shipped recipe without a
+    temporal filter is refused, naming it; a bandpass recipe is not."""
+    from spyglass.spikesorting.v2._motion import unfiltered_source_problem
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        preprocessing_default_contents,
+    )
+
+    (params,) = [
+        row[1] for row in preprocessing_default_contents() if row[0] == name
+    ]
+    problem = unfiltered_source_problem(name, params)
+    if not refused:
+        assert problem is None
+        return
+    assert f"{name!r} applies no temporal filter" in problem
+    assert "filtered, unwhitened traces" in problem
+
+
 def _catalog_motion_recipe(interpolation_name="kriging_force_extrapolate_v1"):
     """A ``MotionRecipe`` built from the shipped rows, without the DB."""
     from spyglass.spikesorting.v2._pipeline_preflight import MotionRecipe

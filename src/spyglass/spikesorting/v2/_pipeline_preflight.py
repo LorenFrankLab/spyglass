@@ -744,9 +744,11 @@ def assert_concat_preflight(
     ``auto_curate`` metric/rule/metric-waveform rows
     (when opted in), and the compute-time param rows + sorter binary via
     :func:`assert_preset_compute_rows`, including member artifact parameters.
-    With a motion mode, also the recipe, each member's geometry against the
-    estimation recipe, and (for ``"apply"``) the sorter's own motion
-    correction, as in :func:`preflight_v2_pipeline`. Fails before
+    With a motion mode, also the recipe, that the preset's preprocessing
+    recipe (the concatenation's) applies a temporal filter, each member's
+    geometry against the estimation recipe, and (for ``"apply"``) the
+    sorter's own motion correction, as in :func:`preflight_v2_pipeline`.
+    Fails before
     member/concat populate. Returns advisory warnings (including
     explicitly disabled artifact masking) for symmetry with
     :func:`preflight_v2_pipeline`.
@@ -881,12 +883,29 @@ def assert_concat_preflight(
 
     assert_preset_compute_rows(bundle)
     if motion_mode != "off":
+        from spyglass.spikesorting.v2._motion import unfiltered_source_problem
+        from spyglass.spikesorting.v2.recording import PreprocessingParameters
         from spyglass.spikesorting.v2.sorting import SorterParameters
 
         try:
             motion_recipe = resolve_motion_recipe(motion_correction_params_name)
         except ValueError as exc:
             raise PreflightError(f"run_v2_pipeline: {exc}") from exc
+        # The concatenation is built with the preset's preprocessing recipe
+        # (checked to exist by assert_preset_compute_rows above).
+        problem = unfiltered_source_problem(
+            bundle.preprocessing_params_name,
+            (
+                PreprocessingParameters
+                & {
+                    "preprocessing_params_name": bundle.preprocessing_params_name
+                }
+            ).fetch1("params"),
+        )
+        if problem is not None:
+            raise PreflightError(
+                f"run_v2_pipeline: motion_mode={motion_mode!r}: {problem}"
+            )
         for member in members:
             problem = motion_geometry_problem(
                 member["nwb_file_name"],
@@ -1428,7 +1447,10 @@ def preflight_v2_pipeline(
     motion_mode, motion_correction_params_name
         Match ``run_v2_pipeline``. A contradictory pair (a recipe with
         ``"off"``, no recipe otherwise, or an unknown mode) fails the
-        ``motion_request_valid`` check before any database access.
+        ``motion_request_valid`` check before any database access. With a
+        motion mode, a preset whose preprocessing recipe applies no temporal
+        filter fails ``motion_source_filtered``: motion is estimated on
+        filtered, unwhitened traces.
 
     Returns
     -------
@@ -1831,12 +1853,34 @@ def preflight_v2_pipeline(
                 )
 
     # 10. Motion stage (estimate / apply). The recipe must exist and resolve,
-    # the group's effective geometry must support the estimation recipe
-    # (checked here on the registered positions, before any populate; the
-    # estimator re-checks the actual recording), and a sort of a corrected
-    # recording must not run the sorter's own motion correction.
+    # the preset's preprocessing recipe must filter (motion is estimated on
+    # filtered, unwhitened traces; MotionEstimateSelection.insert_selection
+    # refuses the same source), the group's effective geometry must support
+    # the estimation recipe (checked here on the registered positions, before
+    # any populate; the estimator re-checks the actual recording), and a sort
+    # of a corrected recording must not run the sorter's own motion
+    # correction.
     motion_recipe = None
     if motion_mode != "off":
+        from spyglass.spikesorting.v2._motion import unfiltered_source_problem
+
+        if preprocessing_params_exist:
+            unfiltered = unfiltered_source_problem(
+                bundle.preprocessing_params_name,
+                (
+                    PreprocessingParameters
+                    & {
+                        "preprocessing_params_name": (
+                            bundle.preprocessing_params_name
+                        )
+                    }
+                ).fetch1("params"),
+            )
+            _check(
+                "motion_source_filtered",
+                unfiltered is None,
+                f"motion_mode={motion_mode!r}: {unfiltered}",
+            )
         try:
             motion_recipe = resolve_motion_recipe(motion_correction_params_name)
         except ValueError as exc:

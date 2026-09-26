@@ -1474,6 +1474,16 @@ and `"apply"`, and rejected for `"off"`; a contradictory pair raises
 `PipelineStageError` and nothing downstream is sorted -- an estimation or
 application error can never fall back to an uncorrected sort silently.
 
+**The source must be filtered.** Motion is estimated on filtered, unwhitened
+traces: peak detection and localization assume traces without DC or slow
+drift of their own. A source whose preprocessing recipe applies no temporal
+filter (`bandpass_filter=None`, the shipped `no_filter` row; for a
+`ConcatenatedRecording`, the concatenation's recipe) is refused by
+`MotionEstimateSelection.insert_selection`, and preflight fails its
+`motion_source_filtered` check for a preset with such a recipe (the concat
+preflight raises `PreflightError`). Whitening is never part of a
+preprocessing recipe, so the traces are always unwhitened.
+
 ```python
 from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
 

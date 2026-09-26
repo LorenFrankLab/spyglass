@@ -618,6 +618,48 @@ def _shank_labels(recording) -> set:
     return {""}
 
 
+def unfiltered_source_problem(
+    preprocessing_params_name: str, preprocessing_params: dict
+) -> "str | None":
+    """Say why a source's preprocessing recipe cannot feed motion estimation.
+
+    Motion is estimated on filtered, unwhitened traces: peaks are detected
+    where a trace crosses a multiple of its noise level, and localized from
+    their waveforms, which assumes the traces carry no DC or slow drift of
+    their own. A recipe with ``bandpass_filter=None`` (the shipped
+    ``no_filter`` row) applies no temporal filter at all, so its traces keep
+    the acquisition's DC and low-frequency content.
+
+    Parameters
+    ----------
+    preprocessing_params_name : str
+        The source's ``PreprocessingParameters`` row (for a concatenated
+        recording, the concatenation's recipe).
+    preprocessing_params : dict
+        That row's ``params`` blob.
+
+    Returns
+    -------
+    str or None
+        The problem, naming the recipe, or ``None`` when the recipe filters.
+    """
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+
+    params = PreprocessingParamsSchema.model_validate(preprocessing_params)
+    if params.bandpass_filter is not None:
+        return None
+    return (
+        f"preprocessing recipe {preprocessing_params_name!r} applies no "
+        "temporal filter (bandpass_filter is None). Motion is estimated on "
+        "filtered, unwhitened traces: peak detection and localization assume "
+        "traces without DC or slow drift of their own. Estimate on a "
+        "recording built with a bandpass-filtering recipe (for example "
+        "'default')."
+    )
+
+
 def check_estimation_eligibility(recording, resolved_params: dict) -> None:
     """Refuse a recording whose geometry cannot support the recipe.
 

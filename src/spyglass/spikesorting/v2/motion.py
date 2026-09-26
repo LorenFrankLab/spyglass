@@ -337,8 +337,11 @@ class MotionEstimateSelection(
         ------
         ValueError
             On unknown fields, zero or two sources, an artifact detection on
-            a concat source, a missing recipe or unpopulated source, an
-            artifact detection that does not belong to the recording, concat
+            a concat source, a missing recipe or unpopulated source, a source
+            whose preprocessing recipe applies no temporal filter
+            (:func:`._motion.unfiltered_source_problem`; for a concat, the
+            concatenation's recipe), an artifact detection that does not
+            belong to the recording, concat
             tables that predate motion's removal from concatenation, or a
             mismatched explicit ``motion_estimate_id``.
         DuplicateSelectionError
@@ -348,10 +351,12 @@ class MotionEstimateSelection(
         """
         from spyglass.spikesorting.v2._motion import (
             motion_estimate_selection_identity,
+            unfiltered_source_problem,
         )
         from spyglass.spikesorting.v2.artifact import (
             assert_artifact_detection_covers_recording,
         )
+        from spyglass.spikesorting.v2.recording import PreprocessingParameters
         from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
 
         caller = "MotionEstimateSelection.insert_selection"
@@ -411,6 +416,25 @@ class MotionEstimateSelection(
             raise ValueError(
                 f"{caller}: {source_key} is not in {source_table.__name__}. "
                 "Populate it before selecting a motion estimate on it."
+            )
+        selection_table = (
+            RecordingSelection
+            if source_kind == "recording"
+            else ConcatenatedRecordingSelection
+        )
+        preprocessing_name = (selection_table & source_key).fetch1(
+            "preprocessing_params_name"
+        )
+        problem = unfiltered_source_problem(
+            preprocessing_name,
+            (
+                PreprocessingParameters
+                & {"preprocessing_params_name": preprocessing_name}
+            ).fetch1("params"),
+        )
+        if problem is not None:
+            raise ValueError(
+                f"{caller}: {source_key} cannot be motion-estimated: {problem}"
             )
         if source_kind == "recording":
             assert_artifact_detection_covers_recording(

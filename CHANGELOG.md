@@ -245,9 +245,15 @@ available.
   a masked sample, or whose detection window (`exclude_sweep_ms` plus one
   frame) crosses an acquisition gap or member join, are dropped. Noise,
   detection and localization read float32 microvolts: a source that is not
-  already float microvolts (gain 1, offset 0), such as an integer `no_filter`
-  recording with an offset, is scaled first and its masked samples are
-  silenced after scaling (0 µV).
+  already float microvolts (gain 1, offset 0), such as a filtered recording
+  of integer counts, is scaled first and its masked samples are silenced
+  after scaling (0 µV).
+- Motion is estimated on filtered, unwhitened traces: a source whose
+  preprocessing recipe applies no temporal filter (`bandpass_filter=None`,
+  the shipped `no_filter` row; for a concatenation, its recipe) is refused by
+  `MotionEstimateSelection.insert_selection`, and pipeline preflight refuses
+  a motion mode for a preset with such a recipe (the `motion_source_filtered`
+  check; the concat preflight raises `PreflightError`).
 - Recordings with acquisition gaps and multi-member concatenations are
   estimated once, on an estimation clock: each uninterrupted span keeps its
   own timing, and the gap between spans (measured on the real timestamps)
@@ -271,9 +277,9 @@ available.
   own timestamps, together with the output channels, any removed channels, the
   unmoved contact positions and the estimate's spans. Interpolation acts on
   microvolts: a source that is not already float microvolts (gain 1, offset
-  0), including an integer `no_filter` recording, is scaled to float32
-  microvolts first, and the corrected traces are stored with gain 1 and
-  offset 0. The corrected NWB's provenance scratch also records its source,
+  0) is scaled to float32 microvolts first, and the corrected traces are
+  stored with gain 1 and offset 0. The corrected NWB's provenance scratch
+  also records its source,
   the statistics spans, each continuity span with its real start and end
   times and its start on the estimation clock, and, for a concatenation, the
   concatenation's member back-map. Changing only the

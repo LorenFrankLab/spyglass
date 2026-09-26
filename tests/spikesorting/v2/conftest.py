@@ -1014,6 +1014,9 @@ def offset_source_concat(dj_conn, tmp_path_factory):
         "concat_key": concat_key,
     }
 
+    drop_concat_motion_selections(concat_key)
+    for recording_key in recording_keys:
+        drop_motion_selections(recording_key)
     clean_session_groups_for_owner(OFFSET_SOURCE_TEAM)
     _clean_session_v2({"nwb_file_name": nwb_file_name})
 

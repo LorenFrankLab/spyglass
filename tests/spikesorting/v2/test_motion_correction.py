@@ -454,104 +454,36 @@ def test_masked_estimate_uses_the_pinned_artifact_mask(drift_recording):
     assert RecordingArtifactDetection & artifact_key
 
 
-def test_integer_source_offset_does_not_change_the_estimate(dj_conn, tmp_path):
-    """Two unfiltered, unreferenced int16 sessions encode the same voltages
-    as 0.25 uV counts, one with offset 0 and one shifted by 10000 counts
-    with offset -2500 uV. With the same masked period, both estimate the
-    same motion from the same peaks and microvolt noise levels."""
-    import datetime as dt
+def test_unfiltered_sources_are_refused_for_motion_estimation(
+    offset_source_concat, motion_params
+):
+    """A single recording and a concatenation built with the ``no_filter``
+    recipe (no temporal filter) cannot be selected for motion estimation,
+    with or without an artifact mask; no selection row is written."""
+    from spyglass.spikesorting.v2.motion import MotionEstimateSelection
 
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-        RecordingArtifactSelection,
-    )
-    from spyglass.spikesorting.v2.motion import (
-        MotionEstimate,
-        MotionEstimationParameters,
-    )
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        RecordingSelection,
-        SortGroupV2,
-    )
-    from tests.spikesorting.v2._ingest_helpers import (
-        _clean_session_v2,
-        configure_v2_run_inputs,
-        copy_and_insert_nwb,
-    )
-    from tests.spikesorting.v2._motion_fixtures import (
-        write_drifting_polymer_nwb,
-    )
-
-    MotionEstimationParameters.insert_default()
-    rows, gains, offsets, sessions, recording_keys = {}, {}, {}, [], []
-    try:
-        for shift in (0, 10_000):
-            name = f"motion_int16_shift{shift}"
-            src = write_drifting_polymer_nwb(
-                tmp_path / f"{name}.nwb",
-                session_start=dt.datetime(
-                    2023, 7, 22, 12, tzinfo=dt.timezone.utc
-                ),
-                fixture_name=name,
-                seed=0,
-                duration_s=10.0,
-                int16_offset_counts=shift,
+    n_selections = len(MotionEstimateSelection())
+    requests = [
+        {"recording_id": offset_source_concat["member_a"]["recording_id"]},
+        {
+            "recording_id": offset_source_concat["member_a"]["recording_id"],
+            **offset_source_concat["artifact_key"],
+        },
+        {
+            "concat_recording_id": offset_source_concat["concat_key"][
+                "concat_recording_id"
+            ]
+        },
+    ]
+    for request in requests:
+        with pytest.raises(ValueError) as raised:
+            MotionEstimateSelection.insert_selection(
+                {**request, "motion_estimation_params_name": "dredge_fast_v1"}
             )
-            nwb_file_name = copy_and_insert_nwb(src, dest_name=f"{name}.nwb")
-            sessions.append(nwb_file_name)
-            SortGroupV2.set_group_by_shank(
-                nwb_file_name=nwb_file_name, reference_mode="none"
-            )
-            run = configure_v2_run_inputs(nwb_file_name, MOTION_TEAM)
-            recording_key = RecordingSelection.insert_selection(
-                {**run, "preprocessing_params_name": "no_filter"}
-            )
-            recording_keys.append(recording_key)
-            Recording.populate(recording_key, reserve_jobs=False)
-            recording = Recording().get_recording(recording_key)
-            assert recording.get_dtype() == np.dtype("int16")
-            gains[shift] = recording.get_channel_gains()
-            offsets[shift] = recording.get_channel_offsets()
-            t0 = float(recording.sample_index_to_time(0))
-            artifact_key = RecordingArtifactSelection.insert_selection(
-                {
-                    "recording_id": recording_key["recording_id"],
-                    "artifact_detection_params_name": "none",
-                    "manual_excluded_times": np.array([[t0 + 4.0, t0 + 5.0]]),
-                }
-            )
-            RecordingArtifactDetection.populate(
-                artifact_key, reserve_jobs=False
-            )
-            key = _select(recording_key, **artifact_key)
-            MotionEstimate.populate(key, reserve_jobs=False)
-            rows[shift] = ((MotionEstimate & key).fetch1(), key)
-
-        np.testing.assert_allclose(gains[0], 0.25)
-        np.testing.assert_allclose(gains[10_000], 0.25)
-        np.testing.assert_allclose(offsets[0], 0.0)
-        np.testing.assert_allclose(offsets[10_000], -2500.0)
-        (plain, plain_key), (shifted, shifted_key) = rows[0], rows[10_000]
-        assert plain["n_peaks_kept"] > 0
-        np.testing.assert_array_equal(
-            shifted["statistics_spans"], plain["statistics_spans"]
-        )
-        assert len(plain["statistics_spans"]) == 2
-        for field in ("n_peaks_detected", "n_peaks_kept"):
-            assert shifted[field] == plain[field], field
-        np.testing.assert_array_equal(
-            shifted["noise_levels"], plain["noise_levels"]
-        )
-        np.testing.assert_array_equal(
-            MotionEstimate().get_motion(shifted_key).displacement[0],
-            MotionEstimate().get_motion(plain_key).displacement[0],
-        )
-    finally:
-        for recording_key in recording_keys:
-            drop_motion_selections(recording_key)
-        for nwb_file_name in sessions:
-            _clean_session_v2({"nwb_file_name": nwb_file_name})
+        message = str(raised.value)
+        assert "'no_filter' applies no temporal filter" in message
+        assert "filtered, unwhitened traces" in message
+    assert len(MotionEstimateSelection()) == n_selections
 
 
 def test_stale_selection_is_refused_at_compute(drift_recording, monkeypatch):
@@ -2778,3 +2710,80 @@ def test_concat_preflight_refuses_unsupported_motion(
     finally:
         if case == "short_member":
             (SessionGroup & group).super_delete(warn=False, safemode=False)
+
+
+@pytest.fixture
+def unfiltered_preset(dj_conn):
+    """A registered preset whose preprocessing recipe is ``no_filter``."""
+    from spyglass.spikesorting.v2._pipeline_presets import (
+        _PIPELINE_PRESETS,
+        register_pipeline_preset,
+    )
+
+    name = "motion_test_no_filter_2026_09"
+    register_pipeline_preset(
+        name,
+        _PIPELINE_PRESETS[PIPELINE_PRESET].model_copy(
+            update={"preprocessing_params_name": "no_filter"}
+        ),
+    )
+    yield name
+    _PIPELINE_PRESETS.pop(name, None)
+
+
+@pytest.mark.parametrize("mode", ["estimate", "apply"])
+def test_preflight_refuses_motion_on_an_unfiltered_recipe(
+    drift_recording, discontinuous_sources, unfiltered_preset, mode
+):
+    """Single-session and concat preflight refuse a motion mode when the
+    preset's preprocessing recipe applies no temporal filter, and the run
+    fails before any recording, concat, motion or sort row is built."""
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.spikesorting.v2.pipeline import (
+        preflight_v2_pipeline,
+        run_v2_pipeline,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+
+    message = "'no_filter' applies no temporal filter"
+    motion = {
+        "motion_mode": mode,
+        "motion_correction_params_name": MOTION_RECIPE,
+    }
+    inputs = {
+        **_pipeline_inputs(drift_recording),
+        "pipeline_preset": unfiltered_preset,
+    }
+
+    def _counts():
+        return {
+            **_row_counts(),
+            "recording_selections": len(RecordingSelection()),
+            "concat_selections": len(ConcatenatedRecordingSelection()),
+        }
+
+    report = preflight_v2_pipeline(**inputs, **motion)
+    failed = {c.name: c.fix for c in report.checks if not c.ok}
+    assert list(failed) == ["motion_source_filtered"], failed
+    assert message in failed["motion_source_filtered"]
+    assert "filtered, unwhitened traces" in failed["motion_source_filtered"]
+    # The filtering recipe of the same run passes the check.
+    passing = preflight_v2_pipeline(
+        **_pipeline_inputs(drift_recording), **motion
+    )
+    assert {c.name: c.ok for c in passing.checks}["motion_source_filtered"]
+
+    before = _counts()
+    with pytest.raises(PreflightError, match=message):
+        run_v2_pipeline(**inputs, **motion)
+    with pytest.raises(PreflightError, match=message):
+        run_v2_pipeline(
+            concat_session_group_owner=MOTION_TEAM,
+            concat_session_group_name=CONCAT_GROUP,
+            pipeline_preset=unfiltered_preset,
+            **motion,
+        )
+    assert _counts() == before
