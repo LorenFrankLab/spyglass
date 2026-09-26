@@ -146,6 +146,7 @@ _GATES = {
     "cost": {
         "max_estimation_s": {"dredge_fast": 12.0},
         "max_peak_rss_gib": 3.6,
+        "max_peak_rss_before_sort_gib": 1.5,
     },
 }
 
@@ -278,6 +279,7 @@ def _row(scenario, seed, recipe, **changes) -> CaseMetrics:
         n_gt_oversplit=3 if recipe == "off" else 1,
         estimation_s=5.0 if recipe == "dredge_fast" else None,
         peak_rss_gib=2.5,
+        peak_rss_before_sort_gib=1.0,
     )
     if recipe == "oracle":
         base.update(mean_accuracy=0.65, fidelity_num=(0.009,) * 3)
@@ -324,6 +326,7 @@ def test_passing_table_passes_every_gate():
         "motion_p95_um",
         "estimation_s",
         "peak_rss_gib",
+        "peak_rss_before_sort_gib",
         "border_keeps_all_channels",
         "sign_corr",
         "fidelity_excess_over_oracle",
@@ -361,6 +364,10 @@ N0 = ("none", 0, "dredge_fast")
         ({R0: dict(sign_corr=-0.8)}, {"sign_corr"}),
         ({R0: dict(estimation_s=12.5)}, {"estimation_s"}),
         ({R0: dict(peak_rss_gib=3.7)}, {"peak_rss_gib"}),
+        (
+            {R0: dict(peak_rss_before_sort_gib=1.6)},
+            {"peak_rss_before_sort_gib"},
+        ),
         ({R0: dict(n_out_channels=2)}, {"border_keeps_all_channels"}),
         # pooled residual 0.1 + 0.011 over an oracle at sqrt(0.009) = 0.0949.
         (
@@ -533,6 +540,7 @@ def test_case_metrics_reads_a_case_result():
         },
         "timings_s": {"estimate": 4.5},
         "peak_rss_bytes": 3 * 2**30,
+        "peak_rss_before_sort_bytes": 2**30,
     }
 
     row = case_metrics(result)
@@ -560,6 +568,7 @@ def test_case_metrics_reads_a_case_result():
         n_gt_oversplit=2,
         estimation_s=4.5,
         peak_rss_gib=3.0,
+        peak_rss_before_sort_gib=1.0,
     )
     assert pooled_residual(row) == pytest.approx(math.sqrt(0.3 / 3.0))
 

@@ -348,10 +348,17 @@ class SortingGates(_Model):
 
 
 class CostGates(_Model):
-    """Estimation wall time per recipe (s) and whole-case peak RSS (GiB)."""
+    """Estimation wall time per recipe (s) and peak RSS (GiB).
+
+    ``max_peak_rss_gib`` bounds the whole case (sorting included);
+    ``max_peak_rss_before_sort_gib``, when set, bounds the case up to the sort
+    (generation, estimation and the interpolation read by the fidelity
+    windows).
+    """
 
     max_estimation_s: dict[str, float]
     max_peak_rss_gib: float = Field(gt=0)
+    max_peak_rss_before_sort_gib: float | None = Field(default=None, gt=0)
 
 
 class Gates(_Model):
@@ -614,6 +621,7 @@ class CaseMetrics(NamedTuple):
     n_gt_oversplit: int
     estimation_s: float | None
     peak_rss_gib: float
+    peak_rss_before_sort_gib: float | None
 
 
 def case_metrics(result: dict) -> CaseMetrics:
@@ -648,6 +656,11 @@ def case_metrics(result: dict) -> CaseMetrics:
         n_gt_oversplit=int(sorting["n_gt_oversplit"]),
         estimation_s=result["timings_s"].get("estimate"),
         peak_rss_gib=float(result["peak_rss_bytes"]) / 2**30,
+        peak_rss_before_sort_gib=(
+            None
+            if result.get("peak_rss_before_sort_bytes") is None
+            else float(result["peak_rss_before_sort_bytes"]) / 2**30
+        ),
     )
 
 
@@ -793,6 +806,22 @@ def check_gates(
                     limit,
                     row.peak_rss_gib <= limit,
                 )
+                limit = gates.cost.max_peak_rss_before_sort_gib
+                if limit is not None:
+                    before = value(
+                        row.peak_rss_before_sort_gib,
+                        "peak RSS before sorting",
+                        row,
+                    )
+                    add(
+                        "peak_rss_before_sort_gib",
+                        scenario,
+                        recipe,
+                        seed,
+                        before,
+                        limit,
+                        before <= limit,
+                    )
                 results.append(_border_result(row))
 
         for scenario, limit in gates.min_sign_corr.items():

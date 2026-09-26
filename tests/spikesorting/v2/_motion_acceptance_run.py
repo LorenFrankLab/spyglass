@@ -750,6 +750,10 @@ def run_case(
         )["pooled"],
     )
     timings["fidelity"] = time.perf_counter() - t
+    # ``ru_maxrss`` only grows, so this is the peak of everything before the
+    # sort: generation, estimation and the interpolation the fidelity windows
+    # read (the sort interpolates the whole recording again).
+    result["peak_rss_before_sort_bytes"] = peak_rss_bytes()
 
     t = time.perf_counter()
     sorting = _sort(
