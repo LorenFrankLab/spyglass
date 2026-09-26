@@ -207,6 +207,15 @@ def _with(path: list, value) -> dict:
         ),
         (
             _held_out(
+                gates={
+                    **_GATES,
+                    "fidelity": {"none": {"max_ratio_to_uncorrected": 0.6}},
+                }
+            ),
+            "static scenario none",
+        ),
+        (
+            _held_out(
                 cases=[
                     {"scenario": "none", "recipes": ["off", "dredge_fast"]},
                     {"scenario": "rigid", "recipes": ["off", "dredge_fast"]},

@@ -453,6 +453,17 @@ class AcceptanceManifest(_Model):
             needs.setdefault(s, set()).add("self")
             if g.max_excess_over_oracle is not None:
                 needs[s].add("oracle")
+            spec = self.scenarios.get(s)
+            if (
+                g.max_ratio_to_uncorrected is not None
+                and spec is not None
+                and spec.kind == "static"
+            ):
+                raise ValueError(
+                    f"fidelity gate on static scenario {s} bounds the ratio "
+                    "to the uncorrected residual, which is 0 without motion; "
+                    "use max_residual."
+                )
         for s in gates.sorting.no_motion:
             needs.setdefault(s, set()).update({"self", "off"})
         for s in gates.sorting.drifting:
