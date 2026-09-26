@@ -29,30 +29,35 @@ RIGID_AMPLITUDE_UM = 25.0
 JOB_KWARGS = {"n_jobs": 1, "chunk_duration": "1s", "progress_bar": False}
 
 
-def polymer_shank_probe(n_contacts: int = N_CONTACTS):
+def polymer_shank_probe(
+    n_contacts: int = N_CONTACTS,
+    *,
+    pitch_um: float = PITCH_UM,
+    contact_radius_um: float = CONTACT_RADIUS_UM,
+):
     """One single-column shank of ``n_contacts`` at the polymer pitch."""
     from probeinterface import Probe
 
     positions = np.column_stack(
-        [np.zeros(n_contacts), -PITCH_UM * np.arange(n_contacts)]
+        [np.zeros(n_contacts), -pitch_um * np.arange(n_contacts)]
     )
     probe = Probe(ndim=2, si_units="um")
     probe.set_contacts(
         positions=positions,
         shapes="circle",
-        shape_params={"radius": CONTACT_RADIUS_UM},
+        shape_params={"radius": contact_radius_um},
     )
     probe.create_auto_shape(probe_type="tip")
     probe.set_device_channel_indices(np.arange(n_contacts))
     return probe
 
 
-def bandpass(recording):
-    """The v2 hippocampus band (600-6000 Hz), float64."""
+def bandpass(recording, *, freq_min: float = 600.0, freq_max: float = 6000.0):
+    """The v2 hippocampus band (600-6000 Hz by default), float64."""
     import spikeinterface.preprocessing as sip
 
     return sip.bandpass_filter(
-        recording, freq_min=600.0, freq_max=6000.0, dtype=np.float64
+        recording, freq_min=freq_min, freq_max=freq_max, dtype=np.float64
     )
 
 
@@ -113,18 +118,20 @@ def _step_displacement_data(
     levels_um,
     num_units: int,
     steps_um=None,
+    displacement_sampling_frequency: float = DISPLACEMENT_SAMPLING_FREQUENCY,
 ):
     """``generate_drifting_recording`` displacement data for rigid steps.
 
     Displacement is ``levels_um[0]`` until ``change_times_s[0]``, then
     ``levels_um[1]`` until ``change_times_s[1]``, and so on, for every unit
-    (rigid). Templates are generated at the displacements ``steps_um``
-    (default: every 1 um within +/-15 um); each level must be one of them.
+    (rigid), sampled at ``displacement_sampling_frequency``. Templates are
+    generated at the displacements ``steps_um`` (default: every 1 um within
+    +/-15 um); each level must be one of them.
     """
     from spikeinterface.generation.drift_tools import make_linear_displacement
 
-    n_t = int(np.ceil(DISPLACEMENT_SAMPLING_FREQUENCY * duration_s))
-    times = np.arange(n_t) / DISPLACEMENT_SAMPLING_FREQUENCY
+    n_t = int(np.ceil(displacement_sampling_frequency * duration_s))
+    times = np.arange(n_t) / displacement_sampling_frequency
     vector = np.asarray(levels_um, dtype=float)[
         np.searchsorted(np.asarray(change_times_s), times, side="right")
     ]
@@ -144,7 +151,7 @@ def _step_displacement_data(
         unit_displacements,
         displacement_vectors,
         np.ones((num_units, 1)),
-        DISPLACEMENT_SAMPLING_FREQUENCY,
+        displacement_sampling_frequency,
         steps,
     )
 
@@ -269,18 +276,29 @@ def jump_across_gap_recordings(
     return joined, joined_static, spans, starts, displacement
 
 
-def source_clock_errors(motion, clock, displacement, channel_depths):
-    """Estimate-minus-truth of a gapped estimate on bins holding data (um).
+def source_clock_estimate_and_truth(
+    motion,
+    clock,
+    displacement,
+    channel_depths,
+    *,
+    displacement_sampling_frequency: float = DISPLACEMENT_SAMPLING_FREQUENCY,
+):
+    """A gapped estimate and its truth on the bins holding data (um).
 
     Each temporal bin is mapped to source time
     (``_motion.displacement_on_source_clock``); bins inside a capped gap are
-    skipped. The truth of a bin is the mean ground-truth displacement over its
-    width on the source clock, clipped to its span. No offset is removed.
+    skipped. The truth of a bin is the mean ground-truth rigid displacement
+    (sampled at ``displacement_sampling_frequency``) over its width on the
+    source clock, clipped to its span.
 
     Returns
     -------
-    numpy.ndarray
-        ``(n_data_bins, n_depths)`` errors.
+    estimate : numpy.ndarray
+        ``(n_data_bins, n_depths)`` estimated displacement at each channel
+        depth, at each kept bin's center.
+    truth : numpy.ndarray
+        ``(n_data_bins,)`` ground-truth displacement of each kept bin.
     """
     from spyglass.spikesorting.v2._motion import displacement_on_source_clock
 
@@ -291,7 +309,7 @@ def source_clock_errors(motion, clock, displacement, channel_depths):
     span_end = clock.source_end_s + 1 / fs
     sample_times = (
         np.arange(displacement.size) + 0.5
-    ) / DISPLACEMENT_SAMPLING_FREQUENCY
+    ) / displacement_sampling_frequency
     rows = []
     truths = []
     for b in np.flatnonzero(~mapped.in_gap):
@@ -309,7 +327,24 @@ def source_clock_errors(motion, clock, displacement, channel_depths):
                 channel_depths,
             )
         )
-    return np.stack(rows) - np.asarray(truths)[:, None]
+    return np.stack(rows), np.asarray(truths)
+
+
+def source_clock_errors(motion, clock, displacement, channel_depths):
+    """Estimate-minus-truth of a gapped estimate on bins holding data (um).
+
+    :func:`source_clock_estimate_and_truth` differenced; no offset is
+    removed.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_data_bins, n_depths)`` errors.
+    """
+    estimate, truth = source_clock_estimate_and_truth(
+        motion, clock, displacement, channel_depths
+    )
+    return estimate - truth[:, None]
 
 
 def common_frame_summary(errors):
