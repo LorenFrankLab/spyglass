@@ -198,8 +198,23 @@ DLCProject().alter()
   own timestamps, together with the output channels, any removed channels, the
   unmoved contact positions and the estimate's spans. Changing only the
   interpolation reuses the estimate. A missing file is rebuilt from the saved
-  motion, never by estimating again. Sorting does not read these recordings
-  yet. The tables are new, so no recreation is needed.
+  motion, never by estimating again. The tables are new, so no recreation is
+  needed.
+- A sort can read a corrected recording:
+  `SortingSelection.insert_selection(..., motion_corrected_recording_id=...)`
+  adds a new `SortingSelection.MotionCorrectionSource` part. The source part
+  still names the original `Recording` or `ConcatenatedRecording`; the
+  corrected recording must have been estimated on that source with the sort's
+  artifact detection, and its id is part of `sorting_id`. A sort without one
+  keeps the `sorting_id` it had before. A sorter row that corrects motion
+  itself (SpykingCircus2's `default` row, Kilosort with `do_correction`) is
+  refused for a corrected source; a sorter whose motion behavior is unknown
+  is refused too. `Sorting` sorts the corrected traces, takes the statistics
+  spans from the corrected recording and records the correction ids in the
+  units NWB provenance. A corrected recording a sort selected cannot be
+  deleted without that sort. The part is a new table, so no recreation is
+  needed; importing `spyglass.spikesorting.v2.sorting` now declares the motion
+  schema.
 
 #### Spike Sorting v2 launch: configuration, resource use, and the curation-to-analysis workflow
 
