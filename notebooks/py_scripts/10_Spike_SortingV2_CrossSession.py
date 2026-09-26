@@ -80,8 +80,9 @@ same_day_members = [
     },
 ]
 concat_group_name = "day1_blocks"
-# A concat preset pins a motion-correction recipe (motion is estimated across the
-# joined blocks); a single-session preset does not.
+# Motion correction is independent of concatenation and off by default: pass
+# motion_mode / motion_correction_params_name to run_v2_pipeline to estimate or
+# apply it, the same way for a single-session or a concat preset.
 concat_preset = "franklab_concat_hippocampus_30khz_ms5_2026_09"
 
 # Part B — sessions to sort INDEPENDENTLY and match, typically across days (same
@@ -125,7 +126,8 @@ LabTeam.insert1(
 #
 # In concat mode, `run_v2_pipeline` takes the *group* instead of a single session:
 # it preprocesses each member, detects artifacts and masks that member, then
-# concatenates and motion-corrects the masked traces before sorting. The summary
+# concatenates the masked traces (motion correction, if requested via
+# motion_mode, then runs on the concatenation before sorting). The summary
 # is concat-shaped — `member_recording_ids` and `concat_recording_id` in place of
 # the single-session `recording_id`, plus `member_artifacts` with exact detection
 # IDs, statuses and masked durations. Inspect the scientific setup in the receipt.
@@ -164,7 +166,8 @@ if run_concat:
         )
     # Compare these original-session kept intervals with short preprocessed
     # trace windows via visualization.plot_recording_traces. The concat cache
-    # itself already contains the mask, before and after motion correction.
+    # itself already contains the mask; motion correction (this run used the
+    # default motion_mode="off") is a separate, optional stage on top of it.
     print(
         f"{len(concat_summary['member_recording_ids'])} member recordings -> "
         f"one concatenated sort with {concat_summary['n_units']} unit(s); "
