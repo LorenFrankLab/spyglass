@@ -415,3 +415,94 @@ def test_corrected_identity_changes_with_each_term():
     }
     assert len(ids) == 6
     assert _id() == _id()
+
+
+# ---- calibration -----------------------------------------------------------
+
+
+def _calibrated_recording(raw, gains, offsets):
+    """A one-shank recording of ``raw`` counts with the given calibration."""
+    from spikeinterface.core import NumpyRecording
+
+    from tests.spikesorting.v2._motion_fixtures import polymer_shank_probe
+
+    recording = NumpyRecording([raw], sampling_frequency=SAMPLING_FREQUENCY)
+    recording.set_probe(polymer_shank_probe(), in_place=True)
+    recording.set_channel_gains(gains)
+    recording.set_channel_offsets(offsets)
+    return recording
+
+
+def _constant_shift(recording, shift_um):
+    """A rigid motion of ``shift_um`` over the whole recording."""
+    n = recording.get_num_samples()
+    return _rigid_motion(
+        [shift_um, shift_um],
+        [0.0, (n - 1) / SAMPLING_FREQUENCY],
+        recording.get_channel_locations()[:, 1],
+    )
+
+
+@pytest.mark.parametrize(
+    "gains",
+    [np.full(32, 0.2), np.linspace(0.1, 0.4, 32)],
+    ids=["equal-gains", "unequal-gains"],
+)
+def test_interpolation_preserves_physical_voltage(gains):
+    """Extrapolation weights at the probe's ends do not sum to 1, so
+    interpolating raw counts and keeping the source's gain and offset changes
+    the physical voltage: a recording that is 0 uV everywhere must stay 0 uV
+    under any displacement. The correction interpolates microvolts and
+    records a unit calibration."""
+    n = 3_000
+    offset_uv = 10.0
+    raw = np.tile(-offset_uv / gains, (n, 1)).astype("float32")
+    recording = _calibrated_recording(raw, gains, np.full(32, offset_uv))
+    np.testing.assert_allclose(
+        recording.get_traces(return_in_uV=True), 0.0, atol=1e-5
+    )
+
+    corrected = _apply(
+        recording,
+        _constant_shift(recording, 20.0),
+        _one_span_clock(n),
+        [(0, n)],
+    ).recording
+
+    np.testing.assert_allclose(
+        corrected.get_traces(return_in_uV=True), 0.0, atol=1e-5
+    )
+    np.testing.assert_array_equal(corrected.get_channel_gains(), 1.0)
+    np.testing.assert_array_equal(corrected.get_channel_offsets(), 0.0)
+
+
+def test_unit_calibrated_float_source_is_interpolated_as_is(pitch_steps):
+    """A float source already in microvolts (unit gain, zero offset) keeps
+    its dtype and gives exactly SpikeInterface's interpolation of it."""
+    from spikeinterface.core import NumpyRecording
+    from spikeinterface.sortingcomponents.motion import interpolate_motion
+
+    drifting, _, displacement = pitch_steps
+    n = drifting.get_num_samples()
+    source = NumpyRecording(
+        [drifting.get_traces().astype(np.float64)],
+        sampling_frequency=SAMPLING_FREQUENCY,
+    )
+    source.set_probe(drifting.get_probe(), in_place=True)
+    source.set_channel_gains(1.0)
+    source.set_channel_offsets(0.0)
+    motion = _truth_motion(displacement, source.get_channel_locations()[:, 1])
+
+    corrected = _apply(source, motion, _one_span_clock(n), [(0, n)]).recording
+    expected = interpolate_motion(
+        source,
+        motion,
+        **FORCE_EXTRAPOLATE,
+        interpolation_time_bin_centers_s=None,
+        interpolation_time_bin_edges_s=None,
+        interpolation_time_bin_size_s=None,
+        dtype=None,
+    )
+
+    assert corrected.get_dtype() == np.float64
+    np.testing.assert_array_equal(corrected.get_traces(), expected.get_traces())

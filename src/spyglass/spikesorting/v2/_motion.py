@@ -55,7 +55,7 @@ MOTION_ALGORITHM_VERSION = 2
 #: (:func:`apply_motion_on_estimation_clock`: masking, clock, interpolation
 #: call). Part of every corrected recording's identity; bump it when a change
 #: can change stored corrected traces.
-MOTION_INTERPOLATION_ALGORITHM_VERSION = 1
+MOTION_INTERPOLATION_ALGORITHM_VERSION = 2
 
 #: Peak waveform window (ms) used to localize peaks. SpikeInterface 0.104.3's
 #: ``compute_motion`` extracts exactly this window in its detect-and-localize
@@ -1461,6 +1461,53 @@ class AppliedMotion(NamedTuple):
     removed_channel_ids: list
 
 
+def recording_in_microvolts(recording):
+    """Present a recording as float microvolts with a unit calibration.
+
+    Interpolation mixes channels with weights that need not sum to 1 (the
+    extrapolated contacts at the probe's ends), so it must act on physical
+    voltages: interpolating raw counts and keeping the source's gains and
+    offsets changes the physical value of every weighted sum whose weights do
+    not sum to 1, and of any mix of channels with different gains.
+
+    A float recording whose gains are all 1 and offsets all 0 (or that has
+    neither, a synthetic one) is already in its physical units and is
+    returned unchanged. Any other recording goes through SpikeInterface's
+    ``scale_to_uV`` (``preprocessing/scale.py:68-102``), which computes
+    ``raw * gain + offset`` per channel in float32 and sets gains 1 and
+    offsets 0 (``preprocessing/normalize_scale.py:21-34``).
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The source recording.
+
+    Returns
+    -------
+    si.BaseRecording
+        ``recording`` itself, or its float32 microvolt view.
+
+    Raises
+    ------
+    RuntimeError
+        From ``scale_to_uV`` if a recording that needs scaling lacks gains or
+        offsets.
+    """
+    import spikeinterface.preprocessing as sip
+
+    gains = recording.get_channel_gains()
+    offsets = recording.get_channel_offsets()
+    if gains is None and offsets is None:
+        unit = True
+    elif gains is None or offsets is None:
+        unit = False
+    else:
+        unit = bool(np.all(gains == 1) and np.all(offsets == 0))
+    if unit and recording.get_dtype().kind == "f":
+        return recording
+    return sip.scale_to_uV(recording)
+
+
 def apply_motion_on_estimation_clock(
     recording,
     motion,
@@ -1484,10 +1531,13 @@ def apply_motion_on_estimation_clock(
     (``preprocessing/basepreprocessor.py:27-29``) and silently shift the
     lookups after the first acquisition gap.
 
-    Interpolation is frame-local (one kernel per temporal bin applied to each
-    frame), so a silenced frame stays exactly zero and the sample count,
-    frame order and sampling frequency are unchanged; the second silencing
-    states that contract rather than relying on it. Every interpolation
+    The recording is first converted to microvolts
+    (:func:`recording_in_microvolts`), so the corrected traces are float
+    microvolts with gains 1 and offsets 0. Interpolation is frame-local (one
+    kernel per temporal bin applied to each frame), so a silenced frame stays
+    exactly zero and the sample count, frame order and sampling frequency are
+    unchanged; the second silencing states that contract rather than relying
+    on it. Every interpolation
     argument is passed explicitly from ``resolved_interpolation``; the
     motion's own temporal bins are the interpolation bins. The output's
     channel locations are the unmoved positions of the kept channels
@@ -1540,7 +1590,7 @@ def apply_motion_on_estimation_clock(
     excluded = complement_frame_ranges(
         normalize_spans(statistics_spans), n_samples
     )
-    masked = silence_frame_ranges(recording, excluded)
+    masked = silence_frame_ranges(recording_in_microvolts(recording), excluded)
     corrected = interpolate_motion(
         EstimationClockRecording(masked, clock),
         motion,
