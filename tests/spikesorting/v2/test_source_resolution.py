@@ -203,6 +203,15 @@ def test_effective_source_deep_hash_tracks_content():
     assert digest(first) != digest(build(uuid.UUID(int=3)))
 
 
+#: The channel map ``written_traces`` writes, as a corrected row records it.
+_WRITTEN_CHANNEL_MAP = {
+    "channel_ids": [0, 1, 2, 3],
+    "channel_locations": np.array(
+        [[0.0, 0.0], [0.0, 20.0], [0.0, 40.0], [0.0, 60.0]]
+    ),
+}
+
+
 def test_motion_corrected_traces_are_never_masked_again(written_traces):
     """A motion-corrected artifact is persisted masked: it loads as stored,
     and asking to mask it again is refused."""
@@ -216,7 +225,7 @@ def test_motion_corrected_traces_are_never_masked_again(written_traces):
     traces = EffectiveTraces(
         kind="motion_corrected_recording",
         key=key,
-        row=row,
+        row={**row, **_WRITTEN_CHANNEL_MAP},
         apply_artifact_mask=False,
     )
     loaded = read_effective_recording(abs_path, traces)
@@ -291,3 +300,89 @@ def test_correction_lineage_mismatch_names_each_difference():
         )
         == 2
     )
+
+
+@pytest.mark.parametrize(
+    "row_change, match",
+    [
+        ({"channel_ids": [0, 1, 2]}, "channel_ids"),
+        ({"channel_ids": [1, 0, 2, 3]}, "channel_ids"),
+        (
+            {
+                "channel_locations": _WRITTEN_CHANNEL_MAP["channel_locations"][
+                    1:
+                ]
+            },
+            "channel_locations",
+        ),
+        (
+            {
+                "channel_locations": _WRITTEN_CHANNEL_MAP["channel_locations"]
+                + [[0.0, 26.0]]
+            },
+            "channel_locations",
+        ),
+    ],
+    ids=["dropped", "reordered", "fewer_positions", "moved_positions"],
+)
+def test_corrected_channel_map_must_match_its_row(
+    written_traces, row_change, match
+):
+    """A corrected artifact whose channels or positions differ from its row
+    (as recorded at correction time) is refused at load, never adapted."""
+    from spyglass.spikesorting.v2._source_resolution import (
+        EffectiveTraces,
+        read_effective_recording,
+    )
+
+    abs_path, row, _raw, _valid_times = written_traces
+    traces = EffectiveTraces(
+        kind="motion_corrected_recording",
+        key={"motion_corrected_recording_id": uuid.UUID(int=5)},
+        row={**row, **_WRITTEN_CHANNEL_MAP, **row_change},
+        apply_artifact_mask=False,
+    )
+    with pytest.raises(ValueError, match=match):
+        read_effective_recording(abs_path, traces)
+
+
+@pytest.mark.parametrize(
+    "positions, match",
+    [
+        ([[0, 0], [0, 20], [0, 20], [0, 60]], "share a position"),
+        ([[0, 0], [0, 20], [0, np.nan], [0, 60]], "finite"),
+    ],
+    ids=["coincident", "non_finite"],
+)
+def test_corrected_geometry_must_be_finite_and_distinct(
+    tmp_path, positions, match
+):
+    """The loaded corrected geometry is checked before any consumer uses it,
+    even when the row records the same (bad) positions."""
+    from spyglass.spikesorting.v2._source_resolution import (
+        EffectiveTraces,
+        read_effective_recording,
+    )
+    from tests.spikesorting.v2._ingest_helpers import (
+        write_processed_recording_nwb,
+    )
+
+    path, series_path = write_processed_recording_nwb(
+        tmp_path / "bad_geometry.nwb",
+        traces=np.ones((100, 4), dtype=np.int16),
+        timestamps=_T0 + np.arange(100) / _FS,
+        rel_positions=positions,
+    )
+    traces = EffectiveTraces(
+        kind="motion_corrected_recording",
+        key={"motion_corrected_recording_id": uuid.UUID(int=6)},
+        row={
+            "analysis_file_name": "bad_geometry.nwb",
+            "electrical_series_path": series_path,
+            "channel_ids": [0, 1, 2, 3],
+            "channel_locations": np.asarray(positions, dtype=float),
+        },
+        apply_artifact_mask=False,
+    )
+    with pytest.raises(ValueError, match=match):
+        read_effective_recording(str(path), traces)

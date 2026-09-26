@@ -210,6 +210,62 @@ def correction_lineage_mismatch(
     return mismatches
 
 
+def check_corrected_channel_map(
+    recording: si.BaseRecording, traces: EffectiveTraces
+) -> None:
+    """Check a loaded corrected recording against its row's channel map.
+
+    Every consumer of a motion-corrected recording must see the channels the
+    correction wrote, in order, at the positions it recorded. With
+    ``border_mode="remove_channels"`` that is a subset of the source's
+    channels; nothing may pad, reorder or drop channels to restore the
+    source's set.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The corrected recording as read from its NWB artifact.
+    traces : EffectiveTraces
+        Its resolved traces; ``row`` is the ``MotionCorrectedRecording`` row
+        (``channel_ids``, ``channel_locations`` ``(n_channels, 2)`` in um).
+
+    Raises
+    ------
+    ValueError
+        If the loaded channel ids differ from the row's (values or order), or
+        the loaded contact positions are not finite, not distinct, or differ
+        from the row's.
+    """
+    import numpy as np
+
+    row = traces.row
+    loaded_ids = [str(c) for c in recording.channel_ids]
+    stored_ids = [str(c) for c in np.asarray(row["channel_ids"]).tolist()]
+    if loaded_ids != stored_ids:
+        raise ValueError(
+            f"{traces.kind} {traces.key}: the artifact's channels "
+            f"{loaded_ids} differ from the row's channel_ids {stored_ids}."
+        )
+    positions = np.asarray(recording.get_channel_locations(), dtype=float)
+    if not np.isfinite(positions).all():
+        raise ValueError(
+            f"{traces.kind} {traces.key}: contact positions must be finite; "
+            f"got {positions.tolist()}."
+        )
+    if len(np.unique(np.round(positions, 6), axis=0)) != len(positions):
+        raise ValueError(
+            f"{traces.kind} {traces.key}: two or more contacts share a "
+            f"position ({positions.tolist()})."
+        )
+    stored = np.asarray(row["channel_locations"], dtype=float)
+    if positions.shape != stored.shape or not np.array_equal(positions, stored):
+        raise ValueError(
+            f"{traces.kind} {traces.key}: the artifact's contact positions "
+            f"{positions.tolist()} differ from the row's channel_locations "
+            f"{stored.tolist()}."
+        )
+
+
 def read_effective_recording(
     abs_path: str,
     traces: EffectiveTraces,
@@ -279,6 +335,8 @@ def read_effective_recording(
         electrical_series_path=traces.row["electrical_series_path"],
     )
     recording.annotate(is_filtered=True)
+    if traces.kind == "motion_corrected_recording":
+        check_corrected_channel_map(recording, traces)
     if traces.apply_artifact_mask:
         from spyglass.spikesorting.v2._sorting_artifact_mask import (
             apply_artifact_mask,
