@@ -341,18 +341,16 @@ def test_boundary_spans_from_timestamps_continuous_is_single_span():
     assert boundary_spans_from_timestamps(rec) == [(0, 300)]
 
 
-def test_concat_boundary_spans_offsets_members():
+def test_concat_continuity_offsets_members():
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        concat_boundary_spans,
-    )
+    from spyglass.spikesorting.v2._concat_recording import concat_continuity
 
     member0 = si.NumpyRecording(
         [np.zeros((100, 2), dtype="float32")], sampling_frequency=1000.0
     )
     member1 = _gapped_recording((80, 120))
-    spans = concat_boundary_spans([member0, member1], [0, 100])
+    spans = concat_continuity([member0, member1], [100, 200]).spans
     assert spans == [(0, 100), (100, 180), (180, 300)]
 
 

@@ -477,35 +477,6 @@ def continuity_from_timestamps(recording) -> Continuity:
     )
 
 
-def concat_boundary_spans(
-    member_recordings, member_starts: list[int]
-) -> list[tuple[int, int]]:
-    """Union of each member's boundary spans, offset into concat-frame
-    coordinates.
-
-    Parameters
-    ----------
-    member_recordings : list[si.BaseRecording]
-        Per-member recordings, ordered by ``member_index``.
-    member_starts : list[int]
-        Each member's cumulative start frame in the concatenated recording,
-        same order/length as ``member_recordings``.
-
-    Returns
-    -------
-    list[tuple[int, int]]
-        Half-open concat-frame spans; a join between two members is never
-        inside a single span.
-    """
-    out: list[tuple[int, int]] = []
-    for rec, start in zip(member_recordings, member_starts, strict=True):
-        out.extend(
-            (start + a, start + b)
-            for a, b in boundary_spans_from_timestamps(rec)
-        )
-    return out
-
-
 def statistics_spans(
     n_samples: int,
     excluded_ranges: list[tuple[int, int]],
@@ -526,7 +497,8 @@ def statistics_spans(
         Half-open artifact-masked frame ranges (need not be sorted/merged).
     boundary_spans : list[tuple[int, int]]
         Half-open frame spans that never cross a join (e.g. from
-        ``boundary_spans_from_timestamps`` / ``concat_boundary_spans``).
+        ``boundary_spans_from_timestamps`` / ``_concat_recording.
+        concat_continuity``).
 
     Returns
     -------
