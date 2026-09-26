@@ -545,6 +545,121 @@ def reject_internal_whiten(sorter: str, params: dict) -> None:
         )
 
 
+# The params key that switches each sorter's own motion correction, as the
+# SpikeInterface 0.104 wrappers read it: SpykingCircus2
+# ``apply_motion_correction`` (default True, ``sorters/internal/
+# spyking_circus2.py:36``, read at :127 and :167); Tridesclous2
+# ``apply_motion_correction`` (default False, ``tridesclous2.py:33``), read
+# only inside ``if params["apply_preprocessing"]`` (:129-130, :171);
+# Kilosort4 ``do_correction`` (default True, ``sorters/external/
+# kilosort4.py:27``; False sets ``nblocks=0`` at :372-375); Kilosort2.5 /
+# Kilosort3 ``do_correction`` (default True, ``kilosort2_5.py:53`` /
+# ``kilosort3.py:48``, passed to the MATLAB ops at :225 / :219).
+_INTERNAL_MOTION_CORRECTION_KEY: dict[str, str] = {
+    "spykingcircus2": "apply_motion_correction",
+    "tridesclous2": "apply_motion_correction",
+    "kilosort4": "do_correction",
+    "kilosort2_5": "do_correction",
+    "kilosort3": "do_correction",
+}
+# A params key that must also be true for the correction key to take effect.
+_INTERNAL_MOTION_CORRECTION_GATE: dict[str, str] = {
+    "tridesclous2": "apply_preprocessing",
+}
+# Sorters with no motion correction of their own.
+_NO_INTERNAL_MOTION_CORRECTION: frozenset[str] = frozenset(
+    {"mountainsort4", "mountainsort5", "clusterless_thresholder"}
+)
+
+
+def sorter_applies_internal_motion_correction(sorter: str, params) -> bool:
+    """Return whether a sorter corrects motion itself with these params.
+
+    Keys missing from ``params`` take SpikeInterface's defaults
+    (``get_default_sorter_params``). A key missing from both counts as
+    on: Kilosort4's wrapper reports no defaults when the ``kilosort``
+    package is not installed (``kilosort4.py:84-110``) while its own
+    default is ``do_correction=True``. SpykingCircus2 also skips its
+    correction on a probe it deems unsuitable, which depends on the
+    recording, so a truthy key counts as on. ``params`` is not modified.
+
+    Parameters
+    ----------
+    sorter : str
+        The ``sorter`` of a ``SorterParameters`` row.
+    params : Mapping
+        That row's ``params`` blob.
+
+    Returns
+    -------
+    bool
+        ``True`` if the sorter would correct motion internally.
+
+    Raises
+    ------
+    ValueError
+        If the sorter's own motion behavior is not known here.
+    """
+    if sorter in _NO_INTERNAL_MOTION_CORRECTION:
+        return False
+    if sorter not in _INTERNAL_MOTION_CORRECTION_KEY:
+        raise ValueError(
+            f"The motion-correction behavior of sorter {sorter!r} is not "
+            "known, so it cannot sort a motion-corrected recording. Supported "
+            f"sorters: {sorted(_NO_INTERNAL_MOTION_CORRECTION)} (no internal "
+            f"correction) and {sorted(_INTERNAL_MOTION_CORRECTION_KEY)} (with "
+            "their internal correction turned off)."
+        )
+    params = params or {}
+    defaults = None
+
+    def resolved(name: str) -> bool:
+        nonlocal defaults
+        if name in params:
+            return bool(params[name])
+        if defaults is None:
+            import spikeinterface.sorters as sis
+
+            defaults = sis.get_default_sorter_params(sorter)
+        return bool(defaults.get(name, True))
+
+    gate = _INTERNAL_MOTION_CORRECTION_GATE.get(sorter)
+    if gate is not None and not resolved(gate):
+        return False
+    return resolved(_INTERNAL_MOTION_CORRECTION_KEY[sorter])
+
+
+def reject_internal_motion_correction(
+    sorter: str, params, *, sorter_params_name: str
+) -> None:
+    """Raise if a sorter would correct an already corrected recording again.
+
+    Parameters
+    ----------
+    sorter : str
+        The ``sorter`` of a ``SorterParameters`` row.
+    params : Mapping
+        That row's ``params`` blob.
+    sorter_params_name : str
+        That row's name, for the message.
+
+    Raises
+    ------
+    ValueError
+        If :func:`sorter_applies_internal_motion_correction` is ``True``, or
+        the sorter's motion behavior is not known.
+    """
+    if sorter_applies_internal_motion_correction(sorter, params):
+        key = _INTERNAL_MOTION_CORRECTION_KEY[sorter]
+        raise ValueError(
+            f"SorterParameters ({sorter!r}, {sorter_params_name!r}) runs "
+            f"{sorter}'s own motion correction ({key!r} is on, set or by "
+            "default), so it would correct a motion-corrected recording a "
+            f"second time. Insert a SorterParameters row with {key}=False "
+            "and select that row."
+        )
+
+
 # Keys that configure sorter EXECUTION (container backend + container-side SI
 # install), not the science of the sort. They are tracked on
 # ``SorterParameters.execution_params`` (validated by

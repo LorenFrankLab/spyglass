@@ -239,3 +239,81 @@ def test_wrapper_vocabulary_rejects_unknown_key_with_suggestion():
     validate_sorter_params_against_wrapper(
         "clusterless_thresholder", {"anything": 1}
     )
+
+
+@pytest.mark.parametrize(
+    ("sorter", "params", "expected"),
+    [
+        # SC2 corrects by default (apply_motion_correction=True).
+        ("spykingcircus2", {}, True),
+        ("spykingcircus2", {"schema_version": 1}, True),
+        ("spykingcircus2", {"apply_motion_correction": False}, False),
+        # TDC2 is off by default and only corrects with its preprocessing on.
+        ("tridesclous2", {}, False),
+        ("tridesclous2", {"apply_motion_correction": True}, True),
+        (
+            "tridesclous2",
+            {"apply_motion_correction": True, "apply_preprocessing": False},
+            False,
+        ),
+        # Kilosort corrects by default (do_correction=True).
+        ("kilosort4", {}, True),
+        ("kilosort4", {"nblocks": 5, "do_correction": True}, True),
+        ("kilosort4", {"do_correction": False}, False),
+        ("kilosort2_5", {}, True),
+        ("kilosort2_5", {"do_correction": False}, False),
+        ("kilosort3", {}, True),
+        ("kilosort3", {"do_correction": False}, False),
+        # No internal correction.
+        ("mountainsort4", {}, False),
+        ("mountainsort5", {"whiten": True}, False),
+        ("clusterless_thresholder", {}, False),
+    ],
+)
+def test_sorter_internal_motion_correction_resolves_si_defaults(
+    sorter, params, expected
+):
+    """Missing keys take SpikeInterface's sorter defaults; params are not
+    modified."""
+    import copy
+
+    from spyglass.spikesorting.v2._params.sorter import (
+        sorter_applies_internal_motion_correction,
+    )
+
+    before = copy.deepcopy(params)
+    assert sorter_applies_internal_motion_correction(sorter, params) is expected
+    assert params == before
+
+
+def test_sorter_internal_motion_correction_matches_si_defaults():
+    """The defaults the resolver relies on are the installed wrappers'."""
+    import spikeinterface.sorters as sis
+
+    assert sis.get_default_sorter_params("spykingcircus2")[
+        "apply_motion_correction"
+    ]
+    tdc2 = sis.get_default_sorter_params("tridesclous2")
+    assert tdc2["apply_motion_correction"] is False
+    assert tdc2["apply_preprocessing"] is True
+    for sorter in ("kilosort2_5", "kilosort3"):
+        assert sis.get_default_sorter_params(sorter)["do_correction"] is True
+
+
+def test_unknown_sorter_motion_behavior_and_rejection_message():
+    """A sorter whose motion behavior is not modeled cannot be combined with
+    an external correction; the rejection names the key to turn off."""
+    from spyglass.spikesorting.v2._params.sorter import (
+        reject_internal_motion_correction,
+        sorter_applies_internal_motion_correction,
+    )
+
+    with pytest.raises(ValueError, match="'herdingspikes' is not known"):
+        sorter_applies_internal_motion_correction("herdingspikes", {})
+    with pytest.raises(ValueError, match="do_correction=False"):
+        reject_internal_motion_correction(
+            "kilosort4", {}, sorter_params_name="franklab_ks4"
+        )
+    reject_internal_motion_correction(
+        "mountainsort5", {}, sorter_params_name="default"
+    )
