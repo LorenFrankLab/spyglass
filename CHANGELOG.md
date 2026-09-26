@@ -157,8 +157,10 @@ DLCProject().alter()
   joins and member-internal gaps with each span's real first and last
   timestamps. Do this after the
   [preproduction database upgrade sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database).
-- Optional motion correction will be a separate stage. `DriftEstimate` is
-  unchanged and stays QC-only.
+- Optional motion correction will be a separate stage. `DriftEstimate` stays
+  QC-only. It no longer fails when two detected peaks share a frame (seen on
+  dense probes): it loads the recording's timestamps into memory before
+  estimating, keeping the same real clock.
 
 #### Spike Sorting v2: saved motion estimates (experimental)
 
