@@ -380,6 +380,7 @@ def write_nwb_artifact(
     *,
     filtering_description: str,
     provenance_tables=None,
+    description: str | None = None,
 ) -> tuple[str, str, str]:
     """Write the preprocessed recording into an ``AnalysisNwbfile``.
 
@@ -441,6 +442,10 @@ def write_nwb_artifact(
         ElectricalSeries so the artifact is self-describing. ``None``
         (default) writes no provenance and leaves the data path unchanged.
         Scratch does not enter the ``content_hash`` fingerprint.
+    description : str, optional
+        Keyword-only. ``ElectricalSeries.description``; ``None`` (default)
+        describes a pre-motion preprocessed recording of ``nwb_file_name``.
+        The description does not enter the ``content_hash`` fingerprint.
     """
     import numpy as np
     import pynwb
@@ -576,7 +581,8 @@ def write_nwb_artifact(
                 timestamps=timestamps_iterator,
                 filtering=filtering_description,
                 description=(
-                    f"Pre-motion preprocessed recording from "
+                    description
+                    or f"Pre-motion preprocessed recording from "
                     f"{nwb_file_name} for spike sorting"
                 ),
                 conversion=conversion,
