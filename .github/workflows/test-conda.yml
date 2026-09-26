@@ -215,6 +215,7 @@ jobs:
               tests/spikesorting/v2/test_brain_region_attribution.py
               tests/spikesorting/v2/test_recording_nwb.py
               tests/spikesorting/v2/test_motion_correction.py
+              tests/spikesorting/v2/test_motion_consumers.py
           - name: unit
             paths: >-
               tests/spikesorting/v2
@@ -231,6 +232,7 @@ jobs:
               --ignore=tests/spikesorting/v2/test_brain_region_attribution.py
               --ignore=tests/spikesorting/v2/test_recording_nwb.py
               --ignore=tests/spikesorting/v2/test_motion_correction.py
+              --ignore=tests/spikesorting/v2/test_motion_consumers.py
     runs-on: ubuntu-latest
     defaults:
       run:
