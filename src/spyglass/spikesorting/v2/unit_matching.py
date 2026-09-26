@@ -89,10 +89,12 @@ class UnitMatchFetched(NamedTuple):
     correctness-sensitive DB state resolved at fetch time:
     ``{"member_index", "nwb_file_name", "sorting_id" (str), "curation_id",
     "recording_date" (canonical UTC ISO 8601 str), "matchable_unit_ids"
-    (sorted list[int])}``. Threading ``recording_date`` and ``matchable_unit_ids``
+    (sorted list[int]), "waveform_traces" (str), "motion_corrected_recording_id"
+    (str or None)}``. Threading ``recording_date`` and ``matchable_unit_ids``
     here -- rather than re-querying in compute -- keeps a curation relabel or
     session-time edit between stages from changing which units match or the
-    chronological drift order.
+    chronological drift order. ``waveform_traces`` names the trace artifact the
+    member's bundle is extracted from (:func:`_member_waveform_traces`).
     """
 
     matcher_name: str
@@ -425,9 +427,12 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         """Channel positions for one pinned member's curated recording.
 
         Loads the curated recording (the same object ``UnitMatch.make`` extracts
-        bundles from) and returns its ``get_channel_locations()`` array. A thin
-        seam so the geometry preflight is unit-testable by patching this rather
-        than building a full SpikeInterface recording.
+        bundles from) and returns its ``get_channel_locations()`` array. For a
+        sort of a motion-corrected recording that is the corrected recording's
+        effective geometry, without any channels ``remove_channels`` dropped;
+        members are compared as they are, never padded, reordered or trimmed
+        to agree. A thin seam so the geometry preflight is unit-testable by
+        patching this rather than building a full SpikeInterface recording.
         """
         return CurationV2.get_recording(curation_key).get_channel_locations()
 
@@ -980,6 +985,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                         timezone.utc
                     ).isoformat(),
                     "matchable_unit_ids": matchable,
+                    **_member_waveform_traces(sorting_id),
                 }
             )
         return UnitMatchFetched(
@@ -1074,6 +1080,12 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                         "sorting_id": str(plan["sorting_id"]),
                         "curation_id": int(plan["curation_id"]),
                         "session_start_time": str(plan["recording_date"]),
+                        "waveform_traces": str(plan["waveform_traces"]),
+                        # Empty for a member whose waveforms come from its
+                        # source's own traces (typed column: no None).
+                        "motion_corrected_recording_id": str(
+                            plan["motion_corrected_recording_id"] or ""
+                        ),
                     }
                     for plan in member_plan
                 ],
@@ -1082,6 +1094,8 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                     ("sorting_id", str),
                     ("curation_id", int),
                     ("session_start_time", str),
+                    ("waveform_traces", str),
+                    ("motion_corrected_recording_id", str),
                 ],
             ),
         ]
@@ -1253,6 +1267,9 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                 # Build the SI objects (NWB I/O) here; the matchable unit set was
                 # already resolved + validated in make_fetch and threaded in via
                 # the plan, so compute does not re-derive curation-label state.
+                # The recording is the sort's effective traces (a selected
+                # motion-corrected recording included), as the plan's
+                # ``waveform_traces`` records.
                 recording = CurationV2.get_recording(curation_key)
                 full_sorting = CurationV2.get_sorting(curation_key)
                 sorting = full_sorting.select_units(plan["matchable_unit_ids"])
@@ -1598,6 +1615,40 @@ def _curation_member_identity(sorting_id, *, exc_class=ValueError):
     return _normalize_member_identity(
         nwb_file_name, sort_group_id, interval_list_name, team_name
     )
+
+
+def _member_waveform_traces(sorting_id) -> dict:
+    """Name the traces a member's matcher waveforms are extracted from.
+
+    The bundle is extracted from ``CurationV2.get_recording``, which reads the
+    sort's effective traces (``SortingSelection.resolve_effective_source``):
+    the sort's ``Recording``, or the ``MotionCorrectedRecording`` it selected.
+    Recording which one makes a match run state whether its waveforms came
+    from corrected or original traces.
+
+    Parameters
+    ----------
+    sorting_id : uuid.UUID or str
+        The member's sort.
+
+    Returns
+    -------
+    dict
+        ``{"waveform_traces": <effective traces kind>,
+        "motion_corrected_recording_id": <str id or None>}``.
+    """
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    traces = SortingSelection.resolve_effective_source(
+        {"sorting_id": sorting_id}
+    ).traces
+    corrected_id = traces.key.get("motion_corrected_recording_id")
+    return {
+        "waveform_traces": traces.kind,
+        "motion_corrected_recording_id": (
+            None if corrected_id is None else str(corrected_id)
+        ),
+    }
 
 
 def normalize_curation_choices(curation_choices) -> dict[int, tuple]:
