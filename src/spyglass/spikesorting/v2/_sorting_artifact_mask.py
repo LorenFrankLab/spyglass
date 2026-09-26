@@ -304,21 +304,42 @@ def apply_artifact_mask(
     return silence_frame_ranges(recording, ranges)
 
 
+def has_nonzero_offset(recording) -> bool:
+    """Say whether a recording keeps a nonzero channel calibration offset.
+
+    SpikeInterface reads a sample as ``raw * gain + offset`` microvolts, so a
+    stored zero is 0 uV exactly when every channel offset is 0. Bandpass
+    filtering and referencing zero the offset, so this is only true of an
+    unfiltered, unreferenced source (typically integer counts).
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+
+    Returns
+    -------
+    bool
+    """
+    import numpy as np
+
+    offsets = recording.get_channel_offsets()
+    return offsets is not None and bool(np.any(offsets != 0))
+
+
 def recording_with_zero_offset(recording):
     """Present a recording so that a stored zero reads as 0 uV.
 
-    SpikeInterface reads a sample as ``raw * gain + offset`` microvolts, so a
-    stored zero is 0 uV exactly when every channel offset is 0. That holds
-    for every filtered or referenced recording: SpikeInterface's filters set
-    the offsets to 0 (``preprocessing/filter.py:114-115``) and the recording
-    stage zeroes them after referencing. Such a recording (or one with no
-    calibration at all) is returned unchanged, whatever its gains and dtype.
+    That holds for every filtered or referenced recording: SpikeInterface's
+    filters set the offsets to 0 (``preprocessing/filter.py:114-115``) and the
+    recording stage zeroes them after referencing. Such a recording (or one
+    with no calibration at all) is returned unchanged, whatever its gains and
+    dtype.
 
-    Only a recording that keeps a nonzero offset -- an unfiltered,
-    unreferenced source, typically integer counts -- goes through
-    SpikeInterface's ``scale_to_uV`` (``preprocessing/scale.py:68-102``),
-    which computes ``raw * gain + offset`` per channel in float32 and sets
-    gains 1 and offsets 0.
+    Only a recording that keeps a nonzero offset (:func:`has_nonzero_offset`)
+    goes through SpikeInterface's ``scale_to_uV``
+    (``preprocessing/scale.py:68-102``), which computes
+    ``raw * gain + offset`` per channel in float32 and sets gains 1 and
+    offsets 0.
 
     Parameters
     ----------
@@ -330,10 +351,7 @@ def recording_with_zero_offset(recording):
     si.BaseRecording
         ``recording`` itself, or its float32 microvolt view.
     """
-    import numpy as np
-
-    offsets = recording.get_channel_offsets()
-    if offsets is None or not np.any(offsets != 0):
+    if not has_nonzero_offset(recording):
         return recording
     import spikeinterface.preprocessing as sip
 

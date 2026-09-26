@@ -539,7 +539,7 @@ def mask_member_recordings(recordings, member_valid_times):
 
     Masked samples must read 0 uV. When any member keeps a nonzero channel
     offset (an unfiltered, unreferenced source; see
-    :func:`~spyglass.spikesorting.v2._sorting_artifact_mask.recording_with_zero_offset`),
+    :func:`~spyglass.spikesorting.v2._sorting_artifact_mask.has_nonzero_offset`),
     every member, masked or not, is presented as float32 microvolts with a
     unit calibration (SpikeInterface ``scale_to_uV``), so the concatenation
     is on one scale and one dtype even for offsets the compatibility check
@@ -553,12 +553,12 @@ def mask_member_recordings(recordings, member_valid_times):
 
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
         artifact_frame_ranges,
-        recording_with_zero_offset,
+        has_nonzero_offset,
         silence_frame_ranges,
     )
 
     assert_concat_compatible(recordings)
-    if any(recording_with_zero_offset(r) is not r for r in recordings):
+    if any(has_nonzero_offset(r) for r in recordings):
         recordings = [sip.scale_to_uV(r) for r in recordings]
     masked, concat_ranges = [], []
     offset = 0
