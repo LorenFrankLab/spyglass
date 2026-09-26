@@ -47,6 +47,7 @@ from tests.spikesorting.v2._motion_acceptance import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+HELD_OUT_MANIFEST = Path(__file__).with_name("motion_acceptance_held_out.json")
 BENCHMARK = os.environ.get("SPYGLASS_V2_MOTION_BENCHMARK") == "1"
 BENCHMARK_SKIP = pytest.mark.skip(
     reason="the motion acceptance benchmark is opt-in: set "
@@ -112,6 +113,36 @@ def test_development_recipes_are_the_shipped_rows_with_a_case_seed():
         if spec.kind != "off":
             assert spec.interpolation in interpolations
     assert manifest.noise_levels_seed == "case_seed"
+
+
+def test_held_out_manifest_tests_the_shipped_rows():
+    """The committed held-out manifest is held-out only, gated, pins a
+    harness, and its DREDge recipes are the shipped estimation rows with
+    their noise seed."""
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        motion_estimation_default_contents,
+    )
+
+    manifest = load_manifest(HELD_OUT_MANIFEST)
+    assert manifest.purpose == "held_out"
+    assert min(manifest.seeds) >= 1000
+    assert manifest.gates.recipes == ["dredge", "dredge_fast"]
+    assert manifest.harness is not None
+    assert {case.scenario for case in manifest.cases} == set(manifest.scenarios)
+    shipped = {row[0]: row[1] for row in motion_estimation_default_contents()}
+    for recipe, row in (
+        ("dredge", "dredge_v1"),
+        ("dredge_fast", "dredge_fast_v1"),
+    ):
+        estimation = {
+            k: v
+            for k, v in shipped[row].items()
+            if k != "schema_version" and v not in ({}, None)
+        }
+        assert estimation == {
+            **manifest.recipes[recipe].estimation,
+            "noise_levels_seed": manifest.noise_levels_seed,
+        }
 
 
 _GATES = {

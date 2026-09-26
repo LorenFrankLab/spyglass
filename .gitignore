@@ -176,9 +176,10 @@ temp_nwb/*s
 # step reads it via `git show HEAD:...` to compare deterministic hashes, so it
 # must be committed despite the blanket *.json ignore.
 !tests/spikesorting/v2/fixtures/fixtures_manifest.json
-# Development motion-acceptance manifest (seeds 0-2, no gates). Only this file:
-# a held-out manifest next to it stays ignored until the owner commits it.
+# Development motion-acceptance manifest (seeds 0-2, no gates). Only this file.
 !tests/spikesorting/v2/motion_acceptance_development.json
+# Held-out motion-acceptance manifest (preregistered gates). Only this file.
+!tests/spikesorting/v2/motion_acceptance_held_out.json
 *.gz
 *.pdf
 *.lock
