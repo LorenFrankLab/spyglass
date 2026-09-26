@@ -557,8 +557,9 @@ def run_case(
     Raises
     ------
     ValueError
-        If the case is not in the manifest's grid, or the seed is reserved
-        for held-out runs while the manifest is a development one.
+        If the case is not in the manifest's grid, the seed is reserved
+        for held-out runs while the manifest is a development one, or the
+        harness files differ from the manifest's harness pin.
     """
     import spikeinterface as si
 
@@ -576,6 +577,7 @@ def run_case(
     from tests.spikesorting.v2._motion_acceptance import (
         HELD_OUT_SEED_MIN,
         case_tag,
+        check_harness_pin,
         harness_fingerprint,
         manifest_sha256,
     )
@@ -584,6 +586,8 @@ def run_case(
         raise ValueError(f"case {scenario} seed {seed} {recipe} not in grid.")
     if manifest.purpose != "held_out" and seed >= HELD_OUT_SEED_MIN:
         raise ValueError(f"seed {seed} is reserved for held-out runs.")
+    fingerprint = harness_fingerprint()
+    check_harness_pin(manifest, fingerprint)
 
     t_start = time.perf_counter()
     timings: dict = {}
@@ -619,7 +623,7 @@ def run_case(
         recipe=recipe,
         manifest=manifest.name,
         manifest_sha256=manifest_sha256(manifest_path),
-        harness=harness_fingerprint(),
+        harness=fingerprint,
         spikeinterface_version=si.__version__,
         n_samples=int(n_samples),
         continuity_spans=[list(s) for s in continuity.spans],

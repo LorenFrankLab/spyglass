@@ -14,7 +14,8 @@ Two purposes are allowed. A ``development`` manifest uses only seeds below
 :data:`HELD_OUT_SEED_MIN` and carries no gates (gates derived from development
 runs would be circular for them). A ``held_out`` manifest uses only seeds at
 or above it and must carry gates, so held-out seeds are never run without
-gates fixed in advance.
+gates fixed in advance. A held-out manifest also pins the harness code it was
+fixed against (:class:`HarnessPin`); its cases refuse to run on other code.
 
 DB-FREE and light at import (pydantic only; the v2 parameter schemas are
 imported when a manifest is validated), so the gate-check unit tests run in the
@@ -401,6 +402,19 @@ class Gates(_Model):
     cost: CostGates
 
 
+class HarnessPin(_Model):
+    """The benchmark code a held-out manifest was fixed against.
+
+    ``git_commit`` is the commit the harness was taken from and ``files`` the
+    SHA-256 of each of :data:`HARNESS_FILES` at that commit
+    (:func:`harness_fingerprint`). A case of the manifest refuses to run
+    when the harness files on disk differ (:func:`check_harness_pin`).
+    """
+
+    git_commit: str = Field(min_length=7)
+    files: dict[str, str]
+
+
 class AcceptanceManifest(_Model):
     """A validated motion acceptance benchmark manifest (see module doc)."""
 
@@ -418,6 +432,7 @@ class AcceptanceManifest(_Model):
     comparison: ComparisonSpec
     evaluation: EvaluationSpec
     gates: Gates | None = None
+    harness: HarnessPin | None = None
 
     @model_validator(mode="after")
     def _consistent(self):
@@ -445,6 +460,16 @@ class AcceptanceManifest(_Model):
                 raise ValueError(
                     "a held-out manifest must carry its gates, fixed before "
                     "the run."
+                )
+            if self.harness is None:
+                raise ValueError(
+                    "a held-out manifest must pin the harness it was fixed "
+                    "against (harness: git_commit and file SHA-256s)."
+                )
+            if set(self.harness.files) != set(HARNESS_FILES):
+                raise ValueError(
+                    f"the harness pin must name exactly {list(HARNESS_FILES)}; "
+                    f"got {sorted(self.harness.files)}."
                 )
         kinds = {name: r.kind for name, r in self.recipes.items()}
         if list(kinds.values()).count("off") != 1:
@@ -604,6 +629,36 @@ def result_is_reusable(
         and result.get("manifest_sha256") == manifest_sha
         and result.get("harness") == fingerprint
     )
+
+
+def check_harness_pin(manifest: AcceptanceManifest, fingerprint: dict) -> None:
+    """Refuse a case whose harness files differ from the manifest's pin.
+
+    Parameters
+    ----------
+    manifest : AcceptanceManifest
+        Manifests without a pin (development ones) always pass.
+    fingerprint : dict
+        :func:`harness_fingerprint` of the checkout that would run the case.
+
+    Raises
+    ------
+    ValueError
+        If any pinned harness file's SHA-256 differs from the fingerprint's.
+    """
+    if manifest.harness is None:
+        return
+    changed = sorted(
+        name
+        for name, sha in manifest.harness.files.items()
+        if fingerprint["files"].get(name) != sha
+    )
+    if changed:
+        raise ValueError(
+            f"manifest {manifest.name} was fixed against the harness at "
+            f"{manifest.harness.git_commit}; {changed} differ on disk. A "
+            "held-out run must use the pinned harness."
+        )
 
 
 def case_tag(scenario: str, seed: int, recipe: str) -> str:

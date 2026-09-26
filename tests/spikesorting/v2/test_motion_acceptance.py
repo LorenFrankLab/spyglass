@@ -37,6 +37,7 @@ from tests.spikesorting.v2._motion_acceptance import (
     case_metrics,
     case_tag,
     check_gates,
+    check_harness_pin,
     check_manifest_gates,
     harness_fingerprint,
     load_manifest,
@@ -151,11 +152,23 @@ _GATES = {
 }
 
 
+_PIN = {
+    "git_commit": "0123456789abcdef",
+    "files": {
+        "_motion_acceptance.py": "a",
+        "_motion_acceptance_run.py": "b",
+        "_motion_fixtures.py": "c",
+    },
+}
+
+
 def _held_out(**changes) -> dict:
     """The development manifest turned held-out (schema checks only; seeds
     2000+ are placeholders, nothing is generated)."""
     data = _dev_dict()
-    data.update(purpose="held_out", seeds=[2000, 2001], gates=_GATES)
+    data.update(
+        purpose="held_out", seeds=[2000, 2001], gates=_GATES, harness=_PIN
+    )
     data.update(changes)
     return data
 
@@ -163,6 +176,19 @@ def _held_out(**changes) -> dict:
 def test_held_out_manifest_with_gates_validates():
     manifest = AcceptanceManifest.model_validate(_held_out())
     assert manifest.gates.recipes == ["dredge_fast"]
+    assert manifest.harness.git_commit == _PIN["git_commit"]
+
+
+def test_held_out_case_refuses_a_harness_other_than_its_pin():
+    manifest = AcceptanceManifest.model_validate(_held_out())
+    fingerprint = {"git_commit": "later", "files": dict(_PIN["files"])}
+
+    check_harness_pin(manifest, fingerprint)  # same files: may run
+    fingerprint["files"]["_motion_acceptance_run.py"] = "edited"
+    with pytest.raises(ValueError, match="_motion_acceptance_run.py"):
+        check_harness_pin(manifest, fingerprint)
+    # Development manifests carry no pin and always pass.
+    check_harness_pin(load_manifest(DEVELOPMENT_MANIFEST), fingerprint)
 
 
 def _with(path: list, value) -> dict:
@@ -180,6 +206,11 @@ def _with(path: list, value) -> dict:
         (_with(["seeds"], [0, 1, 1000]), "reserved for held-out"),
         (_with(["gates"], _GATES), "carries no gates"),
         (_held_out(gates=None), "must carry its gates"),
+        (_held_out(harness=None), "must pin the harness"),
+        (
+            _held_out(harness={**_PIN, "files": {"_motion_fixtures.py": "c"}}),
+            "must name exactly",
+        ),
         (_held_out(seeds=[2, 2000]), "only seeds >= 1000"),
         (_with(["seeds"], [0, 0]), "unique"),
         (
