@@ -744,13 +744,21 @@ def run_v2_pipeline(
             MotionEstimateSelection,
         )
 
-        estimate_key = MotionEstimateSelection.insert_selection(
-            {
-                **source,
-                "motion_estimation_params_name": motion_recipe.recipe[
-                    "motion_estimation_params_name"
-                ],
-            }
+        # The selection inserts run inside ``_run_stage`` too, so a refused
+        # selection (e.g. a source whose content hash drifted) is a
+        # PipelineStageError with the partial summary like a failed populate.
+        estimate_key, _, _ = _run_stage(
+            "motion_estimate",
+            False,
+            lambda: MotionEstimateSelection.insert_selection(
+                {
+                    **source,
+                    "motion_estimation_params_name": motion_recipe.recipe[
+                        "motion_estimation_params_name"
+                    ],
+                }
+            ),
+            run_summary,
         )
 
         # Each stage's work populates AND reads back its row, so a row that
@@ -775,13 +783,18 @@ def run_v2_pipeline(
         if motion_mode == "estimate":
             return {}
 
-        corrected_key = MotionCorrectedRecordingSelection.insert_selection(
-            {
-                "motion_estimate_id": estimate_key["motion_estimate_id"],
-                "motion_interpolation_params_name": motion_recipe.recipe[
-                    "motion_interpolation_params_name"
-                ],
-            }
+        corrected_key, _, _ = _run_stage(
+            "motion_corrected_recording",
+            False,
+            lambda: MotionCorrectedRecordingSelection.insert_selection(
+                {
+                    "motion_estimate_id": estimate_key["motion_estimate_id"],
+                    "motion_interpolation_params_name": motion_recipe.recipe[
+                        "motion_interpolation_params_name"
+                    ],
+                }
+            ),
+            run_summary,
         )
 
         def _correct() -> list:

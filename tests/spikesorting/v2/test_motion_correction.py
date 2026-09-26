@@ -2043,6 +2043,39 @@ def test_motion_stage_failure_stops_before_sorting(
     assert "sorting_id" not in partial
 
 
+def test_motion_selection_failure_is_a_stage_error(
+    drift_recording, monkeypatch
+):
+    """A refused motion selection insert fails its stage like a failed
+    populate -- a ``PipelineStageError`` carrying the partial run summary,
+    not a bare error -- and nothing is estimated or sorted."""
+    from spyglass.spikesorting.v2.exceptions import PipelineStageError
+    from spyglass.spikesorting.v2.motion import MotionEstimateSelection
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    def _refuse(cls, key):
+        raise ValueError("planted selection refusal")
+
+    monkeypatch.setattr(
+        MotionEstimateSelection, "insert_selection", classmethod(_refuse)
+    )
+    before = _row_counts()
+    with pytest.raises(PipelineStageError) as raised:
+        run_v2_pipeline(
+            **_pipeline_inputs(drift_recording),
+            motion_mode="apply",
+            motion_correction_params_name=MOTION_RECIPE,
+        )
+    assert raised.value.stage == "motion_estimate"
+    assert raised.value.original_type == "ValueError"
+    assert "planted selection refusal" in str(raised.value)
+    partial = raised.value.partial_run_summary
+    assert partial["recording_id"] is not None
+    assert partial["motion_estimate_id"] is None
+    assert "sorting_id" not in partial
+    assert _row_counts() == before
+
+
 def test_preflight_previews_the_motion_ids_the_run_mints(drift_recording):
     """For ``apply``, preflight's expected estimate, corrected-recording and
     sort ids are the ones the run then produces, and every motion check
