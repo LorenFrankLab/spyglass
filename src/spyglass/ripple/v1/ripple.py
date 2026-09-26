@@ -6,8 +6,11 @@ import numpy as np
 import pandas as pd
 import sortingview.views as vv
 from matplotlib.axes import Axes
-from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
-from ripple_detection.core import gaussian_smooth, get_envelope
+from ripple_detection import (
+    Karlsson_ripple_detector,
+    Kay_ripple_detector,
+    get_Kay_ripple_consensus_trace,
+)
 from scipy.stats import zscore
 
 from spyglass.common.common_interval import IntervalList
@@ -344,21 +347,20 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
     def get_Kay_ripple_consensus_trace(
         ripple_filtered_lfps, sampling_frequency, smoothing_sigma: float = 0.004
     ) -> pd.DataFrame:
-        """Calculate the consensus trace for the ripple filtered LFPs"""
-        ripple_consensus_trace = np.full_like(ripple_filtered_lfps, np.nan)
-        not_null = np.all(pd.notnull(ripple_filtered_lfps), axis=1)
+        """Calculate the consensus trace for the ripple filtered LFPs.
 
-        ripple_consensus_trace[not_null] = get_envelope(
-            np.asarray(ripple_filtered_lfps)[not_null]
-        )
-        ripple_consensus_trace = np.sum(ripple_consensus_trace**2, axis=1)
-        ripple_consensus_trace[not_null] = gaussian_smooth(
-            ripple_consensus_trace[not_null],
-            smoothing_sigma,
-            sampling_frequency,
-        )
+        The trace `Kay_ripple_detector` thresholds, computed within each
+        contiguous block of valid samples: rows with NaN and gaps in the time
+        index (steps over 1.5 times the median step) split blocks.
+        """
         return pd.DataFrame(
-            np.sqrt(ripple_consensus_trace), index=ripple_filtered_lfps.index
+            get_Kay_ripple_consensus_trace(
+                np.asarray(ripple_filtered_lfps),
+                sampling_frequency,
+                smoothing_sigma,
+                time=np.asarray(ripple_filtered_lfps.index),
+            ),
+            index=ripple_filtered_lfps.index,
         )
 
     @staticmethod
