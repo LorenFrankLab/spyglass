@@ -720,6 +720,31 @@ class MotionEstimateComputed(NamedTuple):
     input_fingerprint: str
 
 
+#: ``EstimationClock`` field -> the ``MotionEstimate`` column that stores it.
+_ESTIMATION_CLOCK_COLUMNS = {
+    "spans": "continuity_spans",
+    "source_start_s": "continuity_start_s",
+    "source_end_s": "continuity_end_s",
+    "estimation_start_s": "estimation_start_s",
+    "sampling_frequency": "sampling_frequency",
+}
+
+
+def _estimation_clock_of(row: dict):
+    """The ``_motion.EstimationClock`` stored in a ``MotionEstimate`` row.
+
+    ``row`` needs only the time-map columns (``_ESTIMATION_CLOCK_COLUMNS``).
+    """
+    from spyglass.spikesorting.v2._motion import estimation_clock_from_blob
+
+    return estimation_clock_from_blob(
+        {
+            field: row[column]
+            for field, column in _ESTIMATION_CLOCK_COLUMNS.items()
+        }
+    )
+
+
 @schema
 class MotionEstimate(SpyglassMixin, dj.Computed):
     """A saved motion estimate with its resolved configuration and evidence.
@@ -1038,25 +1063,8 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             timestamp on the source clock, its start on the estimation clock,
             and the sampling frequency.
         """
-        from spyglass.spikesorting.v2._motion import estimation_clock_from_blob
-
-        spans, source_start, source_end, estimation_start, fs = (
-            self & key
-        ).fetch1(
-            "continuity_spans",
-            "continuity_start_s",
-            "continuity_end_s",
-            "estimation_start_s",
-            "sampling_frequency",
-        )
-        return estimation_clock_from_blob(
-            {
-                "spans": spans,
-                "source_start_s": source_start,
-                "source_end_s": source_end,
-                "estimation_start_s": estimation_start,
-                "sampling_frequency": fs,
-            }
+        return _estimation_clock_of(
+            (self & key).proj(*_ESTIMATION_CLOCK_COLUMNS.values()).fetch1()
         )
 
     def get_displacement_on_source_clock(self, key: dict):
@@ -1566,15 +1574,7 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
             source_path, source_electrical_series_path
         )
 
-        clock = _motion.estimation_clock_from_blob(
-            {
-                "spans": estimate["continuity_spans"],
-                "source_start_s": estimate["continuity_start_s"],
-                "source_end_s": estimate["continuity_end_s"],
-                "estimation_start_s": estimate["estimation_start_s"],
-                "sampling_frequency": estimate["sampling_frequency"],
-            }
-        )
+        clock = _estimation_clock_of(estimate)
         statistics = np.asarray(
             estimate["statistics_spans"], dtype=np.int64
         ).reshape(-1, 2)
