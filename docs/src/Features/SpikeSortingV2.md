@@ -71,7 +71,8 @@ All v2 tables live in dedicated DataJoint schemas (`spikesorting_v2_recording`,
 `spikesorting_v2_sorting`, `spikesorting_v2_curation`,
 `spikesorting_v2_metric_curation`, `spikesorting_v2_concat_curation`,
 `spikesorting_v2_figpack_curation`, `spikesorting_v2_session_group`,
-`spikesorting_v2_unit_matching`, `spikesorting_v2_recompute`), so the v0/v1
+`spikesorting_v2_unit_matching`, `spikesorting_v2_recompute`,
+`spikesorting_v2_motion`), so the v0/v1
 schemas are untouched. `CurationV2` and its session-aligned
 `ConcatMemberCuration` outputs register as parts on the existing
 `SpikeSortingOutput` merge table, so v0, v1, imported, and v2 curations all
@@ -1445,6 +1446,249 @@ samples and acquisition gaps on the recording's real clock) and always uses
 to [the masked, spans-aware motion estimate](#optional-motion-correction)
 below -- use `DriftEstimate` only to flag high-drift sessions, and the motion
 stage's `MotionEstimate` to inspect or apply a correction.
+
+### Optional motion correction
+
+**EXPERIMENTAL: no motion recipe here is validated for a probe.** See
+[Development evidence](#development-evidence-not-a-validation) below before
+relying on a correction; inspect the saved estimate rather than trusting a
+sort's improvement.
+
+Motion correction is a stage independent of concatenation: `motion_mode` on
+`run_v2_pipeline` / `run_v2_pipeline_session` (and the matching preflight
+helpers) is `"off"` (the default), `"estimate"`, or `"apply"`, for a
+single-session **or** a concat run alike.
+
+- `"off"` -- no motion stage; the sort is exactly today's uncorrected sort
+  (same `sorting_id`).
+- `"estimate"` -- saves a `MotionEstimate` on the recording (or
+  `ConcatenatedRecording`) under its mask, for inspection, but still sorts
+  the uncorrected traces (same `sorting_id` as `"off"`).
+- `"apply"` -- also saves a `MotionCorrectedRecording` and sorts it (a new,
+  distinct `sorting_id`).
+
+`motion_correction_params_name` (a `MotionCorrectionParameters` row pairing an
+estimation recipe with an interpolation recipe) is required for `"estimate"`
+and `"apply"`, and rejected for `"off"`; a contradictory pair raises
+`PipelineInputError` before any query. A failed motion stage raises
+`PipelineStageError` and nothing downstream is sorted -- an estimation or
+application error can never fall back to an uncorrected sort silently.
+
+```python
+from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+# Single session, saving an estimate for inspection but sorting uncorrected
+# traces (same sorting_id you would get with motion_mode="off").
+summary = run_v2_pipeline(
+    nwb_file_name=nwb_file_name,
+    sort_group_id=sort_group_id,
+    interval_list_name="raw data valid times",
+    team_name="my_team",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
+    motion_mode="estimate",
+    motion_correction_params_name="dredge_fast_v1",
+)
+print(summary["motion_estimate_id"], summary["motion_estimation_preset"])
+
+# Apply it: sort the motion-corrected recording. Works the same way on a
+# concat run (concat_session_group_owner / concat_session_group_name).
+summary = run_v2_pipeline(
+    nwb_file_name=nwb_file_name,
+    sort_group_id=sort_group_id,
+    interval_list_name="raw data valid times",
+    team_name="my_team",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
+    motion_mode="apply",
+    motion_correction_params_name="dredge_v1",
+)
+print(
+    summary["motion_corrected_recording_id"],
+    summary["motion_removed_channel_ids"],
+)
+```
+
+The equivalent table-level calls (what the pipeline runs under the hood) --
+useful for a manual pipeline or for estimating on a source the orchestrator
+does not (yet) cover:
+
+```python
+from spyglass.spikesorting.v2.motion import (
+    MotionEstimateSelection,
+    MotionEstimate,
+    MotionCorrectedRecordingSelection,
+    MotionCorrectedRecording,
+)
+from spyglass.spikesorting.v2.sorting import SortingSelection, Sorting
+
+# One of recording_id / concat_recording_id; artifact_detection_id is optional
+# and single-recording only (a concat carries its own frozen member masks).
+estimate_key = MotionEstimateSelection.insert_selection(
+    {
+        "recording_id": recording_key["recording_id"],
+        "artifact_detection_id": artifact_detection_key["artifact_detection_id"],
+        "motion_estimation_params_name": "dredge_fast_v1",
+    }
+)
+MotionEstimate.populate(estimate_key)
+
+corrected_key = MotionCorrectedRecordingSelection.insert_selection(
+    {
+        "motion_estimate_id": estimate_key["motion_estimate_id"],
+        "motion_interpolation_params_name": "kriging_force_extrapolate_v1",
+    }
+)
+MotionCorrectedRecording.populate(corrected_key)
+
+# The corrected recording must have been estimated on the SAME source and
+# mask as this sort; a mismatch is rejected at insert (ValueError) and again
+# at compute (SchemaBypassError) if a row bypasses insert_selection.
+sorting_key = SortingSelection.insert_selection(
+    {
+        "recording_id": recording_key["recording_id"],
+        "artifact_detection_id": artifact_detection_key["artifact_detection_id"],
+        "motion_corrected_recording_id": corrected_key["motion_corrected_recording_id"],
+        "sorter": "mountainsort5",
+        "sorter_params_name": "franklab_30khz_ms5_2026_06",
+    }
+)
+Sorting.populate(sorting_key)
+```
+
+**Inspecting a saved estimate.** `MotionEstimate` stores the SpikeInterface
+`Motion`, its resolved configuration, the spans it estimated from, and
+peak-count diagnostics -- never a raw peak array.
+
+```python
+motion = MotionEstimate().get_motion(estimate_key)
+# .displacement, .temporal_bins_s (on the ESTIMATION clock, see below), ...
+
+clock = MotionEstimate().get_estimation_clock(estimate_key)
+# EstimationClock: each continuity span's frame range, its first/last source
+# timestamp, its start on the estimation clock, and the sampling frequency.
+
+mapped = MotionEstimate().get_displacement_on_source_clock(estimate_key)
+# SourceClockDisplacement: the same displacement with bins mapped back to
+# SOURCE time, for inspection; a bin inside a capped gap is flagged
+# (in_gap=True, source_time_s=NaN) rather than assigned to a span.
+
+row = (MotionEstimate & estimate_key).fetch1()
+row["n_peaks_detected"], row["n_peaks_kept"]         # on the masked recording
+row["peaks_per_temporal_bin"], row["peaks_per_continuity_span"]
+row["max_abs_displacement_um"], row["noise_levels"]
+```
+
+**Resolved presets.** Every recipe is DREDge's AP registration
+(`estimate_motion(..., method="dredge_ap")`); the shipped `dredge_v1` /
+`dredge_fast_v1` rows differ only in peak-localization method (accuracy vs
+speed), and `rigid_fast` -- allowed, but with no shipped default row -- is a
+**rigid** DREDge estimator, not a different algorithm:
+
+| recipe | estimator | peak localization | interpolation border mode |
+| --- | --- | --- | --- |
+| `dredge_v1` (default row) | `dredge_ap`, nonrigid (`rigid=False`) | `monopolar_triangulation` | `force_extrapolate` (`kriging_force_extrapolate_v1`) |
+| `dredge_fast_v1` (default row) | `dredge_ap`, nonrigid (`rigid=False`) | `grid_convolution` | `force_extrapolate` (`kriging_force_extrapolate_v1`) |
+| `rigid_fast` (allowed; insert explicitly, no default row) | `dredge_ap`, **rigid=True, 5 s bins** | `center_of_mass` | `remove_channels` (`kriging_remove_channels_v1`) |
+
+`MotionEstimationParameters` persists the fully resolved SpikeInterface
+configuration (preset defaults, every `estimate_motion`/detection/localization
+signature default, and your overrides), the SpikeInterface version, and the
+estimation algorithm version, all folded into the estimate's identity, so a
+SpikeInterface upgrade or a changed override selects a new estimate rather
+than silently reusing a stale one. `MotionInterpolationParameters` is
+similarly explicit about every `interpolate_motion` argument
+(`spatial_interpolation_method`, `sigma_um`, `p`, `num_closest`) -- nothing is
+left to an unstated SpikeInterface default. Only `remove_channels` and
+`force_extrapolate` border modes are allowed; SpikeInterface's `force_zeros`
+is rejected because it zeroes whole channels for some time bins, which the
+statistics spans (below) cannot describe.
+
+**Gap policy.** Each source is estimated **once**, on an *estimation clock*
+(`max_gap_s`, required on every `MotionEstimationParameters` row -- 30 s in
+the shipped rows -- and part of the estimate's identity): within a
+continuity span (an uninterrupted stretch of acquisition, or one
+concatenation member) time advances at `1 / fs` from the span's own start; the
+*real* gap between two spans -- an acquisition gap or a concatenation member
+join -- is kept up to `max_gap_s`, a longer real gap is shortened to it. One
+estimation therefore gives **one common reference frame** for every span
+(DREDge centers its displacement over all data jointly), rather than a
+separate, arbitrarily-offset estimate per span. `get_displacement_on_source_clock`
+maps the result back to each span's real timestamps for inspection.
+Concatenation members must be in acquisition-time order for this to work; an
+estimate on out-of-order or overlapping members raises.
+
+**Masks and statistics spans.** Estimation excludes invalid samples from both
+noise-level and peak-support statistics: a peak is kept only if its entire
+localization window lies inside one *statistics span* (the artifact-free,
+in-order frame ranges also used for whitening/noise), and per-channel noise
+comes from those same spans (the phase-3b span MAD when samples are excluded,
+otherwise SpikeInterface's own seeded `get_noise_levels`). A
+`MotionCorrectedRecording` **reuses** its estimate's statistics and continuity
+spans rather than recomputing them from the corrected traces, and asserts
+`n_samples` and span equality with its source at insert and compute time; the
+corrected recording's traces are silenced again outside those spans after
+interpolation, same as concat masking.
+
+**Correction ownership relative to the sorter.** A `MotionCorrectedRecording`
+is meant to be sorted by a sorter that does **not** also correct motion
+internally. `SortingSelection.insert_selection` rejects a
+`motion_corrected_recording_id` paired with a `SorterParameters` row whose
+sorter would apply its own internal correction (SpykingCircus2's /
+Tridesclous2's `apply_motion_correction`, Kilosort's `do_correction`,
+resolved against SpikeInterface's own default when the row omits the key) --
+the same check re-runs at compute, so a SpikeInterface default flipping
+between insert and populate is still caught. A sorter with unknown motion
+behavior is refused too. To sort a corrected recording with one of these
+sorters, insert a new `SorterParameters` row with the internal-correction key
+explicitly `False` and select that row -- the rejection's error message names
+the sorter, the row, and the key.
+
+**Selecting a corrected vs. uncorrected sort.** `motion_corrected_recording_id`
+follows the same restriction convention as `artifact_detection_id`: `None`
+matches only sorts reading their source's own (uncorrected) traces, an id
+matches only that correction's sorts, and an **absent** key is a wildcard
+matching both alike. Pass the key explicitly (to `CurationV2.resolve_restriction`,
+`SpikeSortingOutput`'s v2 restriction dispatch, etc.) when you need exactly
+one of a source's corrected or uncorrected sorts.
+
+**Database privileges.** `SortingSelection.MotionCorrectionSource`'s foreign
+key means importing `spyglass.spikesorting.v2.sorting` now also declares the
+`spikesorting_v2_motion` schema (`MotionEstimationParameters`,
+`MotionInterpolationParameters`, `MotionCorrectionParameters`,
+`MotionEstimateSelection`, `MotionEstimate`,
+`MotionCorrectedRecordingSelection`, `MotionCorrectedRecording`) -- users need
+insert/create privileges on it, same as any other v2 schema.
+
+#### Development evidence (not a validation)
+
+Development benchmarks on a simulated **32-contact, single-column, 26 µm-pitch
+polymer shank** (planted rigid/nonrigid drift, jumps, and no-motion controls;
+`spikeinterface==0.104.3`) found:
+
+- `dredge` / `dredge_fast` tracked rigid drift and jumps reasonably; `rigid_fast`
+  did not: it produced catastrophic outlier bins on 2 of 12 drifting
+  development cases (tens of µm off in a single 5 s bin) and, on one nonrigid
+  case, made real-sorter accuracy *worse* than no correction at all
+  (well-detected units 0 vs. 8 for "off"). `rigid_fast` also performed worse
+  than no correction on a separate MEArec drift slice.
+- **Interpolation itself costs sorting quality on this 26 µm single-column
+  probe, even given the TRUE (oracle) motion.** On a recording whose true
+  drift puts it about 0.58 contact-pitch off-grid at the moment of a rigid
+  jump, correcting with the exact (oracle) displacement recovered most of the
+  well-detected units lost to no correction at all, but still left a large
+  gap to a static, no-motion twin's well-detected count -- so even perfect
+  knowledge of the motion did not fully undo the interpolation's own cost on
+  this single-column geometry. Kriging also re-mixes background noise across
+  contacts, so a corrected recording can read as noisier than the uncorrected
+  one on a plain noisy trace-distance metric (a metric that is therefore not
+  a good correction check by itself).
+- A nonrigid benefit over the best rigid fit was not demonstrated: this shank
+  is only barely wide enough (by 6 µm) for SpikeInterface's own nonrigid
+  window-count check to accept it as more than one window.
+
+None of the shipped recipes is validated for a probe. `dredge_v1` and
+`dredge_fast_v1` ship as default rows; `rigid_fast` stays an allowed preset
+(insert a `MotionEstimationParameters` row naming it explicitly) so it can
+still be compared, but ships with no default row.
 
 ### Chronic same-day recordings
 
