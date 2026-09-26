@@ -585,6 +585,42 @@ def test_concat_selection_missing_recording_raises(chronic_2_session_minirec):
 
 
 @pytest.mark.usefixtures("dj_conn")
+def test_concat_selection_rejects_a_stale_motion_key_and_unknown_fields():
+    """A concat selection never corrects motion: the removed
+    ``motion_correction_params_name`` key is refused with a pointer to the
+    motion stage instead of silently selecting an uncorrected concat, and any
+    other unknown field is refused too. Both checks run before any member is
+    read, so no group needs to exist."""
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+
+    group_key = {
+        "session_group_owner": "no_such_owner",
+        "session_group_name": "no_such_group",
+    }
+    assert not (SessionGroup & group_key)
+    request = {**group_key, "preprocessing_params_name": "default"}
+    with pytest.raises(ValueError, match='motion_mode="apply"'):
+        ConcatenatedRecordingSelection.insert_selection(
+            {**request, "motion_correction_params_name": "auto_default"},
+            artifact_detection_ids={},
+        )
+    with pytest.raises(ValueError, match=r"unknown field\(s\) \['typo'\]"):
+        ConcatenatedRecordingSelection.insert_selection(
+            {**request, "typo": 1}, artifact_detection_ids={}
+        )
+    # The minted id is accepted (and ignored), so the refusal of unknown
+    # fields is not what the empty-group check below reports.
+    with pytest.raises(ValueError, match="has no members"):
+        ConcatenatedRecordingSelection.insert_selection(
+            {**request, "concat_recording_id": None},
+            artifact_detection_ids={},
+        )
+
+
+@pytest.mark.usefixtures("dj_conn")
 def test_concat_rejects_mismatched_electrode_space(monkeypatch):
     """A SessionGroup whose members map to different physical electrode spaces
     (different electrode ids or brain regions) is rejected.

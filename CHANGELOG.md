@@ -135,7 +135,10 @@ available.
   `motion_preset` column on `ConcatenatedRecording`. The concat preset
   `franklab_concat_hippocampus_30khz_ms5_2026_06` is renamed
   `franklab_concat_hippocampus_30khz_ms5_2026_09`: it no longer pins motion
-  correction and remains experimental. The inputs you pass to
+  correction and remains experimental.
+  `ConcatenatedRecordingSelection.insert_selection` raises on a
+  `motion_correction_params_name` key (or any other unknown field) rather
+  than silently selecting an uncorrected concat. The inputs you pass to
   `run_v2_pipeline` now set single-session or concat mode, so any preset runs
   in either mode.
 - **Schema change: `concat_recording_id` values change.** Motion correction

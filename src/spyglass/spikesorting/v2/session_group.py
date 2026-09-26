@@ -459,7 +459,7 @@ class ConcatenatedRecordingSelection(
         ----------
         key : dict
             Must carry ``session_group_owner``, ``session_group_name``, and
-            ``preprocessing_params_name``.
+            ``preprocessing_params_name``, and nothing else.
             A caller-supplied ``concat_recording_id`` is ignored; the id is
             minted/found here.
         artifact_detection_ids : mapping
@@ -476,7 +476,10 @@ class ConcatenatedRecordingSelection(
         Raises
         ------
         ValueError
-            If a required identity field is missing.
+            If a required identity field is missing, or ``key`` carries any
+            other field -- including the removed
+            ``motion_correction_params_name`` (motion correction is a
+            separate stage, never part of a concat).
         MissingRecordingForConcatError
             If any member has no populated ``Recording`` under
             ``preprocessing_params_name``.
@@ -499,6 +502,26 @@ class ConcatenatedRecordingSelection(
             RecordingSelection,
         )
 
+        if "motion_correction_params_name" in key:
+            raise ValueError(
+                "ConcatenatedRecordingSelection.insert_selection no longer "
+                "takes motion_correction_params_name: concatenation never "
+                "corrects motion. Select the concat without it, then run the "
+                "motion stage on the resulting concat (run_v2_pipeline(..., "
+                'motion_mode="apply", motion_correction_params_name=...)); the '
+                "CHANGELOG describes how to reproduce the old rigid_fast "
+                "correction."
+            )
+        extra = sorted(
+            set(key) - set(cls._IDENTITY_FIELDS) - {"concat_recording_id"}
+        )
+        if extra:
+            raise ValueError(
+                "ConcatenatedRecordingSelection.insert_selection received "
+                f"unknown field(s) {extra}. Pass only "
+                f"{list(cls._IDENTITY_FIELDS)} (a concat_recording_id is "
+                "ignored)."
+            )
         missing_fields = [f for f in cls._IDENTITY_FIELDS if f not in key]
         if missing_fields:
             raise ValueError(
