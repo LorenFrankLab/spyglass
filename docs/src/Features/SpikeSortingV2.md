@@ -142,8 +142,13 @@ coexist under one merge surface.
     for a single session or `ConcatenatedRecordingSource` for a same-day chronic
     concatenation). Single-recording sorts can add an artifact pass through the
     `ArtifactDetectionOutput` merge; concat masks are already materialized.
-    Dispatches `clusterless_thresholder` (peak detection only) vs the SI sorter
-    registry (`mountainsort4`, `mountainsort5`, ...). The Unit part table stores
+    Masked samples must read 0 uV: a source that keeps a nonzero channel
+    offset -- only possible with the `no_filter` preprocessing recipe and
+    `reference_mode="none"` -- is converted to float32 microvolts (gain 1,
+    offset 0) before masking, so its sorter input is float32 uV; a
+    zero-offset source is masked in its stored units, unchanged. Dispatches
+    `clusterless_thresholder` (peak detection only) vs the SI sorter registry
+    (`mountainsort4`, `mountainsort5`, ...). The Unit part table stores
     per-unit summary stats (n_spikes, peak_amplitude_uv) so quick filtering does
     not require loading the NWB.
 - **`MotionEstimationParameters` / `MotionInterpolationParameters` /
@@ -1884,9 +1889,14 @@ Key behaviors and caveats:
     an earlier standalone sort. Direct callers must supply every member index in
     `artifact_detection_ids`; an explicit `None` means no mask for that member.
     A concat `SortingSelection` has no separate artifact input because masking
-    already happened in its source. If you apply the optional motion stage to
-    the concat, its corrected recording re-applies the same mask after
-    interpolation. Sample counts and boundaries never change.
+    already happened in its source. If any member keeps a nonzero channel
+    offset -- only possible with the `no_filter` preprocessing recipe and
+    `reference_mode="none"` -- every member is converted to float32
+    microvolts (gain 1, offset 0) before masking, so the concatenation is
+    float32 uV; members with zero offsets concatenate in their stored units,
+    unchanged. If you apply the optional motion stage to the concat, its
+    corrected recording re-applies the same mask after interpolation. Sample
+    counts and boundaries never change.
 - **Observation intervals survive curation and member export.** The concat NWB
     stores kept intervals in synthetic seconds; each exported member carries its
     kept intervals in original session time, including disjoint recordings.
