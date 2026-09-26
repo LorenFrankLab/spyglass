@@ -191,6 +191,10 @@ class EvaluationRecordingInputs(NamedTuple):
     nwb_file_name: str
     source_kind: str
     recording_id: str | None
+    # The lineage concatenation for a concat-backed sort (``None`` otherwise),
+    # read from the sort's lineage, never from the traces row: a corrected
+    # sort's traces row is the ``MotionCorrectedRecording``.
+    concat_recording_id: str | None
     artifact_detection_id: str | None
     artifact_valid_times: object  # np.ndarray | None (DeepHashed, not ==)
     # The sort's effective traces: the artifact every recording load reads.
@@ -1121,6 +1125,11 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 nwb_file_name=_nwb_file_name_for_sorting(sorting_key),
                 source_kind=lineage.kind,
                 recording_id=recording_id,
+                concat_recording_id=(
+                    str(lineage.key["concat_recording_id"])
+                    if lineage.kind == "concatenated_recording"
+                    else None
+                ),
                 artifact_detection_id=artifact_detection_id,
                 artifact_valid_times=artifact_valid_times,
                 traces=traces,
@@ -1225,13 +1234,13 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         )
 
         # Concat sources carry no single recording_id (recording_id is None);
-        # record the concat_recording_id (from the ConcatenatedRecording row) so
-        # the file identifies its upstream standalone. recording_content_hash is
-        # the source row's content_hash either way (the concat's, for a concat).
-        concat_recording_id = (
-            str(recording_inputs.traces.row["concat_recording_id"])
-            if recording_inputs.source_kind == "concatenated_recording"
-            else None
+        # record the lineage concat_recording_id so the file identifies its
+        # upstream standalone. recording_content_hash is the content_hash of
+        # the traces the metrics were computed on: the source row's (the
+        # concat's, for a concat), or the corrected recording's for a sort of
+        # motion-corrected traces, whose id is then recorded too.
+        corrected_id = recording_inputs.traces.key.get(
+            "motion_corrected_recording_id"
         )
 
         # Provenance header shared by the populated and zero-unit paths so every
@@ -1252,12 +1261,14 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             "auto_curation_rules": metric_inputs.rule_rows,
             "source_kind": recording_inputs.source_kind,
             "recording_id": recording_inputs.recording_id,
-            "concat_recording_id": concat_recording_id,
+            "concat_recording_id": recording_inputs.concat_recording_id,
             "recording_content_hash": recording_inputs.traces.row[
                 "content_hash"
             ],
             "spikeinterface_version": spikeinterface_version,
         }
+        if corrected_id is not None:
+            base_provenance["motion_corrected_recording_id"] = str(corrected_id)
 
         from spyglass.spikesorting.v2._observed_time import OBSERVATION_VERSION
 
