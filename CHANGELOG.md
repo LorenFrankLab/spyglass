@@ -233,6 +233,23 @@ DLCProject().alter()
   resolved preset, border mode and experimental status.
   `initialize_v2_defaults` installs the shipped motion recipes, and
   `verify_v2_default_catalog` audits them.
+- Every consumer of a corrected sort reads the corrected recording, with its
+  channels (a `remove_channels` recipe's reduced set included): analyzer
+  builds and rebuilds, merged and derivative curation analyzers,
+  `CurationEvaluation`, the recompute audit, `CurationV2.get_recording` /
+  `SpikeSortingOutput.get_recording`, the observed-duration report and
+  UnitMatch bundle extraction and geometry checks. Loading a corrected
+  recording checks that its channels and positions are the ones the
+  correction recorded (finite, distinct, in order). Curation analyzer caches
+  are keyed by the corrected recording's content as well as the source's.
+  `CurationEvaluation` provenance takes `concat_recording_id` from the sort's
+  lineage and records the `motion_corrected_recording_id`; the UnitMatch NWB
+  member table records which traces each member's waveforms came from.
+  `CurationV2.resolve_restriction` accepts `motion_corrected_recording_id`
+  (`None` for uncorrected sorts only, an id for that corrected recording's
+  sorts; absent matches both). `ConcatMemberCuration.get_recording`,
+  artifact detection and the recording-level trace plots stay on the
+  uncorrected source.
 
 #### Spike Sorting v2 launch: configuration, resource use, and the curation-to-analysis workflow
 
