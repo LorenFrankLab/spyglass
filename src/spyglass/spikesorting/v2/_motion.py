@@ -730,6 +730,7 @@ def estimation_noise_levels(
                 "seed": seed,
             },
             n_jobs=1,
+            progress_bar=False,
         )
     return np.asarray(levels, dtype=np.float64)
 
