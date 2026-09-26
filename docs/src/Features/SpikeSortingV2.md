@@ -1608,11 +1608,13 @@ than silently reusing a stale one. `MotionInterpolationParameters` is
 similarly explicit about every `interpolate_motion` argument
 (`spatial_interpolation_method`, `sigma_um`, `p`, `num_closest`) -- nothing is
 left to an unstated SpikeInterface default. Estimation and interpolation both
-act on microvolts: peak detection compares each trace with a multiple of its
-noise and treats masked samples as zeros, which is physical only at gain 1 and
-offset 0, and interpolation mixes channels with weights that need not sum to
-1. A source that is not already float microvolts (gain 1, offset 0),
-including an integer `no_filter` recording, is first scaled with
+act on microvolts. Peak detection compares each trace with a multiple of its
+noise and treats masked samples as zeros, which needs a zero offset (only
+then is a stored zero 0 µV). Different gains across channels matter wherever
+channels are combined: localization weighs peak amplitudes across
+neighboring channels, and interpolation mixes channels with weights that need
+not sum to 1, so both need every channel on one physical scale. A source that
+is not already float microvolts (gain 1, offset 0) is first scaled with
 SpikeInterface's `scale_to_uV` (float32); masked samples are silenced after
 scaling, so they are exactly 0 µV, and the corrected recording is stored with
 gain 1 and offset 0.
