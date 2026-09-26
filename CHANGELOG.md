@@ -107,31 +107,38 @@ DLCProject().alter()
 
 ### Breaking Changes
 
-#### Spike Sorting v2: concatenation no longer applies motion correction
+#### Spike Sorting v2: optional motion correction, independent of concatenation
 
-- `ConcatenatedRecording` now stores the masked, unwhitened concatenation of
+Motion correction is now a stage independent of concatenation: `off`
+(default) / `estimate` / `apply`, usable on a single-session `Recording` or a
+`ConcatenatedRecording` alike. **No shipped recipe is validated for a
+probe.**
+
+- **Concatenation itself no longer applies motion correction.**
+  `ConcatenatedRecording` now stores the masked, unwhitened concatenation of
   its members' traces and no longer runs SpikeInterface `correct_motion`.
   Previously the concat preset applied SI's `rigid_fast` preset, which
   estimates rigid motion with DREDge's AP registration (`dredge_ap`) and, by
-  default, removes channels at the probe border.
-- The `MotionCorrectionParameters` table and its `none` / `auto_default` /
-  `rigid_fast_default` rows are removed, along with the
-  `motion_correction_params_name` preset field and the `motion_preset` column
-  on `ConcatenatedRecording`.
-- The concat preset `franklab_concat_hippocampus_30khz_ms5_2026_06` is renamed
-  `franklab_concat_hippocampus_30khz_ms5_2026_09`. It no longer pins motion
+  default, removes channels at the probe border. The old
+  `MotionCorrectionParameters` table (in `spikesorting_v2_session_group`) and
+  its `none` / `auto_default` / `rigid_fast_default` rows are removed, along
+  with the `motion_correction_params_name` preset field and the
+  `motion_preset` column on `ConcatenatedRecording`. The concat preset
+  `franklab_concat_hippocampus_30khz_ms5_2026_06` is renamed
+  `franklab_concat_hippocampus_30khz_ms5_2026_09`: it no longer pins motion
   correction and remains experimental. The inputs you pass to
   `run_v2_pipeline` now set single-session or concat mode, so any preset runs
   in either mode.
 - **Schema change: `concat_recording_id` values change.** Motion correction
   is no longer part of the concat identity. `alter()` cannot remove the
-  foreign key, and `drop()` refuses to drop the `SortingSelection` part table
-  alone. On an existing preproduction database, delete the concat
-  selections, which cascades to their sorts and curations. Then drop the
-  emptied tables leaves-first:
+  foreign key, and `drop()` refuses to drop a part table alone. On an
+  existing preproduction database, delete the concat selections, which
+  cascades to their sorts and curations. Then drop the emptied tables
+  leaves-first:
 
   ```python
   import datajoint as dj
+  from spyglass.spikesorting.v2.motion import MotionEstimateSelection
   from spyglass.spikesorting.v2.session_group import (
       ConcatenatedRecording,
       ConcatenatedRecordingSelection,
@@ -140,6 +147,12 @@ DLCProject().alter()
 
   ConcatenatedRecordingSelection().delete()
   for name in (
+      # MotionEstimateSelection.ConcatenatedRecordingSource also has a live
+      # foreign key on ConcatenatedRecording (importing
+      # spyglass.spikesorting.v2.sorting declares the motion schema at module
+      # level, so this is nearly always the case) -- drop it first, or the
+      # ConcatenatedRecording drop below fails on its foreign key.
+      MotionEstimateSelection.ConcatenatedRecordingSource.full_table_name,
       SortingSelection.ConcatenatedRecordingSource.full_table_name,
       ConcatenatedRecording.MemberBoundary.full_table_name,
       ConcatenatedRecording.full_table_name,
@@ -157,21 +170,52 @@ DLCProject().alter()
   joins and member-internal gaps with each span's real first and last
   timestamps. Do this after the
   [preproduction database upgrade sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database).
-- Optional motion correction will be a separate stage. `DriftEstimate` stays
-  QC-only. It no longer fails when two detected peaks share a frame (seen on
-  dense probes): it loads the recording's timestamps into memory before
-  estimating, keeping the same real clock.
+- **Reproducing the old concat behavior.** The old concat preset applied
+  `rigid_fast` with `remove_channels` interpolation automatically; that is no
+  longer automatic, and `rigid_fast` ships with no default `MotionEstimationParameters`
+  row: development runs on our test probe found catastrophic outlier bins and
+  a case where it made real-sorter accuracy worse than no correction at all
+  (see [Optional motion correction](Features/SpikeSortingV2.md#optional-motion-correction)
+  for the full development evidence). To reproduce the old behavior anyway:
+  insert a `rigid_fast` estimation row, compose it
+  with the shipped `kriging_remove_channels_v1` interpolation row into a new
+  `MotionCorrectionParameters` row, and run with `motion_mode="apply"`:
 
-#### Spike Sorting v2: saved motion estimates (experimental)
+  ```python
+  from spyglass.spikesorting.v2.motion import (
+      MotionCorrectionParameters,
+      MotionEstimationParameters,
+      MotionInterpolationParameters,
+  )
 
-- New module `spyglass.spikesorting.v2.motion` with
+  MotionInterpolationParameters.insert_default()  # ships kriging_remove_channels_v1
+  MotionEstimationParameters.insert1(
+      {
+          "motion_estimation_params_name": "rigid_fast_v1",
+          "params": {"preset": "rigid_fast", "max_gap_s": 30.0},
+      }
+  )
+  MotionCorrectionParameters.insert1(
+      {
+          "motion_correction_params_name": "rigid_fast_v1",
+          "motion_estimation_params_name": "rigid_fast_v1",
+          "motion_interpolation_params_name": "kriging_remove_channels_v1",
+      }
+  )
+  # run_v2_pipeline(..., motion_mode="apply",
+  #                 motion_correction_params_name="rigid_fast_v1")
+  ```
+- `DriftEstimate` stays QC-only, unmasked, and not comparable to the new
+  masked estimate below. It no longer fails when two detected peaks share a
+  frame (seen on dense probes): it loads the recording's timestamps into
+  memory before estimating, keeping the same real clock.
+- **New module `spyglass.spikesorting.v2.motion`.**
   `MotionEstimationParameters` (named SpikeInterface `dredge`, `dredge_fast`
-  or `rigid_fast` recipes; `dredge_v1` and `dredge_fast_v1` ship as rows),
-  `MotionEstimateSelection` (one `Recording` with an optional artifact
-  detection, or one `ConcatenatedRecording`) and `MotionEstimate`, which saves
-  the SpikeInterface `Motion` with the fully resolved configuration, the
-  frame spans it used and peak-count diagnostics. No recipe is validated for
-  a probe.
+  or `rigid_fast` recipes; only `dredge_v1` and `dredge_fast_v1` ship as
+  default rows), `MotionEstimateSelection` (one `Recording` with an optional
+  artifact detection, or one `ConcatenatedRecording`) and `MotionEstimate`,
+  which saves the SpikeInterface `Motion` with the fully resolved
+  configuration, the frame spans it used and peak-count diagnostics.
 - The estimate uses only valid samples: noise levels come from the
   artifact-free statistics spans, and peaks whose localization window touches
   a masked sample are dropped.
@@ -207,14 +251,16 @@ DLCProject().alter()
   corrected recording must have been estimated on that source with the sort's
   artifact detection, and its id is part of `sorting_id`. A sort without one
   keeps the `sorting_id` it had before. A sorter row that corrects motion
-  itself (SpykingCircus2's `default` row, Kilosort with `do_correction`) is
-  refused for a corrected source; a sorter whose motion behavior is unknown
-  is refused too. `Sorting` sorts the corrected traces, takes the statistics
-  spans from the corrected recording and records the correction ids in the
-  units NWB provenance. A corrected recording a sort selected cannot be
-  deleted without that sort. The part is a new table, so no recreation is
-  needed; importing `spyglass.spikesorting.v2.sorting` now declares the motion
-  schema.
+  itself (SpykingCircus2's / Tridesclous2's `apply_motion_correction`,
+  Kilosort with `do_correction`) is refused for a corrected source; a sorter
+  whose motion behavior is unknown is refused too. `Sorting` sorts the
+  corrected traces, takes the statistics spans from the corrected recording
+  and records the correction ids in the units NWB provenance. A corrected
+  recording a sort selected cannot be deleted without that sort. The part is
+  a new table, so no recreation is needed; **importing
+  `spyglass.spikesorting.v2.sorting` now declares the
+  `spikesorting_v2_motion` schema** (grant privileges on it to anyone who
+  imports `sorting`).
 - `run_v2_pipeline`, `run_v2_pipeline_session` and the preflight helpers take
   `motion_mode` (`"off"` by default, `"estimate"` or `"apply"`) and
   `motion_correction_params_name` (required unless the mode is `"off"`), in
@@ -240,14 +286,22 @@ DLCProject().alter()
   `SpikeSortingOutput.get_recording`, the observed-duration report and
   UnitMatch bundle extraction and geometry checks. Loading a corrected
   recording checks that its channels and positions are the ones the
-  correction recorded (finite, distinct, in order). Curation analyzer caches
-  are keyed by the corrected recording's content as well as the source's.
-  `CurationEvaluation` provenance takes `concat_recording_id` from the sort's
-  lineage and records the `motion_corrected_recording_id`; the UnitMatch NWB
-  member table records which traces each member's waveforms came from.
+  correction recorded (finite, distinct, in order). The curation analyzer
+  cache's on-disk **path is unchanged**; only its manifest's
+  `source_artifact_hashes` (the validity check against the traces it was
+  built from) additionally includes the corrected recording's content hash
+  for a corrected sort. `CurationEvaluation` provenance's `recording_id` still
+  names the sort's lineage `Recording` (`None` for a concat), but for a
+  corrected sort `recording_content_hash` is now the **corrected recording's**
+  `content_hash`, not the lineage recording's -- disambiguate the two with the
+  provenance's own `motion_corrected_recording_id` (present only for a
+  corrected sort); the UnitMatch NWB member table records which traces each
+  member's waveforms came from.
   `CurationV2.resolve_restriction` accepts `motion_corrected_recording_id`
-  (`None` for uncorrected sorts only, an id for that corrected recording's
-  sorts; absent matches both). `ConcatMemberCuration.get_recording`,
+  (`None` matches only uncorrected sorts, an id matches only that corrected
+  recording's sorts; an **absent** key is a wildcard matching both -- pass it
+  explicitly to get exactly one of a source's corrected or uncorrected
+  sorts). `ConcatMemberCuration.get_recording`,
   artifact detection and the recording-level trace plots stay on the
   uncorrected source.
 
