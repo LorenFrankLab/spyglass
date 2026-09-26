@@ -867,12 +867,27 @@ _RUN_STAGE_ORDER = (
     "member_recording",
     "member_artifact_detection",
     "concat_recording",
+    # The motion stages run on the sort's source, after it is built and
+    # before the sort, in either input mode.
+    "motion_estimate",
+    "motion_corrected_recording",
     "sorting",
     "curation",
     "auto_curation",
     "member_curation",
     "figpack",
     "merge",
+)
+
+
+#: Motion receipt fields ``describe_run`` shows, in display order.
+_RUN_MOTION_FIELDS = (
+    "motion_mode",
+    "motion_correction_params_name",
+    "motion_estimate_id",
+    "motion_estimation_preset",
+    "motion_corrected_recording_id",
+    "motion_removed_channel_ids",
 )
 
 
@@ -985,6 +1000,19 @@ def _describe_run_single_rows(
             value=str(run_summary["artifact_masked_duration_s"]),
         )
         rows.append(row)
+    # The motion stage's receipt: one ``config`` row per field (``None``
+    # where the mode does not produce it), so an estimate or a corrected
+    # recording is never hidden in a nested dict.
+    if "motion_mode" in run_summary:
+        for setting in _RUN_MOTION_FIELDS:
+            row = _run_blank_row()
+            row.update(
+                row_type="config",
+                sort_group_id=sort_group_id,
+                setting=setting,
+                value=str(run_summary.get(setting)),
+            )
+            rows.append(row)
     for member_index, member_merge_id in sorted(
         (run_summary.get("member_merge_ids") or {}).items()
     ):
@@ -1056,7 +1084,12 @@ def describe_run(result) -> "pd.DataFrame":
         ``"group"`` / ``"warning"``), ``sort_group_id``, ``stage``, ``status``,
         ``seconds``, ``n_units``, ``root_merge_id``, ``auto_labeled_merge_id``,
         ``member_index``, ``nwb_file_name``, ``member_merge_id``, ``warning``,
-        ``error``. For a
+        ``error``, ``setting``, ``value``. ``config`` rows carry the
+        scientific setup, the effective sorter configuration and the motion
+        receipt (``motion_mode``, ``motion_correction_params_name``,
+        ``motion_estimate_id``, ``motion_estimation_preset``,
+        ``motion_corrected_recording_id``, ``motion_removed_channel_ids``;
+        ``"None"`` where the mode produces none). For a
         ``run_v2_pipeline`` summary the ``summary`` row's
         ``status`` is ``"root only"`` / ``"auto-labeled"``. Single-session
         runs expose the auto-labeled child through ``auto_labeled_merge_id``;

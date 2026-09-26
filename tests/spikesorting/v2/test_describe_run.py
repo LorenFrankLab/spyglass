@@ -261,3 +261,54 @@ def test_describe_run_renders_sorter_config_rows():
     )
     # A receipt without the key (e.g. a unit-match manifest) renders no config rows.
     assert "config" not in describe_run(_run_summary())["row_type"].tolist()
+
+
+def _motion_fields(mode):
+    """The motion receipt of a run in ``mode`` (ids as strings)."""
+    applied = mode == "apply"
+    estimated = mode != "off"
+    return {
+        "motion_mode": mode,
+        "motion_correction_params_name": (
+            "dredge_fast_v1" if estimated else None
+        ),
+        "motion_estimate_id": "estimate-1" if estimated else None,
+        "motion_estimation_preset": "dredge_fast" if estimated else None,
+        "motion_corrected_recording_id": "corrected-1" if applied else None,
+        "motion_removed_channel_ids": [0, 31] if applied else None,
+    }
+
+
+@pytest.mark.parametrize("mode", ["off", "estimate", "apply"])
+def test_describe_run_shows_the_motion_receipt(mode):
+    """Every motion receipt field is a ``config`` row (``"None"`` where the
+    mode produces none), and the motion stages sit between the source
+    stages and the sort."""
+    summary = {**_run_summary(), **_motion_fields(mode)}
+    stages = {"motion_estimate": 3.0} if mode != "off" else {}
+    if mode == "apply":
+        stages["motion_corrected_recording"] = 4.0
+    for stage in stages:
+        summary[f"{stage}_status"] = "computed"
+    summary["stage_seconds"] = {**summary["stage_seconds"], **stages}
+
+    frame = describe_run(summary)
+
+    config = frame[frame["row_type"] == "config"].set_index("setting")["value"]
+    for field, value in _motion_fields(mode).items():
+        assert config[field] == str(value)
+    stage_order = frame.loc[frame["row_type"] == "stage", "stage"].tolist()
+    assert stage_order == [
+        "recording",
+        "artifact_detection",
+        *stages,
+        "sorting",
+        "curation",
+    ]
+
+
+def test_describe_run_without_a_motion_receipt_adds_no_motion_rows():
+    """A summary with no motion keys (e.g. a unit-match manifest) renders no
+    motion rows."""
+    frame = describe_run(_run_summary())
+    assert not frame["setting"].fillna("").str.startswith("motion_").any()
