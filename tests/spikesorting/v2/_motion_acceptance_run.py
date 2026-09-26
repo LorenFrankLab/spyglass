@@ -22,6 +22,11 @@ border M4, cost M5) are defined in :func:`plain_motion_error`,
 :func:`sorting_metrics`, :func:`predicted_removed_channels` and
 :func:`run_case`.
 
+The ``representative`` command runs a paired off / dredge / dredge_fast
+estimate-and-apply (and optionally sorting) on one shank of the MEArec polymer
+drift fixture and records quality, border effects, runtime and memory; it
+applies no gate.
+
 DB-FREE: no DataJoint connection is opened. The sorter's scratch lives under
 ``spyglass.settings.temp_dir``, which a test session's teardown clears: do not
 run another pytest session on the same checkout while cases run.
@@ -760,6 +765,277 @@ def run_case(
     return result
 
 
+# ---- representative polymer drift fixture -----------------------------------
+
+
+def run_representative(
+    nwb_path, out_dir, *, shank: int, sort: bool, gt_h5=None
+):
+    """Paired off / dredge / dredge_fast on one shank of a MEArec fixture.
+
+    Reads the fixture with SpikeInterface's NWB reader, keeps one 32-contact
+    shank, bandpasses it like the v2 hippocampus recipe, and runs the shipped
+    ``dredge_v1`` / ``dredge_fast_v1`` estimation rows and
+    ``kriging_force_extrapolate_v1`` interpolation through the stage
+    functions. Records the estimate, its correlation with the MEArec drift
+    vector when ``gt_h5`` is given (both signs: the fixture's convention is
+    unconfirmed), per-channel RMS of the corrected over the uncorrected
+    traces (border effects), runtimes and peak RSS; with ``sort`` also sorts
+    off and corrected with MountainSort5 and reports unit counts and, with
+    ``gt_h5``, agreement with the shank's ground-truth units
+    (:func:`_representative_sorting_summary`).
+    """
+    import spikeinterface as si
+    import spikeinterface.extractors as se
+
+    from spyglass.spikesorting.v2._motion import (
+        apply_motion_on_estimation_clock,
+        build_estimation_clock,
+        estimate_motion_in_spans,
+        resolve_estimation_params,
+        resolve_interpolation_params,
+    )
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        KRIGING_FORCE_EXTRAPOLATE,
+        motion_estimation_default_contents,
+        motion_interpolation_default_contents,
+    )
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        continuity_from_timestamps,
+    )
+    from tests.spikesorting.v2._motion_fixtures import JOB_KWARGS, bandpass
+
+    si.set_global_job_kwargs(**JOB_KWARGS)
+    out_dir = Path(out_dir)
+    t0 = time.perf_counter()
+    raw = se.read_nwb_recording(str(nwb_path))
+    shanks = np.asarray(raw.get_property("probe_shank"))
+    ids = raw.channel_ids[shanks == shank]
+    recording = bandpass(raw.select_channels(ids))
+    n = recording.get_num_samples()
+    fs = recording.get_sampling_frequency()
+    continuity = continuity_from_timestamps(recording)
+    estimation_rows = {
+        row[0]: row[1] for row in motion_estimation_default_contents()
+    }
+    interpolation = resolve_interpolation_params(
+        {r[0]: r[1] for r in motion_interpolation_default_contents()}[
+            KRIGING_FORCE_EXTRAPOLATE
+        ]
+    )
+    result: dict = dict(
+        nwb=str(nwb_path),
+        shank=shank,
+        n_channels=len(ids),
+        n_samples=int(n),
+        duration_s=n / fs,
+        continuity_spans=[list(s) for s in continuity.spans],
+        interpolation=interpolation,
+        load_s=round(time.perf_counter() - t0, 3),
+        recipes={},
+    )
+    gt = None
+    if gt_h5 is not None:
+        import h5py
+
+        with h5py.File(gt_h5, "r") as f:
+            gt = (
+                f["drift_list/0/drift_vector_um"][:],
+                f["drift_list/0/drift_times"][:],
+            )
+    window = int(fs)
+    starts = np.linspace(window, n - 2 * window, 24).astype(int)
+    depths = np.asarray(recording.get_channel_locations())[:, 1]
+    order = np.argsort(depths)
+    sortings = {}
+    if sort:
+        t = time.perf_counter()
+        spans = continuity.spans
+        sortings["off"] = _sort_representative(recording, spans)
+        result["off_sort_s"] = round(time.perf_counter() - t, 3)
+    for name in ("dredge_v1", "dredge_fast_v1"):
+        resolved = resolve_estimation_params(estimation_rows[name])
+        clock = build_estimation_clock(
+            continuity.spans,
+            continuity.start_s,
+            continuity.end_s,
+            fs,
+            max_gap_s=resolved["max_gap_s"],
+        )
+        t = time.perf_counter()
+        motion, diagnostics = estimate_motion_in_spans(
+            recording,
+            statistics_spans=continuity.spans,
+            clock=clock,
+            resolved_params=resolved,
+            job_kwargs=JOB_KWARGS,
+        )
+        estimate_s = time.perf_counter() - t
+        applied = apply_motion_on_estimation_clock(
+            recording,
+            motion,
+            clock=clock,
+            statistics_spans=continuity.spans,
+            resolved_interpolation=interpolation,
+        )
+        corrected = applied.recording
+        num = np.zeros(len(ids))
+        den = np.zeros(len(ids))
+        finite = True
+        for start in starts:
+            a = corrected.get_traces(
+                start_frame=start, end_frame=start + window
+            )
+            b = recording.get_traces(
+                start_frame=start, end_frame=start + window
+            )
+            finite &= bool(np.isfinite(a).all())
+            num += np.sum(a.astype(float) ** 2, axis=0)
+            den += np.sum(b.astype(float) ** 2, axis=0)
+        ratio = np.sqrt(num / den)[order]
+        displacement = np.asarray(motion.displacement[0])
+        entry = dict(
+            estimate_s=round(estimate_s, 3),
+            n_peaks_kept=diagnostics.n_peaks_kept,
+            n_temporal_bins=int(displacement.shape[0]),
+            spatial_bins_um=np.asarray(motion.spatial_bins_um).tolist(),
+            displacement_finite=bool(np.isfinite(displacement).all()),
+            displacement_ptp_um=float(np.ptp(displacement)),
+            displacement_max_abs_um=float(np.max(np.abs(displacement))),
+            n_out_channels=int(corrected.get_num_channels()),
+            removed_channel_ids=[str(c) for c in applied.removed_channel_ids],
+            corrected_traces_finite=finite,
+            rms_ratio_corrected_over_uncorrected_by_depth=ratio.tolist(),
+            rms_ratio_edge_contacts=[
+                float(ratio[0]),
+                float(ratio[1]),
+                float(ratio[-2]),
+                float(ratio[-1]),
+            ],
+            rms_ratio_interior_median=float(np.median(ratio[2:-2])),
+        )
+        if gt is not None:
+            vector, times = gt
+            edges = motion.temporal_bin_edges_s[0]
+            truth = np.array(
+                [
+                    vector[(times >= lo) & (times < hi)].mean()
+                    for lo, hi in zip(edges[:-1], edges[1:])
+                ]
+            )
+            est = displacement.mean(axis=1)
+            entry["corr_with_plus_gt"] = _correlation(est, truth)
+            for sign, key in ((1, "plus_gt"), (-1, "minus_gt")):
+                summary = _error_summary(
+                    displacement,
+                    sign * truth[:, None] * np.ones_like(displacement),
+                )
+                entry[f"error_vs_{key}"] = summary
+            entry["zero_estimate_rms_um"] = float(
+                np.sqrt(np.mean((truth - truth.mean()) ** 2))
+            )
+        if sort:
+            t = time.perf_counter()
+            sortings[name] = _sort_representative(corrected, continuity.spans)
+            entry["sort_s"] = round(time.perf_counter() - t, 3)
+        result["recipes"][name] = entry
+    if sort:
+        result["sorting"] = _representative_sorting_summary(
+            nwb_path, sortings, shank, raw, gt_h5
+        )
+    result["total_s"] = round(time.perf_counter() - t0, 3)
+    result["peak_rss_bytes"] = peak_rss_bytes()
+    (out_dir / f"representative_shank{shank}.json").write_text(
+        json.dumps(result, indent=1, default=str)
+    )
+    return result
+
+
+def _sort_representative(recording, spans):
+    from spyglass.spikesorting.v2._params.sorter import MountainSort5Schema
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        remove_excess_spikes,
+        run_si_sorter,
+    )
+
+    sorting = run_si_sorter(
+        "mountainsort5",
+        MountainSort5Schema().model_dump(),
+        recording,
+        "representative",
+        {"random_seed": 0},
+        statistics_spans=spans,
+    )
+    return remove_excess_spikes(sorting, recording)
+
+
+def _representative_sorting_summary(
+    nwb_path, sortings, shank: int, raw, gt_h5
+) -> dict:
+    """Sorted unit counts and, with the MEArec work file, agreement with the
+    fixture's ground-truth units whose largest template peak is on this shank.
+
+    The fixture's ground-truth spike times (NWB ``processing/ground_truth``)
+    and the MEArec file's ``voltage_peaks`` (units x channels) are matched by
+    unit index; the spike counts and channel positions are checked to agree
+    first. Without ``gt_h5`` only unit counts are reported.
+    """
+    import h5py
+    from spikeinterface.comparison import compare_sorter_to_ground_truth
+    from spikeinterface.core import NumpySorting
+
+    summary = {
+        name: dict(n_sorted_units=int(sorting.get_num_units()))
+        for name, sorting in sortings.items()
+    }
+    if gt_h5 is None:
+        return summary
+    with h5py.File(nwb_path, "r") as f:
+        units = f["processing/ground_truth/units"]
+        times = units["spike_times"][:]
+        bounds = np.r_[0, units["spike_times_index"][:]]
+    with h5py.File(gt_h5, "r") as h:
+        peaks = h["voltage_peaks"][:]
+        positions = h["channel_positions"][:]
+        counts = [
+            h["spiketrains"][str(u)]["times"].shape[0]
+            for u in range(peaks.shape[0])
+        ]
+    if counts != np.diff(bounds).tolist() or not np.allclose(
+        positions[:, [2, 1]], raw.get_channel_locations()
+    ):
+        raise ValueError(
+            "the MEArec work file does not match the fixture's units or "
+            "channel positions."
+        )
+    shanks = np.asarray(raw.get_property("probe_shank"))
+    on_shank = shanks[np.argmax(np.abs(peaks), axis=1)] == shank
+    fs = raw.get_sampling_frequency()
+    t0 = raw.get_start_time()
+    frames, labels = [], []
+    for u in np.flatnonzero(on_shank):
+        spikes = times[bounds[u] : bounds[u + 1]]
+        frames.append(np.round((spikes - t0) * fs).astype(np.int64))
+        labels.append(np.full(spikes.size, u))
+    summary["n_gt_units_on_shank"] = int(on_shank.sum())
+    if not frames:
+        return summary
+    frames = np.concatenate(frames)
+    labels = np.concatenate(labels)
+    order = np.argsort(frames, kind="stable")
+    gt = NumpySorting.from_samples_and_labels(
+        [frames[order]], [labels[order]], fs
+    )
+    for name, sorting in sortings.items():
+        cmp = compare_sorter_to_ground_truth(gt, sorting, exhaustive_gt=False)
+        perf = cmp.get_performance(method="by_unit")
+        summary[name].update(
+            mean_accuracy_on_shank_gt=float(perf["accuracy"].mean()),
+            n_well_detected=int(cmp.count_well_detected_units(0.8)),
+        )
+    return summary
+
+
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -769,18 +1045,33 @@ def main(argv=None) -> None:
     case.add_argument("--seed", type=int, required=True)
     case.add_argument("--recipe", required=True)
     case.add_argument("--out", required=True)
+    rep = sub.add_parser("representative")
+    rep.add_argument("--nwb", required=True)
+    rep.add_argument("--out", required=True)
+    rep.add_argument("--shank", type=int, default=2)
+    rep.add_argument("--sort", action="store_true")
+    rep.add_argument("--gt-h5", default=None)
     args = parser.parse_args(argv)
     Path(args.out).mkdir(parents=True, exist_ok=True)
-    from tests.spikesorting.v2._motion_acceptance import load_manifest
+    if args.command == "case":
+        from tests.spikesorting.v2._motion_acceptance import load_manifest
 
-    run_case(
-        load_manifest(args.manifest),
-        args.manifest,
-        args.scenario,
-        args.seed,
-        args.recipe,
-        args.out,
-    )
+        run_case(
+            load_manifest(args.manifest),
+            args.manifest,
+            args.scenario,
+            args.seed,
+            args.recipe,
+            args.out,
+        )
+    else:
+        run_representative(
+            args.nwb,
+            args.out,
+            shank=args.shank,
+            sort=args.sort,
+            gt_h5=args.gt_h5,
+        )
 
 
 if __name__ == "__main__":

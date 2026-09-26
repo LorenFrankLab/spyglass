@@ -2,10 +2,10 @@
 
 The manifest-schema and gate-check tests are DB-free and fast; they run with
 every unit-shard pass. The benchmark itself (every case of a manifest, each
-in its own process, through the v2 motion, sorting and comparison code) is
-opt-in:
+in its own process, through the v2 motion, sorting and comparison code) and
+the representative polymer-fixture run are opt-in:
 
-- ``SPYGLASS_V2_MOTION_BENCHMARK=1`` runs it (otherwise it skips).
+- ``SPYGLASS_V2_MOTION_BENCHMARK=1`` runs them (otherwise they skip).
 - ``SPYGLASS_V2_MOTION_MANIFEST`` names the manifest (default: the committed
   development manifest, seeds 0-2, no gates).
 - ``SPYGLASS_V2_MOTION_BENCHMARK_OUT`` names the result directory (default: a
@@ -47,6 +47,17 @@ BENCHMARK = os.environ.get("SPYGLASS_V2_MOTION_BENCHMARK") == "1"
 BENCHMARK_SKIP = pytest.mark.skip(
     reason="the motion acceptance benchmark is opt-in: set "
     "SPYGLASS_V2_MOTION_BENCHMARK=1"
+)
+DRIFT_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "mearec_polymer_128ch_drift_120s.nwb"
+)
+DRIFT_FIXTURE_GT_H5 = (
+    REPO_ROOT
+    / "tests"
+    / "_data"
+    / "spikesorting_v2"
+    / "mearec_work"
+    / "mearec_polymer_128ch_drift_120s.h5"
 )
 
 
@@ -635,3 +646,52 @@ def test_benchmark_meets_manifest_gates(enabled, benchmark_out):
         rows.append(case_metrics(result))
     failed = [r for r in check_manifest_gates(rows, manifest) if not r.passed]
     assert not failed, "\n".join(map(str, failed))
+
+
+@pytest.mark.parametrize(
+    "enabled",
+    (
+        [pytest.param(True, id="representative")]
+        if BENCHMARK
+        else [pytest.param(True, marks=BENCHMARK_SKIP, id="opt-in")]
+    ),
+)
+def test_representative_polymer_drift_fixture(enabled, benchmark_out):
+    """Paired off / dredge / dredge_fast on one shank of the MEArec polymer
+    drift fixture, estimated, applied and sorted: it runs, and the estimates
+    and corrected traces are finite with every contact kept. Structural only:
+    the fixture's drift (10 um) is below one contact pitch and its
+    drift-vector sign convention relative to SpikeInterface is unconfirmed,
+    so no scientific threshold applies. Quality, border, runtime and memory
+    figures are written to the result directory."""
+    if not DRIFT_FIXTURE.exists():
+        pytest.skip(
+            "representative polymer evidence is MISSING: the MEArec drift "
+            f"fixture {DRIFT_FIXTURE} is not present"
+        )
+    args = [
+        "representative",
+        "--nwb",
+        str(DRIFT_FIXTURE),
+        "--out",
+        str(benchmark_out),
+        "--shank",
+        "2",
+        "--sort",
+    ]
+    if DRIFT_FIXTURE_GT_H5.exists():
+        args += ["--gt-h5", str(DRIFT_FIXTURE_GT_H5)]
+    _run_module(args)
+    result = json.loads(
+        (benchmark_out / "representative_shank2.json").read_text()
+    )
+
+    assert result["n_channels"] == 32
+    assert set(result["recipes"]) == {"dredge_v1", "dredge_fast_v1"}
+    for entry in result["recipes"].values():
+        assert entry["n_temporal_bins"] > 0
+        assert entry["displacement_finite"]
+        assert entry["corrected_traces_finite"]
+        assert entry["n_out_channels"] == 32
+        assert entry["removed_channel_ids"] == []
+    assert {"off", "dredge_v1", "dredge_fast_v1"} <= set(result["sorting"])
