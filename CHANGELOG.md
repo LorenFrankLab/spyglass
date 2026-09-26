@@ -239,7 +239,8 @@ available.
   `SortingSelection`'s.
 - The estimate uses only valid samples: noise levels come from the
   artifact-free statistics spans, and peaks whose localization window touches
-  a masked sample are dropped.
+  a masked sample, or whose detection window (`exclude_sweep_ms` plus one
+  frame) crosses an acquisition gap or member join, are dropped.
 - Recordings with acquisition gaps and multi-member concatenations are
   estimated once, on an estimation clock: each uninterrupted span keeps its
   own timing, and the gap between spans (measured on the real timestamps)

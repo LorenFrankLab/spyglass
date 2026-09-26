@@ -807,7 +807,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     max_abs_displacement_um: double   # largest absolute displacement over all bins and windows
     n_temporal_bins: int              # temporal bins of the estimate
     n_peaks_detected: int             # peaks detected on the masked recording
-    n_peaks_kept: int                 # peaks whose localization window lies in one statistics span
+    n_peaks_kept: int                 # peaks localized inside one statistics span, detected clear of span joins
     peaks_per_temporal_bin: longblob  # (n_temporal_bins,) int64 kept peaks per temporal bin
     peaks_per_continuity_span: longblob  # (n_spans,) int64 kept peaks per continuity span; 0 marks a span with no evidence
     noise_levels: longblob            # (n_channels,) float64 detection noise in recording units

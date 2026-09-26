@@ -49,7 +49,7 @@ from spyglass.spikesorting.v2._sorting_dispatch import (
 #: SpikeInterface call sequence, peak filter, noise estimate and resolution
 #: rules). Part of every estimate's identity; bump it when any of those change
 #: in a way that can change a stored estimate.
-MOTION_ALGORITHM_VERSION = 1
+MOTION_ALGORITHM_VERSION = 2
 
 #: Version of the motion-application algorithm
 #: (:func:`apply_motion_on_estimation_clock`: masking, clock, interpolation
@@ -441,7 +441,8 @@ class MotionDiagnostics(NamedTuple):
     n_peaks_detected : int
         Peaks the detector found on the masked recording.
     n_peaks_kept : int
-        Peaks whose localization window lies inside one statistics span; only
+        Peaks whose localization window lies inside one statistics span and
+        whose detection window does not cross a continuity-span join; only
         these reach the estimator.
     peaks_per_temporal_bin : numpy.ndarray
         ``(n_temporal_bins,)`` int64 count of kept peaks in each of the
@@ -546,6 +547,48 @@ def peaks_within_spans(
         found
         & (sample_index - n_before >= starts[span])
         & (sample_index + n_after <= ends[span])
+    )
+
+
+def peaks_clear_of_joins(
+    sample_index, continuity_spans, *, margin: int
+) -> np.ndarray:
+    """Mark peaks whose detection did not read across an internal join.
+
+    SpikeInterface's ``locally_exclusive`` detector drops a peak when a larger
+    one on a neighbouring channel lies within ``exclude_sweep_size`` frames
+    (``sortingcomponents/peak_detection/locally_exclusive.py:150-183``), and a
+    peak is itself a local extremum of its neighbouring frames (``:127-143``),
+    so whether a peak at frame ``s`` is detected depends on frames
+    ``[s - margin, s + margin]`` with ``margin = exclude_sweep_size + 1``, the
+    detector's ``get_trace_margin`` (``:86-88``). Across a boundary between
+    continuity spans (an acquisition gap or a concatenation join) those frames
+    are adjacent in the recording but not in time, so a peak on one side can
+    suppress a peak on the other. A peak is kept only when that window stays
+    inside its own continuity span. The recording's first start and last end
+    are not joins (the detector reads no frames past them), so a single span
+    keeps every peak.
+
+    Parameters
+    ----------
+    sample_index : numpy.ndarray
+        ``(n_peaks,)`` peak frames.
+    continuity_spans : numpy.ndarray
+        ``(n_spans, 2)`` contiguous half-open continuity spans covering the
+        recording from frame 0.
+    margin : int
+        Keyword-only. Frames on each side of a peak its detection reads.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_peaks,)`` bool mask of kept peaks.
+    """
+    sample_index = np.asarray(sample_index, dtype=np.int64)
+    spans = np.asarray(continuity_spans, dtype=np.int64)
+    span = np.searchsorted(spans[:, 0], sample_index, side="right") - 1
+    return ((span == 0) | (sample_index - margin >= spans[span, 0])) & (
+        (span == len(spans) - 1) | (sample_index + margin < spans[span, 1])
     )
 
 
@@ -1175,8 +1218,9 @@ def estimate_motion_in_spans(
        instead of ``compute_motion``'s unseeded ``get_noise_levels`` call
        (``motion.py:359``).
     2. Between localization and estimation, only peaks whose localization
-       window lies inside one statistics span are kept
-       (:func:`peaks_within_spans`).
+       window lies inside one statistics span (:func:`peaks_within_spans`)
+       and whose detection did not read across a join between continuity
+       spans (:func:`peaks_clear_of_joins`) are kept.
     3. ``estimate_motion`` reads peak times on the estimation clock
        (:class:`EstimationClockRecording`), so every continuity span is
        estimated in one call and shares one reference frame. DREDge centres
@@ -1301,12 +1345,17 @@ def estimate_motion_in_spans(
         statistics,
         n_before=waveform_node.nbefore,
         n_after=waveform_node.nafter,
+    ) & peaks_clear_of_joins(
+        peaks["sample_index"],
+        clock.spans,
+        margin=int(detect_node.get_trace_margin()),
     )
     n_kept = int(keep.sum())
     if n_kept == 0:
         raise ValueError(
             f"Motion estimation: {len(peaks)} peaks were detected but none "
-            "has its localization window inside a statistics span; there is "
+            "has its localization window inside a statistics span and its "
+            "detection window clear of the continuity-span joins; there is "
             "no valid evidence to estimate motion from."
         )
     kept_peaks = peaks[keep]

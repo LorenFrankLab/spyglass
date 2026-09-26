@@ -1233,6 +1233,64 @@ def test_span_without_peaks_is_reported_not_fatal(caplog):
     assert np.isfinite(motion.displacement[0]).all()
 
 
+def _planted_join_recording(recording, join, planted):
+    """Copy ``recording`` with single-sample values set at given frames.
+
+    ``planted`` maps ``(frame, channel)`` to a value in units of the
+    channel's MAD noise.
+    """
+    from spikeinterface.core import NumpyRecording
+
+    traces = recording.get_traces().copy()
+    sigma = np.median(np.abs(traces), axis=0) / 0.6745
+    # The planted values must be the only large values near the join.
+    assert (np.abs(traces[join - 60 : join + 60]) < 4 * sigma).all()
+    for (frame, channel), value in planted.items():
+        traces[frame, channel] = value * sigma[channel]
+    copy = NumpyRecording(
+        [traces], sampling_frequency=recording.get_sampling_frequency()
+    )
+    copy.set_probe(recording.get_probe(), in_place=True)
+    return copy
+
+
+def test_peak_near_a_join_is_not_suppressed_across_it():
+    """The detector's exclusion reaches the other side of a join, which is
+    adjacent in frames but not in time: a larger peak just after the join
+    suppresses a valid peak just before it. The evidence a span keeps must
+    not depend on the traces across a join.
+
+    Both copies hold the same peak 0.5 ms before the join; they differ only
+    in one sample 0.17 ms after it, a larger peak in one copy and a
+    sub-threshold value in the other. The sub-threshold value lies in the
+    same noise tail as the peak, so the seeded noise levels are identical.
+    """
+    from tests.spikesorting.v2._motion_fixtures import rigid_drift_recordings
+
+    recording, _, _ = rigid_drift_recordings(seed=0, duration_s=5.0)
+    n = recording.get_num_samples()
+    join, channel = 76_000, 16
+    before, after = (join - 15, channel), (join + 5, channel)
+    quiet = _planted_join_recording(
+        recording, join, {before: -30.0, after: -4.0}
+    )
+    loud = _planted_join_recording(
+        recording, join, {before: -30.0, after: -60.0}
+    )
+    clock = _clock_for([(0, join), (join, n)], [0.0, join / 3e4 + 100.0])
+
+    _, quiet_diagnostics = _estimate(quiet, clock=clock)
+    _, loud_diagnostics = _estimate(loud, clock=clock)
+
+    np.testing.assert_array_equal(
+        quiet_diagnostics.noise_levels, loud_diagnostics.noise_levels
+    )
+    assert (
+        quiet_diagnostics.peaks_per_continuity_span[0]
+        == loud_diagnostics.peaks_per_continuity_span[0]
+    )
+
+
 # ---- span filter and failures -----------------------------------------------
 
 
@@ -1247,6 +1305,24 @@ def test_peak_window_must_lie_inside_one_span():
     # 13 reads [10, 22); 21 reads [18, 30); 33 reads [30, 42); 51 reads
     # [48, 60). 30 reads [27, 39), crossing the span edge at 30.
     assert peaks[keep].tolist() == [13, 21, 33, 51]
+
+
+def test_detection_window_must_not_cross_a_join():
+    """Only joins between continuity spans restrict detection support; the
+    recording's own start and end do not."""
+    from spyglass.spikesorting.v2._motion import peaks_clear_of_joins
+
+    spans = np.array([[0, 30], [30, 60], [60, 90]])
+    peaks = np.array([0, 1, 25, 26, 33, 34, 55, 56, 63, 64, 89])
+
+    keep = peaks_clear_of_joins(peaks, spans, margin=4)
+
+    # Detection at s reads frames [s - 4, s + 4]. 25 reads [21, 29] and 34
+    # reads [30, 38], each inside its span, as do 55 and 64 around the join
+    # at 60; 26, 33, 56 and 63 read one frame across a join. Frames 0, 1 and
+    # 89 read past the recording's ends, which are not joins.
+    assert peaks[keep].tolist() == [0, 1, 25, 34, 55, 64, 89]
+    assert peaks_clear_of_joins(peaks, [(0, 90)], margin=4).all()
 
 
 def _bare_recording(positions, *, duration_s=0.2, properties=None):

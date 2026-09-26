@@ -1619,8 +1619,11 @@ estimate on out-of-order or overlapping members raises.
 **Masks and statistics spans.** Estimation excludes invalid samples from both
 noise-level and peak-support statistics: a peak is kept only if its entire
 localization window lies inside one *statistics span* (the artifact-free,
-in-order frame ranges also used for whitening/noise), and per-channel noise
-comes from those same spans (the same artifact-aware span MAD noise/whitening
+in-order frame ranges also used for whitening/noise) and its detection
+window (SpikeInterface's `exclude_sweep_ms` on each side, plus one frame)
+does not cross a join between continuity spans, where a peak on the far side
+of an acquisition gap or member join could otherwise suppress it.
+Per-channel noise comes from those same spans (the same artifact-aware span MAD noise/whitening
 uses elsewhere in v2 when samples are excluded, otherwise SpikeInterface's own
 seeded `get_noise_levels`). A
 `MotionCorrectedRecording` **reuses** its estimate's statistics and continuity
