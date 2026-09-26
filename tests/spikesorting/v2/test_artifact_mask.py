@@ -720,3 +720,96 @@ def test_apply_artifact_mask_returns_ranges_matching_silenced_samples():
     np.testing.assert_array_equal(
         masked_traces[~expected_mask], traces[~expected_mask]
     )
+
+
+# ---------------------------------------------------------------------------
+# A motion-corrected recording's spans: the row's copy, checked against the
+# corrected traces' frames, timestamps and the sort's mask.
+# ---------------------------------------------------------------------------
+
+#: Valid times masking frames [500, 700) of a 2000-frame, 1 kHz recording.
+_CORRECTED_VALID_TIMES = np.array([[0.0, 0.5], [0.7, 1.999]])
+
+
+def _corrected_row(spans, n_samples=2000):
+    return {
+        "motion_corrected_recording_id": "corrected-0",
+        "n_samples": n_samples,
+        "statistics_spans": np.asarray(spans, dtype=np.int64),
+    }
+
+
+def _corrected_spans(recording, row, **overrides):
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        corrected_statistics_spans,
+    )
+
+    kwargs = {
+        "source_n_samples": 2000,
+        "concat_statistics_spans": None,
+        "obs_intervals": _CORRECTED_VALID_TIMES,
+        "artifact_detection_id": "detection-0",
+        "recording_id": "recording-0",
+        **overrides,
+    }
+    return corrected_statistics_spans(recording, row, **kwargs)
+
+
+def test_corrected_spans_are_the_rows_copy_under_the_sorts_mask():
+    rec = _recording(n_samples=2000, fs=1000.0)
+    masked = [(0, 500), (700, 2000)]
+    assert _corrected_spans(rec, _corrected_row(masked)) == masked
+    # The same copy without the sort's mask would be a different sort.
+    with pytest.raises(ValueError, match="carries statistics spans"):
+        _corrected_spans(rec, _corrected_row([(0, 2000)]))
+    # Unmasked sort: the copy must be the timestamp spans alone.
+    assert _corrected_spans(
+        rec,
+        _corrected_row([(0, 2000)]),
+        obs_intervals=None,
+        artifact_detection_id=None,
+    ) == [(0, 2000)]
+
+
+def test_corrected_spans_split_at_the_corrected_traces_own_gaps():
+    rec = _gapped_recording((1000, 1000))
+    unmasked = {"obs_intervals": None, "artifact_detection_id": None}
+    assert _corrected_spans(
+        rec, _corrected_row([(0, 1000), (1000, 2000)]), **unmasked
+    ) == [(0, 1000), (1000, 2000)]
+    with pytest.raises(ValueError, match="carries statistics spans"):
+        _corrected_spans(rec, _corrected_row([(0, 2000)]), **unmasked)
+
+
+@pytest.mark.parametrize(
+    "row_n, source_n", [(1999, 2000), (2000, 2001)], ids=["row", "source"]
+)
+def test_corrected_spans_refuse_a_changed_frame_count(row_n, source_n):
+    rec = _recording(n_samples=2000, fs=1000.0)
+    with pytest.raises(ValueError, match="frames"):
+        _corrected_spans(
+            rec,
+            _corrected_row([(0, 500), (700, 2000)], n_samples=row_n),
+            source_n_samples=source_n,
+        )
+
+
+def test_corrected_concat_spans_are_the_concatenations_not_the_clock():
+    """A concat source's spans come from the concatenation row (its member
+    joins), not from the corrected traces' timestamps, which here run on
+    one uninterrupted clock."""
+    rec = _recording(n_samples=2000, fs=1000.0)
+    concat_spans = np.array([[0, 800], [800, 1500], [1600, 2000]])
+    concat = {
+        "concat_statistics_spans": concat_spans,
+        "obs_intervals": None,
+        "artifact_detection_id": None,
+        "recording_id": None,
+    }
+    assert _corrected_spans(rec, _corrected_row(concat_spans), **concat) == [
+        (0, 800),
+        (800, 1500),
+        (1600, 2000),
+    ]
+    with pytest.raises(ValueError, match="carries statistics spans"):
+        _corrected_spans(rec, _corrected_row([(0, 2000)]), **concat)

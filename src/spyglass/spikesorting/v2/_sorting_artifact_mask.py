@@ -540,6 +540,99 @@ def statistics_spans(
     return out
 
 
+def corrected_statistics_spans(
+    recording,
+    row: dict,
+    *,
+    source_n_samples: int,
+    concat_statistics_spans,
+    obs_intervals,
+    artifact_detection_id,
+    recording_id,
+) -> list[tuple[int, int]]:
+    """Return a corrected recording's statistics spans after checking them.
+
+    The ``MotionCorrectedRecording`` row carries a copy of its source's spans;
+    they are used as is. The corrected traces must keep the source's frame
+    count. For a single recording the copied spans must equal those derived
+    from the corrected traces' own timestamps and the sort's pinned mask; for
+    a concatenation they must equal the concatenation's stored spans.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The loaded corrected recording.
+    row : dict
+        Its ``MotionCorrectedRecording`` row (``motion_corrected_recording_id``,
+        ``n_samples``, ``statistics_spans`` ``(n, 2)``).
+    source_n_samples : int
+        The source's frame count.
+    concat_statistics_spans : numpy.ndarray or None
+        A concat source's stored ``(n, 2)`` spans; ``None`` for a single
+        recording.
+    obs_intervals : numpy.ndarray or None
+        The sort's artifact-removed valid times, ``(n_intervals, 2)`` in
+        seconds, or ``None`` without an artifact detection.
+    artifact_detection_id : uuid.UUID or None
+        The sort's pinned detection (single recording only).
+    recording_id : uuid.UUID or None
+        The single-recording source, for error messages.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        The half-open frame spans.
+
+    Raises
+    ------
+    ValueError
+        If the frame count or the spans disagree with the source's.
+    """
+    import numpy as np
+
+    def as_spans(spans) -> list[tuple[int, int]]:
+        return [
+            (int(a), int(b))
+            for a, b in np.asarray(spans, dtype=np.int64).reshape(-1, 2)
+        ]
+
+    n_samples = int(recording.get_num_samples())
+    if not n_samples == int(row["n_samples"]) == int(source_n_samples):
+        raise ValueError(
+            "Sorting: motion-corrected recording "
+            f"{row['motion_corrected_recording_id']} has {n_samples} "
+            f"frames (row: {int(row['n_samples'])}); its source has "
+            f"{int(source_n_samples)}."
+        )
+    spans = as_spans(row["statistics_spans"])
+    if concat_statistics_spans is None:
+        excluded = []
+        if artifact_detection_id is not None:
+            excluded = artifact_frame_ranges(
+                recording,
+                obs_intervals,
+                artifact_detection_id=artifact_detection_id,
+                recording_id=recording_id,
+            )
+        expected = as_spans(
+            statistics_spans(
+                n_samples,
+                excluded,
+                boundary_spans_from_timestamps(recording),
+            )
+        )
+    else:
+        expected = as_spans(concat_statistics_spans)
+    if spans != expected:
+        raise ValueError(
+            "Sorting: motion-corrected recording "
+            f"{row['motion_corrected_recording_id']} carries statistics "
+            f"spans {spans}, but its source and the sort's mask give "
+            f"{expected}."
+        )
+    return spans
+
+
 def spans_cover_recording(spans, n_samples: int) -> bool:
     """True when ``spans`` is ``None`` or exactly ``[(0, n_samples)]``.
 
