@@ -751,20 +751,26 @@ def run_v2_pipeline(
                 ],
             }
         )
+
+        # Each stage's work populates AND reads back its row, so a row that
+        # is missing afterwards is a stage failure with the partial summary.
+        def _estimate() -> str:
+            _populate_once(MotionEstimate, estimate_key)
+            return (MotionEstimate & estimate_key).fetch1("resolved_params")[
+                "preset"
+            ]
+
         (
-            _,
+            run_summary["motion_estimation_preset"],
             run_summary["motion_estimate_status"],
             stage_seconds["motion_estimate"],
         ) = _run_stage(
             "motion_estimate",
             bool(MotionEstimate & estimate_key),
-            lambda: _populate_once(MotionEstimate, estimate_key),
+            _estimate,
             run_summary,
         )
         run_summary["motion_estimate_id"] = estimate_key["motion_estimate_id"]
-        run_summary["motion_estimation_preset"] = (
-            MotionEstimate & estimate_key
-        ).fetch1("resolved_params")["preset"]
         if motion_mode == "estimate":
             return {}
 
@@ -776,24 +782,28 @@ def run_v2_pipeline(
                 ],
             }
         )
+
+        def _correct() -> list:
+            _populate_once(MotionCorrectedRecording, corrected_key)
+            return list(
+                (MotionCorrectedRecording & corrected_key).fetch1(
+                    "removed_channel_ids"
+                )
+            )
+
         (
-            _,
+            run_summary["motion_removed_channel_ids"],
             run_summary["motion_corrected_recording_status"],
             stage_seconds["motion_corrected_recording"],
         ) = _run_stage(
             "motion_corrected_recording",
             bool(MotionCorrectedRecording & corrected_key),
-            lambda: _populate_once(MotionCorrectedRecording, corrected_key),
+            _correct,
             run_summary,
         )
         run_summary["motion_corrected_recording_id"] = corrected_key[
             "motion_corrected_recording_id"
         ]
-        run_summary["motion_removed_channel_ids"] = list(
-            (MotionCorrectedRecording & corrected_key).fetch1(
-                "removed_channel_ids"
-            )
-        )
         return dict(corrected_key)
 
     if is_single:
