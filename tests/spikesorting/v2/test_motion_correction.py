@@ -486,6 +486,52 @@ def test_unfiltered_sources_are_refused_for_motion_estimation(
     assert len(MotionEstimateSelection()) == n_selections
 
 
+def test_unfiltered_source_planted_directly_is_refused_at_compute(
+    offset_source_concat, motion_params
+):
+    """``insert_selection`` refuses a ``no_filter`` source, but a selection
+    row written straight to the table (``allow_direct_insert=True``, e.g. a
+    restored backup or a bulk load) bypasses that guard. ``MotionEstimate``
+    must re-check the recipe itself: ``populate`` raises the same problem
+    before reading any file, and no ``MotionEstimate`` row is written."""
+    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2.motion import (
+        MotionEstimate,
+        MotionEstimateSelection,
+        MotionEstimationParameters,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+
+    recording_key = offset_source_concat["member_a"]
+    params_name = "dredge_fast_v1"
+    estimation_params = (
+        MotionEstimationParameters
+        & {"motion_estimation_params_name": params_name}
+    ).fetch1("params")
+    content_hash = (Recording & recording_key).fetch1("content_hash")
+    motion_estimate_id, master_row = _motion.motion_estimate_selection_identity(
+        source_kind="recording",
+        source_id=recording_key["recording_id"],
+        source_content_hash=content_hash,
+        artifact_detection_id=None,
+        motion_estimation_params_name=params_name,
+        estimation_params=estimation_params,
+    )
+    key = {"motion_estimate_id": motion_estimate_id}
+    MotionEstimateSelection.insert1(
+        {**key, **master_row}, allow_direct_insert=True
+    )
+    MotionEstimateSelection.RecordingSource.insert1(
+        {**key, "recording_id": recording_key["recording_id"]}
+    )
+    try:
+        with pytest.raises(ValueError, match="no temporal filter"):
+            MotionEstimate.populate(key, reserve_jobs=False)
+        assert not (MotionEstimate & key)
+    finally:
+        (MotionEstimateSelection & key).super_delete(warn=False, safemode=False)
+
+
 def test_stale_selection_is_refused_at_compute(drift_recording, monkeypatch):
     import spikeinterface
 

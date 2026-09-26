@@ -846,16 +846,48 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         selection, and concat tables that predate motion's removal from
         concatenation. A concat source's continuity spans and their start
         times come from its row.
+
+        Raises
+        ------
+        ValueError
+            If the source's preprocessing recipe applies no temporal filter
+            (:func:`._motion.unfiltered_source_problem`; for a concat, the
+            concatenation's own recipe). ``insert_selection`` already refuses
+            this, but a selection row can reach the table without it (a raw
+            insert via ``allow_direct_insert=True``), so this is re-checked
+            here before any file is read.
         """
         from spyglass.spikesorting.v2._artifact_intervals import (
             read_artifact_removed_intervals,
         )
+        from spyglass.spikesorting.v2._motion import unfiltered_source_problem
         from spyglass.spikesorting.v2._recording_nwb import (
             ensure_artifact_file,
         )
+        from spyglass.spikesorting.v2.recording import PreprocessingParameters
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         lineage = MotionEstimateSelection.resolve_source(key)
+        source_selection_table = (
+            RecordingSelection
+            if lineage.kind == "recording"
+            else ConcatenatedRecordingSelection
+        )
+        preprocessing_name = (source_selection_table & lineage.key).fetch1(
+            "preprocessing_params_name"
+        )
+        problem = unfiltered_source_problem(
+            preprocessing_name,
+            (
+                PreprocessingParameters
+                & {"preprocessing_params_name": preprocessing_name}
+            ).fetch1("params"),
+        )
+        if problem is not None:
+            raise ValueError(
+                f"MotionEstimate: {lineage.key} cannot be motion-estimated: "
+                f"{problem}"
+            )
         selection = (MotionEstimateSelection & key).fetch1()
         params, job_kwargs = (
             MotionEstimationParameters
