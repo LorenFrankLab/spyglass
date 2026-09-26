@@ -1590,7 +1590,8 @@ def apply_motion_on_estimation_clock(
     excluded = complement_frame_ranges(
         normalize_spans(statistics_spans), n_samples
     )
-    masked = silence_frame_ranges(recording_in_microvolts(recording), excluded)
+    in_uv = recording_in_microvolts(recording)
+    masked = silence_frame_ranges(in_uv, excluded)
     corrected = interpolate_motion(
         EstimationClockRecording(masked, clock),
         motion,
@@ -1604,7 +1605,10 @@ def apply_motion_on_estimation_clock(
         interpolation_time_bin_centers_s=None,
         interpolation_time_bin_edges_s=None,
         interpolation_time_bin_size_s=None,
-        dtype=None,
+        # Stated rather than left to ``dtype=None``, which inherits the input
+        # dtype and raises for an integer one (``sortingcomponents/motion/
+        # motion_interpolation.py:397-401``).
+        dtype=in_uv.get_dtype(),
     )
     kept = set(corrected.channel_ids.tolist())
     removed = [c for c in recording.channel_ids.tolist() if c not in kept]

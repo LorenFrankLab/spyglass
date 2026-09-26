@@ -476,6 +476,30 @@ def test_interpolation_preserves_physical_voltage(gains):
     np.testing.assert_array_equal(corrected.get_channel_offsets(), 0.0)
 
 
+def test_integer_source_is_corrected_in_microvolts():
+    """An integer recording (a no-filter, no-reference artifact) is corrected
+    rather than refused, in float32 microvolts; with no displacement the
+    output is the source's physical voltage to the kriging ridge."""
+    rng = np.random.default_rng(0)
+    n = 3_000
+    gains = np.full(32, 0.195)
+    raw = rng.integers(-2_000, 2_000, size=(n, 32)).astype("int16")
+    recording = _calibrated_recording(raw, gains, np.zeros(32))
+
+    corrected = _apply(
+        recording, _constant_shift(recording, 0.0), _one_span_clock(n), [(0, n)]
+    ).recording
+
+    source_uv = raw * gains
+    assert corrected.get_dtype() == np.float32
+    np.testing.assert_array_equal(corrected.get_channel_gains(), 1.0)
+    np.testing.assert_array_equal(corrected.get_channel_offsets(), 0.0)
+    traces = corrected.get_traces()
+    assert np.max(np.abs(traces - source_uv)) <= 1e-5 * np.max(
+        np.abs(source_uv)
+    )
+
+
 def test_unit_calibrated_float_source_is_interpolated_as_is(pitch_steps):
     """A float source already in microvolts (unit gain, zero offset) keeps
     its dtype and gives exactly SpikeInterface's interpolation of it."""

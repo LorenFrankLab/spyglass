@@ -1599,9 +1599,9 @@ similarly explicit about every `interpolate_motion` argument
 (`spatial_interpolation_method`, `sigma_um`, `p`, `num_closest`) -- nothing is
 left to an unstated SpikeInterface default. Interpolation mixes channels with
 weights that need not sum to 1, so it acts on microvolts: a source that is not
-already float microvolts (gain 1, offset 0) is first scaled with
-SpikeInterface's `scale_to_uV` (float32), and the corrected recording is
-stored with gain 1 and offset 0.
+already float microvolts (gain 1, offset 0), including an integer
+`no_filter` recording, is first scaled with SpikeInterface's `scale_to_uV`
+(float32), and the corrected recording is stored with gain 1 and offset 0.
 Only `remove_channels` and
 `force_extrapolate` border modes are allowed; SpikeInterface's `force_zeros`
 is rejected because it zeroes whole channels for some time bins, which the

@@ -264,8 +264,9 @@ available.
   own timestamps, together with the output channels, any removed channels, the
   unmoved contact positions and the estimate's spans. Interpolation acts on
   microvolts: a source that is not already float microvolts (gain 1, offset
-  0) is scaled to float32 microvolts first, and the corrected traces are
-  stored with gain 1 and offset 0. Changing only the
+  0), including an integer `no_filter` recording, is scaled to float32
+  microvolts first, and the corrected traces are stored with gain 1 and
+  offset 0. Changing only the
   interpolation reuses the estimate. A missing file is rebuilt from the saved
   motion, never by estimating again, and installed only if it reproduces the
   stored content hash (even under another SpikeInterface version, which a
