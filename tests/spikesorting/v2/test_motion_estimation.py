@@ -1059,6 +1059,8 @@ def test_jump_inside_a_gap_is_recovered_in_one_reference_frame(
     reference and fails the same check by the full 15 um half-jump."""
     from tests.spikesorting.v2._motion_fixtures import (
         common_frame_error_on_source_clock,
+        common_frame_summary,
+        source_clock_errors,
     )
 
     case = jump_across_gap
@@ -1081,26 +1083,22 @@ def test_jump_inside_a_gap_is_recovered_in_one_reference_frame(
     # The capped gap is 30 bins of the 1 s dredge_fast grid.
     assert motion.displacement[0].shape[0] == 2 * GAP_SPAN_S + 30
 
-    # Discriminating control: each span alone, its own reference frame.
-    rows, truths = [], []
-    sample_times = (np.arange(case["displacement"].size) + 0.5) / 5.0
+    # Discriminating control: each span alone, its own reference frame,
+    # then one offset over both spans' errors.
+    errors = []
     for (a, b), start in zip(case["spans"], case["starts"]):
-        part = case["drifting"].frame_slice(a, b)
-        alone, _ = _estimate(part, clock=_clock_for([(0, b - a)], [start]))
-        for center in alone.temporal_bins_s[0]:
-            inside = (sample_times >= max(center - 0.5, start)) & (
-                sample_times < min(center + 0.5, start + GAP_SPAN_S)
+        part_clock = _clock_for([(0, b - a)], [start])
+        alone, _ = _estimate(
+            case["drifting"].frame_slice(a, b), clock=part_clock
+        )
+        errors.append(
+            source_clock_errors(
+                alone, part_clock, case["displacement"], case["depths"]
             )
-            truths.append(case["displacement"][inside].mean())
-            rows.append(
-                alone.get_displacement_at_time_and_depth(
-                    np.full(case["depths"].size, center), case["depths"]
-                )
-            )
-    diff = np.stack(rows) - np.asarray(truths)[:, None]
-    diff -= diff.mean()
-    assert np.sqrt(np.mean(diff**2)) > DEV_GAP_JUMP_RMS_UM
-    assert np.abs(diff).max() > DEV_GAP_JUMP_MAX_ABS_UM
+        )
+    separate_rms, separate_max = common_frame_summary(np.vstack(errors))
+    assert separate_rms > DEV_GAP_JUMP_RMS_UM
+    assert separate_max > DEV_GAP_JUMP_MAX_ABS_UM
 
 
 def test_no_motion_across_a_gap_estimates_no_jump(jump_across_gap):

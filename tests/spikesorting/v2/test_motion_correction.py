@@ -814,9 +814,15 @@ def test_concat_source_is_estimated_end_to_end(discontinuous_sources):
         rigid_drift_recordings,
     )
 
+    # The ground truth's time zero is the raw recording's first sample.
     _, _, truth = rigid_drift_recordings(seed=0, duration_s=DRIFT_DURATION_S)
     motion = MotionEstimate().get_motion(key)
+    t0 = discontinuous_sources["t0"]
     clock = MotionEstimate().get_estimation_clock(key)
+    clock = clock._replace(
+        source_start_s=clock.source_start_s - t0,
+        source_end_s=clock.source_end_s - t0,
+    )
     depths = row["channel_locations"][:, 1]
     error_rms, _ = common_frame_error_on_source_clock(
         motion, clock, truth, depths

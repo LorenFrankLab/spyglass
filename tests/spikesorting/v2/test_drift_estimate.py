@@ -194,24 +194,26 @@ def test_drift_estimate_survives_peaks_sharing_a_frame(
         hdf5_timed_recording_with_shared_peak_frame,
     )
 
-    recording, timestamps = hdf5_timed_recording_with_shared_peak_frame(
+    with hdf5_timed_recording_with_shared_peak_frame(
         tmp_path / "timestamps.h5", gap_s=30.0
-    )
-    detect = dict(motion_options_preset["dredge_fast"]["detect_kwargs"])
-    peaks = detect_peaks(
-        recording,
-        method=detect.pop("method"),
-        method_kwargs=detect,
-        job_kwargs={"n_jobs": 1, "progress_bar": False},
-    )
-    frames, counts = np.unique(peaks["sample_index"], return_counts=True)
-    shared = frames[counts > 1]
-    assert shared.size, "fixture must put two peaks on one frame"
-    with pytest.raises(TypeError, match="increasing order"):
-        recording.sample_index_to_time(np.repeat(shared[:1], 2))
-    monkeypatch.setattr(Recording, "get_recording", lambda self, key: recording)
+    ) as (recording, timestamps):
+        detect = dict(motion_options_preset["dredge_fast"]["detect_kwargs"])
+        peaks = detect_peaks(
+            recording,
+            method=detect.pop("method"),
+            method_kwargs=detect,
+            job_kwargs={"n_jobs": 1, "progress_bar": False},
+        )
+        frames, counts = np.unique(peaks["sample_index"], return_counts=True)
+        shared = frames[counts > 1]
+        assert shared.size, "fixture must put two peaks on one frame"
+        with pytest.raises(TypeError, match="increasing order"):
+            recording.sample_index_to_time(np.repeat(shared[:1], 2))
+        monkeypatch.setattr(
+            Recording, "get_recording", lambda self, key: recording
+        )
 
-    computed = DriftEstimate().make_compute({}, "dredge_fast")
+        computed = DriftEstimate().make_compute({}, "dredge_fast")
 
     centers = computed.motion["temporal_bins_s"][0]
     assert centers[0] == pytest.approx(timestamps[0] + 0.5)

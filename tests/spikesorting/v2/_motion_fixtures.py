@@ -14,6 +14,8 @@ costs about 1 GB peak with estimation (measured with ``/usr/bin/time -l``).
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import numpy as np
 
 PITCH_UM = 26.0
@@ -234,21 +236,18 @@ def jump_across_gap_recordings(
     return joined, joined_static, spans, starts, displacement
 
 
-def common_frame_error_on_source_clock(
-    motion, clock, displacement, channel_depths
-):
-    """Common-frame error of a gapped estimate, on bins holding data (um).
+def source_clock_errors(motion, clock, displacement, channel_depths):
+    """Estimate-minus-truth of a gapped estimate on bins holding data (um).
 
     Each temporal bin is mapped to source time
     (``_motion.displacement_on_source_clock``); bins inside a capped gap are
     skipped. The truth of a bin is the mean ground-truth displacement over its
-    width on the source clock, clipped to its span. One offset over all kept
-    bins and depths is removed before the error is summarized, as in
-    :func:`common_frame_error`.
+    width on the source clock, clipped to its span. No offset is removed.
 
     Returns
     -------
-    rms, max_abs : float
+    numpy.ndarray
+        ``(n_data_bins, n_depths)`` errors.
     """
     from spyglass.spikesorting.v2._motion import displacement_on_source_clock
 
@@ -256,7 +255,7 @@ def common_frame_error_on_source_clock(
     half_bin = float(np.diff(motion.temporal_bins_s[0][:2])[0]) / 2
     fs = clock.sampling_frequency
     span_start = clock.source_start_s
-    span_end = span_start + (clock.spans[:, 1] - clock.spans[:, 0]) / fs
+    span_end = clock.source_end_s + 1 / fs
     sample_times = (
         np.arange(displacement.size) + 0.5
     ) / DISPLACEMENT_SAMPLING_FREQUENCY
@@ -277,9 +276,30 @@ def common_frame_error_on_source_clock(
                 channel_depths,
             )
         )
-    diff = np.stack(rows) - np.asarray(truths)[:, None]
-    diff -= diff.mean()
+    return np.stack(rows) - np.asarray(truths)[:, None]
+
+
+def common_frame_summary(errors):
+    """RMS and max |error| after removing one offset over all ``errors``."""
+    diff = np.asarray(errors) - np.mean(errors)
     return float(np.sqrt(np.mean(diff**2))), float(np.max(np.abs(diff)))
+
+
+def common_frame_error_on_source_clock(
+    motion, clock, displacement, channel_depths
+):
+    """Common-frame error of a gapped estimate, on bins holding data (um).
+
+    :func:`source_clock_errors` with one offset over all kept bins and depths
+    removed, as in :func:`common_frame_error`.
+
+    Returns
+    -------
+    rms, max_abs : float
+    """
+    return common_frame_summary(
+        source_clock_errors(motion, clock, displacement, channel_depths)
+    )
 
 
 def common_frame_error(motion, displacement, channel_depths):
@@ -455,6 +475,7 @@ def write_drifting_polymer_nwb(
     return out_path
 
 
+@contextmanager
 def hdf5_timed_recording_with_shared_peak_frame(h5_path, *, gap_s: float):
     """A 2 s, 32-contact recording whose two spikes share one frame.
 
@@ -465,8 +486,10 @@ def hdf5_timed_recording_with_shared_peak_frame(h5_path, *, gap_s: float):
     dataset, as the v2 NWB reader leaves it: 1 s at ``100 s``, then
     ``gap_s`` of no samples, then 1 s more.
 
-    Returns
-    -------
+    A context manager: the HDF5 file stays open while it is active.
+
+    Yields
+    ------
     recording : si.BaseRecording
     timestamps : numpy.ndarray
         ``(n_samples,)`` the timestamps written to ``h5_path``.
@@ -502,7 +525,6 @@ def hdf5_timed_recording_with_shared_peak_frame(h5_path, *, gap_s: float):
     )
     with h5py.File(h5_path, "w") as h5:
         h5.create_dataset("timestamps", data=timestamps)
-    recording._recording_segments[0].time_vector = h5py.File(h5_path, "r")[
-        "timestamps"
-    ]
-    return recording, timestamps
+    with h5py.File(h5_path, "r") as h5:
+        recording._recording_segments[0].time_vector = h5["timestamps"]
+        yield recording, timestamps
