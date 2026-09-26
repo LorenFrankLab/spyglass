@@ -152,7 +152,9 @@ DLCProject().alter()
 
   In a new Python session, `import spyglass.spikesorting.v2.sorting`
   redeclares the tables. Then recreate the concat selections, sorts and
-  curations. Do this after the
+  curations. The recreated `ConcatenatedRecording` also stores
+  `continuity_spans` and `continuity_start_s`, the member joins and
+  member-internal gaps with each span's real start time. Do this after the
   [preproduction database upgrade sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database).
 - Optional motion correction will be a separate stage. `DriftEstimate` is
   unchanged and stays QC-only.
@@ -170,8 +172,15 @@ DLCProject().alter()
   validated for a probe.
 - The estimate uses only valid samples: noise levels come from the
   artifact-free statistics spans, and peaks whose localization window touches
-  a masked sample are dropped. Recordings with acquisition gaps and
-  multi-member concatenations are refused for now.
+  a masked sample are dropped.
+- Recordings with acquisition gaps and multi-member concatenations are
+  estimated once, on an estimation clock: each uninterrupted span keeps its
+  own timing, and the gap between spans keeps its real length up to the
+  recipe's required `max_gap_s` (30 s in the shipped rows). All spans share
+  one reference frame. `MotionEstimate` stores this time map;
+  `get_displacement_on_source_clock` maps the estimate back to acquisition
+  time. Spans must be in acquisition order: concatenation members whose
+  timestamps overlap are refused at estimation.
 - Artifact detections referenced by a `MotionEstimateSelection` are protected
   from deletion like those referenced by a `SortingSelection`.
 
