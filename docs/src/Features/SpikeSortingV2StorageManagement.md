@@ -221,10 +221,13 @@ atomically, so a reclamation can never race a rebuild. There is no hash-mutating
 
 ## Concatenated recordings
 
-The cross-session `ConcatenatedRecording` cache (a motion-corrected, unwhitened
-`ElectricalSeries` stitched from the ordered member recordings) is a third
-regeneratable family, with the same fail-closed lifecycle as the single-session
-recording — plus a frozen member set tied into its identity.
+The cross-session `ConcatenatedRecording` cache (a masked, unwhitened
+`ElectricalSeries` stitched from the ordered member recordings; concatenation
+never corrects motion itself -- see
+[Motion-correction artifacts](#motion-correction-artifacts) below for the
+optional stage on top of it) is a third regeneratable family, with the same
+fail-closed lifecycle as the single-session recording — plus a frozen member
+set tied into its identity.
 
 - **Identity = the ordered member set.** `concat_recording_id` is content-
     addressed from the group + parameter names **and** a SHA-256 of the ordered
@@ -247,8 +250,8 @@ recording — plus a frozen member set tied into its identity.
 - **Artifact dependencies and valid time are preserved.** The selected member
     detections are foreign-key dependencies; ordinary deletion refuses
     referenced detections, while explicit `cascade_delete()` removes dependent
-    concat and sorting outputs. Materialization and rebuild apply the same masks
-    before motion correction and preserve masked samples afterward.
+    concat and sorting outputs. Materialization and rebuild apply the same
+    masks before concatenation and preserve masked samples afterward.
     `obs_intervals` stores valid time on the concat timeline;
     `MemberBoundary.member_valid_times` stores it in original session timestamps
     for member exports.
@@ -259,9 +262,8 @@ recording — plus a frozen member set tied into its identity.
     locked (`concat_recording_artifact_lock`), atomic (`os.replace`),
     content-`hash`-verified path, raising `RecordingContentDriftError` on a
     fingerprint mismatch instead of installing drifted bytes (the canonical slot
-    is left untouched). A motion-corrected concat is only byte-reproducible
-    insofar as `correct_motion` is deterministic; an irreproducible rebuild
-    fails loudly here rather than silently.
+    is left untouched); an irreproducible rebuild fails loudly here rather
+    than silently.
 - **Split-back conserves spikes.** `split_sorting_by_session()` back-maps a
     concat-frame sorting into per-member local frames; it asserts one strictly-
     increasing boundary per frozen member and that every input spike lands in
@@ -285,6 +287,55 @@ recording — plus a frozen member set tied into its identity.
     surface (the analogue of the recording trio above) is deferred until concat
     outputs are first retained at scale, and should reuse the shared recompute
     helpers rather than a bespoke table family.
+
+## Motion-correction artifacts
+
+The optional motion stage (see
+[Optional motion correction](./SpikeSortingV2.md#optional-motion-correction))
+adds two new, opt-in artifact families -- nothing is written unless a run
+passes `motion_mode="estimate"` or `"apply"`.
+
+- **`MotionEstimate`** -- a relational row per saved estimate: the
+    SpikeInterface `Motion` blob, resolved configuration, spans, and
+    peak-count diagnostics (never a raw peak array). This is DataJoint blob
+    storage, not a separate NWB artifact, so it has no `AnalysisNwbfile`
+    lifecycle of its own.
+- **`MotionCorrectedRecording`** -- a full NWB-resident `ElectricalSeries`
+    artifact, one **AnalysisNwbfile-sized cost per corrected recording**: it
+    persists the corrected, masked, unwhitened traces at the source's own
+    sample count and rate, i.e. roughly the same disk footprint as the
+    `Recording` (or `ConcatenatedRecording`) it was computed from. A
+    single-session sort in `"apply"` mode therefore keeps both the original
+    `Recording` artifact (other consumers still read it) and the corrected
+    one on disk.
+- **Write-buffer memory (transient, not disk).** Applying motion is lazy but
+    still holds about two float64 copies of each write buffer (the parent
+    read plus the interpolation output) while writing: roughly
+    2 x n_channels x 8 bytes/frame for a ~30 s buffer, i.e. **~1.9 GB at 128
+    channels and ~5.5 GB at 384 channels** (plus a smaller per-frame cost for
+    chunk times/bin indices). Size `write_buffer_gb` accordingly on a
+    high-channel-count probe.
+- **Rebuild reapplies the saved motion, never re-estimates.** A missing
+    `MotionCorrectedRecording` file is rebuilt from its saved `MotionEstimate`
+    (never by estimating again), through the same locked, atomic,
+    content-hash-verified path as `Recording`/`ConcatenatedRecording`; a
+    fingerprint mismatch raises `RecordingContentDriftError` and never
+    installs drifted bytes.
+- **Deletion protection.** `SortingSelection.MotionCorrectionSource` is a
+    foreign key onto `MotionCorrectedRecording`: `delete_quick` on a
+    referenced `MotionCorrectedRecording` fails on the constraint, and an
+    ordinary DataJoint delete without `force_masters` is refused ("Attempt to
+    delete part table ... before deleting from its master"). Spyglass's
+    `cautious_delete` sets `force_masters=True`, so deleting a corrected
+    recording that a sort reads cascades up through that sort's
+    `SortingSelection`/`Sorting` -- a sort can never end up pointing at a
+    deleted corrected recording. The same protection covers a
+    `MotionEstimate` a `MotionCorrectedRecordingSelection` still references.
+- **Recompute/reclamation: deferred, like concat.** There is no
+    `MotionCorrectedRecordingArtifact*` recompute trio; a missing artifact is
+    rebuilt and verified on demand as above, which covers correctness. A
+    dedicated audit/reclamation surface is deferred with the same rationale
+    as the concat family.
 
 ## Admin surface
 
