@@ -1301,11 +1301,15 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         traces : EffectiveTraces
             The ``traces`` of :meth:`resolve_effective_source`.
         """
-        abs_path = AnalysisNwbfile.get_abs_path(
-            traces.row["analysis_file_name"]
+        from spyglass.spikesorting.v2._recording_nwb import (
+            ensure_artifact_file,
         )
-        if not Path(abs_path).exists():
-            _TRACE_TABLES[traces.kind]()._rebuild_nwb_artifact(traces.key)
+
+        ensure_artifact_file(
+            _TRACE_TABLES[traces.kind],
+            traces.key,
+            traces.row["analysis_file_name"],
+        )
 
     @classmethod
     def resolve_source_preprocessing_params_name(cls, key: dict) -> str:

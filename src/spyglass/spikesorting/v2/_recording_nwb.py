@@ -6,7 +6,8 @@ including when workers or analyzers reconstruct the extractor.
 timestamps vector into an ``AnalysisNwbfile`` for ``Recording.make_compute``
 (and the rebuild path), then hashes the persisted file for the cache contract.
 ``install_rebuilt_recording`` installs verified single/concatenated recording
-rebuilds and reconciles their tracked byte checksums.
+rebuilds and reconciles their tracked byte checksums, and
+``ensure_artifact_file`` is the shared self-heal that triggers them.
 The table threads already-fetched DB state in (the tri-part
 ``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
 compute), and the file row is registered by the caller inside its DataJoint
@@ -82,6 +83,41 @@ def install_rebuilt_recording(
     except Exception:
         Path(canonical_abs).unlink(missing_ok=True)
         raise
+
+
+def ensure_artifact_file(table, key: dict, analysis_file_name: str) -> str:
+    """Absolute path of a cached trace artifact, rebuilt first if missing.
+
+    The one self-heal every trace-artifact table shares: when the file is
+    gone, ``table()._rebuild_nwb_artifact(key)`` restores it (a locked,
+    content-verified rebuild; the DataJoint row is never deleted), and the
+    path is resolved again.
+
+    Parameters
+    ----------
+    table : type
+        The owning table class (``Recording``, ``ConcatenatedRecording`` or
+        ``MotionCorrectedRecording``); it must define
+        ``_rebuild_nwb_artifact(key)``.
+    key : dict
+        The artifact row's primary key.
+    analysis_file_name : str
+        The row's ``analysis_file_name``.
+
+    Returns
+    -------
+    str
+        Absolute path of the (present) artifact file.
+    """
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+    abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+    if not Path(abs_path).exists():
+        table()._rebuild_nwb_artifact(key)
+        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+    return abs_path
 
 
 def raw_eseries_path_and_timestamp_mode(

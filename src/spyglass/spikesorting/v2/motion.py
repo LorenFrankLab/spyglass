@@ -20,13 +20,11 @@ estimation adapter, the ``Motion`` serialization) lives in ``_motion``.
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 from typing import NamedTuple
 
 import datajoint as dj
 import numpy as np
 
-from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v2._params.motion_estimation import (
     MOTION_ESTIMATION_SCHEMA_VERSION,
     MotionEstimationParamsSchema,
@@ -618,14 +616,6 @@ class MotionEstimateComputed(NamedTuple):
     input_fingerprint: str
 
 
-def _artifact_path(table, key: dict, row: dict) -> str:
-    """Absolute path of a cached trace artifact, rebuilt first if missing."""
-    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-    if not Path(abs_path).exists():
-        table()._rebuild_nwb_artifact(key)
-    return abs_path
-
-
 @schema
 class MotionEstimate(SpyglassMixin, dj.Computed):
     """A saved motion estimate with its resolved configuration and evidence.
@@ -693,6 +683,9 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._artifact_intervals import (
             read_artifact_removed_intervals,
         )
+        from spyglass.spikesorting.v2._recording_nwb import (
+            ensure_artifact_file,
+        )
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         lineage = MotionEstimateSelection.resolve_source(key)
@@ -717,7 +710,9 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
                 f"{selection['source_content_hash']}). Select a new estimate "
                 "with MotionEstimateSelection.insert_selection."
             )
-        source_path = _artifact_path(table, lineage.key, source_row)
+        source_path = ensure_artifact_file(
+            table, lineage.key, source_row["analysis_file_name"]
+        )
 
         artifact_valid_times = None
         if lineage.artifact_detection_id is not None:

@@ -1823,13 +1823,15 @@ class Recording(SpyglassMixin, dj.Computed):
             The preprocessed (bandpass-filtered, common-referenced)
             recording, annotated ``is_filtered=True``.
         """
-        from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+        from spyglass.spikesorting.v2._recording_nwb import (
+            ensure_artifact_file,
+            read_recording_nwb,
+        )
 
         row = (self & key).fetch1()
-        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-        if not Path(abs_path).exists():
-            self._rebuild_nwb_artifact(key)
-            abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        abs_path = ensure_artifact_file(
+            type(self), key, row["analysis_file_name"]
+        )
         # Honor the stored ``electrical_series_path`` rather than
         # letting SI auto-detect the series. A future writer that
         # places more than one ``ElectricalSeries`` in the analysis
