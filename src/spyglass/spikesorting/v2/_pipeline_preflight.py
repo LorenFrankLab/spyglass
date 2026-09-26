@@ -2062,6 +2062,8 @@ def _expected_motion_ids(
         ``motion_corrected_recording_id``) entries shaped like the other
         ``expected_ids`` entries.
     """
+    if motion_mode == "off" or motion_recipe is None:
+        return {}
     from spyglass.spikesorting.v2._motion import (
         motion_corrected_selection_identity,
         motion_estimate_selection_identity,
@@ -2074,8 +2076,6 @@ def _expected_motion_ids(
     )
     from spyglass.spikesorting.v2.recording import Recording
 
-    if motion_mode == "off" or motion_recipe is None:
-        return {}
     names = ["motion_estimate_id"] + (
         ["motion_corrected_recording_id"] if motion_mode == "apply" else []
     )
