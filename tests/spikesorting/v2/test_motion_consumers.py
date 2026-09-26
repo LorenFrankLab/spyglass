@@ -594,10 +594,14 @@ def test_unitmatch_records_the_waveform_traces(
         (SessionGroup & group).super_delete(warn=False, safemode=False)
 
 
-def test_make_fetch_rechecks_the_sorters_own_correction(corrected_sorts):
-    """A correction part inserted around ``insert_selection`` onto a sort
-    whose sorter corrects motion itself is refused at the compute boundary,
-    before anything is sorted."""
+def test_make_fetch_rechecks_the_sorters_own_correction(
+    corrected_sorts, monkeypatch
+):
+    """A corrected sort whose sorter corrects motion itself is refused at the
+    compute boundary, before anything is sorted, even when the insert-time
+    check passed (as it would if SpikeInterface's default changed between
+    selection and populate)."""
+    from spyglass.spikesorting.v2._params import sorter as sorter_params
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
         Sorting,
@@ -606,23 +610,62 @@ def test_make_fetch_rechecks_the_sorters_own_correction(corrected_sorts):
 
     sorts = corrected_sorts
     SorterParameters.insert_default()
-    sort_key = SortingSelection.insert_selection(
-        {
-            "recording_id": sorts["recording_key"]["recording_id"],
-            **sorts["artifact_key"],
-            "sorter": "spykingcircus2",
-            "sorter_params_name": "default",
-        }
-    )
-    try:
-        SortingSelection.MotionCorrectionSource.insert1(
-            {**sort_key, **sorts["corrected_key"]}
+    with monkeypatch.context() as insert_time:
+        insert_time.setattr(
+            sorter_params,
+            "reject_internal_motion_correction",
+            lambda *args, **kwargs: None,
         )
+        sort_key = SortingSelection.insert_selection(
+            {
+                "recording_id": sorts["recording_key"]["recording_id"],
+                **sorts["artifact_key"],
+                **sorts["corrected_key"],
+                "sorter": "spykingcircus2",
+                "sorter_params_name": "default",
+            }
+        )
+    try:
         with pytest.raises(ValueError, match="apply_motion_correction=False"):
             Sorting().make_fetch(sort_key)
         assert not (Sorting & sort_key)
     finally:
         drop_sorts([sort_key])
+
+
+def test_part_drift_on_a_sorted_selection_is_refused(corrected_sorts):
+    """A correction part deleted from a corrected sort, or inserted (with
+    matching source and mask) onto an uncorrected one, after both were
+    sorted, is refused where consumers resolve their traces, instead of
+    silently switching them to other traces than the sorter read."""
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    sorts = corrected_sorts
+    uncorrected, corrected = sorts["uncorrected_sort"], sorts["corrected_sort"]
+    correction_part = SortingSelection.MotionCorrectionSource
+    drift = "not the ones it was selected with"
+
+    for sort in (uncorrected, corrected):
+        SortingSelection.resolve_effective_source(sort)
+
+    correction_part.insert1({**uncorrected, **sorts["corrected_key"]})
+    try:
+        with pytest.raises(SchemaBypassError, match=drift):
+            SortingSelection.resolve_effective_source(uncorrected)
+    finally:
+        (correction_part & uncorrected).delete_quick()
+
+    (correction_part & corrected).delete_quick()
+    try:
+        with pytest.raises(SchemaBypassError, match=drift):
+            SortingSelection.resolve_effective_source(corrected)
+    finally:
+        correction_part.insert1({**corrected, **sorts["corrected_key"]})
+    assert (
+        SortingSelection.resolve_effective_source(corrected).traces.kind
+        == "motion_corrected_recording"
+    )
 
 
 @pytest.mark.parametrize("kind", ["recording", "concatenated_recording"])

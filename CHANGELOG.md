@@ -271,7 +271,13 @@ available.
   whose motion behavior is unknown is refused too. `Sorting` sorts the
   corrected traces, takes the statistics spans from the corrected recording
   and records the correction ids in the units NWB provenance. A corrected
-  recording a sort selected cannot be deleted without that sort. The part is
+  recording a sort selected cannot be deleted without that sort, and
+  `SortingSelection.resolve_effective_source` (the path every trace consumer
+  takes) re-derives `sorting_id` from the selection's current source,
+  artifact-detection and motion-correction parts, raising
+  `SchemaBypassError` when a part was inserted or deleted around
+  `insert_selection` -- so consumers never read other traces than the
+  sorter did. The part is
   a new table, so no recreation is needed; **importing
   `spyglass.spikesorting.v2.sorting` now declares the
   `spikesorting_v2_motion` schema** (grant privileges on it to anyone who

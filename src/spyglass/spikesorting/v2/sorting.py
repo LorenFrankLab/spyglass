@@ -76,6 +76,7 @@ from spyglass.spikesorting.v2._source_resolution import (
     effective_source_from_base,
     effective_source_from_correction,
     load_effective_recording,
+    sorting_parts_mismatch,
 )
 from spyglass.spikesorting.v2._units_nwb import (
     STATISTICS_SPANS_FIELD,
@@ -1437,9 +1438,13 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         ------
         SchemaBypassError
             If the selected corrected recording was not made from the sort's
-            source and artifact mask (a part row inserted without
+            source and artifact mask, or the current source, artifact
+            detection and motion-correction parts do not give the stored
+            ``sorting_id`` (a part row inserted or deleted without
             :meth:`insert_selection`).
         """
+        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
         source = cls.resolve_source(key)
         lineage = SourceLineage(
             kind=source.kind,
@@ -1447,26 +1452,48 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             artifact_detection_id=cls.resolve_artifact_detection(key),
         )
         corrected_id = cls.resolve_motion_correction(key)
+        if corrected_id is not None:
+            mismatches = correction_lineage_mismatch(
+                lineage,
+                MotionCorrectedRecordingSelection.resolve_source(
+                    {"motion_corrected_recording_id": corrected_id}
+                ),
+            )
+            if mismatches:
+                raise SchemaBypassError(
+                    f"SortingSelection {dict(key)} reads motion-corrected "
+                    f"recording {corrected_id}, which was not made from its "
+                    f"source and mask ({'; '.join(mismatches)}). The "
+                    "MotionCorrectionSource part was inserted without "
+                    "SortingSelection.insert_selection; drop the selection "
+                    "and re-insert it."
+                )
+        # sorting_id folds in every part, so a part inserted or deleted after
+        # the selection (and after its sort) shows up as an id mismatch.
+        master = (
+            cls & {k: v for k, v in key.items() if k in cls.primary_key}
+        ).fetch1()
+        mismatch = sorting_parts_mismatch(
+            master["sorting_id"],
+            lineage,
+            sorter=master["sorter"],
+            sorter_params_name=master["sorter_params_name"],
+            motion_corrected_recording_id=corrected_id,
+        )
+        if mismatch is not None:
+            raise SchemaBypassError(
+                f"SortingSelection {master['sorting_id']}: its current parts "
+                f"({mismatch}) are not the ones it was selected with. A "
+                "source, ArtifactDetectionSource or MotionCorrectionSource "
+                "part was inserted or deleted without "
+                "SortingSelection.insert_selection, so its consumers would "
+                "read other traces than its sorter did. Drop the selection "
+                "(and its sort) and re-insert it with insert_selection."
+            )
         if corrected_id is None:
             row = (_TRACE_TABLES[source.kind] & source.key).fetch1()
             return effective_source_from_base(lineage, row)
-
         corrected_key = {"motion_corrected_recording_id": corrected_id}
-        mismatches = correction_lineage_mismatch(
-            lineage,
-            MotionCorrectedRecordingSelection.resolve_source(corrected_key),
-        )
-        if mismatches:
-            from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
-            raise SchemaBypassError(
-                f"SortingSelection {dict(key)} reads motion-corrected "
-                f"recording {corrected_id}, which was not made from its "
-                f"source and mask ({'; '.join(mismatches)}). The "
-                "MotionCorrectionSource part was inserted without "
-                "SortingSelection.insert_selection; drop the selection and "
-                "re-insert it."
-            )
         row = (MotionCorrectedRecording & corrected_key).fetch1()
         return effective_source_from_correction(lineage, corrected_key, row)
 

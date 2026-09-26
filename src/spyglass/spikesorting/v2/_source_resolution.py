@@ -20,7 +20,9 @@ read the original source without inferring it from the derived artifact.
 ``SortingSelection.resolve_effective_source`` performs the DB reads and builds
 the result with :func:`effective_source_from_base` or
 :func:`effective_source_from_correction`; :func:`correction_lineage_mismatch`
-checks that a corrected recording was made from the sort's own source and mask.
+checks that a corrected recording was made from the sort's own source and mask,
+and :func:`sorting_parts_mismatch` that the parts still give the stored
+``sorting_id``.
 :func:`load_effective_recording` opens the traces, and
 :func:`read_effective_recording` does the same from an already-resolved path.
 
@@ -208,6 +210,76 @@ def correction_lineage_mismatch(
             f"artifact_detection_id {detection} != the sort's {sort_detection}"
         )
     return mismatches
+
+
+def sorting_parts_mismatch(
+    sorting_id,
+    lineage: SourceLineage,
+    *,
+    sorter: str,
+    sorter_params_name: str,
+    motion_corrected_recording_id,
+) -> str | None:
+    """Describe why a sort's current parts do not give its ``sorting_id``.
+
+    ``sorting_id`` is derived from the source, the artifact detection, the
+    motion-corrected recording and the sorter row when the selection is
+    inserted. Recomputing it from the parts present now detects a part
+    inserted or deleted around ``SortingSelection.insert_selection``, which
+    would otherwise change the traces a sort's consumers read without
+    changing the sort.
+
+    Parameters
+    ----------
+    sorting_id : uuid.UUID or str
+        The stored ``SortingSelection`` primary key.
+    lineage : SourceLineage
+        The source and artifact detection read from the selection's parts.
+    sorter : str
+        The selection's sorter.
+    sorter_params_name : str
+        The selection's ``SorterParameters`` name.
+    motion_corrected_recording_id : uuid.UUID, str or None
+        The ``MotionCorrectionSource`` part's corrected recording, or ``None``.
+
+    Returns
+    -------
+    str or None
+        ``None`` when the parts give ``sorting_id``; otherwise a description.
+    """
+    from spyglass.spikesorting.v2._selection_identity import (
+        deterministic_id,
+        sorting_identity_payload,
+    )
+
+    if lineage.kind == "concatenated_recording":
+        if lineage.artifact_detection_id is not None:
+            return (
+                "a concatenated-recording source with artifact_detection_id "
+                f"{lineage.artifact_detection_id}, which no selection can have"
+            )
+        source = {"concat_recording_id": lineage.key["concat_recording_id"]}
+    else:
+        source = {
+            "recording_id": lineage.key["recording_id"],
+            "artifact_detection_id": lineage.artifact_detection_id,
+        }
+    expected = deterministic_id(
+        "sorting",
+        sorting_identity_payload(
+            sorter=sorter,
+            sorter_params_name=sorter_params_name,
+            motion_corrected_recording_id=motion_corrected_recording_id,
+            **source,
+        ),
+    )
+    if expected == uuid.UUID(str(sorting_id)):
+        return None
+    return (
+        f"source {lineage.kind} {lineage.key}, artifact_detection_id "
+        f"{lineage.artifact_detection_id}, motion_corrected_recording_id "
+        f"{motion_corrected_recording_id} give sorting_id {expected}"
+    )
 
 
 def check_corrected_channel_map(

@@ -458,3 +458,129 @@ def test_corrected_concat_sort_still_rejects_an_artifact():
                 "motion_corrected_recording_id": _CORRECTED,
             }
         )
+
+
+def _lineage_of(source):
+    from spyglass.spikesorting.v2._source_resolution import SourceLineage
+
+    if "concat_recording_id" in source:
+        return SourceLineage(
+            kind="concatenated_recording",
+            key={
+                "concat_recording_id": uuid.UUID(source["concat_recording_id"])
+            },
+            artifact_detection_id=None,
+        )
+    detection = source.get("artifact_detection_id")
+    return SourceLineage(
+        kind="recording",
+        key={"recording_id": uuid.UUID(source["recording_id"])},
+        artifact_detection_id=(
+            None if detection is None else uuid.UUID(detection)
+        ),
+    )
+
+
+@pytest.mark.parametrize(("source", "sorting_id", "canonical"), _BASE_SORTS)
+def test_sort_parts_must_still_give_the_stored_sorting_id(
+    source, sorting_id, canonical
+):
+    """The parts a selection was inserted with give back its ``sorting_id``
+    (the recorded ids included); a correction part added to an uncorrected
+    sort, or deleted from a corrected one, gives another id."""
+    from spyglass.spikesorting.v2._source_resolution import (
+        sorting_parts_mismatch,
+    )
+
+    lineage = _lineage_of(source)
+    assert (
+        sorting_parts_mismatch(
+            sorting_id,
+            lineage,
+            **_BASE_SORTER,
+            motion_corrected_recording_id=None,
+        )
+        is None
+    )
+    added = sorting_parts_mismatch(
+        uuid.UUID(sorting_id),
+        lineage,
+        **_BASE_SORTER,
+        motion_corrected_recording_id=uuid.UUID(_CORRECTED),
+    )
+    assert added is not None and _CORRECTED in added
+
+    corrected_id = build_sorting_selection_plan(
+        {**_BASE_SORTER, **source, "motion_corrected_recording_id": _CORRECTED}
+    ).sorting_id
+    assert (
+        sorting_parts_mismatch(
+            corrected_id,
+            lineage,
+            **_BASE_SORTER,
+            motion_corrected_recording_id=_CORRECTED,
+        )
+        is None
+    )
+    assert (
+        sorting_parts_mismatch(
+            corrected_id,
+            lineage,
+            **_BASE_SORTER,
+            motion_corrected_recording_id=None,
+        )
+        is not None
+    )
+    assert (
+        sorting_parts_mismatch(
+            corrected_id,
+            lineage,
+            **_BASE_SORTER,
+            motion_corrected_recording_id=_CORRECTED_2,
+        )
+        is not None
+    )
+
+
+def test_sort_parts_detect_artifact_part_drift():
+    """Deleting a sort's artifact detection part, adding one, or adding one
+    to a concatenated-recording sort all break the stored ``sorting_id``."""
+    from spyglass.spikesorting.v2._source_resolution import (
+        sorting_parts_mismatch,
+    )
+
+    (
+        (masked, masked_id, _),
+        (unmasked, unmasked_id, _),
+        (concat, concat_id, _),
+    ) = _BASE_SORTS
+    masked_lineage = _lineage_of(masked)
+    for stored, lineage in (
+        (masked_id, masked_lineage._replace(artifact_detection_id=None)),
+        (unmasked_id, masked_lineage),
+        (
+            concat_id,
+            _lineage_of(concat)._replace(
+                artifact_detection_id=uuid.UUID(_BASE_ARTIFACT_ID)
+            ),
+        ),
+    ):
+        assert (
+            sorting_parts_mismatch(
+                stored,
+                lineage,
+                **_BASE_SORTER,
+                motion_corrected_recording_id=None,
+            )
+            is not None
+        )
+    other_sorter = {**_BASE_SORTER, "sorter_params_name": "other"}
+    assert (
+        sorting_parts_mismatch(
+            unmasked_id,
+            _lineage_of(unmasked),
+            **other_sorter,
+            motion_corrected_recording_id=None,
+        )
+        is not None
+    )
