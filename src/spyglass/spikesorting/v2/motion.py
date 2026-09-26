@@ -1136,9 +1136,9 @@ class MotionCorrectedRecordingSelection(
 
     ``motion_corrected_recording_id`` is derived from the
     ``motion_estimate_id`` (which already carries the source, its content,
-    the mask, the estimation recipe and the SpikeInterface version), the
-    interpolation recipe name, its resolved configuration's hash and the
-    application algorithm version. Changing only the interpolation recipe
+    the mask and the estimation recipe), the interpolation recipe name, its
+    resolved configuration's hash, the SpikeInterface version that applies
+    it and the application algorithm version. Changing only the interpolation recipe
     therefore selects a new corrected recording on the same estimate. Create
     rows with :meth:`insert_selection`.
     """
@@ -1149,6 +1149,7 @@ class MotionCorrectedRecordingSelection(
     -> MotionEstimate
     -> MotionInterpolationParameters
     resolved_params_hash: char(64)                # SHA-256 of the resolved interpolation configuration
+    spikeinterface_version: varchar(32)           # SpikeInterface the corrected recording is computed with
     motion_interpolation_algorithm_version: int   # application algorithm version at selection
     """
 
@@ -1187,6 +1188,8 @@ class MotionCorrectedRecordingSelection(
         DuplicateSelectionError
             If a matching row has a non-deterministic id.
         """
+        import spikeinterface
+
         from spyglass.spikesorting.v2._motion import (
             MOTION_INTERPOLATION_ALGORITHM_VERSION,
             motion_corrected_identity_payload,
@@ -1242,6 +1245,7 @@ class MotionCorrectedRecordingSelection(
             "motion_estimate_id": motion_estimate_id,
             "motion_interpolation_params_name": params_name,
             "resolved_params_hash": resolved_hash,
+            "spikeinterface_version": spikeinterface.__version__,
             "motion_interpolation_algorithm_version": (
                 MOTION_INTERPOLATION_ALGORITHM_VERSION
             ),
@@ -1479,8 +1483,8 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
         Raises
         ------
         ValueError
-            On a stale selection (interpolation recipe resolution or
-            application algorithm changed), a source whose frames, rate or
+            On a stale selection (interpolation recipe resolution,
+            SpikeInterface version or application algorithm changed), a source whose frames, rate or
             channels differ from the estimate's, or an application failure
             (see ``_motion.apply_motion_on_estimation_clock``).
         """
@@ -1507,6 +1511,11 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
                     "resolved interpolation hash",
                     _motion.resolved_params_hash(resolved),
                     selection["resolved_params_hash"],
+                ),
+                (
+                    "SpikeInterface version",
+                    si.__version__,
+                    selection["spikeinterface_version"],
                 ),
                 (
                     "motion interpolation algorithm version",

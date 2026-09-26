@@ -1011,6 +1011,7 @@ def test_interpolation_only_change_reuses_the_estimate(
     estimates motion again. Selection is idempotent, content-addressed and
     guarded."""
     import datajoint as dj
+    import spikeinterface
 
     from spyglass.spikesorting.v2 import _motion
     from spyglass.spikesorting.v2._selection_identity import deterministic_id
@@ -1034,12 +1035,14 @@ def test_interpolation_only_change_reuses_the_estimate(
         estimate["motion_estimate_id"]
     }
     row = (MotionCorrectedRecordingSelection & extrapolate).fetch1()
+    assert row["spikeinterface_version"] == spikeinterface.__version__
     assert extrapolate["motion_corrected_recording_id"] == deterministic_id(
         "motion_corrected_recording",
         _motion.motion_corrected_identity_payload(
             motion_estimate_id=estimate["motion_estimate_id"],
             motion_interpolation_params_name="kriging_force_extrapolate_v1",
             resolved_params_hash=row["resolved_params_hash"],
+            spikeinterface_version=row["spikeinterface_version"],
             motion_interpolation_algorithm_version=(
                 _motion.MOTION_INTERPOLATION_ALGORITHM_VERSION
             ),
@@ -1071,6 +1074,62 @@ def test_interpolation_only_change_reuses_the_estimate(
     unpopulated = _select(discontinuous_sources["member_b"], "dredge_v1")
     with pytest.raises(ValueError, match="not populated"):
         _select_corrected(unpopulated)
+
+
+def test_stale_corrected_selection_is_refused_at_compute(
+    discontinuous_sources, monkeypatch
+):
+    """A selection made under another SpikeInterface version, or whose
+    interpolation recipe now resolves differently, is refused at compute and
+    leaves no row."""
+    import spikeinterface
+
+    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionCorrectedRecordingSelection,
+        MotionInterpolationParameters,
+    )
+
+    MotionInterpolationParameters.insert1(
+        {
+            "motion_interpolation_params_name": "stale_test_idw",
+            "params": {
+                "border_mode": "force_extrapolate",
+                "spatial_interpolation_method": "idw",
+                "sigma_um": 20.0,
+                "p": 2,
+                "num_closest": 3,
+            },
+        },
+        skip_duplicates=True,
+    )
+    estimate = _populated_estimate(
+        recording_id=discontinuous_sources["member_b"]["recording_id"]
+    )
+    key = _select_corrected(estimate, "stale_test_idw")
+    try:
+        monkeypatch.setattr(spikeinterface, "__version__", "0.0.0")
+        with pytest.raises(ValueError, match="SpikeInterface version"):
+            MotionCorrectedRecording.populate(key, reserve_jobs=False)
+        monkeypatch.undo()
+
+        resolve = _motion.resolve_interpolation_params
+
+        def _changed_resolution(params):
+            return {**resolve(params), "sigma_um": 30.0}
+
+        monkeypatch.setattr(
+            _motion, "resolve_interpolation_params", _changed_resolution
+        )
+        with pytest.raises(ValueError, match="resolved interpolation hash"):
+            MotionCorrectedRecording.populate(key, reserve_jobs=False)
+        assert not (MotionCorrectedRecording & key)
+    finally:
+        monkeypatch.undo()
+        (MotionCorrectedRecordingSelection & key).super_delete(
+            warn=False, safemode=False
+        )
 
 
 @pytest.mark.parametrize("source", ["gapped_recording", "concat"])

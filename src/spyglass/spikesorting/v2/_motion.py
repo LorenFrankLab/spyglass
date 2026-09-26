@@ -1530,6 +1530,7 @@ def motion_corrected_identity_payload(
     motion_estimate_id,
     motion_interpolation_params_name: str,
     resolved_params_hash: str,
+    spikeinterface_version: str,
     motion_interpolation_algorithm_version: int,
 ) -> dict:
     """The logical identity a ``motion_corrected_recording_id`` is derived from.
@@ -1542,6 +1543,8 @@ def motion_corrected_identity_payload(
     motion_interpolation_params_name : str
     resolved_params_hash : str
         :func:`resolved_params_hash` of the resolved interpolation.
+    spikeinterface_version : str
+        SpikeInterface whose ``interpolate_motion`` applies the estimate.
     motion_interpolation_algorithm_version : int
 
     Returns
@@ -1553,6 +1556,7 @@ def motion_corrected_identity_payload(
         "motion_estimate_id": motion_estimate_id,
         "motion_interpolation_params_name": motion_interpolation_params_name,
         "resolved_params_hash": resolved_params_hash,
+        "spikeinterface_version": spikeinterface_version,
         "motion_interpolation_algorithm_version": int(
             motion_interpolation_algorithm_version
         ),

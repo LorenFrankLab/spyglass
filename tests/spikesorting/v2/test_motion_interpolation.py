@@ -395,6 +395,7 @@ def test_corrected_identity_changes_with_each_term():
         "motion_estimate_id": uuid.UUID(int=1),
         "motion_interpolation_params_name": "kriging_force_extrapolate_v1",
         "resolved_params_hash": "a" * 64,
+        "spikeinterface_version": "0.104.3",
         "motion_interpolation_algorithm_version": 1,
     }
 
@@ -409,7 +410,8 @@ def test_corrected_identity_changes_with_each_term():
         _id(motion_estimate_id=uuid.UUID(int=2)),
         _id(motion_interpolation_params_name="kriging_remove_channels_v1"),
         _id(resolved_params_hash="b" * 64),
+        _id(spikeinterface_version="0.105.0"),
         _id(motion_interpolation_algorithm_version=2),
     }
-    assert len(ids) == 5
+    assert len(ids) == 6
     assert _id() == _id()
