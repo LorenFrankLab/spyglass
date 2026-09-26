@@ -1,12 +1,30 @@
-"""Motion acceptance benchmark: manifest schema and gate check.
+"""Motion acceptance benchmark: manifest, gate check and opt-in runs.
 
-DB-free and fast; these run with every unit-shard pass.
+The manifest-schema and gate-check tests are DB-free and fast; they run with
+every unit-shard pass. The benchmark itself (every case of a manifest, each
+in its own process, through the v2 motion, sorting and comparison code) is
+opt-in:
+
+- ``SPYGLASS_V2_MOTION_BENCHMARK=1`` runs it (otherwise it skips).
+- ``SPYGLASS_V2_MOTION_MANIFEST`` names the manifest (default: the committed
+  development manifest, seeds 0-2, no gates).
+- ``SPYGLASS_V2_MOTION_BENCHMARK_OUT`` names the result directory (default: a
+  pytest temporary directory). A result already there that was produced
+  from the same manifest bytes is reused, so an interrupted run resumes.
+
+A development manifest carries no gates, so its benchmark run asserts only
+structural facts and writes the metric evidence; a held-out manifest's gates
+are checked by ``test_benchmark_meets_manifest_gates``.
 """
 
 from __future__ import annotations
 
 import json
 import math
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -16,10 +34,19 @@ from tests.spikesorting.v2._motion_acceptance import (
     CaseMetrics,
     Gates,
     case_metrics,
+    case_tag,
     check_gates,
     check_manifest_gates,
     load_manifest,
+    manifest_sha256,
     pooled_residual,
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+BENCHMARK = os.environ.get("SPYGLASS_V2_MOTION_BENCHMARK") == "1"
+BENCHMARK_SKIP = pytest.mark.skip(
+    reason="the motion acceptance benchmark is opt-in: set "
+    "SPYGLASS_V2_MOTION_BENCHMARK=1"
 )
 
 
@@ -473,3 +500,138 @@ def test_case_metrics_reads_a_case_result():
         peak_rss_gib=3.0,
     )
     assert pooled_residual(row) == pytest.approx(math.sqrt(0.3 / 3.0))
+
+
+# ---- opt-in benchmark -------------------------------------------------------
+
+
+def _manifest_path() -> Path:
+    return Path(
+        os.environ.get("SPYGLASS_V2_MOTION_MANIFEST", DEVELOPMENT_MANIFEST)
+    )
+
+
+def _benchmark_params():
+    if not BENCHMARK:
+        return [pytest.param(None, marks=BENCHMARK_SKIP, id="opt-in")]
+    return [
+        pytest.param(case, id=case_tag(*case))
+        for case in load_manifest(_manifest_path()).iter_cases()
+    ]
+
+
+@pytest.fixture(scope="module")
+def benchmark_out(tmp_path_factory) -> Path:
+    out = os.environ.get("SPYGLASS_V2_MOTION_BENCHMARK_OUT")
+    path = Path(out) if out else tmp_path_factory.mktemp("motion_benchmark")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _run_module(args: list[str]) -> None:
+    completed = subprocess.run(
+        [sys.executable, "-m", "tests.spikesorting.v2._motion_acceptance_run"]
+        + args,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr[-4000:]
+
+
+def _result(out: Path, case, sha: str) -> dict | None:
+    path = out / f"{case_tag(*case)}.json"
+    if not path.exists():
+        return None
+    result = json.loads(path.read_text())
+    return result if result.get("manifest_sha256") == sha else None
+
+
+@pytest.mark.parametrize("case", _benchmark_params())
+def test_benchmark_case(case, benchmark_out):
+    """Run one case (or reuse its result) and check its structure: it ran
+    through estimation, application, sorting and comparison, every metric is
+    finite, and the output channels follow the border mode. No numeric
+    acceptance threshold is applied here."""
+    manifest_path = _manifest_path()
+    sha = manifest_sha256(manifest_path)
+    result = _result(benchmark_out, case, sha)
+    if result is None:
+        scenario, seed, recipe = case
+        _run_module(
+            [
+                "case",
+                "--manifest",
+                str(manifest_path),
+                "--scenario",
+                scenario,
+                "--seed",
+                str(seed),
+                "--recipe",
+                recipe,
+                "--out",
+                str(benchmark_out),
+            ]
+        )
+        result = _result(benchmark_out, case, sha)
+    assert result is not None
+    assert (result["scenario"], result["seed"], result["recipe"]) == case
+
+    row = case_metrics(result)
+    kind = load_manifest(manifest_path).recipes[case[2]].kind
+    assert (row.motion_rms_um is None) == (kind == "off")
+    if kind != "off":
+        assert math.isfinite(row.motion_rms_um)
+        assert math.isfinite(row.motion_p95_um)
+    if kind == "estimate":
+        estimation = result["estimation"]
+        assert 0 < estimation["n_peaks_kept"] <= estimation["n_peaks_detected"]
+        assert sum(estimation["peaks_per_continuity_span"]) == (
+            estimation["n_peaks_kept"]
+        )
+    assert all(math.isfinite(v) for v in row.fidelity_num)
+    assert all(v > 0 for v in row.fidelity_den)
+    assert 1 <= row.n_out_channels <= row.n_contacts
+    if row.border_mode in (None, "force_extrapolate"):
+        assert row.n_out_channels == row.n_contacts
+        assert row.removed_channel_ids == ()
+    else:
+        assert set(row.removed_channel_ids) == set(
+            row.predicted_removed_channel_ids
+        )
+    assert list(row.fidelity_channel_ids) == [
+        c
+        for c in result["fidelity_signal"]["uncorrected"]["channel_ids"]
+        if c not in row.removed_channel_ids
+    ]
+    assert 0.0 <= row.mean_accuracy <= 1.0
+    assert result["sorting"]["n_gt_units"] == (
+        load_manifest(manifest_path).generator.num_units
+    )
+
+
+@pytest.mark.parametrize(
+    "enabled",
+    (
+        [pytest.param(True, id="gates")]
+        if BENCHMARK
+        else [pytest.param(True, marks=BENCHMARK_SKIP, id="opt-in")]
+    ),
+)
+def test_benchmark_meets_manifest_gates(enabled, benchmark_out):
+    """Every case result of the manifest meets its gates (held-out only)."""
+    manifest_path = _manifest_path()
+    manifest = load_manifest(manifest_path)
+    if manifest.gates is None:
+        pytest.skip(
+            f"manifest {manifest.name} carries no gates (development "
+            "evidence, not an acceptance test)"
+        )
+    sha = manifest_sha256(manifest_path)
+    rows = []
+    for case in manifest.iter_cases():
+        result = _result(benchmark_out, case, sha)
+        assert result is not None, f"no result for case {case}"
+        rows.append(case_metrics(result))
+    failed = [r for r in check_manifest_gates(rows, manifest) if not r.passed]
+    assert not failed, "\n".join(map(str, failed))

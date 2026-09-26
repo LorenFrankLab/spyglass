@@ -5,8 +5,8 @@ depends on: the seeds, the recording generator, the probe, the filter, the
 drift scenarios, the correction recipes, the case grid, the sorter, the
 ground-truth comparison, the evaluation windows and, for a held-out run, the
 numeric gates. :func:`load_manifest` validates one against
-:class:`AcceptanceManifest`. A case runner turns each
-``(scenario, seed, recipe)`` case into a result JSON;
+:class:`AcceptanceManifest`. The case runner (``_motion_acceptance_run``)
+turns each ``(scenario, seed, recipe)`` case into a result JSON;
 :func:`case_metrics` reduces a result to one :class:`CaseMetrics` row and
 :func:`check_gates` evaluates a table of rows against :class:`Gates`.
 
