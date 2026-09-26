@@ -947,8 +947,9 @@ class SourceClockDisplacement(NamedTuple):
     ----------
     source_time_s : numpy.ndarray
         ``(n_temporal_bins,)`` float64 source-clock time of each bin center
-        (``t_i + (c - e_i)`` for a center ``c`` in span ``i``); NaN for a bin
-        whose center lies in a capped gap.
+        (span ``i``'s estimation interval mapped affinely onto its real
+        extent, :func:`displacement_on_source_clock`); NaN for a bin whose
+        center lies in a capped gap.
     continuity_span : numpy.ndarray
         ``(n_temporal_bins,)`` int64 continuity span holding each bin center;
         ``-1`` for a bin inside a capped gap.
@@ -973,11 +974,17 @@ def displacement_on_source_clock(
     """Map a single-segment estimate's temporal bins to source time.
 
     A bin belongs to the continuity span whose estimation-clock interval
-    ``[e_i, e_i + (b_i - a_i) / fs)`` holds its center; its source time is
-    ``t_i + (center - e_i)``. A center between two spans lies in a capped gap
-    and is reported there, not assigned to a span. A center before the first
-    span or past the last span's end belongs to that span: those are the
-    outer histogram bins that hold its first / final samples.
+    ``[e_i, e_i + (b_i - a_i) / fs)`` holds its center. That interval is
+    mapped affinely onto the span's real extent ``[t_i, u_i + 1 / fs)``
+    (first timestamp to one sample after the last), so the source time is
+    ``t_i + (center - e_i) * (u_i + 1 / fs - t_i) / ((b_i - a_i) / fs)``:
+    when the timestamps run at a rate other than the nominal ``fs`` (which
+    SpikeInterface derives from a series' first 1000 steps), inspection
+    times do not inherit that scale error. A center between two spans lies
+    in a capped gap and is reported there, not assigned to a span. A center
+    before the first span or past the last span's end belongs to that span
+    (extrapolated): those are the outer histogram bins that hold its first /
+    final samples.
 
     Parameters
     ----------
@@ -992,10 +999,14 @@ def displacement_on_source_clock(
     centers = np.asarray(motion.temporal_bins_s[0], dtype=np.float64)
     fs = clock.sampling_frequency
     starts = clock.estimation_start_s
-    ends = starts + (clock.spans[:, 1] - clock.spans[:, 0]) / fs
+    nominal = (clock.spans[:, 1] - clock.spans[:, 0]) / fs
+    real = clock.source_end_s + 1.0 / fs - clock.source_start_s
+    ends = starts + nominal
     span = np.clip(np.searchsorted(starts, centers, side="right") - 1, 0, None)
     in_gap = (centers >= ends[span]) & (span < len(starts) - 1)
-    source = clock.source_start_s[span] + (centers - starts[span])
+    source = clock.source_start_s[span] + (centers - starts[span]) * (
+        real[span] / nominal[span]
+    )
     source[in_gap] = np.nan
     return SourceClockDisplacement(
         source_time_s=source,

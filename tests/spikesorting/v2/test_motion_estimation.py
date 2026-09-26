@@ -912,13 +912,44 @@ def test_source_clock_mapping_flags_bins_inside_a_capped_gap():
         mapped.continuity_span, [0, 0, 0, -1, -1, 1, 1]
     )
     np.testing.assert_array_equal(mapped.in_gap, mapped.continuity_span == -1)
-    np.testing.assert_array_equal(
+    np.testing.assert_allclose(
         mapped.source_time_s,
         [50.5, 51.5, 52.5, np.nan, np.nan, 153.5, 154.5],
+        rtol=0,
+        atol=1e-9,
     )
     np.testing.assert_array_equal(
         mapped.displacement_um, motion.displacement[0]
     )
+
+
+def test_source_clock_mapping_follows_the_real_timestamps():
+    """A span whose timestamps run 1 % slower than the nominal fs: each bin
+    center maps to within one sample of the real timestamp of the frame at
+    that estimation time, where the nominal ``t_i + (c - e_i)`` would be off
+    by up to 0.3 s by the end of the 30 s span."""
+    from spikeinterface.core.motion import Motion
+
+    from spyglass.spikesorting.v2._motion import (
+        build_estimation_clock,
+        displacement_on_source_clock,
+    )
+
+    fs, real_rate, n = 10.0, 9.9, 300
+    timestamps = 50.0 + np.arange(n) / real_rate
+    clock = build_estimation_clock(
+        [(0, n)], [timestamps[0]], [timestamps[-1]], fs, max_gap_s=30.0
+    )
+    centers = 50.5 + np.arange(30.0)
+    motion = Motion([np.zeros((30, 1))], [centers], np.array([0.0]))
+
+    mapped = displacement_on_source_clock(motion, clock)
+
+    frames = np.round((centers - 50.0) * fs).astype(int)
+    np.testing.assert_allclose(
+        mapped.source_time_s, timestamps[frames], rtol=0, atol=1 / fs
+    )
+    assert np.max(np.abs(centers - timestamps[frames])) > 2.5 / fs
 
 
 def _clock_for(spans, starts, ends=None):
