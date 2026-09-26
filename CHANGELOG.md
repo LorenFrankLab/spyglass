@@ -23,8 +23,25 @@
     #1662
 - Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
 - Add `prefer_download` custom config for stream-capable backends #1662
+- Require `ripple-detection>=2.0` #XXXX
 
 ### Pipelines
+
+- MUA
+
+    - Pass per-unit spike counts to `multiunit_HSE_detector`, so the new
+        `n_active_units` column counts units; events are unchanged #XXXX
+    - Apply stored `use_speed_threshold_for_zscore` and `normalization_time_range`
+        keys, removed in ripple-detection 2.0, as the equivalent
+        `normalization_mask` #XXXX
+
+- Ripple
+
+    - Apply a stored `normalization_time_range` key, removed in ripple-detection
+        2.0, as the equivalent `normalization_mask` #XXXX
+    - `RippleTimesV1.get_Kay_ripple_consensus_trace` uses ripple-detection's
+        public function, so the plotted trace is computed within each contiguous
+        block, as the detector's is #XXXX
 
 - Spike Sorting
 
@@ -34,6 +51,41 @@
         written before this have a null hash; a recompute of one warns and is
         accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
         #1662
+
+### Breaking Changes
+
+#### ripple-detection 2.0 (#XXXX)
+
+`RippleTimesV1` and `MuaEventsV1` now run on ripple-detection 2.0, which changes
+results as well as calls. Rows populated before the upgrade are not recomputed
+and keep their 1.x events; repopulate them to compare, and do not mix events
+from the two versions in one analysis. See ripple-detection's `MIGRATING.md` for
+every change.
+
+- **Columns**: `max_thresh` is renamed `max_sustained_zscore` (now computed
+    exactly). Every event table adds `n_samples`, `clipped_start`, `clipped_end`
+    and `peak_time`; `MuaEventsV1` adds `n_active_units`. Code reading
+    `max_thresh` from a fetched dataframe must use the new name for new rows.
+- **More events**: `minimum_duration` now counts samples,
+    `round(minimum_duration * sampling rate)`, where 1.x compared timestamps. At
+    1.5 kHz and 15 ms a run needs 23 samples, not 24, so short events that 1.x
+    dropped are kept. On a simulated 300 s session every 1.x event was still
+    found, nearly all with identical bounds, plus 1 to 3% more events; on pure
+    noise ripple-detection reports about 20% more. Set `minimum_duration` one
+    sample longer (for example `0.016` at 1.5 kHz) to require the sample count
+    1.x did.
+- **Gaps**: a gap in the timestamps (a step over 1.5 times the median step, e.g.
+    between intervals of a multi-interval `IntervalList`) or a NaN sample ends a
+    block; smoothing, thresholding and events stay within a block, and an event
+    cut off by a gap is flagged in `clipped_start` / `clipped_end`.
+- **Stored parameters**: existing `RippleParameters` and `MuaEventsParameters`
+    rows keep working. The two keys 2.0 removed are applied with their 1.x
+    meaning: `normalization_time_range=(start, end)` as
+    `normalization_mask=(time >= start) & (time <= end)`, and
+    `use_speed_threshold_for_zscore=True` as
+    `normalization_mask=speed < speed_threshold` (strict, as in 1.x). New rows
+    may use any ripple-detection 2.0 keyword, such as `maximum_duration` or
+    `minimum_active_units`.
 
 ## [0.6.0] (Sep 1st 2026)
 
