@@ -231,6 +231,9 @@ available.
   artifact detection, or one `ConcatenatedRecording`) and `MotionEstimate`,
   which saves the SpikeInterface `Motion` with the fully resolved
   configuration, the frame spans it used and peak-count diagnostics.
+  `MotionEstimateSelection.prune_orphaned_selections` finds (and, with
+  `dry_run=False`, deletes) masters left without a source part, like
+  `SortingSelection`'s.
 - The estimate uses only valid samples: noise levels come from the
   artifact-free statistics spans, and peaks whose localization window touches
   a masked sample are dropped.

@@ -440,11 +440,13 @@ class ImmutableParamsLookup:
 def find_orphaned_masters(master_table, part_tables: list) -> list[dict]:
     """Return master PKs whose source-part counts sum to zero.
 
-    Backs ``SortingSelection.prune_orphaned_selections`` (its only caller):
-    ``part_tables`` is that master's XOR source-part set
+    Backs ``SortingSelection.prune_orphaned_selections`` and
+    ``MotionEstimateSelection.prune_orphaned_selections``: ``part_tables`` is
+    that master's XOR source-part set
     ``[RecordingSource, ConcatenatedRecordingSource]``. (The split artifact
-    selections carry their source as a REQUIRED FK on the master, so they cannot
-    be orphaned and have no ``prune_orphaned_selections``.)
+    selections and ``MotionCorrectedRecordingSelection`` carry their input as
+    a REQUIRED FK on the master, so they cannot be orphaned and have no
+    ``prune_orphaned_selections``.)
 
     Source-part atomicity is enforced at insert time by the transactional
     ``insert_selection`` helper, but DataJoint cannot enforce "exactly one

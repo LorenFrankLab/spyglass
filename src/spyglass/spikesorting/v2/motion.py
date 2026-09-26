@@ -58,6 +58,7 @@ from spyglass.spikesorting.v2.session_group import (
 from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
+    find_orphaned_masters,
     reject_duplicate_parameter_content,
     transaction_or_noop,
     validate_lookup_rows,
@@ -641,6 +642,40 @@ class MotionEstimateSelection(
             key={"concat_recording_id": concat_rows[0]},
             artifact_detection_id=None,
         )
+
+    @classmethod
+    def prune_orphaned_selections(cls, dry_run: bool = True) -> list[dict]:
+        """Find or delete master rows that have no source-part row.
+
+        As for ``SortingSelection``, DataJoint cannot enforce "exactly one
+        source per master" across the two XOR source parts, so a quick
+        delete of a source part (or an upstream delete that bypasses the
+        master) can leave a master with no source. A master left with only
+        an ``ArtifactDetectionSource`` part is an orphan too, and deleting it
+        removes that part. Dry-run by default; with ``dry_run=False`` runs
+        ``cautious_delete`` on each orphan, cascading to its
+        ``MotionEstimate`` and every corrected recording and sort made from
+        it. ``MotionCorrectedRecordingSelection`` needs no such helper: its
+        estimate is a foreign key on the master itself.
+
+        Parameters
+        ----------
+        dry_run : bool, optional
+            Only list the orphans (default ``True``).
+
+        Returns
+        -------
+        list of dict
+            The orphaned masters' primary keys.
+        """
+        orphans = find_orphaned_masters(
+            cls, [cls.RecordingSource, cls.ConcatenatedRecordingSource]
+        )
+        if dry_run or not orphans:
+            return orphans
+        for orphan in orphans:
+            (cls & orphan).cautious_delete()
+        return orphans
 
 
 class MotionEstimateFetched(NamedTuple):

@@ -1737,6 +1737,60 @@ def test_corrected_recording_referenced_by_a_sort_is_protected(
         drop_sorts([sort_key, orphan])
 
 
+def test_orphaned_motion_estimate_selections_are_pruned(
+    discontinuous_sources,
+):
+    """A motion-estimate master left without a source part (alone, or with
+    only its artifact part) is an orphan the prune lists and, when asked,
+    deletes; a selection with its source is kept."""
+    from spyglass.spikesorting.v2.motion import MotionEstimateSelection
+
+    estimate = populated_estimate(
+        recording_id=discontinuous_sources["member_b"]["recording_id"]
+    )
+    template = (MotionEstimateSelection & estimate).fetch1()
+    bare = {"motion_estimate_id": uuid.uuid4()}
+    masked = {"motion_estimate_id": uuid.uuid4()}
+    artifact_merge_id = uuid.uuid4()
+    try:
+        assert (
+            estimate not in MotionEstimateSelection.prune_orphaned_selections()
+        )
+        for orphan in (bare, masked):
+            MotionEstimateSelection().insert1(
+                {**template, **orphan}, allow_direct_insert=True
+            )
+        # The artifact part's merge row need not exist for the orphan check.
+        conn = MotionEstimateSelection.connection
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            MotionEstimateSelection.ArtifactDetectionSource.insert1(
+                {**masked, "artifact_detection_merge_id": artifact_merge_id}
+            )
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+        found = MotionEstimateSelection.prune_orphaned_selections()
+        assert bare in found and masked in found
+        assert estimate not in found
+        assert MotionEstimateSelection & bare
+
+        MotionEstimateSelection.prune_orphaned_selections(dry_run=False)
+        assert not (MotionEstimateSelection & [bare, masked])
+        assert not (MotionEstimateSelection.ArtifactDetectionSource & masked)
+        assert MotionEstimateSelection & estimate
+    finally:
+        conn = MotionEstimateSelection.connection
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                MotionEstimateSelection.ArtifactDetectionSource & masked
+            ).delete_quick()
+            (MotionEstimateSelection & [bare, masked]).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+
 def test_corrected_sort_reads_the_corrected_traces(
     drift_recording, monkeypatch
 ):
