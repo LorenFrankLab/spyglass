@@ -1503,6 +1503,9 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
             MOTION_CORRECTION_PROVENANCE,
             build_provenance_table,
         )
+        from spyglass.spikesorting.v2._recording_geometry import (
+            flatten_planar_geometry,
+        )
         from spyglass.spikesorting.v2._recording_nwb import (
             read_recording_nwb,
             write_nwb_artifact,
@@ -1574,6 +1577,24 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
             source_path, source_electrical_series_path
         )
 
+        # The estimate stored the flattened positions it was computed on.
+        flatten_planar_geometry(source)
+        source_locations = np.asarray(
+            source.get_channel_locations(), dtype=np.float64
+        )
+        estimate_locations = np.asarray(
+            estimate["channel_locations"], dtype=np.float64
+        )
+        if source_locations.shape != estimate_locations.shape or not (
+            np.array_equal(source_locations, estimate_locations)
+        ):
+            raise ValueError(
+                f"MotionCorrectedRecording {key}: the source's contact "
+                f"positions {source_locations.tolist()} differ from the saved "
+                f"estimate's {estimate_locations.tolist()}; the estimate does "
+                "not describe this geometry."
+            )
+
         clock = _estimation_clock_of(estimate)
         statistics = np.asarray(
             estimate["statistics_spans"], dtype=np.int64
@@ -1585,14 +1606,6 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
             statistics_spans=statistics,
             resolved_interpolation=resolved,
         )
-        if not np.array_equal(
-            np.asarray(source.get_channel_locations(), dtype=np.float64),
-            np.asarray(estimate["channel_locations"], dtype=np.float64),
-        ):
-            raise ValueError(
-                f"MotionCorrectedRecording {key}: the source's contact "
-                "positions differ from the saved estimate's."
-            )
         corrected = applied.recording
         if int(corrected.get_num_samples()) != n_samples:
             raise ValueError(
