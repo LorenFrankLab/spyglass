@@ -609,6 +609,37 @@ def test_oracle_reference_is_restricted_to_the_output_channels():
         pooled_residual(oracle, ("3",))
 
 
+def test_uncorrected_baseline_uses_the_output_channels():
+    """The ratio to uncorrected compares like with like: a correction that
+    only drops channels, leaving every kept trace unchanged, has ratio 1,
+    however much larger the dropped end contacts' residual was."""
+    import numpy as np
+    from spikeinterface.core import NumpyRecording
+
+    from tests.spikesorting.v2._motion_acceptance_run import paired_fidelity
+
+    rng = np.random.default_rng(0)
+    static_traces = rng.normal(size=(2_000, 8))
+    error = 0.1 * rng.normal(size=static_traces.shape)
+    error[:, [0, -1]] *= 20.0
+    static = NumpyRecording([static_traces], sampling_frequency=30_000.0)
+    uncorrected = NumpyRecording(
+        [static_traces + error], sampling_frequency=30_000.0
+    )
+    corrected = uncorrected.remove_channels(
+        [uncorrected.channel_ids[0], uncorrected.channel_ids[-1]]
+    )
+
+    sums = paired_fidelity(
+        corrected, uncorrected, static, starts=[0, 1_000], window=1_000
+    )
+
+    assert sums["uncorrected"]["channel_ids"] == (
+        sums["corrected"]["channel_ids"]
+    )
+    assert sums["corrected"]["pooled"] / sums["uncorrected"]["pooled"] == 1.0
+
+
 def test_missing_or_duplicate_cases_raise():
     rows = [r for r in _table() if r[:3] != ("rigid", 1, "oracle")]
     with pytest.raises(ValueError, match="rigid seed 1 oracle"):
@@ -835,11 +866,11 @@ def test_benchmark_case(case, benchmark_out):
         assert set(row.removed_channel_ids) == set(
             row.predicted_removed_channel_ids
         )
-    assert list(row.fidelity_channel_ids) == [
-        c
-        for c in result["fidelity_signal"]["uncorrected"]["channel_ids"]
-        if c not in row.removed_channel_ids
-    ]
+    assert list(row.fidelity_channel_ids) == (
+        result["fidelity_signal"]["uncorrected"]["channel_ids"]
+    )
+    assert len(row.fidelity_channel_ids) == row.n_out_channels
+    assert not set(row.fidelity_channel_ids) & set(row.removed_channel_ids)
     assert 0.0 <= row.mean_accuracy <= 1.0
     assert result["sorting"]["n_gt_units"] == (
         load_manifest(manifest_path).generator.num_units

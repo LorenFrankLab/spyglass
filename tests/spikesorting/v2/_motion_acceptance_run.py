@@ -491,6 +491,26 @@ def fidelity_sums(test, reference, channel_ids, starts, window) -> dict:
     )
 
 
+def paired_fidelity(corrected, uncorrected, static, starts, window) -> dict:
+    """M2 of one twin: the corrected and the uncorrected recording against
+    the static twin, both over the corrected recording's channels.
+
+    A ``remove_channels`` correction drops the end contacts, which carry the
+    largest residual; measuring the uncorrected baseline over every channel
+    would credit the dropped channels to the correction.
+
+    Returns
+    -------
+    dict
+        ``corrected`` and ``uncorrected`` :func:`fidelity_sums`.
+    """
+    kept = list(corrected.channel_ids)
+    return dict(
+        corrected=fidelity_sums(corrected, static, kept, starts, window),
+        uncorrected=fidelity_sums(uncorrected, static, kept, starts, window),
+    )
+
+
 def sorting_metrics(gt_sorting, sorting, comparison) -> dict:
     """M3: ground-truth comparison of one sort (manifest scores)."""
     from spikeinterface.comparison import compare_sorter_to_ground_truth
@@ -748,22 +768,15 @@ def run_case(
     uncorrected_clean = silence_frame_ranges(clean.recording, clean.excluded)
     static_noisy = silence_frame_ranges(noisy.static, noisy.excluded)
     uncorrected_noisy = silence_frame_ranges(recording, noisy.excluded)
-    result["fidelity_signal"] = dict(
-        corrected=fidelity_sums(
-            corrected_clean, static_clean, kept, starts, window
-        ),
-        uncorrected=fidelity_sums(
-            uncorrected_clean, static_clean, channel_ids, starts, window
-        ),
+    result["fidelity_signal"] = paired_fidelity(
+        corrected_clean, uncorrected_clean, static_clean, starts, window
     )
-    result["fidelity_noisy_pooled"] = dict(
-        corrected=fidelity_sums(corrected, static_noisy, kept, starts, window)[
-            "pooled"
-        ],
-        uncorrected=fidelity_sums(
-            uncorrected_noisy, static_noisy, channel_ids, starts, window
-        )["pooled"],
-    )
+    result["fidelity_noisy_pooled"] = {
+        name: sums["pooled"]
+        for name, sums in paired_fidelity(
+            corrected, uncorrected_noisy, static_noisy, starts, window
+        ).items()
+    }
     timings["fidelity"] = time.perf_counter() - t
     # ``ru_maxrss`` only grows, so this is the peak of everything before the
     # sort: generation, estimation and the interpolation the fidelity windows

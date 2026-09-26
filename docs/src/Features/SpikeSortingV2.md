@@ -1712,6 +1712,11 @@ with MountainSort5:
   and the fidelity checks against the oracle-motion correction and against the
   uncorrected recording.
 
+These verdicts come from the harness version pinned in that manifest. A later
+harness fix (the uncorrected fidelity baseline is now measured on the
+corrected recording's output channels) changes results only for recipes that
+remove channels, which no gate covered.
+
 No real lab polymer recording with drift was available to test on.
 
 None of the shipped recipes is validated for a probe; all remain
