@@ -1068,13 +1068,10 @@ def sort_group_geometry_problem(
         ``None`` when the group's contacts are distinct (or will be made so
         by the tetrode repair); otherwise the operator-facing fix text.
     """
-    import numpy as np
-
     from spyglass.spikesorting.v2._recording_geometry import (
-        classify_missing_geometry,
+        effective_contact_plane,
         fetch_sort_group_contact_positions,
         fetch_sort_group_probe_info,
-        select_distinct_plane,
         tetrode_repair_applies,
     )
     from spyglass.spikesorting.v2.recording import SortGroupV2
@@ -1094,13 +1091,11 @@ def sort_group_geometry_problem(
         # would just duplicate the error.
         return None
 
-    positions = fetch_sort_group_contact_positions(nwb_file_name, channel_ids)
+    registered = fetch_sort_group_contact_positions(nwb_file_name, channel_ids)
     # The same verdict ``normalize_channel_locations`` reaches at make, so a
     # group cannot clear preflight and then fail there.
-    missing_geometry = classify_missing_geometry(positions)
-    if missing_geometry == "complete":
-        positions = np.zeros_like(positions)
-    elif missing_geometry == "partial":
+    verdict, positions, _ = effective_contact_plane(registered)
+    if verdict == "partial":
         report = _missing_coordinate_report(channel_ids, positions)
         return (
             f"sort_group_id={int(sort_group_id)} of {nwb_file_name!r} has "
@@ -1111,7 +1106,7 @@ def sort_group_geometry_problem(
             "rel_x/rel_y/rel_z for every electrode in the sort group."
         )
 
-    if select_distinct_plane(positions) is not None:
+    if verdict == "plane":
         return None
 
     probe_types, electrode_group_names = fetch_sort_group_probe_info(
@@ -1292,24 +1287,17 @@ def motion_geometry_problem_from_contacts(
 
     from spyglass.spikesorting.v2._motion import check_estimation_eligibility
     from spyglass.spikesorting.v2._recording_geometry import (
-        classify_missing_geometry,
+        effective_contact_plane,
         maybe_apply_tetrode_geometry,
-        select_distinct_plane,
         tetrode_repair_applies,
     )
 
     channel_ids = [int(c) for c in channel_ids]
-    positions = np.asarray(positions, dtype=float)
-    missing = classify_missing_geometry(positions)
-    plane = None if missing != "none" else select_distinct_plane(positions)
-    repaired = (
-        plane is None
-        and missing != "partial"
-        and tetrode_repair_applies(
-            tuple(probe_types), tuple(electrode_group_names), len(channel_ids)
-        )
+    verdict, _, planar = effective_contact_plane(positions)
+    repaired = verdict == "collapsed" and tetrode_repair_applies(
+        tuple(probe_types), tuple(electrode_group_names), len(channel_ids)
     )
-    if plane is None and not repaired:
+    if verdict != "plane" and not repaired:
         return None
     recording = NumpyRecording(
         np.zeros((1, len(channel_ids)), dtype="float32"),
@@ -1324,7 +1312,7 @@ def motion_geometry_problem_from_contacts(
             channel_ids,
         )
     else:
-        recording.set_channel_locations(plane[1])
+        recording.set_channel_locations(planar)
     recording.set_property("group", [str(g) for g in electrode_group_names])
     recording.set_property("probe_shank", [str(s) for s in probe_shanks])
     try:

@@ -484,3 +484,40 @@ def test_tetrode_repair_applies_gates():
     assert tetrode_repair_applies(tetrode, ("0", "0", "1", "1"), 4) is False
     # An empty group must answer False, not raise on the empty probe set.
     assert tetrode_repair_applies((), (), 0) is False
+
+
+@pytest.mark.parametrize(
+    "case, verdict",
+    [
+        ("column", "plane"),
+        ("unpositioned", "collapsed"),
+        ("coincident", "collapsed"),
+        ("one_null", "partial"),
+    ],
+)
+def test_effective_contact_plane(case, verdict):
+    """Preflight's shared reading of registered positions: a separable set
+    gives its plane, a set with no position reads as all-zero (collapsed),
+    coincident contacts collapse, and a partly missing set is ``partial``
+    with its positions untouched."""
+    from spyglass.spikesorting.v2._recording_geometry import (
+        effective_contact_plane,
+    )
+
+    locations = np.column_stack([np.zeros(4), np.arange(4) * 20.0, np.zeros(4)])
+    if case == "unpositioned":
+        locations = np.full((4, 3), np.nan)
+    elif case == "coincident":
+        locations[1] = locations[0]
+    elif case == "one_null":
+        locations[2, 2] = np.nan
+    got, positions, planar = effective_contact_plane(locations)
+    assert got == verdict
+    if verdict == "plane":
+        np.testing.assert_array_equal(planar, locations[:, :2])
+    else:
+        assert planar is None
+    if case == "unpositioned":
+        np.testing.assert_array_equal(positions, np.zeros((4, 3)))
+    if case == "one_null":
+        np.testing.assert_array_equal(positions, locations)

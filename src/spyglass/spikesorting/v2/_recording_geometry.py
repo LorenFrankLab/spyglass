@@ -567,6 +567,50 @@ def select_distinct_plane(locations):
     return None
 
 
+def effective_contact_plane(locations) -> tuple:
+    """Classify a sort group's registered positions the way preflight does.
+
+    The shared first steps of reproducing the recording stage's planar
+    geometry without a recording: :func:`classify_missing_geometry`, then --
+    reading a group with no position at all as the legacy all-zero geometry
+    -- :func:`select_distinct_plane`. Whether a collapsed group is rescued by
+    the ``tetrode_12.5`` repair is left to the caller
+    (:func:`tetrode_repair_applies`), which needs the probe metadata.
+    :func:`normalize_channel_locations` does not use this: it chooses the
+    plane from a retained subset of a sliced recording and raises on
+    incomplete rows.
+
+    Parameters
+    ----------
+    locations : array_like
+        ``(n_contacts, 3)`` ``(rel_x, rel_y, rel_z)`` positions, NaN where
+        missing, with at least one contact.
+
+    Returns
+    -------
+    verdict : {"partial", "plane", "collapsed"}
+        ``"partial"``: some but not all coordinates are missing.
+        ``"plane"``: an axis pair separates every contact. ``"collapsed"``:
+        none does (including a group with no positions at all).
+    positions : numpy.ndarray
+        ``(n_contacts, 3)`` positions, all zero when none was registered.
+    planar : numpy.ndarray or None
+        ``(n_contacts, 2)`` positions in the chosen plane for ``"plane"``.
+    """
+    import numpy as np
+
+    positions = np.asarray(locations, dtype=float)
+    missing = classify_missing_geometry(positions)
+    if missing == "partial":
+        return "partial", positions, None
+    if missing == "complete":
+        positions = np.zeros_like(positions)
+    chosen = select_distinct_plane(positions)
+    if chosen is None:
+        return "collapsed", positions, None
+    return "plane", positions, chosen[1]
+
+
 def normalize_channel_locations(recording, *, channel_ids=None):
     """Reduce 3D channel locations to the distinct 2D plane, in place.
 
