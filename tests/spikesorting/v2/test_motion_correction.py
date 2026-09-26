@@ -1051,9 +1051,13 @@ def test_estimate_and_corrected_recording_round_trip(
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecording,
         MotionEstimate,
+        MotionEstimateSelection,
     )
     from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+    )
 
     if source == "concat":
         source_key = discontinuous_sources["concat_key"]
@@ -1162,6 +1166,66 @@ def test_estimate_and_corrected_recording_round_trip(
     )
     assert provenance["source_content_hash"] == row["source_content_hash"]
     assert provenance["removed_channel_ids"] == []
+
+    # The file alone describes its spans, its time map and, for a concat, its
+    # members: the statistics spans, each continuity span with its real start
+    # and end times and its start on the estimation clock, and the concat's
+    # own member back-map.
+    lineage = MotionEstimateSelection.resolve_source(estimate)
+    assert (
+        provenance["source_kind"]
+        == lineage.kind
+        == ("concatenated_recording" if source == "concat" else "recording")
+    )
+    assert provenance["source_key"] == {
+        name: str(value) for name, value in lineage.key.items()
+    }
+    assert provenance["statistics_spans"] == (
+        estimate_row["statistics_spans"].tolist()
+    )
+    assert provenance["estimation_clock_sampling_frequency"] == (
+        estimate_row["sampling_frequency"]
+    )
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        CONCAT_MEMBERS,
+        MOTION_CONTINUITY_SPANS,
+        read_long_provenance,
+    )
+
+    spans = read_long_provenance(abs_path, MOTION_CONTINUITY_SPANS)
+    assert [s["span_index"] for s in spans] == list(range(len(spans)))
+    np.testing.assert_array_equal(
+        [[s["start_sample"], s["end_sample"]] for s in spans],
+        estimate_row["continuity_spans"],
+    )
+    for field, column in (
+        ("source_start_s", "continuity_start_s"),
+        ("source_end_s", "continuity_end_s"),
+        ("estimation_start_s", "estimation_start_s"),
+    ):
+        np.testing.assert_array_equal(
+            [s[field] for s in spans], estimate_row[column]
+        )
+    if source == "concat":
+        concat_path = AnalysisNwbfile.get_abs_path(
+            (ConcatenatedRecording & source_key).fetch1("analysis_file_name")
+        )
+        members = read_long_provenance(abs_path, CONCAT_MEMBERS)
+        assert members == read_long_provenance(concat_path, CONCAT_MEMBERS)
+        boundaries = (ConcatenatedRecording.MemberBoundary & source_key).fetch(
+            "member_index", "end_sample", order_by="member_index"
+        )
+        snapshots = (
+            ConcatenatedRecordingSelection.MemberSnapshot & source_key
+        ).fetch("recording_id", order_by="member_index")
+        assert [m["member_index"] for m in members] == list(boundaries[0])
+        assert [m["concat_end_sample"] for m in members] == list(boundaries[1])
+        assert [m["recording_id"] for m in members] == [
+            str(r) for r in snapshots
+        ]
+    else:
+        with pytest.raises(KeyError):
+            read_long_provenance(abs_path, CONCAT_MEMBERS)
 
     # Rebuilt from the saved motion (the estimator must not run): same hash,
     # same traces.

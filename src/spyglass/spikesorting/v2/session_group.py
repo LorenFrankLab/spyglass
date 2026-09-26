@@ -1167,6 +1167,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # per-member frame boundaries, so split_sorting_by_session is
         # reconstructable from the file alone.
         from spyglass.spikesorting.v2._nwb_provenance import (
+            CONCAT_MEMBER_COLUMNS,
             CONCAT_MEMBERS,
             CONCAT_PROVENANCE,
             build_long_provenance_table,
@@ -1206,19 +1207,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 },
             ),
             build_long_provenance_table(
-                CONCAT_MEMBERS,
-                member_rows,
-                [
-                    ("member_index", int),
-                    ("recording_id", str),
-                    ("nwb_file_name", str),
-                    ("interval_list_name", str),
-                    ("artifact_detection_id", str),
-                    ("start_sample", int),
-                    ("end_sample", int),
-                    ("concat_start_sample", int),
-                    ("concat_end_sample", int),
-                ],
+                CONCAT_MEMBERS, member_rows, CONCAT_MEMBER_COLUMNS
             ),
         ]
         analysis_file_name, object_id, content_hash = write_nwb_artifact(

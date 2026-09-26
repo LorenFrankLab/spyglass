@@ -47,6 +47,34 @@ CURATION_EVALUATION_PROVENANCE = "spyglass_v2_curation_evaluation_provenance"
 CONCAT_PROVENANCE = "spyglass_v2_concat_provenance"
 CONCAT_MEMBERS = "spyglass_v2_concat_members"
 MOTION_CORRECTION_PROVENANCE = "spyglass_v2_motion_correction_provenance"
+MOTION_CONTINUITY_SPANS = "spyglass_v2_motion_continuity_spans"
+
+#: Columns of the ``CONCAT_MEMBERS`` member back-map: each member's frames
+#: ``[start_sample, end_sample)`` on its own recording and
+#: ``[concat_start_sample, concat_end_sample)`` in the concatenation.
+CONCAT_MEMBER_COLUMNS = [
+    ("member_index", int),
+    ("recording_id", str),
+    ("nwb_file_name", str),
+    ("interval_list_name", str),
+    ("artifact_detection_id", str),
+    ("start_sample", int),
+    ("end_sample", int),
+    ("concat_start_sample", int),
+    ("concat_end_sample", int),
+]
+
+#: Columns of ``MOTION_CONTINUITY_SPANS``: each continuity span's frames
+#: ``[start_sample, end_sample)``, its first and last timestamp on the
+#: source's own clock and its start on the motion-estimation clock (s).
+MOTION_CONTINUITY_SPAN_COLUMNS = [
+    ("span_index", int),
+    ("start_sample", int),
+    ("end_sample", int),
+    ("source_start_s", float),
+    ("source_end_s", float),
+    ("estimation_start_s", float),
+]
 
 _KEY_COLUMN = "key"
 _VALUE_COLUMN = "value_json"

@@ -1353,6 +1353,10 @@ class MotionCorrectedFetched(NamedTuple):
         The source's stored ``electrical_series_path``.
     nwb_file_name : str
         The parent NWB the source artifact belongs to.
+    source_kind : str
+        ``"recording"`` or ``"concatenated_recording"``.
+    source_key : dict
+        The source row's primary key.
     """
 
     selection: dict
@@ -1362,6 +1366,8 @@ class MotionCorrectedFetched(NamedTuple):
     source_path: str
     source_electrical_series_path: str
     nwb_file_name: str
+    source_kind: str
+    source_key: dict
 
 
 class MotionCorrectedComputed(NamedTuple):
@@ -1486,6 +1492,8 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
             source_path=source_path,
             source_electrical_series_path=source_row["electrical_series_path"],
             nwb_file_name=nwb_file_name,
+            source_kind=lineage.kind,
+            source_key=dict(lineage.key),
         )
 
     def make_compute(
@@ -1498,13 +1506,20 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
         source_path,
         source_electrical_series_path,
         nwb_file_name,
+        source_kind,
+        source_key,
         *,
         allow_spikeinterface_version_change: bool = False,
     ) -> MotionCorrectedComputed:
         """Apply the saved motion and write the staged artifact; no DB reads.
 
         The artifact file is created through ``write_nwb_artifact`` (as every
-        v2 trace writer does) and registered only by :meth:`make_insert`.
+        v2 trace writer does) and registered only by :meth:`make_insert`. Its
+        provenance scratch describes the file on its own: the correction's
+        ids, recipe and source, the statistics spans, each continuity span
+        with its real start and end times and its start on the estimation
+        clock, and, for a concatenation, the concatenation's member back-map
+        copied from the source artifact.
 
         Parameters
         ----------
@@ -1527,8 +1542,14 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
 
         from spyglass.spikesorting.v2 import _motion
         from spyglass.spikesorting.v2._nwb_provenance import (
+            CONCAT_MEMBER_COLUMNS,
+            CONCAT_MEMBERS,
+            MOTION_CONTINUITY_SPAN_COLUMNS,
+            MOTION_CONTINUITY_SPANS,
             MOTION_CORRECTION_PROVENANCE,
+            build_long_provenance_table,
             build_provenance_table,
+            read_long_provenance,
         )
         from spyglass.spikesorting.v2._recording_geometry import (
             flatten_planar_geometry,
@@ -1647,25 +1668,71 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
         interpolation_text = ", ".join(
             f"{name}={resolved[name]}" for name in sorted(resolved)
         )
-        provenance = build_provenance_table(
-            MOTION_CORRECTION_PROVENANCE,
-            {
-                "motion_corrected_recording_id": str(
-                    key["motion_corrected_recording_id"]
-                ),
-                "motion_estimate_id": str(selection["motion_estimate_id"]),
-                "motion_interpolation_params_name": selection[
-                    "motion_interpolation_params_name"
+        provenance_tables = [
+            build_provenance_table(
+                MOTION_CORRECTION_PROVENANCE,
+                {
+                    "motion_corrected_recording_id": str(
+                        key["motion_corrected_recording_id"]
+                    ),
+                    "motion_estimate_id": str(selection["motion_estimate_id"]),
+                    "motion_interpolation_params_name": selection[
+                        "motion_interpolation_params_name"
+                    ],
+                    "interpolation": resolved,
+                    "motion_interpolation_algorithm_version": int(
+                        selection["motion_interpolation_algorithm_version"]
+                    ),
+                    "source_content_hash": str(source_content_hash),
+                    "removed_channel_ids": applied.removed_channel_ids,
+                    "spikeinterface_version": si.__version__,
+                    "source_kind": source_kind,
+                    "source_key": {
+                        name: str(value) for name, value in source_key.items()
+                    },
+                    "statistics_spans": statistics.tolist(),
+                    "estimation_clock_sampling_frequency": (
+                        clock.sampling_frequency
+                    ),
+                },
+            ),
+            build_long_provenance_table(
+                MOTION_CONTINUITY_SPANS,
+                [
+                    {
+                        "span_index": index,
+                        "start_sample": int(start),
+                        "end_sample": int(end),
+                        "source_start_s": float(source_start),
+                        "source_end_s": float(source_end),
+                        "estimation_start_s": float(estimation_start),
+                    }
+                    for index, (
+                        (start, end),
+                        source_start,
+                        source_end,
+                        estimation_start,
+                    ) in enumerate(
+                        zip(
+                            clock.spans,
+                            clock.source_start_s,
+                            clock.source_end_s,
+                            clock.estimation_start_s,
+                            strict=True,
+                        )
+                    )
                 ],
-                "interpolation": resolved,
-                "motion_interpolation_algorithm_version": int(
-                    selection["motion_interpolation_algorithm_version"]
-                ),
-                "source_content_hash": str(source_content_hash),
-                "removed_channel_ids": applied.removed_channel_ids,
-                "spikeinterface_version": si.__version__,
-            },
-        )
+                MOTION_CONTINUITY_SPAN_COLUMNS,
+            ),
+        ]
+        if source_kind == "concatenated_recording":
+            provenance_tables.append(
+                build_long_provenance_table(
+                    CONCAT_MEMBERS,
+                    read_long_provenance(source_path, CONCAT_MEMBERS),
+                    CONCAT_MEMBER_COLUMNS,
+                )
+            )
         analysis_file_name, object_id, content_hash = write_nwb_artifact(
             corrected,
             nwb_file_name,
@@ -1679,7 +1746,7 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
                 "Motion-corrected preprocessed recording from "
                 f"{nwb_file_name} for spike sorting"
             ),
-            provenance_tables=[provenance],
+            provenance_tables=provenance_tables,
         )
         return MotionCorrectedComputed(
             analysis_file_name=analysis_file_name,

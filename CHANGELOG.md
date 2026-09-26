@@ -266,7 +266,10 @@ available.
   microvolts: a source that is not already float microvolts (gain 1, offset
   0), including an integer `no_filter` recording, is scaled to float32
   microvolts first, and the corrected traces are stored with gain 1 and
-  offset 0. Changing only the
+  offset 0. The corrected NWB's provenance scratch also records its source,
+  the statistics spans, each continuity span with its real start and end
+  times and its start on the estimation clock, and, for a concatenation, the
+  concatenation's member back-map. Changing only the
   interpolation reuses the estimate. A missing file is rebuilt from the saved
   motion, never by estimating again, and installed only if it reproduces the
   stored content hash (even under another SpikeInterface version, which a
