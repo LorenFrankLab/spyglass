@@ -19,14 +19,39 @@ MEMBER_B_INTERVAL = "motion member b"
 CONCAT_GROUP = "motion_concat"
 
 
+def drop_sorts_of_estimates(estimate_keys) -> None:
+    """Delete every sort that reads a corrected recording of these estimates.
+
+    Run before deleting the estimates: their cascade reaches
+    ``SortingSelection.MotionCorrectionSource``, which DataJoint refuses to
+    delete before its master ("part before master"). A test that fails before
+    its own cleanup would otherwise turn the module teardown into that error.
+    """
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    if not estimate_keys:
+        return
+    corrected = (MotionCorrectedRecordingSelection & estimate_keys).proj()
+    drop_pipeline_sorts(
+        (SortingSelection.MotionCorrectionSource & corrected).fetch(
+            "sorting_id"
+        )
+    )
+
+
 def drop_motion_selections(recording_key) -> None:
-    """Delete every motion-estimate selection on a recording (masters first)."""
+    """Delete every motion-estimate selection on a recording (masters first),
+    after the sorts that read their corrected recordings."""
     from spyglass.spikesorting.v2.motion import MotionEstimateSelection
 
     keys = (MotionEstimateSelection.RecordingSource & recording_key).fetch(
         "KEY", as_dict=True
     )
     if keys:
+        drop_sorts_of_estimates(keys)
         (MotionEstimateSelection & keys).super_delete(
             warn=False, safemode=False
         )
@@ -39,6 +64,7 @@ def drop_concat_motion_selections(concat_key) -> None:
         MotionEstimateSelection.ConcatenatedRecordingSource & concat_key
     ).fetch("KEY", as_dict=True)
     if keys:
+        drop_sorts_of_estimates(keys)
         (MotionEstimateSelection & keys).super_delete(
             warn=False, safemode=False
         )
@@ -161,18 +187,25 @@ def drop_sorts(sort_keys) -> None:
 
 
 def drop_pipeline_sorts(sorting_ids) -> None:
-    """Delete run_v2_pipeline sorts leaves-first: member and root merges,
-    curations, sorts, then the selections (so no part outlives its master)."""
+    """Delete run_v2_pipeline sorts leaves-first: match selections pinning
+    their curations, member and root merges, curations, sorts, then the
+    selections (so no part outlives its master)."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
         ConcatMemberCuration,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
 
     keys = [{"sorting_id": sid} for sid in set(sorting_ids) if sid]
     if not keys:
         return
+    pinned = (UnitMatchSelection.MemberCuration & keys).fetch("unitmatch_id")
+    if len(pinned):
+        (
+            UnitMatchSelection & [{"unitmatch_id": u} for u in set(pinned)]
+        ).super_delete(warn=False, safemode=False)
     for part in (
         SpikeSortingOutput.ConcatMemberCuration,
         SpikeSortingOutput.CurationV2,
