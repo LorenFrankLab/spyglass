@@ -1686,6 +1686,129 @@ def motion_estimate_identity_payload(
     return payload
 
 
+class MotionSelectionIdentity(NamedTuple):
+    """The derived id of a motion selection and the master row it names.
+
+    Attributes
+    ----------
+    selection_id : uuid.UUID
+        The deterministic ``motion_estimate_id`` or
+        ``motion_corrected_recording_id``.
+    master_row : dict
+        The selection master's secondary attributes the id was derived from.
+    """
+
+    selection_id: object
+    master_row: dict
+
+
+def motion_estimate_selection_identity(
+    *,
+    source_kind: str,
+    source_id,
+    source_content_hash: str,
+    artifact_detection_id,
+    motion_estimation_params_name: str,
+    estimation_params: dict,
+) -> MotionSelectionIdentity:
+    """Derive a ``MotionEstimateSelection`` id without touching the database.
+
+    Resolves the recipe blob against the installed SpikeInterface and stamps
+    the SpikeInterface and algorithm versions, exactly as
+    ``MotionEstimateSelection.insert_selection`` does, so a planner can
+    preview the id the insert will mint.
+
+    Parameters
+    ----------
+    source_kind : {"recording", "concatenated_recording"}
+    source_id : uuid.UUID or str
+        The ``recording_id`` or ``concat_recording_id``.
+    source_content_hash : str
+        The source artifact's persisted ``content_hash``.
+    artifact_detection_id : uuid.UUID, str or None
+    motion_estimation_params_name : str
+    estimation_params : dict
+        That ``MotionEstimationParameters`` row's ``params`` blob.
+
+    Returns
+    -------
+    MotionSelectionIdentity
+    """
+    import spikeinterface
+
+    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+
+    master_row = {
+        "motion_estimation_params_name": motion_estimation_params_name,
+        "resolved_params_hash": resolved_params_hash(
+            resolve_estimation_params(estimation_params)
+        ),
+        "spikeinterface_version": spikeinterface.__version__,
+        "motion_algorithm_version": MOTION_ALGORITHM_VERSION,
+        "source_content_hash": str(source_content_hash),
+    }
+    selection_id = deterministic_id(
+        "motion_estimate",
+        motion_estimate_identity_payload(
+            source_kind=source_kind,
+            source_id=source_id,
+            source_content_hash=master_row["source_content_hash"],
+            artifact_detection_id=artifact_detection_id,
+            motion_estimation_params_name=motion_estimation_params_name,
+            resolved_params_hash=master_row["resolved_params_hash"],
+            spikeinterface_version=master_row["spikeinterface_version"],
+            motion_algorithm_version=MOTION_ALGORITHM_VERSION,
+        ),
+    )
+    return MotionSelectionIdentity(selection_id, master_row)
+
+
+def motion_corrected_selection_identity(
+    *,
+    motion_estimate_id,
+    motion_interpolation_params_name: str,
+    interpolation_params: dict,
+) -> MotionSelectionIdentity:
+    """Derive a ``MotionCorrectedRecordingSelection`` id without the database.
+
+    The same derivation ``MotionCorrectedRecordingSelection.insert_selection``
+    uses; the estimate need not be populated for the id to be known.
+
+    Parameters
+    ----------
+    motion_estimate_id : uuid.UUID or str
+    motion_interpolation_params_name : str
+    interpolation_params : dict
+        That ``MotionInterpolationParameters`` row's ``params`` blob.
+
+    Returns
+    -------
+    MotionSelectionIdentity
+    """
+    import uuid
+
+    import spikeinterface
+
+    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+
+    master_row = {
+        "motion_estimate_id": uuid.UUID(str(motion_estimate_id)),
+        "motion_interpolation_params_name": motion_interpolation_params_name,
+        "resolved_params_hash": resolved_params_hash(
+            resolve_interpolation_params(interpolation_params)
+        ),
+        "spikeinterface_version": spikeinterface.__version__,
+        "motion_interpolation_algorithm_version": (
+            MOTION_INTERPOLATION_ALGORITHM_VERSION
+        ),
+    }
+    selection_id = deterministic_id(
+        "motion_corrected_recording",
+        motion_corrected_identity_payload(**master_row),
+    )
+    return MotionSelectionIdentity(selection_id, master_row)
+
+
 def motion_input_fingerprint(
     *,
     source_content_hash: str,

@@ -345,16 +345,8 @@ class MotionEstimateSelection(
         SchemaBypassError
             If the deterministic master exists with other source parts.
         """
-        import spikeinterface
-
         from spyglass.spikesorting.v2._motion import (
-            MOTION_ALGORITHM_VERSION,
-            motion_estimate_identity_payload,
-            resolve_estimation_params,
-            resolved_params_hash,
-        )
-        from spyglass.spikesorting.v2._selection_identity import (
-            deterministic_id,
+            motion_estimate_selection_identity,
         )
         from spyglass.spikesorting.v2.artifact import (
             assert_artifact_detection_covers_recording,
@@ -410,10 +402,8 @@ class MotionEstimateSelection(
             helper_name=caller,
             insert_default_path="MotionEstimationParameters.insert_default()",
         )
-        resolved_hash = resolved_params_hash(
-            resolve_estimation_params(
-                (MotionEstimationParameters & params_key).fetch1("params")
-            )
+        estimation_params = (MotionEstimationParameters & params_key).fetch1(
+            "params"
         )
         content_hashes = (source_table & source_key).fetch("content_hash")
         if len(content_hashes) == 0:
@@ -428,25 +418,13 @@ class MotionEstimateSelection(
                 caller=caller,
             )
 
-        master_row = {
-            "motion_estimation_params_name": params_name,
-            "resolved_params_hash": resolved_hash,
-            "spikeinterface_version": spikeinterface.__version__,
-            "motion_algorithm_version": MOTION_ALGORITHM_VERSION,
-            "source_content_hash": str(content_hashes[0]),
-        }
-        motion_estimate_id = deterministic_id(
-            "motion_estimate",
-            motion_estimate_identity_payload(
-                source_kind=source_kind,
-                source_id=next(iter(source_key.values())),
-                source_content_hash=master_row["source_content_hash"],
-                artifact_detection_id=artifact_detection_id,
-                motion_estimation_params_name=params_name,
-                resolved_params_hash=resolved_hash,
-                spikeinterface_version=master_row["spikeinterface_version"],
-                motion_algorithm_version=MOTION_ALGORITHM_VERSION,
-            ),
+        motion_estimate_id, master_row = motion_estimate_selection_identity(
+            source_kind=source_kind,
+            source_id=next(iter(source_key.values())),
+            source_content_hash=content_hashes[0],
+            artifact_detection_id=artifact_detection_id,
+            motion_estimation_params_name=params_name,
+            estimation_params=estimation_params,
         )
         explicit = key.get("motion_estimate_id")
         if explicit is not None and uuid.UUID(str(explicit)) != (
@@ -1197,16 +1175,8 @@ class MotionCorrectedRecordingSelection(
         DuplicateSelectionError
             If a matching row has a non-deterministic id.
         """
-        import spikeinterface
-
         from spyglass.spikesorting.v2._motion import (
-            MOTION_INTERPOLATION_ALGORITHM_VERSION,
-            motion_corrected_identity_payload,
-            resolve_interpolation_params,
-            resolved_params_hash,
-        )
-        from spyglass.spikesorting.v2._selection_identity import (
-            deterministic_id,
+            motion_corrected_selection_identity,
         )
         from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
 
@@ -1245,23 +1215,12 @@ class MotionCorrectedRecordingSelection(
                 "corrected recording on it."
             )
         _estimate_source(motion_estimate_id)
-        resolved_hash = resolved_params_hash(
-            resolve_interpolation_params(
-                (MotionInterpolationParameters & params_key).fetch1("params")
-            )
-        )
-        master_row = {
-            "motion_estimate_id": motion_estimate_id,
-            "motion_interpolation_params_name": params_name,
-            "resolved_params_hash": resolved_hash,
-            "spikeinterface_version": spikeinterface.__version__,
-            "motion_interpolation_algorithm_version": (
-                MOTION_INTERPOLATION_ALGORITHM_VERSION
-            ),
-        }
-        corrected_id = deterministic_id(
-            "motion_corrected_recording",
-            motion_corrected_identity_payload(**master_row),
+        corrected_id, master_row = motion_corrected_selection_identity(
+            motion_estimate_id=motion_estimate_id,
+            motion_interpolation_params_name=params_name,
+            interpolation_params=(
+                MotionInterpolationParameters & params_key
+            ).fetch1("params"),
         )
         explicit = key.get("motion_corrected_recording_id")
         if explicit is not None and uuid.UUID(str(explicit)) != corrected_id:

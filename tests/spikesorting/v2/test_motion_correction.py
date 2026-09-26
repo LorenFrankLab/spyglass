@@ -167,6 +167,7 @@ def test_selection_is_content_addressed_and_idempotent(drift_recording):
     from spyglass.spikesorting.v2._motion import (
         MOTION_ALGORITHM_VERSION,
         motion_estimate_identity_payload,
+        motion_estimate_selection_identity,
         resolve_estimation_params,
         resolved_params_hash,
     )
@@ -204,6 +205,20 @@ def test_selection_is_content_addressed_and_idempotent(drift_recording):
         ),
     )
     assert first == again == {"motion_estimate_id": expected}
+    # The planner's DB-free derivation mints the id the insert does.
+    assert (
+        motion_estimate_selection_identity(
+            source_kind="recording",
+            source_id=recording_key["recording_id"],
+            source_content_hash=(Recording & recording_key).fetch1(
+                "content_hash"
+            ),
+            artifact_detection_id=None,
+            motion_estimation_params_name="dredge_fast_v1",
+            estimation_params=params,
+        ).selection_id
+        == expected
+    )
     assert other_recipe != first
     assert len(MotionEstimateSelection.RecordingSource & first) == 1
     assert not (MotionEstimateSelection.ConcatenatedRecordingSource & first)
@@ -1079,6 +1094,7 @@ def test_interpolation_only_change_reuses_the_estimate(
         MotionCorrectedRecording,
         MotionCorrectedRecordingSelection,
         MotionEstimate,
+        MotionInterpolationParameters,
     )
 
     estimate = _populated_estimate(
@@ -1107,6 +1123,27 @@ def test_interpolation_only_change_reuses_the_estimate(
                 _motion.MOTION_INTERPOLATION_ALGORITHM_VERSION
             ),
         ),
+    )
+    interpolation_params = (
+        MotionInterpolationParameters
+        & {"motion_interpolation_params_name": "kriging_force_extrapolate_v1"}
+    ).fetch1("params")
+    assert _motion.motion_corrected_selection_identity(
+        motion_estimate_id=estimate["motion_estimate_id"],
+        motion_interpolation_params_name="kriging_force_extrapolate_v1",
+        interpolation_params=interpolation_params,
+    ) == (
+        extrapolate["motion_corrected_recording_id"],
+        {
+            k: row[k]
+            for k in (
+                "motion_estimate_id",
+                "motion_interpolation_params_name",
+                "resolved_params_hash",
+                "spikeinterface_version",
+                "motion_interpolation_algorithm_version",
+            )
+        },
     )
 
     n_estimates = len(MotionEstimate())
