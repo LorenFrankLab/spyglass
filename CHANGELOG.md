@@ -215,6 +215,24 @@ DLCProject().alter()
   deleted without that sort. The part is a new table, so no recreation is
   needed; importing `spyglass.spikesorting.v2.sorting` now declares the motion
   schema.
+- `run_v2_pipeline`, `run_v2_pipeline_session` and the preflight helpers take
+  `motion_mode` (`"off"` by default, `"estimate"` or `"apply"`) and
+  `motion_correction_params_name` (required unless the mode is `"off"`), in
+  single-session and concat mode alike. `"estimate"` saves the source's
+  `MotionEstimate` and runs exactly the `"off"` sort (same `sorting_id`);
+  `"apply"` also saves the corrected recording and sorts it. A failed motion
+  stage raises `PipelineStageError` and nothing is sorted. Preflight rejects
+  a contradictory mode and recipe before touching the database, checks that
+  the recipe exists and each sort group's geometry supports it (a tetrode or
+  a group shorter than the detection radius fails), refuses a sorter row
+  that corrects motion itself under `"apply"`, and previews the motion ids.
+  Receipts and `describe_run` carry `motion_mode`,
+  `motion_correction_params_name`, `motion_estimate_id`,
+  `motion_estimation_preset`, `motion_corrected_recording_id` and
+  `motion_removed_channel_ids`; the scientific setup states the mode, recipe,
+  resolved preset, border mode and experimental status.
+  `initialize_v2_defaults` installs the shipped motion recipes, and
+  `verify_v2_default_catalog` audits them.
 
 #### Spike Sorting v2 launch: configuration, resource use, and the curation-to-analysis workflow
 
