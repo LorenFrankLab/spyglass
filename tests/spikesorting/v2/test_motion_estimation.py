@@ -784,10 +784,10 @@ def test_gap_is_measured_from_the_real_last_timestamp():
         ),
         (
             [(0, 1000), (1000, 2000)],
-            [20.0, 10.0],
-            [20.999, 10.999],
+            [0.0, 0.0],
+            [0.999, 0.999],
             5.0,
-            "at or before span 0's last timestamp",
+            "independent .* out of acquisition order",
         ),
         ([(0, 1000), (1500, 2000)], [0.0, 5.0], [1.0, 6.0], 5.0, "contiguous"),
         ([(10, 1000)], [0.0], [1.0], 5.0, "contiguous"),
@@ -801,7 +801,7 @@ def test_gap_is_measured_from_the_real_last_timestamp():
     ],
     ids=[
         "overlap",
-        "out-of-order",
+        "independent-clocks",
         "hole",
         "not-from-zero",
         "empty-span",

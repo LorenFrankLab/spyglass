@@ -874,9 +874,13 @@ def build_estimation_clock(
                 f"Estimation clock: continuity span {i + 1} (frames "
                 f"{spans[i + 1].tolist()}) starts at {starts[i + 1]!r} s, "
                 f"at or before span {i}'s last timestamp ({ends[i]!r} s; "
-                f"frames {spans[i].tolist()}). Spans must be in acquisition "
-                "order without overlap; for a concatenation, order the "
-                "members by acquisition time."
+                f"frames {spans[i].tolist()}). Motion estimation places all "
+                "spans on one acquisition clock, so their timestamps must "
+                "increase across spans. For a concatenation, the members' "
+                "clocks may be independent (for example each starting at 0 "
+                "in a different NWB file) or the members may be out of "
+                "acquisition order; concatenate members that share one "
+                "clock, in acquisition order."
             )
         gap = max(gap, 0.0)
         estimation.append(estimation[-1] + duration + min(gap, max_gap_s))
