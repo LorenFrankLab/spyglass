@@ -1,0 +1,122 @@
+{
+  "name": "motion-acceptance-development-v1",
+  "purpose": "development",
+  "seeds": [0, 1, 2],
+  "generator": {
+    "num_units": 30,
+    "duration_s": 90.0,
+    "sampling_frequency": 30000.0,
+    "displacement_sampling_frequency": 5.0
+  },
+  "probe": {"n_contacts": 32, "pitch_um": 26.0, "contact_radius_um": 7.5},
+  "bandpass": {"freq_min": 600.0, "freq_max": 6000.0},
+  "noise_levels_seed": "case_seed",
+  "scenarios": {
+    "none": {"kind": "static", "amplitude_um": 25.0},
+    "rigid": {"kind": "zigzag", "amplitude_um": 25.0},
+    "nonrigid": {
+      "kind": "zigzag",
+      "amplitude_um": 30.0,
+      "non_rigid_gradient": 0.2
+    },
+    "jump": {"kind": "step", "change_times_s": [45.0], "levels_um": [-15, 15]},
+    "jumpoff": {
+      "kind": "step",
+      "change_times_s": [45.4],
+      "levels_um": [-15, 15]
+    },
+    "gap_jump": {
+      "kind": "step",
+      "change_times_s": [330.0],
+      "levels_um": [-15, 15],
+      "windows_s": [[0.0, 30.0], [630.0, 660.0]]
+    },
+    "members": {
+      "kind": "step",
+      "change_times_s": [25.0, 42.5],
+      "levels_um": [-15, 15, 0],
+      "windows_s": [[0.0, 20.0], [30.0, 40.0], [45.0, 60.0]],
+      "members": [[0], [1, 2]]
+    },
+    "masked_drift": {
+      "kind": "zigzag",
+      "amplitude_um": 25.0,
+      "masked_artifacts": {
+        "windows_s": [[10.0, 13.0], [50.0, 53.0], [75.0, 78.0]],
+        "rate_hz": 100.0,
+        "amplitude_uv": 400.0
+      }
+    }
+  },
+  "recipes": {
+    "off": {"kind": "off"},
+    "oracle": {
+      "kind": "oracle",
+      "max_gap_s": 30.0,
+      "interpolation": {
+        "border_mode": "force_extrapolate",
+        "spatial_interpolation_method": "kriging",
+        "sigma_um": 20.0,
+        "p": 2,
+        "num_closest": 3
+      }
+    },
+    "rigid_fast": {
+      "kind": "estimate",
+      "estimation": {"preset": "rigid_fast", "max_gap_s": 30.0},
+      "interpolation": {
+        "border_mode": "remove_channels",
+        "spatial_interpolation_method": "kriging",
+        "sigma_um": 20.0,
+        "p": 2,
+        "num_closest": 3
+      }
+    },
+    "dredge": {
+      "kind": "estimate",
+      "estimation": {"preset": "dredge", "max_gap_s": 30.0},
+      "interpolation": {
+        "border_mode": "force_extrapolate",
+        "spatial_interpolation_method": "kriging",
+        "sigma_um": 20.0,
+        "p": 2,
+        "num_closest": 3
+      }
+    },
+    "dredge_fast": {
+      "kind": "estimate",
+      "estimation": {"preset": "dredge_fast", "max_gap_s": 30.0},
+      "interpolation": {
+        "border_mode": "force_extrapolate",
+        "spatial_interpolation_method": "kriging",
+        "sigma_um": 20.0,
+        "p": 2,
+        "num_closest": 3
+      }
+    }
+  },
+  "cases": [
+    {"scenario": "none", "recipes": ["off", "rigid_fast", "dredge", "dredge_fast"]},
+    {"scenario": "rigid", "recipes": ["off", "oracle", "rigid_fast", "dredge", "dredge_fast"]},
+    {"scenario": "nonrigid", "recipes": ["off", "oracle", "rigid_fast", "dredge", "dredge_fast"]},
+    {"scenario": "jump", "recipes": ["off", "oracle", "rigid_fast", "dredge", "dredge_fast"]},
+    {"scenario": "jumpoff", "recipes": ["off", "oracle", "rigid_fast", "dredge", "dredge_fast"]},
+    {"scenario": "gap_jump", "recipes": ["off", "oracle", "dredge", "dredge_fast"]},
+    {"scenario": "members", "recipes": ["off", "oracle", "dredge", "dredge_fast"]},
+    {"scenario": "masked_drift", "recipes": ["off", "oracle", "dredge", "dredge_fast"]}
+  ],
+  "sorter": {"name": "mountainsort5", "params": {}, "random_seed": 0},
+  "comparison": {
+    "delta_time_ms": 0.4,
+    "match_score": 0.5,
+    "well_detected_score": 0.8,
+    "redundant_score": 0.2,
+    "overmerged_score": 0.2,
+    "oversplit_agreement": 0.2
+  },
+  "evaluation": {
+    "fidelity_n_windows": 24,
+    "fidelity_window_s": 1.0,
+    "job_kwargs": {"n_jobs": 1, "chunk_duration": "1s", "progress_bar": false}
+  }
+}
