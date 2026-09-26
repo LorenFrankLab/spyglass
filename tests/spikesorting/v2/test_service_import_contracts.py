@@ -231,6 +231,12 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
     assert (
         pipeline_types.RunV2ConcatSummary.__optional_keys__ == _SUMMARY_OPTIONAL
     )
+    # A session-runner success entry is a single-session summary, so it
+    # carries every receipt key (the motion keys included).
+    assert pipeline_types.RunV2PipelineSessionOk.__required_keys__ == (
+        pipeline_types.RunV2SingleSessionSummary.__required_keys__
+        | {"sort_group_id", "outcome"}
+    )
     assert pipeline_types.UnitMatchStageSeconds.__required_keys__ == {
         "unit_match",
         "tracked_unit",
