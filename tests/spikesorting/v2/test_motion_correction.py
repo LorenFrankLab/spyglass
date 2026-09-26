@@ -943,6 +943,25 @@ def _populated_corrected(estimate_key, interpolation=None) -> dict:
     return key
 
 
+def _drop_corrected(key) -> None:
+    """Delete a corrected recording row with its analysis file row and file.
+
+    Leaves no orphaned ``AnalysisNwbfile`` row or file behind, so a test can
+    repopulate the same selection.
+    """
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
+
+    names = (MotionCorrectedRecording & key).fetch("analysis_file_name")
+    paths = [AnalysisNwbfile.get_abs_path(name) for name in names]
+    (MotionCorrectedRecording & key).delete_quick()
+    for name, path in zip(names, paths):
+        (AnalysisNwbfile & {"analysis_file_name": name}).delete_quick()
+        Path(path).unlink(missing_ok=True)
+
+
 def _no_estimation(*_args, **_kwargs):
     raise AssertionError("motion was estimated again")
 
@@ -1164,7 +1183,7 @@ def test_estimate_and_corrected_recording_round_trip(
         table = Recording
         estimate = _populated_estimate(recording_id=source_key["recording_id"])
     key = _select_corrected(estimate)
-    (MotionCorrectedRecording & key).delete_quick()
+    _drop_corrected(key)
 
     captured = {}
     apply = _motion.apply_motion_on_estimation_clock
@@ -1223,6 +1242,7 @@ def test_estimate_and_corrected_recording_round_trip(
         assert "Motion-corrected" in series.attrs["description"]
     assert electrode_ids[region].tolist() == [int(c) for c in ids]
     assert _file_hash(abs_path) == row["content_hash"]
+
 
     # Rebuilt from the saved motion (the estimator must not run): same hash,
     # same traces.
@@ -1320,7 +1340,7 @@ def test_motion_failure_cleanup_and_cache_rebuild(
     recording_key = discontinuous_sources["member_b"]
     estimate = _populated_estimate(recording_id=recording_key["recording_id"])
     key = _select_corrected(estimate)
-    (MotionCorrectedRecording & key).delete_quick()
+    _drop_corrected(key)
     source_file = (Recording & recording_key).fetch1("analysis_file_name")
     folder = Path(AnalysisNwbfile.get_abs_path(source_file)).parent
     nwb_file_name = (
