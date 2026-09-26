@@ -46,6 +46,12 @@ from spikeinterface.core import BaseRecording, BaseRecordingSegment
 #: in a way that can change a stored estimate.
 MOTION_ALGORITHM_VERSION = 1
 
+#: Version of the motion-application algorithm
+#: (:func:`apply_motion_on_estimation_clock`: masking, clock, interpolation
+#: call). Part of every corrected recording's identity; bump it when a change
+#: can change stored corrected traces.
+MOTION_INTERPOLATION_ALGORITHM_VERSION = 1
+
 #: Peak waveform window (ms) used to localize peaks. SpikeInterface 0.104.3's
 #: ``compute_motion`` extracts exactly this window in its detect-and-localize
 #: pipeline (``preprocessing/motion.py:387``), which the estimator reproduces.
@@ -1516,6 +1522,78 @@ def apply_motion_on_estimation_clock(
     return AppliedMotion(
         recording=silence_frame_ranges(corrected, excluded),
         removed_channel_ids=removed,
+    )
+
+
+def motion_corrected_identity_payload(
+    *,
+    motion_estimate_id,
+    motion_interpolation_params_name: str,
+    resolved_params_hash: str,
+    motion_interpolation_algorithm_version: int,
+) -> dict:
+    """The logical identity a ``motion_corrected_recording_id`` is derived from.
+
+    Parameters
+    ----------
+    motion_estimate_id : uuid.UUID or str
+        The saved estimate (it carries the source, mask, estimation recipe,
+        SpikeInterface version and estimation algorithm version).
+    motion_interpolation_params_name : str
+    resolved_params_hash : str
+        :func:`resolved_params_hash` of the resolved interpolation.
+    motion_interpolation_algorithm_version : int
+
+    Returns
+    -------
+    dict
+        Payload for ``_selection_identity.deterministic_id``.
+    """
+    return {
+        "motion_estimate_id": motion_estimate_id,
+        "motion_interpolation_params_name": motion_interpolation_params_name,
+        "resolved_params_hash": resolved_params_hash,
+        "motion_interpolation_algorithm_version": int(
+            motion_interpolation_algorithm_version
+        ),
+    }
+
+
+def motion_corrected_recording_artifact_lock(
+    motion_corrected_recording_id, *, timeout: float = -1
+):
+    """Return a cross-process lock serializing one corrected artifact's slot.
+
+    The analog of :func:`._recording_fingerprint.recording_artifact_lock`
+    for a motion-corrected recording: a rebuild of the same artifact never
+    interleaves with another. Its filename prefix keeps it apart from the
+    recording and concat locks.
+
+    Parameters
+    ----------
+    motion_corrected_recording_id
+        The corrected recording whose canonical artifact the caller mutates.
+    timeout : float, optional
+        Seconds to wait before raising ``filelock.Timeout``; ``-1`` (default)
+        blocks.
+
+    Returns
+    -------
+    filelock.FileLock
+        An unacquired lock.
+    """
+    from filelock import FileLock
+
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_root
+
+    root = analyzer_cache_root()
+    root.mkdir(parents=True, exist_ok=True)
+    return FileLock(
+        str(
+            root
+            / f"motion_corrected_{motion_corrected_recording_id}.artifact.lock"
+        ),
+        timeout=timeout,
     )
 
 

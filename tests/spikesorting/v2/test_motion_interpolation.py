@@ -381,3 +381,35 @@ def test_removing_every_channel_is_an_error(pitch_steps):
     )
     with pytest.raises(ValueError, match="removed every channel"):
         _apply(drifting, motion, _one_span_clock(n), [(0, n)], REMOVE_CHANNELS)
+
+
+def test_corrected_identity_changes_with_each_term():
+    import uuid
+
+    from spyglass.spikesorting.v2._motion import (
+        motion_corrected_identity_payload,
+    )
+    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+
+    base = {
+        "motion_estimate_id": uuid.UUID(int=1),
+        "motion_interpolation_params_name": "kriging_force_extrapolate_v1",
+        "resolved_params_hash": "a" * 64,
+        "motion_interpolation_algorithm_version": 1,
+    }
+
+    def _id(**change):
+        return deterministic_id(
+            "motion_corrected_recording",
+            motion_corrected_identity_payload(**{**base, **change}),
+        )
+
+    ids = {
+        _id(),
+        _id(motion_estimate_id=uuid.UUID(int=2)),
+        _id(motion_interpolation_params_name="kriging_remove_channels_v1"),
+        _id(resolved_params_hash="b" * 64),
+        _id(motion_interpolation_algorithm_version=2),
+    }
+    assert len(ids) == 5
+    assert _id() == _id()

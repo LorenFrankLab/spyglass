@@ -46,6 +46,7 @@ CURATION_MERGE_LINEAGE = "spyglass_v2_curation_merge_lineage"
 CURATION_EVALUATION_PROVENANCE = "spyglass_v2_curation_evaluation_provenance"
 CONCAT_PROVENANCE = "spyglass_v2_concat_provenance"
 CONCAT_MEMBERS = "spyglass_v2_concat_members"
+MOTION_CORRECTION_PROVENANCE = "spyglass_v2_motion_correction_provenance"
 
 _KEY_COLUMN = "key"
 _VALUE_COLUMN = "value_json"

@@ -895,3 +895,436 @@ def test_orphan_and_bypassed_source_parts_are_refused(
         (MotionEstimateSelection & [both, concat_masked]).super_delete(
             warn=False, safemode=False
         )
+
+
+# ---- motion-corrected recordings ---------------------------------------------
+
+
+def _populated_estimate(**source) -> dict:
+    """The ``dredge_fast_v1`` estimate of a source, populated if missing."""
+    from spyglass.spikesorting.v2.motion import (
+        MotionEstimate,
+        MotionEstimateSelection,
+    )
+
+    key = MotionEstimateSelection.insert_selection(
+        {"motion_estimation_params_name": "dredge_fast_v1", **source}
+    )
+    if not (MotionEstimate & key):
+        MotionEstimate.populate(key, reserve_jobs=False)
+    return key
+
+
+def _select_corrected(
+    estimate_key, interpolation="kriging_force_extrapolate_v1"
+) -> dict:
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecordingSelection,
+        MotionInterpolationParameters,
+    )
+
+    MotionInterpolationParameters.insert_default()
+    return MotionCorrectedRecordingSelection.insert_selection(
+        {
+            "motion_estimate_id": estimate_key["motion_estimate_id"],
+            "motion_interpolation_params_name": interpolation,
+        }
+    )
+
+
+def _populated_corrected(estimate_key, interpolation=None) -> dict:
+    from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
+
+    key = _select_corrected(
+        estimate_key, *(() if interpolation is None else (interpolation,))
+    )
+    if not (MotionCorrectedRecording & key):
+        MotionCorrectedRecording.populate(key, reserve_jobs=False)
+    return key
+
+
+def _no_estimation(*_args, **_kwargs):
+    raise AssertionError("motion was estimated again")
+
+
+def _file_hash(abs_path) -> str:
+    from spyglass.spikesorting.v2._recompute import combined_hash
+    from spyglass.spikesorting.v2._recording_fingerprint import (
+        recording_content_fingerprint,
+    )
+
+    return combined_hash(
+        recording_content_fingerprint(
+            abs_path,
+            electrical_series_path="acquisition/ProcessedElectricalSeries",
+        )
+    )
+
+
+def test_correction_recipes_install_and_are_validated(dj_conn):
+    import datajoint as dj
+    from pydantic import ValidationError
+
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectionParameters,
+        MotionInterpolationParameters,
+    )
+
+    MotionCorrectionParameters.insert_default()
+    MotionCorrectionParameters.insert_default()
+    recipes = {
+        row["motion_correction_params_name"]: row
+        for row in MotionCorrectionParameters.fetch(as_dict=True)
+    }
+    for name in ("dredge_v1", "dredge_fast_v1"):
+        assert recipes[name]["motion_estimation_params_name"] == name
+        assert recipes[name]["motion_interpolation_params_name"] == (
+            "kriging_force_extrapolate_v1"
+        )
+    assert MotionInterpolationParameters & {
+        "motion_interpolation_params_name": "kriging_remove_channels_v1"
+    }
+    with pytest.raises(ValidationError, match="border_mode"):
+        MotionInterpolationParameters.insert1(
+            {
+                "motion_interpolation_params_name": "zeros_test",
+                "params": {
+                    "border_mode": "force_zeros",
+                    "spatial_interpolation_method": "kriging",
+                    "sigma_um": 20.0,
+                    "p": 2,
+                    "num_closest": 3,
+                },
+            }
+        )
+    with pytest.raises(dj.errors.DataJointError, match="update1"):
+        MotionCorrectionParameters.update1(
+            {**recipes["dredge_v1"], "motion_estimation_params_name": "x"}
+        )
+
+
+def test_interpolation_only_change_reuses_the_estimate(
+    discontinuous_sources, monkeypatch
+):
+    """Two interpolation recipes on one saved estimate are two corrected
+    recordings with one ``motion_estimate_id``; populating both never
+    estimates motion again. Selection is idempotent, content-addressed and
+    guarded."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionCorrectedRecordingSelection,
+        MotionEstimate,
+    )
+
+    estimate = _populated_estimate(
+        recording_id=discontinuous_sources["member_b"]["recording_id"]
+    )
+    extrapolate = _select_corrected(estimate)
+    removal = _select_corrected(estimate, "kriging_remove_channels_v1")
+    assert extrapolate != removal
+    assert _select_corrected(estimate) == extrapolate
+    rows = (MotionCorrectedRecordingSelection & [extrapolate, removal]).fetch(
+        as_dict=True
+    )
+    assert {row["motion_estimate_id"] for row in rows} == {
+        estimate["motion_estimate_id"]
+    }
+    row = (MotionCorrectedRecordingSelection & extrapolate).fetch1()
+    assert extrapolate["motion_corrected_recording_id"] == deterministic_id(
+        "motion_corrected_recording",
+        _motion.motion_corrected_identity_payload(
+            motion_estimate_id=estimate["motion_estimate_id"],
+            motion_interpolation_params_name="kriging_force_extrapolate_v1",
+            resolved_params_hash=row["resolved_params_hash"],
+            motion_interpolation_algorithm_version=(
+                _motion.MOTION_INTERPOLATION_ALGORITHM_VERSION
+            ),
+        ),
+    )
+
+    n_estimates = len(MotionEstimate())
+    monkeypatch.setattr(_motion, "estimate_motion_in_spans", _no_estimation)
+    MotionCorrectedRecording.populate(
+        [extrapolate, removal], reserve_jobs=False
+    )
+    assert len(MotionCorrectedRecording & [extrapolate, removal]) == 2
+    assert len(MotionEstimate()) == n_estimates
+
+    with pytest.raises(dj.errors.DataJointError, match="insert_selection"):
+        MotionCorrectedRecordingSelection.insert1(
+            {**row, "motion_corrected_recording_id": uuid.uuid4()}
+        )
+    with pytest.raises(ValueError, match="does not match the id derived"):
+        MotionCorrectedRecordingSelection.insert_selection(
+            {
+                "motion_estimate_id": estimate["motion_estimate_id"],
+                "motion_interpolation_params_name": (
+                    "kriging_force_extrapolate_v1"
+                ),
+                "motion_corrected_recording_id": uuid.uuid4(),
+            }
+        )
+    unpopulated = _select(discontinuous_sources["member_b"], "dredge_v1")
+    with pytest.raises(ValueError, match="not populated"):
+        _select_corrected(unpopulated)
+
+
+@pytest.mark.parametrize("source", ["gapped_recording", "concat"])
+def test_estimate_and_corrected_recording_round_trip(
+    discontinuous_sources, monkeypatch, source
+):
+    """The reloaded corrected traces are the in-memory corrected traces,
+    written with the source artifact's own timestamps (a recording with an
+    acquisition gap; a concatenation's own clock). The row carries the
+    channel map, the estimate's spans and the source's content hash; the
+    persisted series references those electrodes; the content hash is the
+    file's fingerprint and survives a rebuild."""
+    import h5py
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionEstimate,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    if source == "concat":
+        source_key = discontinuous_sources["concat_key"]
+        table = ConcatenatedRecording
+        estimate = _populated_estimate(
+            concat_recording_id=source_key["concat_recording_id"]
+        )
+    else:
+        source_key = discontinuous_sources["member_b"]
+        table = Recording
+        estimate = _populated_estimate(recording_id=source_key["recording_id"])
+    key = _select_corrected(estimate)
+    (MotionCorrectedRecording & key).delete_quick()
+
+    captured = {}
+    apply = _motion.apply_motion_on_estimation_clock
+
+    def _capture(*args, **kwargs):
+        applied = apply(*args, **kwargs)
+        captured["traces"] = applied.recording.get_traces()
+        return applied
+
+    monkeypatch.setattr(_motion, "apply_motion_on_estimation_clock", _capture)
+    MotionCorrectedRecording.populate(key, reserve_jobs=False)
+    monkeypatch.undo()
+
+    row = (MotionCorrectedRecording & key).fetch1()
+    estimate_row = (MotionEstimate & estimate).fetch1()
+    source_recording = table().get_recording(source_key)
+    corrected = MotionCorrectedRecording().get_recording(key)
+    n = source_recording.get_num_samples()
+
+    reloaded = corrected.get_traces()
+    np.testing.assert_array_equal(reloaded, captured["traces"])
+    # Motion was planted; the correction changed the traces.
+    assert np.max(np.abs(reloaded - source_recording.get_traces())) > 10.0
+    np.testing.assert_array_equal(
+        corrected.get_times(), source_recording.get_times()
+    )
+    assert row["n_samples"] == corrected.get_num_samples() == n
+    assert row["sampling_frequency"] == estimate_row["sampling_frequency"]
+    assert row["source_content_hash"] == (table & source_key).fetch1(
+        "content_hash"
+    )
+    ids = source_recording.channel_ids.tolist()
+    assert list(row["channel_ids"]) == corrected.channel_ids.tolist() == ids
+    assert row["n_channels"] == len(ids)
+    assert list(row["removed_channel_ids"]) == []
+    np.testing.assert_array_equal(
+        row["channel_locations"], estimate_row["channel_locations"]
+    )
+    np.testing.assert_array_equal(
+        np.asarray(corrected.get_channel_locations())[:, :2],
+        estimate_row["channel_locations"],
+    )
+    np.testing.assert_array_equal(
+        row["statistics_spans"], estimate_row["statistics_spans"]
+    )
+    np.testing.assert_array_equal(
+        row["continuity_spans"], estimate_row["continuity_spans"]
+    )
+
+    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+    with h5py.File(abs_path, "r") as handle:
+        series = handle[row["electrical_series_path"]]
+        region = series["electrodes"][:]
+        electrode_ids = handle["general/extracellular_ephys/electrodes/id"][:]
+        assert "motion corrected" in series.attrs["filtering"]
+        assert "Motion-corrected" in series.attrs["description"]
+    assert electrode_ids[region].tolist() == [int(c) for c in ids]
+    assert _file_hash(abs_path) == row["content_hash"]
+
+    # Rebuilt from the saved motion (the estimator must not run): same hash,
+    # same traces.
+    from pathlib import Path
+
+    Path(abs_path).unlink()
+    monkeypatch.setattr(_motion, "estimate_motion_in_spans", _no_estimation)
+    rebuilt = MotionCorrectedRecording().get_recording(key)
+    assert _file_hash(abs_path) == row["content_hash"]
+    np.testing.assert_array_equal(rebuilt.get_traces(), reloaded)
+
+
+def test_remove_channels_records_the_removed_contacts(discontinuous_sources):
+    """The planted +/-25 um drift moves the end contacts off the probe in
+    some bin: ``remove_channels`` drops them, records them, and keeps the
+    other channels in order at their unmoved positions."""
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionEstimate,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+
+    recording_key = discontinuous_sources["member_b"]
+    estimate = _populated_estimate(recording_id=recording_key["recording_id"])
+    key = _populated_corrected(estimate, "kriging_remove_channels_v1")
+
+    row = (MotionCorrectedRecording & key).fetch1()
+    source_ids = Recording().get_recording(recording_key).channel_ids.tolist()
+    removed = list(row["removed_channel_ids"])
+    kept = [c for c in source_ids if c not in removed]
+    assert removed and set(removed) <= set(source_ids)
+    assert list(row["channel_ids"]) == kept
+    assert row["n_channels"] == len(kept) == len(source_ids) - len(removed)
+    corrected = MotionCorrectedRecording().get_recording(key)
+    assert corrected.channel_ids.tolist() == kept
+    locations = (MotionEstimate & estimate).fetch1("channel_locations")
+    np.testing.assert_array_equal(
+        row["channel_locations"],
+        locations[[source_ids.index(c) for c in kept]],
+    )
+
+
+def test_masked_frames_of_the_corrected_recording_are_zero(drift_recording):
+    """A masked estimate's corrected recording is zero exactly outside the
+    estimate's statistics spans and nonzero inside them."""
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
+
+    recording_key = drift_recording["recording_key"]
+    artifact_key = RecordingArtifactSelection.insert_selection(
+        {
+            "recording_id": recording_key["recording_id"],
+            "artifact_detection_params_name": "none",
+            "manual_excluded_times": np.array([[20.0, 21.0]]),
+        }
+    )
+    RecordingArtifactDetection.populate(artifact_key, reserve_jobs=False)
+    estimate = _populated_estimate(
+        recording_id=recording_key["recording_id"], **artifact_key
+    )
+    key = _populated_corrected(estimate)
+
+    spans = (MotionCorrectedRecording & key).fetch1("statistics_spans")
+    assert spans.shape == (2, 2)
+    traces = MotionCorrectedRecording().get_recording(key).get_traces()
+    masked = slice(int(spans[0, 1]), int(spans[1, 0]))
+    assert masked.stop - masked.start > 25_000
+    assert np.all(traces[masked] == 0)
+    for start, end in spans:
+        assert np.all(np.any(traces[start:end] != 0, axis=1))
+
+
+def test_motion_failure_cleanup_and_cache_rebuild(
+    discontinuous_sources, monkeypatch
+):
+    """A failed write or registration leaves no row and no file; a retry
+    succeeds. A deleted artifact is rebuilt from the saved motion (the
+    estimator is disabled) with the stored hash. A rebuild whose hash
+    differs is refused, leaves nothing behind, and never replaces a present
+    artifact."""
+    import hashlib
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import _motion, _recording_nwb
+    from spyglass.spikesorting.v2.exceptions import (
+        RecordingContentDriftError,
+    )
+    from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
+    from spyglass.spikesorting.v2.recording import Recording
+
+    recording_key = discontinuous_sources["member_b"]
+    estimate = _populated_estimate(recording_id=recording_key["recording_id"])
+    key = _select_corrected(estimate)
+    (MotionCorrectedRecording & key).delete_quick()
+    source_file = (Recording & recording_key).fetch1("analysis_file_name")
+    folder = Path(AnalysisNwbfile.get_abs_path(source_file)).parent
+    nwb_file_name = (
+        AnalysisNwbfile & {"analysis_file_name": source_file}
+    ).fetch1("nwb_file_name")
+
+    def _snapshot():
+        return (
+            set(folder.glob("*.nwb")),
+            len(AnalysisNwbfile & {"nwb_file_name": nwb_file_name}),
+        )
+
+    before = _snapshot()
+
+    def _fail(*_args, **_kwargs):
+        raise RuntimeError("injected failure")
+
+    monkeypatch.setattr(_recording_nwb, "_persist_channel_geometry", _fail)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        MotionCorrectedRecording.populate(key, reserve_jobs=False)
+    monkeypatch.undo()
+    assert not (MotionCorrectedRecording & key)
+    assert _snapshot() == before
+
+    monkeypatch.setattr(AnalysisNwbfile, "add", _fail)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        MotionCorrectedRecording.populate(key, reserve_jobs=False)
+    monkeypatch.undo()
+    assert not (MotionCorrectedRecording & key)
+    assert _snapshot() == before
+
+    MotionCorrectedRecording.populate(key, reserve_jobs=False)
+    row = (MotionCorrectedRecording & key).fetch1()
+    abs_path = Path(AnalysisNwbfile.get_abs_path(row["analysis_file_name"]))
+    traces = MotionCorrectedRecording().get_recording(key).get_traces()
+
+    monkeypatch.setattr(_motion, "estimate_motion_in_spans", _no_estimation)
+    abs_path.unlink()
+    rebuilt = MotionCorrectedRecording().get_recording(key)
+    assert _file_hash(str(abs_path)) == row["content_hash"]
+    np.testing.assert_array_equal(rebuilt.get_traces(), traces)
+
+    apply = _motion.apply_motion_on_estimation_clock
+
+    def _drifted(*args, **kwargs):
+        import spikeinterface.preprocessing as sip
+
+        applied = apply(*args, **kwargs)
+        return applied._replace(
+            recording=sip.scale(applied.recording, gain=1.5)
+        )
+
+    monkeypatch.setattr(_motion, "apply_motion_on_estimation_clock", _drifted)
+    present = hashlib.sha256(abs_path.read_bytes()).hexdigest()
+    MotionCorrectedRecording()._rebuild_nwb_artifact(key)
+    assert hashlib.sha256(abs_path.read_bytes()).hexdigest() == present
+
+    abs_path.unlink()
+    files = set(folder.glob("*.nwb"))
+    with pytest.raises(RecordingContentDriftError, match="does not match"):
+        MotionCorrectedRecording().get_recording(key)
+    assert not abs_path.exists()
+    assert set(folder.glob("*.nwb")) == files
+    monkeypatch.undo()
+    MotionCorrectedRecording().get_recording(key)
+    assert _file_hash(str(abs_path)) == row["content_hash"]
