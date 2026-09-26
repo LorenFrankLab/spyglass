@@ -603,6 +603,7 @@ class MotionEstimateComputed(NamedTuple):
     sampling_frequency: float
     continuity_spans: np.ndarray
     continuity_start_s: np.ndarray
+    continuity_end_s: np.ndarray
     estimation_start_s: np.ndarray
     statistics_spans: np.ndarray
     channel_ids: list
@@ -640,7 +641,9 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     continuity span time advances by ``1 / fs`` per frame from the span's
     ``estimation_start_s``, and the real gap between two spans (an
     acquisition gap or a concatenation member join) is kept up to the
-    recipe's ``max_gap_s`` (``_motion.build_estimation_clock``). All spans
+    recipe's ``max_gap_s`` (``_motion.build_estimation_clock``); a gap runs
+    from one sample after a span's last timestamp to the next span's first
+    timestamp, both on the source's own clock. All spans
     therefore share one reference frame. The ``motion`` bins are on that
     clock; :meth:`get_estimation_clock` returns the time map and
     :meth:`get_displacement_on_source_clock` maps the bins back to source
@@ -663,6 +666,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     sampling_frequency: double        # Hz
     continuity_spans: longblob        # (n, 2) int64 half-open frame ranges of uninterrupted acquisition
     continuity_start_s: longblob      # (n,) float64 first timestamp of each continuity span on the source's own clock, in seconds
+    continuity_end_s: longblob        # (n,) float64 last timestamp of each continuity span on the source's own clock, in seconds
     estimation_start_s: longblob      # (n,) float64 start of each continuity span on the estimation clock, in seconds
     statistics_spans: longblob        # (n, 2) int64 half-open frame ranges of the valid samples used
     channel_ids: longblob             # estimation channel ids in recording order
@@ -759,10 +763,10 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         Re-resolves the recipe and requires its hash, the SpikeInterface
         version and the algorithm version to equal the selection's. Reads the
         source traces; for a single recording derives the continuity spans
-        and their start times from its timestamps, silences the artifact
+        and their first and last timestamps from its timestamps, silences the artifact
         ranges and computes the statistics spans as the sort stage does; for a
-        concat reads its persisted continuity spans, start times and
-        statistics spans. Builds the estimation clock with the recipe's
+        concat reads its persisted continuity spans, their first and last
+        timestamps and its statistics spans. Builds the estimation clock with the recipe's
         ``max_gap_s`` and runs ``_motion.estimate_motion_in_spans`` once.
 
         Raises
@@ -777,7 +781,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
         from spyglass.spikesorting.v2._sorting_artifact_mask import (
             artifact_frame_ranges,
-            boundary_spans_from_timestamps,
+            continuity_from_timestamps,
             silence_frame_ranges,
             statistics_spans,
         )
@@ -819,11 +823,9 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         recording.annotate(is_filtered=True)
         n_samples = int(recording.get_num_samples())
         if lineage.kind == "recording":
-            continuity = boundary_spans_from_timestamps(recording)
-            continuity_start_s = [
-                float(recording.sample_index_to_time(start))
-                for start, _ in continuity
-            ]
+            continuity, continuity_start_s, continuity_end_s = (
+                continuity_from_timestamps(recording)
+            )
             excluded = []
             if artifact_valid_times is not None:
                 excluded = artifact_frame_ranges(
@@ -838,12 +840,14 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         else:
             continuity = _motion.normalize_spans(source_row["continuity_spans"])
             continuity_start_s = source_row["continuity_start_s"]
+            continuity_end_s = source_row["continuity_end_s"]
             statistics = _motion.normalize_spans(source_row["statistics_spans"])
 
         sampling_frequency = float(recording.get_sampling_frequency())
         clock = _motion.build_estimation_clock(
             continuity,
             continuity_start_s,
+            continuity_end_s,
             sampling_frequency,
             resolved["max_gap_s"],
         )
@@ -866,6 +870,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             sampling_frequency=sampling_frequency,
             continuity_spans=clock.spans,
             continuity_start_s=clock.source_start_s,
+            continuity_end_s=clock.source_end_s,
             estimation_start_s=clock.estimation_start_s,
             statistics_spans=statistics_arr,
             channel_ids=channel_ids,
@@ -886,6 +891,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
                 sampling_frequency=sampling_frequency,
                 continuity_spans=clock.spans,
                 continuity_start_s=clock.source_start_s,
+                continuity_end_s=clock.source_end_s,
                 statistics_spans=statistics_arr,
                 channel_ids=channel_ids,
                 channel_locations=channel_locations,
@@ -928,14 +934,18 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         Returns
         -------
         _motion.EstimationClock
-            The continuity spans in frames, each span's start on the source
-            clock and on the estimation clock, and the sampling frequency.
+            The continuity spans in frames, each span's first and last
+            timestamp on the source clock, its start on the estimation clock,
+            and the sampling frequency.
         """
         from spyglass.spikesorting.v2._motion import estimation_clock_from_blob
 
-        spans, source_start, estimation_start, fs = (self & key).fetch1(
+        spans, source_start, source_end, estimation_start, fs = (
+            self & key
+        ).fetch1(
             "continuity_spans",
             "continuity_start_s",
+            "continuity_end_s",
             "estimation_start_s",
             "sampling_frequency",
         )
@@ -943,6 +953,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             {
                 "spans": spans,
                 "source_start_s": source_start,
+                "source_end_s": source_end,
                 "estimation_start_s": estimation_start,
                 "sampling_frequency": fs,
             }

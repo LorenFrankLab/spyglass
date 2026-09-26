@@ -16,8 +16,6 @@ recording.
 
 from __future__ import annotations
 
-from typing import NamedTuple
-
 
 def member_recording_selection_key(
     member: dict, preprocessing_params_name: str
@@ -562,30 +560,12 @@ def mask_member_recordings(recordings, member_valid_times):
     return masked, concat_ranges
 
 
-class ConcatContinuity(NamedTuple):
-    """Continuity spans of a concatenation and their real start times.
-
-    Attributes
-    ----------
-    spans : list[tuple[int, int]]
-        Half-open concat-frame spans of uninterrupted acquisition, split at
-        every member join and every member-internal timestamp gap.
-    start_s : list[float]
-        Each span's first timestamp on its member's own acquisition clock (s).
-    """
-
-    spans: list[tuple[int, int]]
-    start_s: list[float]
-
-
-def concat_continuity(
-    member_recordings, member_sample_counts
-) -> ConcatContinuity:
+def concat_continuity(member_recordings, member_sample_counts):
     """Continuity spans of a concatenation, from its members' own timestamps.
 
     Each member's spans come from its persisted timestamps
-    (``boundary_spans_from_timestamps``), so a member-internal wall-clock gap
-    is a boundary too; they are offset into concat frames by the cumulative
+    (``continuity_from_timestamps``), so a member-internal wall-clock gap is a
+    boundary too; they are offset into concat frames by the cumulative
     member sample counts (the same basis as
     :func:`cumulative_member_boundaries`), so every member join is a boundary
     as well, however short the real gap. The concatenation itself replaces the
@@ -603,22 +583,27 @@ def concat_continuity(
 
     Returns
     -------
-    ConcatContinuity
+    _sorting_artifact_mask.Continuity
+        Concat-frame spans with each span's first and last timestamp on its
+        member's clock.
     """
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        boundary_spans_from_timestamps,
+        Continuity,
+        continuity_from_timestamps,
     )
 
     ends = cumulative_member_boundaries(member_sample_counts)
     spans: list[tuple[int, int]] = []
     start_s: list[float] = []
+    end_s: list[float] = []
     for recording, offset in zip(
         member_recordings, [0, *ends[:-1]], strict=True
     ):
-        for a, b in boundary_spans_from_timestamps(recording):
-            spans.append((offset + a, offset + b))
-            start_s.append(float(recording.sample_index_to_time(a)))
-    return ConcatContinuity(spans=spans, start_s=start_s)
+        member = continuity_from_timestamps(recording)
+        spans.extend((offset + a, offset + b) for a, b in member.spans)
+        start_s.extend(member.start_s)
+        end_s.extend(member.end_s)
+    return Continuity(spans=spans, start_s=start_s, end_s=end_s)
 
 
 def observation_intervals(n_samples, sampling_frequency, artifact_ranges):

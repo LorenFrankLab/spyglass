@@ -23,6 +23,8 @@ touches no DB at call time.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 
 def artifact_frame_ranges(
     recording, valid_times, *, artifact_detection_id=None, recording_id=None
@@ -429,6 +431,50 @@ def boundary_spans_from_timestamps(recording) -> list[tuple[int, int]]:
         }
     )
     return [(a, b) for a, b in zip(cuts[:-1], cuts[1:]) if b > a]
+
+
+class Continuity(NamedTuple):
+    """Continuity spans and the real timestamps that bound each one.
+
+    Attributes
+    ----------
+    spans : list[tuple[int, int]]
+        Half-open frame spans of uninterrupted acquisition.
+    start_s : list[float]
+        Each span's first timestamp on its own acquisition clock (s).
+    end_s : list[float]
+        Each span's last timestamp on that clock (s): the time of frame
+        ``b - 1``, not ``start + (b - a) / fs``, which drifts from it when the
+        timestamps run at a rate slightly different from ``fs``.
+    """
+
+    spans: list[tuple[int, int]]
+    start_s: list[float]
+    end_s: list[float]
+
+
+def continuity_from_timestamps(recording) -> Continuity:
+    """Continuity spans of ``recording`` with their first and last timestamps.
+
+    The spans are :func:`boundary_spans_from_timestamps`; each boundary is
+    read with scalar lookups, so an HDF5-backed time vector is only indexed
+    one frame at a time.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        Single-segment recording carrying its persisted timestamps.
+
+    Returns
+    -------
+    Continuity
+    """
+    spans = boundary_spans_from_timestamps(recording)
+    return Continuity(
+        spans=spans,
+        start_s=[float(recording.sample_index_to_time(a)) for a, _ in spans],
+        end_s=[float(recording.sample_index_to_time(b - 1)) for _, b in spans],
+    )
 
 
 def concat_boundary_spans(

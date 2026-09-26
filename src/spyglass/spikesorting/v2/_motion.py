@@ -752,6 +752,8 @@ class EstimationClock(NamedTuple):
     source_start_s : numpy.ndarray
         ``(n_spans,)`` float64 ``t_i``: each span's first timestamp on the
         source's own acquisition clock (s).
+    source_end_s : numpy.ndarray
+        ``(n_spans,)`` float64: each span's last timestamp on that clock (s).
     estimation_start_s : numpy.ndarray
         ``(n_spans,)`` float64 ``e_i``: each span's start on the estimation
         clock (s).
@@ -761,22 +763,34 @@ class EstimationClock(NamedTuple):
 
     spans: np.ndarray
     source_start_s: np.ndarray
+    source_end_s: np.ndarray
     estimation_start_s: np.ndarray
     sampling_frequency: float
 
 
 def build_estimation_clock(
-    spans, source_start_s, sampling_frequency: float, max_gap_s: float
+    spans,
+    source_start_s,
+    source_end_s,
+    sampling_frequency: float,
+    max_gap_s: float,
 ) -> EstimationClock:
     """Place continuity spans on one estimation clock.
 
     ``e_0 = t_0`` and ``e_{i+1} = e_i + (b_i - a_i) / fs + min(g_i,
-    max_gap_s)``, where ``g_i = t_{i+1} - (t_i + (b_i - a_i) / fs)`` is the
-    real gap after span ``i``. A gap longer than ``max_gap_s`` is shortened to
-    it; a shorter gap keeps its real length. Every span thus shares one clock
-    (and one estimation), while the unobserved time between spans stays
-    bounded: the estimator's temporal bins, and its dense bin-by-bin
-    correlation matrices, grow with the clock's total length.
+    max_gap_s)``, where ``g_i = t_{i+1} - (u_i + 1 / fs)`` is the real gap
+    after span ``i``: from one sample after its last timestamp ``u_i`` to the
+    next span's first timestamp. Inside a span the clock uses the nominal
+    duration ``(b_i - a_i) / fs``; the gap is measured on the real timestamps
+    because a span whose timestamps run slightly off ``fs`` (SpikeInterface
+    derives ``fs`` from a timestamped series' first 1000 steps,
+    ``extractors/nwbextractors.py:369``) drifts from its nominal end by
+    ``ppm * duration``, which would otherwise swamp a gap of a few dropped
+    frames. A gap longer than ``max_gap_s`` is shortened to it; a shorter gap
+    keeps its real length. Every span thus shares one clock (and one
+    estimation), while the unobserved time between spans stays bounded: the
+    estimator's temporal bins, and its dense bin-by-bin correlation matrices,
+    grow with the clock's total length.
 
     Parameters
     ----------
@@ -784,7 +798,9 @@ def build_estimation_clock(
         ``(n_spans, 2)`` half-open continuity spans in frames, contiguous and
         starting at frame 0.
     source_start_s : array_like
-        ``(n_spans,)`` real start time ``t_i`` of each span (s).
+        ``(n_spans,)`` first timestamp ``t_i`` of each span (s).
+    source_end_s : array_like
+        ``(n_spans,)`` last timestamp ``u_i`` of each span (s).
     sampling_frequency : float
         ``fs`` (Hz).
     max_gap_s : float
@@ -798,20 +814,22 @@ def build_estimation_clock(
     ------
     ValueError
         If the spans are empty, not contiguous from frame 0, or empty spans;
-        if a start time or the cap is not finite (or the cap is negative); or
-        if a span starts before the previous one ends on the source clock
-        (a negative gap: overlapping or out-of-order spans).
+        if a timestamp or the cap is not finite (or the cap is negative); if a
+        span ends before it starts; or if a span starts before one sample
+        after the previous span's last timestamp (a negative gap: overlapping
+        or out-of-order spans).
     """
     spans = np.asarray(spans, dtype=np.int64).reshape(-1, 2)
     starts = np.asarray(source_start_s, dtype=np.float64).reshape(-1)
+    ends = np.asarray(source_end_s, dtype=np.float64).reshape(-1)
     fs = float(sampling_frequency)
     max_gap_s = float(max_gap_s)
     if len(spans) == 0:
         raise ValueError("Estimation clock: no continuity spans were given.")
-    if len(starts) != len(spans):
+    if len(starts) != len(spans) or len(ends) != len(spans):
         raise ValueError(
             f"Estimation clock: {len(spans)} continuity spans but "
-            f"{len(starts)} start times."
+            f"{len(starts)} start times and {len(ends)} end times."
         )
     if (
         spans[0, 0] != 0
@@ -822,10 +840,15 @@ def build_estimation_clock(
             "Estimation clock: continuity spans must be non-empty and "
             f"contiguous from frame 0; got {spans.tolist()}."
         )
-    if not np.isfinite(starts).all():
+    if not (np.isfinite(starts).all() and np.isfinite(ends).all()):
         raise ValueError(
-            f"Estimation clock: span start times must be finite; got "
-            f"{starts.tolist()}."
+            "Estimation clock: span start and end times must be finite; got "
+            f"{starts.tolist()} and {ends.tolist()}."
+        )
+    if np.any(ends < starts):
+        raise ValueError(
+            "Estimation clock: a span's last timestamp precedes its first; "
+            f"got starts {starts.tolist()} and ends {ends.tolist()}."
         )
     if not (np.isfinite(fs) and fs > 0):
         raise ValueError(
@@ -839,13 +862,13 @@ def build_estimation_clock(
     estimation = [float(starts[0])]
     for i in range(len(spans) - 1):
         duration = (spans[i, 1] - spans[i, 0]) / fs
-        gap = starts[i + 1] - (starts[i] + duration)
+        gap = starts[i + 1] - (ends[i] + 1.0 / fs)
         if gap < 0:
             raise ValueError(
                 f"Estimation clock: continuity span {i + 1} (frames "
                 f"{spans[i + 1].tolist()}) starts at {starts[i + 1]!r} s, "
-                f"{-gap:.6g} s before span {i} (frames {spans[i].tolist()}, "
-                f"{starts[i]!r} s + {duration!r} s) ends on the source clock. "
+                f"{-gap:.6g} s before one sample after span {i}'s last "
+                f"timestamp ({ends[i]!r} s; frames {spans[i].tolist()}). "
                 "Spans must be in acquisition order without overlap; for a "
                 "concatenation, order the members by acquisition time."
             )
@@ -853,6 +876,7 @@ def build_estimation_clock(
     return EstimationClock(
         spans=spans,
         source_start_s=starts,
+        source_end_s=ends,
         estimation_start_s=np.asarray(estimation, dtype=np.float64),
         sampling_frequency=fs,
     )
@@ -865,6 +889,9 @@ def estimation_clock_from_blob(blob: dict) -> EstimationClock:
         source_start_s=np.asarray(
             blob["source_start_s"], dtype=np.float64
         ).reshape(-1),
+        source_end_s=np.asarray(blob["source_end_s"], dtype=np.float64).reshape(
+            -1
+        ),
         estimation_start_s=np.asarray(
             blob["estimation_start_s"], dtype=np.float64
         ).reshape(-1),
@@ -1385,6 +1412,7 @@ def motion_input_fingerprint(
     sampling_frequency: float,
     continuity_spans,
     continuity_start_s,
+    continuity_end_s,
     statistics_spans,
     channel_ids,
     channel_locations,
@@ -1393,7 +1421,7 @@ def motion_input_fingerprint(
     """SHA-256 of everything an estimate was computed from.
 
     The source content, mask choice, frame spans and the continuity spans'
-    start times, estimation channels and their positions, and the resolved
+    first and last timestamps, estimation channels and their positions, and the resolved
     configuration (which holds the gap cap). Two estimates with the same
     fingerprint read the same valid samples on the same estimation clock and
     geometry with the same settings.
@@ -1417,6 +1445,9 @@ def motion_input_fingerprint(
         ],
         "continuity_start_s": np.asarray(
             continuity_start_s, dtype=np.float64
+        ).tolist(),
+        "continuity_end_s": np.asarray(
+            continuity_end_s, dtype=np.float64
         ).tolist(),
         "statistics_spans": [
             list(span) for span in normalize_spans(statistics_spans)

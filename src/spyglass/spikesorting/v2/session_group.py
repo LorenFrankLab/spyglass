@@ -756,10 +756,11 @@ class ConcatRecordingComputed(NamedTuple):
     statistics_spans: object
     # ``(n, 2)`` int64 half-open concat frame ranges of uninterrupted
     # acquisition (split at every member join and member-internal gap) and
-    # ``(n,)`` float64 start time of each on its member's own clock; the
-    # synthetic concat timeline cannot recover them.
+    # ``(n,)`` float64 first / last timestamp of each on its member's own
+    # clock; the synthetic concat timeline cannot recover them.
     continuity_spans: object
     continuity_start_s: object
+    continuity_end_s: object
 
 
 @schema
@@ -789,6 +790,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     statistics_spans: longblob  # (n, 2) int64 half-open concat frame ranges: artifact-free and never crossing a member join or a member-internal timestamp gap
     continuity_spans: longblob  # (n, 2) int64 half-open concat frame ranges of uninterrupted acquisition, split at every member join and member-internal timestamp gap
     continuity_start_s: longblob  # (n,) float64 first timestamp of each continuity span on its member's own acquisition clock, in seconds
+    continuity_end_s: longblob  # (n,) float64 last timestamp of each continuity span on its member's own acquisition clock, in seconds
     """
 
     class MemberBoundary(SpyglassMixinPart):
@@ -1098,6 +1100,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             -1, 2
         )
         continuity_start_s = np.asarray(continuity.start_s, dtype=np.float64)
+        continuity_end_s = np.asarray(continuity.end_s, dtype=np.float64)
         statistics = np.asarray(
             statistics_spans(
                 sum(member_sample_counts), artifact_ranges, continuity.spans
@@ -1234,6 +1237,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             statistics_spans=statistics,
             continuity_spans=continuity_spans,
             continuity_start_s=continuity_start_s,
+            continuity_end_s=continuity_end_s,
         )
 
     def make_insert(
@@ -1252,6 +1256,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         statistics_spans,
         continuity_spans,
         continuity_start_s,
+        continuity_end_s,
     ):
         """Atomically register the staged concat artifact + boundary rows.
 
@@ -1294,6 +1299,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                         "statistics_spans": statistics_spans,
                         "continuity_spans": continuity_spans,
                         "continuity_start_s": continuity_start_s,
+                        "continuity_end_s": continuity_end_s,
                     }
                 )
                 self.MemberBoundary.insert(boundary_rows)
@@ -1432,14 +1438,15 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 )
             # The traces fingerprint does not include the stored spans:
             # downstream sorts estimate noise from the statistics spans and
-            # motion estimation reads the continuity spans and their start
-            # times, so a rebuild must reproduce them exactly too.
+            # motion estimation reads the continuity spans and their first
+            # and last timestamps, so a rebuild must reproduce them exactly.
             drifted = [
                 name
                 for name, shape in (
                     ("statistics_spans", (-1, 2)),
                     ("continuity_spans", (-1, 2)),
                     ("continuity_start_s", (-1,)),
+                    ("continuity_end_s", (-1,)),
                 )
                 if not np.array_equal(
                     np.asarray(getattr(computed, name)).reshape(shape),

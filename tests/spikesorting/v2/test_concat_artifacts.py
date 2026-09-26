@@ -56,7 +56,8 @@ def test_unmasked_members_keep_their_samples():
 
 def test_concat_preserves_member_internal_gaps():
     """Concat continuity and statistics spans split at member joins and
-    member-internal gaps, and each continuity span keeps its real start time.
+    member-internal gaps, and each continuity span keeps its real first and
+    last timestamps.
 
     The first member is continuous with one artifact; the second has a
     wall-clock gap between its internal spans ``[0, 500)`` and ``[500, 1000)``.
@@ -89,6 +90,7 @@ def test_concat_preserves_member_internal_gaps():
 
     assert continuity.spans == [(0, 800), (800, 1300), (1300, 1800)]
     assert continuity.start_s == [5.0, 10.0, 20.0]
+    assert continuity.end_s == [5.799, 10.499, 20.499]
     assert statistics_spans(1800, artifact_ranges, continuity.spans) == [
         (0, 100),
         (150, 800),
@@ -102,6 +104,7 @@ def test_concat_preserves_member_internal_gaps():
     assert concat_continuity([first, continuous], [800, 1000]) == (
         [(0, 800), (800, 1800)],
         [5.0, 7.5],
+        [5.799, 7.5 + 999 / 1000],
     )
 
 

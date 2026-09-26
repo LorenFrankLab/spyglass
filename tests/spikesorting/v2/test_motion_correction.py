@@ -364,6 +364,10 @@ def test_estimate_round_trip(drift_recording):
         .sample_index_to_time(0)
     )
     np.testing.assert_array_equal(row["continuity_start_s"], [first_timestamp])
+    np.testing.assert_array_equal(
+        row["continuity_end_s"],
+        _timestamps_at(drift_recording["recording_key"], [n - 1]),
+    )
     np.testing.assert_array_equal(row["estimation_start_s"], [first_timestamp])
     np.testing.assert_array_equal(
         row["peaks_per_continuity_span"], [row["n_peaks_kept"]]
@@ -399,6 +403,7 @@ def test_estimate_round_trip(drift_recording):
         sampling_frequency=row["sampling_frequency"],
         continuity_spans=row["continuity_spans"],
         continuity_start_s=row["continuity_start_s"],
+        continuity_end_s=row["continuity_end_s"],
         statistics_spans=row["statistics_spans"],
         channel_ids=row["channel_ids"],
         channel_locations=row["channel_locations"],
@@ -615,15 +620,18 @@ def _timestamps_at(recording_key, frames):
     return [float(recording.sample_index_to_time(int(f))) for f in frames]
 
 
-def _assert_time_map(row, spans, starts):
-    """The row persists ``spans``/``starts`` and the recipe's clock on them."""
+def _assert_time_map(row, spans, starts, ends):
+    """The row persists the spans, their first/last timestamps and the
+    recipe's clock on them."""
     from spyglass.spikesorting.v2._motion import build_estimation_clock
 
     np.testing.assert_array_equal(row["continuity_spans"], spans)
     np.testing.assert_array_equal(row["continuity_start_s"], starts)
+    np.testing.assert_array_equal(row["continuity_end_s"], ends)
     expected = build_estimation_clock(
         spans,
         starts,
+        ends,
         row["sampling_frequency"],
         row["resolved_params"]["max_gap_s"],
     )
@@ -651,7 +659,9 @@ def test_gapped_recording_is_estimated_on_one_clock(discontinuous_sources):
     starts = _timestamps_at(recording_key, spans[:, 0])
     t0 = discontinuous_sources["t0"]
     assert starts == pytest.approx([t0 + 23.0, t0 + 27.0], abs=1e-3)
-    _assert_time_map(row, spans, starts)
+    _assert_time_map(
+        row, spans, starts, _timestamps_at(recording_key, spans[:, 1] - 1)
+    )
     # The 1 s gap is below the 30 s cap, so it keeps its real length.
     assert row["estimation_start_s"][1] - row["estimation_start_s"][0] == (
         pytest.approx(4.0, abs=1e-3)
@@ -679,8 +689,8 @@ def test_concat_persists_its_continuity_and_rebuild_verifies_it(
     discontinuous_sources, monkeypatch
 ):
     """The concat row stores one continuity span per member span (the join
-    and member B's internal gap are both edges) with each span's real start
-    time; a rebuild reproducing different start times is refused."""
+    and member B's internal gap are both edges) with each span's real first
+    and last timestamps; a rebuild reproducing different ones is refused."""
     from pathlib import Path
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -707,6 +717,12 @@ def test_concat_persists_its_continuity_and_rebuild_verifies_it(
         discontinuous_sources["member_b"], [a for a, _ in b_spans]
     )
     np.testing.assert_array_equal(row["continuity_start_s"], expected_starts)
+    expected_ends = _timestamps_at(
+        discontinuous_sources["member_a"], [n_a - 1]
+    ) + _timestamps_at(
+        discontinuous_sources["member_b"], [b - 1 for _, b in b_spans]
+    )
+    np.testing.assert_array_equal(row["continuity_end_s"], expected_ends)
     np.testing.assert_array_equal(row["statistics_spans"], expected_spans)
 
     abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
@@ -766,7 +782,10 @@ def test_concat_source_is_estimated_end_to_end(discontinuous_sources):
     concat = (ConcatenatedRecording & concat_key).fetch1()
     assert row["n_samples"] == concat["n_samples"]
     _assert_time_map(
-        row, concat["continuity_spans"], concat["continuity_start_s"]
+        row,
+        concat["continuity_spans"],
+        concat["continuity_start_s"],
+        concat["continuity_end_s"],
     )
     np.testing.assert_array_equal(
         row["statistics_spans"], concat["statistics_spans"]

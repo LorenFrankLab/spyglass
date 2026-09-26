@@ -286,9 +286,11 @@ def _one_span_clock(recording):
     """The estimation clock of a gap-free recording: its own ``t0 + i / fs``."""
     from spyglass.spikesorting.v2._motion import build_estimation_clock
 
+    n = recording.get_num_samples()
     return build_estimation_clock(
-        [(0, recording.get_num_samples())],
+        [(0, n)],
         [float(recording.sample_index_to_time(0))],
+        [float(recording.sample_index_to_time(n - 1))],
         recording.get_sampling_frequency(),
         max_gap_s=30.0,
     )
@@ -646,44 +648,109 @@ DEV_MEMBERS_MAX_ABS_UM = 0.679
 
 
 def test_estimation_clock_caps_only_long_gaps():
-    """``e_{i+1} = e_i + (b_i - a_i) / fs + min(g_i, max_gap_s)``: a gap
-    below the cap keeps its real length, a longer one is capped, a zero gap
-    stays zero. Every value is exact in binary floating point."""
+    """``e_{i+1} = e_i + (b_i - a_i) / fs + min(g_i, max_gap_s)`` with the
+    real gap ``g_i = t_{i+1} - (u_i + 1 / fs)``: a gap below the cap keeps
+    its real length, a longer one is capped, a zero gap stays zero. At
+    fs = 8 Hz every value is exact in binary floating point."""
     from spyglass.spikesorting.v2._motion import build_estimation_clock
 
-    spans = [(0, 1000), (1000, 3000), (3000, 3500), (3500, 4000)]
-    # Span lengths 1.0 / 2.0 / 0.5 / 0.5 s; real gaps 0.25 s (below the
-    # 5 s cap), 100 s (above it) and 0 s.
+    spans = [(0, 8), (8, 24), (24, 28), (28, 32)]
+    # Span lengths 1.0 / 2.0 / 0.5 / 0.5 s with timestamps at exactly 8 Hz;
+    # real gaps 0.25 s (below the 5 s cap), 100 s (above it) and 0 s.
     starts = [10.0, 11.25, 113.25, 113.75]
+    ends = [t + (b - a - 1) / 8 for t, (a, b) in zip(starts, spans)]
 
-    clock = build_estimation_clock(spans, starts, 1000.0, max_gap_s=5.0)
+    clock = build_estimation_clock(spans, starts, ends, 8.0, max_gap_s=5.0)
 
     np.testing.assert_array_equal(clock.spans, spans)
     np.testing.assert_array_equal(clock.source_start_s, starts)
+    np.testing.assert_array_equal(clock.source_end_s, ends)
     np.testing.assert_array_equal(
         clock.estimation_start_s, [10.0, 11.25, 18.25, 18.75]
     )
-    assert clock.sampling_frequency == 1000.0
-    uncapped = build_estimation_clock(spans, starts, 1000.0, max_gap_s=1e6)
+    assert clock.sampling_frequency == 8.0
+    uncapped = build_estimation_clock(spans, starts, ends, 8.0, max_gap_s=1e6)
     np.testing.assert_array_equal(uncapped.estimation_start_s, starts)
-    squeezed = build_estimation_clock(spans, starts, 1000.0, max_gap_s=0.0)
+    squeezed = build_estimation_clock(spans, starts, ends, 8.0, max_gap_s=0.0)
     np.testing.assert_array_equal(
         squeezed.estimation_start_s, [10.0, 11.0, 13.0, 13.5]
     )
 
 
+def test_gap_is_measured_from_the_real_last_timestamp():
+    """A long span whose timestamps run 20 ppm faster than the nominal fs,
+    then three dropped frames: the real gap (3 frames) is kept, although the
+    span's nominal end ``t_0 + (b - a) / fs`` lies after the next span's first
+    timestamp. Timestamps that genuinely overlap still raise."""
+    from spikeinterface.core import NumpyRecording
+
+    from spyglass.spikesorting.v2._motion import build_estimation_clock
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        continuity_from_timestamps,
+    )
+
+    fs = 30_000.0
+    real_rate = fs * (1 + 20e-6)
+    first, second, dropped = 600_000, 30_000, 3
+    recording = NumpyRecording(
+        [np.zeros((first + second, 1), dtype="float32")], sampling_frequency=fs
+    )
+    ticks = np.r_[np.arange(first), first + dropped + np.arange(second)]
+    recording.set_times(5.0 + ticks / real_rate, with_warning=False)
+
+    continuity = continuity_from_timestamps(recording)
+
+    assert continuity.spans == [(0, first), (first, first + second)]
+    real_gap = continuity.start_s[1] - (continuity.end_s[0] + 1 / fs)
+    # One nominal sample after the last timestamp to the next timestamp:
+    # the three dropped frames, to within the 20 ppm rate difference.
+    assert real_gap == pytest.approx((dropped + 1) / real_rate - 1 / fs)
+    assert real_gap == pytest.approx(dropped / fs, rel=1e-4)
+    # Over 20 s the nominal end drifts ~400 us past the real one, so the
+    # nominal gap would be about -300 us.
+    nominal_gap = continuity.start_s[1] - (continuity.start_s[0] + first / fs)
+    assert nominal_gap < -dropped / fs
+    clock = build_estimation_clock(*continuity, fs, max_gap_s=30.0)
+    assert clock.estimation_start_s[1] == (
+        continuity.start_s[0] + first / fs + real_gap
+    )
+
+    with pytest.raises(ValueError, match="acquisition order"):
+        build_estimation_clock(
+            continuity.spans,
+            continuity.start_s,
+            [continuity.end_s[0] + 1e-3, continuity.end_s[1]],
+            fs,
+            max_gap_s=30.0,
+        )
+
+
 @pytest.mark.parametrize(
-    "spans, starts, cap, match",
+    "spans, starts, ends, cap, match",
     [
-        ([(0, 1000), (1000, 2000)], [10.0, 10.5], 5.0, "0.5 s before span 0"),
-        ([(0, 1000), (1000, 2000)], [20.0, 10.0], 5.0, "before span 0"),
-        ([(0, 1000), (1500, 2000)], [0.0, 5.0], 5.0, "contiguous"),
-        ([(10, 1000)], [0.0], 5.0, "contiguous"),
-        ([(0, 1000), (1000, 1000)], [0.0, 5.0], 5.0, "non-empty"),
-        ([(0, 1000)], [0.0, 5.0], 5.0, "start times"),
-        ([(0, 1000)], [np.nan], 5.0, "finite"),
-        ([(0, 1000)], [0.0], -1.0, "max_gap_s"),
-        ([], [], 5.0, "no continuity spans"),
+        (
+            [(0, 1000), (1000, 2000)],
+            [10.0, 10.5],
+            [10.999, 11.499],
+            5.0,
+            "0.5 s before one sample after span 0",
+        ),
+        (
+            [(0, 1000), (1000, 2000)],
+            [20.0, 10.0],
+            [20.999, 10.999],
+            5.0,
+            "before one sample after span 0",
+        ),
+        ([(0, 1000), (1500, 2000)], [0.0, 5.0], [1.0, 6.0], 5.0, "contiguous"),
+        ([(10, 1000)], [0.0], [1.0], 5.0, "contiguous"),
+        ([(0, 1000), (1000, 1000)], [0.0, 5.0], [1.0, 5.0], 5.0, "non-empty"),
+        ([(0, 1000)], [0.0, 5.0], [1.0], 5.0, "start times"),
+        ([(0, 1000)], [0.0], [1.0, 2.0], 5.0, "end times"),
+        ([(0, 1000)], [np.nan], [1.0], 5.0, "finite"),
+        ([(0, 1000)], [1.0], [0.5], 5.0, "precedes its first"),
+        ([(0, 1000)], [0.0], [1.0], -1.0, "max_gap_s"),
+        ([], [], [], 5.0, "no continuity spans"),
     ],
     ids=[
         "overlap",
@@ -692,16 +759,20 @@ def test_estimation_clock_caps_only_long_gaps():
         "not-from-zero",
         "empty-span",
         "start-count",
+        "end-count",
         "nan-start",
+        "end-before-start",
         "negative-cap",
         "no-spans",
     ],
 )
-def test_estimation_clock_rejects_invalid_input(spans, starts, cap, match):
+def test_estimation_clock_rejects_invalid_input(
+    spans, starts, ends, cap, match
+):
     from spyglass.spikesorting.v2._motion import build_estimation_clock
 
     with pytest.raises(ValueError, match=match):
-        build_estimation_clock(spans, starts, 1000.0, max_gap_s=cap)
+        build_estimation_clock(spans, starts, ends, 1000.0, max_gap_s=cap)
 
 
 def test_clock_view_presents_the_estimation_clock():
@@ -722,7 +793,11 @@ def test_clock_view_presents_the_estimation_clock():
         with_warning=False,
     )
     clock = build_estimation_clock(
-        [(0, 2000), (2000, 6000)], [5.0, 400.0], 3e4, max_gap_s=30.0
+        [(0, 2000), (2000, 6000)],
+        [5.0, 400.0],
+        [5.0 + 1999 / 3e4, 400.0 + 3999 / 3e4],
+        3e4,
+        max_gap_s=30.0,
     )
     view = EstimationClockRecording(parent, clock)
 
@@ -756,10 +831,14 @@ def test_clock_view_presents_the_estimation_clock():
         rebuilt.sample_index_to_time(frames), view.sample_index_to_time(frames)
     )
 
-    short = build_estimation_clock([(0, 5000)], [0.0], 3e4, max_gap_s=30.0)
+    short = build_estimation_clock(
+        [(0, 5000)], [0.0], [4999 / 3e4], 3e4, max_gap_s=30.0
+    )
     with pytest.raises(ValueError, match="6000 samples"):
         EstimationClockRecording(parent, short)
-    other_rate = build_estimation_clock([(0, 6000)], [0.0], 2e4, max_gap_s=30.0)
+    other_rate = build_estimation_clock(
+        [(0, 6000)], [0.0], [5999 / 2e4], 2e4, max_gap_s=30.0
+    )
     with pytest.raises(ValueError, match="sampling frequency"):
         EstimationClockRecording(parent, other_rate)
 
@@ -774,7 +853,7 @@ def test_source_clock_mapping_flags_bins_inside_a_capped_gap():
 
     # Spans of 3 s and 2 s at fs = 10 Hz; a 100 s real gap capped to 2 s.
     clock = build_estimation_clock(
-        [(0, 30), (30, 50)], [50.0, 153.0], 10.0, max_gap_s=2.0
+        [(0, 30), (30, 50)], [50.0, 153.0], [52.9, 154.9], 10.0, max_gap_s=2.0
     )
     centers = np.arange(7) + 50.5  # estimation clock: span 0 is [50, 53),
     # the capped gap [53, 55), span 1 [55, 57).
@@ -795,13 +874,19 @@ def test_source_clock_mapping_flags_bins_inside_a_capped_gap():
     )
 
 
-def _clock_for(spans, starts):
+def _clock_for(spans, starts, ends=None):
+    """The shipped recipe's clock; ``ends`` default to uniform timestamps."""
     from spyglass.spikesorting.v2._motion import build_estimation_clock
     from spyglass.spikesorting.v2._recipe_catalog import MOTION_MAX_GAP_S
     from tests.spikesorting.v2._motion_fixtures import SAMPLING_FREQUENCY
 
+    if ends is None:
+        ends = [
+            start + (b - a - 1) / SAMPLING_FREQUENCY
+            for start, (a, b) in zip(starts, spans)
+        ]
     return build_estimation_clock(
-        spans, starts, SAMPLING_FREQUENCY, max_gap_s=MOTION_MAX_GAP_S
+        spans, starts, ends, SAMPLING_FREQUENCY, max_gap_s=MOTION_MAX_GAP_S
     )
 
 
@@ -985,9 +1070,14 @@ def test_unequal_members_with_a_join_and_an_internal_gap():
         (int(30 * fs), int(45 * fs)),
     ]
     assert continuity.start_s == [0.0, 30.0, 45.0]
-    clock = _clock_for(continuity.spans, continuity.start_s)
+    np.testing.assert_allclose(
+        continuity.end_s, [20.0 - 1 / fs, 40.0 - 1 / fs, 60.0 - 1 / fs]
+    )
+    clock = _clock_for(*continuity)
     # Real gaps of 10 s and 5 s, both below the 30 s cap.
-    np.testing.assert_array_equal(clock.estimation_start_s, [0.0, 30.0, 45.0])
+    np.testing.assert_allclose(
+        clock.estimation_start_s, [0.0, 30.0, 45.0], rtol=0, atol=1e-9
+    )
 
     motion, diagnostics = _estimate(
         concatenated, spans=continuity.spans, clock=clock
@@ -1165,6 +1255,7 @@ def test_invalid_spans_are_rejected(continuity, statistics, match):
     clock = build_estimation_clock(
         continuity,
         [3.0 * i for i in range(len(continuity))],
+        [3.0 * i + 1.0 for i in range(len(continuity))],
         30_000.0,
         max_gap_s=30.0,
     )
