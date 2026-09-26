@@ -1243,6 +1243,42 @@ def test_estimate_and_corrected_recording_round_trip(
     assert electrode_ids[region].tolist() == [int(c) for c in ids]
     assert _file_hash(abs_path) == row["content_hash"]
 
+    import spikeinterface
+
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        MOTION_CORRECTION_PROVENANCE,
+        read_provenance_values,
+    )
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecordingSelection,
+        MotionInterpolationParameters,
+    )
+
+    selection = (MotionCorrectedRecordingSelection & key).fetch1()
+    provenance = read_provenance_values(abs_path, MOTION_CORRECTION_PROVENANCE)
+    assert provenance["spikeinterface_version"] == spikeinterface.__version__
+    assert provenance["interpolation"] == _motion.resolve_interpolation_params(
+        (
+            MotionInterpolationParameters
+            & {
+                "motion_interpolation_params_name": "kriging_force_extrapolate_v1"
+            }
+        ).fetch1("params")
+    )
+    assert provenance["motion_estimate_id"] == str(
+        estimate["motion_estimate_id"]
+    )
+    assert provenance["motion_corrected_recording_id"] == str(
+        key["motion_corrected_recording_id"]
+    )
+    assert provenance["motion_interpolation_params_name"] == (
+        selection["motion_interpolation_params_name"]
+    )
+    assert provenance["motion_interpolation_algorithm_version"] == (
+        selection["motion_interpolation_algorithm_version"]
+    )
+    assert provenance["source_content_hash"] == row["source_content_hash"]
+    assert provenance["removed_channel_ids"] == []
 
     # Rebuilt from the saved motion (the estimator must not run): same hash,
     # same traces.
