@@ -12,6 +12,9 @@ from spyglass.spikesorting.analysis.v1.group import (
     SortedSpikesGroup,
 )  # noqa: F401
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.ripple_detection_params import (
+    detection_kwargs_from_params,
+)
 
 schema = dj.schema("mua_v1")
 
@@ -25,15 +28,21 @@ class MuaEventsParameters(SpyglassMixin, dj.Manual):
     mua_param_name : str
         A name for this set of parameters
     mua_param_dict : dict
-        Dictionary of parameters, including...
+        Keyword arguments for `ripple_detection.multiunit_HSE_detector`
+        (ripple-detection>=2.0), including...
             minimum_duration : float
-                Minimum duration of MUA event (seconds)
+                Minimum duration of MUA event (seconds). The rate must stay
+                above threshold for round(minimum_duration * sampling rate)
+                samples.
             zscore_threshold : float
                 Z-score threshold for MUA detection
             close_event_threshold : float
                 Minimum time between MUA events (seconds)
             speed_threshold : float
                 Minimum speed for MUA detection (cm/s)
+        Keys removed in ripple-detection 2.0 (`use_speed_threshold_for_zscore`,
+        `normalization_time_range`) are applied as the equivalent
+        `normalization_mask`.
     """
 
     definition = """
@@ -86,8 +95,9 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         time = speed.index.to_numpy()
         speed = speed.to_numpy()
 
+        # Per-unit counts: the detector sums them into the population rate,
+        # and counts the units active in each event (n_active_units).
         spike_indicator = SortedSpikesGroup.get_spike_indicator(key, time)
-        spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
 
         sampling_frequency = 1 / np.median(np.diff(time))
 
@@ -109,7 +119,11 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         spike_indicator = spike_indicator[mask]
 
         mua_times = multiunit_HSE_detector(
-            time, spike_indicator, speed, sampling_frequency, **mua_params
+            time,
+            spike_indicator,
+            speed,
+            sampling_frequency,
+            **detection_kwargs_from_params(mua_params, time, speed),
         )
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()

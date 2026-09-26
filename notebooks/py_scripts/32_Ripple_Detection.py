@@ -314,11 +314,18 @@ sgr.RippleParameters()
 # For the `Kay_ripple_detector` (options are currently Kay and Karlsson, see `ripple_detection` package for specifics) the parameters are:
 #
 # - `speed_threshold` (cm/s): maximum speed the animal can move
-# - `minimum_duration` (s): minimum time above threshold
+# - `minimum_duration` (s): minimum time above threshold, counted in samples
+#   (`round(minimum_duration * sampling rate)`) since `ripple_detection` 2.0
 # - `zscore_threshold` (std): minimum value to be considered a ripple, in standard
 #   deviations from mean
 # - `smoothing_sigma` (s): how much to smooth the signal in time
 # - `close_ripple_threshold` (s): exclude ripples closer than this amount
+#
+# Any other keyword argument of the detector can be added, such as
+# `maximum_duration`. Each detected ripple has, among other statistics,
+# `max_sustained_zscore` (named `max_thresh` before `ripple_detection` 2.0),
+# `peak_time`, and `clipped_start`/`clipped_end`, which flag an event cut off
+# by a gap in the data.
 #
 
 # ## Check interval speed
