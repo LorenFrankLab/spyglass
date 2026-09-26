@@ -112,7 +112,16 @@ DLCProject().alter()
 Motion correction is now a stage independent of concatenation: `off`
 (default) / `estimate` / `apply`, usable on a single-session `Recording` or a
 `ConcatenatedRecording` alike. **No shipped recipe is validated for a
-probe.**
+probe.** A preregistered held-out benchmark (a simulated 32-contact
+single-column polymer shank, seeds 1000-1004, MountainSort5;
+`tests/spikesorting/v2/motion_acceptance_held_out.json`) **failed** its gates
+for both shipped recipes: `dredge_fast` failed 3 checks, all on nonrigid drift
+(oracle gap and false positives); `dredge` failed 19 (spurious displacement on
+static recordings, one seed over the rigid / concatenation-member /
+masked-drift motion-error limits, and nonrigid sorting checks). Both passed
+every border, cost, sign, fidelity, mean-gain and no-motion sorting check. All
+recipes remain experimental; no real lab polymer recording with drift was
+available.
 
 - **Concatenation itself no longer applies motion correction.**
   `ConcatenatedRecording` now stores the masked, unwhitened concatenation of

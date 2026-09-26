@@ -1665,8 +1665,7 @@ Development benchmarks on a simulated **32-contact, single-column, 26 µm-pitch
 polymer shank** (planted rigid/nonrigid drift, jumps, and no-motion controls;
 `spikeinterface==0.104.3`) found:
 
-- `dredge` / `dredge_fast` tracked rigid drift and jumps reasonably; `rigid_fast`
-  did not: it produced catastrophic outlier bins on 2 of 12 drifting
+- `rigid_fast` produced catastrophic outlier bins on 2 of 12 drifting
   development cases (tens of µm off in a single 5 s bin) and, on one nonrigid
   case, made real-sorter accuracy *worse* than no correction at all
   (well-detected units 0 vs. 8 for "off"). `rigid_fast` also performed worse
@@ -1686,7 +1685,25 @@ polymer shank** (planted rigid/nonrigid drift, jumps, and no-motion controls;
   is only barely wide enough (by 6 µm) for SpikeInterface's own nonrigid
   window-count check to accept it as more than one window.
 
-None of the shipped recipes is validated for a probe. `dredge_v1` and
+**The preregistered held-out benchmark failed for both shipped recipes.**
+After development, gates and cases were fixed in advance in
+`tests/spikesorting/v2/motion_acceptance_held_out.json` and run once
+(2026-09-26) on held-out seeds 1000-1004 of the same simulated shank, sorted
+with MountainSort5:
+
+- `dredge_fast` failed 3 checks, all on nonrigid drift (sorting accuracy too
+  far below the oracle-motion correction, and too many false-positive units).
+- `dredge` failed 19: it reported spurious displacement on static (no-motion)
+  recordings, one seed exceeded the motion-error limits on the rigid,
+  concatenation-member and masked-drift scenarios, and it failed nonrigid
+  sorting checks.
+- Both passed every border, cost, sign, fidelity, mean-gain and no-motion
+  sorting check.
+
+No real lab polymer recording with drift was available to test on.
+
+None of the shipped recipes is validated for a probe; all remain
+experimental. `dredge_v1` and
 `dredge_fast_v1` ship as default rows; `rigid_fast` stays an allowed preset
 (insert a `MotionEstimationParameters` row naming it explicitly) so it can
 still be compared, but ships with no default row.
