@@ -31,6 +31,11 @@
       "levels_um": [-15, 15],
       "windows_s": [[0.0, 30.0], [630.0, 660.0]]
     },
+    "none_gap": {
+      "kind": "static",
+      "amplitude_um": 25.0,
+      "windows_s": [[0.0, 30.0], [630.0, 660.0]]
+    },
     "members": {
       "kind": "step",
       "change_times_s": [25.0, 42.5],
@@ -103,7 +108,8 @@
     {"scenario": "jumpoff", "recipes": ["off", "oracle", "rigid_fast", "dredge", "dredge_fast"]},
     {"scenario": "gap_jump", "recipes": ["off", "oracle", "dredge", "dredge_fast"]},
     {"scenario": "members", "recipes": ["off", "oracle", "dredge", "dredge_fast"]},
-    {"scenario": "masked_drift", "recipes": ["off", "oracle", "dredge", "dredge_fast"]}
+    {"scenario": "masked_drift", "recipes": ["off", "oracle", "dredge", "dredge_fast"]},
+    {"scenario": "none_gap", "recipes": ["off", "dredge", "dredge_fast"]}
   ],
   "sorter": {"name": "mountainsort5", "params": {}, "random_seed": 0},
   "comparison": {
