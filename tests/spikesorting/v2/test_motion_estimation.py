@@ -518,16 +518,22 @@ def test_integer_calibrations_of_one_voltage_estimate_identically(preset):
     """Two int16 encodings of the same microvolts (0.25 uV per count with
     offset 0, and the counts shifted by 10000 with offset -2500 uV) estimate
     exactly what the float microvolt recording of those values estimates.
-    Each source arrives already silenced over a masked range in its own
-    stored units, so the shifted encoding's masked samples read -2500 uV
-    until the estimator silences them again after scaling."""
+    Each source is masked directly with SpikeInterface's
+    ``silence_periods(..., mode="zeros")`` (``preprocessing/
+    silence_periods.py``) in its own raw units, so the int16 sources still
+    reach the estimator as int16 with their original gain/offset and its own
+    calibration step (``_motion.recording_in_microvolts``) does the
+    conversion to microvolts, rather than arriving pre-converted. The masked
+    range is therefore 0 raw counts on every source -- which reads back as
+    the channel offset voltage on the shifted encoding -- until the estimator
+    calibrates and re-silences it."""
     from unittest import mock
 
+    import spikeinterface.preprocessing as sip
     import spikeinterface.sortingcomponents.motion as si_motion
     from spikeinterface.core import NumpyRecording
 
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        silence_frame_ranges,
         statistics_spans,
     )
     from tests.spikesorting.v2._motion_fixtures import (
@@ -548,7 +554,9 @@ def test_integer_calibrations_of_one_voltage_estimate_identically(preset):
         if gain is not None:
             recording.set_channel_gains(gain)
             recording.set_channel_offsets(offset)
-        return silence_frame_ranges(recording, [masked_range])
+        return sip.silence_periods(
+            recording, list_periods=[[masked_range]], mode="zeros"
+        )
 
     sources = {
         "float_uv": _source((counts * 0.25).astype(np.float32)),
@@ -557,6 +565,13 @@ def test_integer_calibrations_of_one_voltage_estimate_identically(preset):
             (counts + 10_000).astype(np.int16), 0.25, -2500.0
         ),
     }
+
+    assert sources["int16"].get_dtype() == np.int16
+    assert np.all(sources["int16"].get_channel_offsets() == 0.0)
+    assert sources["int16_offset"].get_dtype() == np.int16
+    assert np.all(sources["int16_offset"].get_channel_offsets() == -2500.0)
+    assert np.all(sources["int16_offset"].get_channel_gains() == 0.25)
+
     estimate_motion = si_motion.estimate_motion
     results = {}
     for name, source in sources.items():
