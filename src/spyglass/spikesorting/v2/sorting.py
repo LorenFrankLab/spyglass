@@ -111,7 +111,10 @@ if TYPE_CHECKING:
 
     from spyglass.spikesorting.v2._analyzer_cache import StagedAnalyzer
 
-#: The table owning each effective-traces kind's cached NWB artifact.
+#: The table owning each base effective-traces kind's cached NWB artifact.
+#: ``ensure_effective_traces`` imports ``MotionCorrectedRecording`` for the
+#: ``"motion_corrected_recording"`` kind on demand, so importing this module
+#: does not declare the motion schema.
 _TRACE_TABLES = {
     "recording": Recording,
     "concatenated_recording": ConcatenatedRecording,
@@ -1292,9 +1295,10 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         """Rebuild the effective traces' cached NWB file if it is missing.
 
         The same self-heal the owning table's ``get_recording`` performs
-        (``Recording`` or ``ConcatenatedRecording``): a locked, verified
-        rebuild whose content must match the stored ``content_hash``. Call it
-        before :func:`._source_resolution.load_effective_recording`.
+        (``Recording``, ``ConcatenatedRecording`` or
+        ``MotionCorrectedRecording``): a locked, verified rebuild whose
+        content must match the stored ``content_hash``. Call it before
+        :func:`._source_resolution.load_effective_recording`.
 
         Parameters
         ----------
@@ -1305,10 +1309,14 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             ensure_artifact_file,
         )
 
+        if traces.kind == "motion_corrected_recording":
+            from spyglass.spikesorting.v2.motion import (
+                MotionCorrectedRecording as table,
+            )
+        else:
+            table = _TRACE_TABLES[traces.kind]
         ensure_artifact_file(
-            _TRACE_TABLES[traces.kind],
-            traces.key,
-            traces.row["analysis_file_name"],
+            table, traces.key, traces.row["analysis_file_name"]
         )
 
     @classmethod

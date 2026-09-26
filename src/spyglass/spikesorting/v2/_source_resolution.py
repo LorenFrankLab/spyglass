@@ -12,9 +12,10 @@ A sort answers "what did it run on?" in two separate ways:
   accessor. It also says whether the consumer must still apply the sort's
   artifact mask.
 
-Today the effective traces are always the lineage source itself. Keeping the
-two apart lets a derived trace artifact be selected later without metadata
-consumers having to infer the original source from it.
+The effective traces are the lineage source itself, or a derived artifact:
+a ``MotionCorrectedRecording`` (kind ``"motion_corrected_recording"``), which
+is persisted already masked. Keeping the two apart lets metadata consumers
+read the original source without inferring it from the derived artifact.
 
 ``SortingSelection.resolve_effective_source`` performs the DB reads and builds
 the result with :func:`effective_source_from_base`.
@@ -38,6 +39,9 @@ if TYPE_CHECKING:
     import spikeinterface as si
 
 BaseTraceKind = Literal["recording", "concatenated_recording"]
+TraceKind = Literal[
+    "recording", "concatenated_recording", "motion_corrected_recording"
+]
 
 
 class SourceLineage(NamedTuple):
@@ -66,7 +70,7 @@ class EffectiveTraces(NamedTuple):
 
     Attributes
     ----------
-    kind : {"recording", "concatenated_recording"}
+    kind : {"recording", "concatenated_recording", "motion_corrected_recording"}
         The table that owns the traces artifact.
     key : dict
         That table's primary key for the artifact row.
@@ -76,10 +80,11 @@ class EffectiveTraces(NamedTuple):
     apply_artifact_mask : bool
         ``True`` only when a consumer must still silence the sort's artifact
         periods after loading (a single-recording source with a pinned
-        detection). A concat artifact already has its member masks written in.
+        detection). A concat artifact already has its member masks written
+        in, and a motion-corrected artifact is persisted masked.
     """
 
-    kind: BaseTraceKind
+    kind: TraceKind
     key: dict
     row: dict
     apply_artifact_mask: bool
@@ -166,9 +171,18 @@ def read_effective_recording(
     ------
     ValueError
         If ``artifact_valid_times`` is missing while the mask applies, or given
-        while it does not.
+        while it does not, or if a motion-corrected artifact (persisted
+        masked) is asked to be masked again.
     """
     from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+
+    if traces.kind == "motion_corrected_recording" and (
+        traces.apply_artifact_mask
+    ):
+        raise ValueError(
+            f"{traces.kind} {traces.key} is persisted with its mask applied; "
+            "it must not be artifact-masked again at load."
+        )
 
     if traces.apply_artifact_mask and artifact_valid_times is None:
         raise ValueError(

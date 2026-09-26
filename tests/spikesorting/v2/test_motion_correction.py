@@ -1328,3 +1328,39 @@ def test_motion_failure_cleanup_and_cache_rebuild(
     monkeypatch.undo()
     MotionCorrectedRecording().get_recording(key)
     assert _file_hash(str(abs_path)) == row["content_hash"]
+
+
+def test_effective_traces_resolve_a_corrected_recording(discontinuous_sources):
+    """``ensure_effective_traces`` self-heals a missing corrected artifact
+    through its own table, and ``read_effective_recording`` then reads the
+    corrected traces as stored, without masking them again."""
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._source_resolution import (
+        EffectiveTraces,
+        read_effective_recording,
+    )
+    from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    estimate = _populated_estimate(
+        recording_id=discontinuous_sources["member_b"]["recording_id"]
+    )
+    key = _populated_corrected(estimate)
+    row = (MotionCorrectedRecording & key).fetch1()
+    expected = MotionCorrectedRecording().get_recording(key).get_traces()
+    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+    Path(abs_path).unlink()
+
+    traces = EffectiveTraces(
+        kind="motion_corrected_recording",
+        key=key,
+        row=row,
+        apply_artifact_mask=False,
+    )
+    SortingSelection.ensure_effective_traces(traces)
+    assert Path(abs_path).exists()
+    np.testing.assert_array_equal(
+        read_effective_recording(abs_path, traces).get_traces(), expected
+    )

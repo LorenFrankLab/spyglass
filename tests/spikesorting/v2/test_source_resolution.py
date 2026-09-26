@@ -201,3 +201,28 @@ def test_effective_source_deep_hash_tracks_content():
     assert digest(first) == digest(build(uuid.UUID(int=2)))
     assert digest(first) != digest(build(None))
     assert digest(first) != digest(build(uuid.UUID(int=3)))
+
+
+def test_motion_corrected_traces_are_never_masked_again(written_traces):
+    """A motion-corrected artifact is persisted masked: it loads as stored,
+    and asking to mask it again is refused."""
+    from spyglass.spikesorting.v2._source_resolution import (
+        EffectiveTraces,
+        read_effective_recording,
+    )
+
+    abs_path, row, raw, _valid_times = written_traces
+    key = {"motion_corrected_recording_id": uuid.UUID(int=3)}
+    traces = EffectiveTraces(
+        kind="motion_corrected_recording",
+        key=key,
+        row=row,
+        apply_artifact_mask=False,
+    )
+    loaded = read_effective_recording(abs_path, traces)
+    assert loaded.get_annotation("is_filtered")
+    np.testing.assert_array_equal(loaded.get_traces(return_in_uV=False), raw)
+    with pytest.raises(ValueError, match="must not be artifact-masked"):
+        read_effective_recording(
+            abs_path, traces._replace(apply_artifact_mask=True)
+        )
