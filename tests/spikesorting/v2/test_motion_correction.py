@@ -408,7 +408,12 @@ def test_estimate_round_trip(drift_recording):
 
 def test_masked_estimate_uses_the_pinned_artifact_mask(drift_recording):
     """An artifact-backed selection is a distinct estimate whose statistics
-    spans exclude the masked period, and it protects its detection."""
+    spans exclude the masked period, and it protects its detection.
+
+    The mask starts 5 frames after the deepest trough in [10.0, 10.1) s: that
+    spike stays unmasked and is detected, but its localization window (3
+    frames before, 9 from the peak) reaches into the mask, so it is dropped.
+    """
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -417,13 +422,21 @@ def test_masked_estimate_uses_the_pinned_artifact_mask(drift_recording):
         MotionEstimate,
         MotionEstimateSelection,
     )
+    from spyglass.spikesorting.v2.recording import Recording
 
     recording_key = drift_recording["recording_key"]
+    recording = Recording().get_recording(recording_key)
+    window_start = int(10.0 * 30_000)
+    troughs = recording.get_traces(
+        start_frame=window_start, end_frame=window_start + 3_000
+    ).min(axis=1)
+    trough = window_start + int(np.argmin(troughs))
+    mask_start = float(recording.sample_index_to_time(trough + 5))
     artifact_key = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": recording_key["recording_id"],
             "artifact_detection_params_name": "none",
-            "manual_excluded_times": np.array([[10.0, 12.0]]),
+            "manual_excluded_times": np.array([[mask_start, 12.0]]),
         }
     )
     RecordingArtifactDetection.populate(artifact_key, reserve_jobs=False)
@@ -442,7 +455,19 @@ def test_masked_estimate_uses_the_pinned_artifact_mask(drift_recording):
     spans = row["statistics_spans"]
     assert spans.shape == (2, 2)
     assert spans[0, 0] == 0 and spans[1, 1] == n
-    assert spans[0, 1] <= 10 * fs and spans[1, 0] >= 12 * fs
+    assert trough < spans[0, 1] <= trough + 9 and spans[1, 0] >= 12 * fs
+    # Peaks whose window touches the mask (or the recording's ends) are
+    # dropped, and the masked estimate is not the unmasked one.
+    assert row["n_peaks_kept"] < row["n_peaks_detected"]
+    unmasked_key = _select(recording_key)
+    if not (MotionEstimate & unmasked_key):
+        MotionEstimate.populate(unmasked_key, reserve_jobs=False)
+    unmasked = (MotionEstimate & unmasked_key).fetch1()
+    assert unmasked["n_peaks_kept"] > row["n_peaks_kept"]
+    assert not np.array_equal(
+        MotionEstimate().get_motion(key).displacement[0],
+        MotionEstimate().get_motion(unmasked_key).displacement[0],
+    )
 
     with pytest.raises(ValueError, match="MotionEstimateSelection"):
         (RecordingArtifactDetection & artifact_key).delete(safemode=False)
@@ -784,3 +809,64 @@ def test_concat_source_is_estimated_end_to_end(discontinuous_sources):
     )
     zero_rms, _ = common_frame_error_on_source_clock(zero, clock, truth, depths)
     assert error_rms < 0.5 * zero_rms
+
+
+def test_orphan_and_bypassed_source_parts_are_refused(
+    discontinuous_sources, drift_recording
+):
+    """``resolve_source`` refuses a master with both source parts, and a
+    concat source paired with an artifact detection (raw inserts)."""
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.artifact_output import (
+        ArtifactDetectionOutput,
+    )
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+    from spyglass.spikesorting.v2.motion import MotionEstimateSelection
+
+    concat_id = discontinuous_sources["concat_key"]["concat_recording_id"]
+    recording_id = drift_recording["recording_key"]["recording_id"]
+    artifact_key = RecordingArtifactSelection.insert_selection(
+        {"recording_id": recording_id, "artifact_detection_params_name": "none"}
+    )
+    RecordingArtifactDetection.populate(artifact_key, reserve_jobs=False)
+    try:
+        merge_id = ArtifactDetectionOutput.get_merge_id(artifact_key)
+    except KeyError:
+        ArtifactDetectionOutput.insert_detection(artifact_key)
+        merge_id = ArtifactDetectionOutput.get_merge_id(artifact_key)
+
+    def _orphan(**parts):
+        row = {
+            "motion_estimate_id": uuid.uuid4(),
+            "motion_estimation_params_name": "dredge_v1",
+            "resolved_params_hash": "0" * 64,
+            "spikeinterface_version": "0.104.3",
+            "motion_algorithm_version": 1,
+            "source_content_hash": "0" * 64,
+        }
+        MotionEstimateSelection.insert1(row, allow_direct_insert=True)
+        pk = {"motion_estimate_id": row["motion_estimate_id"]}
+        for part, extra in parts.items():
+            getattr(MotionEstimateSelection, part).insert1({**pk, **extra})
+        return pk
+
+    both = _orphan(
+        RecordingSource={"recording_id": recording_id},
+        ConcatenatedRecordingSource={"concat_recording_id": concat_id},
+    )
+    concat_masked = _orphan(
+        ConcatenatedRecordingSource={"concat_recording_id": concat_id},
+        ArtifactDetectionSource={"artifact_detection_merge_id": merge_id},
+    )
+    try:
+        with pytest.raises(SchemaBypassError, match="2 source part rows"):
+            MotionEstimateSelection.resolve_source(both)
+        with pytest.raises(SchemaBypassError, match="pairs a concatenated"):
+            MotionEstimateSelection.resolve_source(concat_masked)
+    finally:
+        (MotionEstimateSelection & [both, concat_masked]).super_delete(
+            warn=False, safemode=False
+        )
