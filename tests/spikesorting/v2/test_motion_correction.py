@@ -1255,6 +1255,99 @@ def test_estimate_and_corrected_recording_round_trip(
     np.testing.assert_array_equal(rebuilt.get_traces(), reloaded)
 
 
+def test_persisted_corrected_traces_match_the_interpolation_oracle(
+    discontinuous_sources,
+):
+    """On a gapped recording whose gap exceeds the recipe's cap (so its
+    estimation clock differs from its acquisition clock after the gap), the
+    persisted corrected traces equal SpikeInterface's ``interpolate_motion``
+    applied, with the recipe's explicit arguments and the saved estimate, to
+    the masked source carrying the saved estimation clock as its time vector.
+    Interpolating on the acquisition clock gives different traces."""
+    from spikeinterface.sortingcomponents.motion import interpolate_motion
+
+    from spyglass.spikesorting.v2._motion import (
+        estimation_times,
+        resolve_interpolation_params,
+    )
+    from spyglass.spikesorting.v2._params.motion_estimation import (
+        MotionEstimationParamsSchema,
+    )
+    from spyglass.spikesorting.v2._recording_geometry import (
+        flatten_planar_geometry,
+    )
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        complement_frame_ranges,
+        silence_frame_ranges,
+    )
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionEstimate,
+        MotionEstimateSelection,
+        MotionEstimationParameters,
+        MotionInterpolationParameters,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+
+    # Member B's 1 s acquisition gap, capped to 0.25 s on the clock.
+    MotionEstimationParameters.insert1(
+        {
+            "motion_estimation_params_name": "dredge_fast_gap_cap_test",
+            "params": MotionEstimationParamsSchema(
+                preset="dredge_fast", max_gap_s=0.25
+            ).model_dump(),
+        },
+        skip_duplicates=True,
+    )
+    recording_key = discontinuous_sources["member_b"]
+    estimate = MotionEstimateSelection.insert_selection(
+        {
+            "recording_id": recording_key["recording_id"],
+            "motion_estimation_params_name": "dredge_fast_gap_cap_test",
+        }
+    )
+    if not (MotionEstimate & estimate):
+        MotionEstimate.populate(estimate, reserve_jobs=False)
+    key = _populated_corrected(estimate)
+
+    clock = MotionEstimate().get_estimation_clock(estimate)
+    assert len(clock.spans) == 2
+    assert clock.source_start_s[1] - clock.estimation_start_s[1] == (
+        pytest.approx(0.75, abs=1e-3)
+    )
+    statistics = (MotionEstimate & estimate).fetch1("statistics_spans")
+    motion = MotionEstimate().get_motion(estimate)
+    kwargs = resolve_interpolation_params(
+        (
+            MotionInterpolationParameters
+            & {
+                "motion_interpolation_params_name": "kriging_force_extrapolate_v1"
+            }
+        ).fetch1("params")
+    )
+
+    def _interpolated(times):
+        source = Recording().get_recording(recording_key)
+        flatten_planar_geometry(source)
+        n = source.get_num_samples()
+        if times is not None:
+            source.set_times(times(n), with_warning=False)
+        masked = silence_frame_ranges(
+            source,
+            complement_frame_ranges([tuple(s) for s in statistics], n),
+        )
+        return interpolate_motion(masked, motion, **kwargs).get_traces()
+
+    expected = _interpolated(lambda n: estimation_times(clock, np.arange(n)))
+    persisted = MotionCorrectedRecording().get_recording(key)
+    np.testing.assert_array_equal(persisted.get_traces(), expected)
+    np.testing.assert_array_equal(
+        persisted.get_times(),
+        Recording().get_recording(recording_key).get_times(),
+    )
+    assert not np.array_equal(_interpolated(None), expected)
+
+
 def test_remove_channels_records_the_removed_contacts(discontinuous_sources):
     """The planted +/-25 um drift moves the end contacts off the probe in
     some bin: ``remove_channels`` drops them, records them, and keeps the
