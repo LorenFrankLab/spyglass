@@ -69,6 +69,7 @@ _FACADE_ONLY_EXPORTS = (
     "RunV2SingleSessionSummary",
     "RunV2UnitMatchSummary",
     # enums / carriers
+    "MotionMode",
     "SourceMode",
     "StageStatus",
     "UnitMatchCurationChoice",

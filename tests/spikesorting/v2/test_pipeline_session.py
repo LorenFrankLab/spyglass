@@ -133,6 +133,61 @@ def test_resolve_unknown_preset(monkeypatch):
 
 
 @pytest.mark.unit
+def test_session_helpers_forward_the_motion_request(monkeypatch):
+    """The session preflight and runner hand every group the same motion
+    mode and recipe; a contradictory pair is refused before any query."""
+    _no_db(monkeypatch)
+    monkeypatch.setattr(
+        "spyglass.spikesorting.v2._pipeline_preflight."
+        "_resolve_session_sort_group_ids",
+        lambda **kw: [0, 1],
+    )
+    monkeypatch.setattr(
+        plr, "_resolve_session_sort_group_ids", lambda **kw: [0, 1]
+    )
+    seen_preflight, seen_run = [], []
+
+    def _preflight(*, sort_group_id, pipeline_preset, **kw):
+        seen_preflight.append(
+            (kw["motion_mode"], kw["motion_correction_params_name"])
+        )
+        return _ok_report(sort_group_id, pipeline_preset)
+
+    monkeypatch.setattr(
+        "spyglass.spikesorting.v2._pipeline_preflight.preflight_v2_pipeline",
+        _preflight,
+    )
+
+    def _run(**kw):
+        seen_run.append(
+            (kw["motion_mode"], kw["motion_correction_params_name"])
+        )
+        return {"n_units": 1, "warnings": [], "stage_seconds": {}}
+
+    monkeypatch.setattr(plr, "run_v2_pipeline", _run)
+    motion = {
+        "motion_mode": "apply",
+        "motion_correction_params_name": "dredge_fast_v1",
+    }
+    common = {
+        "nwb_file_name": "s.nwb",
+        "interval_list_name": _INTERVAL,
+        "team_name": _TEAM,
+        "pipeline_preset": _PRESET,
+    }
+    preflight_v2_pipeline_session(**common, **motion)
+    assert seen_preflight == [("apply", "dredge_fast_v1")] * 2
+    seen_preflight.clear()
+    results = run_v2_pipeline_session(**common, **motion)
+    assert [r["outcome"] for r in results] == ["ok", "ok"]
+    assert seen_preflight == [("apply", "dredge_fast_v1")] * 2
+    assert seen_run == [("apply", "dredge_fast_v1")] * 2
+
+    with pytest.raises(PipelineInputError, match="requires"):
+        run_v2_pipeline_session(**common, motion_mode="estimate")
+
+
+@pytest.mark.unit
 def test_preflight_session_all_groups(monkeypatch):
     """One ``group_reports`` entry per target, aggregated ``ok``; no DB."""
     monkeypatch.setattr(

@@ -2004,3 +2004,300 @@ def test_corrected_sort_reads_the_corrected_traces(
     finally:
         monkeypatch.undo()
         _drop_sorts([sort_key])
+
+
+# ---- pipeline motion modes ----------------------------------------------------
+
+#: A fast catalog preset (peak detection only, no internal motion correction)
+#: whose preprocessing row is the drift fixture's.
+PIPELINE_PRESET = "franklab_clusterless_2026_06"
+MOTION_RECIPE = "dredge_fast_v1"
+
+
+def _pipeline_inputs(drift_recording) -> dict:
+    from tests.spikesorting.v2._ingest_helpers import configure_v2_run_inputs
+
+    return {
+        **configure_v2_run_inputs(
+            drift_recording["nwb_file_name"], MOTION_TEAM
+        ),
+        "pipeline_preset": PIPELINE_PRESET,
+    }
+
+
+def _session_start_s(nwb_file_name) -> float:
+    from spyglass.common import IntervalList
+
+    valid = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    return float(valid[0][0])
+
+
+def _drop_pipeline_sorts(sorting_ids) -> None:
+    """Delete run_v2_pipeline sorts leaves-first: member and root merges,
+    curations, sorts, then the selections (so no part outlives its master)."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    keys = [{"sorting_id": sid} for sid in set(sorting_ids) if sid]
+    if not keys:
+        return
+    for part in (
+        SpikeSortingOutput.ConcatMemberCuration,
+        SpikeSortingOutput.CurationV2,
+    ):
+        for merge_id in (part & keys).fetch("merge_id"):
+            (SpikeSortingOutput & {"merge_id": merge_id}).super_delete(
+                warn=False, safemode=False
+            )
+    for table in (ConcatMemberCuration, CurationV2, Sorting, SortingSelection):
+        (table & keys).super_delete(warn=False, safemode=False)
+
+
+def _row_counts() -> dict:
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionCorrectedRecordingSelection,
+        MotionEstimate,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    return {
+        table.__name__: len(table())
+        for table in (
+            MotionEstimate,
+            MotionCorrectedRecordingSelection,
+            MotionCorrectedRecording,
+            SortingSelection,
+            Sorting,
+        )
+    }
+
+
+def test_pipeline_motion_modes_on_one_recording(drift_recording):
+    """``estimate`` saves the source's estimate and sorts exactly the ``off``
+    sort; ``apply`` sorts the corrected recording of that estimate; every
+    receipt states the mode, recipe, estimate, preset, corrected recording
+    and removed channels, and a re-run reuses everything."""
+    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionEstimate,
+        MotionEstimateSelection,
+        MotionEstimationParameters,
+    )
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    inputs = _pipeline_inputs(drift_recording)
+    motion = {"motion_correction_params_name": MOTION_RECIPE}
+    sorting_ids = []
+    try:
+        off = run_v2_pipeline(**inputs)
+        sorting_ids.append(off["sorting_id"])
+        assert off["motion_mode"] == "off"
+        for field in (
+            "motion_correction_params_name",
+            "motion_estimate_id",
+            "motion_corrected_recording_id",
+            "motion_estimation_preset",
+            "motion_removed_channel_ids",
+        ):
+            assert off[field] is None
+        assert not {"motion_estimate", "motion_corrected_recording"} & set(
+            off["stage_seconds"]
+        )
+
+        estimate = run_v2_pipeline(**inputs, motion_mode="estimate", **motion)
+        # Same sort as off: the id, and the stage is a reuse.
+        assert estimate["sorting_id"] == off["sorting_id"]
+        assert estimate["sorting_status"] == "reused"
+        assert (
+            SortingSelection.resolve_motion_correction(
+                {"sorting_id": estimate["sorting_id"]}
+            )
+            is None
+        )
+        recording_key = {"recording_id": off["recording_id"]}
+        artifact_id = off["artifact_detection_id"]
+        expected_estimate = _motion.motion_estimate_selection_identity(
+            source_kind="recording",
+            source_id=off["recording_id"],
+            source_content_hash=(Recording & recording_key).fetch1(
+                "content_hash"
+            ),
+            artifact_detection_id=artifact_id,
+            motion_estimation_params_name=MOTION_RECIPE,
+            estimation_params=(
+                MotionEstimationParameters
+                & {"motion_estimation_params_name": MOTION_RECIPE}
+            ).fetch1("params"),
+        ).selection_id
+        assert estimate["motion_estimate_id"] == expected_estimate
+        estimate_key = {"motion_estimate_id": expected_estimate}
+        assert MotionEstimate & estimate_key
+        lineage = MotionEstimateSelection.resolve_source(estimate_key)
+        assert lineage.key == recording_key
+        assert lineage.artifact_detection_id == artifact_id
+        assert estimate["motion_mode"] == "estimate"
+        assert estimate["motion_correction_params_name"] == MOTION_RECIPE
+        assert estimate["motion_estimation_preset"] == "dredge_fast"
+        assert estimate["motion_corrected_recording_id"] is None
+        assert estimate["motion_removed_channel_ids"] is None
+        assert estimate["motion_estimate_status"] == "computed"
+        assert "motion_corrected_recording" not in estimate["stage_seconds"]
+
+        applied = run_v2_pipeline(**inputs, motion_mode="apply", **motion)
+        sorting_ids.append(applied["sorting_id"])
+        assert applied["sorting_id"] != off["sorting_id"]
+        assert applied["motion_estimate_id"] == expected_estimate
+        assert applied["motion_estimate_status"] == "reused"
+        assert applied["motion_corrected_recording_status"] == "computed"
+        corrected_key = {
+            "motion_corrected_recording_id": applied[
+                "motion_corrected_recording_id"
+            ]
+        }
+        corrected_row = (MotionCorrectedRecording & corrected_key).fetch1()
+        assert (
+            SortingSelection.resolve_motion_correction(
+                {"sorting_id": applied["sorting_id"]}
+            )
+            == applied["motion_corrected_recording_id"]
+        )
+        assert Sorting & {"sorting_id": applied["sorting_id"]}
+        # The shipped recipe extrapolates at the borders: nothing removed.
+        assert applied["motion_removed_channel_ids"] == []
+        assert list(corrected_row["removed_channel_ids"]) == []
+        assert applied["motion_estimation_preset"] == "dredge_fast"
+
+        rerun = run_v2_pipeline(**inputs, motion_mode="apply", **motion)
+        for field in (
+            "sorting_id",
+            "motion_estimate_id",
+            "motion_corrected_recording_id",
+        ):
+            assert rerun[field] == applied[field]
+        assert {
+            rerun[f"{stage}_status"]
+            for stage in (
+                "motion_estimate",
+                "motion_corrected_recording",
+                "sorting",
+            )
+        } == {"reused"}
+    finally:
+        _drop_pipeline_sorts(sorting_ids)
+
+
+def test_pipeline_motion_apply_on_a_concatenation(discontinuous_sources):
+    """A concat run in ``apply`` mode estimates the concatenation it built,
+    corrects it and sorts the corrected recording, with the same receipt."""
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecordingSelection,
+        MotionEstimateSelection,
+    )
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    summary = None
+    try:
+        summary = run_v2_pipeline(
+            concat_session_group_owner=MOTION_TEAM,
+            concat_session_group_name=CONCAT_GROUP,
+            pipeline_preset=PIPELINE_PRESET,
+            motion_mode="apply",
+            motion_correction_params_name=MOTION_RECIPE,
+        )
+        assert summary["source_mode"] == "concat"
+        concat_key = {"concat_recording_id": summary["concat_recording_id"]}
+        lineage = MotionEstimateSelection.resolve_source(
+            {"motion_estimate_id": summary["motion_estimate_id"]}
+        )
+        assert (lineage.kind, lineage.key) == (
+            "concatenated_recording",
+            concat_key,
+        )
+        assert (
+            MotionCorrectedRecordingSelection
+            & {
+                "motion_corrected_recording_id": summary[
+                    "motion_corrected_recording_id"
+                ]
+            }
+        ).fetch1("motion_estimate_id") == summary["motion_estimate_id"]
+        sort_key = {"sorting_id": summary["sorting_id"]}
+        assert SortingSelection.resolve_motion_correction(sort_key) == (
+            summary["motion_corrected_recording_id"]
+        )
+        effective = SortingSelection.resolve_effective_source(sort_key)
+        assert effective.lineage.key == concat_key
+        assert effective.traces.kind == "motion_corrected_recording"
+        assert summary["motion_estimation_preset"] == "dredge_fast"
+        assert summary["motion_removed_channel_ids"] == []
+        assert summary["motion_estimate_status"] == "computed"
+        assert set(summary["member_merge_ids"]) == {0, 1}
+    finally:
+        if summary is not None:
+            _drop_pipeline_sorts([summary["sorting_id"]])
+            _drop_concat_motion_selections(
+                {"concat_recording_id": summary["concat_recording_id"]}
+            )
+
+
+@pytest.mark.parametrize(
+    "failing_stage, target, offset_s",
+    [
+        ("motion_estimate", "estimate_motion_in_spans", 2.0),
+        ("motion_corrected_recording", "apply_motion_on_estimation_clock", 4.0),
+    ],
+)
+def test_motion_stage_failure_stops_before_sorting(
+    drift_recording, monkeypatch, failing_stage, target, offset_s
+):
+    """An estimation or application failure fails its own stage: no estimate
+    or corrected row is written for it, and no sort is selected or run --
+    the run never falls back to the uncorrected source."""
+    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2.exceptions import PipelineStageError
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    inputs = _pipeline_inputs(drift_recording)
+    t0 = _session_start_s(drift_recording["nwb_file_name"])
+    # A mask of its own gives this case a fresh estimate (no cached reuse).
+    exclusion = [[t0 + offset_s, t0 + offset_s + 0.5]]
+
+    def _fail(*_args, **_kwargs):
+        raise ValueError(f"planted {failing_stage} failure")
+
+    monkeypatch.setattr(_motion, target, _fail)
+    before = _row_counts()
+    with pytest.raises(PipelineStageError) as raised:
+        run_v2_pipeline(
+            **inputs,
+            manual_excluded_times=exclusion,
+            motion_mode="apply",
+            motion_correction_params_name=MOTION_RECIPE,
+        )
+    assert raised.value.stage == failing_stage
+    assert f"planted {failing_stage} failure" in str(raised.value)
+    after = _row_counts()
+    expected = dict(before)
+    if failing_stage == "motion_corrected_recording":
+        # The estimate succeeded; its corrected recording was only selected.
+        expected["MotionEstimate"] += 1
+        expected["MotionCorrectedRecordingSelection"] += 1
+    assert after == expected
+    partial = raised.value.partial_run_summary
+    assert partial["motion_corrected_recording_id"] is None
+    assert "sorting_id" not in partial

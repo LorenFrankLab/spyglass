@@ -99,6 +99,7 @@ from spyglass.spikesorting.v2.review_api import (
     ReviewStageStatus,
 )
 from spyglass.spikesorting.v2._pipeline_types import (
+    MotionMode,
     PipelineOutcome,
     PipelineStageSeconds,
     RunV2ConcatSummary,

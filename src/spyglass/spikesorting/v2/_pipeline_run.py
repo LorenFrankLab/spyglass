@@ -35,6 +35,7 @@ from spyglass.spikesorting.v2.curation_api import RunResult
 from spyglass.spikesorting.v2._pipeline_preflight import (
     _resolve_session_sort_group_ids,
     assert_concat_preflight,
+    motion_request_problem,
     preflight_v2_pipeline,
     preflight_v2_pipeline_session,
     resolve_preset_sort_config,
@@ -46,6 +47,7 @@ from spyglass.spikesorting.v2._pipeline_reporting import (
 )
 from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
 from spyglass.spikesorting.v2._pipeline_types import (
+    MotionMode,
     RunV2PipelineSessionFailed,
     RunV2PipelineSessionOk,
     RunV2PipelineSessionResult,
@@ -179,14 +181,16 @@ def run_v2_pipeline(
     build_figpack_view: bool = False,
     figpack_label_options: "list[str] | None" = None,
     manual_excluded_times=None,
+    motion_mode: MotionMode = "off",
+    motion_correction_params_name: "str | None" = None,
 ) -> "RunResult":
     """End-to-end sort in one call: select + populate every stage, then curate.
 
     Two input modes, exactly one required. Single-session mode (recording ->
-    optional artifact detection -> sort -> curation) needs ``nwb_file_name``,
+    optional artifact detection -> [motion] -> sort -> curation) needs ``nwb_file_name``,
     ``sort_group_id``, ``interval_list_name``, ``team_name``. Concat mode
     (member recordings -> member artifact masks -> ConcatenatedRecording ->
-    sort -> curation) needs ``concat_session_group_owner`` + ``concat_session_group_name``
+    [motion] -> sort -> curation) needs ``concat_session_group_owner`` + ``concat_session_group_name``
     and rejects the single-session fields (member teams come from
     ``SessionGroup.Member``). Supplying both, neither, or part of a mode raises
     ``PipelineInputError``.
@@ -237,7 +241,8 @@ def run_v2_pipeline(
         single-session fields): the ``(session_group_owner, session_group_name)``
         of an existing ``SessionGroup``. The orchestrator populates each
         member's ``Recording``, concatenates them via ``ConcatenatedRecording``
-        (no motion correction is applied), and sorts the result. Any preset
+        (concatenation itself never corrects motion; see ``motion_mode``), and
+        sorts the result. Any preset
         runs in either mode; the mode is set by which inputs are given. The
         artifact recipe is applied independently to each member.
     pipeline_preset
@@ -321,6 +326,30 @@ def run_v2_pipeline(
         through to ``FigPackCurationSelection``. ``None`` (default) uses
         ``["accept", "mua", "noise"]``. Ignored when
         ``build_figpack_view=False``.
+    motion_mode
+        The motion stage, in either input mode, run on the sort's source (the
+        recording under its artifact mask, or the concatenation):
+
+        - ``"off"`` (default): no motion stage; the sort reads the masked,
+          uncorrected source.
+        - ``"estimate"``: also save a ``MotionEstimate`` of that source (for
+          QC). The sort is exactly the ``"off"`` sort -- same ``sorting_id``,
+          same traces.
+        - ``"apply"``: save the estimate and a ``MotionCorrectedRecording``,
+          and sort the corrected recording (a different ``sorting_id``).
+
+        Experimental: no motion recipe is validated for a probe. An
+        estimation or application failure raises ``PipelineStageError`` for
+        that stage and no sort is attempted; the run never falls back to the
+        uncorrected source. With ``"apply"``, a ``SorterParameters`` row that
+        runs the sorter's own motion correction is rejected (preflight names
+        the key to turn off).
+    motion_correction_params_name
+        The ``MotionCorrectionParameters`` recipe (an estimation recipe plus
+        an interpolation recipe; ``initialize_v2_defaults`` ships
+        ``dredge_v1`` and ``dredge_fast_v1``). Required iff ``motion_mode``
+        is not ``"off"``; a recipe with ``"off"``, a missing recipe, or an
+        unknown mode raises ``PipelineInputError`` before any database access.
 
     Returns
     -------
@@ -364,6 +393,17 @@ def run_v2_pipeline(
             ``member_merge_ids``         : frozen ``member_index`` to
                 wall-clock-aligned SpikeSortingOutput PK; points to the
                 auto-curated child when ``auto_curate=True``, otherwise the root
+        Motion keys (always present; ``None`` where they do not apply):
+            ``motion_mode`` / ``motion_correction_params_name`` : the request
+            ``motion_estimate_id``       : MotionEstimateSelection PK
+                (``"estimate"`` / ``"apply"``)
+            ``motion_estimation_preset`` : the SpikeInterface preset the
+                estimation recipe resolved to
+            ``motion_corrected_recording_id`` : MotionCorrectedRecordingSelection
+                PK (``"apply"``)
+            ``motion_removed_channel_ids`` : source channels the interpolation's
+                ``remove_channels`` border mode dropped (``"apply"``; empty
+                for ``force_extrapolate``)
         ``build_figpack_view=True`` adds (unless the sort found zero units):
             ``figpack_uri``              : the published FigPack curation-view
                 URI (a local bundle path; offline only)
@@ -403,7 +443,8 @@ def run_v2_pipeline(
     Raises
     ------
     PipelineInputError
-        If ``pipeline_preset`` is not a known name.
+        If ``pipeline_preset`` is not a known name, or the motion request is
+        contradictory (see ``motion_mode``).
     PreflightError
         If ``preflight=True`` and a prerequisite is missing (the message
         lists every failed check and its fix). Bypass with
@@ -493,6 +534,11 @@ def run_v2_pipeline(
             "Call spyglass.spikesorting.v2.pipeline.describe_pipeline_presets() to see "
             "what each preset does, or list_pipeline_presets() for just the names."
         )
+    motion_problem = motion_request_problem(
+        motion_mode, motion_correction_params_name
+    )
+    if motion_problem is not None:
+        raise PipelineInputError(f"run_v2_pipeline: {motion_problem}")
     bundle = _PIPELINE_PRESETS[pipeline_preset]
     from spyglass.spikesorting.v2._manual_artifacts import (
         artifact_recipe_with_manual_exclusions,
@@ -565,6 +611,8 @@ def run_v2_pipeline(
             pipeline_preset=pipeline_preset,
             auto_curate=auto_curate,
             manual_excluded_times=manual_excluded_times,
+            motion_mode=motion_mode,
+            motion_correction_params_name=motion_correction_params_name,
         )
         if not report.ok:
             raise PreflightError("\n".join(report.errors))
@@ -593,7 +641,32 @@ def run_v2_pipeline(
     # an existence check on the output row BEFORE populate, time the
     # populate/insert with a monotonic clock, and on failure raise a stage-
     # aware PipelineStageError carrying the run summary built so far.
-    run_summary: dict[str, Any] = {"pipeline_preset": pipeline_preset}
+    run_summary: dict[str, Any] = {
+        "pipeline_preset": pipeline_preset,
+        "motion_mode": motion_mode,
+        "motion_correction_params_name": motion_correction_params_name,
+        "motion_estimate_id": None,
+        "motion_corrected_recording_id": None,
+        "motion_estimation_preset": None,
+        "motion_removed_channel_ids": None,
+    }
+    # Resolve the motion recipe before any populate, so a missing row fails
+    # here (not after the recording / concat build) when preflight is off.
+    motion_recipe = None
+    if motion_mode != "off":
+        from spyglass.spikesorting.v2.motion import MotionCorrectionParameters
+        from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
+
+        recipe_key = {
+            "motion_correction_params_name": motion_correction_params_name
+        }
+        _ensure_lookup_row_exists(
+            MotionCorrectionParameters,
+            recipe_key,
+            helper_name="run_v2_pipeline",
+            insert_default_path="initialize_v2_defaults()",
+        )
+        motion_recipe = (MotionCorrectionParameters & recipe_key).fetch1()
     # Capture what the sort stage executes ONCE, up front, from the same
     # resolver the dispatcher uses (``resolve_sort_config``): the receipt then
     # states the effective sorter kwargs / whiten routing / seed / job kwargs /
@@ -652,6 +725,77 @@ def run_v2_pipeline(
         ).fetch("merge_id", "member_index", as_dict=True)
         return {int(row["member_index"]): row["merge_id"] for row in rows}
 
+    def _run_motion_stages(source: dict) -> dict:
+        """Run the requested motion stages on the sort's source.
+
+        ``source`` is the ``MotionEstimateSelection`` source (and, for a
+        single recording, its artifact mask). Returns the key fragment the
+        sort selection needs: the corrected recording for ``"apply"``, else
+        nothing, so an ``"estimate"`` sort is exactly the ``"off"`` sort. A
+        stage failure raises ``PipelineStageError`` before any sort.
+        """
+        if motion_recipe is None:
+            return {}
+        from spyglass.spikesorting.v2.motion import (
+            MotionCorrectedRecording,
+            MotionCorrectedRecordingSelection,
+            MotionEstimate,
+            MotionEstimateSelection,
+        )
+
+        estimate_key = MotionEstimateSelection.insert_selection(
+            {
+                **source,
+                "motion_estimation_params_name": motion_recipe[
+                    "motion_estimation_params_name"
+                ],
+            }
+        )
+        (
+            _,
+            run_summary["motion_estimate_status"],
+            stage_seconds["motion_estimate"],
+        ) = _run_stage(
+            "motion_estimate",
+            bool(MotionEstimate & estimate_key),
+            lambda: _populate_once(MotionEstimate, estimate_key),
+            run_summary,
+        )
+        run_summary["motion_estimate_id"] = estimate_key["motion_estimate_id"]
+        run_summary["motion_estimation_preset"] = (
+            MotionEstimate & estimate_key
+        ).fetch1("resolved_params")["preset"]
+        if motion_mode == "estimate":
+            return {}
+
+        corrected_key = MotionCorrectedRecordingSelection.insert_selection(
+            {
+                "motion_estimate_id": estimate_key["motion_estimate_id"],
+                "motion_interpolation_params_name": motion_recipe[
+                    "motion_interpolation_params_name"
+                ],
+            }
+        )
+        (
+            _,
+            run_summary["motion_corrected_recording_status"],
+            stage_seconds["motion_corrected_recording"],
+        ) = _run_stage(
+            "motion_corrected_recording",
+            bool(MotionCorrectedRecording & corrected_key),
+            lambda: _populate_once(MotionCorrectedRecording, corrected_key),
+            run_summary,
+        )
+        run_summary["motion_corrected_recording_id"] = corrected_key[
+            "motion_corrected_recording_id"
+        ]
+        run_summary["motion_removed_channel_ids"] = list(
+            (MotionCorrectedRecording & corrected_key).fetch1(
+                "removed_channel_ids"
+            )
+        )
+        return dict(corrected_key)
+
     if is_single:
         # Single-session: recording (+ optional artifact detection) -> sort.
         run_summary["source_mode"] = "single_session"
@@ -708,12 +852,19 @@ def run_v2_pipeline(
             ]
         run_summary["artifact_detection_id"] = artifact_detection_id
 
+        corrected = _run_motion_stages(
+            {
+                "recording_id": recording_key["recording_id"],
+                "artifact_detection_id": artifact_detection_id,
+            }
+        )
         sorting_key = SortingSelection.insert_selection(
             {
                 "recording_id": recording_key["recording_id"],
                 "sorter": bundle.sorter,
                 "sorter_params_name": bundle.sorter_params_name,
                 "artifact_detection_id": artifact_detection_id,
+                **corrected,
             }
         )
     else:
@@ -890,11 +1041,15 @@ def run_v2_pipeline(
             concat_row["total_duration_s"] - valid_duration
         )
 
+        corrected = _run_motion_stages(
+            {"concat_recording_id": concat_key["concat_recording_id"]}
+        )
         sorting_key = SortingSelection.insert_selection(
             {
                 "concat_recording_id": concat_key["concat_recording_id"],
                 "sorter": bundle.sorter,
                 "sorter_params_name": bundle.sorter_params_name,
+                **corrected,
             }
         )
     _, run_summary["sorting_status"], stage_seconds["sorting"] = _run_stage(
@@ -1191,6 +1346,8 @@ def run_v2_pipeline_session(
     preflight: bool = True,
     continue_on_error: bool = False,
     manual_excluded_times=None,
+    motion_mode: MotionMode = "off",
+    motion_correction_params_name: "str | None" = None,
 ) -> list[RunV2PipelineSessionResult]:
     """Sort every (or selected) sort group in a session in one call.
 
@@ -1228,6 +1385,10 @@ def run_v2_pipeline_session(
     ----------
     nwb_file_name, interval_list_name, team_name, curation_description, require_units, auto_curate
         As in :func:`run_v2_pipeline`; applied to every group.
+    motion_mode, motion_correction_params_name
+        As in :func:`run_v2_pipeline`; applied to every group. A
+        contradictory pair raises ``PipelineInputError`` before any database
+        access.
     pipeline_preset
         Required pipeline-preset name (no default). See
         ``describe_pipeline_presets()``.
@@ -1270,8 +1431,8 @@ def run_v2_pipeline_session(
     PipelineInputError
         From the shared target resolver: ``pipeline_preset`` is ``None`` or
         unknown, the session has no sort groups, or a requested
-        ``sort_group_ids`` entry is absent. Never suppressed by
-        ``continue_on_error``.
+        ``sort_group_ids`` entry is absent; or a contradictory motion request.
+        Never suppressed by ``continue_on_error``.
     PreflightError
         If ``preflight=True``, a group fails preflight, and
         ``continue_on_error=False`` -- raised before any group is sorted, with
@@ -1281,12 +1442,18 @@ def run_v2_pipeline_session(
         ``continue_on_error=False``.
     """
     from spyglass.spikesorting.v2.exceptions import (
+        PipelineInputError,
         PipelineStageError,
         PreflightError,
         ZeroUnitSortError,
     )
     from spyglass.utils import logger
 
+    motion_problem = motion_request_problem(
+        motion_mode, motion_correction_params_name
+    )
+    if motion_problem is not None:
+        raise PipelineInputError(f"run_v2_pipeline_session: {motion_problem}")
     targets = _resolve_session_sort_group_ids(
         nwb_file_name=nwb_file_name,
         pipeline_preset=pipeline_preset,
@@ -1308,6 +1475,8 @@ def run_v2_pipeline_session(
             sort_group_ids=targets,
             auto_curate=auto_curate,
             manual_excluded_times=manual_excluded_times,
+            motion_mode=motion_mode,
+            motion_correction_params_name=motion_correction_params_name,
         )
         # Capture each group's non-blocking advisories. OK groups run below with
         # preflight=False (the DB checks are not repeated), so without this their
@@ -1369,6 +1538,8 @@ def run_v2_pipeline_session(
                 auto_curate=auto_curate,
                 preflight=False,
                 manual_excluded_times=manual_excluded_times,
+                motion_mode=motion_mode,
+                motion_correction_params_name=motion_correction_params_name,
             )
         except (
             PipelineStageError,

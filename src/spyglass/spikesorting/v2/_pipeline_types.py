@@ -26,6 +26,10 @@ from typing_extensions import NotRequired
 StageStatus: TypeAlias = Literal["computed", "reused", "skipped"]
 PipelineOutcome: TypeAlias = Literal["ok", "failed"]
 SourceMode: TypeAlias = Literal["single_session", "concat"]
+# ``off``: no motion stage; ``estimate``: save a motion estimate of the sort's
+# source and sort the uncorrected source (same sort as ``off``); ``apply``:
+# save the estimate, a motion-corrected recording, and sort the corrected one.
+MotionMode: TypeAlias = Literal["off", "estimate", "apply"]
 
 
 class RunV2PipelineInputs(TypedDict, total=False):
@@ -55,6 +59,8 @@ class RunV2PipelineInputs(TypedDict, total=False):
     preflight: bool
     build_figpack_view: bool
     figpack_label_options: list[str] | None
+    motion_mode: MotionMode
+    motion_correction_params_name: str | None
 
 
 class RunV2PipelineSessionRequiredInputs(TypedDict):
@@ -77,6 +83,8 @@ class RunV2PipelineSessionInputs(
     auto_curate: bool
     preflight: bool
     continue_on_error: bool
+    motion_mode: MotionMode
+    motion_correction_params_name: str | None
 
 
 class PipelineStageSeconds(TypedDict):
@@ -98,6 +106,10 @@ class PipelineStageSeconds(TypedDict):
     member_artifact_detection: NotRequired[float]
     concat_recording: NotRequired[float]
     member_curation: NotRequired[float]
+    # Motion stages: ``motion_estimate`` when ``motion_mode`` is ``"estimate"``
+    # or ``"apply"``; ``motion_corrected_recording`` only for ``"apply"``.
+    motion_estimate: NotRequired[float]
+    motion_corrected_recording: NotRequired[float]
     # Present only when ``run_v2_pipeline(auto_curate=True)``.
     auto_curation: NotRequired[float]
     # Present only when ``run_v2_pipeline(build_figpack_view=True)``.
@@ -150,6 +162,24 @@ class _RunV2SummaryBase(TypedDict):
     curation_status: StageStatus
     stage_seconds: PipelineStageSeconds
     warnings: list[str]
+    # The motion stage of this run, in both input modes. ``motion_mode`` and
+    # ``motion_correction_params_name`` echo the request (the name is ``None``
+    # for ``"off"``). ``motion_estimate_id`` and ``motion_estimation_preset``
+    # (the SpikeInterface preset the estimation recipe resolved to) are set
+    # for ``"estimate"`` and ``"apply"``; ``motion_corrected_recording_id``
+    # and ``motion_removed_channel_ids`` (the source channels
+    # ``border_mode="remove_channels"`` dropped; empty otherwise) only for
+    # ``"apply"``. Every one is ``None`` where it does not apply.
+    motion_mode: MotionMode
+    motion_correction_params_name: "str | None"
+    motion_estimate_id: "UUID | None"
+    motion_corrected_recording_id: "UUID | None"
+    motion_estimation_preset: "str | None"
+    motion_removed_channel_ids: "list | None"
+    # Stage statuses of the motion stages (present with the matching
+    # ``stage_seconds`` key).
+    motion_estimate_status: NotRequired[StageStatus]
+    motion_corrected_recording_status: NotRequired[StageStatus]
     # Auto-curation keys, present only when ``run_v2_pipeline(auto_curate=True)``:
     # the CurationEvaluation suggestion selection PK and the stage status. The
     # materialized child itself is the always-present ``auto_labeled_*`` pair.
@@ -316,6 +346,7 @@ class RunV2UnitMatchSummary(TypedDict):
 
 
 __all__ = [
+    "MotionMode",
     "PipelineOutcome",
     "PipelineStageSeconds",
     "RunV2ConcatSummary",

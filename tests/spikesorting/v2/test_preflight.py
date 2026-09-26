@@ -198,6 +198,74 @@ def test_preflight_unknown_pipeline_preset(monkeypatch):
     assert "describe_pipeline_presets()" in msg
 
 
+_CONTRADICTORY_MOTION_REQUESTS = [
+    pytest.param("off", "dredge_fast_v1", "motion_mode='off'", id="recipe-off"),
+    pytest.param("estimate", None, "requires", id="estimate-no-recipe"),
+    pytest.param("apply", None, "requires", id="apply-no-recipe"),
+    pytest.param("correct", "dredge_fast_v1", "unknown motion_mode", id="bad"),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode, name, match", _CONTRADICTORY_MOTION_REQUESTS)
+def test_contradictory_motion_request_fails_before_any_query(
+    monkeypatch, mode, name, match
+):
+    """A motion recipe with ``off``, a mode without a recipe, or an unknown
+    mode fails preflight -- and the run -- with no database access."""
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("a contradictory motion request queried the DB")
+
+    monkeypatch.setattr(dj.Connection, "query", _boom)
+    report = preflight_v2_pipeline(
+        "x.nwb",
+        0,
+        _INTERVAL,
+        "team",
+        motion_mode=mode,
+        motion_correction_params_name=name,
+    )
+    assert report.ok is False
+    assert report.expected_ids == {}
+    assert [c.name for c in report.checks] == [
+        "pipeline_preset_known",
+        "motion_request_valid",
+    ]
+    (message,) = report.errors
+    assert match in message
+    with pytest.raises(PipelineInputError, match=match):
+        run_v2_pipeline(
+            nwb_file_name="x.nwb",
+            sort_group_id=0,
+            interval_list_name=_INTERVAL,
+            team_name="team",
+            motion_mode=mode,
+            motion_correction_params_name=name,
+        )
+    with pytest.raises(PipelineInputError, match=match):
+        run_v2_pipeline(
+            concat_session_group_owner="owner",
+            concat_session_group_name="group",
+            motion_mode=mode,
+            motion_correction_params_name=name,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "mode, name",
+    [("off", None), ("estimate", "any_recipe"), ("apply", "any_recipe")],
+)
+def test_valid_motion_requests_have_no_problem(mode, name):
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        motion_request_problem,
+    )
+
+    assert motion_request_problem(mode, name) is None
+
+
 # ---------------------------------------------------------------------------
 # database tier — fixtures
 # ---------------------------------------------------------------------------

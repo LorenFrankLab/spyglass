@@ -12,9 +12,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pprint import pformat
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_args
 
 from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+from spyglass.spikesorting.v2._pipeline_types import MotionMode
 from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
 
 if TYPE_CHECKING:
@@ -33,6 +34,52 @@ if TYPE_CHECKING:
 _SORTER_RUNTIME_BACKENDS: dict[str, tuple[str, ...]] = {
     "mountainsort4": ("ml_ms4alg",),
 }
+
+
+def motion_request_problem(
+    motion_mode, motion_correction_params_name
+) -> "str | None":
+    """Say why a motion mode and recipe name cannot be run together.
+
+    DB-free: it checks the request's shape, not that the named
+    ``MotionCorrectionParameters`` row exists.
+
+    Parameters
+    ----------
+    motion_mode : str
+        One of ``"off"``, ``"estimate"``, ``"apply"``.
+    motion_correction_params_name : str or None
+        The ``MotionCorrectionParameters`` row; required iff ``motion_mode``
+        is not ``"off"``.
+
+    Returns
+    -------
+    str or None
+        The operator-facing problem, or ``None`` for a valid request.
+    """
+    modes = get_args(MotionMode)
+    if motion_mode not in modes:
+        return (
+            f"unknown motion_mode {motion_mode!r}; expected one of "
+            f"{list(modes)}."
+        )
+    if motion_mode == "off":
+        if motion_correction_params_name is not None:
+            return (
+                "motion_correction_params_name="
+                f"{motion_correction_params_name!r} was given with "
+                "motion_mode='off', which runs no motion stage. Pass "
+                "motion_mode='estimate' or 'apply' to use the recipe, or drop "
+                "the name."
+            )
+        return None
+    if motion_correction_params_name is None:
+        return (
+            f"motion_mode={motion_mode!r} requires "
+            "motion_correction_params_name, a MotionCorrectionParameters row "
+            "(e.g. 'dredge_fast_v1'; see MotionCorrectionParameters())."
+        )
+    return None
 
 
 def _docker_runtime_available() -> tuple[bool, str]:
@@ -984,6 +1031,8 @@ def preflight_v2_pipeline(
     pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
     auto_curate: bool = False,
     manual_excluded_times=None,
+    motion_mode: MotionMode = "off",
+    motion_correction_params_name: "str | None" = None,
 ) -> PreflightReport:
     """Read-only pre-populate configuration check for ``run_v2_pipeline``.
 
@@ -1010,6 +1059,10 @@ def preflight_v2_pipeline(
         auto-curation prerequisites (the preset's ``QualityMetricParameters`` /
         ``AutoCurationRules`` rows and the whitened metric analyzer recipe), so
         a missing one fails preflight rather than after the upstream compute.
+    motion_mode, motion_correction_params_name
+        Match ``run_v2_pipeline``. A contradictory pair (a recipe with
+        ``"off"``, no recipe otherwise, or an unknown mode) fails the
+        ``motion_request_valid`` check before any database access.
 
     Returns
     -------
@@ -1047,6 +1100,22 @@ def preflight_v2_pipeline(
             checks=checks,
         )
     _check("pipeline_preset_known", True, "")
+    # A contradictory motion request short-circuits the same way: the motion
+    # checks below need a valid mode and recipe name, and this one is DB-free.
+    motion_problem = motion_request_problem(
+        motion_mode, motion_correction_params_name
+    )
+    if not _check(
+        "motion_request_valid", motion_problem is None, motion_problem
+    ):
+        return PreflightReport(
+            ok=False,
+            errors=[c.fix for c in checks if not c.ok],
+            warnings=warnings,
+            resolved_pipeline_preset=pipeline_preset,
+            expected_ids={},
+            checks=checks,
+        )
     bundle = _PIPELINE_PRESETS[pipeline_preset]
     from spyglass.spikesorting.v2._manual_artifacts import (
         artifact_recipe_with_manual_exclusions,
@@ -1696,6 +1765,8 @@ def preflight_v2_pipeline_session(
     sort_group_ids: "list[int] | None" = None,
     auto_curate: bool = False,
     manual_excluded_times=None,
+    motion_mode: MotionMode = "off",
+    motion_correction_params_name: "str | None" = None,
 ) -> PreflightSessionReport:
     """Read-only preflight for every target sort group in a session.
 
@@ -1717,6 +1788,8 @@ def preflight_v2_pipeline_session(
     auto_curate
         Match ``run_v2_pipeline_session(auto_curate=...)``; when True, each
         group's check also verifies the auto-curation prerequisite rows.
+    motion_mode, motion_correction_params_name
+        Match ``run_v2_pipeline_session``; checked for every group.
 
     Returns
     -------
@@ -1754,6 +1827,8 @@ def preflight_v2_pipeline_session(
             pipeline_preset=pipeline_preset,
             auto_curate=auto_curate,
             manual_excluded_times=manual_excluded_times,
+            motion_mode=motion_mode,
+            motion_correction_params_name=motion_correction_params_name,
         )
         group_reports.append(
             {

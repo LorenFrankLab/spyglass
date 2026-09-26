@@ -122,6 +122,8 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "preflight",
         "build_figpack_view",
         "figpack_label_options",
+        "motion_mode",
+        "motion_correction_params_name",
     }
     assert pipeline_types.RunV2PipelineSessionInputs.__required_keys__ == {
         "nwb_file_name",
@@ -136,6 +138,8 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "auto_curate",
         "preflight",
         "continue_on_error",
+        "motion_mode",
+        "motion_correction_params_name",
     }
     # The result/stage contracts mix always-present and mode/opt-in keys: their
     # NotRequired keys MUST surface as optional in the runtime TypedDict metadata
@@ -154,6 +158,8 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "member_artifact_detection",
         "concat_recording",
         "member_curation",
+        "motion_estimate",
+        "motion_corrected_recording",
         "auto_curation",
         "figpack",
     }
@@ -180,8 +186,16 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "curation_status",
         "stage_seconds",
         "warnings",
+        "motion_mode",
+        "motion_correction_params_name",
+        "motion_estimate_id",
+        "motion_corrected_recording_id",
+        "motion_estimation_preset",
+        "motion_removed_channel_ids",
     }
     _SUMMARY_OPTIONAL = {
+        "motion_estimate_status",
+        "motion_corrected_recording_status",
         "curation_evaluation_id",
         "auto_curation_status",
         "figpack_uri",
