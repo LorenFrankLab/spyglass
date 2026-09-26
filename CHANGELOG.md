@@ -589,6 +589,17 @@ masked).
   validated and normalized as sorted and disjoint. `OBSERVATION_VERSION` is
   now 2: an evaluation selection stamped with the prior version raises,
   asking you to recreate it via `insert_selection`.
+- Masked samples now read 0 µV on a source that keeps a nonzero channel
+  offset -- an unfiltered, unreferenced recording (`no_filter` with
+  `reference_mode="none"`), typically integer counts; bandpass filtering and
+  referencing already set the offset to 0. The sort stage and the
+  concatenation previously zeroed such a source's stored counts, so its masked
+  samples read as the offset voltage. Such a source is now scaled to float32
+  microvolts before masking: its sorter input, and the concatenation of such
+  members (masked or not), are float32 microvolts with gain 1 and offset 0.
+  Sources with zero offsets are masked in their stored units exactly as
+  before, so their sorts and concatenations are unchanged. **Recreate sorts
+  and `ConcatenatedRecording` rows built from sources with a nonzero offset.**
 - See the [preproduction database upgrade sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database)
   for the recreation order.
 

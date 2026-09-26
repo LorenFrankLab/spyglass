@@ -885,6 +885,139 @@ def discontinuous_sources(drift_recording):
     clean_session_groups_for_owner(MOTION_TEAM)
 
 
+#: Team owning the offset-source session group (its own owner, so no other
+#: fixture's group cleanup removes it).
+OFFSET_SOURCE_TEAM = "offset_source_team"
+
+
+@pytest.fixture(scope="module")
+def offset_source_concat(dj_conn, tmp_path_factory):
+    """Unfiltered, unreferenced int16 recordings that keep a nonzero offset,
+    and a masked two-member ``no_filter`` concatenation of them.
+
+    The planted-drift session is written as int16 0.25 uV counts shifted by
+    10000 counts with an NWB offset of -2500 uV (the same voltages as the
+    float session). With ``reference_mode="none"`` and the ``no_filter``
+    recipe, the recording stage neither filters nor references, so each
+    member's artifact keeps that offset. Member A ``[16, 20) s`` masks
+    ``[17, 18) s`` by hand; member B ``[23, end)`` is unmasked. Both start in
+    the same power-of-two range of timestamps, so their derived sampling
+    rates agree (see ``discontinuous_sources``).
+    """
+    import datetime as dt
+
+    import numpy as np
+
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+    from tests.spikesorting.v2._ingest_helpers import (
+        _clean_session_v2,
+        clean_session_groups_for_owner,
+        configure_v2_run_inputs,
+        copy_and_insert_nwb,
+    )
+    from tests.spikesorting.v2._motion_fixtures import (
+        write_drifting_polymer_nwb,
+    )
+
+    name = "offset_source_int16"
+    src = write_drifting_polymer_nwb(
+        tmp_path_factory.mktemp("offset_source") / f"{name}.nwb",
+        session_start=dt.datetime(2023, 8, 22, 12, tzinfo=dt.timezone.utc),
+        fixture_name=name,
+        seed=0,
+        duration_s=DRIFT_DURATION_S,
+        int16_offset_counts=10_000,
+    )
+    nwb_file_name = copy_and_insert_nwb(src, dest_name=f"{name}.nwb")
+    SortGroupV2.set_group_by_shank(
+        nwb_file_name=nwb_file_name, reference_mode="none"
+    )
+    t0 = float(
+        (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": "raw data valid times",
+            }
+        ).fetch1("valid_times")[0][0]
+    )
+    t_end = t0 + DRIFT_DURATION_S - 0.01
+    intervals = {
+        "offset member a": [[t0 + 16.0, t0 + 20.0]],
+        "offset member b": [[t0 + 23.0, t_end]],
+    }
+    members, recording_keys = [], []
+    for interval_name, times in intervals.items():
+        IntervalList.insert1(
+            {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_name,
+                "valid_times": np.asarray(times, dtype=float),
+                "pipeline": "offset_source_test",
+            },
+            skip_duplicates=True,
+        )
+        run = configure_v2_run_inputs(
+            nwb_file_name, OFFSET_SOURCE_TEAM, interval_list_name=interval_name
+        )
+        members.append(run)
+        recording_key = RecordingSelection.insert_selection(
+            {**run, "preprocessing_params_name": "no_filter"}
+        )
+        Recording.populate(recording_key, reserve_jobs=False)
+        recording_keys.append(recording_key)
+    artifact_key = RecordingArtifactSelection.insert_selection(
+        {
+            "recording_id": recording_keys[0]["recording_id"],
+            "artifact_detection_params_name": "none",
+            "manual_excluded_times": np.array([[t0 + 17.0, t0 + 18.0]]),
+        }
+    )
+    RecordingArtifactDetection.populate(artifact_key, reserve_jobs=False)
+
+    clean_session_groups_for_owner(OFFSET_SOURCE_TEAM)
+    group = {
+        "session_group_owner": OFFSET_SOURCE_TEAM,
+        "session_group_name": "offset_source_concat",
+    }
+    SessionGroup.create_group(
+        OFFSET_SOURCE_TEAM, group["session_group_name"], members
+    )
+    concat_key = ConcatenatedRecordingSelection.insert_selection(
+        {**group, "preprocessing_params_name": "no_filter"},
+        artifact_detection_ids={
+            0: artifact_key["artifact_detection_id"],
+            1: None,
+        },
+    )
+    ConcatenatedRecording.populate(concat_key, reserve_jobs=False)
+
+    yield {
+        "nwb_file_name": nwb_file_name,
+        "member_a": recording_keys[0],
+        "member_b": recording_keys[1],
+        "artifact_key": artifact_key,
+        "concat_key": concat_key,
+    }
+
+    clean_session_groups_for_owner(OFFSET_SOURCE_TEAM)
+    _clean_session_v2({"nwb_file_name": nwb_file_name})
+
+
 @pytest.fixture
 def restore_custom_config():
     """Snapshot and restore ``dj.config['custom']`` around a test.

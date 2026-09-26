@@ -1066,8 +1066,13 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         single ``ElectricalSeries`` into a fresh ``AnalysisNwbfile``. No motion
         correction and no whitening are applied here -- whitening stays a
         sorter/analyzer concern, so the persisted concat recording is the
-        masked, unwhitened concatenation of the member traces. The cumulative
-        per-member sample boundaries are carried to ``make_insert``.
+        masked, unwhitened concatenation of the member traces. Masked samples
+        are 0 uV: members that keep a nonzero channel offset (unfiltered,
+        unreferenced sources) are concatenated and persisted as float32
+        microvolts with a unit calibration; every other member keeps its
+        stored samples and calibration (``mask_member_recordings``). The
+        cumulative per-member sample boundaries are carried to
+        ``make_insert``.
 
         Returns
         -------
@@ -1152,7 +1157,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             )
         sampling_frequency = float(concatenated.get_sampling_frequency())
         # Re-apply the excluded frames on the stitched recording so the written
-        # traces are exactly zero there.
+        # traces are exactly zero there (0 uV: the members' offsets are 0 by
+        # now, so this silences in the stored units).
         concatenated = silence_frame_ranges(concatenated, artifact_ranges)
         obs_intervals = observation_intervals(
             concat_n_samples, sampling_frequency, artifact_ranges

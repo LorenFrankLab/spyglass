@@ -54,6 +54,110 @@ def test_unmasked_members_keep_their_samples():
     assert ranges == []
 
 
+def _offset_member(start_s, *, dtype="int16", gain=0.25, offset=-2500.0):
+    """A 2-channel member whose counts encode 0 uV plus a ramp, with the
+    acquisition offset an unfiltered, unreferenced integer source keeps."""
+    from spikeinterface.core import NumpyRecording
+
+    ramp_uv = np.linspace(-50.0, 50.0, 1000)[:, None] * np.ones((1, 2))
+    counts = np.round((ramp_uv - offset) / gain).astype(dtype)
+    member = NumpyRecording(counts, 1000)
+    member.set_channel_gains([gain] * 2)
+    member.set_channel_offsets([offset] * 2)
+    member.set_channel_locations([[0.0, 0.0], [0.0, 20.0]])
+    member.set_times(start_s + np.arange(1000) / 1000)
+    return member
+
+
+def test_offset_members_concatenate_in_microvolts_with_masks_at_zero():
+    """Members with a nonzero offset are concatenated as float microvolts
+    with a unit calibration, so the masked frames of the stitched artifact
+    read 0 uV rather than the offset voltage, and an unmasked member stays
+    on the same scale as a masked one."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        build_concatenated_recording,
+        mask_member_recordings,
+    )
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        silence_frame_ranges,
+    )
+
+    first, second = _offset_member(10.0), _offset_member(100.0)
+    valid = [np.array([[10.0, 10.0995], [10.2, 10.999]]), None]
+    masked, ranges = mask_member_recordings([first, second], valid)
+    assert ranges == [(100, 200)]
+    concatenated = silence_frame_ranges(
+        build_concatenated_recording(masked), ranges
+    )
+
+    np.testing.assert_array_equal(
+        concatenated.get_traces(return_in_uV=True)[100:200], 0.0
+    )
+    assert concatenated.get_dtype() == np.dtype("float32")
+    np.testing.assert_array_equal(concatenated.get_channel_gains(), 1.0)
+    np.testing.assert_array_equal(concatenated.get_channel_offsets(), 0.0)
+    stored = concatenated.get_traces()
+    np.testing.assert_array_equal(stored[100:200], 0.0)
+    first_uv = first.get_traces(return_in_uV=True)
+    np.testing.assert_array_equal(stored[:100], first_uv[:100])
+    np.testing.assert_array_equal(stored[200:1000], first_uv[200:])
+    np.testing.assert_array_equal(
+        stored[1000:], second.get_traces(return_in_uV=True)
+    )
+    np.testing.assert_array_equal(
+        concatenated.get_traces(return_in_uV=True), stored
+    )
+
+
+def test_members_with_different_offsets_are_refused_before_conversion():
+    """Converting members to microvolts would put members with different
+    offsets on one scale; the members themselves must still share offsets,
+    gains and dtype, as the unconverted concatenation required."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        mask_member_recordings,
+    )
+
+    first = _offset_member(10.0)
+    other_offset = _offset_member(100.0, offset=-2000.0)
+    with pytest.raises(ValueError, match="offsets"):
+        mask_member_recordings([first, other_offset], [None, None])
+
+
+@pytest.mark.parametrize(
+    "dtype, gain", [("float32", 1.0), ("float64", 0.25)], ids=["uv", "counts"]
+)
+def test_zero_offset_members_are_masked_in_their_stored_units(dtype, gain):
+    """Members whose offsets are 0 -- every filtered or referenced
+    recording -- are masked in their stored units: the masked members and
+    their concatenation keep the members' dtype, calibration and bytes, so
+    those concat artifacts (and their content hashes) are unchanged."""
+    import spikeinterface.preprocessing as sip
+
+    from spyglass.spikesorting.v2._concat_recording import (
+        build_concatenated_recording,
+        mask_member_recordings,
+    )
+
+    first = _offset_member(10.0, dtype=dtype, gain=gain, offset=0.0)
+    second = _offset_member(100.0, dtype=dtype, gain=gain, offset=0.0)
+    valid = [np.array([[10.0, 10.0995], [10.2, 10.999]]), None]
+    masked, ranges = mask_member_recordings([first, second], valid)
+
+    assert masked[1] is second
+    reference = sip.silence_periods(first, list_periods=[ranges], mode="zeros")
+    np.testing.assert_array_equal(
+        masked[0].get_traces(), reference.get_traces()
+    )
+    concatenated = build_concatenated_recording(masked)
+    assert concatenated.get_dtype() == np.dtype(dtype)
+    np.testing.assert_array_equal(concatenated.get_channel_gains(), gain)
+    np.testing.assert_array_equal(concatenated.get_channel_offsets(), 0.0)
+    np.testing.assert_array_equal(
+        concatenated.get_traces(),
+        np.concatenate([reference.get_traces(), second.get_traces()]),
+    )
+
+
 def test_concat_preserves_member_internal_gaps():
     """Concat continuity and statistics spans split at member joins and
     member-internal gaps, and each continuity span keeps its real first and
@@ -630,3 +734,49 @@ def test_member_artifact_failure_retry_and_reuse(
     assert str(artifact_id) in str(error.value)
     assert str(recording_id) in str(error.value)
     assert len(error.value.partial_run_summary["member_artifacts"]) == 1
+
+
+def test_concat_of_offset_members_persists_masks_at_zero_microvolts(
+    offset_source_concat,
+):
+    """The persisted concatenation of two unfiltered, unreferenced int16
+    members that keep a -2500 uV offset reads 0 uV over the masked second of
+    member A (not -2500 uV), and every other frame at its member's voltage;
+    it is stored as float microvolts with a unit calibration."""
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    members = [
+        Recording().get_recording(offset_source_concat[name])
+        for name in ("member_a", "member_b")
+    ]
+    for member in members:
+        assert member.get_dtype() == np.dtype("int16")
+        np.testing.assert_allclose(member.get_channel_gains(), 0.25)
+        np.testing.assert_allclose(member.get_channel_offsets(), -2500.0)
+    first = members[0]
+    fs = first.get_sampling_frequency()
+    t_a = float(first.sample_index_to_time(0))
+    masked = slice(
+        int(first.time_to_sample_index(t_a + 1.0)),
+        int(first.time_to_sample_index(t_a + 2.0)),
+    )
+    assert masked.stop - masked.start == round(fs)
+
+    concat = ConcatenatedRecording().get_recording(
+        offset_source_concat["concat_key"]
+    )
+    uv = concat.get_traces(return_in_uV=True)
+    np.testing.assert_array_equal(uv[masked], 0.0)
+    assert concat.get_dtype() == np.dtype("float32")
+    np.testing.assert_allclose(concat.get_channel_gains(), 1.0)
+    np.testing.assert_allclose(concat.get_channel_offsets(), 0.0)
+    n_a = first.get_num_samples()
+    first_uv = first.get_traces(return_in_uV=True)
+    np.testing.assert_array_equal(uv[: masked.start], first_uv[: masked.start])
+    np.testing.assert_array_equal(
+        uv[masked.stop : n_a], first_uv[masked.stop :]
+    )
+    np.testing.assert_array_equal(
+        uv[n_a:], members[1].get_traces(return_in_uV=True)
+    )

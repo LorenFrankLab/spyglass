@@ -536,12 +536,24 @@ def mask_member_recordings(recordings, member_valid_times):
     Uses the standalone mask's frame mapping, including disjoint timestamps.
     The result scales with interval count rather than recording duration.
     ``None`` explicitly means no artifact detection for that member.
+
+    Masked samples must read 0 uV. Members that keep a nonzero channel offset
+    (unfiltered, unreferenced sources) are therefore all presented as float32
+    microvolts with a unit calibration
+    (:func:`~spyglass.spikesorting.v2._sorting_artifact_mask.recording_with_zero_offset`),
+    masked or not, so the concatenation is on one scale; every other member
+    is masked in its stored units, so its samples are unchanged. The members
+    are checked for compatibility (:func:`assert_concat_compatible`) before
+    that conversion, which would otherwise give members with different
+    offsets or gains the same unit calibration.
     """
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
         artifact_frame_ranges,
+        recording_with_zero_offset,
         silence_frame_ranges,
     )
 
+    assert_concat_compatible(recordings)
     masked, concat_ranges = [], []
     offset = 0
     for recording, valid_times in zip(
@@ -552,7 +564,9 @@ def mask_member_recordings(recordings, member_valid_times):
             if valid_times is None
             else artifact_frame_ranges(recording, valid_times)
         )
-        masked.append(silence_frame_ranges(recording, ranges))
+        masked.append(
+            silence_frame_ranges(recording_with_zero_offset(recording), ranges)
+        )
         concat_ranges.extend(
             (start + offset, end + offset) for start, end in ranges
         )

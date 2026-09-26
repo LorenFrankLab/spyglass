@@ -2056,7 +2056,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         The long-running steps run here:
 
         - load the cached preprocessed recording,
-        - apply the artifact mask if ``artifact_detection_id`` is set,
+        - apply the artifact mask if ``artifact_detection_id`` is set (masked
+          samples are 0 uV: a recording that keeps a nonzero channel offset,
+          an unfiltered and unreferenced source, is sorted as float32
+          microvolts; any other recording keeps its stored samples),
         - resolve the statistics spans (artifact-free frame ranges that
           never cross a selection or member join),
         - dispatch ``_run_sorter`` (clusterless thresholder or SI

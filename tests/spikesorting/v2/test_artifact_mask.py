@@ -813,3 +813,92 @@ def test_corrected_concat_spans_are_the_concatenations_not_the_clock():
     ]
     with pytest.raises(ValueError, match="carries statistics spans"):
         _corrected_spans(rec, _corrected_row([(0, 2000)]), **concat)
+
+
+def _offset_counts_recording(dtype="int16", gain=0.25, offset=-2500.0):
+    """Counts that encode 0 uV plus a +/-100 uV ramp: ``raw * gain + offset``.
+
+    The counts sit ``-offset / gain`` above zero, so a stored 0 reads as
+    ``offset`` uV -- the voltage a raw-unit silencing writes.
+    """
+    import spikeinterface as si
+
+    ramp_uv = np.linspace(-100.0, 100.0, 1000)[:, None] * np.ones((1, 4))
+    counts = np.round((ramp_uv - offset) / gain).astype(dtype)
+    recording = si.NumpyRecording([counts], sampling_frequency=1000.0)
+    recording.set_channel_gains([gain] * 4)
+    recording.set_channel_offsets([offset] * 4)
+    return recording
+
+
+def test_silenced_samples_read_zero_microvolts_on_an_offset_source():
+    """An unfiltered, unreferenced integer source keeps its acquisition
+    offset, so its stored zero is not 0 uV. Silencing must leave the masked
+    samples at 0 uV (not at the offset voltage) and every other sample at
+    its own voltage."""
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        silence_frame_ranges,
+    )
+
+    recording = _offset_counts_recording()
+    masked = silence_frame_ranges(recording, [(100, 200), (900, 1000)])
+
+    uv = masked.get_traces(return_in_uV=True)
+    source_uv = recording.get_traces(return_in_uV=True)
+    np.testing.assert_array_equal(uv[100:200], 0.0)
+    np.testing.assert_array_equal(uv[900:], 0.0)
+    np.testing.assert_array_equal(uv[:100], source_uv[:100])
+    np.testing.assert_array_equal(uv[200:900], source_uv[200:900])
+    # The masked view is float microvolts with a unit calibration, so its
+    # stored samples are its voltages.
+    assert masked.get_dtype() == np.dtype("float32")
+    np.testing.assert_array_equal(masked.get_channel_gains(), 1.0)
+    np.testing.assert_array_equal(masked.get_channel_offsets(), 0.0)
+    np.testing.assert_array_equal(masked.get_traces(), uv)
+
+
+@pytest.mark.parametrize(
+    "dtype, gain",
+    [
+        ("float32", None),  # synthetic: no calibration at all
+        ("float32", 1.0),  # unit-calibrated float microvolts
+        ("float64", 0.25),  # a bandpassed or referenced integer source
+        ("int16", 0.25),  # zero-offset integer counts
+    ],
+)
+def test_zero_offset_sources_are_silenced_in_their_stored_units(dtype, gain):
+    """A stored 0 already reads as 0 uV when every offset is 0, whatever the
+    gains, so the mask is applied to the stored samples exactly as
+    SpikeInterface's ``silence_periods`` does: same dtype, same calibration,
+    same bytes. This keeps sorter inputs and concat artifacts of such sources
+    unchanged."""
+    import spikeinterface as si
+    import spikeinterface.preprocessing as sip
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        silence_frame_ranges,
+    )
+
+    rng = np.random.default_rng(0)
+    recording = si.NumpyRecording(
+        [(rng.normal(0, 30, (1000, 4))).astype(dtype)],
+        sampling_frequency=1000.0,
+    )
+    if gain is not None:
+        recording.set_channel_gains([gain] * 4)
+        recording.set_channel_offsets([0.0] * 4)
+    ranges = [(100, 200), (900, 1000)]
+
+    masked = silence_frame_ranges(recording, ranges)
+    reference = sip.silence_periods(
+        recording, list_periods=[ranges], mode="zeros"
+    )
+
+    assert masked.get_dtype() == recording.get_dtype()
+    if gain is None:
+        assert masked.get_channel_gains() is None
+        assert masked.get_channel_offsets() is None
+    else:
+        np.testing.assert_array_equal(masked.get_channel_gains(), gain)
+        np.testing.assert_array_equal(masked.get_channel_offsets(), 0.0)
+    np.testing.assert_array_equal(masked.get_traces(), reference.get_traces())

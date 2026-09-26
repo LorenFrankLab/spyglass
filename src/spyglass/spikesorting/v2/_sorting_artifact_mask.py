@@ -304,12 +304,70 @@ def apply_artifact_mask(
     return silence_frame_ranges(recording, ranges)
 
 
+def recording_with_zero_offset(recording):
+    """Present a recording so that a stored zero reads as 0 uV.
+
+    SpikeInterface reads a sample as ``raw * gain + offset`` microvolts, so a
+    stored zero is 0 uV exactly when every channel offset is 0. That holds
+    for every filtered or referenced recording: SpikeInterface's filters set
+    the offsets to 0 (``preprocessing/filter.py:114-115``) and the recording
+    stage zeroes them after referencing. Such a recording (or one with no
+    calibration at all) is returned unchanged, whatever its gains and dtype.
+
+    Only a recording that keeps a nonzero offset -- an unfiltered,
+    unreferenced source, typically integer counts -- goes through
+    SpikeInterface's ``scale_to_uV`` (``preprocessing/scale.py:68-102``),
+    which computes ``raw * gain + offset`` per channel in float32 and sets
+    gains 1 and offsets 0.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The recording to be masked.
+
+    Returns
+    -------
+    si.BaseRecording
+        ``recording`` itself, or its float32 microvolt view.
+    """
+    import numpy as np
+
+    offsets = recording.get_channel_offsets()
+    if offsets is None or not np.any(offsets != 0):
+        return recording
+    import spikeinterface.preprocessing as sip
+
+    return sip.scale_to_uV(recording)
+
+
 def silence_frame_ranges(recording, frame_ranges):
-    """Silence validated half-open frame ranges without expanding sample indices."""
+    """Silence validated half-open frame ranges to 0 uV.
+
+    The ranges are zeroed lazily, without expanding them to sample indices.
+    A zeroed stored sample reads as the channel offset, so a recording with
+    a nonzero offset is first presented as float32 microvolts with a unit
+    calibration (:func:`recording_with_zero_offset`) and its silenced samples
+    are 0 uV rather than the offset voltage. Any other recording is silenced
+    in its stored units and keeps its dtype and calibration. With no ranges,
+    ``recording`` itself is returned.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        A single-segment recording.
+    frame_ranges : sequence of (int, int)
+        Validated, sorted, half-open ``[start, end)`` frame ranges.
+
+    Returns
+    -------
+    si.BaseRecording
+        The silenced recording, or ``recording`` when there are no ranges.
+    """
     import spikeinterface.preprocessing as sip
 
     if not len(frame_ranges):
         return recording
+    recording = recording_with_zero_offset(recording)
 
     # Mask the artifact RANGES with the interval-native ``silence_periods``
     # rather than expanding them to one trigger per sample. ``list_periods``
