@@ -46,7 +46,17 @@ import numpy as np
 
 
 def peak_rss_bytes() -> int:
-    """This process's peak resident set size (bytes)."""
+    """This process's peak resident set size (bytes), for cost metric M5.
+
+    ``getrusage(RUSAGE_SELF).ru_maxrss`` counts this process only. It equals
+    the maximum resident set size ``/usr/bin/time -l`` reports for the case
+    process because everything runs in it: SpikeInterface jobs use the
+    manifest's job kwargs (``n_jobs=1``, no worker processes) and
+    MountainSort5 runs in-process through ``run_sorter`` (local backend).
+    On the 108 development cases the two agreed to the byte. With
+    ``n_jobs > 1`` or a container sorter, worker or container memory would be
+    missing from it.
+    """
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     # ``ru_maxrss`` is bytes on macOS and KiB on Linux.
     return int(rss if sys.platform == "darwin" else rss * 1024)

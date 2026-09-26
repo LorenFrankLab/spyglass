@@ -368,7 +368,14 @@ class Gates(_Model):
     cost gates apply to every case of a gated recipe on a scenario named in
     ``motion``: a ``force_extrapolate`` recipe keeps every contact; a
     ``remove_channels`` recipe removes exactly the contacts SpikeInterface's
-    rule predicts from the estimate and keeps at least one.
+    rule predicts from the estimate and keeps at least one. That the kept
+    contacts keep their ids and source order (no renumbering) is asserted by
+    the benchmark's structural test for every case, not gated here.
+
+    Cost: estimation time is ``estimate_motion_in_spans``'s wall time, which
+    includes the seeded noise estimate (``compute_motion`` alone is slightly
+    faster). Peak RSS is the case process's ``ru_maxrss`` (see
+    ``_motion_acceptance_run.peak_rss_bytes``).
     """
 
     recipes: list[str] = Field(min_length=1)
