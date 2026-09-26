@@ -521,6 +521,11 @@ def _v2_default_catalog_tables():
         AutoCurationRules,
         QualityMetricParameters,
     )
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectionParameters,
+        MotionEstimationParameters,
+        MotionInterpolationParameters,
+    )
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.sorting import (
         AnalyzerWaveformParameters,
@@ -536,6 +541,9 @@ def _v2_default_catalog_tables():
         (QualityMetricParameters, "metric_params_name"),
         (AutoCurationRules, "auto_curation_rules_name"),
         (MatcherParameters, "matcher_params_name"),
+        (MotionEstimationParameters, "motion_estimation_params_name"),
+        (MotionInterpolationParameters, "motion_interpolation_params_name"),
+        (MotionCorrectionParameters, "motion_correction_params_name"),
     ]
 
 

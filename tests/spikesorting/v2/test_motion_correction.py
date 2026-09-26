@@ -1022,6 +1022,47 @@ def test_correction_recipes_install_and_are_validated(dj_conn):
         )
 
 
+def test_initialize_v2_defaults_installs_motion_recipes(dj_conn, monkeypatch):
+    """The one-call default seeding installs the shipped motion recipes, and
+    the default-catalog audit compares them with the shipped content."""
+    from spyglass.spikesorting.v2 import (
+        initialize_v2_defaults,
+        verify_v2_default_catalog,
+    )
+    from spyglass.spikesorting.v2._pipeline_reporting import (
+        _v2_default_catalog_tables,
+    )
+    from spyglass.spikesorting.v2.motion import MotionCorrectionParameters
+
+    calls = []
+    install = MotionCorrectionParameters.insert_default.__func__
+
+    def _observe(cls):
+        calls.append(cls)
+        install(cls)
+
+    monkeypatch.setattr(
+        MotionCorrectionParameters, "insert_default", classmethod(_observe)
+    )
+    initialize_v2_defaults()
+    assert calls == [MotionCorrectionParameters]
+    for name in ("dredge_v1", "dredge_fast_v1"):
+        assert MotionCorrectionParameters & {
+            "motion_correction_params_name": name
+        }
+    audited = {table.__name__ for table, _ in _v2_default_catalog_tables()}
+    assert {
+        "MotionEstimationParameters",
+        "MotionInterpolationParameters",
+        "MotionCorrectionParameters",
+    } <= audited
+    assert not [
+        entry
+        for entry in verify_v2_default_catalog()
+        if entry["table"].startswith("Motion")
+    ]
+
+
 def test_interpolation_only_change_reuses_the_estimate(
     discontinuous_sources, monkeypatch
 ):
