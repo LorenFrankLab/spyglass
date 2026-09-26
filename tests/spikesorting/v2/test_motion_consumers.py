@@ -759,6 +759,41 @@ def test_corrected_concat_sort_end_to_end(
         drop_pipeline_sorts([sort_key["sorting_id"]])
 
 
+def test_unitmatch_bundle_of_a_corrected_sort(
+    corrected_sorts, fresh_curations, tmp_path
+):
+    """Real bundle extraction on a corrected sort writes the corrected
+    channel set and positions, not the source's (needs UnitMatchPy; the
+    matching CI lane runs it)."""
+    pytest.importorskip("UnitMatchPy")
+    from spyglass.spikesorting.v2._unitmatch_backend import (
+        extract_unitmatch_bundle,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    sorts = corrected_sorts
+    row = sorts["corrected_row"]
+    root = CurationV2.insert_curation(sorting_key=sorts["corrected_sort"])
+    sorting = CurationV2.get_sorting(root)
+    session_dir = tmp_path / "member_0"
+    extract_unitmatch_bundle(
+        session_dir,
+        CurationV2.get_recording(root),
+        sorting,
+        max_spikes_per_unit=20,
+    )
+    np.testing.assert_array_equal(
+        np.load(session_dir / "channel_positions.npy"),
+        row["channel_locations"],
+    )
+    unit_id = int(sorting.get_unit_ids()[0])
+    waveform = np.load(
+        session_dir / "RawWaveforms" / f"Unit{unit_id}_RawSpikes.npy"
+    )
+    # (spike_width, n_channels, 2): one column per channel the correction kept.
+    assert waveform.shape[1:] == (len(row["channel_ids"]), 2)
+
+
 def test_motion_cleanup_drops_the_sorts_of_corrected_recordings(
     corrected_sorts,
 ):
