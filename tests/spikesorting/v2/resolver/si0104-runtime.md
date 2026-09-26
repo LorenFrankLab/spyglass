@@ -33,6 +33,14 @@
 
 ## Motion-correction API contract for Phase 3
 
+> Superseded: the shipped implementation does not call SI's `correct_motion`
+> directly and is independent of concatenation (`spyglass.spikesorting.v2.motion`
+> saves a masked, spans-aware `MotionEstimate` and an optional
+> `MotionCorrectedRecording`, keyed to a `Recording` or `ConcatenatedRecording`;
+> see `docs/src/Features/SpikeSortingV2.md#optional-motion-correction`). The
+> SI-0.104 environment evidence below (presets, signature) is unchanged and
+> still applies; the persistence contract in this subsection does not.
+
 - `correct_motion(recording, preset='dredge_fast', output_motion=False, output_motion_info=False, folder=None, **job_kwargs)` returns a corrected recording only when both `output_motion` and `output_motion_info` are `False`.
 - Phase 3's MVP contract (overview.md): persist only the corrected `ElectricalSeries`, sample boundaries, and hash; do not persist motion estimates / motion-info side artifacts. The 0.104 API supports this directly via the `output_motion=False, output_motion_info=False` default.
 - Available presets in 0.104: `dredge`, `medicine`, `dredge_fast`, `nonrigid_accurate`, `nonrigid_fast_and_accurate`, `rigid_fast`, `kilosort_like`. Phase 3's default-row choice for `MotionCorrectionParameters` lands within this set.
