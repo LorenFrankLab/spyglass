@@ -170,9 +170,8 @@ DLCProject().alter()
   `MotionEstimateSelection` (one `Recording` with an optional artifact
   detection, or one `ConcatenatedRecording`) and `MotionEstimate`, which saves
   the SpikeInterface `Motion` with the fully resolved configuration, the
-  frame spans it used and peak-count diagnostics. Nothing populates or
-  consumes these rows yet; applying an estimate comes later. No recipe is
-  validated for a probe.
+  frame spans it used and peak-count diagnostics. No recipe is validated for
+  a probe.
 - The estimate uses only valid samples: noise levels come from the
   artifact-free statistics spans, and peaks whose localization window touches
   a masked sample are dropped.
@@ -187,6 +186,20 @@ DLCProject().alter()
   timestamps overlap are refused at estimation.
 - Artifact detections referenced by a `MotionEstimateSelection` are protected
   from deletion like those referenced by a `SortingSelection`.
+- A saved estimate can be applied: `MotionInterpolationParameters` names
+  every SpikeInterface `interpolate_motion` argument explicitly
+  (`border_mode` is `remove_channels` or `force_extrapolate`;
+  `kriging_force_extrapolate_v1`, the `dredge` presets' interpolation, and
+  `kriging_remove_channels_v1` ship as rows), and `MotionCorrectionParameters`
+  pairs an estimation recipe with an interpolation recipe (`dredge_v1`,
+  `dredge_fast_v1`). `MotionCorrectedRecordingSelection` /
+  `MotionCorrectedRecording` store the corrected, masked, unwhitened traces of
+  one saved estimate and one interpolation recipe, written with the source's
+  own timestamps, together with the output channels, any removed channels, the
+  unmoved contact positions and the estimate's spans. Changing only the
+  interpolation reuses the estimate. A missing file is rebuilt from the saved
+  motion, never by estimating again. Sorting does not read these recordings
+  yet. The tables are new, so no recreation is needed.
 
 #### Spike Sorting v2 launch: configuration, resource use, and the curation-to-analysis workflow
 
