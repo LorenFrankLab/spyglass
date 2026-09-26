@@ -23,7 +23,7 @@
     #1662
 - Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
 - Add `prefer_download` custom config for stream-capable backends #1662
-- Require `ripple-detection>=2.0` #XXXX
+- Require `ripple-detection>=2.0,<3` #XXXX
 
 ### Pipelines
 
