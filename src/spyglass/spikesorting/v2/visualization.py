@@ -210,6 +210,12 @@ def recording_key_for_sorting(sorting_key) -> dict:
     concat-backed sort has multiple member recordings and no single recording
     key, so it raises a clear error rather than guessing one.
 
+    The key is the sort's lineage ``Recording``, not its effective traces: for
+    a sort of a motion-corrected recording, the recording-level plots show
+    the uncorrected source. The corrected traces the sorter read are in the
+    sort's analyzers (the sorting-level plots below) and
+    ``CurationV2.get_recording``.
+
     Examples
     --------
     >>> from spyglass.spikesorting.v2 import visualization as ssviz
@@ -252,7 +258,8 @@ def plot_recording_traces(recording_key, *, backend="matplotlib", **kwargs):
     """Plot the saved preprocessed recording's traces (SI ``plot_traces``).
 
     Reads the saved, bandpass-filtered / common-referenced extractor via
-    ``Recording.get_recording`` -- not any analyzer. All SI ``TracesWidget``
+    ``Recording.get_recording`` -- not any analyzer, and never a motion-corrected
+    recording (see :func:`recording_key_for_sorting`). All SI ``TracesWidget``
     kwargs (``time_range``, ``mode``, ``channel_ids``, ``clim``,
     ``order_channel_by_depth``, ``ax`` ...) pass straight through.
     """

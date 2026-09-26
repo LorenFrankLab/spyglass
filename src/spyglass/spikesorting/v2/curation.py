@@ -1979,7 +1979,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         A standalone source returns its reusable preprocessed ``Recording``;
         its sorting-stage artifact mask is not applied here. A concat source
         returns the materialized ``ConcatenatedRecording``, which includes
-        the member masks. Use ``CurationRef.open_analyzer``
+        the member masks. A sort of a motion-corrected recording returns
+        that ``MotionCorrectedRecording`` -- the traces the sorter read, with
+        the sort's mask already applied and only the channels the correction
+        kept. Use ``CurationRef.open_analyzer``
         for the masked traces used by sorting/QC in either mode.
 
         ``@classmethod`` so the merge-table dispatcher's

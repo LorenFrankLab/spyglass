@@ -485,9 +485,13 @@ class ConcatMemberCuration(SpyglassMixin, dj.Computed):
     def get_recording(cls, key: dict) -> "si.BaseRecording":
         """Return this member's preprocessed recording in session time.
 
-        This is the member cache before concat masking.
-        Use the parent concat curation's analyzer for the actual sorting/QC
-        traces, which use the synthetic concat timeline.
+        This is the member cache before concat masking and before any motion
+        correction: when the parent concat sort read a
+        ``MotionCorrectedRecording``, this still returns the member's own
+        uncorrected ``Recording`` (a corrected recording has no per-member
+        session-time form). Use the parent concat curation's analyzer for the
+        actual sorting/QC traces, which use the synthetic concat timeline and,
+        for a corrected sort, the corrected traces.
         """
         snapshot = cls._member_snapshot_row(key)
         recording = Recording().get_recording(

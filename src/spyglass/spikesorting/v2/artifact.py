@@ -1075,6 +1075,10 @@ class RecordingArtifactDetection(
     required ``Recording`` FK), so ``make_fetch`` resolves it directly without
     a source-kind branch. Writes exactly one ``IntervalList`` row keyed by the
     recording's parent ``nwb_file_name``.
+
+    Detection always reads the original, uncorrected ``Recording``: motion
+    estimation and correction are downstream of the selected mask, so a
+    motion-corrected recording is never an artifact-detection input.
     """
 
     definition = """
