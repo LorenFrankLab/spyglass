@@ -32,6 +32,9 @@ from spyglass.spikesorting.v2._params.artifact_detection import (
 from spyglass.spikesorting.v2._params.motion_estimation import (
     MotionEstimationParamsSchema,
 )
+from spyglass.spikesorting.v2._params.motion_interpolation import (
+    MotionInterpolationParamsSchema,
+)
 from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
@@ -292,6 +295,54 @@ def motion_estimation_default_contents() -> tuple:
                 preset="dredge_fast", max_gap_s=MOTION_MAX_GAP_S
             ).model_dump(),
         ),
+    )
+
+
+#: Shipped motion-interpolation rows. ``kriging_force_extrapolate_v1`` is the
+#: interpolation SpikeInterface 0.104.3's ``dredge`` and ``dredge_fast`` presets
+#: apply (``preprocessing/motion.py:41-43, 78-80``: ``force_extrapolate``,
+#: kriging, ``sigma_um=20``, ``p=2``); the presets leave ``num_closest`` to
+#: ``interpolate_motion``'s default of 3
+#: (``sortingcomponents/motion/motion_interpolation.py:348``).
+#: ``kriging_remove_channels_v1`` is the same kernel with ``remove_channels``.
+KRIGING_FORCE_EXTRAPOLATE = "kriging_force_extrapolate_v1"
+KRIGING_REMOVE_CHANNELS = "kriging_remove_channels_v1"
+
+
+def motion_interpolation_default_contents() -> tuple:
+    """Return ``MotionInterpolationParameters._DEFAULT_CONTENTS``.
+
+    Each row is ``(motion_interpolation_params_name, params_blob,
+    params_schema_version)``.
+    """
+
+    def _row(name: str, border_mode: str) -> tuple:
+        params = MotionInterpolationParamsSchema(
+            border_mode=border_mode,
+            spatial_interpolation_method="kriging",
+            sigma_um=20.0,
+            p=2,
+            num_closest=3,
+        ).model_dump()
+        return (name, params, _params_schema_version(params))
+
+    return (
+        _row(KRIGING_FORCE_EXTRAPOLATE, "force_extrapolate"),
+        _row(KRIGING_REMOVE_CHANNELS, "remove_channels"),
+    )
+
+
+def motion_correction_default_contents() -> tuple:
+    """Return ``MotionCorrectionParameters._DEFAULT_CONTENTS``.
+
+    Each row is ``(motion_correction_params_name,
+    motion_estimation_params_name, motion_interpolation_params_name)``: a
+    DREDge estimation recipe with the interpolation its SpikeInterface preset
+    applies. Neither is validated for a probe.
+    """
+    return (
+        ("dredge_v1", "dredge_v1", KRIGING_FORCE_EXTRAPOLATE),
+        ("dredge_fast_v1", "dredge_fast_v1", KRIGING_FORCE_EXTRAPOLATE),
     )
 
 

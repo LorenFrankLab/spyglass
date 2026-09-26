@@ -56,8 +56,13 @@ def bandpass(recording):
     )
 
 
-def rigid_drift_recordings(*, seed: int, duration_s: float):
+def rigid_drift_recordings(
+    *, seed: int, duration_s: float, noise_free: bool = False
+):
     """Bandpassed rigid-zigzag drifting recording and its static twin.
+
+    ``noise_free`` generates the spikes without background noise, so the two
+    twins differ only where the units moved.
 
     Returns
     -------
@@ -92,19 +97,29 @@ def rigid_drift_recordings(*, seed: int, duration_s: float):
                 )
             ],
         ),
+        **(
+            {"generate_noise_kwargs": {"noise_levels": 0.0}}
+            if noise_free
+            else {}
+        ),
     )
     displacement = extra["displacement_vectors"][:, 1, 0].astype(float)
     return bandpass(drifting), bandpass(static), displacement
 
 
 def _step_displacement_data(
-    duration_s: float, change_times_s, levels_um, num_units: int
+    duration_s: float,
+    change_times_s,
+    levels_um,
+    num_units: int,
+    steps_um=None,
 ):
     """``generate_drifting_recording`` displacement data for rigid steps.
 
     Displacement is ``levels_um[0]`` until ``change_times_s[0]``, then
     ``levels_um[1]`` until ``change_times_s[1]``, and so on, for every unit
-    (rigid). Levels must lie within +/-15 um.
+    (rigid). Templates are generated at the displacements ``steps_um``
+    (default: every 1 um within +/-15 um); each level must be one of them.
     """
     from spikeinterface.generation.drift_tools import make_linear_displacement
 
@@ -117,9 +132,14 @@ def _step_displacement_data(
     displacement_vectors[:, 1, 0] = vector
     unit_displacements = np.zeros((n_t, num_units, 2))
     unit_displacements[:, :, 1] = vector[:, None]
-    steps = make_linear_displacement(
-        np.array([0.0, 15.0]), np.array([0.0, -15.0]), num_step=31
-    )
+    if steps_um is None:
+        steps = make_linear_displacement(
+            np.array([0.0, 15.0]), np.array([0.0, -15.0]), num_step=31
+        )
+    else:
+        steps = np.column_stack(
+            [np.zeros(len(steps_um)), np.asarray(steps_um, dtype=float)]
+        )
     return (
         unit_displacements,
         displacement_vectors,
@@ -130,15 +150,23 @@ def _step_displacement_data(
 
 
 def stepped_recordings_in_windows(
-    *, seed: int, windows_s, change_times_s, levels_um
+    *,
+    seed: int,
+    windows_s,
+    change_times_s,
+    levels_um,
+    steps_um=None,
+    noise_free: bool = False,
 ):
     """Keep only some windows of one recording with planted rigid steps.
 
     One recording lasting until the last window's end is generated with
-    rigid steps (:func:`_step_displacement_data`), bandpassed as a whole (the
-    v2 recording stage filters before it restricts to the selected
-    intervals), and cut to ``windows_s``. Steps placed between two windows
-    happen where no sample was kept. The static twin is cut the same way.
+    rigid steps (:func:`_step_displacement_data`, templates at ``steps_um``),
+    bandpassed as a whole (the v2 recording stage filters before it restricts
+    to the selected intervals), and cut to ``windows_s``. Steps placed
+    between two windows happen where no sample was kept. The static twin is
+    cut the same way. ``noise_free`` generates the spikes without background
+    noise, so the two twins differ only where the units moved.
 
     Returns
     -------
@@ -153,7 +181,7 @@ def stepped_recordings_in_windows(
 
     duration_s = float(windows_s[-1][1])
     displacement_data = _step_displacement_data(
-        duration_s, change_times_s, levels_um, NUM_UNITS
+        duration_s, change_times_s, levels_um, NUM_UNITS, steps_um=steps_um
     )
     static, drifting, _sorting, _extra = generate_drifting_recording(
         num_units=NUM_UNITS,
@@ -163,6 +191,11 @@ def stepped_recordings_in_windows(
         displacement_data=displacement_data,
         extra_outputs=True,
         seed=seed,
+        **(
+            {"generate_noise_kwargs": {"noise_levels": 0.0}}
+            if noise_free
+            else {}
+        ),
     )
 
     def _cut(recording):

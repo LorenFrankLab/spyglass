@@ -18,6 +18,11 @@ recording: it reproduces SpikeInterface's ``compute_motion`` with explicit
 noise levels from the statistics spans and keeps only peaks whose localization
 window lies inside one statistics span.
 
+``resolve_interpolation_params`` canonicalizes a
+``MotionInterpolationParameters`` blob, and
+``apply_motion_on_estimation_clock`` interpolates a saved estimate onto the
+recording it was estimated from, on the same estimation clock.
+
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection. Only ``spikeinterface.core`` is imported at module level (the
 clock view subclasses its recording classes); the rest of SpikeInterface is
@@ -1337,6 +1342,180 @@ def estimate_motion_in_spans(
         peaks_per_temporal_bin=per_bin.astype(np.int64),
         peaks_per_continuity_span=per_span,
         noise_levels=noise_levels,
+    )
+
+
+def resolve_interpolation_params(params: dict) -> dict:
+    """Return the motion-interpolation configuration passed to SpikeInterface.
+
+    Every field of :class:`MotionInterpolationParamsSchema` is required, so
+    resolution is validation plus a canonical encoding (``p`` and
+    ``num_closest`` as ints, ``sigma_um`` as a float) that
+    :func:`resolved_params_hash` content-addresses.
+
+    Parameters
+    ----------
+    params : dict
+        A ``MotionInterpolationParameters.params`` blob (validated or as
+        fetched).
+
+    Returns
+    -------
+    dict
+        ``border_mode``, ``spatial_interpolation_method``, ``sigma_um``, ``p``
+        and ``num_closest``.
+    """
+    from spyglass.spikesorting.v2._lookup_validation import _jsonable_blob
+    from spyglass.spikesorting.v2._params.motion_interpolation import (
+        MotionInterpolationParamsSchema,
+    )
+
+    validated = MotionInterpolationParamsSchema.model_validate(
+        _jsonable_blob(params)
+    )
+    return {
+        "border_mode": str(validated.border_mode),
+        "spatial_interpolation_method": str(
+            validated.spatial_interpolation_method
+        ),
+        "sigma_um": float(validated.sigma_um),
+        "p": int(validated.p),
+        "num_closest": int(validated.num_closest),
+    }
+
+
+class AppliedMotion(NamedTuple):
+    """A lazily motion-corrected recording and the channels it dropped.
+
+    Attributes
+    ----------
+    recording : si.BaseRecording
+        The corrected, masked recording; its channel locations are the
+        source's unmoved positions of the kept channels.
+    removed_channel_ids : list
+        Source channel ids that ``remove_channels`` dropped, in source order;
+        empty for ``force_extrapolate``.
+    """
+
+    recording: BaseRecording
+    removed_channel_ids: list
+
+
+def apply_motion_on_estimation_clock(
+    recording,
+    motion,
+    *,
+    clock: EstimationClock,
+    statistics_spans,
+    resolved_interpolation: dict,
+) -> AppliedMotion:
+    """Interpolate a saved motion estimate onto the recording it came from.
+
+    The recording is silenced outside its statistics spans (the samples the
+    estimate treated as masked), presented on the estimate's estimation clock
+    (:class:`EstimationClockRecording`), interpolated with SpikeInterface's
+    ``interpolate_motion`` and silenced again. The clock view is the direct
+    parent of the ``InterpolateMotionRecording``, whose segments read each
+    frame's time from their parent segment
+    (``sortingcomponents/motion/motion_interpolation.py:504``) and bin it
+    against the motion's temporal bins (``:175-180``): every frame therefore
+    looks up the displacement at exactly the time it had during estimation.
+    A preprocessor between the two would present a plain ``1 / fs`` clock
+    (``preprocessing/basepreprocessor.py:27-29``) and silently shift the
+    lookups after the first acquisition gap.
+
+    Interpolation is frame-local (one kernel per temporal bin applied to each
+    frame), so a silenced frame stays exactly zero and the sample count,
+    frame order and sampling frequency are unchanged; the second silencing
+    states that contract rather than relying on it. Every interpolation
+    argument is passed explicitly from ``resolved_interpolation``; the
+    motion's own temporal bins are the interpolation bins. The output's
+    channel locations are the unmoved positions of the kept channels
+    (``BasePreprocessor`` copies the parent's metadata).
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        Single-segment, unwhitened source recording (the estimate's source
+        artifact as read back). Mutated only by planar flattening.
+    motion : spikeinterface.core.motion.Motion
+        Single-segment estimate whose temporal bins are on ``clock``.
+    clock : EstimationClock
+        The estimate's time map.
+    statistics_spans : array_like
+        ``(n, 2)`` half-open frame ranges the estimate treated as valid
+        samples; every other frame is silenced.
+    resolved_interpolation : dict
+        Output of :func:`resolve_interpolation_params`.
+
+    Returns
+    -------
+    AppliedMotion
+
+    Raises
+    ------
+    ValueError
+        If the recording or motion is not single-segment, the clock does not
+        cover the recording, every channel is removed, or the output contact
+        positions are not finite and distinct.
+    """
+    from spikeinterface.sortingcomponents.motion import interpolate_motion
+
+    from spyglass.spikesorting.v2._recording_geometry import (
+        flatten_planar_geometry,
+    )
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        complement_frame_ranges,
+        silence_frame_ranges,
+    )
+
+    if recording.get_num_segments() != 1 or motion.num_segments != 1:
+        raise ValueError(
+            "Motion correction: expected a single-segment recording and "
+            f"motion; got {recording.get_num_segments()} and "
+            f"{motion.num_segments} segments."
+        )
+    n_samples = int(recording.get_num_samples())
+    flatten_planar_geometry(recording)
+    excluded = complement_frame_ranges(
+        normalize_spans(statistics_spans), n_samples
+    )
+    masked = silence_frame_ranges(recording, excluded)
+    corrected = interpolate_motion(
+        EstimationClockRecording(masked, clock),
+        motion,
+        border_mode=resolved_interpolation["border_mode"],
+        spatial_interpolation_method=resolved_interpolation[
+            "spatial_interpolation_method"
+        ],
+        sigma_um=float(resolved_interpolation["sigma_um"]),
+        p=int(resolved_interpolation["p"]),
+        num_closest=int(resolved_interpolation["num_closest"]),
+        interpolation_time_bin_centers_s=None,
+        interpolation_time_bin_edges_s=None,
+        interpolation_time_bin_size_s=None,
+        dtype=None,
+    )
+    kept = set(corrected.channel_ids.tolist())
+    removed = [c for c in recording.channel_ids.tolist() if c not in kept]
+    if corrected.get_num_channels() == 0:
+        raise ValueError(
+            "Motion correction: border_mode='remove_channels' removed every "
+            f"channel ({removed}); the estimated displacement moves each "
+            "contact outside the probe in some temporal bin. Use "
+            "'force_extrapolate' or inspect the estimate."
+        )
+    positions = np.asarray(corrected.get_channel_locations(), dtype=float)
+    if not np.isfinite(positions).all() or len(
+        np.unique(np.round(positions, 6), axis=0)
+    ) != len(positions):
+        raise ValueError(
+            "Motion correction: the corrected recording's contact positions "
+            f"must be finite and distinct; got {positions.tolist()}."
+        )
+    return AppliedMotion(
+        recording=silence_frame_ranges(corrected, excluded),
+        removed_channel_ids=removed,
     )
 
 
