@@ -162,6 +162,25 @@ identifies that registered output; it is not a filtered population. (A run
 without `auto_curate=True` leaves it `None` and gives you only
 `run.root_curation`, the uncurated root.)
 
+### Optional: motion correction
+
+Off by default. Add `motion_mode="apply"` and a
+`motion_correction_params_name` to sort a motion-corrected recording instead
+(`"estimate"` saves a `MotionEstimate` for inspection without changing the
+sort). **EXPERIMENTAL** -- no shipped recipe is validated for a probe; see
+[Optional motion correction](./SpikeSortingV2.md#optional-motion-correction)
+for the modes, the resolved presets, and the development findings before
+relying on it.
+
+```python
+motion_run = run_v2_pipeline(
+    **run_kwargs,
+    motion_mode="apply",
+    motion_correction_params_name="dredge_fast_v1",
+)
+print(motion_run["motion_estimate_id"], motion_run["motion_corrected_recording_id"])
+```
+
 ## 3. Review it in the browser — and reopen the review later
 
 `start_review` evaluates the pinned curation with a named review profile and
@@ -276,7 +295,9 @@ For a concatenated (multi-member) sort the receipt holds one per-member group
     parameter rows as the probe preset; `probe_type` is informational). The
     analyzer sparsity default (radius 100 µm) is effectively dense on a tetrode.
 - **Polymer probes / drift**: sort same-day sessions together with the concat
-    presets (motion correction) — see the
+    presets, optionally adding `motion_mode="apply"` (EXPERIMENTAL; see
+    [Optional motion correction](./SpikeSortingV2.md#optional-motion-correction))
+    — see the
     [Cross-Session notebook](../notebooks/10_Spike_SortingV2_CrossSession.ipynb);
     `select_units_for_analysis` then returns one group per member.
 - **Clusterless decoding features**: run the `clusterless_thresholder` preset
@@ -314,9 +335,11 @@ additional SNR filter on returned data, use the
 [curation notebook](../../../notebooks/10_Spike_SortingV2_Curation.ipynb).
 
 Inspect the scientific setup in preflight/`describe_run`: artifact masking,
-drift QC and motion correction are different operations. Concat detects and
-masks each member before motion correction; Kilosort's shipped no-mask preset
-does not reject artifacts merely by correcting drift.
+drift QC (`DriftEstimate`), and the optional motion stage are different
+operations. Concat detects and masks each member before concatenation, not
+before motion correction (concatenation never corrects motion itself);
+Kilosort's shipped no-mask preset does not reject artifacts merely by
+correcting drift internally.
 
 Use `review.summary()` before opening the browser. Save draft saves bundle
 edits; Preview and commit creates the curation in a connected local browser.
