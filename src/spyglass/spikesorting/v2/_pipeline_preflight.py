@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pprint import pformat
-from typing import TYPE_CHECKING, Any, get_args
+from typing import TYPE_CHECKING, Any, NamedTuple, get_args
 
 from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
 from spyglass.spikesorting.v2._pipeline_types import MotionMode
@@ -257,7 +257,12 @@ class PreflightReport:
         unknown (the param names needed to derive the IDs are then unavailable).
         For an ``ok`` report each ``id`` equals the PK ``run_v2_pipeline``
         returns. ``curation_id`` is intentionally excluded: it is assigned by
-        ``CurationV2.insert_curation``, not content-addressed.
+        ``CurationV2.insert_curation``, not content-addressed. With a motion
+        mode, ``motion_estimate_id`` (and for ``"apply"``
+        ``motion_corrected_recording_id``) entries precede ``sorting_id``;
+        the estimate id includes the recording's content hash, so before the
+        recording is computed those entries -- and an ``"apply"`` run's
+        ``sorting_id`` -- have ``id=None`` and a ``pending`` reason.
     checks
         Per-check detail; every check runs (the report is complete, not
         first-failure-only).
@@ -390,7 +395,9 @@ def _preflight_details(
             for line in pformat(scientific_config, width=76).splitlines()
         )
     for key, selection in expected_ids.items():
-        if selection["id"] is None:
+        if selection.get("pending"):
+            action = f"compute (id known once {selection['pending']})"
+        elif selection["id"] is None:
             action = "skip"
         elif selection["computed_exists"]:
             action = "reuse completed output"
@@ -659,6 +666,8 @@ def assert_concat_preflight(
     *,
     auto_curate: bool = False,
     manual_excluded_times=None,
+    motion_mode: MotionMode = "off",
+    motion_correction_params_name: "str | None" = None,
 ) -> list[str]:
     """Raise ``PreflightError`` if a concat run's prerequisites are missing.
 
@@ -669,7 +678,10 @@ def assert_concat_preflight(
     ``auto_curate`` metric/rule/metric-waveform rows
     (when opted in), and the compute-time param rows + sorter binary via
     :func:`assert_preset_compute_rows`, including member artifact parameters.
-    Fails before member/concat populate. Returns advisory warnings (including
+    With a motion mode, also the recipe, each member's geometry against the
+    estimation recipe, and (for ``"apply"``) the sorter's own motion
+    correction, as in :func:`preflight_v2_pipeline`. Fails before
+    member/concat populate. Returns advisory warnings (including
     explicitly disabled artifact masking) for symmetry with
     :func:`preflight_v2_pipeline`.
     """
@@ -802,6 +814,37 @@ def assert_concat_preflight(
             )
 
     assert_preset_compute_rows(bundle)
+    if motion_mode != "off":
+        from spyglass.spikesorting.v2.sorting import SorterParameters
+
+        try:
+            motion_recipe = resolve_motion_recipe(motion_correction_params_name)
+        except ValueError as exc:
+            raise PreflightError(f"run_v2_pipeline: {exc}") from exc
+        for member in members:
+            problem = motion_geometry_problem(
+                member["nwb_file_name"],
+                int(member["sort_group_id"]),
+                motion_recipe.resolved_estimation,
+            )
+            if problem is not None:
+                raise PreflightError(
+                    f"run_v2_pipeline: concat member {member['member_index']} "
+                    f"{problem}"
+                )
+        if motion_mode == "apply":
+            sorter_params = (
+                SorterParameters
+                & {
+                    "sorter": bundle.sorter,
+                    "sorter_params_name": bundle.sorter_params_name,
+                }
+            ).fetch1("params")
+            problem = sorter_motion_correction_problem(
+                bundle.sorter, sorter_params, bundle.sorter_params_name
+            )
+            if problem is not None:
+                raise PreflightError(f"run_v2_pipeline: {problem}")
     if (
         bundle.artifact_detection_params_name in (None, "none")
         and not manual_excluded_times
@@ -1020,6 +1063,275 @@ def sort_group_geometry_problem(
         f"from): {_coincident_contact_report(channel_ids, positions)}. Fix "
         "Probe.Electrode rel_x/rel_y/rel_z for this sort group's electrodes; "
         "the tetrode_12.5 repair covers only 4-channel single-group tetrodes."
+    )
+
+
+class MotionRecipe(NamedTuple):
+    """A ``MotionCorrectionParameters`` recipe with its two stage recipes.
+
+    Attributes
+    ----------
+    recipe : dict
+        The ``MotionCorrectionParameters`` row.
+    estimation_params : dict
+        The named ``MotionEstimationParameters`` row's ``params`` blob.
+    interpolation_params : dict
+        The named ``MotionInterpolationParameters`` row's ``params`` blob.
+    resolved_estimation : dict
+        ``estimation_params`` resolved against the installed SpikeInterface
+        (``_motion.resolve_estimation_params``).
+    """
+
+    recipe: dict
+    estimation_params: dict
+    interpolation_params: dict
+    resolved_estimation: dict
+
+
+def resolve_motion_recipe(motion_correction_params_name: str) -> MotionRecipe:
+    """Fetch a motion-correction recipe and resolve its estimation recipe.
+
+    Parameters
+    ----------
+    motion_correction_params_name : str
+        The ``MotionCorrectionParameters`` row.
+
+    Returns
+    -------
+    MotionRecipe
+
+    Raises
+    ------
+    ValueError
+        If the row is missing, or its estimation recipe no longer resolves
+        against the installed SpikeInterface.
+    """
+    from spyglass.spikesorting.v2._motion import resolve_estimation_params
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectionParameters,
+        MotionEstimationParameters,
+        MotionInterpolationParameters,
+    )
+
+    rows = (
+        MotionCorrectionParameters
+        & {"motion_correction_params_name": motion_correction_params_name}
+    ).fetch(as_dict=True)
+    if len(rows) != 1:
+        raise ValueError(
+            "MotionCorrectionParameters row "
+            f"{motion_correction_params_name!r} is missing. Run "
+            "initialize_v2_defaults() (it ships 'dredge_v1' and "
+            "'dredge_fast_v1'), or insert the recipe first."
+        )
+    recipe = rows[0]
+    estimation_name = recipe["motion_estimation_params_name"]
+    estimation_params = (
+        MotionEstimationParameters
+        & {"motion_estimation_params_name": estimation_name}
+    ).fetch1("params")
+    interpolation_params = (
+        MotionInterpolationParameters
+        & {
+            "motion_interpolation_params_name": recipe[
+                "motion_interpolation_params_name"
+            ]
+        }
+    ).fetch1("params")
+    try:
+        resolved = resolve_estimation_params(estimation_params)
+    except ValueError as exc:
+        raise ValueError(
+            f"MotionEstimationParameters row {estimation_name!r} (named by "
+            f"motion recipe {motion_correction_params_name!r}) does not "
+            f"resolve against the installed SpikeInterface: {exc}"
+        ) from exc
+    return MotionRecipe(
+        recipe, estimation_params, interpolation_params, resolved
+    )
+
+
+def sorter_motion_correction_problem(
+    sorter: str, params, sorter_params_name: str
+) -> "str | None":
+    """Say why a sorter row cannot sort a motion-corrected recording.
+
+    Delegates to ``_params.sorter.reject_internal_motion_correction`` (the
+    check ``SortingSelection.insert_selection`` runs), so preflight and the
+    insert agree.
+
+    Parameters
+    ----------
+    sorter, params, sorter_params_name
+        The ``SorterParameters`` row.
+
+    Returns
+    -------
+    str or None
+        The problem, naming the row and the key to turn off, or ``None``.
+    """
+    from spyglass.spikesorting.v2._params.sorter import (
+        reject_internal_motion_correction,
+    )
+
+    try:
+        reject_internal_motion_correction(
+            sorter, params, sorter_params_name=sorter_params_name
+        )
+    except ValueError as exc:
+        return f"motion_mode='apply' sorts a motion-corrected recording: {exc}"
+    return None
+
+
+def motion_geometry_problem_from_contacts(
+    channel_ids,
+    positions,
+    probe_types,
+    electrode_group_names,
+    probe_shanks,
+    resolved_estimation: dict,
+) -> "str | None":
+    """Say why a sort group's effective geometry cannot be motion-estimated.
+
+    Rebuilds the planar geometry the recording stage produces from the
+    registered ``Probe.Electrode`` positions -- ``select_distinct_plane``, or
+    the legacy ``tetrode_12.5`` repair for a group with no usable positions --
+    on a one-frame stand-in recording, and runs the estimator's own
+    eligibility check (``_motion.check_estimation_eligibility``: finite,
+    distinct positions, one shank, an attachable probe, a depth extent of at
+    least the detection radius, and room for the nonrigid windows). A group
+    whose geometry is incomplete or collapses without the repair is left to
+    ``sort_group_geometry_problem`` (``None`` here), so it is not reported
+    twice.
+
+    Parameters
+    ----------
+    channel_ids : sequence of int
+        Sort-group electrode ids, sorted, row-aligned to the other inputs.
+    positions : array_like
+        ``(n, 3)`` ``(rel_x, rel_y, rel_z)`` contact positions (NaN where
+        missing).
+    probe_types, electrode_group_names, probe_shanks : sequence
+        Per-channel probe type, electrode group and probe shank.
+    resolved_estimation : dict
+        A resolved estimation recipe (``_motion.resolve_estimation_params``).
+
+    Returns
+    -------
+    str or None
+        The estimator's refusal, or ``None`` when the geometry is eligible.
+    """
+    import numpy as np
+    from spikeinterface.core import NumpyRecording
+
+    from spyglass.spikesorting.v2._motion import check_estimation_eligibility
+    from spyglass.spikesorting.v2._recording_geometry import (
+        classify_missing_geometry,
+        maybe_apply_tetrode_geometry,
+        select_distinct_plane,
+        tetrode_repair_applies,
+    )
+
+    channel_ids = [int(c) for c in channel_ids]
+    positions = np.asarray(positions, dtype=float)
+    missing = classify_missing_geometry(positions)
+    plane = None if missing != "none" else select_distinct_plane(positions)
+    repaired = (
+        plane is None
+        and missing != "partial"
+        and tetrode_repair_applies(
+            tuple(probe_types), tuple(electrode_group_names), len(channel_ids)
+        )
+    )
+    if plane is None and not repaired:
+        return None
+    recording = NumpyRecording(
+        np.zeros((1, len(channel_ids)), dtype="float32"),
+        sampling_frequency=30000.0,
+        channel_ids=channel_ids,
+    )
+    if repaired:
+        maybe_apply_tetrode_geometry(
+            recording,
+            tuple(probe_types),
+            tuple(electrode_group_names),
+            channel_ids,
+        )
+    else:
+        recording.set_channel_locations(plane[1])
+    recording.set_property("group", [str(g) for g in electrode_group_names])
+    recording.set_property("probe_shank", [str(s) for s in probe_shanks])
+    try:
+        check_estimation_eligibility(recording, resolved_estimation)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def motion_geometry_problem(
+    nwb_file_name: str, sort_group_id: int, resolved_estimation: dict
+) -> "str | None":
+    """Say why a sort group cannot be motion-estimated with a recipe.
+
+    Reads the group's electrodes, registered contact positions, probe types,
+    electrode groups and shanks, then applies
+    :func:`motion_geometry_problem_from_contacts`. Evaluated on the full
+    electrode membership, like :func:`sort_group_geometry_problem`; the
+    estimator re-checks the actual recording.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+    sort_group_id : int
+    resolved_estimation : dict
+        A resolved estimation recipe.
+
+    Returns
+    -------
+    str or None
+        The operator-facing problem, or ``None``.
+    """
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.spikesorting.v2._recording_geometry import (
+        fetch_sort_group_contact_positions,
+        fetch_sort_group_probe_info,
+    )
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    channel_ids = sorted(
+        int(c)
+        for c in (
+            SortGroupV2.SortGroupElectrode
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": int(sort_group_id),
+            }
+        ).fetch("electrode_id")
+    )
+    if not channel_ids:
+        return None
+    positions = fetch_sort_group_contact_positions(nwb_file_name, channel_ids)
+    probe_types, group_names = fetch_sort_group_probe_info(
+        nwb_file_name, channel_ids
+    )
+    shanks = (
+        Electrode
+        & {"nwb_file_name": nwb_file_name}
+        & [{"electrode_id": c} for c in channel_ids]
+    ).fetch("probe_shank", order_by="electrode_id")
+    problem = motion_geometry_problem_from_contacts(
+        channel_ids,
+        positions,
+        probe_types,
+        group_names,
+        shanks,
+        resolved_estimation,
+    )
+    if problem is None:
+        return None
+    return (
+        f"sort_group_id={int(sort_group_id)} of {nwb_file_name!r} cannot be "
+        f"motion-estimated with this recipe: {problem}"
     )
 
 
@@ -1464,6 +1776,40 @@ def preflight_v2_pipeline(
                     "container, not on the host."
                 )
 
+    # 10. Motion stage (estimate / apply). The recipe must exist and resolve,
+    # the group's effective geometry must support the estimation recipe
+    # (checked here on the registered positions, before any populate; the
+    # estimator re-checks the actual recording), and a sort of a corrected
+    # recording must not run the sorter's own motion correction.
+    motion_recipe = None
+    if motion_mode != "off":
+        try:
+            motion_recipe = resolve_motion_recipe(motion_correction_params_name)
+        except ValueError as exc:
+            _check("motion_recipe_exists", False, str(exc))
+        else:
+            _check("motion_recipe_exists", True, "")
+            if sort_group_exists:
+                motion_geometry = motion_geometry_problem(
+                    nwb_file_name,
+                    sort_group_id,
+                    motion_recipe.resolved_estimation,
+                )
+                _check(
+                    "motion_geometry_supported",
+                    motion_geometry is None,
+                    motion_geometry or "",
+                )
+        if motion_mode == "apply" and sorter_params_exist:
+            sorter_motion = sorter_motion_correction_problem(
+                bundle.sorter, sorter_row["params"], bundle.sorter_params_name
+            )
+            _check(
+                "sorter_motion_correction_off",
+                sorter_motion is None,
+                sorter_motion or "",
+            )
+
     # Non-blocking advisory: the "none" artifact params are a no-op
     # pass-through (no masking). "default" performs real amplitude-threshold
     # detection and is the legitimate built-in choice, so it is NOT warned.
@@ -1518,14 +1864,27 @@ def preflight_v2_pipeline(
                     manual_excluded_times=manual_excluded_times,
                 ),
             )
-        sorting_id = build_sorting_selection_plan(
-            {
-                "recording_id": recording_id,
-                "sorter": bundle.sorter,
-                "sorter_params_name": bundle.sorter_params_name,
-                "artifact_detection_id": artifact_detection_id,
-            }
-        ).sorting_id
+        motion_ids = _expected_motion_ids(
+            motion_mode,
+            motion_recipe,
+            recording_id=recording_id,
+            artifact_detection_id=artifact_detection_id,
+        )
+        corrected = motion_ids.get("motion_corrected_recording_id", {})
+        sorting_pending = corrected.get("pending")
+        sorting_id = (
+            None
+            if sorting_pending
+            else build_sorting_selection_plan(
+                {
+                    "recording_id": recording_id,
+                    "sorter": bundle.sorter,
+                    "sorter_params_name": bundle.sorter_params_name,
+                    "artifact_detection_id": artifact_detection_id,
+                    "motion_corrected_recording_id": corrected.get("id"),
+                }
+            ).sorting_id
+        )
         # Per stage, ``exists`` is whether the SELECTION row exists (the run
         # would reuse this PK) and ``computed_exists`` whether the COMPUTED
         # output row exists (the populate already ran -- a reused, near-zero-cost
@@ -1556,11 +1915,25 @@ def preflight_v2_pipeline(
                     ),
                 }
             ),
-            "sorting_id": {
-                "id": sorting_id,
-                "exists": bool(SortingSelection & {"sorting_id": sorting_id}),
-                "computed_exists": bool(Sorting & {"sorting_id": sorting_id}),
-            },
+            **motion_ids,
+            "sorting_id": (
+                {
+                    "id": None,
+                    "exists": False,
+                    "computed_exists": False,
+                    "pending": sorting_pending,
+                }
+                if sorting_pending
+                else {
+                    "id": sorting_id,
+                    "exists": bool(
+                        SortingSelection & {"sorting_id": sorting_id}
+                    ),
+                    "computed_exists": bool(
+                        Sorting & {"sorting_id": sorting_id}
+                    ),
+                }
+            ),
         }
 
     errors = [c.fix for c in checks if not c.ok]
@@ -1595,6 +1968,99 @@ def preflight_v2_pipeline(
             manual_excluded_times=manual_excluded_times,
         ),
     )
+
+
+def _expected_motion_ids(
+    motion_mode,
+    motion_recipe: "MotionRecipe | None",
+    *,
+    recording_id,
+    artifact_detection_id,
+) -> dict:
+    """Preview the motion selection ids a single-recording run would mint.
+
+    The estimate id folds in the source recording's ``content_hash``, so it
+    (and the corrected id and an ``"apply"`` sort id built on it) is known
+    only once the ``Recording`` is computed; until then the entries carry
+    ``id=None`` and a ``pending`` reason instead of a guess. Uses the DB-free
+    derivations the selection inserts use, so a preview cannot drift from the
+    insert.
+
+    Returns
+    -------
+    dict
+        ``{}`` for ``"off"`` or an unresolved recipe; otherwise
+        ``motion_estimate_id`` (and, for ``"apply"``,
+        ``motion_corrected_recording_id``) entries shaped like the other
+        ``expected_ids`` entries.
+    """
+    from spyglass.spikesorting.v2._motion import (
+        motion_corrected_selection_identity,
+        motion_estimate_selection_identity,
+    )
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionCorrectedRecordingSelection,
+        MotionEstimate,
+        MotionEstimateSelection,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+
+    if motion_mode == "off" or motion_recipe is None:
+        return {}
+    names = ["motion_estimate_id"] + (
+        ["motion_corrected_recording_id"] if motion_mode == "apply" else []
+    )
+    content_hashes = (Recording & {"recording_id": recording_id}).fetch(
+        "content_hash"
+    )
+    if len(content_hashes) == 0:
+        pending = (
+            "the recording is computed (the motion estimate id includes its "
+            "content hash)"
+        )
+        return {
+            name: {
+                "id": None,
+                "exists": False,
+                "computed_exists": False,
+                "pending": pending,
+            }
+            for name in names
+        }
+    estimate_id = motion_estimate_selection_identity(
+        source_kind="recording",
+        source_id=recording_id,
+        source_content_hash=content_hashes[0],
+        artifact_detection_id=artifact_detection_id,
+        motion_estimation_params_name=motion_recipe.recipe[
+            "motion_estimation_params_name"
+        ],
+        estimation_params=motion_recipe.estimation_params,
+    ).selection_id
+    estimate_key = {"motion_estimate_id": estimate_id}
+    expected = {
+        "motion_estimate_id": {
+            "id": estimate_id,
+            "exists": bool(MotionEstimateSelection & estimate_key),
+            "computed_exists": bool(MotionEstimate & estimate_key),
+        }
+    }
+    if motion_mode == "apply":
+        corrected_id = motion_corrected_selection_identity(
+            motion_estimate_id=estimate_id,
+            motion_interpolation_params_name=motion_recipe.recipe[
+                "motion_interpolation_params_name"
+            ],
+            interpolation_params=motion_recipe.interpolation_params,
+        ).selection_id
+        corrected_key = {"motion_corrected_recording_id": corrected_id}
+        expected["motion_corrected_recording_id"] = {
+            "id": corrected_id,
+            "exists": bool(MotionCorrectedRecordingSelection & corrected_key),
+            "computed_exists": bool(MotionCorrectedRecording & corrected_key),
+        }
+    return expected
 
 
 def _resource_notes(

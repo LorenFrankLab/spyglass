@@ -266,6 +266,84 @@ def test_valid_motion_requests_have_no_problem(mode, name):
     assert motion_request_problem(mode, name) is None
 
 
+def _resolved_motion_recipe(name: str) -> dict:
+    from spyglass.spikesorting.v2._motion import resolve_estimation_params
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        motion_estimation_default_contents,
+    )
+
+    (params,) = [
+        row[1] for row in motion_estimation_default_contents() if row[0] == name
+    ]
+    return resolve_estimation_params(params)
+
+
+def _column(n_contacts: int, pitch_um: float = 26.0):
+    """``(n, 3)`` single-column contact positions, rel_z constant."""
+    import numpy as np
+
+    return np.column_stack(
+        [
+            np.zeros(n_contacts),
+            np.arange(n_contacts) * pitch_um,
+            np.zeros(n_contacts),
+        ]
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "case, match",
+    [
+        ("polymer_shank", None),
+        ("partial_geometry", None),
+        ("legacy_tetrode", "detection radius_um"),
+        ("four_contacts", "detection radius_um"),
+        ("two_shanks", "2 shanks"),
+        ("sixteen_contacts", "nonrigid windows"),
+    ],
+)
+def test_motion_geometry_eligibility_from_registered_contacts(case, match):
+    """Preflight runs the estimator's own eligibility check on the group's
+    effective planar geometry: a 32-contact polymer shank (806 um) passes the
+    shipped nonrigid recipe; a repaired legacy tetrode (12.5 um) and four
+    contacts are shorter than the detection radius; two shanks and a 16-contact
+    shank (too short for 400 um windows) are refused. Incomplete geometry is
+    left to the recording-geometry check (reported once)."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        motion_geometry_problem_from_contacts,
+    )
+
+    n = {"legacy_tetrode": 4, "four_contacts": 4, "sixteen_contacts": 16}.get(
+        case, 32
+    )
+    positions = _column(n)
+    probe_types = ["128c-4s6mm6cm-15um-26um-sl"] * n
+    groups = ["0"] * n
+    shanks = [0] * n
+    if case == "legacy_tetrode":
+        positions = np.full((4, 3), np.nan)
+        probe_types = ["tetrode_12.5"] * 4
+    elif case == "partial_geometry":
+        positions[3, 2] = np.nan
+    elif case == "two_shanks":
+        shanks = [0] * 16 + [1] * 16
+    problem = motion_geometry_problem_from_contacts(
+        list(range(n)),
+        positions,
+        probe_types,
+        groups,
+        shanks,
+        _resolved_motion_recipe("dredge_fast_v1"),
+    )
+    if match is None:
+        assert problem is None
+    else:
+        assert match in problem
+
+
 # ---------------------------------------------------------------------------
 # database tier — fixtures
 # ---------------------------------------------------------------------------

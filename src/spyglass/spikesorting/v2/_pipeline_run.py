@@ -38,6 +38,7 @@ from spyglass.spikesorting.v2._pipeline_preflight import (
     motion_request_problem,
     preflight_v2_pipeline,
     preflight_v2_pipeline_session,
+    resolve_motion_recipe,
     resolve_preset_sort_config,
 )
 from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
@@ -635,6 +636,8 @@ def run_v2_pipeline(
             bundle,
             auto_curate=auto_curate,
             manual_excluded_times=manual_excluded_times,
+            motion_mode=motion_mode,
+            motion_correction_params_name=motion_correction_params_name,
         )
 
     # Per-stage observability. For each stage: derive computed-vs-reused from
@@ -652,21 +655,11 @@ def run_v2_pipeline(
     }
     # Resolve the motion recipe before any populate, so a missing row fails
     # here (not after the recording / concat build) when preflight is off.
-    motion_recipe = None
-    if motion_mode != "off":
-        from spyglass.spikesorting.v2.motion import MotionCorrectionParameters
-        from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
-
-        recipe_key = {
-            "motion_correction_params_name": motion_correction_params_name
-        }
-        _ensure_lookup_row_exists(
-            MotionCorrectionParameters,
-            recipe_key,
-            helper_name="run_v2_pipeline",
-            insert_default_path="initialize_v2_defaults()",
-        )
-        motion_recipe = (MotionCorrectionParameters & recipe_key).fetch1()
+    motion_recipe = (
+        None
+        if motion_mode == "off"
+        else resolve_motion_recipe(motion_correction_params_name).recipe
+    )
     # Capture what the sort stage executes ONCE, up front, from the same
     # resolver the dispatcher uses (``resolve_sort_config``): the receipt then
     # states the effective sorter kwargs / whiten routing / seed / job kwargs /

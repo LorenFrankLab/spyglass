@@ -2301,3 +2301,283 @@ def test_motion_stage_failure_stops_before_sorting(
     partial = raised.value.partial_run_summary
     assert partial["motion_corrected_recording_id"] is None
     assert "sorting_id" not in partial
+
+
+def test_preflight_previews_the_motion_ids_the_run_mints(drift_recording):
+    """For ``apply``, preflight's expected estimate, corrected-recording and
+    sort ids are the ones the run then produces, and every motion check
+    passes on the eligible polymer shank with a sorter that does not correct
+    motion itself."""
+    from spyglass.spikesorting.v2.pipeline import (
+        preflight_v2_pipeline,
+        run_v2_pipeline,
+    )
+
+    inputs = _pipeline_inputs(drift_recording)
+    motion = {
+        "motion_mode": "apply",
+        "motion_correction_params_name": MOTION_RECIPE,
+    }
+    report = preflight_v2_pipeline(**inputs, **motion)
+    assert report.ok, report.errors
+    checks = {c.name: c.ok for c in report.checks}
+    for name in (
+        "motion_request_valid",
+        "motion_recipe_exists",
+        "motion_geometry_supported",
+        "sorter_motion_correction_off",
+    ):
+        assert checks[name] is True
+    ids = report.expected_ids
+    assert list(ids) == [
+        "recording_id",
+        "artifact_detection_id",
+        "motion_estimate_id",
+        "motion_corrected_recording_id",
+        "sorting_id",
+    ]
+    assert "motion_corrected_recording:" in report.summary()
+    summary = None
+    try:
+        summary = run_v2_pipeline(**inputs, **motion)
+        for name in (
+            "motion_estimate_id",
+            "motion_corrected_recording_id",
+            "sorting_id",
+        ):
+            assert ids[name]["id"] == summary[name]
+    finally:
+        if summary is not None:
+            _drop_pipeline_sorts([summary["sorting_id"]])
+
+
+@pytest.fixture
+def self_correcting_preset(dj_conn):
+    """A registered preset whose sorter row (spykingcircus2 ``default``)
+    runs the sorter's own motion correction."""
+    from spyglass.spikesorting.v2._pipeline_presets import (
+        _PIPELINE_PRESETS,
+        register_pipeline_preset,
+    )
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    name = "motion_test_spykingcircus2_2026_09"
+    SorterParameters.insert_default()
+    register_pipeline_preset(
+        name,
+        _PIPELINE_PRESETS[PIPELINE_PRESET].model_copy(
+            update={
+                "sorter": "spykingcircus2",
+                "sorter_params_name": "default",
+                "sorter_family": "spykingcircus2",
+            }
+        ),
+    )
+    yield name
+    _PIPELINE_PRESETS.pop(name, None)
+
+
+def test_invalid_support_and_geometry_fail_before_sorting(
+    drift_recording, monkeypatch, self_correcting_preset
+):
+    """Each unsupported case fails clearly before any sort, and no corrected
+    recording or sort row is written: an estimate with no valid evidence, a
+    non-finite estimate, a correction that removes every channel, a sort
+    group too short for the recipe, and a sorter row that corrects motion
+    itself."""
+    import spikeinterface.sortingcomponents.motion as si_motion
+
+    from spyglass.spikesorting.v2._params.motion_estimation import (
+        MotionEstimationParamsSchema,
+    )
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        KRIGING_FORCE_EXTRAPOLATE,
+        KRIGING_REMOVE_CHANNELS,
+    )
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.spikesorting.v2.exceptions import (
+        PipelineStageError,
+        PreflightError,
+    )
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectionParameters,
+        MotionEstimationParameters,
+    )
+    from spyglass.spikesorting.v2.pipeline import (
+        preflight_v2_pipeline,
+        run_v2_pipeline,
+    )
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    inputs = _pipeline_inputs(drift_recording)
+    nwb_file_name = drift_recording["nwb_file_name"]
+    t0 = _session_start_s(nwb_file_name)
+    MotionEstimationParameters.insert1(
+        {
+            "motion_estimation_params_name": "no_evidence_test",
+            "params": MotionEstimationParamsSchema(
+                preset="dredge_fast",
+                max_gap_s=30.0,
+                detect_kwargs={"detect_threshold": 1.0e6},
+            ).model_dump(),
+        },
+        skip_duplicates=True,
+    )
+    MotionCorrectionParameters.insert(
+        [
+            {
+                "motion_correction_params_name": "no_evidence_test",
+                "motion_estimation_params_name": "no_evidence_test",
+                "motion_interpolation_params_name": KRIGING_FORCE_EXTRAPOLATE,
+            },
+            {
+                "motion_correction_params_name": "remove_channels_test",
+                "motion_estimation_params_name": MOTION_RECIPE,
+                "motion_interpolation_params_name": KRIGING_REMOVE_CHANNELS,
+            },
+        ],
+        skip_duplicates=True,
+    )
+    real_estimate_motion = si_motion.estimate_motion
+
+    def _shifted_estimate(shift_um):
+        def _estimate(*args, **kwargs):
+            motion = real_estimate_motion(*args, **kwargs)
+            motion.displacement[0] = motion.displacement[0] + shift_um
+            return motion
+
+        return _estimate
+
+    runtime_cases = [
+        # (recipe, planted estimator, failing stage, message, offset s)
+        ("no_evidence_test", None, "motion_estimate", "no valid evidence", 8),
+        (
+            MOTION_RECIPE,
+            _shifted_estimate(np.nan),
+            "motion_estimate",
+            "non-finite",
+            10,
+        ),
+        (
+            "remove_channels_test",
+            _shifted_estimate(5000.0),
+            "motion_corrected_recording",
+            "removed every channel",
+            12,
+        ),
+    ]
+    for recipe, estimator, stage, message, offset_s in runtime_cases:
+        if estimator is not None:
+            monkeypatch.setattr(si_motion, "estimate_motion", estimator)
+        before = _row_counts()
+        with pytest.raises(PipelineStageError) as raised:
+            run_v2_pipeline(
+                **inputs,
+                # A mask of its own gives each case a fresh estimate.
+                manual_excluded_times=[[t0 + offset_s, t0 + offset_s + 0.5]],
+                motion_mode="apply",
+                motion_correction_params_name=recipe,
+            )
+        monkeypatch.undo()
+        assert raised.value.stage == stage, recipe
+        assert message in str(raised.value), recipe
+        after = _row_counts()
+        for table in (
+            "MotionCorrectedRecording",
+            "SortingSelection",
+            "Sorting",
+        ):
+            assert after[table] == before[table], (recipe, table)
+
+    # A four-contact group spans 78 um, under the recipe's 80 um detection
+    # radius: preflight refuses it before anything is computed.
+    short_group = {"nwb_file_name": nwb_file_name, "sort_group_id": 99}
+    electrodes = (
+        Electrode
+        & {"nwb_file_name": nwb_file_name}
+        & (
+            SortGroupV2.SortGroupElectrode
+            & {**short_group, "sort_group_id": inputs["sort_group_id"]}
+        ).proj()
+    ).fetch("KEY", as_dict=True, order_by="electrode_id", limit=4)
+    SortGroupV2.insert1({**short_group, "reference_mode": "none"})
+    SortGroupV2.SortGroupElectrode.insert(
+        [{**short_group, **electrode} for electrode in electrodes]
+    )
+    sc2_preset = self_correcting_preset
+    try:
+        preflight_cases = [
+            (
+                {**inputs, "sort_group_id": 99},
+                "motion_geometry_supported",
+                "detection radius_um",
+            ),
+            (
+                {**inputs, "pipeline_preset": sc2_preset},
+                "sorter_motion_correction_off",
+                "apply_motion_correction=False",
+            ),
+        ]
+        for request, check, message in preflight_cases:
+            report = preflight_v2_pipeline(
+                **request,
+                motion_mode="apply",
+                motion_correction_params_name=MOTION_RECIPE,
+            )
+            failed = {c.name: c.fix for c in report.checks if not c.ok}
+            assert message in failed[check], failed
+            before = _row_counts()
+            with pytest.raises(PreflightError, match=message):
+                run_v2_pipeline(
+                    **request,
+                    motion_mode="apply",
+                    motion_correction_params_name=MOTION_RECIPE,
+                )
+            assert _row_counts() == before
+        # The short group's recording was never computed, so the ids that
+        # fold in its content hash are pending rather than guessed.
+        short = preflight_v2_pipeline(
+            **{**inputs, "sort_group_id": 99},
+            motion_mode="apply",
+            motion_correction_params_name=MOTION_RECIPE,
+        ).expected_ids
+        for name in (
+            "motion_estimate_id",
+            "motion_corrected_recording_id",
+            "sorting_id",
+        ):
+            assert short[name]["id"] is None and short[name]["pending"]
+        # Estimating does not sort a corrected recording, so the sorter's own
+        # correction is not a motion error there.
+        estimate_report = preflight_v2_pipeline(
+            **{**inputs, "pipeline_preset": sc2_preset},
+            motion_mode="estimate",
+            motion_correction_params_name=MOTION_RECIPE,
+        )
+        assert "sorter_motion_correction_off" not in {
+            c.name for c in estimate_report.checks
+        }
+    finally:
+        (SortGroupV2 & short_group).super_delete(warn=False, safemode=False)
+
+
+def test_concat_preflight_refuses_a_self_correcting_sorter(
+    discontinuous_sources, self_correcting_preset
+):
+    """The concat preflight applies the same motion checks: ``apply`` with a
+    sorter row that corrects motion itself fails before any member, concat,
+    motion or sort row is built."""
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    before = {**_row_counts(), "concat": len(ConcatenatedRecording())}
+    with pytest.raises(PreflightError, match="apply_motion_correction=False"):
+        run_v2_pipeline(
+            concat_session_group_owner=MOTION_TEAM,
+            concat_session_group_name=CONCAT_GROUP,
+            pipeline_preset=self_correcting_preset,
+            motion_mode="apply",
+            motion_correction_params_name=MOTION_RECIPE,
+        )
+    assert {**_row_counts(), "concat": len(ConcatenatedRecording())} == before
