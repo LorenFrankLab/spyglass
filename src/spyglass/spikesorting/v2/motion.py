@@ -762,12 +762,13 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
 
         Re-resolves the recipe and requires its hash, the SpikeInterface
         version and the algorithm version to equal the selection's. Reads the
-        source traces; for a single recording derives the continuity spans
-        and their first and last timestamps from its timestamps, silences the artifact
-        ranges and computes the statistics spans as the sort stage does; for a
-        concat reads its persisted continuity spans, their first and last
-        timestamps and its statistics spans. Builds the estimation clock with the recipe's
-        ``max_gap_s`` and runs ``_motion.estimate_motion_in_spans`` once.
+        source traces. For a single recording, reads the continuity spans and
+        each span's first and last timestamp from the persisted timestamps,
+        silences the artifact ranges and computes the statistics spans as the
+        sort stage does; for a concat, reads the same spans, timestamps and
+        statistics spans from its row. Builds the estimation clock with the
+        recipe's ``max_gap_s`` and runs ``_motion.estimate_motion_in_spans``
+        once.
 
         Raises
         ------

@@ -1130,7 +1130,6 @@ class EstimationClockRecording(BaseRecording):
                 recording._recording_segments[0], clock
             )
         )
-        self._parent = recording
         self._serializability["json"] = False
         self._kwargs = {
             "recording": recording,
@@ -1443,10 +1442,10 @@ def motion_input_fingerprint(
     """SHA-256 of everything an estimate was computed from.
 
     The source content, mask choice, frame spans and the continuity spans'
-    first and last timestamps, estimation channels and their positions, and the resolved
-    configuration (which holds the gap cap). Two estimates with the same
-    fingerprint read the same valid samples on the same estimation clock and
-    geometry with the same settings.
+    first and last timestamps, estimation channels and their positions, and
+    the resolved configuration (which holds the gap cap). Two estimates with
+    the same fingerprint read the same valid samples on the same estimation
+    clock and geometry with the same settings.
 
     Returns
     -------
