@@ -27,9 +27,9 @@ def initialize_v2_defaults() -> None:
     ``AutoCurationRules``, ``MatcherParameters``, the shipped
     ``CurationReviewProfile``, and ``MotionCorrectionParameters`` (with the
     estimation and interpolation recipes it names) -- each accepts
-    duplicate-row noise -- so a notebook user can run one helper instead of remembering the
-    per-table calls before the first ``run_v2_pipeline`` / cross-session match
-    or browser review. Idempotent.
+    duplicate-row noise -- so a notebook user can run one helper instead of
+    remembering the per-table calls before the first ``run_v2_pipeline`` /
+    cross-session match or browser review. Idempotent.
 
     Examples
     --------

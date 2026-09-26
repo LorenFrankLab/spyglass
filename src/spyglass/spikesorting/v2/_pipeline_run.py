@@ -188,10 +188,11 @@ def run_v2_pipeline(
     """End-to-end sort in one call: select + populate every stage, then curate.
 
     Two input modes, exactly one required. Single-session mode (recording ->
-    optional artifact detection -> [motion] -> sort -> curation) needs ``nwb_file_name``,
-    ``sort_group_id``, ``interval_list_name``, ``team_name``. Concat mode
-    (member recordings -> member artifact masks -> ConcatenatedRecording ->
-    [motion] -> sort -> curation) needs ``concat_session_group_owner`` + ``concat_session_group_name``
+    optional artifact detection -> [motion] -> sort -> curation) needs
+    ``nwb_file_name``, ``sort_group_id``, ``interval_list_name``,
+    ``team_name``. Concat mode (member recordings -> member artifact masks ->
+    ConcatenatedRecording -> [motion] -> sort -> curation) needs
+    ``concat_session_group_owner`` + ``concat_session_group_name``
     and rejects the single-session fields (member teams come from
     ``SessionGroup.Member``). Supplying both, neither, or part of a mode raises
     ``PipelineInputError``.
@@ -404,8 +405,8 @@ def run_v2_pipeline(
                 (``"estimate"`` / ``"apply"``)
             ``motion_estimation_preset`` : the SpikeInterface preset the
                 estimation recipe resolved to
-            ``motion_corrected_recording_id`` : MotionCorrectedRecordingSelection
-                PK (``"apply"``)
+            ``motion_corrected_recording_id`` :
+                MotionCorrectedRecordingSelection PK (``"apply"``)
             ``motion_removed_channel_ids`` : source channels the interpolation's
                 ``remove_channels`` border mode dropped (``"apply"``; empty
                 for ``force_extrapolate``)
