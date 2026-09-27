@@ -341,7 +341,8 @@ def _run_preflight(
     Parameters
     ----------
     caller : str
-        The public entry point, prefixed to each logged advisory.
+        The public entry point, prefixed to each logged advisory and each
+        concat preflight error.
     is_concat : bool
         The input mode.
     source_inputs : dict
@@ -399,6 +400,7 @@ def _run_preflight(
         motion_mode=motion_mode,
         motion_correction_params_name=motion_correction_params_name,
         motion_estimate_id=motion_estimate_id,
+        caller=caller,
     )
 
 

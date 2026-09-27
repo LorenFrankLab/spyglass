@@ -2698,7 +2698,7 @@ def test_a_supplied_estimate_that_does_not_match_fails_before_sorting(
     elif case == "other_mask":
         estimate = populated_estimate(recording_id=run_recording_id)
         expected = [
-            f"artifact_detection_id None != the sort's "
+            f"artifact_detection_id None != the run's "
             f"{saved['artifact_detection_id']}"
         ]
     elif case == "other_estimation_row":
@@ -2946,6 +2946,20 @@ def test_estimate_motion_then_apply_on_a_concatenation(discontinuous_sources):
             drop_motion_selections(
                 {"concat_recording_id": receipt["concat_recording_id"]}
             )
+
+
+def test_concat_preflight_names_the_calling_entry_point(dj_conn):
+    """A concat preflight failure names the entry point that ran it."""
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.spikesorting.v2.pipeline import estimate_motion
+
+    with pytest.raises(PreflightError, match="^estimate_motion: SessionGroup"):
+        estimate_motion(
+            concat_session_group_owner="no_such_owner",
+            concat_session_group_name="no_such_group",
+            pipeline_preset=PIPELINE_PRESET,
+            motion_correction_params_name=MOTION_RECIPE,
+        )
 
 
 @pytest.fixture

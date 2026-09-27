@@ -616,7 +616,9 @@ def resolve_preset_sort_config(bundle) -> "dict | None":
     ).as_dict()
 
 
-def assert_preset_compute_rows(bundle) -> None:
+def assert_preset_compute_rows(
+    bundle, *, caller: str = "run_v2_pipeline"
+) -> None:
     """Raise ``PreflightError`` if a preset's compute-time rows / sorter binary
     are missing.
 
@@ -629,6 +631,7 @@ def assert_preset_compute_rows(bundle) -> None:
     param-row existence queries mirror ``preflight_v2_pipeline``'s (kept in its
     report-building form there); the sorter binary/runtime check reuses the
     shared :func:`_check_local_sorter_runtime` via a raise-style adapter.
+    ``caller`` names the public entry point in every message.
     """
     import spikeinterface.sorters as sis
 
@@ -655,7 +658,7 @@ def assert_preset_compute_rows(bundle) -> None:
         & {"preprocessing_params_name": bundle.preprocessing_params_name}
     ):
         raise PreflightError(
-            "run_v2_pipeline: PreprocessingParameters row "
+            f"{caller}: PreprocessingParameters row "
             f"{bundle.preprocessing_params_name!r} is missing. Run "
             "initialize_v2_defaults()."
         )
@@ -669,7 +672,7 @@ def assert_preset_compute_rows(bundle) -> None:
             }
         ):
             raise PreflightError(
-                "run_v2_pipeline: ArtifactDetectionParameters row "
+                f"{caller}: ArtifactDetectionParameters row "
                 f"{bundle.artifact_detection_params_name!r} is missing. Run "
                 "initialize_v2_defaults()."
             )
@@ -679,7 +682,7 @@ def assert_preset_compute_rows(bundle) -> None:
     }
     if not sorter_params_query:
         raise PreflightError(
-            "run_v2_pipeline: SorterParameters row (sorter="
+            f"{caller}: SorterParameters row (sorter="
             f"{bundle.sorter!r}, sorter_params_name="
             f"{bundle.sorter_params_name!r}) is missing. Run "
             "initialize_v2_defaults()."
@@ -697,7 +700,7 @@ def assert_preset_compute_rows(bundle) -> None:
             sorter_row["sorter"], sorter_row["params"]
         )
     except ValueError as exc:
-        raise PreflightError(f"run_v2_pipeline: {exc}") from exc
+        raise PreflightError(f"{caller}: {exc}") from exc
     display_waveform_params_name = waveform_params_for_preprocessing(
         bundle.preprocessing_params_name
     )[0]
@@ -706,7 +709,7 @@ def assert_preset_compute_rows(bundle) -> None:
         & {"waveform_params_name": display_waveform_params_name}
     ):
         raise PreflightError(
-            "run_v2_pipeline: AnalyzerWaveformParameters row "
+            f"{caller}: AnalyzerWaveformParameters row "
             f"{display_waveform_params_name!r} (the display analyzer recipe for "
             f"preprocessing {bundle.preprocessing_params_name!r}) is missing. "
             "Run initialize_v2_defaults()."
@@ -743,7 +746,7 @@ def assert_preset_compute_rows(bundle) -> None:
             runtime_ok, runtime_detail = _singularity_runtime_available()
         if not runtime_ok:
             raise PreflightError(
-                f"run_v2_pipeline: the {execution_backend} execution backend "
+                f"{caller}: the {execution_backend} execution backend "
                 f"(image {container_image!r}) for sorter {bundle.sorter!r} is "
                 f"not runnable here: {runtime_detail}. Install the container "
                 "runtime and its Python package, or pick a local-execution "
@@ -761,6 +764,7 @@ def assert_concat_preflight(
     motion_mode: MotionMode = "off",
     motion_correction_params_name: "str | None" = None,
     motion_estimate_id=None,
+    caller: str = "run_v2_pipeline",
 ) -> list[str]:
     """Raise ``PreflightError`` if a concat run's prerequisites are missing.
 
@@ -794,12 +798,12 @@ def assert_concat_preflight(
     }
     if not (SessionGroup & group_key):
         raise PreflightError(
-            f"run_v2_pipeline: SessionGroup {group_key} does not exist. "
+            f"{caller}: SessionGroup {group_key} does not exist. "
             "Create it with SessionGroup.create_group(...) first."
         )
     if not (SessionGroup.Member & group_key):
         raise PreflightError(
-            f"run_v2_pipeline: SessionGroup {group_key} has no members."
+            f"{caller}: SessionGroup {group_key} has no members."
         )
 
     # Each member is sorted through the same single-session Recording build, so
@@ -820,7 +824,7 @@ def assert_concat_preflight(
         )
         if not (Raw & {"nwb_file_name": nwb}):
             raise PreflightError(
-                f"run_v2_pipeline: {tag} has no Raw electrical-series row (the "
+                f"{caller}: {tag} has no Raw electrical-series row (the "
                 "session is ingested but its Raw data is not). Re-run ingestion "
                 "(populate_all_common / insert_sessions)."
             )
@@ -832,7 +836,7 @@ def assert_concat_preflight(
             }
         ):
             raise PreflightError(
-                f"run_v2_pipeline: {tag} is missing IntervalList 'raw data "
+                f"{caller}: {tag} is missing IntervalList 'raw data "
                 "valid times', which the recording build reads for the raw "
                 "sample bounds. Re-run ingestion."
             )
@@ -841,7 +845,7 @@ def assert_concat_preflight(
             & {"nwb_file_name": nwb, "sort_group_id": sort_group_id}
         ):
             raise PreflightError(
-                f"run_v2_pipeline: {tag} SortGroupV2 has zero electrode "
+                f"{caller}: {tag} SortGroupV2 has zero electrode "
                 "members; Recording.populate would raise 'has zero electrodes'. "
                 "Recreate it with SortGroupV2.set_group_by_shank(nwb_file_name="
                 "...)."
@@ -855,7 +859,7 @@ def assert_concat_preflight(
                 > 0.005 * bundle.sampling_rate_hz
             ):
                 raise PreflightError(
-                    f"run_v2_pipeline: {tag} samples at {actual_rate:g} Hz but "
+                    f"{caller}: {tag} samples at {actual_rate:g} Hz but "
                     f"the concat preset is tuned for {bundle.sampling_rate_hz} "
                     "Hz (the rate-keyed sorter row "
                     f"{bundle.sorter_params_name!r} holds its clip_size / "
@@ -884,7 +888,7 @@ def assert_concat_preflight(
             & {"metric_params_name": bundle.metric_params_name}
         ):
             raise PreflightError(
-                "run_v2_pipeline: QualityMetricParameters row "
+                f"{caller}: QualityMetricParameters row "
                 f"{bundle.metric_params_name!r} (the auto-curation metric set) "
                 "is missing. Run initialize_v2_defaults()."
             )
@@ -893,7 +897,7 @@ def assert_concat_preflight(
             & {"auto_curation_rules_name": bundle.auto_curation_rules_name}
         ):
             raise PreflightError(
-                "run_v2_pipeline: AutoCurationRules row "
+                f"{caller}: AutoCurationRules row "
                 f"{bundle.auto_curation_rules_name!r} (the auto-curation rule "
                 "set) is missing. Run initialize_v2_defaults()."
             )
@@ -905,13 +909,13 @@ def assert_concat_preflight(
             & {"waveform_params_name": metric_waveform_params_name}
         ):
             raise PreflightError(
-                "run_v2_pipeline: AnalyzerWaveformParameters row "
+                f"{caller}: AnalyzerWaveformParameters row "
                 f"{metric_waveform_params_name!r} (the whitened metric analyzer "
                 "recipe auto-curation scores on) is missing. Run "
                 "initialize_v2_defaults()."
             )
 
-    assert_preset_compute_rows(bundle)
+    assert_preset_compute_rows(bundle, caller=caller)
     if motion_mode != "off":
         from spyglass.spikesorting.v2.motion import (
             preprocessing_filter_problem,
@@ -921,13 +925,13 @@ def assert_concat_preflight(
         try:
             motion_recipe = resolve_motion_recipe(motion_correction_params_name)
         except ValueError as exc:
-            raise PreflightError(f"run_v2_pipeline: {exc}") from exc
+            raise PreflightError(f"{caller}: {exc}") from exc
         # The concatenation is built with the preset's preprocessing recipe
         # (checked to exist by assert_preset_compute_rows above).
         problem = preprocessing_filter_problem(bundle.preprocessing_params_name)
         if problem is not None:
             raise PreflightError(
-                f"run_v2_pipeline: motion_mode={motion_mode!r}: {problem}"
+                f"{caller}: motion_mode={motion_mode!r}: {problem}"
             )
         for member in members:
             problem = motion_geometry_problem(
@@ -937,7 +941,7 @@ def assert_concat_preflight(
             )
             if problem is not None:
                 raise PreflightError(
-                    f"run_v2_pipeline: concat member {member['member_index']} "
+                    f"{caller}: concat member {member['member_index']} "
                     f"{problem}"
                 )
         if motion_mode == "apply":
@@ -952,7 +956,7 @@ def assert_concat_preflight(
                 bundle.sorter, sorter_params, bundle.sorter_params_name
             )
             if problem is not None:
-                raise PreflightError(f"run_v2_pipeline: {problem}")
+                raise PreflightError(f"{caller}: {problem}")
         if motion_estimate_id is not None:
             problem = supplied_motion_estimate_problem(
                 motion_estimate_id,
@@ -965,7 +969,7 @@ def assert_concat_preflight(
                 },
             )
             if problem is not None:
-                raise PreflightError(f"run_v2_pipeline: {problem}")
+                raise PreflightError(f"{caller}: {problem}")
     if (
         bundle.artifact_detection_params_name in (None, "none")
         and not manual_excluded_times
@@ -1363,7 +1367,9 @@ def supplied_motion_estimate_problem(
         )
     lineage = MotionEstimateSelection.resolve_source(key)
     if source_lineage is not None:
-        problems.extend(correction_lineage_mismatch(source_lineage, lineage))
+        problems.extend(
+            correction_lineage_mismatch(source_lineage, lineage, consumer="run")
+        )
     if concat_source is not None:
         from spyglass.spikesorting.v2.session_group import (
             ConcatenatedRecordingSelection,

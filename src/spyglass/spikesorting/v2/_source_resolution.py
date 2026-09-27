@@ -164,7 +164,10 @@ def effective_source_from_correction(
 
 
 def correction_lineage_mismatch(
-    sort_lineage: SourceLineage, correction_lineage: SourceLineage
+    sort_lineage: SourceLineage,
+    correction_lineage: SourceLineage,
+    *,
+    consumer: str = "sort",
 ) -> list[str]:
     """Describe how a corrected recording's source differs from a sort's.
 
@@ -180,6 +183,10 @@ def correction_lineage_mismatch(
     correction_lineage : SourceLineage
         The source and artifact detection of the corrected recording's
         motion estimate.
+    consumer : str, optional
+        What ``sort_lineage`` belongs to, named in each description
+        (``"the sort's ..."`` by default; ``"run"`` for a pipeline run that
+        applies a saved estimate before any sort exists).
 
     Returns
     -------
@@ -203,11 +210,12 @@ def correction_lineage_mismatch(
     mismatches = []
     if (kind, key) != (sort_kind, sort_key):
         mismatches.append(
-            f"source {kind} {key} != the sort's {sort_kind} {sort_key}"
+            f"source {kind} {key} != the {consumer}'s {sort_kind} {sort_key}"
         )
     if detection != sort_detection:
         mismatches.append(
-            f"artifact_detection_id {detection} != the sort's {sort_detection}"
+            f"artifact_detection_id {detection} != the {consumer}'s "
+            f"{sort_detection}"
         )
     return mismatches
 
