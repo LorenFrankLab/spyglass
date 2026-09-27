@@ -139,6 +139,9 @@ DLCProject().alter()
 - `Recording.make_fetch` resolves the raw NWB path, so `make_compute` (and the
   rebuild path) no longer query `Nwbfile` for it; the channel-id mapping reads
   the raw NWB at that path. Recordings are unchanged.
+- `CurationEvaluation.make_compute` reads the traces file its `make_fetch`
+  healed by path instead of resolving it again from the DB. Metrics are
+  unchanged.
 
 #### Spike Sorting v2: optional motion correction, independent of concatenation
 

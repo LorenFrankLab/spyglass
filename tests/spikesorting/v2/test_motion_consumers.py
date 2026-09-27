@@ -324,7 +324,7 @@ def test_all_consumers_resolve_selected_correction(
         loaded = []
         with monkeypatch.context() as patch:
             _spy_on(
-                patch, _source_resolution, "load_effective_recording", loaded
+                patch, _source_resolution, "read_effective_recording", loaded
             )
             selection = CurationEvaluationSelection.insert_selection(
                 {

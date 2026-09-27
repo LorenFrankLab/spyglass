@@ -197,8 +197,10 @@ class EvaluationRecordingInputs(NamedTuple):
     concat_recording_id: str | None
     artifact_detection_id: str | None
     artifact_valid_times: object  # np.ndarray | None (DeepHashed, not ==)
-    # The sort's effective traces: the artifact every recording load reads.
+    # The sort's effective traces: the artifact every recording load reads,
+    # and its absolute path (the file rebuilt in make_fetch if it was missing).
     traces: EffectiveTraces
+    traces_abs_path: str
     fs: float
     # The sort's persisted statistics spans (``Sorting.get_statistics_spans``)
     # as a tuple of ``(start, end)`` int frame pairs; every analyzer built or
@@ -976,9 +978,9 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
     # Tri-part make so the metric/merge compute (and NWB write) run OUTSIDE the
     # DB transaction. make_compute performs no DB writes: every upstream input
     # is resolved in make_fetch and threaded through the carrier (no get_sorting
-    # / get_analyzer in compute). Runtime helpers such as get_recording and
-    # AnalysisNwbfile().create()/get_abs_path() may perform DB reads while
-    # staging the output -- keeping the heavy NWB write off the commit txn.
+    # / get_analyzer in compute, and the traces are read by the path make_fetch
+    # healed). Its only DB reads stage the output file (see _recording_nwb) --
+    # keeping the heavy NWB write off the commit txn.
     _parallel_make = True
 
     def make_fetch(self, key) -> CurationEvaluationFetched:
@@ -1055,7 +1057,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         lineage, traces = SortingSelection.resolve_effective_source(sorting_key)
         artifact_detection_id = lineage.artifact_detection_id
         recording_id = lineage.key.get("recording_id")
-        SortingSelection.ensure_effective_traces(traces)
+        traces_abs_path = SortingSelection.ensure_effective_traces(traces)
         fs = float(traces.row["sampling_frequency"])
 
         artifact_valid_times = None
@@ -1124,6 +1126,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 artifact_detection_id=artifact_detection_id,
                 artifact_valid_times=artifact_valid_times,
                 traces=traces,
+                traces_abs_path=traces_abs_path,
                 fs=fs,
                 statistics_spans=tuple(
                     Sorting().get_statistics_spans(sorting_key)
@@ -1188,10 +1191,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         This stage performs no DB writes (tri-part contract): upstream inputs
         are resolved in ``make_fetch``, and the recording + raw / curated
         sortings are reconstructed from those threaded inputs rather than via
-        ``CurationV2.get_sorting`` / ``Sorting.get_analyzer``. Runtime helpers
-        such as ``get_recording`` and ``AnalysisNwbfile().create()`` /
-        ``get_abs_path()`` may perform DB reads while staging the output. The
-        heavy NWB write remains outside the commit transaction.
+        ``CurationV2.get_sorting`` / ``Sorting.get_analyzer``; the traces are
+        read from the path ``make_fetch`` resolved. The only DB reads left
+        stage the output file (see :mod:`._recording_nwb`). The heavy NWB
+        write remains outside the commit transaction.
         """
         import tempfile
         from pathlib import Path
@@ -1211,7 +1214,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             load_or_rebuild_analyzer_from_resolved,
         )
         from spyglass.spikesorting.v2._source_resolution import (
-            load_effective_recording,
+            read_effective_recording,
         )
 
         spikeinterface_version = si.__version__
@@ -1300,7 +1303,8 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                     None,
                 )
 
-            recording = load_effective_recording(
+            recording = read_effective_recording(
+                recording_inputs.traces_abs_path,
                 recording_inputs.traces,
                 artifact_valid_times=recording_inputs.artifact_valid_times,
                 artifact_detection_id=recording_inputs.artifact_detection_id,
