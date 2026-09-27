@@ -2924,7 +2924,7 @@ def test_tracked_unit_uses_frozen_universe_after_relabel(
             "frozen MatchableUnit -- not current labels -- is the node universe"
         )
     finally:
-        (CurationV2.UnitLabel & noise_label).delete(safemode=False)
+        (CurationV2.UnitLabel & noise_label).delete_quick()
         (TrackedUnit & pk).delete(safemode=False)
         (UnitMatchSelection & pk).super_delete(warn=False)
 
