@@ -58,11 +58,13 @@ def _table_class(tmp_path, *, fetch=None, insert_error=None, commit_error=None):
     class Computed(NamedTuple):
         analysis_file_name: str
         owner: _Owner
+        bundle: str
 
         def staged_outputs(self):
             return StagedOutputs(
                 analysis_file_names=(self.analysis_file_name,),
                 owners=(self.owner,),
+                folders=(self.bundle,),
             )
 
     class Table(StagedOutputCleanupMixin, AutoPopulate):
@@ -94,9 +96,12 @@ def _table_class(tmp_path, *, fetch=None, insert_error=None, commit_error=None):
             folder = tmp_path / f"{key['id']}.build"
             folder.mkdir()
             self.owners[name] = _Owner(folder)
-            return Computed(name, self.owners[name])
+            bundle = tmp_path / f"{key['id']}.bundle"
+            bundle.mkdir()
+            (bundle / "index.html").write_text("staged")
+            return Computed(name, self.owners[name], str(bundle))
 
-        def make_insert(self, key, analysis_file_name, owner):
+        def make_insert(self, key, analysis_file_name, owner, bundle):
             if insert_error is not None:
                 raise insert_error
             self.registered.append(analysis_file_name)
@@ -130,6 +135,7 @@ def test_success_keeps_registered_outputs(tmp_path):
     assert table.registered == ["a.nwb"]
     assert (tmp_path / "a.nwb").exists()
     assert (tmp_path / "a.build").exists()
+    assert (tmp_path / "a.bundle").exists()
     assert table.owners["a.nwb"].closed == 0
     assert table._staged_output_scopes == []
 
@@ -147,6 +153,7 @@ def test_changed_second_fetch_removes_staged_outputs(tmp_path):
     assert table.registered == []
     assert not (tmp_path / "a.nwb").exists()
     assert not (tmp_path / "a.build").exists()
+    assert not (tmp_path / "a.bundle").exists()
     assert table.owners["a.nwb"].closed == 1
     assert table._staged_output_scopes == []
 
@@ -189,6 +196,7 @@ def test_failed_insert_removes_staged_outputs(tmp_path):
         _populate1(table, {"id": "a"})
 
     assert not (tmp_path / "a.nwb").exists()
+    assert not (tmp_path / "a.bundle").exists()
     assert table.owners["a.nwb"].closed == 1
 
 
@@ -214,6 +222,7 @@ def test_failure_after_insert_leaves_registered_outputs(tmp_path):
 
     assert table.registered == ["a.nwb"]
     assert (tmp_path / "a.nwb").exists()
+    assert (tmp_path / "a.bundle").exists()
     assert table.owners["a.nwb"].closed == 0
 
 
@@ -270,6 +279,7 @@ def test_wrapping_keeps_generator_make_and_signatures(tmp_path):
         "key",
         "analysis_file_name",
         "owner",
+        "bundle",
     ]
 
     class Child(table_cls):

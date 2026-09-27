@@ -30,6 +30,7 @@ lazily.
 from __future__ import annotations
 
 import functools
+import shutil
 from typing import Any, NamedTuple
 
 from spyglass.utils import logger
@@ -50,10 +51,14 @@ class StagedOutputs(NamedTuple):
         Staging owners whose ``close()`` discards the private staged output
         and never a published one (e.g. ``StagedAnalyzer``). ``close`` must be
         safe to call more than once.
+    folders : tuple of str
+        Private staging directories, unique to this attempt, that
+        ``make_insert`` moves into place.
     """
 
     analysis_file_names: tuple[str, ...] = ()
     owners: tuple[Any, ...] = ()
+    folders: tuple[str, ...] = ()
 
 
 def _recording_compute(compute):
@@ -149,6 +154,16 @@ class StagedOutputCleanupMixin:
                     logger.error(
                         f"{context}: failed to discard staged output "
                         f"{owner!r}: {exc!r}"
+                    )
+            for folder in outputs.folders:
+                try:
+                    shutil.rmtree(folder)
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    logger.error(
+                        f"{context}: failed to remove staged folder "
+                        f"{folder!r}: {exc!r}"
                     )
         pending.clear()
 
