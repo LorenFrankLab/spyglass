@@ -253,10 +253,11 @@ def test_all_consumers_resolve_selected_correction(
         CurationEvaluationSelection,
     )
     from spyglass.spikesorting.v2.recompute import _recompute_analyzer_hashes
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from spyglass.spikesorting.v2.unit_matching import (
         UnitMatch,
         UnitMatchSelection,
+        _member_match_files,
     )
 
     sorts = corrected_sorts
@@ -436,6 +437,12 @@ def test_all_consumers_resolve_selected_correction(
             "matchable_unit_ids": [
                 int(u) for u in CurationV2().get_matchable_unit_ids(curation)
             ],
+            **_member_match_files(
+                curation,
+                SortingSelection.resolve_effective_source(
+                    {"sorting_id": curation["sorting_id"]}
+                ),
+            ),
         }
         for index, curation in enumerate([root, uncorrected_root])
     ]
@@ -525,6 +532,7 @@ def test_unitmatch_records_the_waveform_traces(
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.session_group import SessionGroup
+    from spyglass.spikesorting.v2.sorting import SortingSelection
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
         UnitMatch,
@@ -533,13 +541,18 @@ def test_unitmatch_records_the_waveform_traces(
     )
     from tests.spikesorting.v2._ingest_helpers import configure_v2_run_inputs
 
+    def _traces(sort):
+        return SortingSelection.resolve_effective_source(
+            {"sorting_id": sort["sorting_id"]}
+        ).traces
+
     sorts = corrected_sorts
     corrected_id = str(sorts["corrected_key"]["motion_corrected_recording_id"])
-    assert _member_waveform_traces(sorts["corrected_sort"]["sorting_id"]) == {
+    assert _member_waveform_traces(_traces(sorts["corrected_sort"])) == {
         "waveform_traces": "motion_corrected_recording",
         "motion_corrected_recording_id": corrected_id,
     }
-    assert _member_waveform_traces(sorts["uncorrected_sort"]["sorting_id"]) == {
+    assert _member_waveform_traces(_traces(sorts["uncorrected_sort"])) == {
         "waveform_traces": "recording",
         "motion_corrected_recording_id": None,
     }

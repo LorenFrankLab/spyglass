@@ -159,12 +159,14 @@ def test_bundle_params_reach_extract(monkeypatch):
     """The named bundle params actually reach extract_unitmatch_bundle in the
     matcher compute path -- they are no longer silent function defaults."""
     from spyglass.spikesorting.v2 import (
+        _source_resolution,
         _unitmatch_backend,
+        _units_nwb,
         matcher_protocol,
         unit_matching,
     )
     from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
-    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2._source_resolution import EffectiveTraces
 
     captured = {}
 
@@ -179,10 +181,12 @@ def test_bundle_params_reach_extract(monkeypatch):
         _unitmatch_backend, "extract_unitmatch_bundle", fake_extract
     )
     monkeypatch.setattr(
-        CurationV2, "get_recording", staticmethod(lambda key: object())
+        _source_resolution,
+        "read_effective_recording",
+        lambda abs_path, traces: object(),
     )
     monkeypatch.setattr(
-        CurationV2, "get_sorting", staticmethod(lambda key: _DummySorting())
+        _units_nwb, "read_stored_units", lambda units: _DummySorting()
     )
     monkeypatch.setattr(
         matcher_protocol,
@@ -193,6 +197,14 @@ def test_bundle_params_reach_extract(monkeypatch):
     params = UnitMatchParamsSchema(
         ms_before=2.0, ms_after=2.0, seed=4
     ).model_dump()
+    # The member files make_fetch would resolve; the readers are stubbed.
+    files = {
+        "traces": EffectiveTraces(
+            kind="recording", key={}, row={}, apply_artifact_mask=False
+        ),
+        "traces_abs_path": "unused.nwb",
+        "units": None,
+    }
     member_plan = [
         {
             "member_index": 0,
@@ -200,6 +212,7 @@ def test_bundle_params_reach_extract(monkeypatch):
             "curation_id": 0,
             "matchable_unit_ids": [1, 2],
             "recording_date": "2026-01-01T00:00:00+00:00",
+            **files,
         },
         {
             "member_index": 1,
@@ -207,6 +220,7 @@ def test_bundle_params_reach_extract(monkeypatch):
             "curation_id": 0,
             "matchable_unit_ids": [3, 4],
             "recording_date": "2026-01-02T00:00:00+00:00",
+            **files,
         },
     ]
     unit_matching.UnitMatch._extract_and_match(

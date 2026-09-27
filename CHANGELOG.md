@@ -142,6 +142,13 @@ DLCProject().alter()
 - `CurationEvaluation.make_compute` reads the traces file its `make_fetch`
   healed by path instead of resolving it again from the DB. Metrics are
   unchanged.
+- `UnitMatch.make_fetch` resolves each member's traces file (rebuilding a
+  missing one there) and curated Units NWB, and `make_compute` builds the
+  bundles from those files instead of calling `CurationV2.get_recording` /
+  `get_sorting`; it makes no DB queries apart from staging the pairs NWB.
+  `SortingSelection.resolve_stored_units` and `_units_nwb.read_stored_units`
+  split `get_sorting`'s readback into its DB and file halves. Pairs are
+  unchanged.
 
 #### Spike Sorting v2: optional motion correction, independent of concatenation
 

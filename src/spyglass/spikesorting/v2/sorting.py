@@ -79,6 +79,7 @@ from spyglass.spikesorting.v2._source_resolution import (
 )
 from spyglass.spikesorting.v2._units_nwb import (
     STATISTICS_SPANS_FIELD,
+    StoredUnits,
     abs_spike_times_dataframe,
     empty_spike_times_dataframe,
     numpysorting_from_abs_times,
@@ -1514,6 +1515,49 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             _TRACE_TABLES[traces.kind],
             traces.key,
             traces.row["analysis_file_name"],
+        )
+
+    @staticmethod
+    def resolve_stored_units(
+        units_analysis_file_name: str,
+        source: EffectiveSource,
+        traces_abs_path: str,
+    ) -> StoredUnits:
+        """Resolve a sort's or curation's units NWB for a DB-free readback.
+
+        Takes the same inputs ``Sorting.get_sorting`` and
+        ``CurationV2.get_sorting`` take: the units file, and the sampling rate
+        and timestamps of the sort's lineage source row (a motion-corrected
+        recording keeps its source's frames). When the effective traces are
+        that row, its already-resolved path is reused.
+
+        Parameters
+        ----------
+        units_analysis_file_name : str
+            The ``Sorting`` or ``CurationV2`` row's ``analysis_file_name``.
+        source : EffectiveSource
+            The sort's :meth:`resolve_effective_source`.
+        traces_abs_path : str
+            The effective traces' file, from :meth:`ensure_effective_traces`.
+
+        Returns
+        -------
+        StoredUnits
+            For :func:`._units_nwb.read_stored_units`.
+        """
+        lineage, traces = source
+        if traces.kind == lineage.kind:
+            recording_row, recording_abs_path = traces.row, traces_abs_path
+        else:
+            recording_row = (_TRACE_TABLES[lineage.kind] & lineage.key).fetch1()
+            recording_abs_path = AnalysisNwbfile.get_abs_path(
+                recording_row["analysis_file_name"]
+            )
+        return StoredUnits(
+            abs_path=AnalysisNwbfile.get_abs_path(units_analysis_file_name),
+            sampling_frequency=float(recording_row["sampling_frequency"]),
+            timestamps_abs_path=recording_abs_path,
+            timestamps_series_path=recording_row["electrical_series_path"],
         )
 
     @staticmethod

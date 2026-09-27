@@ -2124,6 +2124,108 @@ def test_make_runs_full_matcher_table_path(
 
 
 @pytest.mark.slow
+def test_make_compute_reads_fetched_members_and_only_stages_output(
+    two_session_curated_group, monkeypatch
+):
+    """``make_fetch`` resolves each member's traces file and curated units
+    NWB (its hash is stable across DataJoint's two fetches), and
+    ``make_compute`` builds each bundle from those files with no DB access
+    beyond staging the pairs NWB. The bundle inputs equal what
+    ``CurationV2.get_recording`` / ``get_sorting`` return for the member."""
+    from spyglass.spikesorting.v2 import _unitmatch_backend
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        _unlink_staged_analysis_file,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+    from tests.spikesorting.v2._tripart_helpers import (
+        fetch_hash,
+        forbid_db_queries,
+    )
+
+    grp = two_session_curated_group
+    saved = _install_fixture_pairer(
+        monkeypatch,
+        matcher_name="fixture_pairer_reads",
+        matcher_params_name="fixture_pairer_reads_params",
+        pairs=[],
+    )
+    bundle_inputs = {}
+
+    def _capture(session_dir, recording, sorting, **kwargs):
+        Path(session_dir).mkdir(parents=True, exist_ok=True)
+        bundle_inputs[Path(session_dir).name] = (recording, sorting)
+
+    monkeypatch.setattr(
+        _unitmatch_backend, "extract_unitmatch_bundle", _capture
+    )
+    selection_pk = None
+    try:
+        selection_pk = UnitMatchSelection.insert_selection(
+            grp["owner"],
+            grp["group_name"],
+            "fixture_pairer_reads_params",
+            grp["choices"],
+        )
+        table = UnitMatch()
+        fetched = table.make_fetch(selection_pk)
+        assert fetch_hash(table.make_fetch(selection_pk)) == fetch_hash(fetched)
+        with forbid_db_queries(
+            monkeypatch, "UnitMatch.make_compute", allow_staging=True
+        ):
+            computed = table.make_compute(selection_pk, *fetched)
+        _unlink_staged_analysis_file(
+            computed.analysis_file_name, context="unitmatch read guard"
+        )
+        assert computed.n_pairs == 0
+
+        assert sorted(bundle_inputs) == [
+            f"member_{index}" for index in sorted(grp["choices"])
+        ]
+        for index, choice in grp["choices"].items():
+            recording, sorting = bundle_inputs[f"member_{index}"]
+            expected_recording = CurationV2.get_recording(choice)
+            expected_sorting = CurationV2.get_sorting(choice).select_units(
+                CurationV2().get_matchable_unit_ids(choice)
+            )
+            assert list(recording.channel_ids) == list(
+                expected_recording.channel_ids
+            )
+            assert (
+                recording.get_sampling_frequency()
+                == expected_recording.get_sampling_frequency()
+            )
+            assert (
+                recording.get_num_samples()
+                == expected_recording.get_num_samples()
+            )
+            np.testing.assert_array_equal(
+                recording.get_traces(start_frame=0, end_frame=3000),
+                expected_recording.get_traces(start_frame=0, end_frame=3000),
+            )
+            assert list(sorting.unit_ids) == list(expected_sorting.unit_ids)
+            assert len(sorting.unit_ids) > 0
+            for unit_id in sorting.unit_ids:
+                np.testing.assert_array_equal(
+                    sorting.get_unit_spike_train(unit_id),
+                    expected_sorting.get_unit_spike_train(unit_id),
+                )
+    finally:
+        if selection_pk is not None:
+            (UnitMatch & selection_pk).super_delete(warn=False)
+            (UnitMatchSelection & selection_pk).super_delete(warn=False)
+        (
+            MatcherParameters
+            & {"matcher_params_name": "fixture_pairer_reads_params"}
+        ).super_delete(warn=False)
+        _restore_matcher_registry(saved)
+
+
+@pytest.mark.slow
 def test_full_unitmatch_workflow_with_accepted_evaluation_children(
     two_session_curated_group, curation_evaluation_defaults, monkeypatch
 ):

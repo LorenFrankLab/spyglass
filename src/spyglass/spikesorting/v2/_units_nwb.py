@@ -32,6 +32,8 @@ filesystem, not the database.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 SPIKE_SAMPLE_INDEX_COLUMN = "spike_sample_index"
 
 
@@ -236,17 +238,101 @@ def numpysorting_from_abs_times(abs_times, recording_row, fs):
         A sorting whose per-unit spike trains are frame indices into
         the recording.
     """
+    return numpysorting_from_timestamps(
+        abs_times, recording_timestamps(recording_row), fs
+    )
+
+
+def numpysorting_from_timestamps(abs_times, recording_times, fs):
+    """Build a ``NumpySorting`` from absolute spike times and a timestamp vector.
+
+    The DB-free half of :func:`numpysorting_from_abs_times`, for callers that
+    read the recording's timestamps already.
+
+    Parameters
+    ----------
+    abs_times : dict[int, np.ndarray]
+        ``{unit_id: absolute spike times (seconds)}`` for each unit.
+    recording_times : np.ndarray, shape (n_samples,)
+        The recording's wall-clock timestamps, in seconds.
+    fs : float
+        Sampling frequency of the recording, in Hz.
+
+    Returns
+    -------
+    si.NumpySorting
+        A sorting whose per-unit spike trains are frame indices into
+        the recording.
+    """
     import spikeinterface as si
 
     from spyglass.spikesorting.v2.utils import _spike_times_to_frames
 
-    recording_times = recording_timestamps(recording_row)
     n_samples = int(recording_times.size)
     units_dict = {
         uid: _spike_times_to_frames(recording_times, st, n_samples, uid)
         for uid, st in abs_times.items()
     }
     return si.NumpySorting.from_unit_dict([units_dict], sampling_frequency=fs)
+
+
+class StoredUnits(NamedTuple):
+    """A units NWB resolved for a sorting readback that needs no DB.
+
+    A tri-part ``make_fetch`` builds it with
+    ``SortingSelection.resolve_stored_units`` and ``make_compute`` reads it
+    with :func:`read_stored_units`. Strings and a float only, so DataJoint's
+    hash of the fetched inputs is the same on both of its fetches.
+
+    Attributes
+    ----------
+    abs_path : str
+        Absolute path of the units NWB (a sort's or a curation's).
+    sampling_frequency : float
+        The sort's source recording rate, in Hz: its ``Recording`` or
+        ``ConcatenatedRecording`` row, as ``Sorting.get_sorting`` reads it.
+    timestamps_abs_path : str
+        Absolute path of that source recording's artifact, read only for a
+        units NWB without the ``spike_sample_index`` column.
+    timestamps_series_path : str
+        The source row's ``electrical_series_path``.
+    """
+
+    abs_path: str
+    sampling_frequency: float
+    timestamps_abs_path: str
+    timestamps_series_path: str
+
+
+def read_stored_units(units: StoredUnits):
+    """Open resolved stored units as a ``NumpySorting``; no DB access.
+
+    The readback ``Sorting.get_sorting`` and ``CurationV2.get_sorting`` do
+    for a units-bearing row: stored sample frames when the file has them,
+    otherwise absolute spike times mapped onto the source recording's
+    timestamps.
+
+    Parameters
+    ----------
+    units : StoredUnits
+
+    Returns
+    -------
+    si.NumpySorting
+        Per-unit spike trains as frame indices into the source recording.
+    """
+    sample_indices = read_units_spike_sample_indices(units.abs_path)
+    if sample_indices is not None:
+        return numpysorting_from_sample_indices(
+            sample_indices, units.sampling_frequency
+        )
+    return numpysorting_from_timestamps(
+        read_units_abs_spike_times(units.abs_path),
+        read_series_timestamps(
+            units.timestamps_abs_path, units.timestamps_series_path
+        ),
+        units.sampling_frequency,
+    )
 
 
 def build_lazy_merged_sorting_from_samples(

@@ -82,7 +82,8 @@ def _warn_clusterless_match_once(sorting_id: str) -> None:
 
 
 class UnitMatchFetched(NamedTuple):
-    """DB inputs for ``UnitMatch.make_compute`` (no SI/NWB I/O).
+    """DB inputs for ``UnitMatch.make_compute`` (no SI/NWB I/O except the
+    self-heal rebuild of a missing traces file).
 
     ``member_plan`` is the member_index-ordered per-member list of DeepHash-stable
     dicts with the pinned, provenance-validated curation choice plus the
@@ -90,11 +91,15 @@ class UnitMatchFetched(NamedTuple):
     ``{"member_index", "nwb_file_name", "sorting_id" (str), "curation_id",
     "recording_date" (canonical UTC ISO 8601 str), "matchable_unit_ids"
     (sorted list[int]), "waveform_traces" (str), "motion_corrected_recording_id"
-    (str or None)}``. Threading ``recording_date`` and ``matchable_unit_ids``
-    here -- rather than re-querying in compute -- keeps a curation relabel or
-    session-time edit between stages from changing which units match or the
-    chronological drift order. ``waveform_traces`` names the trace artifact the
-    member's bundle is extracted from (:func:`_member_waveform_traces`).
+    (str or None), "traces" (EffectiveTraces), "traces_abs_path" (str),
+    "units" (StoredUnits)}``. Threading ``recording_date`` and
+    ``matchable_unit_ids`` here -- rather than re-querying in compute -- keeps a
+    curation relabel or session-time edit between stages from changing which
+    units match or the chronological drift order. ``waveform_traces`` names the
+    trace artifact the member's bundle is extracted from
+    (:func:`_member_waveform_traces`); ``traces`` / ``traces_abs_path`` /
+    ``units`` locate that artifact and the curated units NWB, so compute reads
+    them without the DB (:func:`_member_match_files`).
     """
 
     matcher_name: str
@@ -843,7 +848,12 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         below). Require every part row to belong to the master's group and to
         have a unique member_index, then check coverage + per-member ownership --
         all before any matcher input is extracted.
+
+        Each member's traces file is rebuilt here if missing, and its path and
+        curated units NWB are carried to compute.
         """
+        from spyglass.spikesorting.v2.sorting import SortingSelection
+
         sel = (UnitMatchSelection & key).fetch1()
         group_key = {
             "session_group_owner": sel["session_group_owner"],
@@ -943,9 +953,10 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         # fetch and compute stages can't change which units are matchable or the
         # chronological drift order. ``recording_date`` is stored as an ISO
         # string (DeepHash-stable; sorts chronologically) and ``matchable_unit_ids``
-        # as a sorted int list. compute does the heavy SI/NWB object building
-        # (get_recording / get_sorting) but no longer re-derives this state.
+        # as a sorted int list. compute builds the SI objects from the files
+        # resolved here and does not re-derive this state.
         member_plan = []
+        member_sources = []
         for member in members:
             member_index = int(member["member_index"])
             sorting_id, curation_id = choices_by_member[member_index]
@@ -975,6 +986,9 @@ class UnitMatch(SpyglassMixin, dj.Computed):
             # strings would not). A naive datetime is treated as UTC.
             if recording_date.tzinfo is None:
                 recording_date = recording_date.replace(tzinfo=timezone.utc)
+            source = SortingSelection.resolve_effective_source(
+                {"sorting_id": sorting_id}
+            )
             member_plan.append(
                 {
                     "member_index": member_index,
@@ -985,9 +999,16 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                         timezone.utc
                     ).isoformat(),
                     "matchable_unit_ids": matchable,
-                    **_member_waveform_traces(sorting_id),
+                    **_member_waveform_traces(source.traces),
                 }
             )
+            member_sources.append((curation_key, source))
+        # Resolve the files last, once every member passed its checks, so a
+        # fetch that raises never rebuilds a traces file.
+        for plan, (curation_key, source) in zip(
+            member_plan, member_sources, strict=True
+        ):
+            plan.update(_member_match_files(curation_key, source))
         return UnitMatchFetched(
             matcher_name=matcher_name,
             params=dict(params),
@@ -1015,6 +1036,8 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         transaction. The degenerate single-session case writes an empty pairs
         table without calling the matcher backend. The anchor AnalysisNwbfile
         parent is the FIRST member's NWB (``member_plan`` is member_index-ordered).
+        Reads only the member files ``make_fetch`` resolved; the one DB access
+        left is staging the pairs NWB (see :mod:`._recording_nwb`).
         """
         import spikeinterface as si
 
@@ -1236,9 +1259,13 @@ class UnitMatch(SpyglassMixin, dj.Computed):
             canonicalize_match_pairs,
             chronological_member_order,
         )
+        from spyglass.spikesorting.v2._source_resolution import (
+            read_effective_recording,
+        )
         from spyglass.spikesorting.v2._unitmatch_backend import (
             extract_unitmatch_bundle,
         )
+        from spyglass.spikesorting.v2._units_nwb import read_stored_units
         from spyglass.spikesorting.v2.matcher_protocol import (
             SessionMatcherInput,
             get_matcher,
@@ -1260,18 +1287,19 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         ) as tmp_root:
             session_inputs = []
             for plan in ordered_plan:
-                curation_key = {
-                    "sorting_id": plan["sorting_id"],
-                    "curation_id": plan["curation_id"],
-                }
-                # Build the SI objects (NWB I/O) here; the matchable unit set was
-                # already resolved + validated in make_fetch and threaded in via
-                # the plan, so compute does not re-derive curation-label state.
-                # The recording is the sort's effective traces (a selected
+                # Build the SI objects (NWB I/O) here from the files make_fetch
+                # resolved; the matchable unit set was already resolved +
+                # validated there and threaded in via the plan, so compute does
+                # not re-derive curation-label state. The recording is the
+                # sort's effective traces as persisted (a selected
                 # motion-corrected recording included), as the plan's
-                # ``waveform_traces`` records.
-                recording = CurationV2.get_recording(curation_key)
-                full_sorting = CurationV2.get_sorting(curation_key)
+                # ``waveform_traces`` records -- what CurationV2.get_recording
+                # returns; the sorting is CurationV2.get_sorting's.
+                recording = read_effective_recording(
+                    plan["traces_abs_path"],
+                    plan["traces"]._replace(apply_artifact_mask=False),
+                )
+                full_sorting = read_stored_units(plan["units"])
                 sorting = full_sorting.select_units(plan["matchable_unit_ids"])
                 session_dir = Path(tmp_root) / f"member_{plan['member_index']}"
                 # The bundle window / subsample / seed come from the named,
@@ -1617,19 +1645,20 @@ def _curation_member_identity(sorting_id, *, exc_class=ValueError):
     )
 
 
-def _member_waveform_traces(sorting_id) -> dict:
+def _member_waveform_traces(traces) -> dict:
     """Name the traces a member's matcher waveforms are extracted from.
 
-    The bundle is extracted from ``CurationV2.get_recording``, which reads the
-    sort's effective traces (``SortingSelection.resolve_effective_source``):
-    the sort's ``Recording``, or the ``MotionCorrectedRecording`` it selected.
-    Recording which one makes a match run state whether its waveforms came
-    from corrected or original traces.
+    The bundle is extracted from the sort's effective traces
+    (``SortingSelection.resolve_effective_source``), the traces
+    ``CurationV2.get_recording`` returns: the sort's ``Recording``, or the
+    ``MotionCorrectedRecording`` it selected. Recording which one makes a
+    match run state whether its waveforms came from corrected or original
+    traces.
 
     Parameters
     ----------
-    sorting_id : uuid.UUID or str
-        The member's sort.
+    traces : EffectiveTraces
+        The member sort's effective traces.
 
     Returns
     -------
@@ -1637,16 +1666,46 @@ def _member_waveform_traces(sorting_id) -> dict:
         ``{"waveform_traces": <effective traces kind>,
         "motion_corrected_recording_id": <str id or None>}``.
     """
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
-    traces = SortingSelection.resolve_effective_source(
-        {"sorting_id": sorting_id}
-    ).traces
     corrected_id = traces.key.get("motion_corrected_recording_id")
     return {
         "waveform_traces": traces.kind,
         "motion_corrected_recording_id": (
             None if corrected_id is None else str(corrected_id)
+        ),
+    }
+
+
+def _member_match_files(curation_key: dict, source) -> dict:
+    """Resolve the files a member's bundle is read from, for a DB-free read.
+
+    The traces file is rebuilt if missing (the self-heal
+    ``CurationV2.get_recording`` performs), and the curated units NWB is
+    resolved with the sampling rate and timestamps ``CurationV2.get_sorting``
+    reads it against.
+
+    Parameters
+    ----------
+    curation_key : dict
+        ``{"sorting_id", "curation_id"}`` of the member's pinned curation.
+    source : EffectiveSource
+        The member sort's ``SortingSelection.resolve_effective_source``.
+
+    Returns
+    -------
+    dict
+        ``{"traces": EffectiveTraces, "traces_abs_path": str,
+        "units": StoredUnits}``.
+    """
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    traces_abs_path = SortingSelection.ensure_effective_traces(source.traces)
+    return {
+        "traces": source.traces,
+        "traces_abs_path": traces_abs_path,
+        "units": SortingSelection.resolve_stored_units(
+            (CurationV2 & curation_key).fetch1("analysis_file_name"),
+            source,
+            traces_abs_path,
         ),
     }
 
