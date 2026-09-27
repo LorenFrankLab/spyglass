@@ -103,3 +103,62 @@ def forbid_db_queries(monkeypatch, label: str, *, allow_staging=False):
                 AnalysisNwbfile, "get_abs_path", classmethod(_get_abs_path)
             )
         yield
+
+
+def change_second_fetch(monkeypatch, table) -> None:
+    """Make ``table``'s in-transaction ``make_fetch`` return changed data.
+
+    DataJoint runs ``make_fetch`` once before ``make_compute`` and again inside
+    the insert transaction, and refuses the insert when the two differ. Every
+    second call here returns the fetched carrier with one extra element, as if
+    a parent row changed while ``make_compute`` ran, so populate raises after
+    ``make_compute`` has staged its outputs and before ``make_insert`` runs.
+    """
+    real = table.make_fetch
+    calls = [0]
+
+    def _fetch(self, key, **kwargs):
+        fetched = real(self, key, **kwargs)
+        calls[0] += 1
+        if calls[0] % 2 == 0:
+            return (*fetched, "changed while make_compute ran")
+        return fetched
+
+    monkeypatch.setattr(table, "make_fetch", _fetch)
+
+
+def record_created_analysis_files(monkeypatch) -> list[str]:
+    """Record the name of every ``AnalysisNwbfile`` created from now on."""
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+    created: list[str] = []
+    real_create = AnalysisNwbfile.create
+
+    def _create(self, *args, **kwargs):
+        name = real_create(self, *args, **kwargs)
+        created.append(name)
+        return name
+
+    monkeypatch.setattr(AnalysisNwbfile, "create", _create)
+    return created
+
+
+def assert_no_staged_analysis_files(created: list[str]) -> None:
+    """Fail if any file in ``created`` is on disk or has an AnalysisNwbfile row."""
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+    assert created, "precondition: make_compute must have staged a file"
+    on_disk = [
+        name
+        for name in created
+        if Path(AnalysisNwbfile.get_abs_path(name)).exists()
+    ]
+    registered = [
+        name
+        for name in created
+        if AnalysisNwbfile & {"analysis_file_name": name}
+    ]
+    assert not on_disk, f"staged files left on disk: {on_disk}"
+    assert not registered, f"staged files registered: {registered}"

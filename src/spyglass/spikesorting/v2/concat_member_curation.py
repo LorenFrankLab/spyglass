@@ -14,6 +14,10 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v2._concat_recording import (
     split_unit_spike_trains,
 )
+from spyglass.spikesorting.v2._staged_outputs import (
+    StagedOutputCleanupMixin,
+    StagedOutputs,
+)
 from spyglass.spikesorting.v2._units_nwb import (
     _write_curated_units_nwb_body,
     numpysorting_from_abs_times,
@@ -91,9 +95,15 @@ class ConcatMemberComputed(NamedTuple):
     n_units: int
     nwb_file_name: str
 
+    def staged_outputs(self) -> StagedOutputs:
+        """The staged analysis file ``make_insert`` registers."""
+        return StagedOutputs(analysis_file_names=(self.analysis_file_name,))
+
 
 @schema
-class ConcatMemberCuration(SpyglassMixin, dj.Computed):
+class ConcatMemberCuration(
+    StagedOutputCleanupMixin, SpyglassMixin, dj.Computed
+):
     """Per-member, wall-clock-aligned view of a curated concat sort.
 
     Each row splits an already-curated concatenated sorting back into one

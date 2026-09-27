@@ -1815,6 +1815,63 @@ def test_recording_fresh_write_cleanup_unlinks_staged_file(
 
 
 @pytest.mark.slow
+def test_changed_second_fetch_leaves_no_staged_recording_file(
+    polymer_smoke_session, monkeypatch
+):
+    """A populate DataJoint refuses after compute leaves no staged file.
+
+    ``make_compute`` writes the preprocessed NWB outside the insert
+    transaction; when the in-transaction ``make_fetch`` differs, DataJoint
+    raises before ``make_insert`` runs. The staged file must not survive.
+    """
+    from datajoint.errors import DataJointError
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from tests.spikesorting.v2._tripart_helpers import (
+        assert_no_staged_analysis_files,
+        change_second_fetch,
+        record_created_analysis_files,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+    PreprocessingParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": "raw data valid times",
+            "preprocessing_params_name": "default",
+            "team_name": "v2_test_team",
+        }
+    )
+    created = record_created_analysis_files(monkeypatch)
+    change_second_fetch(monkeypatch, Recording)
+    try:
+        with pytest.raises(DataJointError, match="Referential integrity"):
+            Recording.populate(pk, reserve_jobs=False)
+        assert not (Recording & pk), "no Recording row may be inserted"
+        assert_no_staged_analysis_files(created)
+    finally:
+        (Recording & pk).super_delete(warn=False, force_masters=True)
+        (RecordingSelection & pk).super_delete(warn=False)
+
+
+@pytest.mark.slow
 def test_recording_rebuild_path_keeps_existing_file_on_failure(
     populated_sorting, monkeypatch
 ):

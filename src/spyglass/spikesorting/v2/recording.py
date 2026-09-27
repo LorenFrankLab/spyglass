@@ -83,6 +83,10 @@ from spyglass.spikesorting.v2._sort_group_planning import (
     _plan_sort_groups_by_shank,
     _reference_electrode_group,
 )
+from spyglass.spikesorting.v2._staged_outputs import (
+    StagedOutputCleanupMixin,
+    StagedOutputs,
+)
 from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
@@ -1193,6 +1197,10 @@ class RecordingComputed(NamedTuple):
     expected_saved_total: float
     n_intended_intervals: int
 
+    def staged_outputs(self) -> StagedOutputs:
+        """The staged analysis file ``make_insert`` registers."""
+        return StagedOutputs(analysis_file_names=(self.analysis_file_name,))
+
 
 class RecordingArtifactResult(NamedTuple):
     """Outputs of :meth:`Recording._compute_recording_artifact`.
@@ -1240,7 +1248,7 @@ def _unlink_staged_analysis_file(
 
 
 @schema
-class Recording(SpyglassMixin, dj.Computed):
+class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     """Preprocessed recording materialized NWB-resident in AnalysisNwbfile.
 
     The preprocessed ``ElectricalSeries`` lives inside an

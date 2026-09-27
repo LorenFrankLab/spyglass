@@ -553,6 +553,50 @@ def test_direct_member_delete_reclaims_file_and_repopulates(
 
 
 @pytest.mark.slow
+def test_changed_second_fetch_leaves_no_staged_member_file(
+    concat_member_curation, monkeypatch
+):
+    """A member populate refused by DataJoint's fetch check leaves no file.
+
+    The member Units NWB is staged in ``make_compute``, outside the insert
+    transaction. When the in-transaction ``make_fetch`` no longer matches
+    (a parent changed while computing), DataJoint refuses the insert before
+    ``make_insert`` runs; the staged file must not outlive that refusal.
+    """
+    from datajoint.errors import DataJointError
+
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+    from tests.spikesorting.v2._tripart_helpers import (
+        assert_no_staged_analysis_files,
+        change_second_fetch,
+        record_created_analysis_files,
+    )
+
+    curation_key = concat_member_curation["curation_key"]
+    member_key = (
+        ConcatMemberCuration & curation_key & {"member_index": 0}
+    ).fetch1("KEY")
+    (ConcatMemberCuration & member_key).delete(
+        force_permission=True, safemode=False
+    )
+
+    with monkeypatch.context() as patch:
+        created = record_created_analysis_files(patch)
+        change_second_fetch(patch, ConcatMemberCuration)
+        with pytest.raises(DataJointError, match="Referential integrity"):
+            ConcatMemberCuration.populate(member_key, reserve_jobs=False)
+        assert not (ConcatMemberCuration & member_key)
+        assert not (SpikeSortingOutput.ConcatMemberCuration & member_key)
+        assert_no_staged_analysis_files(created)
+
+    ConcatMemberCuration.populate(member_key, reserve_jobs=False)
+    assert ConcatMemberCuration & member_key
+
+
+@pytest.mark.slow
 def test_delete_cascades_member_rows_and_reclaims_files(
     concat_member_curation, monkeypatch
 ):

@@ -49,6 +49,10 @@ from spyglass.spikesorting.v2._recipe_catalog import (
     motion_interpolation_default_contents,
 )
 from spyglass.spikesorting.v2._source_resolution import SourceLineage
+from spyglass.spikesorting.v2._staged_outputs import (
+    StagedOutputCleanupMixin,
+    StagedOutputs,
+)
 from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
 from spyglass.spikesorting.v2.recording import (
     PreprocessingParameters,
@@ -1832,6 +1836,10 @@ class MotionCorrectedComputed(NamedTuple):
     continuity_spans: np.ndarray
     nwb_file_name: str
 
+    def staged_outputs(self) -> StagedOutputs:
+        """The staged analysis file ``make_insert`` registers."""
+        return StagedOutputs(analysis_file_names=(self.analysis_file_name,))
+
 
 def _series_filtering(abs_path: str, electrical_series_path: str) -> str:
     """The ``filtering`` attribute of a persisted ``ElectricalSeries``."""
@@ -1843,7 +1851,9 @@ def _series_filtering(abs_path: str, electrical_series_path: str) -> str:
 
 
 @schema
-class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
+class MotionCorrectedRecording(
+    StagedOutputCleanupMixin, SpyglassMixin, dj.Computed
+):
     """A saved motion estimate applied to the traces it was estimated from.
 
     The source artifact (a ``Recording`` or ``ConcatenatedRecording``) is

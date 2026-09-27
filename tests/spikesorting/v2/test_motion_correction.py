@@ -1648,6 +1648,41 @@ def test_masked_frames_of_the_corrected_recording_are_zero(drift_recording):
         assert np.all(np.any(traces[start:end] != 0, axis=1))
 
 
+def test_changed_second_fetch_leaves_no_staged_corrected_file(
+    discontinuous_sources, monkeypatch
+):
+    """A corrected populate DataJoint refuses after compute leaves no file.
+
+    The corrected NWB is written in ``make_compute``, outside the insert
+    transaction; a changed in-transaction ``make_fetch`` makes DataJoint
+    raise before ``make_insert`` runs, and the staged file must go with it.
+    """
+    from datajoint.errors import DataJointError
+
+    from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
+    from tests.spikesorting.v2._tripart_helpers import (
+        assert_no_staged_analysis_files,
+        change_second_fetch,
+        record_created_analysis_files,
+    )
+
+    recording_key = discontinuous_sources["member_b"]
+    estimate = populated_estimate(recording_id=recording_key["recording_id"])
+    key = select_corrected(estimate)
+    drop_corrected(key)
+
+    with monkeypatch.context() as patch:
+        created = record_created_analysis_files(patch)
+        change_second_fetch(patch, MotionCorrectedRecording)
+        with pytest.raises(DataJointError, match="Referential integrity"):
+            MotionCorrectedRecording.populate(key, reserve_jobs=False)
+        assert not (MotionCorrectedRecording & key)
+        assert_no_staged_analysis_files(created)
+
+    MotionCorrectedRecording.populate(key, reserve_jobs=False)
+    assert MotionCorrectedRecording & key
+
+
 def test_motion_failure_cleanup_and_cache_rebuild(
     discontinuous_sources, monkeypatch
 ):

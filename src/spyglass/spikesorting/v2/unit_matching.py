@@ -41,6 +41,10 @@ import datajoint as dj
 
 from spyglass.common import Session  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
+from spyglass.spikesorting.v2._staged_outputs import (
+    StagedOutputCleanupMixin,
+    StagedOutputs,
+)
 from spyglass.spikesorting.v2.curation import CurationV2  # noqa: F401
 from spyglass.spikesorting.v2.exceptions import (
     TrackedUnitBudgetExceededError,
@@ -139,6 +143,10 @@ class UnitMatchComputed(NamedTuple):
     spikeinterface_version: str
     matcher_backend: str
     matcher_backend_version: str | None
+
+    def staged_outputs(self) -> StagedOutputs:
+        """The staged analysis file ``make_insert`` registers."""
+        return StagedOutputs(analysis_file_names=(self.analysis_file_name,))
 
 
 @schema
@@ -638,7 +646,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
 
 @schema
-class UnitMatch(SpyglassMixin, dj.Computed):
+class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     """Pairwise unit matches across SessionGroup members.
 
     ``make()`` re-validates the pinned member curations (so a direct-insert

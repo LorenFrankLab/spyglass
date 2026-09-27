@@ -24,6 +24,10 @@ import datajoint as dj
 from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.spikesorting.v2._recording_nwb import StoredTraces
+from spyglass.spikesorting.v2._staged_outputs import (
+    StagedOutputCleanupMixin,
+    StagedOutputs,
+)
 from spyglass.spikesorting.v2.artifact import (
     RecordingArtifactDetection,
     RecordingArtifactSelection,
@@ -792,9 +796,15 @@ class ConcatRecordingComputed(NamedTuple):
     continuity_start_s: object
     continuity_end_s: object
 
+    def staged_outputs(self) -> StagedOutputs:
+        """The staged analysis file ``make_insert`` registers."""
+        return StagedOutputs(analysis_file_names=(self.analysis_file_name,))
+
 
 @schema
-class ConcatenatedRecording(SpyglassMixin, dj.Computed):
+class ConcatenatedRecording(
+    StagedOutputCleanupMixin, SpyglassMixin, dj.Computed
+):
     """Materialized cross-session concatenated recording cache.
 
     Tri-part ``make`` writes a single masked, unwhitened ``ElectricalSeries``

@@ -61,6 +61,10 @@ from spyglass.spikesorting.v2._sorting_analyzer import (
     STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
 )
 from spyglass.spikesorting.v2._source_resolution import EffectiveTraces
+from spyglass.spikesorting.v2._staged_outputs import (
+    StagedOutputCleanupMixin,
+    StagedOutputs,
+)
 from spyglass.spikesorting.v2._units_nwb import StoredUnits, read_stored_units
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.exceptions import (
@@ -277,6 +281,10 @@ class CurationEvaluationComputed(NamedTuple):
     # the fast path (``None`` for the merged-curation temp-analyzer path).
     spikeinterface_version: str
     source_analyzer_hashes: dict | None
+
+    def staged_outputs(self) -> StagedOutputs:
+        """The staged analysis file ``make_insert`` registers."""
+        return StagedOutputs(analysis_file_names=(self.analysis_file_name,))
 
 
 @schema
@@ -935,7 +943,7 @@ class CurationEvaluationSelection(
 
 
 @schema
-class CurationEvaluation(SpyglassMixin, dj.Computed):
+class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     """Quality metrics / merge suggestions / labels over a committed curation.
 
     The post-merge / final-metric path: scores an existing committed
