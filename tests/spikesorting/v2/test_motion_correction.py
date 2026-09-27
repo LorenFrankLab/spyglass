@@ -1678,6 +1678,69 @@ def test_corrected_rebuild_is_guarded_by_content_not_spikeinterface_version(
     assert _file_hash(str(abs_path)) == row["content_hash"]
 
 
+@pytest.mark.parametrize("change", ["resolution", "algorithm_version"])
+def test_missing_file_of_a_stale_corrected_selection_names_the_repair(
+    discontinuous_sources, monkeypatch, change
+):
+    """A missing corrected artifact whose selection went stale (the
+    interpolation recipe resolves differently, or the application algorithm
+    changed) cannot be rebuilt: the error says the file is missing, why it
+    cannot be rebuilt, and that everything made from it must be repopulated
+    from a new selection; nothing is installed."""
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2.exceptions import (
+        RecordingContentDriftError,
+    )
+    from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
+
+    estimate = populated_estimate(
+        recording_id=discontinuous_sources["member_b"]["recording_id"]
+    )
+    key = populated_corrected(estimate)
+    row = (MotionCorrectedRecording & key).fetch1()
+    abs_path = Path(AnalysisNwbfile.get_abs_path(row["analysis_file_name"]))
+    MotionCorrectedRecording().get_recording(key)
+    assert abs_path.exists()
+
+    if change == "resolution":
+        resolve = _motion.resolve_interpolation_params
+        monkeypatch.setattr(
+            _motion,
+            "resolve_interpolation_params",
+            lambda params: {**resolve(params), "sigma_um": 30.0},
+        )
+        reason = "resolved interpolation hash"
+    else:
+        monkeypatch.setattr(
+            _motion,
+            "MOTION_INTERPOLATION_ALGORITHM_VERSION",
+            _motion.MOTION_INTERPOLATION_ALGORITHM_VERSION + 1,
+        )
+        reason = "motion interpolation algorithm version"
+    abs_path.unlink()
+    try:
+        with pytest.raises(RecordingContentDriftError) as excinfo:
+            MotionCorrectedRecording().get_recording(key)
+        message = str(excinfo.value)
+        for expected in (
+            row["analysis_file_name"],
+            "missing",
+            reason,
+            "cannot be rebuilt",
+            "new MotionCorrectedRecordingSelection",
+            "repopulate",
+        ):
+            assert expected in message
+        assert not abs_path.exists()
+    finally:
+        monkeypatch.undo()
+        MotionCorrectedRecording().get_recording(key)
+    assert _file_hash(str(abs_path)) == row["content_hash"]
+
+
 def test_effective_traces_resolve_a_corrected_recording(discontinuous_sources):
     """``ensure_effective_traces`` self-heals a missing corrected artifact
     through its own table, and ``read_effective_recording`` then reads the

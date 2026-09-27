@@ -1224,6 +1224,59 @@ def _stale_fields(checks) -> list[str]:
     ]
 
 
+def _stale_corrected_selection_fields(
+    selection: dict,
+    interpolation_params: dict,
+    *,
+    check_spikeinterface_version: bool,
+) -> list[str]:
+    """Describe what changed since a corrected recording was selected.
+
+    Parameters
+    ----------
+    selection : dict
+        The ``MotionCorrectedRecordingSelection`` row.
+    interpolation_params : dict
+        Its ``MotionInterpolationParameters`` row's ``params`` blob.
+    check_spikeinterface_version : bool
+        Also compare the installed SpikeInterface version.
+
+    Returns
+    -------
+    list[str]
+        One description per stale field (:func:`_stale_fields`); empty when
+        the selection is current.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2 import _motion
+
+    resolved = _motion.resolve_interpolation_params(interpolation_params)
+    checks = [
+        (
+            "resolved interpolation hash",
+            _motion.resolved_params_hash(resolved),
+            selection["resolved_params_hash"],
+        )
+    ]
+    if check_spikeinterface_version:
+        checks.append(
+            (
+                "SpikeInterface version",
+                si.__version__,
+                selection["spikeinterface_version"],
+            )
+        )
+    checks.append(
+        (
+            "motion interpolation algorithm version",
+            _motion.MOTION_INTERPOLATION_ALGORITHM_VERSION,
+            selection["motion_interpolation_algorithm_version"],
+        )
+    )
+    return _stale_fields(checks)
+
+
 def _live_source_row(
     lineage: SourceLineage, motion_estimate_id, selected_hash: str
 ) -> tuple:
@@ -1691,29 +1744,13 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
         )
 
         resolved = _motion.resolve_interpolation_params(interpolation_params)
-        checks = [
-            (
-                "resolved interpolation hash",
-                _motion.resolved_params_hash(resolved),
-                selection["resolved_params_hash"],
-            )
-        ]
-        if not allow_spikeinterface_version_change:
-            checks.append(
-                (
-                    "SpikeInterface version",
-                    si.__version__,
-                    selection["spikeinterface_version"],
-                )
-            )
-        checks.append(
-            (
-                "motion interpolation algorithm version",
-                _motion.MOTION_INTERPOLATION_ALGORITHM_VERSION,
-                selection["motion_interpolation_algorithm_version"],
-            )
+        stale = _stale_corrected_selection_fields(
+            selection,
+            interpolation_params,
+            check_spikeinterface_version=(
+                not allow_spikeinterface_version_change
+            ),
         )
-        stale = _stale_fields(checks)
         if stale:
             raise ValueError(
                 f"MotionCorrectedRecording {key}: the selection is stale "
@@ -1964,7 +2001,10 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
         whose ``content_hash`` equals the stored one is installed
         (``install_rebuilt_recording``); otherwise it is removed,
         ``RecordingContentDriftError`` is raised and the canonical slot is
-        left untouched.
+        left untouched. A selection whose interpolation recipe now resolves
+        differently, or whose application algorithm version changed, cannot
+        reproduce the stored traces: ``RecordingContentDriftError`` names
+        the missing file and the repair before anything is computed.
         """
         from pathlib import Path
 
@@ -1999,12 +2039,31 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
                     "motion_corrected_recording_id"
                 ]
             }
+            fetched = self.make_fetch(master_key)
             # The content hash is the guard (as for Recording), so a rebuild
             # under another SpikeInterface version is allowed and installed
-            # only if it reproduces the stored traces.
+            # only if it reproduces the stored traces. A changed recipe
+            # resolution or application algorithm cannot reproduce them.
+            stale = _stale_corrected_selection_fields(
+                fetched.selection,
+                fetched.interpolation_params,
+                check_spikeinterface_version=False,
+            )
+            if stale:
+                raise RecordingContentDriftError(
+                    "MotionCorrectedRecording._rebuild_nwb_artifact: the "
+                    f"corrected recording file {analysis_file_name!r} is "
+                    "missing and cannot be rebuilt: its selection is stale "
+                    f"({'; '.join(stale)}), so reapplying the saved motion "
+                    "would not reproduce the stored traces. Restore the file "
+                    "from a backup, or delete this MotionCorrectedRecording "
+                    "row and everything made from it (sorts, curations) and "
+                    "repopulate them from a new "
+                    "MotionCorrectedRecordingSelection."
+                )
             computed = self.make_compute(
                 master_key,
-                *self.make_fetch(master_key),
+                *fetched,
                 allow_spikeinterface_version_change=True,
             )
             if computed.content_hash != row["content_hash"]:
