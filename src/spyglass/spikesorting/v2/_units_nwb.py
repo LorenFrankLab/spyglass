@@ -276,13 +276,81 @@ def numpysorting_from_timestamps(abs_times, recording_times, fs):
     return si.NumpySorting.from_unit_dict([units_dict], sampling_frequency=fs)
 
 
+def units_nwb_stores_sample_indices(abs_path) -> bool:
+    """Whether a units NWB reads back from its stored sample frames.
+
+    The decision :func:`sorting_from_units_nwb` makes, without reading any
+    spike data: ``False`` only for a populated Units table without the
+    ``spike_sample_index`` column (an older or hand-written file), whose
+    readback maps absolute spike times onto the source recording's
+    timestamps. An empty or absent Units table reads back as an empty
+    sorting, which needs no timestamps either.
+
+    Parameters
+    ----------
+    abs_path : str or pathlib.Path
+        Absolute path to the units NWB file.
+
+    Returns
+    -------
+    bool
+    """
+    import pynwb
+
+    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
+        units = io.read().units
+        return (
+            units is None
+            or len(units) == 0
+            or SPIKE_SAMPLE_INDEX_COLUMN in units.colnames
+        )
+
+
+def sorting_from_units_nwb(abs_path, sampling_frequency, read_timestamps):
+    """Read a units NWB back as a ``NumpySorting`` of source-recording frames.
+
+    The one units readback behind ``Sorting.get_sorting``,
+    ``CurationV2.get_sorting`` and :func:`read_stored_units`: the stored
+    sample frames when the file has them, otherwise the absolute spike times
+    mapped onto the source recording's timestamps with
+    :func:`numpysorting_from_timestamps`. Performs no DB access itself.
+
+    Parameters
+    ----------
+    abs_path : str or pathlib.Path
+        Absolute path to a sort's or a curation's units NWB.
+    sampling_frequency : float
+        The sort's source recording rate, in Hz.
+    read_timestamps : Callable[[], np.ndarray]
+        Returns the source recording's timestamps, shape ``(n_samples,)`` in
+        seconds. Called only for a file without stored sample frames, so a
+        caller may resolve the recording lazily.
+
+    Returns
+    -------
+    si.NumpySorting
+        Per-unit spike trains as frame indices into the source recording.
+    """
+    sample_indices = read_units_spike_sample_indices(abs_path)
+    if sample_indices is not None:
+        return numpysorting_from_sample_indices(
+            sample_indices, sampling_frequency
+        )
+    return numpysorting_from_timestamps(
+        read_units_abs_spike_times(abs_path),
+        read_timestamps(),
+        sampling_frequency,
+    )
+
+
 class StoredUnits(NamedTuple):
     """A units NWB resolved for a sorting readback that needs no DB.
 
     A tri-part ``make_fetch`` builds it with
     ``SortingSelection.resolve_stored_units`` and ``make_compute`` reads it
-    with :func:`read_stored_units`. Strings and a float only, so DataJoint's
-    hash of the fetched inputs is the same on both of its fetches.
+    with :func:`read_stored_units`. Strings, a float and ``None`` only, so
+    DataJoint's hash of the fetched inputs is the same on both of its
+    fetches.
 
     Attributes
     ----------
@@ -291,26 +359,27 @@ class StoredUnits(NamedTuple):
     sampling_frequency : float
         The sort's source recording rate, in Hz: its ``Recording`` or
         ``ConcatenatedRecording`` row, as ``Sorting.get_sorting`` reads it.
-    timestamps_abs_path : str
+    timestamps_abs_path : str or None
         Absolute path of that source recording's artifact, read only for a
-        units NWB without the ``spike_sample_index`` column.
+        units NWB without the ``spike_sample_index`` column. ``None`` when
+        the file has the column and the source recording is not the file
+        the sort's traces were already resolved to (a motion-corrected
+        sort), so that file is never resolved or checksummed for nothing.
     timestamps_series_path : str
         The source row's ``electrical_series_path``.
     """
 
     abs_path: str
     sampling_frequency: float
-    timestamps_abs_path: str
+    timestamps_abs_path: str | None
     timestamps_series_path: str
 
 
 def read_stored_units(units: StoredUnits):
     """Open resolved stored units as a ``NumpySorting``; no DB access.
 
-    The readback ``Sorting.get_sorting`` and ``CurationV2.get_sorting`` do
-    for a units-bearing row: stored sample frames when the file has them,
-    otherwise absolute spike times mapped onto the source recording's
-    timestamps.
+    :func:`sorting_from_units_nwb` over a :class:`StoredUnits`, reading the
+    source timestamps from its resolved artifact.
 
     Parameters
     ----------
@@ -321,17 +390,12 @@ def read_stored_units(units: StoredUnits):
     si.NumpySorting
         Per-unit spike trains as frame indices into the source recording.
     """
-    sample_indices = read_units_spike_sample_indices(units.abs_path)
-    if sample_indices is not None:
-        return numpysorting_from_sample_indices(
-            sample_indices, units.sampling_frequency
-        )
-    return numpysorting_from_timestamps(
-        read_units_abs_spike_times(units.abs_path),
-        read_series_timestamps(
+    return sorting_from_units_nwb(
+        units.abs_path,
+        units.sampling_frequency,
+        lambda: read_series_timestamps(
             units.timestamps_abs_path, units.timestamps_series_path
         ),
-        units.sampling_frequency,
     )
 
 

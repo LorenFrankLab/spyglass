@@ -39,12 +39,10 @@ from spyglass.spikesorting.v2._units_nwb import (
     build_lazy_merged_sorting_from_samples,
     build_lazy_merged_sorting,
     empty_spike_times_dataframe,
-    numpysorting_from_abs_times,
-    numpysorting_from_sample_indices,
     read_units_abs_spike_times,
     read_units_abs_times_and_sample_indices,
-    read_units_spike_sample_indices,
     recording_timestamps,
+    sorting_from_units_nwb,
     write_curated_units_nwb,
 )
 from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
@@ -2134,11 +2132,9 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             return df
 
         if not as_dataframe:
-            sample_indices = read_units_spike_sample_indices(abs_path)
-            if sample_indices is not None:
-                return numpysorting_from_sample_indices(sample_indices, fs)
-            abs_times = read_units_abs_spike_times(abs_path)
-            return numpysorting_from_abs_times(abs_times, recording_row, fs)
+            return sorting_from_units_nwb(
+                abs_path, fs, lambda: recording_timestamps(recording_row)
+            )
 
         abs_times = read_units_abs_spike_times(abs_path)
         # Reuse the shared spike-times DataFrame builder (the same one

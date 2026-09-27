@@ -61,6 +61,7 @@ from spyglass.spikesorting.v2._sorting_analyzer import (
     STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
 )
 from spyglass.spikesorting.v2._source_resolution import EffectiveTraces
+from spyglass.spikesorting.v2._units_nwb import StoredUnits, read_stored_units
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.exceptions import (
     UnsupportedDirectInsertError,
@@ -201,7 +202,6 @@ class EvaluationRecordingInputs(NamedTuple):
     # and its absolute path (the file rebuilt in make_fetch if it was missing).
     traces: EffectiveTraces
     traces_abs_path: str
-    fs: float
     # The sort's persisted statistics spans (``Sorting.get_statistics_spans``)
     # as a tuple of ``(start, end)`` int frame pairs; every analyzer built or
     # rebuilt here estimates noise and whitening from them.
@@ -213,9 +213,11 @@ class EvaluationSortingInputs(NamedTuple):
 
     sorting_id: str
     curation_id: int
-    raw_units_abs_path: str
+    # The raw sort's and the curation's units NWBs, resolved against the
+    # sort's lineage source row (``SortingSelection.resolve_stored_units``).
+    raw_units: StoredUnits
     raw_n_units: int
-    curated_units_abs_path: str
+    curated_units: StoredUnits
     expected_unit_ids: list[int]
     use_fast_path: bool
 
@@ -1054,11 +1056,13 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         # inputs; self-heal the regeneratable cache here so that read succeeds,
         # mirroring Recording().get_recording's rebuild-if-missing (the same
         # self-heal get_analyzer provides).
-        lineage, traces = SortingSelection.resolve_effective_source(sorting_key)
+        effective_source = SortingSelection.resolve_effective_source(
+            sorting_key
+        )
+        lineage, traces = effective_source
         artifact_detection_id = lineage.artifact_detection_id
         recording_id = lineage.key.get("recording_id")
         traces_abs_path = SortingSelection.ensure_effective_traces(traces)
-        fs = float(traces.row["sampling_frequency"])
 
         artifact_valid_times = None
         if traces.apply_artifact_mask:
@@ -1072,12 +1076,20 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 caller="CurationEvaluation.make_fetch",
             )
 
-        raw_units_abs_path = AnalysisNwbfile.get_abs_path(
-            (Sorting & sorting_key).fetch1("analysis_file_name")
+        # Units readback: stored sample frames, or (older units files) the
+        # absolute spike times mapped onto the LINEAGE source row's
+        # timestamps, whose file is resolved here so compute reads it
+        # without the DB.
+        raw_units = SortingSelection.resolve_stored_units(
+            (Sorting & sorting_key).fetch1("analysis_file_name"),
+            effective_source,
+            traces_abs_path,
         )
         raw_n_units = int((Sorting & sorting_key).fetch1("n_units"))
-        curated_units_abs_path = AnalysisNwbfile.get_abs_path(
-            (CurationV2 & curation_key).fetch1("analysis_file_name")
+        curated_units = SortingSelection.resolve_stored_units(
+            (CurationV2 & curation_key).fetch1("analysis_file_name"),
+            effective_source,
+            traces_abs_path,
         )
         expected_unit_ids = sorted(
             int(u) for u in (CurationV2.Unit & curation_key).fetch("unit_id")
@@ -1127,7 +1139,6 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 artifact_valid_times=artifact_valid_times,
                 traces=traces,
                 traces_abs_path=traces_abs_path,
-                fs=fs,
                 statistics_spans=tuple(
                     Sorting().get_statistics_spans(sorting_key)
                 ),
@@ -1135,9 +1146,9 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             sorting_inputs=EvaluationSortingInputs(
                 sorting_id=sorting_id,
                 curation_id=curation_id,
-                raw_units_abs_path=raw_units_abs_path,
+                raw_units=raw_units,
                 raw_n_units=raw_n_units,
-                curated_units_abs_path=curated_units_abs_path,
+                curated_units=curated_units,
                 expected_unit_ids=expected_unit_ids,
                 use_fast_path=use_fast_path,
             ),
@@ -1317,7 +1328,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             )
 
             observation_metrics, interval_hash = observation_metrics_from_nwb(
-                sorting_inputs.curated_units_abs_path,
+                sorting_inputs.curated_units.abs_path,
                 recording,
                 bin_duration_s=metric_inputs.observed_presence_bin_duration_s,
             )
@@ -1329,11 +1340,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 # canonical-folder load/rebuild + metric-extension mutation
                 # (_compute_metrics / _compute_merge_groups mutate the shared
                 # analyzer in place).
-                raw_sorting = self._sorting_from_units_nwb(
-                    sorting_inputs.raw_units_abs_path,
-                    recording_inputs.traces.row,
-                    recording_inputs.fs,
-                )
+                raw_sorting = read_stored_units(sorting_inputs.raw_units)
                 with analyzer_cache_lock(sorting_inputs.sorting_id):
                     display_analyzer = load_or_rebuild_analyzer_from_resolved(
                         sorting_id=sorting_inputs.sorting_id,
@@ -1385,10 +1392,8 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 # merged curated sorting. Never published to the canonical
                 # analyzer cache (identity is curation-scoped, not sorting-
                 # scoped); cleaned on success and failure by TemporaryDirectory.
-                curated_sorting = self._sorting_from_units_nwb(
-                    sorting_inputs.curated_units_abs_path,
-                    recording_inputs.traces.row,
-                    recording_inputs.fs,
+                curated_sorting = read_stored_units(
+                    sorting_inputs.curated_units
                 )
                 compute_key = {"sorting_id": sorting_inputs.sorting_id}
                 from spyglass.settings import temp_dir as spyglass_temp_dir
@@ -1628,29 +1633,6 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         }
 
     # ---- compute helpers (DB-free; SI work) ------------------------------
-
-    @staticmethod
-    def _sorting_from_units_nwb(abs_path, recording_row, fs):
-        """Reconstruct a ``NumpySorting`` from a units NWB (no DB).
-
-        The same machinery ``CurationV2.get_sorting`` / ``Sorting.get_sorting``
-        use internally, minus the DB fetch: new files reconstruct from stored
-        sample frames; legacy files map absolute times to frames against the
-        recording timestamps. Works for both the raw-sort and curated-units NWB
-        (an applied-merge curated NWB already stores the MERGED unit set).
-        """
-        from spyglass.spikesorting.v2._units_nwb import (
-            numpysorting_from_abs_times,
-            numpysorting_from_sample_indices,
-            read_units_abs_spike_times,
-            read_units_spike_sample_indices,
-        )
-
-        sample_indices = read_units_spike_sample_indices(abs_path)
-        if sample_indices is not None:
-            return numpysorting_from_sample_indices(sample_indices, fs)
-        abs_times = read_units_abs_spike_times(abs_path)
-        return numpysorting_from_abs_times(abs_times, recording_row, fs)
 
     def _evaluate_analyzers(
         self,

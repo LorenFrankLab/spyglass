@@ -82,12 +82,11 @@ from spyglass.spikesorting.v2._units_nwb import (
     StoredUnits,
     abs_spike_times_dataframe,
     empty_spike_times_dataframe,
-    numpysorting_from_abs_times,
-    numpysorting_from_sample_indices,
     read_units_abs_spike_times,
     read_sorting_statistics_spans,
-    read_units_spike_sample_indices,
     recording_timestamps,
+    sorting_from_units_nwb,
+    units_nwb_stores_sample_indices,
     write_sorting_units_nwb,
 )
 from spyglass.spikesorting.v2.artifact_output import (
@@ -1529,7 +1528,10 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         ``CurationV2.get_sorting`` take: the units file, and the sampling rate
         and timestamps of the sort's lineage source row (a motion-corrected
         recording keeps its source's frames). When the effective traces are
-        that row, its already-resolved path is reused.
+        that row, its already-resolved path is reused. Otherwise (a
+        motion-corrected sort) the source row's file is resolved only when
+        the units file has no stored sample frames, since only then are its
+        timestamps read.
 
         Parameters
         ----------
@@ -1546,15 +1548,20 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             For :func:`._units_nwb.read_stored_units`.
         """
         lineage, traces = source
+        units_abs_path = AnalysisNwbfile.get_abs_path(units_analysis_file_name)
         if traces.kind == lineage.kind:
             recording_row, recording_abs_path = traces.row, traces_abs_path
         else:
             recording_row = (_TRACE_TABLES[lineage.kind] & lineage.key).fetch1()
-            recording_abs_path = AnalysisNwbfile.get_abs_path(
-                recording_row["analysis_file_name"]
+            recording_abs_path = (
+                None
+                if units_nwb_stores_sample_indices(units_abs_path)
+                else AnalysisNwbfile.get_abs_path(
+                    recording_row["analysis_file_name"]
+                )
             )
         return StoredUnits(
-            abs_path=AnalysisNwbfile.get_abs_path(units_analysis_file_name),
+            abs_path=units_abs_path,
             sampling_frequency=float(recording_row["sampling_frequency"]),
             timestamps_abs_path=recording_abs_path,
             timestamps_series_path=recording_row["electrical_series_path"],
@@ -2656,11 +2663,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         if as_dataframe:
             abs_times = read_units_abs_spike_times(abs_path)
             return abs_spike_times_dataframe(abs_times)
-        sample_indices = read_units_spike_sample_indices(abs_path)
-        if sample_indices is not None:
-            return numpysorting_from_sample_indices(sample_indices, fs)
-        abs_times = read_units_abs_spike_times(abs_path)
-        return numpysorting_from_abs_times(abs_times, rec_row, fs)
+        return sorting_from_units_nwb(
+            abs_path, fs, lambda: recording_timestamps(rec_row)
+        )
 
     @staticmethod
     def _recording_timestamps(recording_row):

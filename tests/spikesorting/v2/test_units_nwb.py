@@ -272,6 +272,139 @@ def test_read_units_spike_sample_indices_missing_column(tmp_path):
     assert read_units_spike_sample_indices(str(p)) is None
 
 
+# A source clock with a 100 s wall-clock gap between frames 49 and 50, and
+# spikes on both sides of it: an affine ``t_start + i / fs`` inverse lands the
+# post-gap spikes on the wrong frames, so only a timestamp lookup (or the
+# stored frames) recovers them.
+_GAP_TIMESTAMPS = np.concatenate(
+    [100.0 + np.arange(50) / _FS, 200.0 + np.arange(50) / _FS]
+)
+_GAP_FRAMES = {4: [3, 49, 50, 77], 9: [60]}
+
+
+def _write_legacy_units_nwb(path, frames_by_unit, timestamps):
+    """Units NWB with absolute spike times only (no sample-frame column)."""
+    from datetime import datetime, timezone
+
+    import pynwb
+
+    nwbfile = pynwb.NWBFile(
+        session_description="test",
+        identifier="test-legacy-units-nwb",
+        session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    )
+    for unit_id, frames in frames_by_unit.items():
+        nwbfile.add_unit(id=unit_id, spike_times=list(timestamps[frames]))
+    with pynwb.NWBHDF5IO(path=str(path), mode="w") as io:
+        io.write(nwbfile)
+
+
+def _write_series_timestamps_nwb(path, timestamps):
+    """An NWB whose ``acquisition/series`` carries ``timestamps``."""
+    from datetime import datetime, timezone
+
+    import pynwb
+
+    nwbfile = pynwb.NWBFile(
+        session_description="test",
+        identifier="test-series-timestamps",
+        session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    )
+    nwbfile.add_acquisition(
+        pynwb.TimeSeries(
+            name="series",
+            data=np.zeros((timestamps.size, 1)),
+            unit="V",
+            timestamps=timestamps,
+        )
+    )
+    with pynwb.NWBHDF5IO(path=str(path), mode="w") as io:
+        io.write(nwbfile)
+
+
+def _trains(sorting):
+    return {
+        int(u): sorting.get_unit_spike_train(unit_id=u).tolist()
+        for u in sorting.get_unit_ids()
+    }
+
+
+def test_stored_units_readback_recovers_frames_in_both_file_layouts(tmp_path):
+    """Both units-file layouts read back the known frames across a clock gap.
+
+    A file without stored sample frames maps its absolute spike times onto
+    the source series' timestamps; a file with them never reads the source
+    (its path is ``None`` here, so reading it would raise).
+    """
+    from spyglass.spikesorting.v2._units_nwb import (
+        StoredUnits,
+        read_stored_units,
+    )
+
+    source = tmp_path / "source.nwb"
+    _write_series_timestamps_nwb(source, _GAP_TIMESTAMPS)
+    legacy = tmp_path / "legacy_units.nwb"
+    _write_legacy_units_nwb(legacy, _GAP_FRAMES, _GAP_TIMESTAMPS)
+    with_samples = tmp_path / "units_with_samples.nwb"
+    _write_units_nwb_with_samples(
+        with_samples,
+        [
+            (unit_id, _GAP_TIMESTAMPS[frames], frames)
+            for unit_id, frames in _GAP_FRAMES.items()
+        ],
+    )
+
+    from_timestamps = read_stored_units(
+        StoredUnits(str(legacy), _FS, str(source), "acquisition/series")
+    )
+    from_samples = read_stored_units(
+        StoredUnits(str(with_samples), _FS, None, "acquisition/series")
+    )
+
+    assert _trains(from_timestamps) == _GAP_FRAMES
+    assert _trains(from_samples) == _GAP_FRAMES
+    assert from_timestamps.get_sampling_frequency() == _FS
+    assert from_samples.get_sampling_frequency() == _FS
+
+
+def test_units_readback_reads_source_timestamps_only_without_sample_frames(
+    tmp_path,
+):
+    """The timestamps callback runs only for a file without sample frames,
+    and ``units_nwb_stores_sample_indices`` predicts which branch runs."""
+    from spyglass.spikesorting.v2._units_nwb import (
+        sorting_from_units_nwb,
+        units_nwb_stores_sample_indices,
+    )
+
+    legacy = tmp_path / "legacy_units.nwb"
+    _write_legacy_units_nwb(legacy, _GAP_FRAMES, _GAP_TIMESTAMPS)
+    with_samples = tmp_path / "units_with_samples.nwb"
+    _write_units_nwb_with_samples(
+        with_samples,
+        [
+            (unit_id, _GAP_TIMESTAMPS[frames], frames)
+            for unit_id, frames in _GAP_FRAMES.items()
+        ],
+    )
+    no_units = tmp_path / "no_units.nwb"
+    _write_units_nwb(no_units, [])
+
+    reads = []
+
+    def read_timestamps():
+        reads.append(1)
+        return _GAP_TIMESTAMPS
+
+    expected_reads = {legacy: 1, with_samples: 0, no_units: 0}
+    for path, n_reads in expected_reads.items():
+        reads.clear()
+        sorting = sorting_from_units_nwb(str(path), _FS, read_timestamps)
+        assert len(reads) == n_reads, path.name
+        assert units_nwb_stores_sample_indices(str(path)) == (n_reads == 0)
+        assert _trains(sorting) == ({} if path == no_units else _GAP_FRAMES)
+
+
 def test_read_units_abs_times_and_sample_indices_matches_single_readers(
     tmp_path,
 ):

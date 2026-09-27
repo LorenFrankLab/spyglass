@@ -1257,6 +1257,70 @@ def test_make_compute_reads_fetched_traces_and_only_stages_output(
         clear_curations_for(planted_two_unit_sort)
 
 
+@pytest.mark.slow
+@pytest.mark.integration
+@pytest.mark.parametrize("curation_kind", ["root", "merged"])
+def test_make_compute_reads_units_without_sample_frames_without_the_db(
+    planted_two_unit_sort,
+    curation_evaluation_defaults,
+    monkeypatch,
+    curation_kind,
+):
+    """An older units file (no stored sample frames) is read back in
+    ``make_compute`` from the source timestamps ``make_fetch`` resolved, with
+    no DB access, on both the cached-analyzer (root) and the merged path.
+
+    The older layout is simulated by making the sample-frame reader report
+    the column absent, which is exactly what it returns for such a file.
+    """
+    from spyglass.spikesorting.v2 import _units_nwb
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        _unlink_staged_analysis_file,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+    from tests.spikesorting.v2._tripart_helpers import forbid_db_queries
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        curation = CurationV2.insert_curation(sorting_key=sorting_key)
+        if curation_kind == "merged":
+            unit_ids = sorted(
+                int(u) for u in (CurationV2.Unit & curation).fetch("unit_id")
+            )
+            curation = CurationV2.create_merged_curation(
+                sorting_key,
+                merge_groups=[unit_ids[:2]],
+                parent_curation_id=curation["curation_id"],
+            )
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **curation,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        table = CurationEvaluation()
+        monkeypatch.setattr(
+            _units_nwb, "read_units_spike_sample_indices", lambda path: None
+        )
+        fetched = table.make_fetch(sel)
+        with forbid_db_queries(
+            monkeypatch, "CurationEvaluation.make_compute", allow_staging=True
+        ):
+            computed = table.make_compute(sel, *fetched)
+        _unlink_staged_analysis_file(
+            computed.analysis_file_name, context="test"
+        )
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
 @pytest.fixture(scope="package")
 def planted_zero_unit_sort(dj_conn):
     """A populated Sorting with ZERO units (an empty planted sorting).
