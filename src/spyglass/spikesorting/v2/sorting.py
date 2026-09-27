@@ -1370,20 +1370,12 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             If more than one ``ArtifactDetectionSource`` row exists for ``key``
             (the part is zero-or-one by construction).
         """
-        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
-        master_key = {k: v for k, v in key.items() if k in cls.primary_key}
-        rows = (cls.ArtifactDetectionSource & master_key).fetch(
-            "artifact_detection_merge_id"
+        merge_id = cls._optional_part_value(
+            key, cls.ArtifactDetectionSource, "artifact_detection_merge_id"
         )
-        if len(rows) > 1:
-            raise SchemaBypassError(
-                f"SortingSelection {master_key} has {len(rows)} "
-                "ArtifactDetectionSource rows; expected zero or one."
-            )
-        if len(rows) == 0:
+        if merge_id is None:
             return None
-        return ArtifactDetectionOutput.resolve_artifact_detection_id(rows[0])
+        return ArtifactDetectionOutput.resolve_artifact_detection_id(merge_id)
 
     @classmethod
     def resolve_motion_correction(cls, key: dict):
@@ -1397,16 +1389,27 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         SchemaBypassError
             If more than one ``MotionCorrectionSource`` row exists for ``key``.
         """
+        return cls._optional_part_value(
+            key, cls.MotionCorrectionSource, "motion_corrected_recording_id"
+        )
+
+    @classmethod
+    def _optional_part_value(cls, key: dict, part, column: str):
+        """Return ``column`` of a selection's zero-or-one part row, or ``None``.
+
+        Raises
+        ------
+        SchemaBypassError
+            If more than one ``part`` row exists for ``key``.
+        """
         from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
         master_key = {k: v for k, v in key.items() if k in cls.primary_key}
-        rows = (cls.MotionCorrectionSource & master_key).fetch(
-            "motion_corrected_recording_id"
-        )
+        rows = (part & master_key).fetch(column)
         if len(rows) > 1:
             raise SchemaBypassError(
                 f"SortingSelection {master_key} has {len(rows)} "
-                "MotionCorrectionSource rows; expected zero or one."
+                f"{part.__name__} rows; expected zero or one."
             )
         return rows[0] if len(rows) else None
 
