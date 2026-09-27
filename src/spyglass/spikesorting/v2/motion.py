@@ -405,18 +405,16 @@ class MotionEstimateSelection(
         from spyglass.spikesorting.v2._motion import (
             motion_estimate_selection_identity,
         )
+        from spyglass.spikesorting.v2._selection_identity import (
+            reject_unknown_fields,
+        )
         from spyglass.spikesorting.v2.artifact import (
             assert_artifact_detection_covers_recording,
         )
         from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
 
         caller = "MotionEstimateSelection.insert_selection"
-        extra = sorted(set(key) - cls._INPUT_FIELDS)
-        if extra:
-            raise ValueError(
-                f"{caller} received unknown field(s) {extra}; pass only "
-                f"{sorted(cls._INPUT_FIELDS)}."
-            )
+        reject_unknown_fields(key, cls._INPUT_FIELDS, caller=caller)
         recording_id = key.get("recording_id")
         concat_recording_id = key.get("concat_recording_id")
         if (recording_id is None) == (concat_recording_id is None):
@@ -1666,15 +1664,13 @@ class MotionCorrectedRecordingSelection(
         from spyglass.spikesorting.v2._motion import (
             motion_corrected_selection_identity,
         )
+        from spyglass.spikesorting.v2._selection_identity import (
+            reject_unknown_fields,
+        )
         from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
 
         caller = "MotionCorrectedRecordingSelection.insert_selection"
-        extra = sorted(set(key) - cls._INPUT_FIELDS)
-        if extra:
-            raise ValueError(
-                f"{caller} received unknown field(s) {extra}; pass only "
-                f"{sorted(cls._INPUT_FIELDS)}."
-            )
+        reject_unknown_fields(key, cls._INPUT_FIELDS, caller=caller)
         missing = [
             name
             for name in (

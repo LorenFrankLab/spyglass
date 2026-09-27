@@ -481,6 +481,31 @@ def sorting_identity_payload(
     return payload
 
 
+def reject_unknown_fields(key, allowed, *, caller: str) -> None:
+    """Refuse a selection key carrying a field outside ``allowed``.
+
+    Parameters
+    ----------
+    key : Mapping
+        The caller's selection key.
+    allowed : set of str
+        Every field the selection accepts.
+    caller : str
+        Names the refusing method in the message.
+
+    Raises
+    ------
+    ValueError
+        If ``key`` has a field not in ``allowed``.
+    """
+    extra = sorted(set(key) - set(allowed))
+    if extra:
+        raise ValueError(
+            f"{caller} received unknown field(s) {extra}; pass only "
+            f"{sorted(allowed)}."
+        )
+
+
 def assert_supplied_id_matches(supplied, deterministic, *, field: str) -> None:
     """Reject a caller-supplied selection PK that is not the deterministic id.
 

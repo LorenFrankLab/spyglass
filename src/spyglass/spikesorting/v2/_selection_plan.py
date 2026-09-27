@@ -32,6 +32,7 @@ from spyglass.spikesorting.v2._selection_identity import (
     assert_supplied_id_matches,
     deterministic_id,
     recording_identity_payload,
+    reject_unknown_fields,
     sorting_identity_payload,
 )
 
@@ -178,12 +179,11 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
         with an ``artifact_detection_id``, or if an explicit ``sorting_id``
         does not equal the derived deterministic id.
     """
-    extra = sorted(set(key) - SORTING_SELECTION_FIELDS)
-    if extra:
-        raise ValueError(
-            "SortingSelection.insert_selection received unknown field(s) "
-            f"{extra}; pass only {sorted(SORTING_SELECTION_FIELDS)}."
-        )
+    reject_unknown_fields(
+        key,
+        SORTING_SELECTION_FIELDS,
+        caller="SortingSelection.insert_selection",
+    )
     has_recording = "recording_id" in key
     has_concat = "concat_recording_id" in key
     if has_recording == has_concat:
