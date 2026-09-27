@@ -258,6 +258,45 @@ def test_changed_second_fetch_leaves_bundles_untouched(
     assert not (bundle / "sentinel.txt").exists()
 
 
+def test_bundle_install_keeps_old_bundle_when_replace_fails(
+    dj_conn, tmp_path, monkeypatch
+):
+    """A failed install restores the previous bundle; a good one replaces it."""
+    import os
+
+    import spyglass.spikesorting.v2.figpack_curation as figpack_mod
+
+    def _folder(name, text):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "index.html").write_text(text)
+        return folder
+
+    bundle = _folder("figure", "old")
+    staged = _folder(".figure.build-1", "new")
+    real_replace = os.replace
+    calls = []
+
+    def _fail_install(src, dst):
+        calls.append((src, dst))
+        if Path(src) == staged:
+            raise OSError("simulated rename failure")
+        return real_replace(src, dst)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(figpack_mod.os, "replace", _fail_install)
+        with pytest.raises(OSError, match="simulated rename failure"):
+            figpack_mod._install_bundle(str(staged), str(bundle))
+    assert len(calls) == 3  # move aside, failed install, restore
+    assert (bundle / "index.html").read_text() == "old"
+    assert (staged / "index.html").read_text() == "new"
+    assert not list(tmp_path.glob(".figure.trash-*"))
+
+    figpack_mod._install_bundle(str(staged), str(bundle))
+    assert (bundle / "index.html").read_text() == "new"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["figure"]
+
+
 def test_edited_curation_round_trips(populated_sorting_with_curation):
     """A user's edited annotations.json round-trips to (labels, merge_groups)."""
     from spyglass.spikesorting.v2._figpack_curation import (

@@ -733,12 +733,25 @@ def _install_bundle(staged: str, bundle: str) -> None:
     """Move a staged bundle into its durable folder, replacing a stale one.
 
     Called only after the row recording ``bundle`` is inserted, so the
-    durable folder never holds a bundle whose populate was refused.
+    durable folder never holds a bundle whose populate was refused. A
+    directory rename cannot replace a non-empty folder, so an existing bundle
+    is first moved aside to a hidden sibling, restored if the install fails,
+    and removed only once the new bundle is in place.
     """
     bundle_path = Path(bundle)
-    if bundle_path.exists():
-        shutil.rmtree(bundle_path)
-    os.replace(staged, bundle_path)
+    if not bundle_path.exists():
+        os.replace(staged, bundle_path)
+        return
+    trash = bundle_path.parent / (
+        f".{bundle_path.name}.trash-{uuid.uuid4().hex}"
+    )
+    os.replace(bundle_path, trash)
+    try:
+        os.replace(staged, bundle_path)
+    except BaseException:
+        os.replace(trash, bundle_path)
+        raise
+    shutil.rmtree(trash, ignore_errors=True)
 
 
 class FigPackCurationFetched(NamedTuple):
