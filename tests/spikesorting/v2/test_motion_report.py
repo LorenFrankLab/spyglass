@@ -401,3 +401,34 @@ def test_figure_draws_trace_windows_when_given():
         "original",
         "corrected",
     }
+
+
+def test_trace_lines_break_at_an_acquisition_gap():
+    """A window holding span 0's last 50 frames and span 1's first 50: every
+    trace line has exactly one NaN, between 104.999 s and 110.0 s, so no
+    line bridges the gap."""
+    from spyglass.spikesorting.v2._motion_report import (
+        TraceWindow,
+        plot_motion_report,
+        source_time_of_frames,
+    )
+
+    frames = np.concatenate([np.arange(4950, 5000), np.arange(5000, 5050)])
+    traces = np.ones((100, 2))
+    window = TraceWindow(
+        source_time_s=source_time_of_frames(_clock(), frames),
+        channel_ids=[3, 4],
+        original_uv=traces,
+        corrected_uv=2.0 * traces,
+    )
+    lines = _axes(plot_motion_report(_inputs(), trace_window=window))[
+        "traces"
+    ].get_lines()
+    assert len(lines) == 4
+    for line in lines:
+        x, y = np.asarray(line.get_xdata()), np.asarray(line.get_ydata())
+        assert len(x) == 101
+        assert np.flatnonzero(np.isnan(x)).tolist() == [50]
+        assert np.flatnonzero(np.isnan(y)).tolist() == [50]
+        assert x[49] == pytest.approx(4.999, abs=1e-9)
+        assert x[51] == pytest.approx(10.0, abs=1e-9)

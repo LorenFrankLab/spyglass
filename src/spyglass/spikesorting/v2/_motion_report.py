@@ -684,15 +684,23 @@ def _draw_border_channels(ax, inputs: MotionReportInputs, summary) -> None:
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), fontsize=7)
 
 
-def _draw_traces(ax, window: TraceWindow, t0: float) -> None:
+def _draw_traces(
+    ax, window: TraceWindow, clock: EstimationClock, t0: float
+) -> None:
     """Panel (e): original vs corrected traces, one offset row per
-    channel."""
+    channel, broken (a NaN sample) where a continuity span starts inside
+    the window so no line bridges a gap."""
     original = np.asarray(window.original_uv, dtype=np.float64)
     corrected = np.asarray(window.corrected_uv, dtype=np.float64)
     both = np.concatenate([original, corrected], axis=0)
     spread = float(np.nanmax(np.ptp(both, axis=0))) if both.size else 0.0
     spacing = 1.2 * spread if spread > 0 else 1.0
-    times = np.asarray(window.source_time_s, dtype=np.float64) - t0
+    times = np.asarray(window.source_time_s, dtype=np.float64)
+    breaks = np.searchsorted(times, clock.source_start_s[1:], side="left")
+    breaks = breaks[(breaks > 0) & (breaks < len(times))]
+    times = np.insert(times, breaks, np.nan) - t0
+    original = np.insert(original, breaks, np.nan, axis=0)
+    corrected = np.insert(corrected, breaks, np.nan, axis=0)
     offsets = spacing * np.arange(len(window.channel_ids))
     for k in range(len(window.channel_ids)):
         ax.plot(
@@ -737,7 +745,7 @@ def plot_motion_report(
       with the range each moves over and the probe's extent; border contacts
       circled, removed ones crossed.
     - (e) ``[traces]``: original vs corrected traces, only when
-      ``trace_window`` is given.
+      ``trace_window`` is given; broken where a continuity span starts.
 
     Parameters
     ----------
@@ -778,7 +786,7 @@ def plot_motion_report(
     _draw_evidence(axes["evidence"], summary)
     _draw_border_channels(axes["border_channels"], inputs, summary)
     if trace_window is not None:
-        _draw_traces(axes["traces"], trace_window, t0)
+        _draw_traces(axes["traces"], trace_window, inputs.clock, t0)
     n_empty = len(summary["spans_without_evidence"])
     fig.suptitle(
         f"Motion estimate: max |displacement| "
