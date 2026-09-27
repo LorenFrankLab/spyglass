@@ -892,7 +892,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     n_peaks_kept: int                 # peaks localized inside one statistics span, detected clear of span joins
     peaks_per_temporal_bin: longblob  # (n_temporal_bins,) int64 kept peaks per temporal bin
     peaks_per_continuity_span: longblob  # (n_spans,) int64 kept peaks per continuity span; 0 marks a span with no evidence
-    noise_levels: longblob            # (n_channels,) float64 detection noise in recording units
+    noise_levels: longblob            # (n_channels,) float64 detection noise in microvolts
     input_fingerprint: char(64)       # SHA-256 of source content, spans, channels and configuration
     """
 

@@ -453,7 +453,7 @@ class MotionDiagnostics(NamedTuple):
         ``(n_spans,)`` int64 count of kept peaks in each continuity span; a
         zero marks a span that contributed no evidence.
     noise_levels : numpy.ndarray
-        ``(n_channels,)`` float64 per-channel noise (recording units) the
+        ``(n_channels,)`` float64 per-channel noise (microvolts) the
         detection threshold was scaled by.
     """
 
