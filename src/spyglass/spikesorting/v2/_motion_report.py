@@ -723,7 +723,9 @@ def _draw_traces(
 
 
 def plot_motion_report(
-    inputs: MotionReportInputs, trace_window: TraceWindow | None = None
+    inputs: MotionReportInputs,
+    trace_window: TraceWindow | None = None,
+    summary: dict | None = None,
 ):
     """Draw one saved motion estimate as a multi-panel figure.
 
@@ -748,6 +750,9 @@ def plot_motion_report(
     inputs : MotionReportInputs
     trace_window : TraceWindow, optional
         Traces for panel (e).
+    summary : dict, optional
+        :func:`motion_report_summary` of ``inputs``, when the caller already
+        has it; computed here otherwise.
 
     Returns
     -------
@@ -755,7 +760,8 @@ def plot_motion_report(
     """
     import matplotlib.pyplot as plt
 
-    summary = motion_report_summary(inputs)
+    if summary is None:
+        summary = motion_report_summary(inputs)
     t0 = summary["source_start_s"]
     mosaic = [
         ["displacement", "border_channels"],

@@ -1400,7 +1400,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             else corrected_key["motion_corrected_recording_id"]
         )
         return (
-            _motion_report.plot_motion_report(inputs, trace_window),
+            _motion_report.plot_motion_report(inputs, trace_window, summary),
             summary,
         )
 
