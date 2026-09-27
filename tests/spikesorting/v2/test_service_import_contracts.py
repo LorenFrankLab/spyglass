@@ -31,6 +31,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_figpack_curation",
     "_lookup_validation",
     "_motion",
+    "_motion_report",
     "_nwb_metadata_helpers",
     "_pipeline_presets",
     "_pipeline_types",
