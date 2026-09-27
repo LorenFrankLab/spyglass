@@ -132,6 +132,10 @@ DLCProject().alter()
   previously carried only its preset). `Recording.resolve_stored_traces(key)`
   returns the resolved file, and `SortingSelection.ensure_effective_traces`
   now returns the healed file's path. Results are unchanged.
+- `SortingAnalyzerVersions.make_fetch` reads the sort's unit count and
+  resolves the analyzer folder (it previously fetched nothing), and
+  `make_compute` loads and hashes that folder with no DB access. Inventory
+  rows are unchanged.
 
 #### Spike Sorting v2: optional motion correction, independent of concatenation
 

@@ -701,6 +701,75 @@ def test_analyzer_manifest_records_noise_levels_seed(
     )
 
 
+@pytest.mark.slow
+@pytest.mark.integration
+def test_sorting_analyzer_versions_fetch_pins_folder_and_compute_needs_no_db(
+    populated_sorting, clean_recompute, monkeypatch
+):
+    """``make_fetch`` carries the unit count and the analyzer folder (so
+    DataJoint's fetch-integrity check covers the sort), and ``make_compute``
+    hashes that folder with no DB access, matching the populated row."""
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.recompute import SortingAnalyzerVersions
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._tripart_helpers import (
+        fetch_hash,
+        forbid_db_queries,
+    )
+
+    sort_key = {"sorting_id": populated_sorting["sorting_id"]}
+    n_units, recipe = (Sorting & sort_key).fetch1(
+        "n_units", "display_waveform_params_name"
+    )
+    assert n_units > 0, "precondition: the analyzer path needs units"
+    Sorting().get_analyzer(sort_key)  # build if a prior test removed it
+    key = {**sort_key, "waveform_params_name": recipe}
+    table = SortingAnalyzerVersions()
+
+    fetched = table.make_fetch(key)
+    assert fetched.n_units == n_units
+    assert fetched.analyzer_folder == str(
+        analyzer_path(sort_key["sorting_id"], recipe)
+    )
+    assert fetch_hash(table.make_fetch(key)) == fetch_hash(fetched)
+    with forbid_db_queries(monkeypatch, "SortingAnalyzerVersions"):
+        computed = table.make_compute(key, *fetched)
+
+    SortingAnalyzerVersions.populate(key, reserve_jobs=False)
+    row = (SortingAnalyzerVersions & key).fetch1()
+    assert computed.analyzer_hash == row["analyzer_hash"]
+    assert (
+        computed.analyzer_manifest["extension_content_hashes"]
+        == row["analyzer_manifest"]["extension_content_hashes"]
+    )
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sorting_analyzer_versions_compute_zero_unit_and_missing(
+    tmp_path, monkeypatch
+):
+    """A zero-unit sort inventories the zero-unit hash and an absent folder
+    the missing hash, from the fetched inputs alone and with no DB access."""
+    from spyglass.spikesorting.v2.recompute import (
+        _MISSING_HASH,
+        _ZERO_HASH,
+        SortingAnalyzerVersions,
+    )
+    from tests.spikesorting.v2._tripart_helpers import forbid_db_queries
+
+    key = {"sorting_id": "no-such-sort", "waveform_params_name": "recipe"}
+    absent = str(tmp_path / "absent.analyzer")
+    table = SortingAnalyzerVersions()
+    with forbid_db_queries(monkeypatch, "SortingAnalyzerVersions"):
+        zero = table.make_compute(key, 0, absent)
+        missing = table.make_compute(key, 3, absent)
+    assert (zero.analyzer_hash, zero.analyzer_manifest) == (_ZERO_HASH, {})
+    assert (missing.analyzer_hash, missing.analyzer_manifest) == (
+        _MISSING_HASH,
+        {},
+    )
+
+
 @pytest.fixture
 def display_analyzer_folder(populated_sorting):
     """Resolve (building if needed) the sort's display analyzer folder, and

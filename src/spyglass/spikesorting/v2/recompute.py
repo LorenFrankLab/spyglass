@@ -136,9 +136,21 @@ class RecordingVersionsComputed(NamedTuple):
 
 
 class AnalyzerVersionsFetched(NamedTuple):
-    """No upstream DB state to read -- the populate key already carries
-    ``sorting_id`` + ``waveform_params_name``; the heavy analyzer load + hash is
-    deferred to ``make_compute`` (off the framework transaction)."""
+    """DB inputs for ``SortingAnalyzerVersions.make_compute``.
+
+    The heavy analyzer load + hash is deferred to ``make_compute`` (off the
+    framework transaction), which reads only these.
+
+    Attributes
+    ----------
+    n_units : int
+        The sort's unit count; ``0`` means no analyzer exists.
+    analyzer_folder : str
+        The (sort, recipe) analyzer cache folder.
+    """
+
+    n_units: int
+    analyzer_folder: str
 
 
 class AnalyzerVersionsComputed(NamedTuple):
@@ -826,15 +838,39 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
 
     # Tri-part: loading the analyzer folder + hashing its full extension arrays
     # is the heavy step and must stay OUTSIDE the framework transaction
-    # (make_compute), not hold row locks in a monolithic make. make_fetch is
-    # empty -- the populate key already carries sorting_id + waveform_params_name.
+    # (make_compute), not hold row locks in a monolithic make. make_fetch reads
+    # the sort's unit count, validates the recipe and resolves the folder.
     _parallel_make = True
 
     def make_fetch(self, key) -> AnalyzerVersionsFetched:
-        """No upstream DB state to read (key is self-sufficient)."""
-        return AnalyzerVersionsFetched()
+        """Read the unit count and resolve the analyzer folder.
 
-    def make_compute(self, key) -> AnalyzerVersionsComputed:
+        Validates the recipe (path-safe name, existing row) for a sort with
+        units, as ``Sorting.get_analyzer`` does, before any folder is read.
+        """
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            assert_path_safe_waveform_params_name,
+        )
+        from spyglass.spikesorting.v2._sorting_analyzer import (
+            fetch_waveform_params,
+        )
+
+        n_units = int(
+            (Sorting & {"sorting_id": key["sorting_id"]}).fetch1("n_units")
+        )
+        if n_units > 0:
+            assert_path_safe_waveform_params_name(key["waveform_params_name"])
+            fetch_waveform_params(key["waveform_params_name"])
+        return AnalyzerVersionsFetched(
+            n_units=n_units,
+            analyzer_folder=str(
+                _analyzer_folder(key["sorting_id"], key["waveform_params_name"])
+            ),
+        )
+
+    def make_compute(
+        self, key, n_units, analyzer_folder
+    ) -> AnalyzerVersionsComputed:
         """Load the analyzer + hash its extensions off the transaction.
 
         Uses the NO-REBUILD loader: an absent analyzer folder is inventoried as
@@ -842,16 +878,27 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         rebuilt and hashed as if present -- so the inventory distinguishes a
         reclaimed/missing analyzer from a legitimately zero-unit one
         (``_ZERO_HASH``), and reclaimed disk is not re-materialized just to
-        record a hash.
+        record a hash. No DB access: reads only the folder ``make_fetch``
+        resolved.
         """
         import spikeinterface as si
 
+        from spyglass.spikesorting.v2._sorting_analyzer import (
+            load_analyzer_folder_no_rebuild,
+        )
+
         si_deps = {"spikeinterface": si.__version__}
+        if n_units == 0:
+            # SI cannot build an analyzer over zero units, so there is nothing
+            # to hash: an empty manifest and the zero-unit hash.
+            return AnalyzerVersionsComputed(
+                si_deps=si_deps, analyzer_manifest={}, analyzer_hash=_ZERO_HASH
+            )
         try:
-            analyzer = Sorting().get_analyzer(
-                {"sorting_id": key["sorting_id"]},
-                waveform_params_name=key["waveform_params_name"],
-                rebuild=False,
+            analyzer = load_analyzer_folder_no_rebuild(
+                Path(analyzer_folder),
+                recipe_label=key["waveform_params_name"],
+                sorting_id=key["sorting_id"],
             )
             # The content hashes drive the recompute identity (analyzer_hash);
             # the seed modes are SECONDARY provenance recorded alongside them, so
@@ -863,16 +910,9 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
                 "extension_content_hashes": content_hashes,
                 "base_extension_seed_modes": analyzer_seed_modes(analyzer),
                 "storage_fingerprint": analyzer_folder_storage_fingerprint(
-                    _analyzer_folder(
-                        key["sorting_id"], key["waveform_params_name"]
-                    )
+                    analyzer_folder
                 ),
             }
-        except ZeroUnitAnalyzerError:
-            # No extensions to hash -> empty manifest + content hashes; the
-            # return below folds an empty content-hash map to _ZERO_HASH.
-            content_hashes = {}
-            manifest = {}
         except AnalyzerFolderInvalidError as exc:
             logger.warning(
                 "SortingAnalyzerVersions: analyzer folder invalid for "

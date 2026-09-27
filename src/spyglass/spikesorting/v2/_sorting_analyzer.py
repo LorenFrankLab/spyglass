@@ -346,6 +346,43 @@ def load_or_rebuild_analyzer(
     )
 
 
+def load_analyzer_folder_no_rebuild(folder, *, recipe_label, sorting_id):
+    """Load a resolved analyzer folder without rebuilding it; no DB access.
+
+    The ``rebuild=False`` policy of :func:`load_or_rebuild_analyzer` for a
+    folder the caller already resolved, so the recompute inventory can
+    observe a missing or corrupt analyzer inside a tri-part ``make_compute``.
+
+    Parameters
+    ----------
+    folder : pathlib.Path
+        The canonical cache folder (``analyzer_path(sorting_id, recipe)``).
+    recipe_label : str
+        The recipe name, for error messages.
+    sorting_id
+        The sort, for the cache lock and error messages.
+
+    Returns
+    -------
+    spikeinterface.SortingAnalyzer
+        The loaded analyzer, extensions included.
+
+    Raises
+    ------
+    AnalyzerFolderMissingError
+        If the folder is absent.
+    AnalyzerFolderInvalidError
+        If the folder exists but cannot be loaded.
+    """
+    return _load_analyzer_folder_or_rebuild(
+        folder,
+        rebuild=False,
+        rebuild_fn=None,
+        recipe_label=recipe_label,
+        sorting_id=sorting_id,
+    )
+
+
 def load_or_rebuild_analyzer_from_resolved(
     *,
     sorting_id,
