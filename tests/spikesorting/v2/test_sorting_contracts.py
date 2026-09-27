@@ -158,3 +158,26 @@ def test_recording_artifact_result_field_contract():
         "duration_s",
     )
     assert RecordingArtifactResult._fields == RecordingComputed._fields[:8]
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_sorting_make_fetch_heals_the_traces_file_idempotently(
+    populated_sorting,
+):
+    """``make_fetch`` resolves the sort's traces file and rebuilds it when it
+    is missing, returning the same carrier as before the file was removed --
+    so DataJoint's second fetch (inside the insert transaction) matches the
+    first, and ``make_compute`` reads a file that exists."""
+    from pathlib import Path
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._tripart_helpers import fetch_hash
+
+    fetched = Sorting().make_fetch(populated_sorting)
+    assert Path(fetched.traces_abs_path).exists()
+    Path(fetched.traces_abs_path).unlink()
+
+    healed = Sorting().make_fetch(populated_sorting)
+    assert Path(healed.traces_abs_path).exists()
+    assert fetch_hash(healed) == fetch_hash(fetched)

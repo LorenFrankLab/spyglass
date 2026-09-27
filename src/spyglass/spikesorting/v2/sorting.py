@@ -190,8 +190,10 @@ class SortingFetched(NamedTuple):
     concat_statistics_spans: np.ndarray | None
     # The sort's effective traces from
     # ``SortingSelection.resolve_effective_source``: the cached artifact
-    # ``make_compute`` loads as the sorter input.
+    # ``make_compute`` loads as the sorter input, and its absolute path
+    # (the file rebuilt here if it was missing).
     traces: EffectiveTraces
+    traces_abs_path: str
     # For a sort of a motion-corrected recording: the correction's ids and
     # recipe names written to the units NWB provenance, and the source's frame
     # count the corrected traces must keep. ``None`` for an uncorrected sort.
@@ -1483,7 +1485,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         return effective_source_from_correction(lineage, corrected_key, row)
 
     @staticmethod
-    def ensure_effective_traces(traces: EffectiveTraces) -> None:
+    def ensure_effective_traces(traces: EffectiveTraces) -> str:
         """Rebuild the effective traces' cached NWB file if it is missing.
 
         The same self-heal the owning table's ``get_recording`` performs
@@ -1497,12 +1499,18 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         ----------
         traces : EffectiveTraces
             The ``traces`` of :meth:`resolve_effective_source`.
+
+        Returns
+        -------
+        str
+            Absolute path of the (present) file, for
+            :func:`._source_resolution.read_effective_recording`.
         """
         from spyglass.spikesorting.v2._recording_nwb import (
             ensure_artifact_file,
         )
 
-        ensure_artifact_file(
+        return ensure_artifact_file(
             _TRACE_TABLES[traces.kind],
             traces.key,
             traces.row["analysis_file_name"],
@@ -1800,8 +1808,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
 
         # Resolved after the concat schema-bypass check above, which must fire
-        # before any source-row fetch.
+        # before any source-row fetch. A missing traces file is rebuilt here,
+        # so the second fetch finds it and resolves the same path.
         traces = SortingSelection.resolve_effective_source(key).traces
+        traces_abs_path = SortingSelection.ensure_effective_traces(traces)
         motion_correction_provenance = source_n_samples = None
         if traces.kind == "motion_corrected_recording":
             motion_correction_provenance, source_n_samples = (
@@ -1823,6 +1833,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             region_by_electrode=region_by_electrode,
             concat_statistics_spans=concat_statistics_spans,
             traces=traces,
+            traces_abs_path=traces_abs_path,
             motion_correction_provenance=motion_correction_provenance,
             source_n_samples=source_n_samples,
         )
@@ -1894,9 +1905,9 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         Resolved once here so ``make_compute`` performs no DB writes while
         building the ``Sorting.Unit`` rows (and matching NWB unit columns).
-        Upstream inputs are resolved in ``make_fetch``; runtime calls such as
-        ``get_recording`` and ``AnalysisNwbfile.create`` may still perform DB
-        reads. ``electrode_by_id`` comes from the unjoined
+        Upstream inputs are resolved in ``make_fetch``; the only DB reads
+        left in ``make_compute`` stage the units NWB (see
+        :mod:`._recording_nwb`). ``electrode_by_id`` comes from the unjoined
         ``SortGroupElectrode`` so it stays complete (the row-construction key set
         is unchanged); ``region_by_electrode`` is a best-effort
         ``electrode_id -> brain region`` map (an electrode without a region
@@ -2050,10 +2061,14 @@ class Sorting(SpyglassMixin, dj.Computed):
         region_by_electrode,
         concat_statistics_spans,
         traces,
+        traces_abs_path,
         motion_correction_provenance,
         source_n_samples,
     ):
         """Sort, build analyzer, stage Units NWB outside any DB transaction.
+
+        Reads only the inputs ``make_fetch`` resolved; the one DB access left
+        is staging the units NWB file (see :mod:`._recording_nwb`).
 
         The long-running steps run here:
 
@@ -2114,6 +2129,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         traces : EffectiveTraces
             The sort's effective traces from ``make_fetch``: the cached
             artifact loaded as the sorter input.
+        traces_abs_path : str
+            That artifact's absolute path, resolved (and the file rebuilt if
+            missing) in ``make_fetch``.
         motion_correction_provenance : dict or None
             For a sort of a motion-corrected recording, the correction's ids
             and recipe names, written to the units NWB provenance; ``None``
@@ -2130,7 +2148,8 @@ class Sorting(SpyglassMixin, dj.Computed):
         """
         # Load the sort input from the effective traces: the cached Recording
         # for a single-recording source, the materialized ConcatenatedRecording
-        # for a concat source (a missing file is rebuilt first). ``recording_id``
+        # for a concat source (a missing file was rebuilt in make_fetch), read
+        # by path with no DB access. ``recording_id``
         # is the anchor (threaded from make_fetch) used for the per-unit
         # Electrode FK, NOT necessarily the loaded recording's own id. A single
         # recording's traces load unmasked because the artifact mask is applied
@@ -2138,7 +2157,13 @@ class Sorting(SpyglassMixin, dj.Computed):
         # feed the statistics spans. Concat and motion-corrected masks are
         # already materialized. Both modes pass observation intervals to the
         # units writer.
-        recording = SortingSelection.load_stored_traces(traces)
+        from spyglass.spikesorting.v2._source_resolution import (
+            read_effective_recording,
+        )
+
+        recording = read_effective_recording(
+            traces_abs_path, traces._replace(apply_artifact_mask=False)
+        )
 
         # Statistics spans: the artifact-free frame ranges every noise and
         # whitening estimate samples from, persisted with the sort so each
