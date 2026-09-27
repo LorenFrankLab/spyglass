@@ -1333,15 +1333,17 @@ def test_unequal_members_with_a_join_and_an_internal_gap():
 
 def test_span_without_peaks_is_reported_not_fatal(caplog):
     """A continuity span too short to hold a localization window keeps no
-    peak: it is counted as such and logged, and the estimate is still made
-    from the other span."""
+    peak: it is counted as such, logged and listed with its frames and
+    source times, and the estimate is still made from the other span."""
     import logging
 
+    from spyglass.spikesorting.v2._motion import spans_without_evidence
     from tests.spikesorting.v2._motion_fixtures import rigid_drift_recordings
 
     recording, _, _ = rigid_drift_recordings(seed=0, duration_s=5.0)
     n = recording.get_num_samples()
-    clock = _clock_for([(0, n - 5), (n - 5, n)], [0.0, (n - 5) / 3e4 + 1.0])
+    second_start_s = (n - 5) / 3e4 + 1.0
+    clock = _clock_for([(0, n - 5), (n - 5, n)], [0.0, second_start_s])
 
     with caplog.at_level(logging.WARNING):
         motion, diagnostics = _estimate(recording, clock=clock)
@@ -1350,6 +1352,18 @@ def test_span_without_peaks_is_reported_not_fatal(caplog):
     assert diagnostics.peaks_per_continuity_span[1] == 0
     assert "kept no peaks" in caplog.text
     assert np.isfinite(motion.displacement[0]).all()
+    assert spans_without_evidence(
+        diagnostics.peaks_per_continuity_span, clock
+    ) == [
+        {
+            "span_index": 1,
+            "start_frame": n - 5,
+            "end_frame": n,
+            "source_start_s": second_start_s,
+            "source_end_s": second_start_s + 4 / 3e4,
+        }
+    ]
+    assert spans_without_evidence(np.array([3, 1]), clock) == []
 
 
 def _planted_join_recording(recording, join, planted):

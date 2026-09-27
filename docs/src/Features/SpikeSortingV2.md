@@ -1589,6 +1589,12 @@ mapped = MotionEstimate().get_displacement_on_source_clock(estimate_key)
 # SOURCE time, for inspection; a bin inside a capped gap is flagged
 # (in_gap=True, source_time_s=NaN) rather than assigned to a span.
 
+MotionEstimate().get_spans_without_evidence(estimate_key)
+# Continuity spans that kept no peak (e.g. very short spans between dropped
+# frames): their displacement is the estimator's temporal prior alone, so a
+# correction there is not evidence-based. Not refused; run_v2_pipeline also
+# lists them in motion_spans_without_evidence and warns.
+
 row = (MotionEstimate & estimate_key).fetch1()
 row["n_peaks_detected"], row["n_peaks_kept"]         # on the masked recording
 row["peaks_per_temporal_bin"], row["peaks_per_continuity_span"]

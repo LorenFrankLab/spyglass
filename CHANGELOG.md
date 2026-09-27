@@ -333,9 +333,13 @@ available.
   that corrects motion itself under `"apply"`, and previews the motion ids.
   Receipts and `describe_run` carry `motion_mode`,
   `motion_correction_params_name`, `motion_estimate_id`,
-  `motion_estimation_preset`, `motion_corrected_recording_id` and
-  `motion_removed_channel_ids`; the scientific setup states the mode, recipe,
-  resolved preset, border mode and experimental status.
+  `motion_estimation_preset`, `motion_corrected_recording_id`,
+  `motion_removed_channel_ids` and `motion_spans_without_evidence`; the
+  scientific setup states the mode, recipe, resolved preset, border mode and
+  experimental status. A continuity span that kept no peak (its displacement
+  is the estimator's temporal prior alone) is not refused: it is listed in
+  `motion_spans_without_evidence`, adds a run warning, and
+  `MotionEstimate.get_spans_without_evidence` reports it for any estimate.
   `initialize_v2_defaults` installs the shipped motion recipes, and
   `verify_v2_default_catalog` audits them.
 - Every consumer of a corrected sort reads the corrected recording, with its

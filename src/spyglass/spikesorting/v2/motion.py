@@ -1164,6 +1164,34 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             (self & key).proj(*_ESTIMATION_CLOCK_COLUMNS.values()).fetch1()
         )
 
+    def get_spans_without_evidence(self, key: dict) -> list[dict]:
+        """The continuity spans of one estimate that kept no peak.
+
+        The displacement over such a span rests on the estimator's temporal
+        prior only, not on spikes recorded in it; a correction applied there
+        is not evidence-based. Dropped-frame gaps can leave spans too short
+        to hold a peak, so this is reported rather than refused.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting one ``MotionEstimate`` row.
+
+        Returns
+        -------
+        list[dict]
+            ``_motion.spans_without_evidence``: one ``{"span_index",
+            "start_frame", "end_frame", "source_start_s", "source_end_s"}``
+            per such span (times on the source's own clock, s); empty when
+            every span kept a peak.
+        """
+        from spyglass.spikesorting.v2._motion import spans_without_evidence
+
+        return spans_without_evidence(
+            (self & key).fetch1("peaks_per_continuity_span"),
+            self.get_estimation_clock(key),
+        )
+
     def get_displacement_on_source_clock(self, key: dict):
         """One estimate's displacement with its bins in source time.
 

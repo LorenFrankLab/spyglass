@@ -276,6 +276,7 @@ def _motion_fields(mode):
         "motion_estimation_preset": "dredge_fast" if estimated else None,
         "motion_corrected_recording_id": "corrected-1" if applied else None,
         "motion_removed_channel_ids": [0, 31] if applied else None,
+        "motion_spans_without_evidence": [] if estimated else None,
     }
 
 

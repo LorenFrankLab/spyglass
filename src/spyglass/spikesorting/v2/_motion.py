@@ -464,6 +464,43 @@ class MotionDiagnostics(NamedTuple):
     noise_levels: np.ndarray
 
 
+def spans_without_evidence(
+    peaks_per_continuity_span, clock: EstimationClock
+) -> list[dict]:
+    """The continuity spans that kept no peak.
+
+    The estimate over such a span rests on the estimator's temporal prior
+    only (dropped-frame gaps can leave spans too short to hold a peak).
+
+    Parameters
+    ----------
+    peaks_per_continuity_span : numpy.ndarray
+        ``(n_spans,)`` kept peaks per continuity span
+        (:attr:`EstimateDiagnostics.peaks_per_continuity_span`).
+    clock : EstimationClock
+        The estimate's time map.
+
+    Returns
+    -------
+    list[dict]
+        One ``{"span_index", "start_frame", "end_frame", "source_start_s",
+        "source_end_s"}`` per span without a kept peak, in span order: its
+        half-open frame range and its first and last timestamp on the
+        source's own clock (s). Empty when every span kept a peak.
+    """
+    empty = np.flatnonzero(np.asarray(peaks_per_continuity_span) == 0)
+    return [
+        {
+            "span_index": int(i),
+            "start_frame": int(clock.spans[i, 0]),
+            "end_frame": int(clock.spans[i, 1]),
+            "source_start_s": float(clock.source_start_s[i]),
+            "source_end_s": float(clock.source_end_s[i]),
+        }
+        for i in empty
+    ]
+
+
 def normalize_spans(spans) -> list[tuple[int, int]]:
     """Return ``spans`` as a list of ``(start, end)`` Python-int tuples."""
     return [

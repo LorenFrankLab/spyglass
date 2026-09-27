@@ -882,6 +882,7 @@ _RUN_MOTION_FIELDS = (
     "motion_estimation_preset",
     "motion_corrected_recording_id",
     "motion_removed_channel_ids",
+    "motion_spans_without_evidence",
 )
 
 
@@ -1082,8 +1083,9 @@ def describe_run(result) -> "pd.DataFrame":
         scientific setup, the effective sorter configuration and the motion
         receipt (``motion_mode``, ``motion_correction_params_name``,
         ``motion_estimate_id``, ``motion_estimation_preset``,
-        ``motion_corrected_recording_id``, ``motion_removed_channel_ids``;
-        ``"None"`` where the mode produces none). For a
+        ``motion_corrected_recording_id``, ``motion_removed_channel_ids``,
+        ``motion_spans_without_evidence``; ``"None"`` where the mode produces
+        none). For a
         ``run_v2_pipeline`` summary the ``summary`` row's
         ``status`` is ``"root only"`` / ``"auto-labeled"``. Single-session
         runs expose the auto-labeled child through ``auto_labeled_merge_id``;

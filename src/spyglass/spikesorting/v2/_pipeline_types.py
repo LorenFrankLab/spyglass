@@ -169,13 +169,18 @@ class _RunV2SummaryBase(TypedDict):
     # for ``"estimate"`` and ``"apply"``; ``motion_corrected_recording_id``
     # and ``motion_removed_channel_ids`` (the source channels
     # ``border_mode="remove_channels"`` dropped; empty otherwise) only for
-    # ``"apply"``. Every one is ``None`` where it does not apply.
+    # ``"apply"``. ``motion_spans_without_evidence`` lists the estimate's
+    # continuity spans that kept no peak
+    # (``MotionEstimate.get_spans_without_evidence``; empty when every span
+    # has evidence) for ``"estimate"`` and ``"apply"``. Every one is ``None``
+    # where it does not apply.
     motion_mode: MotionMode
     motion_correction_params_name: "str | None"
     motion_estimate_id: "UUID | None"
     motion_corrected_recording_id: "UUID | None"
     motion_estimation_preset: "str | None"
     motion_removed_channel_ids: "list | None"
+    motion_spans_without_evidence: "list[dict] | None"
     # Stage statuses of the motion stages (present with the matching
     # ``stage_seconds`` key).
     motion_estimate_status: NotRequired[StageStatus]

@@ -192,6 +192,7 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "motion_corrected_recording_id",
         "motion_estimation_preset",
         "motion_removed_channel_ids",
+        "motion_spans_without_evidence",
     }
     _SUMMARY_OPTIONAL = {
         "motion_estimate_status",

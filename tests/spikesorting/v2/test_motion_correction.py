@@ -2196,6 +2196,7 @@ def test_pipeline_motion_modes_on_one_recording(drift_recording):
             "motion_corrected_recording_id",
             "motion_estimation_preset",
             "motion_removed_channel_ids",
+            "motion_spans_without_evidence",
         ):
             assert off[field] is None
         assert not {"motion_estimate", "motion_corrected_recording"} & set(
@@ -2239,6 +2240,7 @@ def test_pipeline_motion_modes_on_one_recording(drift_recording):
         assert estimate["motion_estimation_preset"] == "dredge_fast"
         assert estimate["motion_corrected_recording_id"] is None
         assert estimate["motion_removed_channel_ids"] is None
+        assert estimate["motion_spans_without_evidence"] == []
         assert estimate["motion_estimate_status"] == "computed"
         assert estimate["scientific_config"]["motion"]["mode"] == "estimate"
         assert estimate["scientific_config"]["motion"]["recipe"] == (
@@ -2351,6 +2353,82 @@ def test_pipeline_motion_apply_on_a_concatenation(discontinuous_sources):
             drop_motion_selections(
                 {"concat_recording_id": summary["concat_recording_id"]}
             )
+
+
+def test_pipeline_surfaces_a_span_without_evidence(
+    drift_recording, discontinuous_sources
+):
+    """An artifact exclusion covering the whole short second acquisition span
+    of a gapped recording leaves that span without a kept peak. The run is
+    not refused: the receipt lists the span (frames and source times, as
+    ``MotionEstimate.get_spans_without_evidence`` reports it) and the run
+    warns. An estimate whose spans all kept peaks reports none."""
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.motion import (
+        MotionEstimate,
+        MotionEstimateSelection,
+    )
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from tests.spikesorting.v2._ingest_helpers import configure_v2_run_inputs
+
+    nwb_file_name = drift_recording["nwb_file_name"]
+    t0 = discontinuous_sources["t0"]
+    with_evidence = populated_estimate(
+        recording_id=discontinuous_sources["member_b"]["recording_id"]
+    )
+    assert MotionEstimate().get_spans_without_evidence(with_evidence) == []
+
+    # The second span (1.5 s, above the recipe's 1 s minimum segment) is
+    # excluded whole; the exclusion masks ~11% of the recording, well under
+    # the artifact guard's 50%.
+    interval_list_name = "motion short second span"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_list_name,
+            "valid_times": np.array(
+                [[t0 + 2.0, t0 + 14.0], [t0 + 15.0, t0 + 16.5]]
+            ),
+            "pipeline": "motion_estimate_test",
+        },
+        skip_duplicates=True,
+    )
+    summary = None
+    try:
+        summary = run_v2_pipeline(
+            **configure_v2_run_inputs(
+                nwb_file_name,
+                MOTION_TEAM,
+                interval_list_name=interval_list_name,
+            ),
+            pipeline_preset=PIPELINE_PRESET,
+            motion_mode="estimate",
+            motion_correction_params_name=MOTION_RECIPE,
+            manual_excluded_times=[[t0 + 14.5, t0 + 16.9]],
+        )
+        estimate_key = {"motion_estimate_id": summary["motion_estimate_id"]}
+        row = (MotionEstimate & estimate_key).fetch1()
+        assert row["peaks_per_continuity_span"][0] > 0
+        assert row["peaks_per_continuity_span"][1] == 0
+        spans = MotionEstimate().get_spans_without_evidence(estimate_key)
+        assert summary["motion_spans_without_evidence"] == spans
+        assert len(spans) == 1
+        assert spans[0]["span_index"] == 1
+        assert (spans[0]["start_frame"], spans[0]["end_frame"]) == tuple(
+            row["continuity_spans"][1]
+        )
+        assert spans[0]["source_start_s"] == pytest.approx(t0 + 15.0, abs=1e-3)
+        assert spans[0]["source_end_s"] == pytest.approx(t0 + 16.5, abs=1e-3)
+        warnings = [w for w in summary["warnings"] if "kept no peaks" in str(w)]
+        assert len(warnings) == 1
+        assert str(summary["motion_estimate_id"]) in warnings[0]
+    finally:
+        if summary is not None:
+            drop_pipeline_sorts([summary["sorting_id"]])
+            (
+                MotionEstimateSelection
+                & {"motion_estimate_id": summary["motion_estimate_id"]}
+            ).super_delete(warn=False, safemode=False)
 
 
 @pytest.mark.parametrize(

@@ -410,6 +410,11 @@ def run_v2_pipeline(
             ``motion_removed_channel_ids`` : source channels the interpolation's
                 ``remove_channels`` border mode dropped (``"apply"``; empty
                 for ``force_extrapolate``)
+            ``motion_spans_without_evidence`` : the estimate's continuity
+                spans that kept no peak
+                (``MotionEstimate.get_spans_without_evidence``; ``"estimate"``
+                / ``"apply"``; empty when every span has evidence). A
+                non-empty list also adds a ``warnings`` entry.
         ``build_figpack_view=True`` adds (unless the sort found zero units):
             ``figpack_uri``              : the published FigPack curation-view
                 URI (a local bundle path; offline only)
@@ -658,6 +663,7 @@ def run_v2_pipeline(
         "motion_corrected_recording_id": None,
         "motion_estimation_preset": None,
         "motion_removed_channel_ids": None,
+        "motion_spans_without_evidence": None,
     }
     # Resolve the motion recipe before any populate, so a missing row fails
     # here (not after the recording / concat build) when preflight is off.
@@ -780,6 +786,27 @@ def run_v2_pipeline(
             run_summary,
         )
         run_summary["motion_estimate_id"] = estimate_key["motion_estimate_id"]
+        # Surfaced, not refused: dropped-frame gaps can leave spans too short
+        # to hold a peak, and the estimate there is the temporal prior alone.
+        empty_spans = MotionEstimate().get_spans_without_evidence(estimate_key)
+        run_summary["motion_spans_without_evidence"] = empty_spans
+        if empty_spans:
+            empty_span_warning = (
+                f"Motion estimate {estimate_key['motion_estimate_id']}: "
+                f"{len(empty_spans)} continuity span(s) kept no peaks "
+                "(source times "
+                + ", ".join(
+                    f"{span['source_start_s']:.3f}-{span['source_end_s']:.3f} s"
+                    for span in empty_spans
+                )
+                + "); the displacement there rests on the estimator's "
+                "temporal prior only, so a correction applied to them is not "
+                "evidence-based. See run_summary"
+                "['motion_spans_without_evidence'] or "
+                "MotionEstimate().get_spans_without_evidence(...)."
+            )
+            logger.warning(empty_span_warning)
+            warnings_list.append(empty_span_warning)
         if motion_mode == "estimate":
             return {}
 
