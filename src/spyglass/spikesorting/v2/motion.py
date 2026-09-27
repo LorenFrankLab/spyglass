@@ -2212,32 +2212,22 @@ class MotionCorrectedRecording(
     def make_insert(self, key, *computed) -> None:
         """Register the staged artifact and insert the row atomically.
 
-        On any failure the staged file is removed before re-raising, so no
-        unregistered artifact outlives a failed populate.
+        A failed populate's staged file is removed by
+        ``StagedOutputCleanupMixin``.
         """
-        from spyglass.spikesorting.v2.recording import (
-            _ELECTRICAL_SERIES_PATH,
-            _unlink_staged_analysis_file,
-        )
+        from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_PATH
 
         row = MotionCorrectedComputed(*computed)._asdict()
         nwb_file_name = row.pop("nwb_file_name")
-        try:
-            with transaction_or_noop(self.connection):
-                AnalysisNwbfile().add(nwb_file_name, row["analysis_file_name"])
-                self.insert1(
-                    {
-                        **key,
-                        **row,
-                        "electrical_series_path": _ELECTRICAL_SERIES_PATH,
-                    }
-                )
-        except Exception:
-            _unlink_staged_analysis_file(
-                row["analysis_file_name"],
-                context="MotionCorrectedRecording.make_insert",
+        with transaction_or_noop(self.connection):
+            AnalysisNwbfile().add(nwb_file_name, row["analysis_file_name"])
+            self.insert1(
+                {
+                    **key,
+                    **row,
+                    "electrical_series_path": _ELECTRICAL_SERIES_PATH,
+                }
             )
-            raise
 
     def get_recording(self, key: dict):
         """Return the corrected recording, rebuilding a missing file first.

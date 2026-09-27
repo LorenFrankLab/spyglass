@@ -1201,60 +1201,50 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         are read back from the staged NWB (the canonical written pairs) rather
         than threaded through the compute carrier, mirroring ``CurationEvaluation``;
         ``matchable_units`` is the frozen node universe snapshot carried from
-        ``make_compute``. On failure the staged file is unlinked before re-raising.
+        ``make_compute``. A failed populate's staged file is removed by
+        ``StagedOutputCleanupMixin``.
         """
         from spyglass.spikesorting.v2._unitmatch_nwb import read_pairs
-        from spyglass.spikesorting.v2.recording import (
-            _unlink_staged_analysis_file,
-        )
 
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        try:
-            # Read the canonical pairs back from the staged NWB INSIDE the try so
-            # a corrupt/mismatched file still unlinks the staged scratch. Use an
-            # explicit raise (not assert -- assert is stripped under ``python
-            # -O``): the NWB table is the source of the Pair rows, so its length
-            # must agree with the computed n_pairs.
-            pairs = read_pairs(abs_path, pairs_object_id)
-            if len(pairs) != n_pairs:
-                raise RuntimeError(
-                    "UnitMatch.make_insert: staged NWB has "
-                    f"{len(pairs)} pairs but the computed n_pairs is {n_pairs}; "
-                    "the pairs table is inconsistent."
-                )
-            # transaction_or_noop keeps the registration + master + Pair inserts
-            # atomic even on a direct (non-populate) call; under tri-part populate
-            # the framework transaction is already open and this is a no-op.
-            with transaction_or_noop(self.connection):
-                AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
-                self.insert1(
-                    {
-                        **key,
-                        "analysis_file_name": analysis_file_name,
-                        "pairs_object_id": pairs_object_id,
-                        "n_pairs": len(pairs),
-                        "matcher_runtime_s": matcher_runtime_s,
-                        "spikeinterface_version": spikeinterface_version,
-                        "matcher_backend": matcher_backend,
-                        "matcher_backend_version": matcher_backend_version,
-                    }
-                )
-                # ``read_pairs`` returns exactly the Pair part columns
-                # (pair_index + the two projected unit FKs + probability/drift/
-                # fdr) and ``key`` adds only the master PK, so splatting both is
-                # the full Pair row -- no second hand-maintained column list to
-                # drift from the NWB writer/reader.
-                self.Pair.insert([{**key, **pair} for pair in pairs])
-                # Persist the frozen matchable universe so TrackedUnit reads the
-                # exact node set the matcher saw, not current curation labels.
-                self.MatchableUnit.insert(
-                    [{**key, **unit} for unit in matchable_units]
-                )
-        except Exception:
-            _unlink_staged_analysis_file(
-                analysis_file_name, context="UnitMatch.make_insert"
+        # Use an explicit raise (not assert -- assert is stripped under
+        # ``python -O``): the NWB table is the source of the Pair rows, so its
+        # length must agree with the computed n_pairs.
+        pairs = read_pairs(abs_path, pairs_object_id)
+        if len(pairs) != n_pairs:
+            raise RuntimeError(
+                "UnitMatch.make_insert: staged NWB has "
+                f"{len(pairs)} pairs but the computed n_pairs is {n_pairs}; "
+                "the pairs table is inconsistent."
             )
-            raise
+        # transaction_or_noop keeps the registration + master + Pair inserts
+        # atomic even on a direct (non-populate) call; under tri-part populate
+        # the framework transaction is already open and this is a no-op.
+        with transaction_or_noop(self.connection):
+            AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
+            self.insert1(
+                {
+                    **key,
+                    "analysis_file_name": analysis_file_name,
+                    "pairs_object_id": pairs_object_id,
+                    "n_pairs": len(pairs),
+                    "matcher_runtime_s": matcher_runtime_s,
+                    "spikeinterface_version": spikeinterface_version,
+                    "matcher_backend": matcher_backend,
+                    "matcher_backend_version": matcher_backend_version,
+                }
+            )
+            # ``read_pairs`` returns exactly the Pair part columns
+            # (pair_index + the two projected unit FKs + probability/drift/
+            # fdr) and ``key`` adds only the master PK, so splatting both is
+            # the full Pair row -- no second hand-maintained column list to
+            # drift from the NWB writer/reader.
+            self.Pair.insert([{**key, **pair} for pair in pairs])
+            # Persist the frozen matchable universe so TrackedUnit reads the
+            # exact node set the matcher saw, not current curation labels.
+            self.MatchableUnit.insert(
+                [{**key, **unit} for unit in matchable_units]
+            )
 
     @staticmethod
     def _extract_and_match(member_plan, matcher_name, params, job_kwargs):

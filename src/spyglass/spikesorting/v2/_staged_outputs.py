@@ -16,9 +16,10 @@ private analyzer build, a figure bundle) leaves registering it to
 3. Any exception cancels the transaction (lines 423-427) and is re-raised,
    or returned as ``(key, error)`` when ``suppress_errors`` (lines 443-447).
 
-A table's own ``make_compute`` / ``make_insert`` cleanup covers failures inside
-those two methods, not step 2. The :class:`StagedOutputCleanupMixin` covers
-everything from ``make_compute`` returning until ``make_insert`` returns: it
+A table's own ``make_compute`` cleanup covers a compute that raises: nothing
+is recorded until it returns. The :class:`StagedOutputCleanupMixin` covers
+everything from ``make_compute`` returning until ``make_insert`` returns,
+including a ``make_insert`` that raises: it
 records the staged outputs of each computed result when ``make_compute``
 returns, forgets them once ``make_insert`` returns (they are registered from
 then on), and removes whatever is still recorded when ``_populate1`` ends

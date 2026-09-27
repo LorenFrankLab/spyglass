@@ -2441,8 +2441,9 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         The successful master insert establishes publication ownership. Only
         that attempt renames its completed analyzer into the shared cache,
         before the surrounding transaction commits. A duplicate insert never
-        publishes. Failure removes this attempt's staged NWB and analyzer;
-        previously published caches are never deleted by a losing attempt.
+        publishes. Every exit closes this attempt's staged analyzer; a failed
+        populate's staged NWB is removed by ``StagedOutputCleanupMixin``.
+        Previously published caches are never deleted by a losing attempt.
 
         Parameters
         ----------
@@ -2490,11 +2491,6 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 # rollback. A duplicate worker cannot reach publication. Only
                 # a rename happens here; waveform extraction was in compute.
                 staged_analyzer.publish()
-        except BaseException:
-            self._cleanup_staged_units_nwb(
-                analysis_file_name=analysis_file_name
-            )
-            raise
         finally:
             staged_analyzer.close()
 
@@ -2569,30 +2565,6 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 }
             )
             self._populate_unit_part(unit_rows)
-
-    @staticmethod
-    def _cleanup_staged_units_nwb(*, analysis_file_name):
-        """Best-effort removal of the attempt-owned units NWB after failure.
-
-        Removes ONLY the staged units NWB (failure-mode B: registration failed
-        after ``make_compute`` staged the file) -- it is per-attempt and
-        owned by this populate attempt. Analyzer staging has its own ownership
-        and cleanup in ``make_compute`` / ``make_insert``. A published canonical
-        analyzer is never removed by this failure path. Best-effort: a cleanup
-        failure is logged, never raised, so it cannot
-        mask the original error. DataJoint cannot roll back this filesystem side
-        effect, so the caller invokes this in its ``except`` before re-raising.
-        """
-        import pathlib
-
-        try:
-            abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-            pathlib.Path(abs_path).unlink(missing_ok=True)
-        except Exception as cleanup_exc:  # pragma: no cover -- defensive
-            logger.error(
-                "Sorting._cleanup_staged_units_nwb: failed to clean up staged "
-                f"units NWB {analysis_file_name!r}: {cleanup_exc!r}"
-            )
 
     # ---- Accessors -------------------------------------------------------
 

@@ -1305,14 +1305,11 @@ class ConcatenatedRecording(
 
         DataJoint's tri-part dispatch already opens the master transaction
         around this method, so ``transaction_or_noop`` is a no-op here; it is
-        kept so a direct (non-populate) call still commits atomically. On any
-        registration failure the staged ``ElectricalSeries`` is unlinked before
-        re-raising so it does not orphan.
+        kept so a direct (non-populate) call still commits atomically. A failed
+        populate's staged ``ElectricalSeries`` is removed by
+        ``StagedOutputCleanupMixin``.
         """
-        from spyglass.spikesorting.v2.recording import (
-            _ELECTRICAL_SERIES_PATH,
-            _unlink_staged_analysis_file,
-        )
+        from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_PATH
         from spyglass.spikesorting.v2.utils import transaction_or_noop
 
         boundary_rows = [
@@ -1324,38 +1321,27 @@ class ConcatenatedRecording(
             }
             for boundary in member_boundaries
         ]
-        try:
-            with transaction_or_noop(self.connection):
-                AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
-                self.insert1(
-                    {
-                        **key,
-                        "analysis_file_name": analysis_file_name,
-                        "electrical_series_path": _ELECTRICAL_SERIES_PATH,
-                        "object_id": object_id,
-                        "n_channels": n_channels,
-                        "sampling_frequency": sampling_frequency,
-                        "total_duration_s": total_duration_s,
-                        "n_samples": n_samples,
-                        "content_hash": content_hash,
-                        "obs_intervals": obs_intervals,
-                        "statistics_spans": statistics_spans,
-                        "continuity_spans": continuity_spans,
-                        "continuity_start_s": continuity_start_s,
-                        "continuity_end_s": continuity_end_s,
-                    }
-                )
-                self.MemberBoundary.insert(boundary_rows)
-        except Exception:
-            # ``write_nwb_artifact`` already wrote the concat ElectricalSeries
-            # to disk; if registration (AnalysisNwbfile.add + the inserts) then
-            # fails, that file would orphan, so unlink it before re-raising --
-            # matching Recording.make_insert's staged-file cleanup.
-            _unlink_staged_analysis_file(
-                analysis_file_name,
-                context="ConcatenatedRecording.make_insert",
+        with transaction_or_noop(self.connection):
+            AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
+            self.insert1(
+                {
+                    **key,
+                    "analysis_file_name": analysis_file_name,
+                    "electrical_series_path": _ELECTRICAL_SERIES_PATH,
+                    "object_id": object_id,
+                    "n_channels": n_channels,
+                    "sampling_frequency": sampling_frequency,
+                    "total_duration_s": total_duration_s,
+                    "n_samples": n_samples,
+                    "content_hash": content_hash,
+                    "obs_intervals": obs_intervals,
+                    "statistics_spans": statistics_spans,
+                    "continuity_spans": continuity_spans,
+                    "continuity_start_s": continuity_start_s,
+                    "continuity_end_s": continuity_end_s,
+                }
             )
-            raise
+            self.MemberBoundary.insert(boundary_rows)
 
     def get_recording(self, key) -> "si.BaseRecording":  # noqa: F821
         """Return the cached concatenated SpikeInterface recording.

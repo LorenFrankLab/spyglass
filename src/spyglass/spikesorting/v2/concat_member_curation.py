@@ -591,8 +591,8 @@ class ConcatMemberCuration(
     def make_insert(self, key, *computed) -> None:
         """Register the staged file, insert the row and its merge entry.
 
-        On any failure the staged file is removed before re-raising, so no
-        unregistered artifact outlives a failed populate.
+        A failed populate's staged file is removed by
+        ``StagedOutputCleanupMixin``.
         """
         from spyglass.spikesorting.spikesorting_merge import (
             SpikeSortingOutput,
@@ -601,27 +601,16 @@ class ConcatMemberCuration(
         row = ConcatMemberComputed(*computed)._asdict()
         curation_key = self._curation_key(key)
         member_key = {**curation_key, "member_index": int(key["member_index"])}
-        try:
-            with transaction_or_noop(self.connection):
-                AnalysisNwbfile().add(
-                    row["nwb_file_name"], row["analysis_file_name"]
-                )
-                self.insert1({**member_key, **row})
-                SpikeSortingOutput._merge_insert(
-                    [member_key],
-                    part_name="ConcatMemberCuration",
-                    skip_duplicates=True,
-                )
-        except Exception:
-            from spyglass.spikesorting.v2.recording import (
-                _unlink_staged_analysis_file,
+        with transaction_or_noop(self.connection):
+            AnalysisNwbfile().add(
+                row["nwb_file_name"], row["analysis_file_name"]
             )
-
-            _unlink_staged_analysis_file(
-                row["analysis_file_name"],
-                context="ConcatMemberCuration.make_insert",
+            self.insert1({**member_key, **row})
+            SpikeSortingOutput._merge_insert(
+                [member_key],
+                part_name="ConcatMemberCuration",
+                skip_duplicates=True,
             )
-            raise
 
     @classmethod
     def get_recording(cls, key: dict) -> "si.BaseRecording":

@@ -582,9 +582,8 @@ def test_sorting_make_rollback_cleans_units_nwb(
 
     Patches ``Sorting._populate_unit_part`` to raise so the
     transaction rolls back AFTER the file is written and registered.
-    The rollback path in ``Sorting.make``'s ``except`` block must
-    unlink the staged NWB so the file system doesn't accumulate
-    orphans on each retry.
+    The failed populate must unlink the staged NWB so the file system
+    doesn't accumulate orphans on each retry.
 
     Self-sufficient setup so it doesn't depend on the
     populated_recording module fixture's row still being live
@@ -670,8 +669,8 @@ def test_sorting_make_rollback_cleans_units_nwb(
 
     # Snapshot the analysis-file directory contents before the
     # broken populate runs so we can detect any orphan file that
-    # appears AFTER the rollback. The except block in Sorting.make
-    # is responsible for unlinking the staged file before re-raising.
+    # appears AFTER the rollback. The failed populate is responsible for
+    # unlinking the staged file.
     from spyglass.settings import analysis_dir as ad
 
     analysis_dir = pathlib.Path(ad)
@@ -709,8 +708,8 @@ def test_sorting_make_rollback_cleans_units_nwb(
     new_files = after - before
     assert not new_files, (
         f"Sorting.make rollback left orphan analysis files: {new_files}. "
-        "The except-block in Sorting.make must unlink the staged file "
-        "when the transaction rolls back."
+        "A failed populate must unlink the staged file when the "
+        "transaction rolls back."
     )
 
     # Failure precedes publication: only the private attempt existed, and both

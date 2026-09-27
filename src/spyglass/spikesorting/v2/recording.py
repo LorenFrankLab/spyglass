@@ -1692,7 +1692,9 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         without re-opening when a transaction is active). The wrap
         is kept defensively: if ``make_insert`` is ever called
         outside ``populate()``, the ``AnalysisNwbfile`` registration
-        and the ``self.insert1`` still commit atomically.
+        and the ``self.insert1`` still commit atomically. A failed populate's
+        staged file (a truncation refusal included) is removed by
+        ``StagedOutputCleanupMixin``.
 
         The truncation check fires when the requested valid_times exceed
         the raw recording coverage (#1585), or when interval
@@ -1776,12 +1778,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
         missing = expected_saved_total - duration_s
         if missing > tolerance:
-            # File written but never registered: clean it up before
-            # raising so the AnalysisNwbfile cleanup tooling does not
-            # have to chase an orphan from a request-time validation.
-            _unlink_staged_analysis_file(
-                analysis_file_name, context="Recording.make_insert"
-            )
             raise RecordingTruncatedError(
                 "Recording.make wrote a shorter recording than expected. "
                 f"After min_segment_length filtering, IntervalList "
@@ -1793,34 +1789,23 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 "packets or interval misalignment."
             )
 
-        try:
-            # ``transaction_or_noop`` no-ops inside the framework
-            # transaction; kept as defensive scaffolding so the
-            # registration stays atomic if ``make_insert`` is ever
-            # called outside ``populate()``.
-            with transaction_or_noop(self.connection):
-                AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
-                self.insert1(
-                    {
-                        **key,
-                        "analysis_file_name": analysis_file_name,
-                        "electrical_series_path": _ELECTRICAL_SERIES_PATH,
-                        "object_id": object_id,
-                        "n_channels": n_channels,
-                        "sampling_frequency": sampling_frequency,
-                        "duration_s": duration_s,
-                        "content_hash": content_hash,
-                    }
-                )
-        except Exception:
-            # Any failure during registration: the DB row never landed, so
-            # remove the orphan staged analysis file before re-raising. The
-            # unlink itself is best-effort -- a cleanup failure is logged, not
-            # raised, so it cannot mask the original error.
-            _unlink_staged_analysis_file(
-                analysis_file_name, context="Recording.make_insert"
+        # ``transaction_or_noop`` no-ops inside the framework transaction;
+        # kept as defensive scaffolding so the registration stays atomic if
+        # ``make_insert`` is ever called outside ``populate()``.
+        with transaction_or_noop(self.connection):
+            AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+            self.insert1(
+                {
+                    **key,
+                    "analysis_file_name": analysis_file_name,
+                    "electrical_series_path": _ELECTRICAL_SERIES_PATH,
+                    "object_id": object_id,
+                    "n_channels": n_channels,
+                    "sampling_frequency": sampling_frequency,
+                    "duration_s": duration_s,
+                    "content_hash": content_hash,
+                }
             )
-            raise
 
     # ---- Public accessors ------------------------------------------------
 

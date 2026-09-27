@@ -913,9 +913,8 @@ def test_recording_make_rollback_cleans_analysis_nwb(
     Mirrors ``test_sorting_make_rollback_cleans_units_nwb`` for the
     Recording stage. Patches ``Recording.insert1`` to raise inside
     the transaction (after ``AnalysisNwbfile().add`` has run), so
-    the transaction rolls back. The except block in
-    ``Recording.make`` is responsible for unlinking the staged
-    preprocessed NWB.
+    the transaction rolls back. The failed populate is responsible
+    for unlinking the staged preprocessed NWB.
     """
     import pathlib
 
@@ -989,7 +988,7 @@ def test_recording_make_rollback_cleans_analysis_nwb(
     new_files = after - before
     assert not new_files, (
         f"Recording.make rollback left orphan analysis files: "
-        f"{new_files}. The except-block must unlink the staged file."
+        f"{new_files}. A failed populate must unlink the staged file."
     )
 
 
