@@ -9,6 +9,7 @@ importing DataJoint / SpikeInterface-backed modules at import time.
 PACKAGE_ROOT_REEXPORTS = (
     "run_v2_pipeline",
     "run_v2_pipeline_session",
+    "estimate_motion",
     "run_v2_unit_match",
     "plan_v2_unit_match",
     "preflight_v2_pipeline",
@@ -68,6 +69,8 @@ _FACADE_ONLY_EXPORTS = (
     "RunV2PipelineSummary",
     "RunV2SingleSessionSummary",
     "RunV2UnitMatchSummary",
+    "EstimateMotionReceipt",
+    "MotionEstimateDiagnostics",
     # enums / carriers
     "MotionMode",
     "SourceMode",

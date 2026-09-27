@@ -50,6 +50,7 @@ from spyglass.spikesorting.v2._pipeline_reporting import (
 )
 from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
 from spyglass.spikesorting.v2._pipeline_types import (
+    EstimateMotionReceipt,
     MotionMode,
     RunV2PipelineSessionFailed,
     RunV2PipelineSessionOk,
@@ -1740,6 +1741,196 @@ def run_v2_pipeline(
 
     run_summary["stage_seconds"] = stage_seconds
     return RunResult(run_summary)
+
+
+def estimate_motion(
+    nwb_file_name: "str | None" = None,
+    sort_group_id: "int | None" = None,
+    interval_list_name: "str | None" = None,
+    team_name: "str | None" = None,
+    pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
+    preflight: bool = True,
+    *,
+    concat_session_group_owner: "str | None" = None,
+    concat_session_group_name: "str | None" = None,
+    manual_excluded_times=None,
+    motion_correction_params_name: "str | None" = None,
+) -> "EstimateMotionReceipt":
+    """Save the motion estimate of a run's source, without sorting.
+
+    Builds the source exactly as ``run_v2_pipeline`` does with the same
+    arguments -- the recording and its artifact detection, or the member
+    recordings, member artifact masks and their concatenation -- and saves
+    its ``MotionEstimate`` with the estimation row of
+    ``motion_correction_params_name``. Nothing is sorted or curated. Inspect
+    the estimate (``MotionEstimate().get_motion`` /
+    ``get_displacement_on_source_clock`` / ``get_spans_without_evidence``),
+    then sort the recording corrected with exactly that estimate::
+
+        receipt = estimate_motion(..., motion_correction_params_name=name)
+        run_v2_pipeline(
+            ...,
+            motion_mode="apply",
+            motion_correction_params_name=name,
+            motion_estimate_id=receipt["motion_estimate_id"],
+        )
+
+    Idempotent: the estimate id is content-addressed (source, its content,
+    mask, estimation row and resolved configuration), so a second call, or a
+    ``run_v2_pipeline`` run in ``"estimate"`` / ``"apply"`` mode on the same
+    source and recipe, reuses it.
+
+    Parameters
+    ----------
+    nwb_file_name, sort_group_id, interval_list_name, team_name
+        Single-session mode, as in :func:`run_v2_pipeline`.
+    concat_session_group_owner, concat_session_group_name
+        Concat mode, as in :func:`run_v2_pipeline` (mutually exclusive with
+        the single-session fields).
+    pipeline_preset
+        The preset whose preprocessing and artifact rows build the source; use
+        the preset of the run that will apply the estimate.
+    preflight
+        If True (default), run ``run_v2_pipeline``'s read-only preflight for
+        ``motion_mode="estimate"`` first: the source prerequisites, the
+        preset's rows and sorter (the run that applies the estimate needs
+        them), the recipe, a filtering preprocessing recipe and a geometry the
+        estimation recipe supports. A failure raises ``PreflightError``.
+    manual_excluded_times
+        Manual exclusions, as in :func:`run_v2_pipeline`; they are part of
+        the mask the estimate is made under.
+    motion_correction_params_name
+        The ``MotionCorrectionParameters`` recipe (required). Its estimation
+        row is estimated here; its interpolation row is the one the later
+        ``"apply"`` run uses.
+
+    Returns
+    -------
+    EstimateMotionReceipt
+        ``motion_estimate_id``, the resolved SpikeInterface estimation preset,
+        the continuity spans without evidence, ``motion_diagnostics`` (peaks
+        detected and kept, largest absolute displacement in um, number of
+        temporal bins), the source-stage ids and statuses, ``stage_seconds``
+        and ``warnings`` (a span without evidence adds one).
+
+    Raises
+    ------
+    PipelineInputError
+        If ``motion_correction_params_name`` is missing, the input mode is
+        incomplete or mixed, or ``pipeline_preset`` is unknown -- before any
+        database access.
+    PreflightError
+        If ``preflight=True`` and a prerequisite is missing.
+    PipelineStageError
+        If a source stage or the estimation fails; names the stage and
+        carries the partial summary.
+    ValueError
+        If the recipe row is missing and ``preflight=False``.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+
+    if motion_correction_params_name is None:
+        raise PipelineInputError(
+            "estimate_motion requires motion_correction_params_name, a "
+            "MotionCorrectionParameters row (e.g. 'dredge_fast_v1'; see "
+            "MotionCorrectionParameters()). Its estimation row is estimated "
+            "here and its interpolation row is applied by the later "
+            "run_v2_pipeline(motion_mode='apply', motion_estimate_id=...)."
+        )
+    is_concat, bundle, manual_excluded_times = _validate_run_request(
+        "estimate_motion",
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name=interval_list_name,
+        team_name=team_name,
+        concat_session_group_owner=concat_session_group_owner,
+        concat_session_group_name=concat_session_group_name,
+        pipeline_preset=pipeline_preset,
+        motion_mode="estimate",
+        motion_correction_params_name=motion_correction_params_name,
+        manual_excluded_times=manual_excluded_times,
+    )
+    source_inputs = (
+        {
+            "concat_session_group_owner": concat_session_group_owner,
+            "concat_session_group_name": concat_session_group_name,
+        }
+        if is_concat
+        else {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": interval_list_name,
+            "team_name": team_name,
+        }
+    )
+    warnings_list: list[str] = []
+    if preflight:
+        warnings_list = _run_preflight(
+            "estimate_motion",
+            is_concat=is_concat,
+            source_inputs=source_inputs,
+            bundle=bundle,
+            pipeline_preset=pipeline_preset,
+            auto_curate=False,
+            manual_excluded_times=manual_excluded_times,
+            motion_mode="estimate",
+            motion_correction_params_name=motion_correction_params_name,
+        )
+    from spyglass.spikesorting.v2.motion import MotionEstimate
+
+    stage_seconds: dict[str, float] = {}
+    run_summary: dict[str, Any] = {
+        "pipeline_preset": pipeline_preset,
+        "motion_correction_params_name": motion_correction_params_name,
+        "motion_estimate_id": None,
+        "motion_estimation_preset": None,
+        "motion_spans_without_evidence": None,
+        "stage_seconds": stage_seconds,
+        "warnings": warnings_list,
+    }
+    motion_recipe = resolve_motion_recipe(motion_correction_params_name)
+    # The source builder records the run's scientific setup, which states
+    # the preset's sorter configuration; neither describes an estimate, so
+    # both are dropped from the receipt below.
+    run_summary["sorter_config"] = resolve_preset_sort_config(bundle)
+    source = _build_run_source(
+        is_concat=is_concat,
+        source_inputs=source_inputs,
+        bundle=bundle,
+        manual_excluded_times=manual_excluded_times,
+        motion_mode="estimate",
+        motion_recipe=motion_recipe,
+        run_summary=run_summary,
+        stage_seconds=stage_seconds,
+    )
+    estimate_key = _run_motion_estimate(
+        source.motion_source,
+        motion_recipe,
+        run_summary,
+        stage_seconds,
+        warnings_list,
+    )
+    diagnostics = (
+        (MotionEstimate & estimate_key)
+        .proj(
+            "n_peaks_detected",
+            "n_peaks_kept",
+            "max_abs_displacement_um",
+            "n_temporal_bins",
+        )
+        .fetch1()
+    )
+    run_summary["motion_diagnostics"] = {
+        "n_peaks_detected": int(diagnostics["n_peaks_detected"]),
+        "n_peaks_kept": int(diagnostics["n_peaks_kept"]),
+        "max_abs_displacement_um": float(
+            diagnostics["max_abs_displacement_um"]
+        ),
+        "n_temporal_bins": int(diagnostics["n_temporal_bins"]),
+    }
+    for key in ("sorter_config", "scientific_config"):
+        run_summary.pop(key, None)
+    return cast("EstimateMotionReceipt", run_summary)
 
 
 def run_v2_pipeline_session(

@@ -343,6 +343,60 @@ def test_apply_with_a_saved_estimate_id_is_a_valid_request():
     )
 
 
+_SINGLE_SESSION = {
+    "nwb_file_name": "x.nwb",
+    "sort_group_id": 0,
+    "interval_list_name": _INTERVAL,
+    "team_name": "team",
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "inputs, match",
+    [
+        pytest.param(
+            _SINGLE_SESSION,
+            "requires motion_correction_params_name",
+            id="no-recipe",
+        ),
+        pytest.param(
+            {
+                "nwb_file_name": "x.nwb",
+                "motion_correction_params_name": "dredge_fast_v1",
+            },
+            "estimate_motion: single-session mode is missing required "
+            "field\\(s\\): sort_group_id",
+            id="incomplete-mode",
+        ),
+        pytest.param(
+            {
+                **_SINGLE_SESSION,
+                "pipeline_preset": "not_a_real_preset",
+                "motion_correction_params_name": "dredge_fast_v1",
+            },
+            "estimate_motion: unknown pipeline_preset",
+            id="unknown-preset",
+        ),
+    ],
+)
+def test_estimate_motion_rejects_a_bad_request_before_any_query(
+    monkeypatch, inputs, match
+):
+    """``estimate_motion`` without a recipe, with an incomplete input mode,
+    or with an unknown preset fails with ``PipelineInputError`` naming
+    itself, before any database access."""
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import estimate_motion
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("a bad estimate_motion request queried the DB")
+
+    monkeypatch.setattr(dj.Connection, "query", _boom)
+    with pytest.raises(PipelineInputError, match=match):
+        estimate_motion(**inputs)
+
+
 def _resolved_motion_recipe(name: str) -> dict:
     from spyglass.spikesorting.v2._motion import resolve_estimation_params
     from spyglass.spikesorting.v2._recipe_catalog import (

@@ -256,6 +256,65 @@ class RunV2ConcatSummary(_RunV2SummaryBase):
 RunV2PipelineSummary: TypeAlias = RunV2SingleSessionSummary | RunV2ConcatSummary
 
 
+class MotionEstimateDiagnostics(TypedDict):
+    """Peak and displacement counts of one saved ``MotionEstimate``.
+
+    The same-named ``MotionEstimate`` columns: peaks detected on the masked
+    source, peaks kept (localized inside one statistics span and detected
+    clear of span joins), the largest absolute displacement in micrometers
+    over all temporal bins and spatial windows, and the number of temporal
+    bins.
+    """
+
+    n_peaks_detected: int
+    n_peaks_kept: int
+    max_abs_displacement_um: float
+    n_temporal_bins: int
+
+
+class EstimateMotionReceipt(TypedDict):
+    """Return value of ``estimate_motion``.
+
+    The saved estimate of the source a ``run_v2_pipeline`` call with the same
+    source arguments would sort, before any sort. Pass
+    ``motion_estimate_id`` to ``run_v2_pipeline(motion_mode="apply",
+    motion_estimate_id=...)`` to sort the recording corrected with exactly
+    this estimate. ``source_mode`` says which source keys are present:
+    single-session receipts carry the recording and artifact-detection keys
+    (``artifact_detection_id`` is ``None`` and its status ``"skipped"`` when
+    the preset runs no artifact detection); concat receipts carry the member
+    and concatenation keys, as in :class:`RunV2ConcatSummary`.
+    ``stage_seconds`` holds each source stage and ``motion_estimate``.
+    """
+
+    pipeline_preset: str
+    source_mode: SourceMode
+    motion_correction_params_name: str
+    motion_estimate_id: UUID
+    # The SpikeInterface preset the recipe's estimation row resolved to.
+    motion_estimation_preset: str
+    motion_estimate_status: StageStatus
+    # ``MotionEstimate.get_spans_without_evidence``; empty when every
+    # continuity span kept a peak.
+    motion_spans_without_evidence: list[dict]
+    motion_diagnostics: MotionEstimateDiagnostics
+    stage_seconds: dict[str, float]
+    warnings: list[str]
+    # Single-session source keys.
+    recording_id: NotRequired[UUID]
+    recording_status: NotRequired[StageStatus]
+    artifact_detection_id: NotRequired["UUID | None"]
+    artifact_detection_status: NotRequired[StageStatus]
+    # Concat source keys.
+    member_recording_ids: NotRequired[list[UUID]]
+    member_recording_status: NotRequired[StageStatus]
+    member_artifact_detection_status: NotRequired[StageStatus]
+    member_artifacts: NotRequired[list[MemberArtifactSummary]]
+    artifact_masked_duration_s: NotRequired[float]
+    concat_recording_id: NotRequired[UUID]
+    concat_recording_status: NotRequired[StageStatus]
+
+
 class RunV2PipelineSessionOk(RunV2SingleSessionSummary):
     """Successful entry returned by ``run_v2_pipeline_session``.
 
@@ -355,6 +414,8 @@ class RunV2UnitMatchSummary(TypedDict):
 
 
 __all__ = [
+    "EstimateMotionReceipt",
+    "MotionEstimateDiagnostics",
     "MotionMode",
     "PipelineOutcome",
     "PipelineStageSeconds",

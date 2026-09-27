@@ -7,7 +7,9 @@ insert_selection / populate boilerplate. The same orchestrator also
 runs metric-driven auto-curation (``auto_curate=True``), same-day
 concatenated sorts (concat mode over a ``SessionGroup``), and a
 publishable browser curation view (``build_figpack_view=True``); cross-session
-unit matching is its own helper, ``run_v2_unit_match``.
+unit matching is its own helper, ``run_v2_unit_match``. ``estimate_motion``
+builds the same source and saves only its motion estimate, for inspection
+before ``run_v2_pipeline(motion_mode="apply", motion_estimate_id=...)``.
 
 Pipeline presets are Pydantic-validated bundles of Lookup-row names; the
 orchestrator looks them up at first call. The shipped presets are the dated
@@ -62,6 +64,7 @@ from spyglass.spikesorting.v2._pipeline_reporting import (
 )
 from spyglass.spikesorting.v2._pipeline_run import (
     describe_unit_match_choices,
+    estimate_motion,
     plan_v2_unit_match,
     run_v2_pipeline,
     run_v2_pipeline_session,
@@ -99,6 +102,8 @@ from spyglass.spikesorting.v2.review_api import (
     ReviewStageStatus,
 )
 from spyglass.spikesorting.v2._pipeline_types import (
+    EstimateMotionReceipt,
+    MotionEstimateDiagnostics,
     MotionMode,
     PipelineOutcome,
     PipelineStageSeconds,

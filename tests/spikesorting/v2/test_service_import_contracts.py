@@ -244,6 +244,33 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "unit_match",
         "tracked_unit",
     }
+    # ``estimate_motion``'s receipt: the estimate keys always, the source keys
+    # of whichever input mode ran.
+    assert pipeline_types.EstimateMotionReceipt.__required_keys__ == {
+        "pipeline_preset",
+        "source_mode",
+        "motion_correction_params_name",
+        "motion_estimate_id",
+        "motion_estimation_preset",
+        "motion_estimate_status",
+        "motion_spans_without_evidence",
+        "motion_diagnostics",
+        "stage_seconds",
+        "warnings",
+    }
+    assert pipeline_types.EstimateMotionReceipt.__optional_keys__ == {
+        "recording_id",
+        "recording_status",
+        "artifact_detection_id",
+        "artifact_detection_status",
+        "member_recording_ids",
+        "member_recording_status",
+        "member_artifact_detection_status",
+        "member_artifacts",
+        "artifact_masked_duration_s",
+        "concat_recording_id",
+        "concat_recording_status",
+    }
 
 
 def test_package_root_imports_without_optional_extra_modules():

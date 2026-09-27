@@ -2738,6 +2738,216 @@ def test_a_supplied_estimate_that_does_not_match_fails_before_sorting(
     assert len(CurationV2()) == curations_before
 
 
+def _drop_estimate(motion_estimate_id) -> None:
+    """Delete one motion-estimate selection (and its estimate) by id, after
+    the sorts that read its corrected recordings."""
+    from spyglass.spikesorting.v2.motion import MotionEstimateSelection
+    from tests.spikesorting.v2._motion_db_helpers import (
+        drop_sorts_of_estimates,
+    )
+
+    key = [{"motion_estimate_id": motion_estimate_id}]
+    drop_sorts_of_estimates(key)
+    (MotionEstimateSelection & key).super_delete(warn=False, safemode=False)
+
+
+def test_estimate_motion_then_apply_that_estimate(drift_recording, monkeypatch):
+    """``estimate_motion`` builds the source ``run_v2_pipeline`` would sort,
+    saves its estimate (the id preflight previews for that run) and selects
+    no sort or curation; the receipt's diagnostics are the saved row's, and
+    a second call reuses the estimate. ``apply`` with that id then corrects
+    and sorts with it without estimating or selecting an estimate again."""
+    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecordingSelection,
+        MotionEstimate,
+        MotionEstimateSelection,
+    )
+    from spyglass.spikesorting.v2.pipeline import (
+        estimate_motion,
+        preflight_v2_pipeline,
+        run_v2_pipeline,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    inputs = _pipeline_inputs(drift_recording)
+    t0 = session_start_s(drift_recording["nwb_file_name"])
+    # A mask of its own gives this test a fresh estimate (no cached reuse).
+    exclusion = [[t0 + 6.0, t0 + 6.5]]
+    before = _row_counts()
+    curations_before = len(CurationV2())
+    receipt = None
+    try:
+        receipt = estimate_motion(
+            **inputs,
+            manual_excluded_times=exclusion,
+            motion_correction_params_name=MOTION_RECIPE,
+        )
+        expected = dict(before)
+        expected["MotionEstimate"] += 1
+        assert _row_counts() == expected
+        assert len(CurationV2()) == curations_before
+        assert "sorting_id" not in receipt
+
+        estimate_key = {"motion_estimate_id": receipt["motion_estimate_id"]}
+        lineage = MotionEstimateSelection.resolve_source(estimate_key)
+        assert lineage.key == {"recording_id": receipt["recording_id"]}
+        assert lineage.artifact_detection_id == receipt["artifact_detection_id"]
+        assert receipt["artifact_detection_id"] is not None
+        report = preflight_v2_pipeline(
+            **inputs,
+            manual_excluded_times=exclusion,
+            motion_mode="estimate",
+            motion_correction_params_name=MOTION_RECIPE,
+        )
+        assert report.expected_ids["motion_estimate_id"]["id"] == (
+            receipt["motion_estimate_id"]
+        )
+        assert receipt["source_mode"] == "single_session"
+        assert receipt["motion_correction_params_name"] == MOTION_RECIPE
+        assert receipt["motion_estimation_preset"] == "dredge_fast"
+        assert receipt["motion_estimate_status"] == "computed"
+        assert receipt["motion_spans_without_evidence"] == []
+        row = (MotionEstimate & estimate_key).fetch1()
+        assert receipt["motion_diagnostics"] == {
+            name: row[name]
+            for name in (
+                "n_peaks_detected",
+                "n_peaks_kept",
+                "max_abs_displacement_um",
+                "n_temporal_bins",
+            )
+        }
+        # A +/-25 um drift was planted; the estimate must see it.
+        assert receipt["motion_diagnostics"]["n_peaks_kept"] > 0
+        assert receipt["motion_diagnostics"]["max_abs_displacement_um"] > 10.0
+        assert set(receipt["stage_seconds"]) == {
+            "recording",
+            "artifact_detection",
+            "motion_estimate",
+        }
+        assert "scientific_config" not in receipt
+        assert "sorter_config" not in receipt
+
+        again = estimate_motion(
+            **inputs,
+            manual_excluded_times=exclusion,
+            motion_correction_params_name=MOTION_RECIPE,
+        )
+        assert again["motion_estimate_id"] == receipt["motion_estimate_id"]
+        assert again["motion_estimate_status"] == "reused"
+        assert _row_counts() == expected
+
+        def _no_estimation(*_args, **_kwargs):
+            raise AssertionError("the inspected estimate was estimated again")
+
+        def _no_selection(cls, key):
+            raise AssertionError("the inspected estimate was selected again")
+
+        monkeypatch.setattr(_motion, "estimate_motion_in_spans", _no_estimation)
+        monkeypatch.setattr(
+            MotionEstimateSelection,
+            "insert_selection",
+            classmethod(_no_selection),
+        )
+        applied = run_v2_pipeline(
+            **inputs,
+            manual_excluded_times=exclusion,
+            motion_mode="apply",
+            motion_correction_params_name=MOTION_RECIPE,
+            motion_estimate_id=receipt["motion_estimate_id"],
+        )
+        assert applied["motion_estimate_id"] == receipt["motion_estimate_id"]
+        assert applied["motion_estimate_supplied"] is True
+        assert applied["motion_estimate_status"] == "reused"
+        assert applied["recording_id"] == receipt["recording_id"]
+        assert applied["artifact_detection_id"] == (
+            receipt["artifact_detection_id"]
+        )
+        assert _row_counts()["MotionEstimate"] == expected["MotionEstimate"]
+        corrected_key = {
+            "motion_corrected_recording_id": applied[
+                "motion_corrected_recording_id"
+            ]
+        }
+        assert (MotionCorrectedRecordingSelection & corrected_key).fetch1(
+            "motion_estimate_id"
+        ) == receipt["motion_estimate_id"]
+        assert (
+            SortingSelection.resolve_motion_correction(
+                {"sorting_id": applied["sorting_id"]}
+            )
+            == corrected_key["motion_corrected_recording_id"]
+        )
+    finally:
+        if receipt is not None:
+            _drop_estimate(receipt["motion_estimate_id"])
+
+
+def test_estimate_motion_then_apply_on_a_concatenation(discontinuous_sources):
+    """On a concat source, ``estimate_motion`` estimates the concatenation a
+    concat run builds (and sorts nothing), and ``apply`` with that id sorts
+    the concatenation corrected with it."""
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecordingSelection,
+        MotionEstimateSelection,
+    )
+    from spyglass.spikesorting.v2.pipeline import (
+        estimate_motion,
+        run_v2_pipeline,
+    )
+
+    concat = {
+        "concat_session_group_owner": MOTION_TEAM,
+        "concat_session_group_name": CONCAT_GROUP,
+        "pipeline_preset": PIPELINE_PRESET,
+    }
+    before = _row_counts()
+    receipt = applied = None
+    try:
+        receipt = estimate_motion(
+            **concat, motion_correction_params_name=MOTION_RECIPE
+        )
+        assert receipt["source_mode"] == "concat"
+        assert "sorting_id" not in receipt
+        for table in ("SortingSelection", "Sorting"):
+            assert _row_counts()[table] == before[table]
+        lineage = MotionEstimateSelection.resolve_source(
+            {"motion_estimate_id": receipt["motion_estimate_id"]}
+        )
+        assert (lineage.kind, lineage.key) == (
+            "concatenated_recording",
+            {"concat_recording_id": receipt["concat_recording_id"]},
+        )
+        assert receipt["motion_diagnostics"]["n_peaks_kept"] > 0
+
+        applied = run_v2_pipeline(
+            **concat,
+            motion_mode="apply",
+            motion_correction_params_name=MOTION_RECIPE,
+            motion_estimate_id=receipt["motion_estimate_id"],
+        )
+        assert applied["concat_recording_id"] == receipt["concat_recording_id"]
+        assert applied["motion_estimate_id"] == receipt["motion_estimate_id"]
+        assert applied["motion_estimate_status"] == "reused"
+        assert (
+            MotionCorrectedRecordingSelection
+            & {
+                "motion_corrected_recording_id": applied[
+                    "motion_corrected_recording_id"
+                ]
+            }
+        ).fetch1("motion_estimate_id") == receipt["motion_estimate_id"]
+    finally:
+        if applied is not None:
+            drop_pipeline_sorts([applied["sorting_id"]])
+        if receipt is not None:
+            drop_motion_selections(
+                {"concat_recording_id": receipt["concat_recording_id"]}
+            )
+
+
 @pytest.fixture
 def self_correcting_preset(dj_conn):
     """A registered preset whose sorter row (spykingcircus2 ``default``)
