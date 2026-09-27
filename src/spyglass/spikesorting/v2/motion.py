@@ -1722,9 +1722,7 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
         estimate_locations = np.asarray(
             estimate["channel_locations"], dtype=np.float64
         )
-        if source_locations.shape != estimate_locations.shape or not (
-            np.array_equal(source_locations, estimate_locations)
-        ):
+        if not np.array_equal(source_locations, estimate_locations):
             raise ValueError(
                 f"MotionCorrectedRecording {key}: the source's contact "
                 f"positions {source_locations.tolist()} differ from the saved "

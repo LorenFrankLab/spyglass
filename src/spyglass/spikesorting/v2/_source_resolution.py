@@ -330,7 +330,7 @@ def check_corrected_channel_map(
             f"position ({positions.tolist()})."
         )
     stored = np.asarray(row["channel_locations"], dtype=float)
-    if positions.shape != stored.shape or not np.array_equal(positions, stored):
+    if not np.array_equal(positions, stored):
         raise ValueError(
             f"{traces.kind} {traces.key}: the artifact's contact positions "
             f"{positions.tolist()} differ from the row's channel_locations "
