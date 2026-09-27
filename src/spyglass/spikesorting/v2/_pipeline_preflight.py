@@ -1956,11 +1956,10 @@ def preflight_v2_pipeline(
             artifact_detection_id=artifact_detection_id,
         )
         corrected = motion_ids.get("motion_corrected_recording_id", {})
-        sorting_pending = corrected.get("pending")
-        sorting_id = (
-            None
-            if sorting_pending
-            else build_sorting_selection_plan(
+        if corrected.get("pending"):
+            sorting_entry = _pending_id_entry(corrected["pending"])
+        else:
+            sorting_id = build_sorting_selection_plan(
                 {
                     "recording_id": recording_id,
                     "sorter": bundle.sorter,
@@ -1969,7 +1968,11 @@ def preflight_v2_pipeline(
                     "motion_corrected_recording_id": corrected.get("id"),
                 }
             ).sorting_id
-        )
+            sorting_entry = {
+                "id": sorting_id,
+                "exists": bool(SortingSelection & {"sorting_id": sorting_id}),
+                "computed_exists": bool(Sorting & {"sorting_id": sorting_id}),
+            }
         # Per stage, ``exists`` is whether the SELECTION row exists (the run
         # would reuse this PK) and ``computed_exists`` whether the COMPUTED
         # output row exists (the populate already ran -- a reused, near-zero-cost
@@ -2001,24 +2004,7 @@ def preflight_v2_pipeline(
                 }
             ),
             **motion_ids,
-            "sorting_id": (
-                {
-                    "id": None,
-                    "exists": False,
-                    "computed_exists": False,
-                    "pending": sorting_pending,
-                }
-                if sorting_pending
-                else {
-                    "id": sorting_id,
-                    "exists": bool(
-                        SortingSelection & {"sorting_id": sorting_id}
-                    ),
-                    "computed_exists": bool(
-                        Sorting & {"sorting_id": sorting_id}
-                    ),
-                }
-            ),
+            "sorting_id": sorting_entry,
         }
 
     errors = [c.fix for c in checks if not c.ok]
@@ -2055,6 +2041,16 @@ def preflight_v2_pipeline(
             motion_recipe=motion_recipe,
         ),
     )
+
+
+def _pending_id_entry(reason: str) -> dict:
+    """An ``expected_ids`` entry whose id cannot be derived yet, and why."""
+    return {
+        "id": None,
+        "exists": False,
+        "computed_exists": False,
+        "pending": reason,
+    }
 
 
 def _expected_motion_ids(
@@ -2106,15 +2102,7 @@ def _expected_motion_ids(
             "the recording is computed (the motion estimate id includes its "
             "content hash)"
         )
-        return {
-            name: {
-                "id": None,
-                "exists": False,
-                "computed_exists": False,
-                "pending": pending,
-            }
-            for name in names
-        }
+        return {name: _pending_id_entry(pending) for name in names}
     estimate_id = motion_estimate_selection_identity(
         source_kind="recording",
         source_id=recording_id,
