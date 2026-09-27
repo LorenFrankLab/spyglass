@@ -2758,6 +2758,7 @@ def test_estimate_motion_then_apply_that_estimate(drift_recording, monkeypatch):
     a second call reuses the estimate. ``apply`` with that id then corrects
     and sorts with it without estimating or selecting an estimate again."""
     from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2.artifact import RecordingArtifactSelection
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecordingSelection,
@@ -2883,6 +2884,12 @@ def test_estimate_motion_then_apply_that_estimate(drift_recording, monkeypatch):
     finally:
         if receipt is not None:
             _drop_estimate(receipt["motion_estimate_id"])
+            # The exclusion's own artifact detection (and its merge entry).
+            _drop_artifact_detections([receipt["artifact_detection_id"]])
+    assert not (
+        RecordingArtifactSelection
+        & {"artifact_detection_id": receipt["artifact_detection_id"]}
+    )
 
 
 def test_estimate_motion_then_apply_on_a_concatenation(discontinuous_sources):
