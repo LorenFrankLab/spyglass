@@ -223,13 +223,34 @@ def stored_traces(table, key: dict, row: dict) -> StoredTraces:
     )
 
 
-def read_stored_traces(traces: StoredTraces):
-    """Open resolved stored traces; no DB access.
+def open_persisted_traces(abs_path: str, electrical_series_path: str):
+    """Open a persisted trace artifact's ``ElectricalSeries``; no DB access.
 
     Reads the stored ``electrical_series_path`` (authoritative, not an
     auto-detect hint) and annotates ``is_filtered=True``: the persisted traces
     are already bandpass-filtered and referenced, so a downstream
     SpikeInterface consumer must not filter them again.
+
+    Parameters
+    ----------
+    abs_path : str
+        Absolute path of the artifact's analysis NWB.
+    electrical_series_path : str
+        The row's stored ``electrical_series_path``.
+
+    Returns
+    -------
+    si.BaseRecording
+    """
+    recording = read_recording_nwb(
+        abs_path, electrical_series_path=electrical_series_path
+    )
+    recording.annotate(is_filtered=True)
+    return recording
+
+
+def read_stored_traces(traces: StoredTraces):
+    """Open resolved stored traces with :func:`open_persisted_traces`.
 
     Parameters
     ----------
@@ -239,11 +260,7 @@ def read_stored_traces(traces: StoredTraces):
     -------
     si.BaseRecording
     """
-    recording = read_recording_nwb(
-        traces.abs_path, electrical_series_path=traces.electrical_series_path
-    )
-    recording.annotate(is_filtered=True)
-    return recording
+    return open_persisted_traces(traces.abs_path, traces.electrical_series_path)
 
 
 def raw_eseries_path_and_timestamp_mode(

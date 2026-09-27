@@ -356,11 +356,9 @@ def read_effective_recording(
 ) -> si.BaseRecording:
     """Open the effective traces from a resolved file path, masking if needed.
 
-    Reads the stored ``electrical_series_path`` (authoritative, not an
-    auto-detect hint) and annotates ``is_filtered=True``: the persisted traces
-    are already bandpass-filtered and referenced, so a downstream SpikeInterface
-    consumer must not filter them again. The artifact mask is applied exactly
-    when ``traces.apply_artifact_mask`` is set.
+    Opens the file with ``_recording_nwb.open_persisted_traces`` (the stored
+    ``electrical_series_path``, annotated ``is_filtered=True``). The artifact
+    mask is applied exactly when ``traces.apply_artifact_mask`` is set.
 
     Parameters
     ----------
@@ -390,7 +388,7 @@ def read_effective_recording(
         while it does not, or if a motion-corrected artifact (persisted
         masked) is asked to be masked again.
     """
-    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._recording_nwb import open_persisted_traces
 
     if traces.kind == "motion_corrected_recording" and (
         traces.apply_artifact_mask
@@ -410,11 +408,9 @@ def read_effective_recording(
             f"{traces.kind} {traces.key} is not artifact-masked at load, but "
             "artifact_valid_times were supplied."
         )
-    recording = read_recording_nwb(
-        abs_path,
-        electrical_series_path=traces.row["electrical_series_path"],
+    recording = open_persisted_traces(
+        abs_path, traces.row["electrical_series_path"]
     )
-    recording.annotate(is_filtered=True)
     if traces.kind == "motion_corrected_recording":
         check_corrected_channel_map(recording, traces)
     if traces.apply_artifact_mask:
