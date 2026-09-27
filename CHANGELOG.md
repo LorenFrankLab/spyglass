@@ -410,10 +410,13 @@ available.
   and a diagnostics summary (peaks detected and kept, largest displacement,
   temporal bins). `run_v2_pipeline(motion_mode="apply", motion_estimate_id=...)`
   then corrects and sorts with exactly that estimate, never recomputing it; an
-  estimate of another source or mask, or made with an estimation row other
-  than the recipe's, fails preflight (or the `motion_estimate` stage) naming
-  both, and the id with any other mode is a `PipelineInputError`. Receipts and
-  `describe_run` add `motion_estimate_supplied`.
+  estimate of another source, mask or concat member set, of source traces that
+  changed since, or made with an estimation row other than the recipe's, fails
+  preflight (or the `motion_estimate` stage) naming both, and the id with any
+  other mode is a `PipelineInputError`. Receipts and `describe_run` add
+  `motion_estimate_supplied`. `estimate_motion` skips the sorter-only preflight
+  checks (`preflight_v2_pipeline` / the concat preflight take
+  `sort_checks=False`), so the preset's sorter need not be available.
 - Every consumer of a corrected sort reads the corrected recording, with its
   channels (a `remove_channels` recipe's reduced set included): analyzer
   builds and rebuilds, merged and derivative curation analyzers,

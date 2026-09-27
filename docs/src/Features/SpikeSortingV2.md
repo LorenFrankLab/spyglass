@@ -1540,13 +1540,16 @@ summary["motion_estimate_supplied"]  # True; motion_estimate_status "reused"
 ```
 
 The supplied estimate must be a populated estimate of this run's source and
-artifact mask, made with the recipe's **estimation** row; any mismatch is an
-error naming the estimate's value and the run's, before anything is corrected or
-sorted -- from preflight (for concat, preflight compares the session group and
-preprocessing recipe, and the run then compares the member masks) or, with
-`preflight=False`, from the `motion_estimate` stage (`PipelineStageError`).
-`motion_estimate_id` with `"off"` or `"estimate"` is a `PipelineInputError`. The
-receipt and `describe_run` show `motion_estimate_supplied`.
+artifact mask (for concat: the same session group, preprocessing recipe,
+members, member recordings and member masks), made with the recipe's
+**estimation** row, on traces that have not changed since it was selected; any
+mismatch is an error naming the estimate's value and the run's, before anything
+is corrected or sorted -- from preflight or, with `preflight=False`, from the
+`motion_estimate` stage (`PipelineStageError`). `motion_estimate_id` with
+`"off"` or `"estimate"` is a `PipelineInputError`. The receipt and
+`describe_run` show `motion_estimate_supplied`. `estimate_motion` skips the
+sorter-only preflight checks, so the preset's sorter need not be available where
+the estimate is made; the `"apply"` run checks it.
 
 `motion_mode` also works without an explicit estimate id:
 

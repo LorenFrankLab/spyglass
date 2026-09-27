@@ -1118,12 +1118,13 @@ def run_v2_pipeline(
         ``MotionEstimate`` instead of selecting the source's estimate. It is
         reused as is (never recomputed) and corrected with the interpolation
         row of ``motion_correction_params_name``. It must be a populated
-        estimate of this run's source and artifact mask made with that
-        recipe's estimation row; a mismatch names the estimate's value and the
-        run's, and fails preflight (``PreflightError``; a concat preflight
-        compares the session group and preprocessing recipe, the run then the
-        member masks) or, with ``preflight=False``, the ``motion_estimate``
-        stage (``PipelineStageError``), before any sort. Given with another
+        estimate of this run's source and artifact mask (for concat: its
+        session group, preprocessing recipe, members and member masks) made
+        with that recipe's estimation row, on source traces unchanged since;
+        a mismatch names the estimate's value and the run's, and fails
+        preflight (``PreflightError``) or, with ``preflight=False``, the
+        ``motion_estimate`` stage (``PipelineStageError``), before any
+        sort. Given with another
         mode, or not a UUID, it raises ``PipelineInputError`` before any
         database access.
 
