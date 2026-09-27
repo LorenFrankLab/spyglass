@@ -124,14 +124,14 @@ DLCProject().alter()
   Rows, merge entries and file contents are unchanged.
 - `RecordingArtifactDetection`, `SharedGroupArtifactDetection`,
   `DriftEstimate`, `Sorting` and `ConcatenatedRecording` resolve their cached
-  trace files in
-  `make_fetch`, rebuilding a missing file there, and `make_compute` reads them
-  by path. Their `make_compute` makes no DB queries apart from staging an
-  output file, and the trace rows are covered by DataJoint's check that the
-  fetched inputs did not change before the insert (`DriftEstimate`'s fetch
-  previously carried only its preset). `Recording.resolve_stored_traces(key)`
-  returns the resolved file, and `SortingSelection.ensure_effective_traces`
-  now returns the healed file's path. Results are unchanged.
+  trace files in `make_fetch`, rebuilding a missing file there, and
+  `make_compute` reads them by path. Their `make_compute` makes no DB queries
+  apart from staging an output file, and the trace rows are covered by
+  DataJoint's check that the fetched inputs did not change before the insert
+  (`DriftEstimate`'s fetch previously carried only its preset).
+  `Recording.resolve_stored_traces(key)` returns the resolved file, and
+  `SortingSelection.ensure_effective_traces` now returns the healed file's
+  path. Results are unchanged.
 - `SortingAnalyzerVersions.make_fetch` reads the sort's unit count and
   resolves the analyzer folder (it previously fetched nothing), and
   `make_compute` loads and hashes that folder with no DB access. Inventory
