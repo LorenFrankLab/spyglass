@@ -1501,7 +1501,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         bad_channel_ids,
         raw_object_id,
         raw_path,
-    ):
+    ) -> RecordingComputed:
         """Run the preprocessing + streaming write outside any DB transaction.
 
         Long-running step (open raw NWB, channel slice, bandpass, frame

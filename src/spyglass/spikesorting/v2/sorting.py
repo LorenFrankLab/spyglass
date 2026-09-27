@@ -2128,7 +2128,7 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         traces_abs_path,
         motion_correction_provenance,
         source_n_samples,
-    ):
+    ) -> SortingComputed:
         """Sort, build analyzer, stage Units NWB outside any DB transaction.
 
         Reads only the inputs ``make_fetch`` resolved; the one DB access left

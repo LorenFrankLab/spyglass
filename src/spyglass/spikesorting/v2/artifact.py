@@ -1150,7 +1150,7 @@ class RecordingArtifactDetection(
         artifact_job_kwargs,
         traces,
         manual_excluded_times=None,
-    ):
+    ) -> ArtifactComputed:
         """Read the single recording and scan it for artifacts; no DB access.
 
         Returns
@@ -1314,7 +1314,7 @@ class SharedGroupArtifactDetection(
         artifact_job_kwargs,
         member_traces,
         manual_excluded_times=None,
-    ):
+    ) -> ArtifactComputed:
         """Union the members' channels and scan the union ONCE; no DB access.
 
         Returns
