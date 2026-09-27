@@ -65,7 +65,8 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
     loads/hashes an analyzer, or runs SI compute must keep that work outside the
     framework transaction: the sort/recording/artifact stages, the cross-session
     matcher, the concat cache, the recompute QC tables, the curation-evaluation
-    metrics, the drift estimate, AND the ``*Versions`` inventory tables (which
+    metrics, the drift estimate, the motion estimate and motion-corrected
+    recording, AND the ``*Versions`` inventory tables (which
     open the NWB / load + hash the analyzer -- not "pure bookkeeping" as once
     assumed). Two tables are intentionally excluded (documented, not
     oversights -- asserted below): ``TrackedUnit`` does DB reads + a bounded
@@ -80,6 +81,10 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
         SharedGroupArtifactDetection,
     )
     from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionEstimate,
+    )
     from spyglass.spikesorting.v2.recompute import (
         RecordingArtifactRecompute,
         RecordingArtifactVersions,
@@ -104,6 +109,8 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
         SortingAnalyzerVersions,
         CurationEvaluation,
         DriftEstimate,
+        MotionEstimate,
+        MotionCorrectedRecording,
     ):
         assert inspect.isgeneratorfunction(cls.make), (
             f"{cls.__name__}.make is not a generator -- DataJoint's "

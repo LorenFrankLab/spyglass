@@ -871,6 +871,14 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     input_fingerprint: char(64)       # SHA-256 of source content, spans, channels and configuration
     """
 
+    # ``_parallel_make = True`` + the tri-part ``make_fetch`` /
+    # ``make_compute`` / ``make_insert`` split mirror ``Recording`` so the
+    # long peak detection and estimation run OUTSIDE the DB transaction (and
+    # so multiple sources can be estimated in parallel). The inherited
+    # ``AutoPopulate.make`` generator is left in place so DataJoint routes
+    # through tri-part dispatch.
+    _parallel_make = True
+
     def make_fetch(self, key) -> MotionEstimateFetched:
         """Resolve the selection, recipe, source artifact and mask.
 
@@ -1533,6 +1541,14 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
     statistics_spans: longblob         # (n, 2) int64 copy of the estimate's statistics spans; frames outside them are zero
     continuity_spans: longblob         # (n, 2) int64 copy of the estimate's continuity spans
     """
+
+    # ``_parallel_make = True`` + the tri-part ``make_fetch`` /
+    # ``make_compute`` / ``make_insert`` split mirror ``Recording`` so the
+    # long interpolation and NWB write run OUTSIDE the DB transaction (and so
+    # multiple sources can be corrected in parallel). The inherited
+    # ``AutoPopulate.make`` generator is left in place so DataJoint routes
+    # through tri-part dispatch.
+    _parallel_make = True
 
     def make_fetch(self, key) -> MotionCorrectedFetched:
         """Resolve the selection, recipe, saved estimate and source artifact.
