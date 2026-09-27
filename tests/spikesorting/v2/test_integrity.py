@@ -211,6 +211,38 @@ def test_staging_tables_remove_outputs_of_failed_populates():
         not wrong
     ), f"{wrong} do not use StagedOutputCleanupMixin ahead of AutoPopulate"
 
+    # Beyond the list: the mixin and a carrier that names its staged outputs
+    # must go together on every tri-part table.
+    carriers = {
+        name: _compute_carrier(cls)
+        for name, cls in tables.items()
+        if name not in _MONOLITHIC_MAKE_EXCLUSIONS
+    }
+    unresolved = sorted(name for name, c in carriers.items() if c is None)
+    assert (
+        not unresolved
+    ), f"{unresolved}: annotate make_compute's return with its carrier class"
+    mismatched = sorted(
+        name
+        for name, carrier in carriers.items()
+        if issubclass(tables[name], StagedOutputCleanupMixin)
+        != callable(getattr(carrier, "staged_outputs", None))
+    )
+    assert not mismatched, (
+        f"{mismatched}: a table uses StagedOutputCleanupMixin exactly when "
+        "its make_compute carrier defines staged_outputs()"
+    )
+
+
+def _compute_carrier(cls) -> type | None:
+    """Return the class ``cls.make_compute`` is annotated to return."""
+    import sys
+
+    annotation = inspect.signature(cls.make_compute).return_annotation
+    if isinstance(annotation, str):
+        annotation = vars(sys.modules[cls.__module__]).get(annotation)
+    return annotation if inspect.isclass(annotation) else None
+
 
 def _write_package(root, name: str, files: dict[str, str]):
     """Write a throwaway package under ``root`` and import it."""
