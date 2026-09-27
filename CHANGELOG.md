@@ -123,7 +123,8 @@ DLCProject().alter()
   read and the member Units NWB write run before the insert transaction opens.
   Rows, merge entries and file contents are unchanged.
 - `RecordingArtifactDetection`, `SharedGroupArtifactDetection`,
-  `DriftEstimate` and `Sorting` resolve their cached trace files in
+  `DriftEstimate`, `Sorting` and `ConcatenatedRecording` resolve their cached
+  trace files in
   `make_fetch`, rebuilding a missing file there, and `make_compute` reads them
   by path. Their `make_compute` makes no DB queries apart from staging an
   output file, and the trace rows are covered by DataJoint's check that the

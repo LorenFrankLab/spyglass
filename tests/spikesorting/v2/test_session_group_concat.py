@@ -862,14 +862,21 @@ def test_load_member_recordings_returns_aligned_counts_and_indices(
     snapshot-resolved plan in member_index order and returns sample counts /
     indices aligned element-wise with the loaded recordings -- the core per-member
     materialization contract, exercised without driving a full populate."""
+    from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
     grp = same_day_group
     member_plan = ConcatenatedRecording._resolve_snapshot_recordings(
         _member_snapshot(grp)
     )
+    member_traces = tuple(
+        Recording().resolve_stored_traces(plan["recording_pk"])
+        for plan in member_plan
+    )
     recordings, sample_counts, member_indices = (
-        ConcatenatedRecording._load_member_recordings(member_plan)
+        ConcatenatedRecording._load_member_recordings(
+            member_plan, member_traces
+        )
     )
     expected = _member_sample_counts(grp)
     assert member_indices == [0, 1]

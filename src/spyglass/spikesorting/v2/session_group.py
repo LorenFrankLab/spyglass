@@ -23,6 +23,7 @@ import datajoint as dj
 
 from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
+from spyglass.spikesorting.v2._recording_nwb import StoredTraces
 from spyglass.spikesorting.v2.artifact import (
     RecordingArtifactDetection,
     RecordingArtifactSelection,
@@ -748,9 +749,12 @@ class ConcatRecordingFetched(NamedTuple):
     ``recording_id`` is the str UUID)}`` -- each member's cached ``Recording`` PK
     resolved and existence-checked at fetch time, so a member's cache going
     missing between stages fails in fetch rather than mid-compute.
+    ``member_traces`` holds each member's cached file, aligned with
+    ``member_plan`` and resolved (rebuilt if missing) at fetch time too.
     """
 
     member_plan: list[dict]
+    member_traces: tuple[StoredTraces, ...]
     preprocessing_params_name: str
     anchor_nwb_file_name: str
 
@@ -947,21 +951,23 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         return member_plan
 
     @staticmethod
-    def _load_member_recordings(member_plan):
+    def _load_member_recordings(member_plan, member_traces):
         """Load each member's cached ``Recording`` from the resolved plan (SI I/O).
 
         The compute-side half: given the fetch-resolved ``member_plan`` (see
-        :meth:`_resolve_snapshot_recordings`), load each cached ``Recording``
-        and collect its sample count (the basis for the
+        :meth:`_resolve_snapshot_recordings`) and member files, read each
+        cached ``Recording`` and collect its sample count (the basis for the
         ``MemberBoundary`` back-mapping). Aligned element-wise in
-        ``member_index`` order. No DB resolution happens here -- the PKs were
-        pinned at fetch time.
+        ``member_index`` order. No DB access -- the files were resolved at
+        fetch time.
 
         Parameters
         ----------
         member_plan : list[dict]
             Resolved per-member plan dicts from
             :meth:`_resolve_snapshot_recordings`.
+        member_traces : tuple[StoredTraces, ...]
+            Each member's resolved file, aligned with ``member_plan``.
 
         Returns
         -------
@@ -969,13 +975,13 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             ``(recordings, member_sample_counts, member_indices)`` -- aligned
             element-wise and in ``member_index`` order.
         """
-        from spyglass.spikesorting.v2.recording import Recording
+        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
 
         recordings = []
         member_sample_counts = []
         member_indices = []
-        for plan in member_plan:
-            recording = Recording().get_recording(plan["recording_pk"])
+        for plan, traces in zip(member_plan, member_traces, strict=True):
+            recording = read_stored_traces(traces)
             recordings.append(recording)
             member_sample_counts.append(int(recording.get_num_samples()))
             member_indices.append(int(plan["member_index"]))
@@ -993,9 +999,10 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
         Resolves the selection row, the FROZEN member snapshot (never the live
         ``SessionGroup.Member`` set) and each member's still-current ``Recording``
-        (raising if any is missing or its content drifted from the snapshot).
-        Returns a DeepHash-stable carrier so the framework's two-fetch
-        integrity check does not trip.
+        (raising if any is missing or its content drifted from the snapshot),
+        then each member's cached file, rebuilding a missing one through
+        ``Recording``'s own verified self-heal. Returns a DeepHash-stable
+        carrier so the framework's two-fetch integrity check does not trip.
 
         Parameters
         ----------
@@ -1018,6 +1025,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             If a frozen member's recording content drifted from the snapshot.
         """
         from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+        from spyglass.spikesorting.v2.recording import Recording
 
         # The populate key carries only concat_recording_id; every member and
         # parameter query restricts with the fetched selection row, not the
@@ -1044,8 +1052,13 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # ids/geometry, different DB electrodes/regions).
         assert_members_share_electrode_space(snapshot)
         member_plan = self._resolve_snapshot_recordings(snapshot)
+        member_traces = tuple(
+            Recording().resolve_stored_traces(plan["recording_pk"])
+            for plan in member_plan
+        )
         return ConcatRecordingFetched(
             member_plan=member_plan,
+            member_traces=member_traces,
             preprocessing_params_name=preprocessing_params_name,
             anchor_nwb_file_name=snapshot[0]["nwb_file_name"],
         )
@@ -1054,14 +1067,16 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         self,
         key,
         member_plan,
+        member_traces,
         preprocessing_params_name,
         anchor_nwb_file_name,
     ) -> ConcatRecordingComputed:
         """Materialize the concat cache outside any DB transaction.
 
         Reuses each member's already-populated, cached ``Recording`` artifact
-        (NEVER calls ``Recording.populate`` -- the PKs were pinned in
-        ``make_fetch``), zeros each member's selected artifact intervals,
+        (NEVER calls ``Recording.populate`` -- the files were resolved in
+        ``make_fetch``; the only DB access here stages the output file, see
+        :mod:`._recording_nwb`), zeros each member's selected artifact intervals,
         stitches the members into one mono-segment recording, and writes a
         single ``ElectricalSeries`` into a fresh ``AnalysisNwbfile``. No motion
         correction and no whitening are applied here -- whitening stays a
@@ -1103,7 +1118,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         )
 
         recordings, member_sample_counts, member_indices = (
-            self._load_member_recordings(member_plan)
+            self._load_member_recordings(member_plan, member_traces)
         )
         member_valid_times = [
             (
