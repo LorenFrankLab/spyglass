@@ -830,6 +830,22 @@ _ESTIMATION_CLOCK_COLUMNS = {
 }
 
 
+def _id_restriction(value, field: str):
+    """Restrict by ``field`` given its value or any mapping holding it.
+
+    A ``uuid.UUID`` or ``str`` becomes ``{field: value}``; a mapping holding
+    ``field`` (e.g. a pipeline receipt) keeps only that field; anything else
+    is returned unchanged as a restriction.
+    """
+    from collections.abc import Mapping
+
+    if isinstance(value, (uuid.UUID, str)):
+        return {field: value}
+    if isinstance(value, Mapping) and field in value:
+        return {field: value[field]}
+    return value
+
+
 def _estimation_clock_of(row: dict):
     """The ``_motion.EstimationClock`` stored in a ``MotionEstimate`` row.
 
@@ -1280,8 +1296,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             selects no frame, if the corrected recording was made from
             another estimate, or if a trace channel is not in it.
         """
-        from collections.abc import Mapping
-
         from spyglass.spikesorting.v2 import _motion, _motion_report
 
         if trace_window_s is not None and corrected_key is None:
@@ -1289,10 +1303,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
                 "MotionEstimate.report: trace_window_s compares original and "
                 "corrected traces; pass corrected_key too."
             )
-        if isinstance(key, (uuid.UUID, str)):
-            key = {"motion_estimate_id": key}
-        elif isinstance(key, Mapping) and "motion_estimate_id" in key:
-            key = {"motion_estimate_id": key["motion_estimate_id"]}
+        key = _id_restriction(key, "motion_estimate_id")
         estimate_key = (self & key).fetch1("KEY")
         row = (
             (self & estimate_key)
@@ -1318,20 +1329,12 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         corrected = None
         border_mode = None
         if corrected_key is not None:
-            if isinstance(corrected_key, (uuid.UUID, str)):
-                corrected_key = {"motion_corrected_recording_id": corrected_key}
-            elif (
-                isinstance(corrected_key, Mapping)
-                and "motion_corrected_recording_id" in corrected_key
-            ):
-                corrected_key = {
-                    "motion_corrected_recording_id": corrected_key[
-                        "motion_corrected_recording_id"
-                    ]
-                }
-            corrected_key = (MotionCorrectedRecording & corrected_key).fetch1(
-                "KEY"
-            )
+            corrected_key = (
+                MotionCorrectedRecording
+                & _id_restriction(
+                    corrected_key, "motion_corrected_recording_id"
+                )
+            ).fetch1("KEY")
             selection = (
                 MotionCorrectedRecordingSelection & corrected_key
             ).fetch1()
