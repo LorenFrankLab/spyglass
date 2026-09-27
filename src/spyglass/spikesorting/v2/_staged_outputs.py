@@ -82,7 +82,6 @@ def _recording_compute(compute):
             scopes[-1].append(computed.staged_outputs())
         return computed
 
-    make_compute._records_staged_outputs = True
     return make_compute
 
 
@@ -96,7 +95,6 @@ def _releasing_insert(insert):
         if scopes:
             scopes[-1].clear()
 
-    make_insert._records_staged_outputs = True
     return make_insert
 
 
@@ -122,9 +120,7 @@ class StagedOutputCleanupMixin:
             ("make_insert", _releasing_insert),
         ):
             method = cls.__dict__.get(name)
-            if method is not None and not getattr(
-                method, "_records_staged_outputs", False
-            ):
+            if method is not None:
                 setattr(cls, name, wrap(method))
 
     def _populate1(self, key, jobs, *args, **kwargs):
@@ -175,7 +171,6 @@ class StagedOutputCleanupMixin:
                         f"{context}: failed to remove staged folder "
                         f"{folder!r}: {exc!r}"
                     )
-        pending.clear()
 
     @staticmethod
     def _unlink_analysis_file(analysis_file_name: str, *, context: str):
