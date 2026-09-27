@@ -142,11 +142,13 @@ coexist under one merge surface.
     for a single session or `ConcatenatedRecordingSource` for a same-day chronic
     concatenation). Single-recording sorts can add an artifact pass through the
     `ArtifactDetectionOutput` merge; concat masks are already materialized.
-    Masked samples must read 0 uV: a source that keeps a nonzero channel
-    offset -- only possible with the `no_filter` preprocessing recipe and
-    `reference_mode="none"` -- is converted to float32 microvolts (gain 1,
-    offset 0) before masking, so its sorter input is float32 uV; a
-    zero-offset source is masked in its stored units, unchanged. Dispatches
+    Masked samples must read 0 uV: when the sort actually masks frames, a
+    source that keeps a nonzero channel offset -- only possible with the
+    `no_filter` preprocessing recipe and `reference_mode="none"` -- is
+    converted to float32 microvolts (gain 1, offset 0) before masking, so its
+    sorter input is float32 uV. A nonzero-offset source with no excluded
+    frames keeps its stored units, and a zero-offset source is masked in its
+    stored units, unchanged. Dispatches
     `clusterless_thresholder` (peak detection only) vs the SI sorter registry
     (`mountainsort4`, `mountainsort5`, ...). The Unit part table stores
     per-unit summary stats (n_spikes, peak_amplitude_uv) so quick filtering does
@@ -1506,9 +1508,11 @@ summary = run_v2_pipeline(
 print(summary["motion_estimate_id"], summary["motion_estimation_preset"])
 
 # Apply it: sort the motion-corrected recording. The same source, mask and
-# recipe resolve to the same motion_estimate_id, so this reuses the estimate
-# saved above instead of computing a new one (a different recipe would select
-# a different estimate). Works the same way on a concat run
+# estimation row resolve to the same motion_estimate_id, so this reuses the
+# estimate saved above instead of computing a new one. A correction recipe
+# with a different ESTIMATION row selects a different estimate; two recipes
+# sharing an estimation row (differing only in interpolation) reuse it.
+# Works the same way on a concat run
 # (concat_session_group_owner / concat_session_group_name).
 summary = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
