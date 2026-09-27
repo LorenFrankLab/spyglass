@@ -2560,6 +2560,184 @@ def test_preflight_previews_the_motion_ids_the_run_mints(drift_recording):
             drop_pipeline_sorts([summary["sorting_id"]])
 
 
+def _saved_estimate_of_the_run(drift_recording) -> dict:
+    """The ``dredge_fast_v1`` estimate of the pipeline run's recording under
+    the run's own artifact detection, saved through the tables."""
+    from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+
+    recording_id = drift_recording["recording_key"]["recording_id"]
+    artifact_key = RecordingArtifactSelection.insert_selection(
+        {
+            "recording_id": recording_id,
+            "artifact_detection_params_name": _PIPELINE_PRESETS[
+                PIPELINE_PRESET
+            ].artifact_detection_params_name,
+            "manual_excluded_times": [],
+        }
+    )
+    RecordingArtifactDetection.populate(artifact_key, reserve_jobs=False)
+    return {
+        **populated_estimate(recording_id=recording_id, **artifact_key),
+        **artifact_key,
+    }
+
+
+def test_apply_reuses_a_supplied_estimate(drift_recording, monkeypatch):
+    """``apply`` with ``motion_estimate_id`` corrects and sorts with exactly
+    that saved estimate: no estimate is computed (the estimator is patched to
+    fail), the corrected recording is made from it, and the receipt,
+    ``describe_run`` and preflight's preview all name it."""
+    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecordingSelection,
+        MotionEstimateSelection,
+    )
+    from spyglass.spikesorting.v2.pipeline import (
+        describe_run,
+        preflight_v2_pipeline,
+        run_v2_pipeline,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    inputs = _pipeline_inputs(drift_recording)
+    saved = _saved_estimate_of_the_run(drift_recording)
+    estimate_id = saved["motion_estimate_id"]
+    motion = {
+        "motion_mode": "apply",
+        "motion_correction_params_name": MOTION_RECIPE,
+        # A string id is accepted like the UUID.
+        "motion_estimate_id": str(estimate_id),
+    }
+    report = preflight_v2_pipeline(**inputs, **motion)
+    assert report.ok, report.errors
+    assert {c.name: c.ok for c in report.checks}["motion_estimate_applicable"]
+    ids = report.expected_ids
+    assert ids["artifact_detection_id"]["id"] == saved["artifact_detection_id"]
+    assert ids["motion_estimate_id"]["id"] == estimate_id
+
+    def _no_estimation(*_args, **_kwargs):
+        raise AssertionError("a supplied estimate was estimated again")
+
+    def _no_selection(cls, key):
+        raise AssertionError("a supplied estimate was selected again")
+
+    monkeypatch.setattr(_motion, "estimate_motion_in_spans", _no_estimation)
+    monkeypatch.setattr(
+        MotionEstimateSelection, "insert_selection", classmethod(_no_selection)
+    )
+    estimates_before = _row_counts()["MotionEstimate"]
+    summary = None
+    try:
+        summary = run_v2_pipeline(**inputs, **motion)
+        assert summary["motion_estimate_id"] == estimate_id
+        assert summary["motion_estimate_supplied"] is True
+        assert summary["motion_estimate_status"] == "reused"
+        assert summary["motion_estimation_preset"] == "dredge_fast"
+        assert _row_counts()["MotionEstimate"] == estimates_before
+        corrected_id = summary["motion_corrected_recording_id"]
+        assert (
+            MotionCorrectedRecordingSelection
+            & {"motion_corrected_recording_id": corrected_id}
+        ).fetch1("motion_estimate_id") == estimate_id
+        assert (
+            SortingSelection.resolve_motion_correction(
+                {"sorting_id": summary["sorting_id"]}
+            )
+            == corrected_id
+        )
+        for name in ("motion_corrected_recording_id", "sorting_id"):
+            assert ids[name]["id"] == summary[name]
+        config = describe_run(summary).set_index("setting")["value"]
+        assert config["motion_estimate_supplied"] == "True"
+        assert config["motion_estimate_id"] == str(estimate_id)
+    finally:
+        if summary is not None:
+            drop_pipeline_sorts([summary["sorting_id"]])
+
+
+@pytest.mark.parametrize(
+    "case, preflight",
+    [
+        ("other_source", True),
+        ("other_mask", True),
+        ("other_estimation_row", True),
+        ("concat_run", True),
+        ("other_mask", False),
+        ("other_estimation_row", False),
+    ],
+)
+def test_a_supplied_estimate_that_does_not_match_fails_before_sorting(
+    drift_recording, discontinuous_sources, case, preflight
+):
+    """A supplied estimate of another recording, of the run's recording under
+    another mask, made with an estimation row other than the recipe's, or of
+    a recording for a concat run, is refused -- by preflight, or with
+    ``preflight=False`` by the ``motion_estimate`` stage -- naming both
+    values, before anything is corrected or sorted."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import (
+        PipelineStageError,
+        PreflightError,
+    )
+    from spyglass.spikesorting.v2.motion import MotionCorrectionParameters
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    MotionCorrectionParameters.insert_default()
+    run_recording_id = drift_recording["recording_key"]["recording_id"]
+    saved = _saved_estimate_of_the_run(drift_recording)
+    inputs = _pipeline_inputs(drift_recording)
+    recipe = MOTION_RECIPE
+    if case == "other_source":
+        other_id = discontinuous_sources["member_b"]["recording_id"]
+        estimate = populated_estimate(recording_id=other_id)
+        expected = [str(other_id), str(run_recording_id)]
+    elif case == "other_mask":
+        estimate = populated_estimate(recording_id=run_recording_id)
+        expected = [
+            f"artifact_detection_id None != the sort's "
+            f"{saved['artifact_detection_id']}"
+        ]
+    elif case == "other_estimation_row":
+        estimate = saved
+        recipe = "dredge_v1"
+        expected = ["'dredge_fast_v1'", "'dredge_v1'"]
+    else:
+        estimate = saved
+        inputs = {
+            "concat_session_group_owner": MOTION_TEAM,
+            "concat_session_group_name": CONCAT_GROUP,
+            "pipeline_preset": PIPELINE_PRESET,
+        }
+        expected = [str(run_recording_id), "sorts a concatenation"]
+
+    before = _row_counts()
+    curations_before = len(CurationV2())
+    raised_type = PreflightError if preflight else PipelineStageError
+    with pytest.raises(raised_type) as raised:
+        run_v2_pipeline(
+            **inputs,
+            preflight=preflight,
+            motion_mode="apply",
+            motion_correction_params_name=recipe,
+            motion_estimate_id=estimate["motion_estimate_id"],
+        )
+    message = str(raised.value)
+    assert f"motion estimate {estimate['motion_estimate_id']}" in message
+    for fragment in expected:
+        assert fragment in message
+    if not preflight:
+        assert raised.value.stage == "motion_estimate"
+        partial = raised.value.partial_run_summary
+        assert partial["motion_estimate_supplied"] is True
+        assert "sorting_id" not in partial
+    assert _row_counts() == before
+    assert len(CurationV2()) == curations_before
+
+
 @pytest.fixture
 def self_correcting_preset(dj_conn):
     """A registered preset whose sorter row (spykingcircus2 ``default``)

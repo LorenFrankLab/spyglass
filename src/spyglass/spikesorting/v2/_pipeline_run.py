@@ -10,6 +10,7 @@ also imports the two shared run-summary helpers from ``_pipeline_reporting``.
 from __future__ import annotations
 
 import time
+import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
@@ -40,6 +41,7 @@ from spyglass.spikesorting.v2._pipeline_preflight import (
     preflight_v2_pipeline_session,
     resolve_motion_recipe,
     resolve_preset_sort_config,
+    supplied_motion_estimate_problem,
 )
 from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
 from spyglass.spikesorting.v2._pipeline_reporting import (
@@ -179,6 +181,7 @@ def _validate_run_request(
     motion_mode,
     motion_correction_params_name,
     manual_excluded_times,
+    motion_estimate_id=None,
 ) -> tuple[bool, Any, Any]:
     """Validate a run request without touching the database.
 
@@ -202,6 +205,8 @@ def _validate_run_request(
     manual_excluded_times
         The caller's manual exclusions (intervals, or a member-index mapping
         for concat).
+    motion_estimate_id
+        A saved estimate to apply (see :func:`motion_request_problem`).
 
     Returns
     -------
@@ -278,7 +283,7 @@ def _validate_run_request(
             "what each preset does, or list_pipeline_presets() for just the names."
         )
     motion_problem = motion_request_problem(
-        motion_mode, motion_correction_params_name
+        motion_mode, motion_correction_params_name, motion_estimate_id
     )
     if motion_problem is not None:
         raise PipelineInputError(f"{caller}: {motion_problem}")
@@ -307,6 +312,7 @@ def _run_preflight(
     manual_excluded_times,
     motion_mode,
     motion_correction_params_name,
+    motion_estimate_id=None,
 ) -> list[str]:
     """Run the mode's read-only preflight; return its advisories.
 
@@ -326,7 +332,7 @@ def _run_preflight(
         ``concat_session_group_owner`` and ``concat_session_group_name``.
     bundle, pipeline_preset, auto_curate, manual_excluded_times
         As validated by :func:`_validate_run_request`.
-    motion_mode, motion_correction_params_name
+    motion_mode, motion_correction_params_name, motion_estimate_id
         The motion request.
 
     Returns
@@ -350,6 +356,7 @@ def _run_preflight(
             manual_excluded_times=manual_excluded_times,
             motion_mode=motion_mode,
             motion_correction_params_name=motion_correction_params_name,
+            motion_estimate_id=motion_estimate_id,
         )
         if not report.ok:
             raise PreflightError("\n".join(report.errors))
@@ -373,6 +380,7 @@ def _run_preflight(
         manual_excluded_times=manual_excluded_times,
         motion_mode=motion_mode,
         motion_correction_params_name=motion_correction_params_name,
+        motion_estimate_id=motion_estimate_id,
     )
 
 
@@ -713,6 +721,7 @@ def _run_motion_estimate(
     run_summary: dict,
     stage_seconds: dict,
     warnings_list: list,
+    motion_estimate_id=None,
 ) -> dict:
     """Select and populate the motion estimate of a run's source.
 
@@ -730,6 +739,11 @@ def _run_motion_estimate(
         The run's accumulating summary and per-stage seconds (mutated).
     warnings_list : list
         The run's warnings (appended to).
+    motion_estimate_id : uuid.UUID or str, optional
+        A saved estimate to reuse instead of selecting one: it must be a
+        populated estimate of ``source`` made with the recipe's estimation
+        row (:func:`supplied_motion_estimate_problem`), and it is never
+        recomputed (the stage is ``"reused"``).
 
     Returns
     -------
@@ -739,7 +753,8 @@ def _run_motion_estimate(
     Raises
     ------
     PipelineStageError
-        If the selection is refused or the estimation fails (stage
+        If the selection is refused, the estimation fails, or the supplied
+        estimate does not match the source or recipe (stage
         ``"motion_estimate"``).
     """
     from spyglass.spikesorting.v2.motion import (
@@ -748,41 +763,70 @@ def _run_motion_estimate(
     )
     from spyglass.utils import logger
 
-    # The selection insert runs inside ``_run_stage`` too, so a refused
-    # selection (e.g. a source whose content hash drifted) is a
-    # PipelineStageError with the partial summary like a failed populate.
-    estimate_key, _, _ = _run_stage(
-        "motion_estimate",
-        False,
-        lambda: MotionEstimateSelection.insert_selection(
-            {
-                **source,
-                "motion_estimation_params_name": motion_recipe.recipe[
-                    "motion_estimation_params_name"
-                ],
-            }
-        ),
-        run_summary,
-    )
-
-    # The stage's work populates AND reads back its row, so a row that is
-    # missing afterwards is a stage failure with the partial summary.
-    def _estimate() -> str:
-        _populate_once(MotionEstimate, estimate_key)
+    def _preset() -> str:
         return (MotionEstimate & estimate_key).fetch1("resolved_params")[
             "preset"
         ]
+
+    if motion_estimate_id is not None:
+        from spyglass.spikesorting.v2._source_resolution import SourceLineage
+
+        estimate_key = {
+            "motion_estimate_id": uuid.UUID(str(motion_estimate_id))
+        }
+        if "concat_recording_id" in source:
+            lineage = SourceLineage(
+                "concatenated_recording", dict(source), None
+            )
+        else:
+            lineage = SourceLineage(
+                "recording",
+                {"recording_id": source["recording_id"]},
+                source["artifact_detection_id"],
+            )
+
+        # Checked against the source this run built (for a concat, its member
+        # masks too), then read back without any populate.
+        def _estimate() -> str:
+            problem = supplied_motion_estimate_problem(
+                motion_estimate_id, motion_recipe, source_lineage=lineage
+            )
+            if problem is not None:
+                raise ValueError(problem)
+            return _preset()
+
+        exists = True
+    else:
+        # The selection insert runs inside ``_run_stage`` too, so a refused
+        # selection (e.g. a source whose content hash drifted) is a
+        # PipelineStageError with the partial summary like a failed populate.
+        estimate_key, _, _ = _run_stage(
+            "motion_estimate",
+            False,
+            lambda: MotionEstimateSelection.insert_selection(
+                {
+                    **source,
+                    "motion_estimation_params_name": motion_recipe.recipe[
+                        "motion_estimation_params_name"
+                    ],
+                }
+            ),
+            run_summary,
+        )
+
+        # The stage's work populates AND reads back its row, so a row that is
+        # missing afterwards is a stage failure with the partial summary.
+        def _estimate() -> str:
+            _populate_once(MotionEstimate, estimate_key)
+            return _preset()
+
+        exists = bool(MotionEstimate & estimate_key)
 
     (
         run_summary["motion_estimation_preset"],
         run_summary["motion_estimate_status"],
         stage_seconds["motion_estimate"],
-    ) = _run_stage(
-        "motion_estimate",
-        bool(MotionEstimate & estimate_key),
-        _estimate,
-        run_summary,
-    )
+    ) = _run_stage("motion_estimate", exists, _estimate, run_summary)
     run_summary["motion_estimate_id"] = estimate_key["motion_estimate_id"]
     # Surfaced, not refused: dropped-frame gaps can leave spans too short to
     # hold a peak, and the estimate there is the temporal prior alone.
@@ -902,6 +946,7 @@ def run_v2_pipeline(
     manual_excluded_times=None,
     motion_mode: MotionMode = "off",
     motion_correction_params_name: "str | None" = None,
+    motion_estimate_id: "uuid.UUID | str | None" = None,
 ) -> "RunResult":
     """End-to-end sort in one call: select + populate every stage, then curate.
 
@@ -1074,6 +1119,19 @@ def run_v2_pipeline(
         no ``MotionCorrectionParameters`` row fails preflight
         (``PreflightError``); with ``preflight=False`` it raises
         ``ValueError`` (like any missing parameter row) before any populate.
+    motion_estimate_id
+        With ``motion_mode="apply"`` only: apply exactly this saved
+        ``MotionEstimate`` instead of selecting the source's estimate. It is
+        reused as is (never recomputed) and corrected with the interpolation
+        row of ``motion_correction_params_name``. It must be a populated
+        estimate of this run's source and artifact mask made with that
+        recipe's estimation row; a mismatch names the estimate's value and the
+        run's, and fails preflight (``PreflightError``; a concat preflight
+        compares the session group and preprocessing recipe, the run then the
+        member masks) or, with ``preflight=False``, the ``motion_estimate``
+        stage (``PipelineStageError``), before any sort. Given with another
+        mode, or not a UUID, it raises ``PipelineInputError`` before any
+        database access.
 
     Returns
     -------
@@ -1121,6 +1179,9 @@ def run_v2_pipeline(
             ``motion_mode`` / ``motion_correction_params_name`` : the request
             ``motion_estimate_id``       : MotionEstimateSelection PK
                 (``"estimate"`` / ``"apply"``)
+            ``motion_estimate_supplied`` : whether the caller supplied that
+                estimate (``motion_estimate_id=``) rather than the run
+                selecting the source's estimate
             ``motion_estimation_preset`` : the SpikeInterface preset the
                 estimation recipe resolved to
             ``motion_corrected_recording_id`` :
@@ -1173,7 +1234,7 @@ def run_v2_pipeline(
     ------
     PipelineInputError
         If ``pipeline_preset`` is not a known name, or the motion request is
-        contradictory (see ``motion_mode``).
+        contradictory (see ``motion_mode`` and ``motion_estimate_id``).
     PreflightError
         If ``preflight=True`` and a prerequisite is missing (the message
         lists every failed check and its fix). Bypass with
@@ -1220,6 +1281,7 @@ def run_v2_pipeline(
         motion_mode=motion_mode,
         motion_correction_params_name=motion_correction_params_name,
         manual_excluded_times=manual_excluded_times,
+        motion_estimate_id=motion_estimate_id,
     )
     source_inputs = (
         {
@@ -1285,6 +1347,7 @@ def run_v2_pipeline(
             manual_excluded_times=manual_excluded_times,
             motion_mode=motion_mode,
             motion_correction_params_name=motion_correction_params_name,
+            motion_estimate_id=motion_estimate_id,
         )
 
     # Per-stage observability. For each stage: derive computed-vs-reused from
@@ -1296,6 +1359,7 @@ def run_v2_pipeline(
         "motion_mode": motion_mode,
         "motion_correction_params_name": motion_correction_params_name,
         "motion_estimate_id": None,
+        "motion_estimate_supplied": motion_estimate_id is not None,
         "motion_corrected_recording_id": None,
         "motion_estimation_preset": None,
         "motion_removed_channel_ids": None,
@@ -1377,6 +1441,7 @@ def run_v2_pipeline(
             run_summary,
             stage_seconds,
             warnings_list,
+            motion_estimate_id=motion_estimate_id,
         )
         if motion_mode == "apply":
             corrected = _run_motion_correction(

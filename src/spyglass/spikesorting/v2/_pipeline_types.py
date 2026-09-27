@@ -61,6 +61,7 @@ class RunV2PipelineInputs(TypedDict, total=False):
     figpack_label_options: list[str] | None
     motion_mode: MotionMode
     motion_correction_params_name: str | None
+    motion_estimate_id: UUID | str | None
 
 
 class RunV2PipelineSessionRequiredInputs(TypedDict):
@@ -166,7 +167,9 @@ class _RunV2SummaryBase(TypedDict):
     # ``motion_correction_params_name`` echo the request (the name is ``None``
     # for ``"off"``). ``motion_estimate_id`` and ``motion_estimation_preset``
     # (the SpikeInterface preset the estimation recipe resolved to) are set
-    # for ``"estimate"`` and ``"apply"``; ``motion_corrected_recording_id``
+    # for ``"estimate"`` and ``"apply"``; ``motion_estimate_supplied`` is True
+    # when the caller passed that estimate (``motion_estimate_id=``, apply
+    # only) instead of the run selecting it; ``motion_corrected_recording_id``
     # and ``motion_removed_channel_ids`` (the source channels
     # ``border_mode="remove_channels"`` dropped; empty otherwise) only for
     # ``"apply"``. ``motion_spans_without_evidence`` lists the estimate's
@@ -177,6 +180,7 @@ class _RunV2SummaryBase(TypedDict):
     motion_mode: MotionMode
     motion_correction_params_name: "str | None"
     motion_estimate_id: "UUID | None"
+    motion_estimate_supplied: bool
     motion_corrected_recording_id: "UUID | None"
     motion_estimation_preset: "str | None"
     motion_removed_channel_ids: "list | None"

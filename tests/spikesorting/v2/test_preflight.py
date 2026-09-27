@@ -266,6 +266,83 @@ def test_valid_motion_requests_have_no_problem(mode, name):
     assert motion_request_problem(mode, name) is None
 
 
+_ESTIMATE_ID = "9b8c7f5e-2d1a-4c3b-8e6f-0a1b2c3d4e5f"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "mode, name, estimate_id, match",
+    [
+        pytest.param(
+            "off", None, _ESTIMATE_ID, "only motion_mode='apply'", id="off"
+        ),
+        pytest.param(
+            "estimate",
+            "dredge_fast_v1",
+            _ESTIMATE_ID,
+            "only motion_mode='apply'",
+            id="estimate",
+        ),
+        pytest.param(
+            "apply", None, _ESTIMATE_ID, "requires", id="apply-no-recipe"
+        ),
+        pytest.param(
+            "apply", "dredge_fast_v1", "not-a-uuid", "is not a UUID", id="bad"
+        ),
+    ],
+)
+def test_motion_estimate_id_outside_apply_fails_before_any_query(
+    monkeypatch, mode, name, estimate_id, match
+):
+    """A saved estimate id with a mode other than ``apply``, without a
+    recipe, or that is not a UUID fails preflight and the run (either input
+    mode) with no database access."""
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("a bad motion_estimate_id request queried the DB")
+
+    monkeypatch.setattr(dj.Connection, "query", _boom)
+    motion = {
+        "motion_mode": mode,
+        "motion_correction_params_name": name,
+        "motion_estimate_id": estimate_id,
+    }
+    report = preflight_v2_pipeline("x.nwb", 0, _INTERVAL, "team", **motion)
+    assert report.ok is False
+    assert [c.name for c in report.checks][-1] == "motion_request_valid"
+    (message,) = report.errors
+    assert match in message
+    with pytest.raises(PipelineInputError, match=match):
+        run_v2_pipeline(
+            nwb_file_name="x.nwb",
+            sort_group_id=0,
+            interval_list_name=_INTERVAL,
+            team_name="team",
+            **motion,
+        )
+    with pytest.raises(PipelineInputError, match=match):
+        run_v2_pipeline(
+            concat_session_group_owner="owner",
+            concat_session_group_name="group",
+            **motion,
+        )
+
+
+@pytest.mark.unit
+def test_apply_with_a_saved_estimate_id_is_a_valid_request():
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        motion_request_problem,
+    )
+
+    assert (
+        motion_request_problem(
+            "apply", "dredge_fast_v1", uuid.UUID(_ESTIMATE_ID)
+        )
+        is None
+    )
+
+
 def _resolved_motion_recipe(name: str) -> dict:
     from spyglass.spikesorting.v2._motion import resolve_estimation_params
     from spyglass.spikesorting.v2._recipe_catalog import (

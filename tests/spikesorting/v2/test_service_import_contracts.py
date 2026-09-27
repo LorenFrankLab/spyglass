@@ -124,6 +124,7 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "figpack_label_options",
         "motion_mode",
         "motion_correction_params_name",
+        "motion_estimate_id",
     }
     assert pipeline_types.RunV2PipelineSessionInputs.__required_keys__ == {
         "nwb_file_name",
@@ -189,6 +190,7 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "motion_mode",
         "motion_correction_params_name",
         "motion_estimate_id",
+        "motion_estimate_supplied",
         "motion_corrected_recording_id",
         "motion_estimation_preset",
         "motion_removed_channel_ids",

@@ -926,6 +926,7 @@ _RUN_MOTION_FIELDS = (
     "motion_mode",
     "motion_correction_params_name",
     "motion_estimate_id",
+    "motion_estimate_supplied",
     "motion_estimation_preset",
     "motion_corrected_recording_id",
     "motion_removed_channel_ids",
@@ -1129,7 +1130,8 @@ def describe_run(result) -> "pd.DataFrame":
         ``error``, ``setting``, ``value``. ``config`` rows carry the
         scientific setup, the effective sorter configuration and the motion
         receipt (``motion_mode``, ``motion_correction_params_name``,
-        ``motion_estimate_id``, ``motion_estimation_preset``,
+        ``motion_estimate_id``, ``motion_estimate_supplied``,
+        ``motion_estimation_preset``,
         ``motion_corrected_recording_id``, ``motion_removed_channel_ids``,
         ``motion_spans_without_evidence``; ``"None"`` where the mode produces
         none). For a

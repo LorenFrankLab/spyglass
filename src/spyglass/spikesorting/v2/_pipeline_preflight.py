@@ -10,6 +10,7 @@ import paths are unchanged. Depends only on ``_pipeline_presets``
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from pprint import pformat
 from typing import TYPE_CHECKING, Any, NamedTuple, get_args
@@ -37,12 +38,12 @@ _SORTER_RUNTIME_BACKENDS: dict[str, tuple[str, ...]] = {
 
 
 def motion_request_problem(
-    motion_mode, motion_correction_params_name
+    motion_mode, motion_correction_params_name, motion_estimate_id=None
 ) -> "str | None":
     """Say why a motion mode and recipe name cannot be run together.
 
     DB-free: it checks the request's shape, not that the named
-    ``MotionCorrectionParameters`` row exists.
+    ``MotionCorrectionParameters`` row or motion estimate exists.
 
     Parameters
     ----------
@@ -51,12 +52,37 @@ def motion_request_problem(
     motion_correction_params_name : str or None
         The ``MotionCorrectionParameters`` row; required iff ``motion_mode``
         is not ``"off"``.
+    motion_estimate_id : uuid.UUID or str, optional
+        A saved motion estimate to apply; only valid with ``"apply"``.
 
     Returns
     -------
     str or None
         The operator-facing problem, or ``None`` for a valid request.
     """
+    problem = _motion_mode_problem(motion_mode, motion_correction_params_name)
+    if problem is not None or motion_estimate_id is None:
+        return problem
+    if motion_mode != "apply":
+        return (
+            f"motion_estimate_id={motion_estimate_id!r} was given with "
+            f"motion_mode={motion_mode!r}; only motion_mode='apply' applies "
+            "a saved estimate. Pass motion_mode='apply', or drop the id."
+        )
+    try:
+        uuid.UUID(str(motion_estimate_id))
+    except ValueError:
+        return (
+            f"motion_estimate_id={motion_estimate_id!r} is not a UUID; pass "
+            "the motion_estimate_id of a saved MotionEstimate."
+        )
+    return None
+
+
+def _motion_mode_problem(
+    motion_mode, motion_correction_params_name
+) -> "str | None":
+    """The mode / recipe-name half of :func:`motion_request_problem`."""
     modes = get_args(MotionMode)
     if motion_mode not in modes:
         return (
@@ -734,6 +760,7 @@ def assert_concat_preflight(
     manual_excluded_times=None,
     motion_mode: MotionMode = "off",
     motion_correction_params_name: "str | None" = None,
+    motion_estimate_id=None,
 ) -> list[str]:
     """Raise ``PreflightError`` if a concat run's prerequisites are missing.
 
@@ -748,7 +775,10 @@ def assert_concat_preflight(
     recipe (the concatenation's) applies a temporal filter, each member's
     geometry against the estimation recipe, and (for ``"apply"``) the
     sorter's own motion correction, as in :func:`preflight_v2_pipeline`.
-    Fails before
+    A supplied ``motion_estimate_id`` must be a populated estimate, made with
+    the recipe's estimation row, of a concatenation of this session group
+    under the preset's preprocessing recipe (the run compares the member
+    masks once it has built the concatenation). Fails before
     member/concat populate. Returns advisory warnings (including
     explicitly disabled artifact masking) for symmetry with
     :func:`preflight_v2_pipeline`.
@@ -920,6 +950,19 @@ def assert_concat_preflight(
             ).fetch1("params")
             problem = sorter_motion_correction_problem(
                 bundle.sorter, sorter_params, bundle.sorter_params_name
+            )
+            if problem is not None:
+                raise PreflightError(f"run_v2_pipeline: {problem}")
+        if motion_estimate_id is not None:
+            problem = supplied_motion_estimate_problem(
+                motion_estimate_id,
+                motion_recipe,
+                concat_source={
+                    **group_key,
+                    "preprocessing_params_name": (
+                        bundle.preprocessing_params_name
+                    ),
+                },
             )
             if problem is not None:
                 raise PreflightError(f"run_v2_pipeline: {problem}")
@@ -1256,6 +1299,100 @@ def sorter_motion_correction_problem(
     return None
 
 
+def supplied_motion_estimate_problem(
+    motion_estimate_id,
+    motion_recipe: MotionRecipe,
+    *,
+    source_lineage=None,
+    concat_source: "dict | None" = None,
+) -> "str | None":
+    """Say why a saved motion estimate cannot be applied by a run.
+
+    The estimate must be populated, estimated with the recipe's estimation
+    row, and made from the run's source: exactly its source and artifact
+    mask (``source_lineage``), or, before a concat run has built its
+    concatenation, a concatenation of the same session group under the same
+    preprocessing recipe (``concat_source``; the member masks are compared
+    once the concatenation exists, through ``source_lineage``).
+
+    Parameters
+    ----------
+    motion_estimate_id : uuid.UUID or str
+        The ``MotionEstimate`` to apply.
+    motion_recipe : MotionRecipe
+        The run's resolved ``MotionCorrectionParameters`` recipe.
+    source_lineage : SourceLineage, optional
+        The run's source and artifact detection.
+    concat_source : dict, optional
+        ``session_group_owner``, ``session_group_name`` and
+        ``preprocessing_params_name`` of a concat run.
+
+    Returns
+    -------
+    str or None
+        Every mismatch, each naming the estimate's value and the run's, or
+        ``None`` when the estimate can be applied.
+    """
+    from spyglass.spikesorting.v2._source_resolution import (
+        correction_lineage_mismatch,
+    )
+    from spyglass.spikesorting.v2.motion import (
+        MotionEstimate,
+        MotionEstimateSelection,
+    )
+
+    key = {"motion_estimate_id": uuid.UUID(str(motion_estimate_id))}
+    if not (MotionEstimate & key):
+        return (
+            f"motion_estimate_id {key['motion_estimate_id']} is not a "
+            "populated MotionEstimate. Save the estimate first "
+            "(MotionEstimateSelection.insert_selection, then "
+            "MotionEstimate.populate)."
+        )
+    problems = []
+    estimation_name = (MotionEstimateSelection & key).fetch1(
+        "motion_estimation_params_name"
+    )
+    recipe_estimation = motion_recipe.recipe["motion_estimation_params_name"]
+    if estimation_name != recipe_estimation:
+        problems.append(
+            f"it was estimated with MotionEstimationParameters "
+            f"{estimation_name!r}, but recipe "
+            f"{motion_recipe.recipe['motion_correction_params_name']!r} "
+            f"names {recipe_estimation!r}"
+        )
+    lineage = MotionEstimateSelection.resolve_source(key)
+    if source_lineage is not None:
+        problems.extend(correction_lineage_mismatch(source_lineage, lineage))
+    if concat_source is not None:
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecordingSelection,
+        )
+
+        if lineage.kind != "concatenated_recording":
+            problems.append(
+                f"it was estimated on recording {lineage.key}, but this run "
+                "sorts a concatenation"
+            )
+        else:
+            estimated = (ConcatenatedRecordingSelection & lineage.key).fetch1(
+                *concat_source
+            )
+            for name, value in zip(concat_source, estimated):
+                if value != concat_source[name]:
+                    problems.append(
+                        f"its concatenation has {name} {value!r}, but this "
+                        f"run's has {concat_source[name]!r}"
+                    )
+    if not problems:
+        return None
+    return (
+        f"motion estimate {key['motion_estimate_id']} cannot be applied to "
+        f"this run: {'; '.join(problems)}. Apply an estimate of this run's "
+        "source, artifact mask and recipe."
+    )
+
+
 def motion_geometry_problem_from_contacts(
     channel_ids,
     positions,
@@ -1411,6 +1548,7 @@ def preflight_v2_pipeline(
     manual_excluded_times=None,
     motion_mode: MotionMode = "off",
     motion_correction_params_name: "str | None" = None,
+    motion_estimate_id=None,
 ) -> PreflightReport:
     """Read-only pre-populate configuration check for ``run_v2_pipeline``.
 
@@ -1444,6 +1582,13 @@ def preflight_v2_pipeline(
         motion mode, a preset whose preprocessing recipe applies no temporal
         filter fails ``motion_source_filtered``: motion is estimated on
         filtered, unwhitened traces.
+    motion_estimate_id
+        Match ``run_v2_pipeline``. Given with a mode other than ``"apply"``
+        (or not a UUID), it fails ``motion_request_valid`` before any database
+        access. Otherwise the ``motion_estimate_applicable`` check requires a
+        populated estimate of this run's recording and artifact mask made
+        with the recipe's estimation row, and ``expected_ids`` previews the
+        corrected recording and sort built on it.
 
     Returns
     -------
@@ -1484,7 +1629,7 @@ def preflight_v2_pipeline(
     # A contradictory motion request short-circuits the same way: the motion
     # checks below need a valid mode and recipe name, and this one is DB-free.
     motion_problem = motion_request_problem(
-        motion_mode, motion_correction_params_name
+        motion_mode, motion_correction_params_name, motion_estimate_id
     )
     if not _check(
         "motion_request_valid", motion_problem is None, motion_problem
@@ -1949,11 +2094,27 @@ def preflight_v2_pipeline(
                     manual_excluded_times=manual_excluded_times,
                 ),
             )
+        if motion_estimate_id is not None and motion_recipe is not None:
+            from spyglass.spikesorting.v2._source_resolution import (
+                SourceLineage,
+            )
+
+            supplied = supplied_motion_estimate_problem(
+                motion_estimate_id,
+                motion_recipe,
+                source_lineage=SourceLineage(
+                    kind="recording",
+                    key={"recording_id": recording_id},
+                    artifact_detection_id=artifact_detection_id,
+                ),
+            )
+            _check("motion_estimate_applicable", supplied is None, supplied)
         motion_ids = _expected_motion_ids(
             motion_mode,
             motion_recipe,
             recording_id=recording_id,
             artifact_detection_id=artifact_detection_id,
+            motion_estimate_id=motion_estimate_id,
         )
         corrected = motion_ids.get("motion_corrected_recording_id", {})
         if corrected.get("pending"):
@@ -2059,15 +2220,17 @@ def _expected_motion_ids(
     *,
     recording_id,
     artifact_detection_id,
+    motion_estimate_id=None,
 ) -> dict:
     """Preview the motion selection ids a single-recording run would mint.
 
     The estimate id folds in the source recording's ``content_hash``, so it
     (and the corrected id and an ``"apply"`` sort id built on it) is known
     only once the ``Recording`` is computed; until then the entries carry
-    ``id=None`` and a ``pending`` reason instead of a guess. Uses the DB-free
-    derivations the selection inserts use, so a preview cannot drift from the
-    insert.
+    ``id=None`` and a ``pending`` reason instead of a guess. A supplied
+    ``motion_estimate_id`` (the saved estimate an ``"apply"`` run reuses) is
+    known up front. Uses the DB-free derivations the selection inserts use,
+    so a preview cannot drift from the insert.
 
     Returns
     -------
@@ -2094,25 +2257,28 @@ def _expected_motion_ids(
     names = ["motion_estimate_id"] + (
         ["motion_corrected_recording_id"] if motion_mode == "apply" else []
     )
-    content_hashes = (Recording & {"recording_id": recording_id}).fetch(
-        "content_hash"
-    )
-    if len(content_hashes) == 0:
-        pending = (
-            "the recording is computed (the motion estimate id includes its "
-            "content hash)"
+    if motion_estimate_id is not None:
+        estimate_id = uuid.UUID(str(motion_estimate_id))
+    else:
+        content_hashes = (Recording & {"recording_id": recording_id}).fetch(
+            "content_hash"
         )
-        return {name: _pending_id_entry(pending) for name in names}
-    estimate_id = motion_estimate_selection_identity(
-        source_kind="recording",
-        source_id=recording_id,
-        source_content_hash=content_hashes[0],
-        artifact_detection_id=artifact_detection_id,
-        motion_estimation_params_name=motion_recipe.recipe[
-            "motion_estimation_params_name"
-        ],
-        estimation_params=motion_recipe.estimation_params,
-    ).selection_id
+        if len(content_hashes) == 0:
+            pending = (
+                "the recording is computed (the motion estimate id includes "
+                "its content hash)"
+            )
+            return {name: _pending_id_entry(pending) for name in names}
+        estimate_id = motion_estimate_selection_identity(
+            source_kind="recording",
+            source_id=recording_id,
+            source_content_hash=content_hashes[0],
+            artifact_detection_id=artifact_detection_id,
+            motion_estimation_params_name=motion_recipe.recipe[
+                "motion_estimation_params_name"
+            ],
+            estimation_params=motion_recipe.estimation_params,
+        ).selection_id
     estimate_key = {"motion_estimate_id": estimate_id}
     expected = {
         "motion_estimate_id": {
