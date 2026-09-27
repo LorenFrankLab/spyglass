@@ -31,6 +31,11 @@ cycle.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, NamedTuple
+
+if TYPE_CHECKING:
+    from spyglass.spikesorting.v2._source_resolution import EffectiveSource
+
 BASE_ANALYZER_EXTENSIONS = (
     "random_spikes",
     "noise_levels",
@@ -469,18 +474,115 @@ def load_or_rebuild_analyzer_from_resolved(
     )
 
 
+class CanonicalRecording(NamedTuple):
+    """A sort's canonical recording resolved for a read that needs no DB.
+
+    Built by :func:`resolve_canonical_recording` and opened by
+    :func:`read_canonical_recording`.
+
+    Attributes
+    ----------
+    source : EffectiveSource
+        The sort's lineage and effective traces.
+    abs_path : str
+        The effective traces' file (present on disk).
+    artifact_valid_times : np.ndarray or None
+        Artifact-removed valid times, shape ``(n_intervals, 2)`` in seconds,
+        when the traces must be artifact-masked at load; ``None`` otherwise.
+    """
+
+    source: EffectiveSource
+    abs_path: str
+    artifact_valid_times: object
+
+
+def resolve_canonical_recording(key) -> CanonicalRecording:
+    """Resolve a sort's canonical (artifact-masked) recording; reads the DB.
+
+    Resolves the sort's effective traces
+    (``SortingSelection.resolve_effective_source``), reads the artifact
+    valid times when the traces require the mask (an artifact-backed single
+    recording), and rebuilds a missing traces file.
+
+    Parameters
+    ----------
+    key : dict
+        Restriction carrying a literal ``sorting_id``.
+
+    Returns
+    -------
+    CanonicalRecording
+    """
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    # The effective source carries the artifact-detection id from the
+    # ArtifactDetectionSource part (the master has no artifact_detection_id
+    # FK); without it an artifact-backed sort's recording would omit the mask,
+    # diverging from what Sorting.make wrote. A concat cache already holds its
+    # member masks, so its traces are never masked again here.
+    source = SortingSelection.resolve_effective_source(key)
+    lineage, traces = source
+    valid_times = None
+    if traces.apply_artifact_mask:
+        # Route the artifact mask through the ownership-validated helper -- the
+        # same one Sorting.make_fetch uses -- so a rebuilt analyzer never
+        # diverges from what Sorting.make wrote.
+        from spyglass.spikesorting.v2._artifact_intervals import (
+            read_recording_artifact_valid_times,
+        )
+
+        valid_times = read_recording_artifact_valid_times(
+            lineage.artifact_detection_id,
+            (RecordingSelection & lineage.key).fetch1("nwb_file_name"),
+            caller="reconstruct_recording_and_sorting",
+        )
+    return CanonicalRecording(
+        source=source,
+        abs_path=SortingSelection.ensure_effective_traces(traces),
+        artifact_valid_times=valid_times,
+    )
+
+
+def read_canonical_recording(canonical: CanonicalRecording):
+    """Open a resolved canonical recording, masking if needed; no DB access.
+
+    Parameters
+    ----------
+    canonical : CanonicalRecording
+
+    Returns
+    -------
+    si.BaseRecording
+        The effective traces, silenced over the artifact periods when the
+        mask applies.
+    """
+    from spyglass.spikesorting.v2._source_resolution import (
+        read_effective_recording,
+    )
+
+    lineage, traces = canonical.source
+    return read_effective_recording(
+        canonical.abs_path,
+        traces,
+        artifact_valid_times=canonical.artifact_valid_times,
+        artifact_detection_id=lineage.artifact_detection_id,
+        recording_id=lineage.key.get("recording_id"),
+    )
+
+
 def reconstruct_recording_and_sorting(sorting_table, key):
     """Reconstruct the canonical (artifact-masked) recording + sorting for a sort.
 
-    Resolves the sort's effective traces
-    (``SortingSelection.resolve_effective_source``), rebuilds a missing traces
-    file, applies the artifact mask when the traces require it (an
-    artifact-backed single recording), and loads the canonical
-    sorting from the units NWB -- exactly the ``(recording, sorting)`` pair
+    The recording is :func:`resolve_canonical_recording` opened by
+    :func:`read_canonical_recording` (effective traces, rebuilt if missing,
+    masked when they require it), and the sorting is the canonical one from
+    the units NWB -- exactly the ``(recording, sorting)`` pair
     ``build_analyzer`` starts from (it then 2D-projects + whitens per recipe).
     Touches NO analyzer cache, so the recompute audit can source sorting +
-    recording without loading a (possibly reclaimed) analyzer folder -- shared
-    with ``rebuild_analyzer_folder`` (the cache-rebuild path) so both stay in
+    recording without loading a (possibly reclaimed) analyzer folder -- the
+    recording halves are shared with the audit and with
+    ``rebuild_analyzer_folder`` (the cache-rebuild path) so all stay in
     lockstep. ``key`` must carry a literal ``sorting_id``.
 
     Parameters
@@ -497,39 +599,7 @@ def reconstruct_recording_and_sorting(sorting_table, key):
         ``(recording, sorting)`` -- the artifact-masked SI recording and the
         canonical SI sorting.
     """
-    from spyglass.spikesorting.v2._source_resolution import (
-        load_effective_recording,
-    )
-    from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
-    # The effective source carries the artifact-detection id from the
-    # ArtifactDetectionSource part (the master has no artifact_detection_id
-    # FK); without it an artifact-backed sort's recording would omit the mask,
-    # diverging from what Sorting.make wrote. A concat cache already holds its
-    # member masks, so its traces are never masked again here.
-    lineage, traces = SortingSelection.resolve_effective_source(key)
-    valid_times = None
-    if traces.apply_artifact_mask:
-        # Route the artifact mask through the ownership-validated helper -- the
-        # same one Sorting.make_fetch uses -- so a rebuilt analyzer never
-        # diverges from what Sorting.make wrote.
-        from spyglass.spikesorting.v2._artifact_intervals import (
-            read_recording_artifact_valid_times,
-        )
-
-        valid_times = read_recording_artifact_valid_times(
-            lineage.artifact_detection_id,
-            (RecordingSelection & lineage.key).fetch1("nwb_file_name"),
-            caller="reconstruct_recording_and_sorting",
-        )
-    SortingSelection.ensure_effective_traces(traces)
-    recording = load_effective_recording(
-        traces,
-        artifact_valid_times=valid_times,
-        artifact_detection_id=lineage.artifact_detection_id,
-        recording_id=lineage.key.get("recording_id"),
-    )
+    recording = read_canonical_recording(resolve_canonical_recording(key))
     return recording, sorting_table.get_sorting(key)
 
 

@@ -304,7 +304,10 @@ def test_recompute_audit_rebuilds_noise_from_persisted_spans(
     masked_planted_sort,
 ):
     """The recompute audit's fresh build hashes to the stored noise levels."""
-    from spyglass.spikesorting.v2.recompute import _recompute_analyzer_hashes
+    from spyglass.spikesorting.v2.recompute import (
+        _recompute_analyzer_hashes,
+        _resolve_analyzer_regen_inputs,
+    )
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sort = masked_planted_sort
@@ -315,7 +318,8 @@ def test_recompute_audit_rebuilds_noise_from_persisted_spans(
         sort["noise"],
     )
     stored, fresh = _recompute_analyzer_hashes(
-        sort["sort_key"], 4, sort["display_name"]
+        _resolve_analyzer_regen_inputs(sort["sort_key"], sort["display_name"]),
+        4,
     )
     assert "noise_levels" in stored
     assert fresh == stored

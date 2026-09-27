@@ -56,7 +56,6 @@ from spyglass.spikesorting.v2.exceptions import (
     AnalyzerFolderInvalidError,
     AnalyzerFolderMissingError,
     StaleEnvMatchedError,
-    ZeroUnitAnalyzerError,
 )
 from spyglass.spikesorting.v2.recording import (
     _ELECTRICAL_SERIES_PATH,
@@ -185,6 +184,57 @@ class RecordingRegenInputs(NamedTuple):
 
     current: object
     recording: object
+
+
+class AnalyzerRecipe(NamedTuple):
+    """A validated analyzer recipe: its cache folder and params blob."""
+
+    analyzer_folder: str
+    waveform_params: dict
+
+
+class AnalyzerRegenSource(NamedTuple):
+    """The canonical recording, sorting and sorter row an analyzer rebuilds from.
+
+    Attributes
+    ----------
+    recording : CanonicalRecording
+        The sort's artifact-masked effective traces (file rebuilt if missing).
+    units : StoredUnits
+        The sort's units NWB (its statistics spans are read from it too).
+    sorter_row : dict
+        The sort's ``SorterParameters`` row.
+    """
+
+    recording: object
+    units: object
+    sorter_row: dict
+
+
+class AnalyzerRegenInputs(NamedTuple):
+    """What ``SortingAnalyzerRecompute.make_compute`` regenerates from.
+
+    Attributes
+    ----------
+    sorting_id : uuid.UUID
+        The sort, as stored (named in the no-rebuild loader's errors).
+    waveform_params_name : str
+        The recipe verified.
+    n_units : int
+        ``0`` means no analyzer exists; nothing else is resolved.
+    recipe : AnalyzerRecipe, FetchFailure or None
+        The validated recipe; ``None`` for a zero-unit sort.
+    source : AnalyzerRegenSource, FetchFailure or None
+        ``None`` when the stored folder was absent at fetch (compute reports
+        it missing without reading a source, so no traces file is rebuilt)
+        or an earlier input is missing.
+    """
+
+    sorting_id: object
+    waveform_params_name: str
+    n_units: int
+    recipe: object
+    source: object
 
 
 class RecordingVersionsFetched(NamedTuple):
@@ -1218,20 +1268,35 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
     _parallel_make = True
 
     def make_fetch(self, key) -> RecomputeFetched:
-        """Read the recompute inputs (no regeneration I/O)."""
+        """Read the recompute inputs (no regeneration I/O except the
+        self-heal rebuild of a missing traces file).
+
+        Unless the row is ``xfail`` or ``unverifiable``, resolves the recipe
+        and, when the stored folder exists, the canonical recording, units
+        and sorter row the fresh analyzer is built from (see
+        :func:`_resolve_analyzer_regen_inputs`); a failure is carried as a
+        :class:`FetchFailure` and recorded as the ``'error'`` outcome.
+        """
         rounding, xfail_reason = (
             SortingAnalyzerRecomputeSelection & key
         ).fetch1("rounding", "xfail_reason")
         manifest = (SortingAnalyzerVersions & key).fetch1("analyzer_manifest")
         unverifiable_reason = analyzer_recompute_unverifiable_reason(manifest)
         parent = self.get_parent_key(key)
+        # str the sorting_id UUID for a DeepHash-stable carrier.
+        parent_key = {"sorting_id": str(parent["sorting_id"])}
         return RecomputeFetched(
-            # str the sorting_id UUID for a DeepHash-stable carrier.
-            parent_key={"sorting_id": str(parent["sorting_id"])},
+            parent_key=parent_key,
             rounding=int(rounding),
             xfail_reason=xfail_reason,
             unverifiable_reason=unverifiable_reason,
-            regen_inputs=None,
+            regen_inputs=(
+                None
+                if xfail_reason or unverifiable_reason
+                else _resolve_analyzer_regen_inputs(
+                    parent_key, key["waveform_params_name"]
+                )
+            ),
         )
 
     def make_compute(
@@ -1243,14 +1308,15 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
         unverifiable_reason,
         regen_inputs,
     ) -> RecomputeComputed:
-        """Regenerate the analyzer folder + hash extensions off the transaction."""
+        """Regenerate the analyzer folder + hash extensions off the transaction.
+
+        Reads only ``regen_inputs``; no DB access.
+        """
         return _recompute_compute(
             parent_key,
             xfail_reason,
             unverifiable_reason,
-            regen=lambda: _recompute_analyzer_hashes(
-                parent_key, rounding, key["waveform_params_name"]
-            ),
+            regen=lambda: _recompute_analyzer_hashes(regen_inputs, rounding),
             what="SortingAnalyzerRecompute",
         )
 
@@ -1382,38 +1448,125 @@ def repopulate_sorting_analyzer_inventory(
     )
 
 
-def _recompute_analyzer_hashes(
-    sort_key: dict, rounding: int, waveform_params_name: str
-):
-    """Hash a recipe's stored analyzer and a fresh temp rebuild.
+def _resolve_analyzer_regen_inputs(
+    sort_key: dict, waveform_params_name: str
+) -> AnalyzerRegenInputs:
+    """Resolve what an analyzer recompute regenerates from (DB, self-heal).
 
-    ``waveform_params_name`` selects which recipe to verify (display or
-    whitened metric); the rebuild uses that recipe's params, so the fresh
+    In the order :func:`_recompute_analyzer_hashes` uses them: the unit
+    count (a zero-unit sort has nothing to verify), the recipe (path-safe
+    name, tracked params row), then -- only when the stored folder exists,
+    since compute otherwise reports it missing before reading a source --
+    the canonical recording (traces rebuilt if missing), the units NWB and
+    the sorter row. A failure stops the resolution and is carried as a
+    :class:`FetchFailure`.
+    """
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        assert_path_safe_waveform_params_name,
+    )
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        fetch_waveform_params,
+        resolve_canonical_recording,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        SortingSelection,
+    )
+
+    what = "SortingAnalyzerRecompute"
+    sorting_id, n_units = (Sorting & sort_key).fetch1("sorting_id", "n_units")
+    if int(n_units) == 0:
+        return AnalyzerRegenInputs(
+            sorting_id, waveform_params_name, 0, recipe=None, source=None
+        )
+
+    def _recipe():
+        assert_path_safe_waveform_params_name(waveform_params_name)
+        waveform_params = fetch_waveform_params(waveform_params_name)
+        return AnalyzerRecipe(
+            analyzer_folder=str(
+                _analyzer_folder(sorting_id, waveform_params_name)
+            ),
+            waveform_params=waveform_params,
+        )
+
+    def _source():
+        canonical = resolve_canonical_recording(sort_key)
+        return AnalyzerRegenSource(
+            recording=canonical,
+            units=SortingSelection.resolve_stored_units(
+                (Sorting & sort_key).fetch1("analysis_file_name"),
+                canonical.source,
+                canonical.abs_path,
+            ),
+            sorter_row=(
+                SorterParameters
+                & (
+                    (SortingSelection & sort_key).proj(
+                        "sorter", "sorter_params_name"
+                    )
+                )
+            ).fetch1(),
+        )
+
+    recipe = _resolve_or_failure(_recipe, what=what, parent_key=sort_key)
+    source = None
+    if (
+        not isinstance(recipe, FetchFailure)
+        and Path(recipe.analyzer_folder).exists()
+    ):
+        source = _resolve_or_failure(_source, what=what, parent_key=sort_key)
+    return AnalyzerRegenInputs(
+        sorting_id,
+        waveform_params_name,
+        int(n_units),
+        recipe=recipe,
+        source=source,
+    )
+
+
+def _recompute_analyzer_hashes(inputs: AnalyzerRegenInputs, rounding: int):
+    """Hash a recipe's stored analyzer and a fresh temp rebuild; no DB access.
+
+    ``inputs.waveform_params_name`` selects which recipe to verify (display
+    or whitened metric); the rebuild uses that recipe's params, so the fresh
     analyzer is byte-comparable to the cached one for the SAME recipe.
     """
     from spyglass.spikesorting.v2._sorting_analyzer import (
         build_analyzer,
-        fetch_waveform_params,
-        reconstruct_recording_and_sorting,
+        load_analyzer_folder_no_rebuild,
+        read_canonical_recording,
+    )
+    from spyglass.spikesorting.v2._units_nwb import (
+        read_sorting_statistics_spans,
+        read_stored_units,
     )
 
-    try:
-        # NO-REBUILD: an absent stored analyzer must NOT be self-healed here --
-        # rebuilding it would compare a fresh build to another fresh build and
-        # report a tautological match, authorizing deletion of a folder that was
-        # reconstructed for the audit. Instead AnalyzerFolderMissingError
-        # propagates to _recompute_compute, which records matched=0 (the audit
-        # cannot verify reproducibility against an original that is gone).
-        stored = Sorting().get_analyzer(
-            sort_key,
-            waveform_params_name=waveform_params_name,
-            rebuild=False,
-        )
-    except ZeroUnitAnalyzerError:
+    if inputs.n_units == 0:
         return {}, {}  # zero-unit: nothing to verify -> trivially matched
+    recipe = _resolved(inputs.recipe)
+    # NO-REBUILD: an absent stored analyzer must NOT be self-healed here --
+    # rebuilding it would compare a fresh build to another fresh build and
+    # report a tautological match, authorizing deletion of a folder that was
+    # reconstructed for the audit. Instead AnalyzerFolderMissingError
+    # propagates to _recompute_compute, which records matched=0 (the audit
+    # cannot verify reproducibility against an original that is gone).
+    stored = load_analyzer_folder_no_rebuild(
+        Path(recipe.analyzer_folder),
+        recipe_label=inputs.waveform_params_name,
+        sorting_id=inputs.sorting_id,
+    )
     stored_hashes = hash_extension_data(stored, rounding=rounding)
 
-    params = fetch_waveform_params(waveform_params_name)
+    if inputs.source is None:
+        # make_fetch found no stored folder and resolved no source; one has
+        # appeared since.
+        raise RuntimeError(
+            "SortingAnalyzerRecompute: the analyzer folder "
+            f"{recipe.analyzer_folder} was absent when the inputs were "
+            "fetched and present at compute; recheck the row to verify it."
+        )
+    source = _resolved(inputs.source)
     # Source sorting + recording from the CANONICAL units NWB + recording (the
     # shared resolver), NOT a self-healing analyzer load. This (a) never rebuilds
     # the DISPLAY analyzer cache as a side effect -- so verifying a metric
@@ -1422,9 +1575,10 @@ def _recompute_analyzer_hashes(
     # audit) -- and (b) reconstructs the SAME artifact-masked, unwhitened
     # recording build_analyzer starts from (it 2D-projects + whitens per recipe,
     # so a whitened metric analyzer is not double-whitened). The sorting is
-    # recipe-independent. (Recording.get_recording can still rebuild a reclaimed
-    # RECORDING cache -- a separate, known self-heal, out of scope here.)
-    recording, sorting = reconstruct_recording_and_sorting(Sorting(), sort_key)
+    # recipe-independent. (make_fetch can still rebuild a reclaimed RECORDING
+    # cache -- a separate, known self-heal, out of scope here.)
+    recording = read_canonical_recording(source.recording)
+    sorting = read_stored_units(source.units)
 
     from spyglass.settings import temp_dir as spyglass_temp_dir
 
@@ -1447,13 +1601,16 @@ def _recompute_analyzer_hashes(
         build_analyzer(
             sorting,
             recording,
-            sort_key,
+            {"sorting_id": str(inputs.sorting_id)},
+            sorter_row=source.sorter_row,
             analyzer_folder=fresh_folder,
-            waveform_params=params,
+            waveform_params=recipe.waveform_params,
             extensions=ANALYZER_RECOMPUTE_EXTENSIONS,
             # The sort's persisted spans, so noise_levels regenerates from the
             # same samples as the stored build it is compared against.
-            statistics_spans=Sorting().get_statistics_spans(sort_key),
+            statistics_spans=read_sorting_statistics_spans(
+                source.units.abs_path, sorting_id=inputs.sorting_id
+            ),
         )
         fresh = load_analyzer_folder(fresh_folder)
         new_hashes = hash_extension_data(fresh, rounding=rounding)

@@ -252,7 +252,10 @@ def test_all_consumers_resolve_selected_correction(
         CurationEvaluation,
         CurationEvaluationSelection,
     )
-    from spyglass.spikesorting.v2.recompute import _recompute_analyzer_hashes
+    from spyglass.spikesorting.v2.recompute import (
+        _recompute_analyzer_hashes,
+        _resolve_analyzer_regen_inputs,
+    )
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from spyglass.spikesorting.v2.unit_matching import (
         UnitMatch,
@@ -355,19 +358,20 @@ def test_all_consumers_resolve_selected_correction(
 
     # The recompute audit rebuilds from the corrected traces and reproduces
     # the stored analyzer.
+    regen_inputs = _resolve_analyzer_regen_inputs(
+        {"sorting_id": sort["sorting_id"]}, display
+    )
     reconstructed = []
     with monkeypatch.context() as patch:
         _spy_on(
             patch,
             _sorting_analyzer,
-            "reconstruct_recording_and_sorting",
+            "read_canonical_recording",
             reconstructed,
         )
-        stored, fresh = _recompute_analyzer_hashes(
-            {"sorting_id": sort["sorting_id"]}, 4, display
-        )
+        stored, fresh = _recompute_analyzer_hashes(regen_inputs, 4)
     assert len(reconstructed) == 1
-    _assert_reads_corrected(reconstructed[0][0], sorts, "recompute audit")
+    _assert_reads_corrected(reconstructed[0], sorts, "recompute audit")
     assert stored and fresh == stored
 
     # The curation recording accessor (the merge table's get_recording).

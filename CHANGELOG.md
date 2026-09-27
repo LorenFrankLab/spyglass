@@ -156,6 +156,15 @@ DLCProject().alter()
   apart from staging that rebuild. An input that cannot be resolved is still
   recorded as a `matched=0` row with the same `err_msg`, not a failed
   populate. `Recording._compute_recording_artifact` is now a classmethod.
+- `SortingAnalyzerRecompute.make_fetch` resolves the unit count, the recipe
+  and, when the stored analyzer folder exists, the canonical recording
+  (rebuilding a missing traces file there), the units NWB and the sorter row;
+  `make_compute` loads, rebuilds and hashes the analyzer with no DB access.
+  As before, a reclaimed analyzer folder is reported missing without
+  rebuilding the traces file, and failures are recorded as `matched=0` rows.
+  `_sorting_analyzer.resolve_canonical_recording` /
+  `read_canonical_recording` are the two halves of
+  `reconstruct_recording_and_sorting`'s recording.
 
 #### Spike Sorting v2: optional motion correction, independent of concatenation
 

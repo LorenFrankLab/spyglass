@@ -64,27 +64,35 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
 
     # --- analyzer-recompute scratch (tempfile.mkdtemp) --------------------- #
     from spyglass.spikesorting.v2 import _sorting_analyzer as sa
+    from spyglass.spikesorting.v2 import _units_nwb
     from spyglass.spikesorting.v2 import recompute as rc
-    from spyglass.spikesorting.v2.sorting import Sorting
 
     captured_rc = {}
     monkeypatch.setattr(
         tempfile, "mkdtemp", _capture_dir_then_stop(captured_rc)
     )
-    # Mock the pre-temp work (stored-analyzer load, hash, recipe + source
-    # reconstruction) so the function reaches the mkdtemp site cheaply.
-    monkeypatch.setattr(Sorting, "get_analyzer", lambda self, *a, **k: object())
-    monkeypatch.setattr(rc, "hash_extension_data", lambda *a, **k: {})
-    monkeypatch.setattr(sa, "fetch_waveform_params", lambda name: {})
+    # Mock the pre-temp work (stored-analyzer load, hash, recording + sorting
+    # reads) so the function reaches the mkdtemp site cheaply.
     monkeypatch.setattr(
-        sa,
-        "reconstruct_recording_and_sorting",
-        lambda *a, **k: (object(), object()),
+        sa, "load_analyzer_folder_no_rebuild", lambda *a, **k: object()
+    )
+    monkeypatch.setattr(rc, "hash_extension_data", lambda *a, **k: {})
+    monkeypatch.setattr(sa, "read_canonical_recording", lambda c: object())
+    monkeypatch.setattr(_units_nwb, "read_stored_units", lambda u: object())
+    regen_inputs = rc.AnalyzerRegenInputs(
+        sorting_id="s1",
+        waveform_params_name="display",
+        n_units=1,
+        recipe=rc.AnalyzerRecipe(
+            analyzer_folder=str(tmp_path / "s1__display.analyzer"),
+            waveform_params={},
+        ),
+        source=rc.AnalyzerRegenSource(
+            recording=None, units=None, sorter_row={}
+        ),
     )
     with pytest.raises(_StopAfterTempDir):
-        rc._recompute_analyzer_hashes(
-            {"sorting_id": "s1"}, rounding=4, waveform_params_name="display"
-        )
+        rc._recompute_analyzer_hashes(regen_inputs, rounding=4)
     assert captured_rc["dir"] == configured, (
         "analyzer-recompute scratch must be created under the configured "
         "temp_dir"

@@ -671,6 +671,54 @@ def test_sorting_analyzer_recompute_matches(populated_sorting, clean_recompute):
     assert SortingAnalyzerRecompute & populated_sorting & "matched=1"
 
 
+@pytest.mark.slow
+@pytest.mark.integration
+def test_sorting_analyzer_recompute_fetch_resolves_inputs_and_compute_needs_no_db(
+    populated_sorting, clean_recompute, monkeypatch
+):
+    """``make_fetch`` resolves the recipe, canonical recording, units NWB and
+    sorter row (its hash is stable across DataJoint's two fetches), and
+    ``make_compute`` rebuilds and hashes the analyzer from them with no DB
+    access, matching the stored analyzer."""
+    _assert_temp_base_dir()
+    from spyglass.spikesorting.v2._recompute import compare_hash_dicts
+    from spyglass.spikesorting.v2.recompute import (
+        AnalyzerRegenSource,
+        SortingAnalyzerRecompute,
+        SortingAnalyzerRecomputeSelection,
+        SortingAnalyzerVersions,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._tripart_helpers import (
+        fetch_hash,
+        forbid_db_queries,
+    )
+
+    sort_key = {"sorting_id": populated_sorting["sorting_id"]}
+    recipe = (Sorting & sort_key).fetch1("display_waveform_params_name")
+    Sorting().get_analyzer(sort_key)  # build if a prior test removed it
+    SortingAnalyzerVersions.populate(sort_key, reserve_jobs=False)
+    SortingAnalyzerRecomputeSelection.attempt_all(sort_key)
+    sel_key = (
+        SortingAnalyzerRecomputeSelection
+        & sort_key
+        & {"waveform_params_name": recipe}
+    ).fetch1("KEY")
+    table = SortingAnalyzerRecompute()
+
+    fetched = table.make_fetch(sel_key)
+    assert isinstance(fetched.regen_inputs.source, AnalyzerRegenSource)
+    assert fetch_hash(table.make_fetch(sel_key)) == fetch_hash(fetched)
+    with forbid_db_queries(monkeypatch, "SortingAnalyzerRecompute"):
+        computed = table.make_compute(sel_key, *fetched)
+    assert computed.outcome == "compare", computed.err_msg
+    assert computed.stored_hashes
+    matched, *_ = compare_hash_dicts(
+        computed.stored_hashes, computed.new_hashes
+    )
+    assert matched, (computed.stored_hashes, computed.new_hashes)
+
+
 def test_analyzer_manifest_records_noise_levels_seed(
     populated_sorting, clean_recompute
 ):
@@ -900,10 +948,21 @@ def test_sorting_analyzer_recompute_missing_is_unmatched(
         SortingAnalyzerVersions,
     )
 
-    sort_key, _recipe, folder = display_analyzer_folder
+    sort_key, recipe, folder = display_analyzer_folder
     SortingAnalyzerVersions.populate(sort_key, reserve_jobs=False)
     SortingAnalyzerRecomputeSelection.attempt_all(sort_key)
     shutil.rmtree(folder)  # the original is gone before the verify runs
+    # With the original gone, make_fetch resolves no rebuild source (so it
+    # rebuilds no traces file for an audit that cannot compare anything).
+    sel_key = (
+        SortingAnalyzerRecomputeSelection
+        & sort_key
+        & {"waveform_params_name": recipe}
+    ).fetch1("KEY")
+    assert (
+        SortingAnalyzerRecompute().make_fetch(sel_key).regen_inputs.source
+        is None
+    )
     SortingAnalyzerRecompute.populate(sort_key, reserve_jobs=False)
     assert SortingAnalyzerRecompute & sort_key & "matched=0"
     assert not (SortingAnalyzerRecompute & sort_key & "matched=1")
@@ -923,7 +982,10 @@ def test_recompute_metric_verify_independent_of_display_cache(
 
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2._recompute import compare_hash_dicts
-    from spyglass.spikesorting.v2.recompute import _recompute_analyzer_hashes
+    from spyglass.spikesorting.v2.recompute import (
+        _recompute_analyzer_hashes,
+        _resolve_analyzer_regen_inputs,
+    )
     from spyglass.spikesorting.v2.sorting import (
         AnalyzerWaveformParameters,
         Sorting,
@@ -945,7 +1007,9 @@ def test_recompute_metric_verify_independent_of_display_cache(
         shutil.rmtree(display_folder)  # display reclaimed; metric present
         # No AnalyzerFolderMissingError: sorting+recording come from canonical
         # sources, not the (now-absent) display analyzer folder.
-        stored, fresh = _recompute_analyzer_hashes(sort_key, 4, metric_recipe)
+        stored, fresh = _recompute_analyzer_hashes(
+            _resolve_analyzer_regen_inputs(sort_key, metric_recipe), 4
+        )
         assert stored and fresh
         matched, *_ = compare_hash_dicts(stored, fresh)
         assert matched, (stored, fresh)
@@ -1384,7 +1448,7 @@ def test_sorting_analyzer_recompute_mismatch_records_hash_rows(
     monkeypatch.setattr(
         rc,
         "_recompute_analyzer_hashes",
-        lambda sort_key, rounding, waveform_params_name: (
+        lambda regen_inputs, rounding: (
             {"templates": "stored"},
             {"templates": "deadbeefmismatch"},
         ),
