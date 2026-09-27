@@ -1497,7 +1497,8 @@ def test_report_reads_the_stored_estimate_and_corrected_recording(
     spans without evidence are the stored row's; the removed channels are
     the corrected row's and equal the border contacts SpikeInterface's
     criterion names; the concatenation's member join is told apart from
-    member B's own acquisition gap; the trace panel plots the corrected
+    member B's own acquisition gap; mappings passed as either key are
+    reduced to their ids; the trace panel plots the corrected
     recording's traces, which differ from the original's. A corrected
     recording of another estimate, or a trace window without one, is
     refused."""
@@ -1585,8 +1586,11 @@ def test_report_reads_the_stored_estimate_and_corrected_recording(
             concat_recording_id=concat_key["concat_recording_id"]
         )
         extrapolated_key = populated_corrected(concat)
+        # Both keys are mappings carrying more than the id; a field the
+        # corrected row also has (n_channels, deliberately wrong) must not
+        # restrict it.
         _, summary = MotionEstimate().report(
-            {**concat, "warnings": []}, extrapolated_key
+            {**concat, "warnings": []}, {**extrapolated_key, "n_channels": -1}
         )
         _assert_stored(summary, concat, extrapolated_key)
         assert summary["border_mode"] == "force_extrapolate"

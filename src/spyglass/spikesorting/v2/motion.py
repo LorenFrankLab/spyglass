@@ -1237,8 +1237,10 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             One ``MotionEstimate``: a restriction, an ``estimate_motion``
             receipt (only its ``motion_estimate_id`` is used) or the id.
         corrected_key : dict, uuid.UUID or str, optional
-            A ``MotionCorrectedRecording`` made from this estimate (a
-            restriction or its ``motion_corrected_recording_id``): adds its
+            A ``MotionCorrectedRecording`` made from this estimate: a
+            restriction, any mapping holding its
+            ``motion_corrected_recording_id`` (only the id is used, e.g. a
+            ``run_v2_pipeline`` receipt) or the id. Adds its
             ``border_mode`` and ``removed_channel_ids``.
         trace_window_s : tuple of float, optional
             ``(start, end)`` on the source's own clock (s, the clock of
@@ -1305,6 +1307,15 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         if corrected_key is not None:
             if isinstance(corrected_key, (uuid.UUID, str)):
                 corrected_key = {"motion_corrected_recording_id": corrected_key}
+            elif (
+                isinstance(corrected_key, Mapping)
+                and "motion_corrected_recording_id" in corrected_key
+            ):
+                corrected_key = {
+                    "motion_corrected_recording_id": corrected_key[
+                        "motion_corrected_recording_id"
+                    ]
+                }
             corrected_key = (MotionCorrectedRecording & corrected_key).fetch1(
                 "KEY"
             )
