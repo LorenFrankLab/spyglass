@@ -965,9 +965,14 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         # the plan already rejects a concat source that supplies an artifact,
         # so this validation runs for the recording path only.
         if plan.source_kind == "recording":
-            cls._validate_artifact_detection_source_for_recording(
+            from spyglass.spikesorting.v2.artifact import (
+                assert_artifact_detection_covers_recording,
+            )
+
+            assert_artifact_detection_covers_recording(
                 recording_id=plan.source_restriction["recording_id"],
                 artifact_detection_id=plan.artifact_detection_id,
+                caller="SortingSelection.insert_selection",
             )
 
         # Pre-check the recording source exists so the most common mistake --
@@ -1203,30 +1208,6 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 "insert_selection."
             )
         return {"sorting_id": deterministic_id} if master_ids else None
-
-    @classmethod
-    def _validate_artifact_detection_source_for_recording(
-        cls,
-        *,
-        recording_id,
-        artifact_detection_id,
-    ) -> None:
-        """Ensure an artifact-detection pass is valid for a sorting recording.
-
-        Single-recording artifact detections may only be linked to that exact
-        ``recording_id``. Shared-group detections may be linked to any member
-        recording in the group. This keeps artifact masks from one recording
-        in a session from being silently applied to a different recording.
-        """
-        from spyglass.spikesorting.v2.artifact import (
-            assert_artifact_detection_covers_recording,
-        )
-
-        assert_artifact_detection_covers_recording(
-            recording_id=recording_id,
-            artifact_detection_id=artifact_detection_id,
-            caller="SortingSelection.insert_selection",
-        )
 
     @classmethod
     def _validate_motion_correction_source(cls, plan) -> None:
