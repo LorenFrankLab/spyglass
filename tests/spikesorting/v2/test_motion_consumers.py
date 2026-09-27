@@ -825,6 +825,250 @@ def test_unitmatch_bundle_of_a_corrected_sort(
     assert waveform.shape[1:] == (len(row["channel_ids"]), 2)
 
 
+#: An estimation recipe whose zero gap cap removes every real gap from the
+#: estimation clock, so estimation-clock times after a gap differ from the
+#: source's real times by the whole gap.
+GAP_CAPPED_RECIPE = "dredge_fast_no_gap_test"
+
+
+def _gap_capped_corrected(source) -> tuple[dict, dict]:
+    """The estimate and corrected recording of ``source`` under the
+    zero-gap-cap recipe (populated)."""
+    from spyglass.spikesorting.v2._params.motion_estimation import (
+        MotionEstimationParamsSchema,
+    )
+    from spyglass.spikesorting.v2.motion import (
+        MotionEstimate,
+        MotionEstimateSelection,
+        MotionEstimationParameters,
+    )
+
+    MotionEstimationParameters.insert1(
+        {
+            "motion_estimation_params_name": GAP_CAPPED_RECIPE,
+            "params": MotionEstimationParamsSchema(
+                preset="dredge_fast", max_gap_s=0.0
+            ).model_dump(),
+        },
+        skip_duplicates=True,
+    )
+    estimate_key = MotionEstimateSelection.insert_selection(
+        {"motion_estimation_params_name": GAP_CAPPED_RECIPE, **source}
+    )
+    MotionEstimate.populate(estimate_key, reserve_jobs=False)
+    return estimate_key, populated_corrected(estimate_key)
+
+
+def _planted_frames(frames):
+    """A ``Sorting._run_sorter`` stand-in returning one unit at ``frames``."""
+    import spikeinterface as si
+
+    def _plant(sorter, sorter_params, recording, sorting_id, **kwargs):
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[np.asarray(frames, dtype=np.int64)],
+            labels_list=[np.zeros(len(frames), dtype=np.int32)],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    return _plant
+
+
+def _drop_estimate(estimate_key) -> None:
+    from spyglass.spikesorting.v2.motion import MotionEstimateSelection
+
+    (MotionEstimateSelection & estimate_key).super_delete(
+        warn=False, safemode=False
+    )
+
+
+def test_corrected_sort_across_a_capped_gap_keeps_source_frames_and_times(
+    discontinuous_sources, monkeypatch
+):
+    """A corrected sort of a recording whose 1 s acquisition gap is capped
+    to zero on the estimation clock reads back exactly the frames its sorter
+    returned, and its stored spike times are the source's real timestamps at
+    those frames: after the gap they fall in the recording's second valid
+    interval, where the estimation clock would have put them inside the
+    gap."""
+    from spyglass.common import IntervalList
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._units_nwb import (
+        read_units_abs_times_and_sample_indices,
+        recording_timestamps,
+    )
+    from spyglass.spikesorting.v2.motion import MotionEstimate
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from tests.spikesorting.v2._motion_db_helpers import MEMBER_B_INTERVAL
+
+    recording_key = {
+        "recording_id": discontinuous_sources["member_b"]["recording_id"]
+    }
+    estimate_key, corrected_key = _gap_capped_corrected(recording_key)
+    sort_key = None
+    try:
+        clock = MotionEstimate().get_estimation_clock(estimate_key)
+        fs = clock.sampling_frequency
+        spans = clock.spans
+        assert spans.shape == (2, 2)
+        first_len_s = (spans[0, 1] - spans[0, 0]) / fs
+        assert clock.source_start_s[1] - clock.source_end_s[0] > 0.9
+        assert clock.estimation_start_s[1] == pytest.approx(
+            clock.estimation_start_s[0] + first_len_s, abs=1e-9
+        )
+
+        second = int(spans[1, 0])
+        planted = np.array(
+            [
+                3000,
+                60000,
+                second + 3000,
+                second + 45000,
+                int(spans[1, 1]) - 3000,
+            ]
+        )
+        sort_key = SortingSelection.insert_selection(
+            {**recording_key, **sorter_key(), **corrected_key}
+        )
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                Sorting, "_run_sorter", staticmethod(_planted_frames(planted))
+            )
+            Sorting.populate(sort_key, reserve_jobs=False)
+
+        sorting = Sorting().get_sorting(sort_key)
+        (unit_id,) = sorting.unit_ids
+        np.testing.assert_array_equal(
+            sorting.get_unit_spike_train(unit_id=unit_id), planted
+        )
+        abs_times, sample_indices, _ = read_units_abs_times_and_sample_indices(
+            AnalysisNwbfile.get_abs_path(
+                (Sorting & sort_key).fetch1("analysis_file_name")
+            )
+        )
+        (unit,) = abs_times
+        np.testing.assert_array_equal(sample_indices[unit], planted)
+        timestamps = recording_timestamps((Recording & recording_key).fetch1())
+        np.testing.assert_array_equal(abs_times[unit], timestamps[planted])
+
+        valid = (
+            IntervalList
+            & {
+                "nwb_file_name": (RecordingSelection & recording_key).fetch1(
+                    "nwb_file_name"
+                ),
+                "interval_list_name": MEMBER_B_INTERVAL,
+            }
+        ).fetch1("valid_times")
+        after_gap = abs_times[unit][2:]
+        assert ((after_gap >= valid[1][0]) & (after_gap <= valid[1][1])).all()
+        estimation_times = (
+            clock.estimation_start_s[1] + (planted[2:] - second) / fs
+        )
+        assert valid[0][1] < estimation_times[0] < valid[1][0]
+    finally:
+        if sort_key is not None:
+            drop_pipeline_sorts([sort_key["sorting_id"]])
+        _drop_estimate(estimate_key)
+
+
+def test_corrected_concat_split_into_members_conserves_spikes(
+    discontinuous_sources, monkeypatch
+):
+    """A corrected concatenation sort (its gaps capped to zero on the
+    estimation clock) split into member outputs by ``ConcatMemberCuration``
+    keeps every spike: each member holds the sorter's frames that fall in
+    it, shifted to member frames, with the member recording's own
+    timestamps at those frames."""
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._units_nwb import (
+        read_units_abs_times_and_sample_indices,
+        recording_timestamps,
+    )
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    concat_key = discontinuous_sources["concat_key"]
+    estimate_key, corrected_key = _gap_capped_corrected(dict(concat_key))
+    snapshots = (
+        ConcatenatedRecordingSelection.MemberSnapshot & concat_key
+    ).fetch(as_dict=True, order_by="member_index")
+    member_timestamps = [
+        recording_timestamps(
+            (Recording & {"recording_id": m["recording_id"]}).fetch1()
+        )
+        for m in snapshots
+    ]
+    lengths = [len(t) for t in member_timestamps]
+    assert len(lengths) == 2
+    offsets = np.cumsum([0, *lengths])
+    planted = np.array(
+        [
+            3000,
+            lengths[0] - 3000,
+            offsets[1] + 3000,
+            offsets[1] + lengths[1] // 2 + 3000,
+            offsets[2] - 3000,
+        ]
+    )
+    sort_key = None
+    try:
+        sort_key = SortingSelection.insert_selection(
+            {**concat_key, **sorter_key(), **corrected_key}
+        )
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                Sorting, "_run_sorter", staticmethod(_planted_frames(planted))
+            )
+            Sorting.populate(sort_key, reserve_jobs=False)
+        curation_key = CurationV2.insert_curation(sorting_key=sort_key)
+        ConcatMemberCuration.populate(curation_key, reserve_jobs=False)
+
+        n_member_spikes = 0
+        for index in range(len(snapshots)):
+            member_key = {**curation_key, "member_index": index}
+            expected = (
+                planted[
+                    (planted >= offsets[index]) & (planted < offsets[index + 1])
+                ]
+                - offsets[index]
+            )
+            member_sorting = ConcatMemberCuration.get_sorting(member_key)
+            (unit_id,) = member_sorting.unit_ids
+            frames = member_sorting.get_unit_spike_train(unit_id=unit_id)
+            np.testing.assert_array_equal(frames, expected)
+            abs_times, sample_indices, _ = (
+                read_units_abs_times_and_sample_indices(
+                    AnalysisNwbfile.get_abs_path(
+                        (ConcatMemberCuration & member_key).fetch1(
+                            "analysis_file_name"
+                        )
+                    )
+                )
+            )
+            (unit,) = abs_times
+            np.testing.assert_array_equal(sample_indices[unit], expected)
+            np.testing.assert_array_equal(
+                abs_times[unit], member_timestamps[index][expected]
+            )
+            n_member_spikes += len(frames)
+        assert n_member_spikes == len(planted)
+    finally:
+        if sort_key is not None:
+            drop_pipeline_sorts([sort_key["sorting_id"]])
+        _drop_estimate(estimate_key)
+
+
 def test_motion_cleanup_drops_the_sorts_of_corrected_recordings(
     corrected_sorts,
 ):

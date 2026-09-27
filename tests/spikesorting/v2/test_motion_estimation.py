@@ -318,6 +318,16 @@ def test_default_rows_resolve():
 # max |error| 1.175 - 0.985).
 DEV_RIGID_RMS_UM = 0.319
 DEV_RIGID_MAX_ABS_UM = 1.175
+# Physical bounds on the same common-frame error, from the probe rather than
+# from a benchmark: the correction is useful only if the residual stays a
+# small fraction of one contact spacing (26 um pitch). A residual near one
+# pitch would put a unit on its neighbour's contact; leaving the +/-25 um
+# zigzag uncorrected has an RMS error of 25 / sqrt(3) ~ 14 um. One tenth of
+# the pitch (RMS) and one quarter of it (worst bin) are several times below
+# that failure level and several times above the development errors, so they
+# fail only on a real estimation failure, not on platform numerics.
+PHYSICAL_RIGID_RMS_UM = 26.0 / 10
+PHYSICAL_RIGID_MAX_ABS_UM = 26.0 / 4
 DEV_STATIC_MAX_ABS_UM = 0.197
 DEV_RIGID_RMS_SPREAD_UM = 0.319 - 0.273
 DEV_RIGID_MAX_ABS_SPREAD_UM = 1.175 - 0.985
@@ -649,7 +659,10 @@ def test_repeated_estimates_are_bit_identical():
 
 
 def test_known_rigid_drift_is_recovered_in_a_common_frame(rigid_drift_90s):
-    from tests.spikesorting.v2._motion_fixtures import common_frame_error
+    from tests.spikesorting.v2._motion_fixtures import (
+        PITCH_UM,
+        common_frame_error,
+    )
 
     rms, max_abs = common_frame_error(
         rigid_drift_90s["motion"],
@@ -658,6 +671,12 @@ def test_known_rigid_drift_is_recovered_in_a_common_frame(rigid_drift_90s):
     )
     diagnostics = rigid_drift_90s["diagnostics"]
 
+    assert PITCH_UM == 26.0  # the physical bounds are fractions of it
+    assert rms <= PHYSICAL_RIGID_RMS_UM
+    assert max_abs <= PHYSICAL_RIGID_MAX_ABS_UM
+    # Regression pin, not an accuracy requirement: the development maxima on
+    # this fixture. A failure here with the physical bounds met means the
+    # estimate changed (e.g. a SpikeInterface upgrade), not that it is wrong.
     assert rms <= DEV_RIGID_RMS_UM
     assert max_abs <= DEV_RIGID_MAX_ABS_UM
     assert diagnostics.peaks_per_temporal_bin.shape == (
