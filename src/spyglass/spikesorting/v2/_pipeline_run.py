@@ -303,19 +303,7 @@ def _validate_run_request(
     bundle = artifact_recipe_with_manual_exclusions(
         _PIPELINE_PRESETS[pipeline_preset], manual_excluded_times
     )
-    source_inputs = (
-        {
-            "concat_session_group_owner": concat_session_group_owner,
-            "concat_session_group_name": concat_session_group_name,
-        }
-        if is_concat
-        else {
-            "nwb_file_name": nwb_file_name,
-            "sort_group_id": sort_group_id,
-            "interval_list_name": interval_list_name,
-            "team_name": team_name,
-        }
-    )
+    source_inputs = concat_named if is_concat else single_named
     return is_concat, bundle, manual_excluded_times, source_inputs
 
 
