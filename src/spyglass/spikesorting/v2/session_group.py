@@ -1366,20 +1366,13 @@ class ConcatenatedRecording(
             The concatenated, masked, unwhitened recording.
         """
         from spyglass.spikesorting.v2._recording_nwb import (
-            ensure_artifact_file,
-            read_recording_nwb,
+            read_stored_traces,
+            stored_traces,
         )
 
-        row = (self & key).fetch1()
-        abs_path = ensure_artifact_file(
-            type(self), key, row["analysis_file_name"]
+        return read_stored_traces(
+            stored_traces(type(self), key, (self & key).fetch1())
         )
-        rec = read_recording_nwb(
-            abs_path,
-            electrical_series_path=row["electrical_series_path"],
-        )
-        rec.annotate(is_filtered=True)
-        return rec
 
     def _rebuild_nwb_artifact(self, key) -> None:
         """Rebuild a missing concat artifact -- locked, atomic, content-verified.
