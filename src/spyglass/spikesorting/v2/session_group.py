@@ -742,7 +742,10 @@ class ConcatenatedRecordingSelection(
 
 
 class ConcatRecordingFetched(NamedTuple):
-    """DB-side inputs for ``ConcatenatedRecording.make_compute`` (no SI/NWB I/O).
+    """DB-side inputs for ``ConcatenatedRecording.make_compute``.
+
+    Gathered with no SI/NWB I/O except the self-heal rebuild of a missing
+    member file.
 
     ``member_plan`` is the member_index-ordered list of DeepHash-stable dicts
     ``{"member_index" (int), "nwb_file_name" (str), "recording_pk" (dict whose
@@ -995,7 +998,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     _parallel_make = True
 
     def make_fetch(self, key) -> ConcatRecordingFetched:
-        """Read every DB input the materialization needs (no SI / NWB I/O).
+        """Read every DB input the materialization needs.
+
+        No SI / NWB I/O except the self-heal rebuild of a missing member file.
 
         Resolves the selection row, the FROZEN member snapshot (never the live
         ``SessionGroup.Member`` set) and each member's still-current ``Recording``

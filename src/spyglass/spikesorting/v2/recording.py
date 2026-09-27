@@ -2380,7 +2380,10 @@ class Recording(SpyglassMixin, dj.Computed):
 
 
 class DriftFetched(NamedTuple):
-    """``make_fetch`` output for :class:`DriftEstimate` (no trace/SI I/O).
+    """``make_fetch`` output for :class:`DriftEstimate`.
+
+    Gathered with no trace/SI I/O except the self-heal rebuild of a missing
+    recording file.
 
     Attributes
     ----------
@@ -2470,10 +2473,11 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
     def make_fetch(self, key) -> DriftFetched:
         """Return the preset and the resolved recording artifact.
 
-        Rebuilds a missing recording file through ``Recording``'s own
-        verified self-heal. No SpikeInterface or NWB I/O: the carrier holds
-        strings only, so the tri-part contract's two ``make_fetch`` calls
-        stay DeepHash-stable (the second finds the file the first rebuilt).
+        No SpikeInterface or NWB I/O except the self-heal rebuild of a
+        missing recording file (``Recording``'s own verified rebuild). The
+        carrier holds strings only, so the tri-part contract's two
+        ``make_fetch`` calls stay DeepHash-stable (the second finds the file
+        the first rebuilt).
         """
         return DriftFetched(
             preset=self._DEFAULT_PRESET,
