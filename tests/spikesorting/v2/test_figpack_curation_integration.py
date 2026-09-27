@@ -179,25 +179,19 @@ def test_make_compute_touches_no_database(
     populated_sorting_with_curation, monkeypatch
 ):
     """The view build and publish run on fetched inputs with no DB access."""
-    import datajoint as dj
-
     from spyglass.spikesorting.v2.figpack_curation import (
         FigPackCuration,
         FigPackCurationSelection,
     )
+    from tests.spikesorting.v2._tripart_helpers import forbid_db_queries
 
     selection = FigPackCurationSelection.insert_selection(
         populated_sorting_with_curation, displayed_unit_properties=["x", "y"]
     )
     table = FigPackCuration()
     fetched = table.make_fetch(selection)
-
-    def _boom(*args, **kwargs):
-        raise AssertionError("FigPackCuration.make_compute queried the DB")
-
-    monkeypatch.setattr(dj.Connection, "query", _boom)
-    computed = table.make_compute(selection, *fetched)
-    monkeypatch.undo()
+    with forbid_db_queries(monkeypatch, "FigPackCuration.make_compute"):
+        computed = table.make_compute(selection, *fetched)
 
     # The offline bundle is staged privately; make_insert moves it to the URI.
     staged = Path(computed.staged_bundle)
