@@ -240,13 +240,10 @@ def review_timeline_from_inputs(inputs: ReviewTimelineInputs):
         artifact_frame_ranges,
     )
     from spyglass.spikesorting.v2._source_resolution import (
-        read_effective_recording,
+        read_persisted_traces,
     )
 
-    recording = read_effective_recording(
-        inputs.traces_path,
-        inputs.traces._replace(apply_artifact_mask=False),
-    )
+    recording = read_persisted_traces(inputs.traces_path, inputs.traces)
     fs = recording.sampling_frequency
     with NWBHDF5IO(inputs.units_path, "r", load_namespaces=True) as io:
         units = io.read().units

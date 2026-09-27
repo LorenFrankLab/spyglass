@@ -1265,7 +1265,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             chronological_member_order,
         )
         from spyglass.spikesorting.v2._source_resolution import (
-            read_effective_recording,
+            read_persisted_traces,
         )
         from spyglass.spikesorting.v2._unitmatch_backend import (
             extract_unitmatch_bundle,
@@ -1300,9 +1300,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 # motion-corrected recording included), as the plan's
                 # ``waveform_traces`` records -- what CurationV2.get_recording
                 # returns; the sorting is CurationV2.get_sorting's.
-                recording = read_effective_recording(
-                    plan["traces_abs_path"],
-                    plan["traces"]._replace(apply_artifact_mask=False),
+                recording = read_persisted_traces(
+                    plan["traces_abs_path"], plan["traces"]
                 )
                 full_sorting = read_stored_units(plan["units"])
                 sorting = full_sorting.select_units(plan["matchable_unit_ids"])

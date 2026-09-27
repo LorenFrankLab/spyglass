@@ -24,13 +24,15 @@ checks that a corrected recording was made from the sort's own source and mask,
 and :func:`sorting_parts_mismatch` that the parts still give the stored
 ``sorting_id``.
 :func:`load_effective_recording` opens the traces, and
-:func:`read_effective_recording` does the same from an already-resolved path.
+:func:`read_effective_recording` does the same from an already-resolved path;
+:func:`read_persisted_traces` opens them as persisted, with no mask at load.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import. SpikeInterface and the NWB reader are imported lazily.
 :func:`load_effective_recording` resolves the file path through
 ``AnalysisNwbfile.get_abs_path``, which reads the ``AnalysisNwbfile`` table;
-:func:`read_effective_recording` touches no DB.
+:func:`read_effective_recording` and :func:`read_persisted_traces` touch no
+DB.
 """
 
 from __future__ import annotations
@@ -425,6 +427,35 @@ def read_effective_recording(
             recording_id=recording_id,
         )
     return recording
+
+
+def read_persisted_traces(
+    abs_path: str, traces: EffectiveTraces
+) -> si.BaseRecording:
+    """Open the effective traces as persisted: no artifact mask at load.
+
+    A single-recording source's cache comes back unmasked (a consumer that
+    needs the mask applies it itself, e.g. through ``artifact_frame_ranges``),
+    while a concat artifact keeps its member masks and a motion-corrected
+    artifact keeps the sort's mask, both of which are written into the file.
+    No DB access.
+
+    Parameters
+    ----------
+    abs_path : str
+        Absolute path of the analysis NWB named by
+        ``traces.row["analysis_file_name"]``.
+    traces : EffectiveTraces
+        The resolved traces artifact.
+
+    Returns
+    -------
+    si.BaseRecording
+        The persisted traces, annotated ``is_filtered=True``.
+    """
+    return read_effective_recording(
+        abs_path, traces._replace(apply_artifact_mask=False)
+    )
 
 
 def load_effective_recording(

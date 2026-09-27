@@ -1583,10 +1583,9 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         """Open the effective traces as persisted, rebuilding a missing file.
 
         Self-heals through :meth:`ensure_effective_traces`, then opens the
-        file with no artifact mask applied at load. A single-recording
-        source's cache therefore comes back unmasked, while a concat artifact
-        keeps its member masks and a motion-corrected artifact keeps the
-        sort's mask, both of which are written into the file.
+        file it resolved with
+        :func:`._source_resolution.read_persisted_traces` (no artifact mask
+        applied at load).
 
         Parameters
         ----------
@@ -1599,12 +1598,11 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             The persisted traces, annotated ``is_filtered=True``.
         """
         from spyglass.spikesorting.v2._source_resolution import (
-            load_effective_recording,
+            read_persisted_traces,
         )
 
-        SortingSelection.ensure_effective_traces(traces)
-        return load_effective_recording(
-            traces._replace(apply_artifact_mask=False)
+        return read_persisted_traces(
+            SortingSelection.ensure_effective_traces(traces), traces
         )
 
     @classmethod
@@ -2222,12 +2220,10 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         # already materialized. Both modes pass observation intervals to the
         # units writer.
         from spyglass.spikesorting.v2._source_resolution import (
-            read_effective_recording,
+            read_persisted_traces,
         )
 
-        recording = read_effective_recording(
-            traces_abs_path, traces._replace(apply_artifact_mask=False)
-        )
+        recording = read_persisted_traces(traces_abs_path, traces)
 
         # Statistics spans: the artifact-free frame ranges every noise and
         # whitening estimate samples from, persisted with the sort so each

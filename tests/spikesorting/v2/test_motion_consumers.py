@@ -430,7 +430,7 @@ def test_all_consumers_resolve_selected_correction(
     # source's.
     loaded = []
     with monkeypatch.context() as patch:
-        _spy_on(patch, _source_resolution, "load_effective_recording", loaded)
+        _spy_on(patch, _source_resolution, "read_persisted_traces", loaded)
         corrected_duration = _pipeline_reporting._observed_duration_s(
             sort["sorting_id"]
         )
