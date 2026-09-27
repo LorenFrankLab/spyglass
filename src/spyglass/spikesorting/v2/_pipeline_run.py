@@ -183,7 +183,7 @@ def _validate_run_request(
     motion_correction_params_name,
     manual_excluded_times,
     motion_estimate_id=None,
-) -> tuple[bool, Any, Any]:
+) -> tuple[bool, Any, Any, dict]:
     """Validate a run request without touching the database.
 
     Determines the input mode, checks the preset name and the motion request,
@@ -218,6 +218,10 @@ def _validate_run_request(
         need a detection output and the preset scans for none.
     manual_excluded_times : list or dict
         The normalized manual exclusions.
+    source_inputs : dict
+        The mode's source fields: ``nwb_file_name``, ``sort_group_id``,
+        ``interval_list_name`` and ``team_name``, or
+        ``concat_session_group_owner`` and ``concat_session_group_name``.
 
     Raises
     ------
@@ -299,7 +303,20 @@ def _validate_run_request(
     bundle = artifact_recipe_with_manual_exclusions(
         _PIPELINE_PRESETS[pipeline_preset], manual_excluded_times
     )
-    return is_concat, bundle, manual_excluded_times
+    source_inputs = (
+        {
+            "concat_session_group_owner": concat_session_group_owner,
+            "concat_session_group_name": concat_session_group_name,
+        }
+        if is_concat
+        else {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": interval_list_name,
+            "team_name": team_name,
+        }
+    )
+    return is_concat, bundle, manual_excluded_times, source_inputs
 
 
 def _run_preflight(
@@ -1270,32 +1287,21 @@ def run_v2_pipeline(
     # rather than an opaque connection error.
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
-    is_concat, bundle, manual_excluded_times = _validate_run_request(
-        "run_v2_pipeline",
-        nwb_file_name=nwb_file_name,
-        sort_group_id=sort_group_id,
-        interval_list_name=interval_list_name,
-        team_name=team_name,
-        concat_session_group_owner=concat_session_group_owner,
-        concat_session_group_name=concat_session_group_name,
-        pipeline_preset=pipeline_preset,
-        motion_mode=motion_mode,
-        motion_correction_params_name=motion_correction_params_name,
-        manual_excluded_times=manual_excluded_times,
-        motion_estimate_id=motion_estimate_id,
-    )
-    source_inputs = (
-        {
-            "concat_session_group_owner": concat_session_group_owner,
-            "concat_session_group_name": concat_session_group_name,
-        }
-        if is_concat
-        else {
-            "nwb_file_name": nwb_file_name,
-            "sort_group_id": sort_group_id,
-            "interval_list_name": interval_list_name,
-            "team_name": team_name,
-        }
+    is_concat, bundle, manual_excluded_times, source_inputs = (
+        _validate_run_request(
+            "run_v2_pipeline",
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            interval_list_name=interval_list_name,
+            team_name=team_name,
+            concat_session_group_owner=concat_session_group_owner,
+            concat_session_group_name=concat_session_group_name,
+            pipeline_preset=pipeline_preset,
+            motion_mode=motion_mode,
+            motion_correction_params_name=motion_correction_params_name,
+            manual_excluded_times=manual_excluded_times,
+            motion_estimate_id=motion_estimate_id,
+        )
     )
 
     # Fail fast (still DB-free, before the table imports) if a FigPack view was
@@ -1837,31 +1843,20 @@ def estimate_motion(
             "here and its interpolation row is applied by the later "
             "run_v2_pipeline(motion_mode='apply', motion_estimate_id=...)."
         )
-    is_concat, bundle, manual_excluded_times = _validate_run_request(
-        "estimate_motion",
-        nwb_file_name=nwb_file_name,
-        sort_group_id=sort_group_id,
-        interval_list_name=interval_list_name,
-        team_name=team_name,
-        concat_session_group_owner=concat_session_group_owner,
-        concat_session_group_name=concat_session_group_name,
-        pipeline_preset=pipeline_preset,
-        motion_mode="estimate",
-        motion_correction_params_name=motion_correction_params_name,
-        manual_excluded_times=manual_excluded_times,
-    )
-    source_inputs = (
-        {
-            "concat_session_group_owner": concat_session_group_owner,
-            "concat_session_group_name": concat_session_group_name,
-        }
-        if is_concat
-        else {
-            "nwb_file_name": nwb_file_name,
-            "sort_group_id": sort_group_id,
-            "interval_list_name": interval_list_name,
-            "team_name": team_name,
-        }
+    is_concat, bundle, manual_excluded_times, source_inputs = (
+        _validate_run_request(
+            "estimate_motion",
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            interval_list_name=interval_list_name,
+            team_name=team_name,
+            concat_session_group_owner=concat_session_group_owner,
+            concat_session_group_name=concat_session_group_name,
+            pipeline_preset=pipeline_preset,
+            motion_mode="estimate",
+            motion_correction_params_name=motion_correction_params_name,
+            manual_excluded_times=manual_excluded_times,
+        )
     )
     warnings_list: list[str] = []
     if preflight:
