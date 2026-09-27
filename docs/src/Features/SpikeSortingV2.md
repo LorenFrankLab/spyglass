@@ -1633,6 +1633,10 @@ source's own clock (seconds, the clock of `get_spans_without_evidence`) to
 compare traces:
 
 ```python
+# 60 s after the source's first sample, on its own clock.
+estimate_key = {"motion_estimate_id": receipt["motion_estimate_id"]}
+t_start = MotionEstimate().get_estimation_clock(estimate_key).source_start_s[0]
+t_start += 60.0
 fig, report = MotionEstimate().report(
     receipt,
     corrected_key=corrected_key,  # optional MotionCorrectedRecording
