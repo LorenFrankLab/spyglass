@@ -403,19 +403,16 @@ class _RunSource(NamedTuple):
 
     Attributes
     ----------
-    motion_source : dict
-        The ``MotionEstimateSelection`` source: ``recording_id`` and
-        ``artifact_detection_id`` (``None`` without artifact detection), or
-        ``concat_recording_id``.
-    sort_source : dict
-        The ``SortingSelection`` source fields (the same keys: a sort and its
-        motion estimate read one source under one mask).
+    selection_fields : dict
+        The source fields of both ``MotionEstimateSelection`` and
+        ``SortingSelection`` (a sort and its motion estimate read one source
+        under one mask): ``recording_id`` and ``artifact_detection_id``
+        (``None`` without artifact detection), or ``concat_recording_id``.
     concat_key : dict or None
         The ``ConcatenatedRecordingSelection`` PK in concat mode.
     """
 
-    motion_source: dict
-    sort_source: dict
+    selection_fields: dict
     concat_key: "dict | None"
 
 
@@ -529,7 +526,7 @@ def _build_run_source(
             "recording_id": recording_key["recording_id"],
             "artifact_detection_id": artifact_detection_id,
         }
-        return _RunSource(source, dict(source), None)
+        return _RunSource(source, None)
 
     # Member detections are inputs to the masked concat.
     run_summary["source_mode"] = "concat"
@@ -694,7 +691,7 @@ def _build_run_source(
         concat_row["total_duration_s"] - valid_duration
     )
     source = {"concat_recording_id": concat_key["concat_recording_id"]}
-    return _RunSource(source, dict(source), dict(concat_key))
+    return _RunSource(source, dict(concat_key))
 
 
 def _run_motion_estimate(
@@ -714,7 +711,7 @@ def _run_motion_estimate(
     Parameters
     ----------
     source : dict
-        The ``MotionEstimateSelection`` source (``_RunSource.motion_source``).
+        The ``MotionEstimateSelection`` source (``_RunSource.selection_fields``).
     motion_recipe : MotionRecipe
         The resolved ``MotionCorrectionParameters`` recipe.
     run_summary, stage_seconds : dict
@@ -1440,7 +1437,7 @@ def run_v2_pipeline(
     corrected: dict = {}
     if motion_recipe is not None:
         estimate_key = _run_motion_estimate(
-            source.motion_source,
+            source.selection_fields,
             motion_recipe,
             run_summary,
             stage_seconds,
@@ -1453,7 +1450,7 @@ def run_v2_pipeline(
             )
     sorting_key = SortingSelection.insert_selection(
         {
-            **source.sort_source,
+            **source.selection_fields,
             "sorter": bundle.sorter,
             "sorter_params_name": bundle.sorter_params_name,
             **corrected,
@@ -1894,7 +1891,7 @@ def estimate_motion(
         stage_seconds=stage_seconds,
     )
     estimate_key = _run_motion_estimate(
-        source.motion_source,
+        source.selection_fields,
         motion_recipe,
         run_summary,
         stage_seconds,
