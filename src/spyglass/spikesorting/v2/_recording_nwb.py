@@ -29,6 +29,18 @@ touches the DB / DataJoint at CALL time via lazy imports (``AnalysisNwbfile``
 path resolution + file create). It also lazily imports the
 ``_ELECTRICAL_SERIES_NAME`` constant from ``recording`` at call time -- by then
 ``recording`` is fully imported, so there is no import cycle.
+
+STAGING IS THE ONE DB ACCESS A TRI-PART ``make_compute`` MAY KEEP. Its inputs
+belong in ``make_fetch``, whose result DataJoint re-checks inside the insert
+transaction; a cached trace file is resolved there with :func:`stored_traces`
+(rebuilt if missing) and read in compute with :func:`read_stored_traces`.
+Staging an output file still goes through ``AnalysisNwbfile().create`` and
+``AnalysisNwbfile.get_abs_path``, which read the ``Nwbfile`` /
+``AnalysisNwbfile`` tables to mint and locate the file: in
+``write_nwb_artifact`` here, in ``_units_nwb.write_sorting_units_nwb``, and in
+the ``UnitMatch`` and ``CurationEvaluation`` writers. This is accepted (a
+DB-free ``create`` would be a ``spyglass.common`` change); the staged file is
+registered only in ``make_insert``.
 """
 
 from __future__ import annotations
