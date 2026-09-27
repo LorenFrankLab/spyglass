@@ -150,12 +150,14 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2 import _recording_nwb
+    from spyglass.spikesorting.v2 import _recording_nwb, _source_resolution
 
     # Substitute the loaded preprocessed recording with the synthetic one
-    # carrying a known transient. RecordingArtifactDetection reads the
-    # resolved artifact via _recording_nwb.read_stored_traces.
-    # Save it to disk first: production recordings are file-backed, and the
+    # carrying a known transient at both seams: RecordingArtifactDetection
+    # reads the resolved artifact via _recording_nwb.read_stored_traces, and
+    # Sorting reads the sort's effective traces via
+    # _source_resolution.read_effective_recording (patched below, before the
+    # sort). Save it to disk first: production recordings are file-backed, and the
     # sorting analyzer stores a reloadable reference to its recording. An
     # in-memory NumpyRecording is not pickle-serializable, so SI would build
     # a recordingless analyzer that the cache loader rejects as invalid.
@@ -255,6 +257,18 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
 
     monkeypatch.setattr(
         Sorting, "_run_sorter", staticmethod(_capture_run_sorter)
+    )
+
+    def _synthetic_sort_input(abs_path, traces, **kwargs):
+        # Sorting reads the single recording unmasked and applies the
+        # detected mask itself; anything else would bypass the path under test.
+        assert traces.kind == "recording", traces.kind
+        assert not traces.apply_artifact_mask
+        assert not kwargs, kwargs
+        return si.load(synthetic_folder)
+
+    monkeypatch.setattr(
+        _source_resolution, "read_effective_recording", _synthetic_sort_input
     )
     Sorting.populate(sort_pk, reserve_jobs=False)
 
