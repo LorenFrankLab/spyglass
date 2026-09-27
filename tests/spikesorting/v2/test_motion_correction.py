@@ -3079,6 +3079,42 @@ def test_concat_preflight_refuses_an_estimate_of_other_member_masks(
             )
 
 
+def test_preflight_refuses_a_supplied_estimate_of_changed_traces(
+    drift_recording,
+):
+    """A supplied estimate whose source recording's content hash changed
+    since it was selected describes other traces: preflight refuses it,
+    naming both hashes."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.pipeline import preflight_v2_pipeline
+    from spyglass.spikesorting.v2.recording import Recording
+
+    saved = _saved_estimate_of_the_run(drift_recording)
+    recording_key = dict(drift_recording["recording_key"])
+    recordings = dj.FreeTable(dj.conn(), Recording.full_table_name)
+    original = (recordings & recording_key).fetch1("content_hash")
+    changed = "0" * 64
+    recordings.update1({**recording_key, "content_hash": changed})
+    try:
+        report = preflight_v2_pipeline(
+            **_pipeline_inputs(drift_recording),
+            motion_mode="apply",
+            motion_correction_params_name=MOTION_RECIPE,
+            motion_estimate_id=saved["motion_estimate_id"],
+        )
+    finally:
+        recordings.update1({**recording_key, "content_hash": original})
+    assert not report.ok
+    (fix,) = [
+        check.fix
+        for check in report.checks
+        if check.name == "motion_estimate_applicable"
+    ]
+    assert "changed since motion estimate" in fix
+    assert f"content_hash {changed} != {original}" in fix
+
+
 @pytest.fixture
 def self_correcting_preset(dj_conn):
     """A registered preset whose sorter row (spykingcircus2 ``default``)

@@ -1463,7 +1463,9 @@ def supplied_motion_estimate_problem(
     """Say why a saved motion estimate cannot be applied by a run.
 
     The estimate must be populated, estimated with the recipe's estimation
-    row, and made from the run's source: exactly its source and artifact
+    row, on a source whose traces have not changed since (its live
+    ``content_hash``, when the source row exists, is the one the estimate
+    was selected on), and made from the run's source: exactly its source and artifact
     mask (``source_lineage``), or, before a concat run has built its
     concatenation, a concatenation of the same session group under the same
     preprocessing recipe (``concat_source``) whose frozen members are the
@@ -1495,8 +1497,10 @@ def supplied_motion_estimate_problem(
         correction_lineage_mismatch,
     )
     from spyglass.spikesorting.v2.motion import (
+        _SOURCE_TABLES,
         MotionEstimate,
         MotionEstimateSelection,
+        _live_source_row,
     )
 
     key = {"motion_estimate_id": uuid.UUID(str(motion_estimate_id))}
@@ -1520,6 +1524,18 @@ def supplied_motion_estimate_problem(
             f"names {recipe_estimation!r}"
         )
     lineage = MotionEstimateSelection.resolve_source(key)
+    # A source recomputed since the estimate was selected no longer has the
+    # traces the estimate describes (checked while the source row exists; a
+    # run that has not built it yet is checked again when it applies it).
+    if _SOURCE_TABLES[lineage.kind] & lineage.key:
+        try:
+            _live_source_row(
+                lineage,
+                key["motion_estimate_id"],
+                (MotionEstimateSelection & key).fetch1("source_content_hash"),
+            )
+        except ValueError as exc:
+            problems.append(str(exc))
     if source_lineage is not None:
         problems.extend(
             correction_lineage_mismatch(source_lineage, lineage, consumer="run")
