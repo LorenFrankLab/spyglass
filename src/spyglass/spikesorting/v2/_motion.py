@@ -35,6 +35,7 @@ import copy
 import hashlib
 import inspect
 import json
+import uuid
 from typing import NamedTuple
 
 import numpy as np
@@ -1879,6 +1880,61 @@ def motion_estimate_identity_payload(
     if artifact_detection_id is not None:
         payload["artifact_detection_id"] = artifact_detection_id
     return payload
+
+
+def motion_estimate_parts_mismatch(
+    motion_estimate_id, lineage, master_row: dict
+) -> str | None:
+    """Describe why a selection's current parts do not give its id.
+
+    ``motion_estimate_id`` is derived from the source, the artifact
+    detection and the master's identity columns when the selection is
+    inserted. Recomputing it from the parts present now (with the stored
+    master columns, so a later SpikeInterface or recipe change is not a
+    mismatch) detects a part inserted or deleted around
+    ``MotionEstimateSelection.insert_selection``.
+
+    Parameters
+    ----------
+    motion_estimate_id : uuid.UUID or str
+        The stored primary key.
+    lineage : SourceLineage
+        The source and artifact detection read from the selection's parts.
+    master_row : dict
+        The selection master's stored columns.
+
+    Returns
+    -------
+    str or None
+        ``None`` when the parts give ``motion_estimate_id``; otherwise a
+        description of the id they give.
+    """
+    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+
+    expected = deterministic_id(
+        "motion_estimate",
+        motion_estimate_identity_payload(
+            source_kind=lineage.kind,
+            source_id=next(iter(lineage.key.values())),
+            artifact_detection_id=lineage.artifact_detection_id,
+            **{
+                name: master_row[name]
+                for name in (
+                    "source_content_hash",
+                    "motion_estimation_params_name",
+                    "resolved_params_hash",
+                    "spikeinterface_version",
+                    "motion_algorithm_version",
+                )
+            },
+        ),
+    )
+    if expected == uuid.UUID(str(motion_estimate_id)):
+        return None
+    return (
+        f"source {lineage.kind} {lineage.key}, artifact_detection_id "
+        f"{lineage.artifact_detection_id} give motion_estimate_id {expected}"
+    )
 
 
 class MotionSelectionIdentity(NamedTuple):

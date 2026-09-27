@@ -239,7 +239,10 @@ available.
   configuration, the frame spans it used and peak-count diagnostics.
   `MotionEstimateSelection.prune_orphaned_selections` finds (and, with
   `dry_run=False`, deletes) masters left without a source part, like
-  `SortingSelection`'s.
+  `SortingSelection`'s. Resolving a selection's source re-derives
+  `motion_estimate_id` from its current parts and raises `SchemaBypassError`
+  when a source or `ArtifactDetectionSource` part was inserted or deleted
+  around `insert_selection`.
 - The estimate uses only valid samples: noise levels come from the
   artifact-free statistics spans, and peaks whose localization window touches
   a masked sample, or whose detection window (`exclude_sweep_ms` plus one

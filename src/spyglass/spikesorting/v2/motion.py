@@ -659,13 +659,22 @@ class MotionEstimateSelection(
     def resolve_source(cls, key: dict) -> SourceLineage:
         """Return the selection's source and pinned artifact detection.
 
+        ``motion_estimate_id`` folds in every part, so the id is re-derived
+        from the parts present now: a source or ``ArtifactDetectionSource``
+        part inserted or deleted after the selection shows up as a
+        mismatch.
+
         Raises
         ------
         SchemaBypassError
-            If the row has zero or two source parts, or a concat source
-            carries an artifact detection (a raw insert bypassing
-            :meth:`insert_selection`).
+            If the row has zero or two source parts, a concat source
+            carries an artifact detection, or the current parts do not give
+            the stored ``motion_estimate_id`` (a raw insert or part-only
+            delete bypassing :meth:`insert_selection`).
         """
+        from spyglass.spikesorting.v2._motion import (
+            motion_estimate_parts_mismatch,
+        )
         from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
         master_key = {k: v for k, v in key.items() if k in cls.primary_key}
@@ -683,22 +692,38 @@ class MotionEstimateSelection(
             )
         artifact_detection_id = cls.resolve_artifact_detection(master_key)
         if len(recording_rows):
-            return SourceLineage(
+            lineage = SourceLineage(
                 kind="recording",
                 key={"recording_id": recording_rows[0]},
                 artifact_detection_id=artifact_detection_id,
             )
-        if artifact_detection_id is not None:
+        elif artifact_detection_id is not None:
             raise SchemaBypassError(
                 f"MotionEstimateSelection {master_key} pairs a concatenated "
                 "recording with an ArtifactDetectionSource; a concat source "
                 "owns its member masks. Drop the stray part row."
             )
-        return SourceLineage(
-            kind="concatenated_recording",
-            key={"concat_recording_id": concat_rows[0]},
-            artifact_detection_id=None,
+        else:
+            lineage = SourceLineage(
+                kind="concatenated_recording",
+                key={"concat_recording_id": concat_rows[0]},
+                artifact_detection_id=None,
+            )
+        master = (cls & master_key).fetch1()
+        mismatch = motion_estimate_parts_mismatch(
+            master["motion_estimate_id"], lineage, master
         )
+        if mismatch is not None:
+            raise SchemaBypassError(
+                f"MotionEstimateSelection {master['motion_estimate_id']}: its "
+                f"current parts ({mismatch}) are not the ones it was selected "
+                "with. A source or ArtifactDetectionSource part was inserted "
+                "or deleted without MotionEstimateSelection.insert_selection, "
+                "so the estimate would describe another mask or source than "
+                "the one selected. Drop the selection (and everything made "
+                "from it) and re-insert it with insert_selection."
+            )
+        return lineage
 
     @classmethod
     def prune_orphaned_selections(cls, dry_run: bool = True) -> list[dict]:

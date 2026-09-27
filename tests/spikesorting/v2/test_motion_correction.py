@@ -857,6 +857,55 @@ def test_orphan_and_bypassed_source_parts_are_refused(
         )
 
 
+def test_artifact_part_changed_around_insert_is_refused(drift_recording):
+    """``motion_estimate_id`` folds in the artifact detection, so an
+    ``ArtifactDetectionSource`` part deleted from a masked selection, or
+    inserted on an unmasked one, no longer gives the stored id: the source
+    resolution (and so ``MotionEstimate.populate``) raises instead of
+    estimating on another mask than the one selected."""
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+    from spyglass.spikesorting.v2.motion import (
+        MotionEstimate,
+        MotionEstimateSelection,
+    )
+
+    recording_key = drift_recording["recording_key"]
+    artifact_key = masked_artifact(recording_key, [5.0, 6.0])
+    masked = _select(recording_key, "dredge_v1", **artifact_key)
+    unmasked = _select(recording_key, "dredge_v1")
+    try:
+        parts = MotionEstimateSelection.ArtifactDetectionSource
+        artifact_row = (parts & masked).fetch1()
+        for key, artifact_id in (
+            (masked, artifact_key["artifact_detection_id"]),
+            (unmasked, None),
+        ):
+            lineage = MotionEstimateSelection.resolve_source(key)
+            assert lineage.artifact_detection_id == artifact_id
+
+        (parts & masked).delete_quick()
+        parts.insert1(
+            {
+                **unmasked,
+                "artifact_detection_merge_id": artifact_row[
+                    "artifact_detection_merge_id"
+                ],
+            }
+        )
+        for key in (masked, unmasked):
+            with pytest.raises(
+                SchemaBypassError, match=str(key["motion_estimate_id"])
+            ):
+                MotionEstimateSelection.resolve_source(key)
+            with pytest.raises(SchemaBypassError, match="current parts"):
+                MotionEstimate.populate(key, reserve_jobs=False)
+            assert not (MotionEstimate & key)
+    finally:
+        (MotionEstimateSelection & [masked, unmasked]).super_delete(
+            warn=False, safemode=False
+        )
+
+
 # ---- motion-corrected recordings ---------------------------------------------
 
 
