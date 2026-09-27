@@ -61,6 +61,34 @@ def _synth_recording_with_transient():
     return rec.set_probe(probe)
 
 
+def _insert_transient_threshold_params():
+    """Insert a detect=True preset whose amplitude threshold sits between the
+    synthetic background and its transient (only the transient fires)."""
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+
+    params_name = "v2_e2e_amp1000"
+    ArtifactDetectionParameters().insert1(
+        {
+            "artifact_detection_params_name": params_name,
+            "params": ArtifactDetectionParamsSchema(
+                detect=True,
+                amplitude_threshold_uv=_AMP_THRESH_UV,
+                zscore_threshold=None,
+                proportion_above_threshold=1.0,
+                removal_window_ms=1.0,
+                min_length_s=0.001,
+            ).model_dump(),
+            "params_schema_version": 2,
+            "job_kwargs": None,
+        },
+        skip_duplicates=True,
+    )
+    return params_name
+
+
 @pytest.fixture(scope="module")
 def artifact_e2e_session(dj_conn):
     """Ingest the smoke fixture under a unique session name + a populated
@@ -131,11 +159,7 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
     sorter.
     """
     from spyglass.common import IntervalList
-    from spyglass.spikesorting.v2._params.artifact_detection import (
-        ArtifactDetectionParamsSchema,
-    )
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetectionParameters,
         RecordingArtifactDetection,
         RecordingArtifactSelection,
     )
@@ -169,25 +193,7 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
         lambda traces: si.load(synthetic_folder),
     )
 
-    # A detect=True preset whose amplitude threshold sits between the
-    # background and the transient; only the transient should fire.
-    params_name = "v2_e2e_amp1000"
-    ArtifactDetectionParameters().insert1(
-        {
-            "artifact_detection_params_name": params_name,
-            "params": ArtifactDetectionParamsSchema(
-                detect=True,
-                amplitude_threshold_uv=_AMP_THRESH_UV,
-                zscore_threshold=None,
-                proportion_above_threshold=1.0,
-                removal_window_ms=1.0,
-                min_length_s=0.001,
-            ).model_dump(),
-            "params_schema_version": 2,
-            "job_kwargs": None,
-        },
-        skip_duplicates=True,
-    )
+    params_name = _insert_transient_threshold_params()
     SorterParameters.insert_default()
     from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
 
@@ -760,8 +766,12 @@ def test_make_fetch_heals_recording_and_compute_needs_no_db(
 ):
     """``make_fetch`` rebuilds a missing cached recording and resolves it to
     the same values on DataJoint's second fetch; ``make_compute`` then scans
-    that file with no DB access and finds what a scan of
-    ``Recording().get_recording`` finds."""
+    exactly the file ``make_fetch`` resolved, with no DB access.
+
+    The read is substituted with the synthetic transient recording, keyed on
+    the resolved file, so the detected gap shows compute scanned the
+    recording its fetch pinned."""
+    from spyglass.spikesorting.v2 import _recording_nwb
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -774,25 +784,49 @@ def test_make_fetch_heals_recording_and_compute_needs_no_db(
 
     rec_key = {"recording_id": artifact_e2e_session["recording_id"]}
     art_pk = RecordingArtifactSelection.insert_selection(
-        {**rec_key, "artifact_detection_params_name": "default"}
+        {
+            **rec_key,
+            "artifact_detection_params_name": (
+                _insert_transient_threshold_params()
+            ),
+        }
     )
     table = RecordingArtifactDetection()
-    Path(Recording().resolve_stored_traces(rec_key).abs_path).unlink()
+    resolved = Recording().resolve_stored_traces(rec_key)
+    Path(resolved.abs_path).unlink()
 
     fetched = table.make_fetch(art_pk)
+    assert fetched.traces == resolved
     assert Path(fetched.traces.abs_path).exists()
     assert fetch_hash(table.make_fetch(art_pk)) == fetch_hash(fetched)
+
+    synthetic = _synth_recording_with_transient()
+
+    def _read_resolved(traces):
+        assert traces == resolved
+        return synthetic
+
+    monkeypatch.setattr(_recording_nwb, "read_stored_traces", _read_resolved)
     with forbid_db_queries(monkeypatch, "RecordingArtifactDetection"):
         computed = table.make_compute(art_pk, *fetched)
 
+    # Only the synthetic transient splits the window.
+    valid_times = computed.valid_times
+    assert valid_times.shape == (2, 2), valid_times.tolist()
+    assert (
+        valid_times[0][1]
+        <= _ART_LO / _FS
+        <= _ART_HI / _FS
+        <= (valid_times[1][0])
+    )
     expected = table._run_artifact_scan(
-        Recording().get_recording(rec_key),
+        synthetic,
         fetched.validated,
         fetched.artifact_job_kwargs,
         context="",
         manual_excluded_times=fetched.manual_excluded_times,
     )
-    np.testing.assert_array_equal(computed.valid_times, expected)
+    np.testing.assert_array_equal(valid_times, expected)
     assert computed.per_member_nwb_files == (
         artifact_e2e_session["nwb_file_name"],
     )
