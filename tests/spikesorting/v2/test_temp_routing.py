@@ -82,7 +82,6 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
     regen_inputs = rc.AnalyzerRegenInputs(
         sorting_id="s1",
         waveform_params_name="display",
-        n_units=1,
         recipe=rc.AnalyzerRecipe(
             analyzer_folder=str(tmp_path / "s1__display.analyzer"),
             waveform_params={},

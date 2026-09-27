@@ -230,10 +230,9 @@ class AnalyzerRegenInputs(NamedTuple):
         ``uuid.UUID``: DeepHash hashes it by value.
     waveform_params_name : str
         The recipe verified.
-    n_units : int
-        ``0`` means no analyzer exists; nothing else is resolved.
     recipe : AnalyzerRecipe, FetchFailure or None
-        The validated recipe; ``None`` for a zero-unit sort.
+        The validated recipe; ``None`` for a zero-unit sort, which has no
+        analyzer (nothing else is resolved).
     source : AnalyzerRegenSource, FetchFailure or None
         ``None`` when the stored folder was absent at fetch (compute reports
         it missing without reading a source, so no traces file is rebuilt)
@@ -242,7 +241,6 @@ class AnalyzerRegenInputs(NamedTuple):
 
     sorting_id: object
     waveform_params_name: str
-    n_units: int
     recipe: object
     source: object
 
@@ -1498,7 +1496,7 @@ def _resolve_analyzer_regen_inputs(
     sorting_id, n_units = (Sorting & sort_key).fetch1("sorting_id", "n_units")
     if int(n_units) == 0:
         return AnalyzerRegenInputs(
-            sorting_id, waveform_params_name, 0, recipe=None, source=None
+            sorting_id, waveform_params_name, recipe=None, source=None
         )
 
     def _source():
@@ -1532,11 +1530,7 @@ def _resolve_analyzer_regen_inputs(
     ):
         source = _resolve_or_failure(_source, what=what, parent_key=sort_key)
     return AnalyzerRegenInputs(
-        sorting_id,
-        waveform_params_name,
-        int(n_units),
-        recipe=recipe,
-        source=source,
+        sorting_id, waveform_params_name, recipe=recipe, source=source
     )
 
 
@@ -1557,7 +1551,7 @@ def _recompute_analyzer_hashes(inputs: AnalyzerRegenInputs, rounding: int):
         read_stored_units,
     )
 
-    if inputs.n_units == 0:
+    if inputs.recipe is None:
         return {}, {}  # zero-unit: nothing to verify -> trivially matched
     recipe = _resolved(inputs.recipe)
     # NO-REBUILD: an absent stored analyzer must NOT be self-healed here --
