@@ -264,7 +264,7 @@ def test_obs_intervals_recorded_windows_fallback(populated_sorting):
     "channel_names", [None, ["ch_a", "ch_b", "ch_c", "ch_d"]]
 )
 def test_channel_name_resolution_path_real_nwb(
-    dj_conn, tmp_path, monkeypatch, channel_names
+    dj_conn, tmp_path, channel_names
 ):
     """``spikeinterface_channel_ids`` resolves channel ids from the raw
     NWB ``channel_name`` column when present, and falls back to integer
@@ -281,7 +281,6 @@ def test_channel_name_resolution_path_real_nwb(
 
     import pynwb
 
-    from spyglass.common import Nwbfile
     from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
         _add_probe_and_electrodes,
         tetrode_probe_layout,
@@ -305,16 +304,10 @@ def test_channel_name_resolution_path_real_nwb(
     with pynwb.NWBHDF5IO(str(out), mode="w") as io:
         io.write(nwbfile)
 
-    # spikeinterface_channel_ids resolves the raw path via Nwbfile; redirect
-    # it to our standalone fixture (no ingestion needed for the lookup).
-    monkeypatch.setattr(
-        Nwbfile, "get_abs_path", staticmethod(lambda *a, **k: str(out))
-    )
-
+    # spikeinterface_channel_ids reads the file at the given path (no
+    # ingestion needed for the lookup).
     spyglass_ids = [0, 1, 2, 3]
-    resolved = spikeinterface_channel_ids(
-        "a19_channel_name_fixture.nwb", spyglass_ids
-    )
+    resolved = spikeinterface_channel_ids(str(out), spyglass_ids)
 
     if channel_names is None:
         assert resolved == [0, 1, 2, 3], (
@@ -379,9 +372,7 @@ def _write_electrode_table_nwb(path, electrode_ids, *, channel_names=None):
         io.write(nwbfile)
 
 
-def test_channel_name_maps_by_electrode_id_not_row(
-    dj_conn, tmp_path, monkeypatch
-):
+def test_channel_name_maps_by_electrode_id_not_row(dj_conn, tmp_path):
     """``spikeinterface_channel_ids`` resolves each electrode id to its
     electrodes-table ROW, then reads ``channel_name`` -- it must NOT treat the
     electrode id as a row index.
@@ -391,7 +382,6 @@ def test_channel_name_maps_by_electrode_id_not_row(
     12 / row 10 (out of range) instead of the rows holding electrode ids 12
     and 10. Requesting ids ``[12, 10]`` must return their own channel names.
     """
-    from spyglass.common import Nwbfile
     from spyglass.spikesorting.v2._recording_geometry import (
         spikeinterface_channel_ids,
     )
@@ -402,11 +392,8 @@ def test_channel_name_maps_by_electrode_id_not_row(
     _write_electrode_table_nwb(
         path, ids_in_row_order, channel_names=names_in_row_order
     )
-    monkeypatch.setattr(
-        Nwbfile, "get_abs_path", staticmethod(lambda *a, **k: str(path))
-    )
 
-    resolved = spikeinterface_channel_ids("noncontiguous_ids.nwb", [12, 10])
+    resolved = spikeinterface_channel_ids(str(path), [12, 10])
     assert resolved == ["c12", "c10"], (
         "channel_name lookup must map electrode id -> table row (id 12 -> row "
         "2 -> 'c12', id 10 -> row 0 -> 'c10'), not index the column by the id "
@@ -414,7 +401,7 @@ def test_channel_name_maps_by_electrode_id_not_row(
     )
 
 
-def test_missing_electrode_id_raises(dj_conn, tmp_path, monkeypatch):
+def test_missing_electrode_id_raises(dj_conn, tmp_path):
     """A requested electrode id absent from the electrodes table raises,
     rather than silently mis-indexing the ``channel_name`` column.
 
@@ -423,7 +410,6 @@ def test_missing_electrode_id_raises(dj_conn, tmp_path, monkeypatch):
     for the absent ids 1 and 2 (a wrong-channel mapping with no error). The
     id->row mapping has no entry for those ids and must raise.
     """
-    from spyglass.common import Nwbfile
     from spyglass.spikesorting.v2._recording_geometry import (
         spikeinterface_channel_ids,
     )
@@ -432,18 +418,13 @@ def test_missing_electrode_id_raises(dj_conn, tmp_path, monkeypatch):
     _write_electrode_table_nwb(
         path, [10, 11, 12, 13], channel_names=["c10", "c11", "c12", "c13"]
     )
-    monkeypatch.setattr(
-        Nwbfile, "get_abs_path", staticmethod(lambda *a, **k: str(path))
-    )
 
-    with pytest.raises(ValueError, match="electrodes table"):
-        spikeinterface_channel_ids("missing_id.nwb", [1, 2])
+    with pytest.raises(ValueError, match="'missing_id.nwb' electrodes table"):
+        spikeinterface_channel_ids(str(path), [1, 2])
 
 
 @pytest.mark.slow
-def test_channel_selection_carries_correct_traces(
-    dj_conn, tmp_path, monkeypatch
-):
+def test_channel_selection_carries_correct_traces(dj_conn, tmp_path):
     """After ``select_sort_group_channels`` renames sliced SI channels back to
     electrode ids, each renamed electrode id carries ITS OWN raw trace.
 
@@ -456,7 +437,6 @@ def test_channel_selection_carries_correct_traces(
     """
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.common import Nwbfile
     from spyglass.spikesorting.v2._recording_restriction import (
         select_sort_group_channels,
     )
@@ -468,9 +448,6 @@ def test_channel_selection_carries_correct_traces(
     path = tmp_path / "shuffled_traces.nwb"
     _write_electrode_table_nwb(
         path, ids_in_row_order, channel_names=si_channel_names
-    )
-    monkeypatch.setattr(
-        Nwbfile, "get_abs_path", staticmethod(lambda *a, **k: str(path))
     )
 
     # Distinguishable constant traces: SI channel ``s{k}`` carries value
@@ -487,7 +464,7 @@ def test_channel_selection_carries_correct_traces(
 
     sliced = select_sort_group_channels(
         recording,
-        nwb_file_name="shuffled_traces.nwb",
+        nwb_file_abs_path=str(path),
         sort_group_channel_ids=[0, 1],
         reference_mode="none",
         reference_electrode_id=None,

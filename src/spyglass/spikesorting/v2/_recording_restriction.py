@@ -23,9 +23,8 @@ DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / numpy / spyglass dependencies are
 imported lazily inside the functions. ``restrict_recording`` touches the DB at
 CALL time via its lazy ``Interval`` import (which opens a DB connection on
-import), and ``select_sort_group_channels`` via the lazy
-``spikeinterface_channel_ids`` it calls (an ``Nwbfile`` path resolution in
-``_recording_geometry``). The duration arithmetic
+import). ``select_sort_group_channels`` reads the raw NWB at the path its
+caller resolved. The duration arithmetic
 (``truncation_tolerance``, ``compute_recording_save_expectation``) is pure.
 """
 
@@ -582,7 +581,7 @@ def restrict_recording(
 
 def select_sort_group_channels(
     recording,
-    nwb_file_name: str,
+    nwb_file_abs_path: str,
     sort_group_channel_ids: list,
     reference_mode: str,
     reference_electrode_id: int | None,
@@ -605,9 +604,9 @@ def select_sort_group_channels(
     ----------
     recording : si.BaseRecording
         The full-source SI recording to slice in channels.
-    nwb_file_name : str
-        Parent NWB filename, used to resolve SpikeInterface channel
-        ids for the requested electrode ids.
+    nwb_file_abs_path : str
+        Absolute path of the parent (raw) NWB, whose electrodes table maps
+        the requested electrode ids onto SpikeInterface channel ids.
     sort_group_channel_ids : list
         Spyglass electrode ids of the sort group's declared members.
     reference_mode : str
@@ -653,7 +652,7 @@ def select_sort_group_channels(
         extra.extend(int(c) for c in bad_channel_ids)
     slice_ids = sorted(set([int(c) for c in sort_group_channel_ids] + extra))
 
-    si_ids = spikeinterface_channel_ids(nwb_file_name, slice_ids)
+    si_ids = spikeinterface_channel_ids(nwb_file_abs_path, slice_ids)
     return ChannelSliceRecording(
         recording,
         channel_ids=si_ids,

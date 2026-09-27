@@ -19,9 +19,8 @@ services" direction as ``_artifact_compute`` / ``_selection_identity`` /
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / numpy / probeinterface / spyglass
-dependencies are imported lazily inside the functions. Four functions
+dependencies are imported lazily inside the functions. Three functions
 inherently touch the DB / DataJoint at CALL time via lazy imports:
-``spikeinterface_channel_ids`` (an ``Nwbfile`` path resolution),
 ``fetch_sort_group_probe_info`` (an ``Electrode * Probe`` fetch),
 ``fetch_sort_group_contact_positions`` and ``fetch_interior_bad_channel_ids``
 (both an ``Electrode * Probe.Electrode`` fetch).
@@ -37,7 +36,7 @@ pitch/adjacency helpers
 from __future__ import annotations
 
 
-def spikeinterface_channel_ids(nwb_file_name: str, spyglass_ids):
+def spikeinterface_channel_ids(nwb_file_abs_path: str, spyglass_ids):
     """Map Spyglass electrode_ids onto SpikeInterface channel ids.
 
     SpikeInterface 0.104's ``read_nwb_recording`` uses the raw NWB
@@ -55,8 +54,10 @@ def spikeinterface_channel_ids(nwb_file_name: str, spyglass_ids):
 
     Parameters
     ----------
-    nwb_file_name : str
-        Parent NWB filename whose electrodes table is read.
+    nwb_file_abs_path : str
+        Absolute path of the parent (raw) NWB whose electrodes table is read;
+        the caller resolves it (``Nwbfile.get_abs_path``), so this reads no
+        DB.
     spyglass_ids : sequence of int
         Spyglass electrode ids to map onto SI channel ids.
 
@@ -73,16 +74,17 @@ def spikeinterface_channel_ids(nwb_file_name: str, spyglass_ids):
         If any requested electrode id is not in the electrodes table, or maps
         to more than one row (ambiguous id).
     """
+    from pathlib import Path
+
     import pynwb
 
-    from spyglass.common.common_nwbfile import Nwbfile
     from spyglass.utils.nwb_helper_fn import (
         get_electrode_indices,
         invalid_electrode_index,
     )
 
     ids = [int(c) for c in spyglass_ids]
-    nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
+    nwb_file_name = Path(nwb_file_abs_path).name
     with pynwb.NWBHDF5IO(nwb_file_abs_path, mode="r") as io:
         nwbfile = io.read()
         electrodes_table = nwbfile.electrodes

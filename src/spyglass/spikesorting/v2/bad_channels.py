@@ -341,7 +341,7 @@ def suggest_bad_channels(
     rec_f = sip.bandpass_filter(rec, freq_min=bandpass[0], freq_max=bandpass[1])
     all_ids = [eid for ids in shanks.values() for eid in ids]
     si_by_eid = dict(
-        zip(all_ids, spikeinterface_channel_ids(nwb_file_name, all_ids))
+        zip(all_ids, spikeinterface_channel_ids(raw_path, all_ids))
     )
 
     # 3. Detect within each shank; build the report. Detection is read-only --

@@ -1155,6 +1155,8 @@ class RecordingFetched(NamedTuple):
         NWB object id of the session's raw acquisition ElectricalSeries
         (``Raw.raw_object_id``); pins the compute step to the exact raw
         source the selection lineage points at.
+    raw_path : str
+        Absolute path of the session's raw NWB (``Nwbfile.get_abs_path``).
     """
 
     sel: dict
@@ -1169,6 +1171,7 @@ class RecordingFetched(NamedTuple):
     electrode_group_names: tuple
     bad_channel_ids: tuple
     raw_object_id: str
+    raw_path: str
 
 
 class RecordingComputed(NamedTuple):
@@ -1471,6 +1474,7 @@ class Recording(SpyglassMixin, dj.Computed):
             electrode_group_names=electrode_group_names,
             bad_channel_ids=bad_channel_ids,
             raw_object_id=raw_object_id,
+            raw_path=Nwbfile().get_abs_path(nwb_file_name),
         )
 
     def make_compute(
@@ -1488,6 +1492,7 @@ class Recording(SpyglassMixin, dj.Computed):
         electrode_group_names,
         bad_channel_ids,
         raw_object_id,
+        raw_path,
     ):
         """Run the preprocessing + streaming write outside any DB transaction.
 
@@ -1496,7 +1501,10 @@ class Recording(SpyglassMixin, dj.Computed):
         ``AnalysisNwbfile``, hash the persisted file). Returning
         happens before the framework opens its commit transaction so
         a 20-minute write here does not hold any DB lock -- the
-        original motivation for the tri-part refactor.
+        original motivation for the tri-part refactor. Reads only the
+        inputs ``make_fetch`` resolved (the raw NWB path included); the one
+        DB access left is staging the output file (see
+        :mod:`._recording_nwb`).
 
         Pipeline body is shared with ``_rebuild_nwb_artifact`` via
         ``_compute_recording_artifact``; this method only handles
@@ -1535,6 +1543,9 @@ class Recording(SpyglassMixin, dj.Computed):
         raw_object_id : str
             NWB object id of the raw acquisition ElectricalSeries
             (``Raw.raw_object_id``); selects the raw source to read.
+        raw_path : str
+            Absolute path of the session's raw NWB, resolved in
+            ``make_fetch``.
 
         Returns
         -------
@@ -1552,7 +1563,6 @@ class Recording(SpyglassMixin, dj.Computed):
 
         _resolved_job_kwargs(preprocessing_job_kwargs)
 
-        raw_path = Nwbfile().get_abs_path(sel["nwb_file_name"])
         artifact = self._compute_recording_artifact(
             raw_path=raw_path,
             raw_object_id=raw_object_id,
@@ -1930,13 +1940,12 @@ class Recording(SpyglassMixin, dj.Computed):
                 "the preprocessed artifact..."
             )
             fetched = self.make_fetch(key)
-            raw_path = Nwbfile().get_abs_path(fetched.sel["nwb_file_name"])
             # Rebuild to a FRESH, unregistered temp file -- same analysis dir
             # (and filesystem) as the canonical slot, so the install is an
             # atomic rename. ``_compute_recording_artifact`` returns the temp's
             # readback content fingerprint as ``content_hash``.
             rebuilt = self._compute_recording_artifact(
-                raw_path=raw_path,
+                raw_path=fetched.raw_path,
                 raw_object_id=fetched.raw_object_id,
                 nwb_file_name=fetched.sel["nwb_file_name"],
                 interval_list_name=fetched.sel["interval_list_name"],
@@ -2160,7 +2169,7 @@ class Recording(SpyglassMixin, dj.Computed):
         # and run afterwards, on the restricted recording only.
         recording = select_sort_group_channels(
             recording,
-            nwb_file_name=nwb_file_name,
+            nwb_file_abs_path=raw_path,
             sort_group_channel_ids=channel_ids,
             reference_mode=reference_mode,
             reference_electrode_id=reference_electrode_id,

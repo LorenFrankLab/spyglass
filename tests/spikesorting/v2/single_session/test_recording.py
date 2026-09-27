@@ -2130,7 +2130,7 @@ def test_compute_artifact_filters_before_restriction(recording_selection_key):
         )
         sliced = select_sort_group_channels(
             source,
-            nwb_file_name=nwb_file_name,
+            nwb_file_abs_path=Nwbfile().get_abs_path(nwb_file_name),
             sort_group_channel_ids=fetched.channel_ids,
             reference_mode=fetched.reference_mode,
             reference_electrode_id=fetched.reference_electrode_id,

@@ -136,6 +136,9 @@ DLCProject().alter()
   resolves the analyzer folder (it previously fetched nothing), and
   `make_compute` loads and hashes that folder with no DB access. Inventory
   rows are unchanged.
+- `Recording.make_fetch` resolves the raw NWB path, so `make_compute` (and the
+  rebuild path) no longer query `Nwbfile` for it; the channel-id mapping reads
+  the raw NWB at that path. Recordings are unchanged.
 
 #### Spike Sorting v2: optional motion correction, independent of concatenation
 
