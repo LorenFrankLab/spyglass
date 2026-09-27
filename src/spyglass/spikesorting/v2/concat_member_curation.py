@@ -45,8 +45,6 @@ class ConcatMemberFetched(NamedTuple):
 
     Attributes
     ----------
-    member_index : int
-        The member this row derives.
     nwb_file_name : str
         The member's session NWB, the parent of the staged Units NWB.
     curated_abs_path : str
@@ -73,7 +71,6 @@ class ConcatMemberFetched(NamedTuple):
         The curation provenance written into the staged Units NWB.
     """
 
-    member_index: int
     nwb_file_name: str
     curated_abs_path: str
     boundaries: list
@@ -440,7 +437,6 @@ class ConcatMemberCuration(
         ]
         nwb_file_name = snapshot["nwb_file_name"]
         return ConcatMemberFetched(
-            member_index=member_index,
             nwb_file_name=nwb_file_name,
             curated_abs_path=curated_abs_path,
             boundaries=boundaries,
@@ -470,7 +466,6 @@ class ConcatMemberCuration(
     def make_compute(
         self,
         key,
-        member_index,
         nwb_file_name,
         curated_abs_path,
         boundaries,
@@ -529,7 +524,7 @@ class ConcatMemberCuration(
             }
             raise ValueError(
                 "ConcatMemberCuration.make: local spike frames fall outside "
-                f"member {member_index}'s timestamp vector of length "
+                f"member {int(key['member_index'])}'s timestamp vector of length "
                 f"{len(timestamps)}: {bounds}."
             )
 
