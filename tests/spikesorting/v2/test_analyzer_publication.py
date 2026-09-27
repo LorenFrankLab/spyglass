@@ -17,8 +17,12 @@ import spikeinterface as si
 def test_duplicate_compute_keeps_winners_analyzer(
     planted_two_unit_sort, monkeypatch, winner_already_committed
 ):
+    from spyglass.spikesorting.v2.recording import _unlink_staged_analysis_file
     from spyglass.spikesorting.v2.sorting import Sorting
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+    from tests.spikesorting.v2._tripart_helpers import (
+        assert_no_staged_analysis_files,
+    )
 
     table, key = Sorting(), planted_two_unit_sort
     clear_curations_for(key)
@@ -66,6 +70,11 @@ def test_duplicate_compute_keeps_winners_analyzer(
         assert not Path(loser.staged_analyzer._lock.lock_file).exists()
     finally:
         loser.staged_analyzer.close()
+        # A direct make_insert call (only ever done by this test) never runs
+        # inside populate(), so StagedOutputCleanupMixin never records this
+        # attempt's staged units NWB; unlink it ourselves.
+        _unlink_staged_analysis_file(loser.analysis_file_name, context="test")
+    assert_no_staged_analysis_files([loser.analysis_file_name])
 
 
 @pytest.mark.parametrize("kill_point", ["build", "swap"])
