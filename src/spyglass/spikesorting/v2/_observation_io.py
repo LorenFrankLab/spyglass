@@ -147,9 +147,9 @@ class ReviewTimelineInputs(NamedTuple):
     members : list of dict
         One entry per original session in timeline order, each with ``name``
         (the member's ``nwb_file_name``). A concatenated source's entries also
-        carry ``path`` and ``electrical_series_path`` of the member's
-        ``Recording`` artifact (rebuilt first if missing) and ``end_sample``,
-        its exclusive end frame on the concatenated timeline.
+        carry ``traces``, the member's ``Recording.resolve_stored_traces``
+        (rebuilt first if missing), and ``end_sample``, its exclusive end frame
+        on the concatenated timeline.
     """
 
     traces: "EffectiveTraces"
@@ -166,30 +166,21 @@ def resolve_review_timeline_inputs(curation_key) -> ReviewTimelineInputs:
     table's verified self-heal, as ``get_recording`` would.
     """
     from spyglass.common import AnalysisNwbfile
-    from spyglass.spikesorting.v2._recording_nwb import ensure_artifact_file
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,
     )
-    from spyglass.spikesorting.v2.sorting import (
-        _TRACE_TABLES,
-        SortingSelection,
-    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
 
     sorting_id, units_file = (CurationV2 & curation_key).fetch1(
         "sorting_id", "analysis_file_name"
     )
-    traces = SortingSelection.resolve_effective_source(
+    source, traces = SortingSelection.resolve_effective_source(
         {"sorting_id": sorting_id}
-    ).traces
-    traces_path = ensure_artifact_file(
-        _TRACE_TABLES[traces.kind],
-        traces.key,
-        traces.row["analysis_file_name"],
     )
+    traces_path = SortingSelection.ensure_effective_traces(traces)
     units_path = AnalysisNwbfile.get_abs_path(units_file)
-    source = SortingSelection.resolve_source(curation_key)
     concatenated = source.kind == "concatenated_recording"
     if concatenated:
         from spyglass.spikesorting.v2.session_group import (
@@ -202,22 +193,16 @@ def resolve_review_timeline_inputs(curation_key) -> ReviewTimelineInputs:
             * ConcatenatedRecording.MemberBoundary
             & source.key
         ).fetch(as_dict=True, order_by="member_index")
-        members = []
-        for row in rows:
-            member_key = {"recording_id": row["recording_id"]}
-            member_row = (Recording & member_key).fetch1()
-            members.append(
-                {
-                    "name": row["nwb_file_name"],
-                    "path": ensure_artifact_file(
-                        Recording, member_key, member_row["analysis_file_name"]
-                    ),
-                    "electrical_series_path": member_row[
-                        "electrical_series_path"
-                    ],
-                    "end_sample": int(row["end_sample"]),
-                }
-            )
+        members = [
+            {
+                "name": row["nwb_file_name"],
+                "traces": Recording().resolve_stored_traces(
+                    {"recording_id": row["recording_id"]}
+                ),
+                "end_sample": int(row["end_sample"]),
+            }
+            for row in rows
+        ]
     else:
         members = [
             {"name": (RecordingSelection & source.key).fetch1("nwb_file_name")}
@@ -246,7 +231,7 @@ def review_timeline_from_inputs(inputs: ReviewTimelineInputs):
     """Build :func:`review_timeline` from resolved inputs; no DB access."""
     from pynwb import NWBHDF5IO
 
-    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
     from spyglass.spikesorting.v2._signal_math import (
         _segment_times_at,
         base_intervals_and_gaps,
@@ -297,11 +282,7 @@ def review_timeline_from_inputs(inputs: ReviewTimelineInputs):
     if inputs.concatenated:
         offset = 0
         for entry in inputs.members:
-            member = read_recording_nwb(
-                entry["path"],
-                electrical_series_path=entry["electrical_series_path"],
-            )
-            member.annotate(is_filtered=True)
+            member = read_stored_traces(entry["traces"])
             add_member(member, entry["name"], offset)
             offset = entry["end_sample"]
     else:
