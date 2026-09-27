@@ -983,32 +983,35 @@ def test_unitmatch_selection_accepts_curation_evaluation_committed_children(
 
     grp = two_session_curated_group
     accepted_choices = {}
-    for member_index, choice in grp["choices"].items():
-        sel = CurationEvaluationSelection.insert_selection(
-            {
-                **choice,
-                "metric_params_name": "minimal",
-                "auto_curation_rules_name": "none",
-            }
-        )
-        CurationEvaluation.populate(sel, reserve_jobs=False)
-        child = CurationEvaluation().use_evaluation_labels(sel)
-        assert CurationV2.is_committed_curation(child)
-        assert (CurationV2 & child).fetch1("curation_source") == (
-            "curation_evaluation"
-        )
-        accepted_choices[int(member_index)] = {
-            "sorting_id": child["sorting_id"],
-            "curation_id": child["curation_id"],
-        }
-
-    pk = UnitMatchSelection.insert_selection(
-        grp["owner"],
-        grp["group_name"],
-        "unitmatch_default",
-        accepted_choices,
-    )
+    accepted_children = []
+    pk = None
     try:
+        for member_index, choice in grp["choices"].items():
+            sel = CurationEvaluationSelection.insert_selection(
+                {
+                    **choice,
+                    "metric_params_name": "minimal",
+                    "auto_curation_rules_name": "none",
+                }
+            )
+            CurationEvaluation.populate(sel, reserve_jobs=False)
+            child = CurationEvaluation().use_evaluation_labels(sel)
+            accepted_children.append(child)
+            assert CurationV2.is_committed_curation(child)
+            assert (CurationV2 & child).fetch1("curation_source") == (
+                "curation_evaluation"
+            )
+            accepted_choices[int(member_index)] = {
+                "sorting_id": child["sorting_id"],
+                "curation_id": child["curation_id"],
+            }
+
+        pk = UnitMatchSelection.insert_selection(
+            grp["owner"],
+            grp["group_name"],
+            "unitmatch_default",
+            accepted_choices,
+        )
         fetched = UnitMatch().make_fetch(pk)
         plan_by_member = {
             int(plan["member_index"]): plan for plan in fetched.member_plan
@@ -1023,7 +1026,25 @@ def test_unitmatch_selection_accepts_curation_evaluation_committed_children(
             ]
             assert plan["matchable_unit_ids"] == expected_matchable
     finally:
-        (UnitMatchSelection & pk).super_delete(warn=False)
+        from spyglass.spikesorting.spikesorting_merge import (
+            SpikeSortingOutput,
+        )
+
+        if pk is not None:
+            (UnitMatchSelection & pk).super_delete(warn=False)
+        # The accepted children are curation_evaluation curations of the
+        # shared members; left behind, a later auto_curated plan would find
+        # them. Accepting registers each child on SpikeSortingOutput, so drop
+        # the merge master (it cascades to its CurationV2 part) before the
+        # curation -- DataJoint refuses to delete the part ahead of its master.
+        for child in accepted_children:
+            for mid in (SpikeSortingOutput.CurationV2 & child).fetch(
+                "merge_id"
+            ):
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+                    warn=False
+                )
+            (CurationV2 & child).super_delete(warn=False)
 
 
 def _plant_two_unit_sort_on_first_member(grp):
