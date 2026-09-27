@@ -1327,7 +1327,8 @@ def test_shared_artifact_group_multi_member_union(
     member resolves to, so all members see identical artifact-removed times.
 
     The two member recordings are loaded as synthetic SI recordings via a
-    monkeypatched ``Recording.get_recording`` (planting a real artifact in
+    monkeypatched ``Recording.get_recording`` and
+    ``_recording_nwb.read_stored_traces`` (planting a real artifact in
     fixture data is not otherwise possible); the DB rows / FK chain are
     real.
     """
@@ -1410,7 +1411,19 @@ def test_shared_artifact_group_multi_member_union(
             with_artifact=str(key["recording_id"]) == str(rid_a)
         )
 
+    # ``insert_group`` validates the members through ``get_recording``; the
+    # detection reads the files its ``make_fetch`` resolved.
+    from spyglass.spikesorting.v2 import _recording_nwb
+
+    path_a = Recording().resolve_stored_traces({"recording_id": rid_a}).abs_path
     monkeypatch.setattr(Recording, "get_recording", _fake_get_recording)
+    monkeypatch.setattr(
+        _recording_nwb,
+        "read_stored_traces",
+        lambda traces: _synth_recording(
+            with_artifact=traces.abs_path == path_a
+        ),
+    )
 
     # Custom param: detect with proportion 0.4 so 4 of 8 union channels
     # (member A's) suffice to flag a frame; min_length 0.1 s so both

@@ -467,7 +467,7 @@ def test_artifact_detection_delete_refuses_master_without_part_rows():
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_shared_group_member_set_frozen():
+def test_shared_group_member_set_frozen(monkeypatch):
     """A ``SharedArtifactGroup.Member`` edit after the selection is
     created cannot silently change the scanned set under a fixed
     ``artifact_detection_id``. ``insert_selection`` snapshots the ordered member
@@ -478,6 +478,7 @@ def test_shared_group_member_set_frozen():
     """
     import uuid
 
+    from spyglass.spikesorting.v2._recording_nwb import StoredTraces
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
         SharedArtifactGroup,
@@ -487,6 +488,7 @@ def test_shared_group_member_set_frozen():
     from spyglass.spikesorting.v2.exceptions import (
         SharedArtifactGroupMemberDriftError,
     )
+    from spyglass.spikesorting.v2.recording import Recording
 
     import datajoint as dj
 
@@ -501,8 +503,16 @@ def test_shared_group_member_set_frozen():
     # Build the group + members directly: insert_group loads each member recording
     # for a strict n_samples/dtype check (the fake recordings are not loadable), but
     # insert_selection's hash snapshot and make_fetch's drift check only read member
-    # recording_ids -- never the recording. FK checks off because the fake session
-    # is not a real Session row.
+    # recording_ids -- never the recording. make_fetch resolves each member's file
+    # after the drift check; the fake rows have none, so that resolution is
+    # stubbed. FK checks off because the fake session is not a real Session row.
+    monkeypatch.setattr(
+        Recording,
+        "resolve_stored_traces",
+        lambda self, key: StoredTraces(
+            f"/fake/{key['recording_id']}.nwb", "/fake/es", "0" * 64
+        ),
+    )
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
         SharedArtifactGroup.insert1(
@@ -536,7 +546,10 @@ def test_shared_group_member_set_frozen():
             }
         )
         # Clean: the live member set matches the frozen snapshot.
-        SharedGroupArtifactDetection().make_fetch(art_pk)
+        fetched = SharedGroupArtifactDetection().make_fetch(art_pk)
+        assert [t.abs_path for t in fetched.member_traces] == [
+            f"/fake/{rid}.nwb" for rid in fetched.member_recording_ids
+        ]
 
         # Drift: add a member after the snapshot was taken.
         SharedArtifactGroup.Member.insert1(

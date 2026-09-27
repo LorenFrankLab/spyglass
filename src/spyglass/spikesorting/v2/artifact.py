@@ -711,9 +711,10 @@ class SharedGroupArtifactFetched(NamedTuple):
     """DB-side inputs for :meth:`SharedGroupArtifactDetection.make_fetch`.
 
     The per-member fields are ordered tuples (length n_members) so
-    ``make_compute`` can union their channels without further DB I/O.
-    ``nwb_file_name`` is the common parent session (``insert_group``
-    validated single-session).
+    ``make_compute`` can union their channels without further DB I/O;
+    ``member_traces`` holds each member's cached artifact, resolved (and
+    rebuilt if missing) here. ``nwb_file_name`` is the common parent session
+    (``insert_group`` validated single-session).
     """
 
     validated: ArtifactDetectionParamsSchema
@@ -722,6 +723,7 @@ class SharedGroupArtifactFetched(NamedTuple):
     member_nwb_file_names: tuple
     nwb_file_name: str
     artifact_job_kwargs: dict | None
+    member_traces: tuple[StoredTraces, ...]
     manual_excluded_times: object = None
 
 
@@ -1212,12 +1214,16 @@ class SharedGroupArtifactDetection(
     def make_fetch(self, key):
         """Read params, resolve members, and reject a member-set drift.
 
+        Also resolves each member's cached artifact, rebuilding a missing
+        file through ``Recording``'s own verified self-heal.
+
         Returns
         -------
         SharedGroupArtifactFetched
             Validated params, the group name, the ordered member
             ``recording_id`` / ``nwb_file_name`` tuples, the canonical parent
-            ``nwb_file_name``, and the per-row job kwargs.
+            ``nwb_file_name``, the per-row job kwargs and the resolved member
+            artifacts.
 
         Raises
         ------
@@ -1288,6 +1294,10 @@ class SharedGroupArtifactDetection(
             member_nwb_file_names=member_nwb_file_names,
             nwb_file_name=member_nwb_file_names[0],
             artifact_job_kwargs=artifact_job_kwargs,
+            member_traces=tuple(
+                Recording().resolve_stored_traces({"recording_id": rid})
+                for rid in member_recording_ids
+            ),
             manual_excluded_times=(SharedGroupArtifactSelection & key).fetch1(
                 "manual_excluded_times"
             ),
@@ -1302,9 +1312,10 @@ class SharedGroupArtifactDetection(
         member_nwb_file_names,
         nwb_file_name,
         artifact_job_kwargs,
+        member_traces,
         manual_excluded_times=None,
     ):
-        """Union the members' channels and scan the union ONCE.
+        """Union the members' channels and scan the union ONCE; no DB access.
 
         Returns
         -------
@@ -1314,6 +1325,8 @@ class SharedGroupArtifactDetection(
         """
         import spikeinterface as si
 
+        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
+
         if not member_recording_ids:
             raise RuntimeError(
                 "SharedGroupArtifactDetection.make_compute: shared-group "
@@ -1321,8 +1334,7 @@ class SharedGroupArtifactDetection(
                 "violated."
             )
         per_member_recordings = [
-            Recording().get_recording({"recording_id": rid})
-            for rid in member_recording_ids
+            read_stored_traces(traces) for traces in member_traces
         ]
         # aggregate_channels column-stacks along the channel axis. insert_group
         # enforces session + n_samples + fs + dtype + timestamp equality, but a
