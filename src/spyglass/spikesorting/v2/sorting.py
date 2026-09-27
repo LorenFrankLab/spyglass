@@ -75,7 +75,6 @@ from spyglass.spikesorting.v2._source_resolution import (
     correction_lineage_mismatch,
     effective_source_from_base,
     effective_source_from_correction,
-    load_effective_recording,
     sorting_parts_mismatch,
 )
 from spyglass.spikesorting.v2._units_nwb import (
@@ -1489,7 +1488,8 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         (``Recording``, ``ConcatenatedRecording`` or
         ``MotionCorrectedRecording``): a locked, verified rebuild whose
         content must match the stored ``content_hash``. Call it before
-        :func:`._source_resolution.load_effective_recording`.
+        :func:`._source_resolution.load_effective_recording`, or use
+        :meth:`load_stored_traces`.
 
         Parameters
         ----------
@@ -1504,6 +1504,35 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             _TRACE_TABLES[traces.kind],
             traces.key,
             traces.row["analysis_file_name"],
+        )
+
+    @staticmethod
+    def load_stored_traces(traces: EffectiveTraces) -> "si.BaseRecording":
+        """Open the effective traces as persisted, rebuilding a missing file.
+
+        Self-heals through :meth:`ensure_effective_traces`, then opens the
+        file with no artifact mask applied at load. A single-recording
+        source's cache therefore comes back unmasked, while a concat artifact
+        keeps its member masks and a motion-corrected artifact keeps the
+        sort's mask, both of which are written into the file.
+
+        Parameters
+        ----------
+        traces : EffectiveTraces
+            The ``traces`` of :meth:`resolve_effective_source`.
+
+        Returns
+        -------
+        si.BaseRecording
+            The persisted traces, annotated ``is_filtered=True``.
+        """
+        from spyglass.spikesorting.v2._source_resolution import (
+            load_effective_recording,
+        )
+
+        SortingSelection.ensure_effective_traces(traces)
+        return load_effective_recording(
+            traces._replace(apply_artifact_mask=False)
         )
 
     @classmethod
@@ -2101,15 +2130,13 @@ class Sorting(SpyglassMixin, dj.Computed):
         # for a single-recording source, the materialized ConcatenatedRecording
         # for a concat source (a missing file is rebuilt first). ``recording_id``
         # is the anchor (threaded from make_fetch) used for the per-unit
-        # Electrode FK, NOT necessarily the loaded recording's own id. The
-        # traces load unmasked because the artifact mask is applied below
-        # through ``artifact_frame_ranges``, whose excluded ranges also feed the
-        # statistics spans. Concat masks are already materialized. Both modes
-        # pass observation intervals to the units writer.
-        SortingSelection.ensure_effective_traces(traces)
-        recording = load_effective_recording(
-            traces._replace(apply_artifact_mask=False)
-        )
+        # Electrode FK, NOT necessarily the loaded recording's own id. A single
+        # recording's traces load unmasked because the artifact mask is applied
+        # below through ``artifact_frame_ranges``, whose excluded ranges also
+        # feed the statistics spans. Concat and motion-corrected masks are
+        # already materialized. Both modes pass observation intervals to the
+        # units writer.
+        recording = SortingSelection.load_stored_traces(traces)
 
         # Statistics spans: the artifact-free frame ranges every noise and
         # whitening estimate samples from, persisted with the sort so each

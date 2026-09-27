@@ -1674,9 +1674,6 @@ def test_off_and_estimate_preserve_sort_input(drift_recording):
     from spyglass.spikesorting.v2._selection_plan import (
         build_sorting_selection_plan,
     )
-    from spyglass.spikesorting.v2._source_resolution import (
-        load_effective_recording,
-    )
     from spyglass.spikesorting.v2.motion import MotionEstimate
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
@@ -1699,8 +1696,8 @@ def test_off_and_estimate_preserve_sort_input(drift_recording):
             assert fetched.traces.kind == "recording"
             assert fetched.motion_correction_provenance is None
             assert fetched.source_n_samples is None
-            return load_effective_recording(
-                fetched.traces._replace(apply_artifact_mask=False)
+            return SortingSelection.load_stored_traces(
+                fetched.traces
             ).get_traces()
 
         before = sorter_input()

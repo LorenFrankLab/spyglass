@@ -2009,23 +2009,17 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             The cached preprocessed recording, annotated
             ``is_filtered=True``.
         """
-        from spyglass.spikesorting.v2._source_resolution import (
-            load_effective_recording,
-        )
-
         sorting_id = (cls & key).fetch1("sorting_id")
         traces = SortingSelection.resolve_effective_source(
             {"sorting_id": sorting_id}
         ).traces
         # The curated spike times live in the sort's effective-traces timeline:
         # a single-recording sort reads its Recording cache; a concat sort reads
-        # the materialized ConcatenatedRecording cache. This accessor
-        # deliberately returns a single recording WITHOUT the sort's artifact
-        # mask (the reusable preprocessed traces), so the mask flag is cleared.
-        SortingSelection.ensure_effective_traces(traces)
-        return load_effective_recording(
-            traces._replace(apply_artifact_mask=False)
-        )
+        # the materialized ConcatenatedRecording cache; a corrected sort reads
+        # its MotionCorrectedRecording. The traces load as persisted, so a
+        # single recording comes back WITHOUT the sort's artifact mask (the
+        # reusable preprocessed traces).
+        return SortingSelection.load_stored_traces(traces)
 
     @classmethod
     def _load_curation_recording_meta(cls, key):

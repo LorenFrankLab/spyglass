@@ -710,9 +710,6 @@ def _observed_duration_s(sorting_id) -> float:
 
     from spyglass.common.common_interval import IntervalList
     from spyglass.spikesorting.v2._observed_time import observed_intervals
-    from spyglass.spikesorting.v2._source_resolution import (
-        load_effective_recording,
-    )
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
     from spyglass.spikesorting.v2.utils import (
@@ -721,12 +718,9 @@ def _observed_duration_s(sorting_id) -> float:
 
     sorting_key = {"sorting_id": sorting_id}
     source, traces = SortingSelection.resolve_effective_source(sorting_key)
-    # Only the sample count and timestamps are read, so the traces load
-    # without the artifact mask.
-    SortingSelection.ensure_effective_traces(traces)
-    recording = load_effective_recording(
-        traces._replace(apply_artifact_mask=False)
-    )
+    # Only the sample count and timestamps are read, so the traces load as
+    # persisted, with no artifact mask applied at load.
+    recording = SortingSelection.load_stored_traces(traces)
     if source.kind == "concatenated_recording":
         from spyglass.spikesorting.v2.session_group import (
             ConcatenatedRecording,
