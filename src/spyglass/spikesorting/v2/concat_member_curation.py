@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import datajoint as dj
 import numpy as np
@@ -17,8 +17,8 @@ from spyglass.spikesorting.v2._concat_recording import (
 from spyglass.spikesorting.v2._units_nwb import (
     _write_curated_units_nwb_body,
     numpysorting_from_abs_times,
+    read_series_timestamps,
     read_units_abs_times_and_sample_indices,
-    recording_timestamps,
 )
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.recording import Recording
@@ -34,6 +34,62 @@ if TYPE_CHECKING:
     import spikeinterface as si
 
 schema = dj.schema("spikesorting_v2_concat_curation")
+
+
+class ConcatMemberFetched(NamedTuple):
+    """DB inputs of :meth:`ConcatMemberCuration.make_compute`.
+
+    Attributes
+    ----------
+    member_index : int
+        The member this row derives.
+    nwb_file_name : str
+        The member's session NWB, the parent of the staged Units NWB.
+    curated_abs_path : str
+        Absolute path of the parent concat curation's Units NWB.
+    boundaries : list of int
+        Exclusive end frame of each frozen member on the concatenated
+        timeline, in ``member_index`` order.
+    n_samples : int
+        Frames of the concatenated recording.
+    member_position : int
+        Position of ``member_index`` in ``boundaries``.
+    recording_abs_path : str
+        Absolute path of the member ``Recording`` analysis NWB.
+    recording_electrical_series_path : str
+        That artifact's stored ``electrical_series_path``.
+    member_obs : np.ndarray
+        The member's valid times, shape ``(n_intervals, 2)`` in seconds.
+    labels : dict
+        The parent curation's labels, ``{unit_id: [label, ...]}``.
+    merge_group_rows : list of dict
+        The parent's merge rows (``unit_id``, ``contributor_unit_id``), in
+        fetch order.
+    curation_header : dict
+        The curation provenance written into the staged Units NWB.
+    """
+
+    member_index: int
+    nwb_file_name: str
+    curated_abs_path: str
+    boundaries: list
+    n_samples: int
+    member_position: int
+    recording_abs_path: str
+    recording_electrical_series_path: str
+    member_obs: np.ndarray
+    labels: dict
+    merge_group_rows: list
+    curation_header: dict
+
+
+class ConcatMemberComputed(NamedTuple):
+    """The ``ConcatMemberCuration`` secondary fields make_compute returns."""
+
+    analysis_file_name: str
+    object_id: str
+    n_units: int
+    nwb_file_name: str
 
 
 @schema
@@ -288,8 +344,21 @@ class ConcatMemberCuration(SpyglassMixin, dj.Computed):
             & {"member_index": member_index}
         ).fetch1()
 
-    def make(self, key):
-        """Write and register one member's wall-clock curated Units table."""
+    # ``_parallel_make = True`` + the tri-part ``make_fetch`` /
+    # ``make_compute`` / ``make_insert`` split keep the curated Units read, the
+    # member's full timestamp read and the member Units NWB write OUTSIDE the
+    # populate transaction. The inherited ``AutoPopulate.make`` generator is
+    # left in place so DataJoint routes through tri-part dispatch.
+    _parallel_make = True
+
+    def make_fetch(self, key) -> ConcatMemberFetched:
+        """Resolve the frozen members, boundaries, files and curation state.
+
+        Rechecks that every frozen member still resolves to the exact
+        ``Recording`` content captured by the concat identity (a member output
+        must never silently bind to replacement recording bytes) and that the
+        stored member boundaries cover exactly the frozen member set.
+        """
         curation_key = self._curation_key(key)
         curation_row = (CurationV2 & curation_key).fetch1()
         concat_recording_id = (
@@ -300,9 +369,6 @@ class ConcatMemberCuration(SpyglassMixin, dj.Computed):
         snapshots = (
             ConcatenatedRecordingSelection.MemberSnapshot & concat_key
         ).fetch(as_dict=True, order_by="member_index")
-        # Recheck that every frozen member still resolves to the exact
-        # Recording content captured by the concat identity. A member output
-        # must never silently bind to replacement recording bytes.
         ConcatenatedRecording._resolve_snapshot_recordings(snapshots)
 
         indices, ends = (
@@ -327,27 +393,8 @@ class ConcatMemberCuration(SpyglassMixin, dj.Computed):
         curated_abs_path = AnalysisNwbfile.get_abs_path(
             curation_row["analysis_file_name"]
         )
-        _concat_times, sample_indices, _concat_obs = (
-            read_units_abs_times_and_sample_indices(curated_abs_path)
-        )
-        if sample_indices is None:
-            raise ValueError(
-                "ConcatMemberCuration.make: the curated concatenated Units "
-                "table has no spike_sample_index sidecar, so its synthetic "
-                "times cannot be mapped safely back to member frames. Recreate "
-                "the curation with CurationV2.insert_curation."
-            )
-
         n_samples = int(
             (ConcatenatedRecording & concat_key).fetch1("n_samples")
-        )
-        # This performs the conservation assertion across ALL members before
-        # selecting the requested one. Do not replace it with a one-member
-        # slice: every concat spike must be accounted for exactly once.
-        split_trains = split_unit_spike_trains(
-            sample_indices,
-            boundaries,
-            total_n_samples=n_samples,
         )
         member_positions = {
             int(snapshot["member_index"]): position
@@ -359,12 +406,103 @@ class ConcatMemberCuration(SpyglassMixin, dj.Computed):
                 "ConcatMemberCuration.make: member_index "
                 f"{member_index} is absent from the frozen member snapshot."
             )
-        snapshot = snapshots[member_positions[member_index]]
-        local_frames = split_trains[member_positions[member_index]]
+        member_position = member_positions[member_index]
+        snapshot = snapshots[member_position]
 
-        recording_key = {"recording_id": snapshot["recording_id"]}
-        recording_row = (Recording & recording_key).fetch1()
-        timestamps = recording_timestamps(recording_row)
+        recording_row = (
+            Recording & {"recording_id": snapshot["recording_id"]}
+        ).fetch1()
+        member_obs = (
+            ConcatenatedRecording.MemberBoundary
+            & concat_key
+            & {"member_index": member_index}
+        ).fetch1("member_valid_times")
+        # Only the kept/contributor unit ids reach the NWB merge lineage, in
+        # the fetched row order.
+        merge_group_rows = [
+            {
+                "unit_id": int(row["unit_id"]),
+                "contributor_unit_id": int(row["contributor_unit_id"]),
+            }
+            for row in (CurationV2.MergeGroup & curation_key).fetch(
+                as_dict=True
+            )
+        ]
+        nwb_file_name = snapshot["nwb_file_name"]
+        return ConcatMemberFetched(
+            member_index=member_index,
+            nwb_file_name=nwb_file_name,
+            curated_abs_path=curated_abs_path,
+            boundaries=boundaries,
+            n_samples=n_samples,
+            member_position=member_position,
+            recording_abs_path=AnalysisNwbfile.get_abs_path(
+                recording_row["analysis_file_name"]
+            ),
+            recording_electrical_series_path=recording_row[
+                "electrical_series_path"
+            ],
+            member_obs=member_obs,
+            labels=CurationV2._labels_by_unit(curation_key),
+            merge_group_rows=merge_group_rows,
+            curation_header={
+                "sorting_id": str(curation_row["sorting_id"]),
+                "curation_id": int(curation_row["curation_id"]),
+                "parent_curation_id": int(curation_row["parent_curation_id"]),
+                "curation_source": str(curation_row["curation_source"]),
+                "merges_applied": bool(curation_row["merges_applied"]),
+                "description": curation_row["description"],
+                "member_index": member_index,
+                "member_nwb_file_name": nwb_file_name,
+            },
+        )
+
+    def make_compute(
+        self,
+        key,
+        member_index,
+        nwb_file_name,
+        curated_abs_path,
+        boundaries,
+        n_samples,
+        member_position,
+        recording_abs_path,
+        recording_electrical_series_path,
+        member_obs,
+        labels,
+        merge_group_rows,
+        curation_header,
+    ) -> ConcatMemberComputed:
+        """Split the curated units into the member and stage its Units NWB.
+
+        No DB reads apart from the shared ``AnalysisNwbfile`` staging helpers.
+        The staged file is registered only by :meth:`make_insert` and removed
+        here if staging fails.
+        """
+        _concat_times, sample_indices, _concat_obs = (
+            read_units_abs_times_and_sample_indices(curated_abs_path)
+        )
+        if sample_indices is None:
+            raise ValueError(
+                "ConcatMemberCuration.make: the curated concatenated Units "
+                "table has no spike_sample_index sidecar, so its synthetic "
+                "times cannot be mapped safely back to member frames. Recreate "
+                "the curation with CurationV2.insert_curation."
+            )
+
+        # This performs the conservation assertion across ALL members before
+        # selecting the requested one. Do not replace it with a one-member
+        # slice: every concat spike must be accounted for exactly once.
+        split_trains = split_unit_spike_trains(
+            sample_indices,
+            boundaries,
+            total_n_samples=n_samples,
+        )
+        local_frames = split_trains[member_position]
+
+        timestamps = read_series_timestamps(
+            recording_abs_path, recording_electrical_series_path
+        )
         bad_frames = {
             int(unit_id): np.asarray(frames, dtype=np.int64)
             for unit_id, frames in local_frames.items()
@@ -389,18 +527,9 @@ class ConcatMemberCuration(SpyglassMixin, dj.Computed):
             int(unit_id): timestamps[np.asarray(frames, dtype=np.int64)]
             for unit_id, frames in local_frames.items()
         }
-        member_obs = (
-            ConcatenatedRecording.MemberBoundary
-            & concat_key
-            & {"member_index": member_index}
-        ).fetch1("member_valid_times")
         obs_intervals_by_uid = {
             int(unit_id): member_obs for unit_id in local_frames
         }
-        labels = CurationV2._labels_by_unit(curation_key)
-        merge_group_rows = (CurationV2.MergeGroup & curation_key).fetch(
-            as_dict=True
-        )
 
         # The source NWB is already curated. In particular, an applied merge
         # contains the fresh merged ID and no longer contains its raw
@@ -410,7 +539,6 @@ class ConcatMemberCuration(SpyglassMixin, dj.Computed):
         identity_groups = {
             int(unit_id): [int(unit_id)] for unit_id in local_frames
         }
-        nwb_file_name = snapshot["nwb_file_name"]
         analysis_file_name = AnalysisNwbfile().create(
             nwb_file_name=nwb_file_name,
             restrict_permission=True,
@@ -425,18 +553,7 @@ class ConcatMemberCuration(SpyglassMixin, dj.Computed):
                 abs_times_by_uid=abs_times_by_uid,
                 sample_indices_by_uid=local_frames,
                 obs_intervals_by_uid=obs_intervals_by_uid,
-                curation_header={
-                    "sorting_id": str(curation_row["sorting_id"]),
-                    "curation_id": int(curation_row["curation_id"]),
-                    "parent_curation_id": int(
-                        curation_row["parent_curation_id"]
-                    ),
-                    "curation_source": str(curation_row["curation_source"]),
-                    "merges_applied": bool(curation_row["merges_applied"]),
-                    "description": curation_row["description"],
-                    "member_index": member_index,
-                    "member_nwb_file_name": nwb_file_name,
-                },
+                curation_header=curation_header,
                 merge_group_rows=merge_group_rows,
             )
             if set(n_spikes_by_uid) != set(local_frames):
@@ -444,29 +561,44 @@ class ConcatMemberCuration(SpyglassMixin, dj.Computed):
                     "ConcatMemberCuration.make: staged Units IDs differ from "
                     "the conserved member split."
                 )
-
-            from spyglass.spikesorting.spikesorting_merge import (
-                SpikeSortingOutput,
+        except Exception:
+            from spyglass.spikesorting.v2.recording import (
+                _unlink_staged_analysis_file,
             )
 
-            insert_key = {
-                **curation_key,
-                "member_index": member_index,
-                "nwb_file_name": nwb_file_name,
-                "analysis_file_name": analysis_file_name,
-                "object_id": object_id,
-                "n_units": len(local_frames),
-            }
+            _unlink_staged_analysis_file(
+                analysis_file_name,
+                context="ConcatMemberCuration.make_compute",
+            )
+            raise
+        return ConcatMemberComputed(
+            analysis_file_name=analysis_file_name,
+            object_id=object_id,
+            n_units=len(local_frames),
+            nwb_file_name=nwb_file_name,
+        )
+
+    def make_insert(self, key, *computed) -> None:
+        """Register the staged file, insert the row and its merge entry.
+
+        On any failure the staged file is removed before re-raising, so no
+        unregistered artifact outlives a failed populate.
+        """
+        from spyglass.spikesorting.spikesorting_merge import (
+            SpikeSortingOutput,
+        )
+
+        row = ConcatMemberComputed(*computed)._asdict()
+        curation_key = self._curation_key(key)
+        member_key = {**curation_key, "member_index": int(key["member_index"])}
+        try:
             with transaction_or_noop(self.connection):
-                AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
-                self.insert1(insert_key)
+                AnalysisNwbfile().add(
+                    row["nwb_file_name"], row["analysis_file_name"]
+                )
+                self.insert1({**member_key, **row})
                 SpikeSortingOutput._merge_insert(
-                    [
-                        {
-                            **curation_key,
-                            "member_index": member_index,
-                        }
-                    ],
+                    [member_key],
                     part_name="ConcatMemberCuration",
                     skip_duplicates=True,
                 )
@@ -476,8 +608,8 @@ class ConcatMemberCuration(SpyglassMixin, dj.Computed):
             )
 
             _unlink_staged_analysis_file(
-                analysis_file_name,
-                context="ConcatMemberCuration.make",
+                row["analysis_file_name"],
+                context="ConcatMemberCuration.make_insert",
             )
             raise
 

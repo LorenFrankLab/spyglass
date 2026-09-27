@@ -118,6 +118,10 @@ DLCProject().alter()
   while its `SortingAnalyzerVersions` row remained (the rebuild re-inventories
   the analyzer through a nested populate). Rows and bundle contents are
   unchanged.
+- `ConcatMemberCuration` now uses DataJoint's tri-part make with
+  `_parallel_make = True`: the curated Units read, the member's full timestamp
+  read and the member Units NWB write run before the insert transaction opens.
+  Rows, merge entries and file contents are unchanged.
 
 #### Spike Sorting v2: optional motion correction, independent of concatenation
 

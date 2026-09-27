@@ -550,13 +550,37 @@ def recording_timestamps(recording_row):
     np.ndarray, shape (n_samples,)
         The recording's wall-clock timestamps, in seconds (float64).
     """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+    return read_series_timestamps(
+        AnalysisNwbfile.get_abs_path(recording_row["analysis_file_name"]),
+        recording_row["electrical_series_path"],
+    )
+
+
+def read_series_timestamps(abs_path, electrical_series_path):
+    """Read a persisted ``ElectricalSeries``' full timestamp vector; no DB.
+
+    The file-level half of :func:`recording_timestamps`, for callers that
+    resolved the artifact path already.
+
+    Parameters
+    ----------
+    abs_path : str
+        Absolute path of the analysis NWB holding the series.
+    electrical_series_path : str
+        The stored in-file path of the series (its last component names the
+        acquisition entry).
+
+    Returns
+    -------
+    np.ndarray, shape (n_samples,)
+        The series' wall-clock timestamps, in seconds (float64).
+    """
     import numpy as np
     import pynwb
 
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-
-    abs_path = AnalysisNwbfile.get_abs_path(recording_row["analysis_file_name"])
-    series_name = recording_row["electrical_series_path"].rsplit("/", 1)[-1]
+    series_name = electrical_series_path.rsplit("/", 1)[-1]
     with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
         nwbf = io.read()
         series = nwbf.acquisition[series_name]
