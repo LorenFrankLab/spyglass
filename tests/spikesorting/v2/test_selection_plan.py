@@ -319,6 +319,37 @@ def test_sorting_plan_requires_sorter_and_params_name():
         build_sorting_selection_plan({"recording_id": _REC, "sorter": "ms5"})
 
 
+@pytest.mark.parametrize(
+    "source", [{"recording_id": _REC}, {"concat_recording_id": _CONCAT}]
+)
+def test_sorting_plan_rejects_unknown_fields(source):
+    """A misspelled optional key (here the corrected recording's) is refused
+    by name instead of being dropped, which would select an uncorrected
+    sort; the message lists every accepted field."""
+    with pytest.raises(ValueError, match="unknown field") as excinfo:
+        build_sorting_selection_plan(
+            {
+                **source,
+                "sorter": "ms5",
+                "sorter_params_name": "d",
+                "motion_corrected_recording": _ART,
+                "nwb_file_name": "x.nwb",
+            }
+        )
+    message = str(excinfo.value)
+    assert "['motion_corrected_recording', 'nwb_file_name']" in message
+    for field in (
+        "artifact_detection_id",
+        "concat_recording_id",
+        "motion_corrected_recording_id",
+        "recording_id",
+        "sorter",
+        "sorter_params_name",
+        "sorting_id",
+    ):
+        assert repr(field) in message
+
+
 def test_sorting_plan_supplied_id_mismatch_raises_but_match_ok():
     """A supplied sorting_id must equal the derived id; a match is accepted."""
     key = {"recording_id": _REC, "sorter": "ms5", "sorter_params_name": "d"}

@@ -311,6 +311,12 @@ available.
   `spyglass.spikesorting.v2.sorting` now declares the
   `spikesorting_v2_motion` schema** (grant privileges on it to anyone who
   imports `sorting`).
+- `SortingSelection.insert_selection` now raises `ValueError` naming any
+  field other than `recording_id`, `concat_recording_id`, `sorter`,
+  `sorter_params_name`, `artifact_detection_id`,
+  `motion_corrected_recording_id` and `sorting_id`, instead of silently
+  ignoring it (a misspelled motion key used to select an uncorrected sort).
+  Pass only those fields, not a joined or fetched row.
 - `run_v2_pipeline`, `run_v2_pipeline_session` and the preflight helpers take
   `motion_mode` (`"off"` by default, `"estimate"` or `"apply"`) and
   `motion_correction_params_name` (required unless the mode is `"off"`), in

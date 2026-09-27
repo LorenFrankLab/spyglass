@@ -903,8 +903,10 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         Raises
         ------
         ValueError
-            If zero or both source keys are supplied, if a concat source
-            also supplies an ``artifact_detection_id`` (concat member masks
+            If ``key`` carries a field other than those listed above (a
+            misspelled key is refused, not dropped), if zero or both source
+            keys are supplied, if a concat source also supplies an
+            ``artifact_detection_id`` (concat member masks
             are configured on ``ConcatenatedRecordingSelection``), or if a
             motion-corrected recording is not populated, was estimated on
             another source or mask, or is paired with a sorter that corrects

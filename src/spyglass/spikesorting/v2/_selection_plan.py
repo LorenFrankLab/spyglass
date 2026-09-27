@@ -35,6 +35,21 @@ from spyglass.spikesorting.v2._selection_identity import (
     sorting_identity_payload,
 )
 
+#: Every field ``SortingSelection.insert_selection`` accepts. Anything else
+#: is refused rather than dropped: a misspelled optional key (e.g. the
+#: corrected recording's) would otherwise select a different sort.
+SORTING_SELECTION_FIELDS = frozenset(
+    {
+        "recording_id",
+        "concat_recording_id",
+        "sorter",
+        "sorter_params_name",
+        "artifact_detection_id",
+        "motion_corrected_recording_id",
+        "sorting_id",
+    }
+)
+
 
 class RecordingSelectionPlan(NamedTuple):
     """The row + restriction a ``RecordingSelection`` insert needs.
@@ -157,11 +172,18 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
     Raises
     ------
     ValueError
-        If zero or both source keys are supplied, if ``sorter`` /
+        If ``key`` carries a field outside :data:`SORTING_SELECTION_FIELDS`,
+        if zero or both source keys are supplied, if ``sorter`` /
         ``sorter_params_name`` is missing, if a concat source is combined
         with an ``artifact_detection_id``, or if an explicit ``sorting_id``
         does not equal the derived deterministic id.
     """
+    extra = sorted(set(key) - SORTING_SELECTION_FIELDS)
+    if extra:
+        raise ValueError(
+            "SortingSelection.insert_selection received unknown field(s) "
+            f"{extra}; pass only {sorted(SORTING_SELECTION_FIELDS)}."
+        )
     has_recording = "recording_id" in key
     has_concat = "concat_recording_id" in key
     if has_recording == has_concat:
