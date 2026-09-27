@@ -1720,10 +1720,12 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
         *,
         allow_spikeinterface_version_change: bool = False,
     ) -> MotionCorrectedComputed:
-        """Apply the saved motion and write the staged artifact; no DB reads.
+        """Apply the saved motion and write the staged artifact.
 
-        The artifact file is created through ``write_nwb_artifact`` (as every
-        v2 trace writer does) and registered only by :meth:`make_insert`. Its
+        Reads only the inputs ``make_fetch`` resolved. The artifact file is
+        created through ``write_nwb_artifact`` (as every v2 trace writer
+        does), whose staging is the one DB access left here (see
+        :mod:`._recording_nwb`), and registered only by :meth:`make_insert`. Its
         provenance scratch describes the file on its own: the correction's
         ids, recipe and source, the statistics spans, each continuity span
         with its real start and end times and its start on the estimation
