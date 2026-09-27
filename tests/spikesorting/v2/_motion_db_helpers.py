@@ -42,14 +42,21 @@ def drop_sorts_of_estimates(estimate_keys) -> None:
     )
 
 
-def drop_motion_selections(recording_key) -> None:
-    """Delete every motion-estimate selection on a recording (masters first),
-    after the sorts that read their corrected recordings."""
+def drop_motion_selections(source_key) -> None:
+    """Delete every motion-estimate selection on a source (masters first),
+    after the sorts that read their corrected recordings.
+
+    ``source_key`` is a ``{"recording_id": ...}`` or
+    ``{"concat_recording_id": ...}`` restriction.
+    """
     from spyglass.spikesorting.v2.motion import MotionEstimateSelection
 
-    keys = (MotionEstimateSelection.RecordingSource & recording_key).fetch(
-        "KEY", as_dict=True
+    source_part = (
+        MotionEstimateSelection.ConcatenatedRecordingSource
+        if "concat_recording_id" in source_key
+        else MotionEstimateSelection.RecordingSource
     )
+    keys = (source_part & source_key).fetch("KEY", as_dict=True)
     if keys:
         drop_sorts_of_estimates(keys)
         (MotionEstimateSelection & keys).super_delete(
@@ -57,17 +64,18 @@ def drop_motion_selections(recording_key) -> None:
         )
 
 
-def drop_concat_motion_selections(concat_key) -> None:
-    from spyglass.spikesorting.v2.motion import MotionEstimateSelection
+def session_start_s(nwb_file_name) -> float:
+    """The session's first raw valid time, in seconds."""
+    from spyglass.common import IntervalList
 
-    keys = (
-        MotionEstimateSelection.ConcatenatedRecordingSource & concat_key
-    ).fetch("KEY", as_dict=True)
-    if keys:
-        drop_sorts_of_estimates(keys)
-        (MotionEstimateSelection & keys).super_delete(
-            warn=False, safemode=False
-        )
+    valid = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    return float(valid[0][0])
 
 
 def populated_estimate(**source) -> dict:
@@ -102,12 +110,12 @@ def select_corrected(
     )
 
 
-def populated_corrected(estimate_key, interpolation=None) -> dict:
+def populated_corrected(
+    estimate_key, interpolation="kriging_force_extrapolate_v1"
+) -> dict:
     from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
 
-    key = select_corrected(
-        estimate_key, *(() if interpolation is None else (interpolation,))
-    )
+    key = select_corrected(estimate_key, interpolation)
     if not (MotionCorrectedRecording & key):
         MotionCorrectedRecording.populate(key, reserve_jobs=False)
     return key

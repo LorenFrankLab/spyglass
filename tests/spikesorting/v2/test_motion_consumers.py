@@ -29,6 +29,7 @@ from tests.spikesorting.v2._motion_db_helpers import (
     masked_artifact,
     populated_corrected,
     populated_estimate,
+    session_start_s,
     sorter_key,
 )
 
@@ -37,19 +38,6 @@ EXCLUDED_S = (20.0, 21.0)
 #: The corrected recording must differ from its source by more than this in
 #: the compared window (uV); the planted drift is +/-25 um on a 26 um pitch.
 MIN_CORRECTION_UV = 10.0
-
-
-def _session_start_s(nwb_file_name) -> float:
-    from spyglass.common import IntervalList
-
-    valid = (
-        IntervalList
-        & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": "raw data valid times",
-        }
-    ).fetch1("valid_times")
-    return float(valid[0][0])
 
 
 def _planted_sorter(captured):
@@ -98,7 +86,7 @@ def corrected_sorts(drift_recording):
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     recording_key = drift_recording["recording_key"]
-    t0 = _session_start_s(drift_recording["nwb_file_name"])
+    t0 = session_start_s(drift_recording["nwb_file_name"])
     artifact_key = masked_artifact(
         recording_key, [t0 + EXCLUDED_S[0], t0 + EXCLUDED_S[1]]
     )

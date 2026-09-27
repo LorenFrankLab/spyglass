@@ -30,7 +30,6 @@ from tests.spikesorting.v2._motion_db_helpers import (
     MEMBER_A_INTERVAL,
     MEMBER_B_INTERVAL,
     MOTION_TEAM,
-    drop_concat_motion_selections,
     drop_motion_selections,
 )
 
@@ -879,7 +878,7 @@ def discontinuous_sources(drift_recording):
         "concat_key": concat_key,
     }
 
-    drop_concat_motion_selections(concat_key)
+    drop_motion_selections(concat_key)
     for key in recording_keys.values():
         drop_motion_selections(key)
     clean_session_groups_for_owner(MOTION_TEAM)
@@ -1014,7 +1013,7 @@ def offset_source_concat(dj_conn, tmp_path_factory):
         "concat_key": concat_key,
     }
 
-    drop_concat_motion_selections(concat_key)
+    drop_motion_selections(concat_key)
     for recording_key in recording_keys:
         drop_motion_selections(recording_key)
     clean_session_groups_for_owner(OFFSET_SOURCE_TEAM)

@@ -21,7 +21,6 @@ from tests.spikesorting.v2._motion_db_helpers import (
     MEMBER_A_INTERVAL,
     MEMBER_B_INTERVAL,
     MOTION_TEAM,
-    drop_concat_motion_selections,
     drop_corrected,
     drop_motion_selections,
     drop_pipeline_sorts,
@@ -30,6 +29,7 @@ from tests.spikesorting.v2._motion_db_helpers import (
     populated_corrected,
     populated_estimate,
     select_corrected,
+    session_start_s,
     sorter_key,
 )
 
@@ -2035,19 +2035,6 @@ def _pipeline_inputs(drift_recording) -> dict:
     }
 
 
-def _session_start_s(nwb_file_name) -> float:
-    from spyglass.common import IntervalList
-
-    valid = (
-        IntervalList
-        & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": "raw data valid times",
-        }
-    ).fetch1("valid_times")
-    return float(valid[0][0])
-
-
 def _row_counts() -> dict:
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecording,
@@ -2249,7 +2236,7 @@ def test_pipeline_motion_apply_on_a_concatenation(discontinuous_sources):
     finally:
         if summary is not None:
             drop_pipeline_sorts([summary["sorting_id"]])
-            drop_concat_motion_selections(
+            drop_motion_selections(
                 {"concat_recording_id": summary["concat_recording_id"]}
             )
 
@@ -2272,7 +2259,7 @@ def test_motion_stage_failure_stops_before_sorting(
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
 
     inputs = _pipeline_inputs(drift_recording)
-    t0 = _session_start_s(drift_recording["nwb_file_name"])
+    t0 = session_start_s(drift_recording["nwb_file_name"])
     # A mask of its own gives this case a fresh estimate (no cached reuse).
     exclusion = [[t0 + offset_s, t0 + offset_s + 0.5]]
 
@@ -2508,7 +2495,7 @@ def test_invalid_support_and_geometry_fail_before_sorting(
     from spyglass.spikesorting.v2.recording import RecordingSelection
 
     inputs = _pipeline_inputs(drift_recording)
-    t0 = _session_start_s(drift_recording["nwb_file_name"])
+    t0 = session_start_s(drift_recording["nwb_file_name"])
     test_recipes = ["no_evidence_test", "remove_channels_test"]
     artifact_ids = []
     MotionEstimationParameters.insert1(
