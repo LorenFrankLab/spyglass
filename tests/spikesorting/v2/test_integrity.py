@@ -4,11 +4,10 @@ Tests verify cross-table invariants and transactional atomicity that
 the per-table tests in the ``single_session/`` suite do not
 exercise as a focused gate:
 
-- **Tri-part dispatch active**: ``Recording`` /
-  ``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection`` /
-  ``Sorting`` / ``UnitMatch`` use DataJoint's tri-part ``make_fetch`` /
-  ``make_compute`` / ``make_insert`` rather than a monolithic
-  ``make``. The reason is to move the long-running compute step
+- **Tri-part dispatch active**: every v2 ``AutoPopulate`` table (discovered
+  from the package, minus a short documented exclusion set) uses DataJoint's
+  tri-part ``make_fetch`` / ``make_compute`` / ``make_insert`` rather than a
+  monolithic ``make``. The reason is to move the long-running compute step
   OUTSIDE the framework transaction so it does not hold row locks.
 - **Selection FK consistency**: every ``SortingSelection`` master row has
   EXACTLY one source-part row (recording XOR concatenated), and an
@@ -47,105 +46,106 @@ import pytest
 pytestmark = pytest.mark.usefixtures("dj_conn")
 
 
+#: v2 ``AutoPopulate`` tables that intentionally keep a monolithic ``make``,
+#: each with the reason it does no work worth moving out of the framework
+#: transaction. Anything not listed here must be tri-part.
+_MONOLITHIC_MAKE_EXCLUSIONS = {
+    # DB reads plus a bounded pure-Python clique partition (``max_strict_nodes``
+    # budget enforced); no SpikeInterface, NWB, or file I/O.
+    "TrackedUnit",
+}
+
+
+def _v2_autopopulate_tables() -> dict[str, type]:
+    """Import every v2 module and return its declared ``AutoPopulate`` tables.
+
+    Discovery walks the package instead of trusting a hand-written list, so a
+    new ``dj.Computed`` / ``dj.Imported`` table cannot escape the gate. Only
+    classes defined in the module being scanned count (re-exports are skipped),
+    keyed by class name.
+    """
+    import importlib
+    import pkgutil
+
+    from datajoint.autopopulate import AutoPopulate
+
+    import spyglass.spikesorting.v2 as v2
+
+    tables: dict[str, type] = {}
+    for info in pkgutil.iter_modules(v2.__path__):
+        if info.ispkg:
+            continue
+        module = importlib.import_module(f"{v2.__name__}.{info.name}")
+        for obj in vars(module).values():
+            if (
+                inspect.isclass(obj)
+                and issubclass(obj, AutoPopulate)
+                and obj.__module__ == module.__name__
+            ):
+                tables[obj.__name__] = obj
+    return tables
+
+
 def test_tripart_dispatch_active_on_all_v2_computed_tables():
-    """``Recording`` / ``RecordingArtifactDetection`` /
-    ``SharedGroupArtifactDetection`` / ``Sorting`` / ``UnitMatch``
-    route through DataJoint's tri-part dispatch.
+    """Every v2 ``AutoPopulate`` table routes through tri-part dispatch.
 
     DataJoint fires tri-part dispatch only when
-    ``inspect.isgeneratorfunction(self.make)`` is True (the
-    inherited generator-based ``make`` from ``AutoPopulate``); if
-    a subclass overrides ``make`` with a regular function,
-    DataJoint falls back to monolithic and the tri-part methods
-    become dead code. Without this gate a refactor that silently
-    re-introduces a monolithic ``make`` would turn off tri-part
-    dispatch (long-transaction avoidance + parallel-populate).
+    ``inspect.isgeneratorfunction(self.make)`` is True (the inherited
+    generator-based ``make`` from ``AutoPopulate``, which exists only when the
+    class defines ``make_fetch`` / ``make_compute`` / ``make_insert``); a
+    subclass that overrides ``make`` with a regular function runs monolithic,
+    with the whole ``make`` inside the populate transaction, and its tri-part
+    methods become dead code. ``_parallel_make`` routes
+    ``populate(processes>1)`` through Spyglass's non-daemon pool, which a
+    ``make_compute`` running SpikeInterface ``n_jobs>1`` needs.
 
-    Every heavy v2 Computed table is included -- anything that opens an NWB,
-    loads/hashes an analyzer, or runs SI compute must keep that work outside the
-    framework transaction: the sort/recording/artifact stages, the cross-session
-    matcher, the concat cache, the recompute QC tables, the curation-evaluation
-    metrics, the drift estimate, the motion estimate and motion-corrected
-    recording, AND the ``*Versions`` inventory tables (which
-    open the NWB / load + hash the analyzer -- not "pure bookkeeping" as once
-    assumed). Two tables are intentionally excluded (documented, not
-    oversights -- asserted below): ``TrackedUnit`` does DB reads + a bounded
-    pure-Python clique partition (no SI/NWB I/O), and ``FigPackCuration``
-    publishes a figpack bundle including a NETWORK upload that cannot be rolled
-    back inside a DataJoint transaction, so tri-part (which exists to keep heavy
-    work OUT of the transaction) buys nothing there -- a monolithic make is the
-    honest shape for both.
+    The tables are discovered from the v2 package, not listed by hand. The
+    only exceptions are :data:`_MONOLITHIC_MAKE_EXCLUSIONS`, and those must
+    really be monolithic (a regular-function ``make``): an exclusion that was
+    converted, or that no longer exists, fails here so the set stays honest.
     """
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-        SharedGroupArtifactDetection,
-    )
-    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
-    from spyglass.spikesorting.v2.motion import (
-        MotionCorrectedRecording,
-        MotionEstimate,
-    )
-    from spyglass.spikesorting.v2.recompute import (
-        RecordingArtifactRecompute,
-        RecordingArtifactVersions,
-        SortingAnalyzerRecompute,
-        SortingAnalyzerVersions,
-    )
-    from spyglass.spikesorting.v2.recording import DriftEstimate, Recording
-    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
-    from spyglass.spikesorting.v2.sorting import Sorting
-    from spyglass.spikesorting.v2.unit_matching import UnitMatch
+    tables = _v2_autopopulate_tables()
 
-    for cls in (
-        Recording,
-        RecordingArtifactDetection,
-        SharedGroupArtifactDetection,
-        Sorting,
-        UnitMatch,
-        ConcatenatedRecording,
-        RecordingArtifactRecompute,
-        SortingAnalyzerRecompute,
-        RecordingArtifactVersions,
-        SortingAnalyzerVersions,
-        CurationEvaluation,
-        DriftEstimate,
-        MotionEstimate,
-        MotionCorrectedRecording,
-    ):
-        assert inspect.isgeneratorfunction(cls.make), (
-            f"{cls.__name__}.make is not a generator -- DataJoint's "
-            "tri-part dispatch fires only on generator make. A "
-            "silent refactor to a monolithic make would turn off "
-            "long-transaction avoidance + parallel populate."
-        )
-        for method in ("make_fetch", "make_compute", "make_insert"):
-            assert hasattr(cls, method), (
-                f"{cls.__name__} missing {method!r}; tri-part contract "
-                "broken."
+    stale = sorted(_MONOLITHIC_MAKE_EXCLUSIONS - set(tables))
+    assert not stale, (
+        f"Monolithic-make exclusions {stale} are not v2 AutoPopulate tables; "
+        "remove them from _MONOLITHIC_MAKE_EXCLUSIONS."
+    )
+    # A discovery that silently found nothing would pass every loop below.
+    assert {"Recording", "Sorting", "CurationEvaluation"} <= set(tables)
+
+    not_tripart = []
+    for name, cls in sorted(tables.items()):
+        if name in _MONOLITHIC_MAKE_EXCLUSIONS:
+            assert not inspect.isgeneratorfunction(cls.make), (
+                f"{name} is listed as a monolithic-make exclusion but its "
+                "make is a generator (tri-part); remove it from "
+                "_MONOLITHIC_MAKE_EXCLUSIONS."
             )
-        assert cls._parallel_make is True, (
-            f"{cls.__name__}._parallel_make is not True; the "
-            "non-daemon parallel-populate flag from Spyglass's "
-            "PopulateMixin is off."
-        )
-
-    # Intentional monolithic-make exclusions (recorded so they read as
-    # deliberate, not as a table that was forgotten above). TrackedUnit does no
-    # SI/NWB I/O; FigPackCuration's make does a non-rollback-able network upload
-    # (upload=True), so keeping its work outside a transaction is pointless.
-    # ConcatMemberCuration is a bounded read-split-write over one Units table;
-    # its staged file is still kept outside its explicit insert transaction.
-    from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+            continue
+        missing = [
+            method
+            for method in ("make_fetch", "make_compute", "make_insert")
+            if not callable(getattr(cls, method, None))
+        ]
+        if (
+            missing
+            or not inspect.isgeneratorfunction(cls.make)
+            or getattr(cls, "_parallel_make", False) is not True
+        ):
+            not_tripart.append(
+                f"{name} (generator make="
+                f"{inspect.isgeneratorfunction(cls.make)}, missing={missing}, "
+                f"_parallel_make={getattr(cls, '_parallel_make', None)!r})"
+            )
+    assert not not_tripart, (
+        "v2 AutoPopulate tables not on DataJoint's tri-part dispatch with "
+        "_parallel_make=True: "
+        + "; ".join(not_tripart)
+        + ". Split make into make_fetch / make_compute / make_insert (keeping "
+        "the inherited generator make) or, for a table that does only bounded "
+        "DB bookkeeping, add it to _MONOLITHIC_MAKE_EXCLUSIONS with a reason."
     )
-    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
-    from spyglass.spikesorting.v2.unit_matching import TrackedUnit
-
-    for excluded in (TrackedUnit, FigPackCuration, ConcatMemberCuration):
-        assert hasattr(excluded, "make"), (
-            f"{excluded.__name__} should still define a make; it is a "
-            "documented monolithic exclusion from the tri-part gate above."
-        )
 
 
 def test_v2_dispatch_classes_wired_into_merge_table():

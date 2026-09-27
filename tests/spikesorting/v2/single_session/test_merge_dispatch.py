@@ -6,51 +6,6 @@ import pytest
 
 from tests.spikesorting.v2.single_session._helpers import _clear_curations
 
-# ---------- Tri-part dispatch active smoke gate ---------------------------
-
-
-def test_tripart_dispatch_active(dj_conn):
-    """Each refactored Computed table uses DataJoint's tri-part dispatch.
-
-    Plan-required smoke gate. DataJoint's ``AutoPopulate.populate`` only
-    fires the ``make_fetch`` / ``make_compute`` / ``make_insert``
-    sequence when ``inspect.isgeneratorfunction(self.make) is True``
-    -- i.e. the inherited generator-based ``make`` from
-    ``AutoPopulate`` is in use. If a subclass overrides ``make`` with
-    a regular function, DataJoint falls back to monolithic and the
-    tri-part methods become dead code; the long-transaction
-    regression silently persists. This test catches that failure
-    mode in milliseconds.
-
-    The parametrize list covers Recording / ArtifactDetection /
-    Sorting -- the three v2 tables that use tri-part dispatch --
-    so a future "consolidate back into ``make``" change fails
-    loudly.
-    """
-    import inspect
-
-    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
-    from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.sorting import Sorting
-
-    for cls in (Recording, RecordingArtifactDetection, Sorting):
-        assert inspect.isgeneratorfunction(cls.make), (
-            f"{cls.__name__}.make must remain the inherited generator "
-            "from AutoPopulate so tri-part dispatch fires; a regular-"
-            "function override would silently re-enable the monolithic "
-            "long-transaction path."
-        )
-        for attr in ("make_fetch", "make_compute", "make_insert"):
-            assert getattr(cls, attr, None) is not None, (
-                f"{cls.__name__}.{attr} missing; tri-part dispatch "
-                "needs all three methods defined."
-            )
-        assert getattr(cls, "_parallel_make", False) is True, (
-            f"{cls.__name__}._parallel_make is not True; the "
-            "non-daemon process-pool path is the secondary benefit "
-            "of the tri-part refactor and should be enabled."
-        )
-
 
 @pytest.mark.slow
 def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
