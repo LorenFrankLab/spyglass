@@ -617,7 +617,7 @@ def resolve_preset_sort_config(bundle) -> "dict | None":
 
 
 def assert_preset_compute_rows(
-    bundle, *, caller: str = "run_v2_pipeline"
+    bundle, *, caller: str = "run_v2_pipeline", sort_checks: bool = True
 ) -> None:
     """Raise ``PreflightError`` if a preset's compute-time rows / sorter binary
     are missing.
@@ -631,7 +631,9 @@ def assert_preset_compute_rows(
     param-row existence queries mirror ``preflight_v2_pipeline``'s (kept in its
     report-building form there); the sorter binary/runtime check reuses the
     shared :func:`_check_local_sorter_runtime` via a raise-style adapter.
-    ``caller`` names the public entry point in every message.
+    ``caller`` names the public entry point in every message;
+    ``sort_checks=False`` stops after the preprocessing and artifact rows
+    (a caller that builds the source without sorting it).
     """
     import spikeinterface.sorters as sis
 
@@ -676,6 +678,8 @@ def assert_preset_compute_rows(
                 f"{bundle.artifact_detection_params_name!r} is missing. Run "
                 "initialize_v2_defaults()."
             )
+    if not sort_checks:
+        return
     sorter_params_query = SorterParameters & {
         "sorter": bundle.sorter,
         "sorter_params_name": bundle.sorter_params_name,
@@ -765,6 +769,7 @@ def assert_concat_preflight(
     motion_correction_params_name: "str | None" = None,
     motion_estimate_id=None,
     caller: str = "run_v2_pipeline",
+    sort_checks: bool = True,
 ) -> list[str]:
     """Raise ``PreflightError`` if a concat run's prerequisites are missing.
 
@@ -782,7 +787,10 @@ def assert_concat_preflight(
     A supplied ``motion_estimate_id`` must be a populated estimate, made with
     the recipe's estimation row, of a concatenation of this session group
     under the preset's preprocessing recipe (the run compares the member
-    masks once it has built the concatenation). Fails before
+    masks once it has built the concatenation). ``sort_checks=False`` skips
+    the sorter-only checks (the sorter rows and runtime, the display analyzer
+    recipe and each member's preset sampling rate), as in
+    :func:`preflight_v2_pipeline`. Fails before
     member/concat populate. Returns advisory warnings (including
     explicitly disabled artifact masking) for symmetry with
     :func:`preflight_v2_pipeline`.
@@ -850,7 +858,7 @@ def assert_concat_preflight(
                 "Recreate it with SortGroupV2.set_group_by_shank(nwb_file_name="
                 "...)."
             )
-        if bundle.sampling_rate_hz is not None:
+        if sort_checks and bundle.sampling_rate_hz is not None:
             actual_rate = float(
                 (Raw & {"nwb_file_name": nwb}).fetch1("sampling_rate")
             )
@@ -915,7 +923,7 @@ def assert_concat_preflight(
                 "initialize_v2_defaults()."
             )
 
-    assert_preset_compute_rows(bundle, caller=caller)
+    assert_preset_compute_rows(bundle, caller=caller, sort_checks=sort_checks)
     if motion_mode != "off":
         from spyglass.spikesorting.v2.motion import (
             preprocessing_filter_problem,
@@ -1555,6 +1563,8 @@ def preflight_v2_pipeline(
     motion_mode: MotionMode = "off",
     motion_correction_params_name: "str | None" = None,
     motion_estimate_id=None,
+    *,
+    sort_checks: bool = True,
 ) -> PreflightReport:
     """Read-only pre-populate configuration check for ``run_v2_pipeline``.
 
@@ -1595,6 +1605,11 @@ def preflight_v2_pipeline(
         populated estimate of this run's recording and artifact mask made
         with the recipe's estimation row, and ``expected_ids`` previews the
         corrected recording and sort built on it.
+    sort_checks
+        If False, skip the checks only a sort needs -- the sorter row and its
+        parameters, the display analyzer recipe, the preset's sampling rate
+        and the sorter runtime or container -- for a caller that builds the
+        source without sorting it (``estimate_motion``). Default True.
 
     Returns
     -------
@@ -1813,7 +1828,9 @@ def preflight_v2_pipeline(
         "sorter": bundle.sorter,
         "sorter_params_name": bundle.sorter_params_name,
     }
-    sorter_params_exist = _check(
+    # The sorter-only checks (7-7a, the display analyzer row, 8b and 9) are
+    # skipped for a caller that builds no sort (``sort_checks=False``).
+    sorter_params_exist = sort_checks and _check(
         "sorter_params_exist",
         sorter_params_query,
         f"SorterParameters row (sorter={bundle.sorter!r}, "
@@ -1849,15 +1866,16 @@ def preflight_v2_pipeline(
     display_waveform_params_name = waveform_params_for_preprocessing(
         bundle.preprocessing_params_name
     )[0]
-    _check(
-        "analyzer_waveform_params_exist",
-        AnalyzerWaveformParameters
-        & {"waveform_params_name": display_waveform_params_name},
-        f"AnalyzerWaveformParameters row {display_waveform_params_name!r} "
-        "(the display analyzer recipe for preprocessing "
-        f"{bundle.preprocessing_params_name!r}) is missing. Run "
-        "initialize_v2_defaults().",
-    )
+    if sort_checks:
+        _check(
+            "analyzer_waveform_params_exist",
+            AnalyzerWaveformParameters
+            & {"waveform_params_name": display_waveform_params_name},
+            f"AnalyzerWaveformParameters row {display_waveform_params_name!r} "
+            "(the display analyzer recipe for preprocessing "
+            f"{bundle.preprocessing_params_name!r}) is missing. Run "
+            "initialize_v2_defaults().",
+        )
 
     # 8a. auto-curation prerequisites -- only when the caller opts into
     # auto_curate, so a default run is unchanged. CurationEvaluation scores the
@@ -1900,7 +1918,7 @@ def preflight_v2_pipeline(
     # is rate-agnostic (sampling_rate_hz is None) and is skipped; the check is
     # also skipped if Raw is not ingested yet (raw_exists already reports that,
     # so this would only add a confusing second failure).
-    if bundle.sampling_rate_hz is not None:
+    if sort_checks and bundle.sampling_rate_hz is not None:
         raw = Raw & {"nwb_file_name": nwb_file_name}
         if raw:
             actual_rate = float(raw.fetch1("sampling_rate"))
@@ -1928,11 +1946,11 @@ def preflight_v2_pipeline(
     # the container / MATLAB-policy checks are skipped; the sorter NAME is still
     # validated as a local sorter (the pre-execution-params behavior) so a
     # misspelled sorter keeps its spelling hint.
-    if not sorter_params_exist:
+    if sort_checks and not sorter_params_exist:
         _check_local_sorter_runtime(
             bundle, sis, SorterParameters._NON_SI_SORTERS, _check
         )
-    else:
+    elif sort_checks:
         from spyglass.spikesorting.v2._params.sorter import (
             validate_execution_params,
         )

@@ -331,6 +331,7 @@ def _run_preflight(
     motion_mode,
     motion_correction_params_name,
     motion_estimate_id=None,
+    sort_checks: bool = True,
 ) -> list[str]:
     """Run the mode's read-only preflight; return its advisories.
 
@@ -353,6 +354,9 @@ def _run_preflight(
         As validated by :func:`_validate_run_request`.
     motion_mode, motion_correction_params_name, motion_estimate_id
         The motion request.
+    sort_checks : bool
+        False skips the checks only a sort needs (see
+        :func:`preflight_v2_pipeline`).
 
     Returns
     -------
@@ -376,6 +380,7 @@ def _run_preflight(
             motion_mode=motion_mode,
             motion_correction_params_name=motion_correction_params_name,
             motion_estimate_id=motion_estimate_id,
+            sort_checks=sort_checks,
         )
         if not report.ok:
             raise PreflightError("\n".join(report.errors))
@@ -401,6 +406,7 @@ def _run_preflight(
         motion_correction_params_name=motion_correction_params_name,
         motion_estimate_id=motion_estimate_id,
         caller=caller,
+        sort_checks=sort_checks,
     )
 
 
@@ -1801,10 +1807,12 @@ def estimate_motion(
         the preset of the run that will apply the estimate.
     preflight
         If True (default), run ``run_v2_pipeline``'s read-only preflight for
-        ``motion_mode="estimate"`` first: the source prerequisites, the
-        preset's rows and sorter (the run that applies the estimate needs
-        them), the recipe, a filtering preprocessing recipe and a geometry the
-        estimation recipe supports. A failure raises ``PreflightError``.
+        ``motion_mode="estimate"`` first, without its sorter-only checks: the
+        source prerequisites, the preset's preprocessing and artifact rows,
+        the recipe, a filtering preprocessing recipe and a geometry the
+        estimation recipe supports. The preset's sorter need not be available
+        here (the run that applies the estimate checks it). A failure raises
+        ``PreflightError``.
     manual_excluded_times
         Manual exclusions, as in :func:`run_v2_pipeline`; they are part of
         the mask the estimate is made under.
@@ -1873,6 +1881,7 @@ def estimate_motion(
             manual_excluded_times=manual_excluded_times,
             motion_mode="estimate",
             motion_correction_params_name=motion_correction_params_name,
+            sort_checks=False,
         )
     from spyglass.spikesorting.v2.motion import MotionEstimate
 

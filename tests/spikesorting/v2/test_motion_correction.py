@@ -2962,6 +2962,59 @@ def test_concat_preflight_names_the_calling_entry_point(dj_conn):
         )
 
 
+def test_estimate_motion_does_not_need_the_sorter(
+    drift_recording, discontinuous_sources, monkeypatch
+):
+    """With the preset's sorter reported unavailable, ``estimate_motion``
+    and both preflights without the sorter-only checks pass, while a
+    ``run_v2_pipeline`` call (which sorts) is still refused."""
+    from spyglass.spikesorting.v2 import _pipeline_preflight
+    from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.spikesorting.v2.pipeline import (
+        estimate_motion,
+        preflight_v2_pipeline,
+        run_v2_pipeline,
+    )
+
+    def _unavailable(bundle, sis, non_si_sorters, check):
+        check("sorter_installed", False, "planted: the sorter is unavailable")
+
+    monkeypatch.setattr(
+        _pipeline_preflight, "_check_local_sorter_runtime", _unavailable
+    )
+    inputs = _pipeline_inputs(drift_recording)
+    motion = {
+        "motion_mode": "estimate",
+        "motion_correction_params_name": MOTION_RECIPE,
+    }
+    report = preflight_v2_pipeline(**inputs, **motion, sort_checks=False)
+    assert report.ok, report.errors
+    assert not {c.name for c in report.checks} & {
+        "sorter_params_exist",
+        "sorter_params_valid",
+        "analyzer_waveform_params_exist",
+        "sampling_rate_matches",
+        "sorter_installed",
+        "container_runtime_available",
+    }
+    with pytest.raises(PreflightError, match="planted"):
+        run_v2_pipeline(**inputs, **motion)
+    receipt = estimate_motion(
+        **inputs, motion_correction_params_name=MOTION_RECIPE
+    )
+    assert receipt["motion_estimate_id"] is not None
+
+    bundle = _PIPELINE_PRESETS[PIPELINE_PRESET]
+    concat = (MOTION_TEAM, CONCAT_GROUP, bundle)
+    # Raises nothing (it returns its advisories).
+    _pipeline_preflight.assert_concat_preflight(
+        *concat, **motion, sort_checks=False
+    )
+    with pytest.raises(PreflightError, match="planted"):
+        _pipeline_preflight.assert_concat_preflight(*concat, **motion)
+
+
 @pytest.fixture
 def self_correcting_preset(dj_conn):
     """A registered preset whose sorter row (spykingcircus2 ``default``)
