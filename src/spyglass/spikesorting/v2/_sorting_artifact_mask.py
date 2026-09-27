@@ -664,13 +664,7 @@ def corrected_statistics_spans(
     ValueError
         If the frame count or the spans disagree with the source's.
     """
-    import numpy as np
-
-    def as_spans(spans) -> list[tuple[int, int]]:
-        return [
-            (int(a), int(b))
-            for a, b in np.asarray(spans, dtype=np.int64).reshape(-1, 2)
-        ]
+    from spyglass.spikesorting.v2._motion import normalize_spans
 
     n_samples = int(recording.get_num_samples())
     if not n_samples == int(row["n_samples"]) == int(source_n_samples):
@@ -680,7 +674,7 @@ def corrected_statistics_spans(
             f"frames (row: {int(row['n_samples'])}); its source has "
             f"{int(source_n_samples)}."
         )
-    spans = as_spans(row["statistics_spans"])
+    spans = normalize_spans(row["statistics_spans"])
     if concat_statistics_spans is None:
         excluded = []
         if artifact_detection_id is not None:
@@ -690,7 +684,7 @@ def corrected_statistics_spans(
                 artifact_detection_id=artifact_detection_id,
                 recording_id=recording_id,
             )
-        expected = as_spans(
+        expected = normalize_spans(
             statistics_spans(
                 n_samples,
                 excluded,
@@ -698,7 +692,7 @@ def corrected_statistics_spans(
             )
         )
     else:
-        expected = as_spans(concat_statistics_spans)
+        expected = normalize_spans(concat_statistics_spans)
     if spans != expected:
         raise ValueError(
             "Sorting: motion-corrected recording "
