@@ -1935,6 +1935,44 @@ def test_recording_make_fetch_pins_raw_object_id(recording_selection_key):
 
 
 @pytest.mark.slow
+def test_recording_make_compute_queries_db_only_to_stage_output(
+    populated_recording, monkeypatch
+):
+    """``make_compute`` builds the artifact from ``make_fetch``'s inputs (the
+    raw NWB path included) and queries the DB only while staging its output
+    file; the staged traces reproduce the stored row's ``content_hash``."""
+    from spyglass.common.common_nwbfile import Nwbfile
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        _unlink_staged_analysis_file,
+    )
+    from tests.spikesorting.v2._tripart_helpers import forbid_db_queries
+
+    table = Recording()
+    fetched = table.make_fetch(populated_recording)
+    assert fetched.raw_path == Nwbfile().get_abs_path(
+        fetched.sel["nwb_file_name"]
+    )
+    # The guard still refuses a query made outside staging.
+    with forbid_db_queries(monkeypatch, "probe", allow_staging=True):
+        with pytest.raises(AssertionError, match="queried the DB"):
+            len(Nwbfile())
+
+    with forbid_db_queries(
+        monkeypatch, "Recording.make_compute", allow_staging=True
+    ):
+        computed = table.make_compute(populated_recording, *fetched)
+    try:
+        assert computed.content_hash == (
+            Recording & populated_recording
+        ).fetch1("content_hash")
+    finally:
+        _unlink_staged_analysis_file(
+            computed.analysis_file_name, context="test"
+        )
+
+
+@pytest.mark.slow
 def test_raw_source_series_pinned_to_raw_object_id(
     dj_conn, tmp_path, monkeypatch
 ):
