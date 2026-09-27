@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from itertools import pairwise
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
@@ -12,6 +13,9 @@ from spyglass.spikesorting.v2._observed_time import (
     compact_observation_intervals,
     observed_intervals,
 )
+
+if TYPE_CHECKING:
+    from spyglass.spikesorting.v2._source_resolution import EffectiveTraces
 
 
 def canonical_unit_intervals(recording, intervals_by_unit):
@@ -127,15 +131,122 @@ def cached_review_timeline(curation_key, *, cache_path, curation_uuid):
     return timeline
 
 
+class ReviewTimelineInputs(NamedTuple):
+    """DB-resolved inputs of :func:`review_timeline_from_inputs`.
+
+    Attributes
+    ----------
+    traces : EffectiveTraces
+        The sort's effective traces, opened as persisted (no load-time mask).
+    traces_path : str
+        Absolute path of the traces' analysis NWB (rebuilt first if missing).
+    units_path : str
+        Absolute path of the curation's Units NWB.
+    concatenated : bool
+        Whether the sort read a concatenated recording.
+    members : list of dict
+        One entry per original session in timeline order, each with ``name``
+        (the member's ``nwb_file_name``). A concatenated source's entries also
+        carry ``path`` and ``electrical_series_path`` of the member's
+        ``Recording`` artifact (rebuilt first if missing) and ``end_sample``,
+        its exclusive end frame on the concatenated timeline.
+    """
+
+    traces: "EffectiveTraces"
+    traces_path: str
+    units_path: str
+    concatenated: bool
+    members: list
+
+
+def resolve_review_timeline_inputs(curation_key) -> ReviewTimelineInputs:
+    """Resolve every DB input :func:`review_timeline_from_inputs` reads.
+
+    Rebuilds a missing traces or member ``Recording`` artifact through its
+    table's verified self-heal, as ``get_recording`` would.
+    """
+    from spyglass.common import AnalysisNwbfile
+    from spyglass.spikesorting.v2._recording_nwb import ensure_artifact_file
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        _TRACE_TABLES,
+        SortingSelection,
+    )
+
+    sorting_id, units_file = (CurationV2 & curation_key).fetch1(
+        "sorting_id", "analysis_file_name"
+    )
+    traces = SortingSelection.resolve_effective_source(
+        {"sorting_id": sorting_id}
+    ).traces
+    traces_path = ensure_artifact_file(
+        _TRACE_TABLES[traces.kind],
+        traces.key,
+        traces.row["analysis_file_name"],
+    )
+    units_path = AnalysisNwbfile.get_abs_path(units_file)
+    source = SortingSelection.resolve_source(curation_key)
+    concatenated = source.kind == "concatenated_recording"
+    if concatenated:
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecording,
+            ConcatenatedRecordingSelection,
+        )
+
+        rows = (
+            ConcatenatedRecordingSelection.MemberSnapshot
+            * ConcatenatedRecording.MemberBoundary
+            & source.key
+        ).fetch(as_dict=True, order_by="member_index")
+        members = []
+        for row in rows:
+            member_key = {"recording_id": row["recording_id"]}
+            member_row = (Recording & member_key).fetch1()
+            members.append(
+                {
+                    "name": row["nwb_file_name"],
+                    "path": ensure_artifact_file(
+                        Recording, member_key, member_row["analysis_file_name"]
+                    ),
+                    "electrical_series_path": member_row[
+                        "electrical_series_path"
+                    ],
+                    "end_sample": int(row["end_sample"]),
+                }
+            )
+    else:
+        members = [
+            {"name": (RecordingSelection & source.key).fetch1("nwb_file_name")}
+        ]
+    return ReviewTimelineInputs(
+        traces=traces,
+        traces_path=traces_path,
+        units_path=units_path,
+        concatenated=concatenated,
+        members=members,
+    )
+
+
 def review_timeline(curation_key):
     """Excluded frame spans and original-session mapping for browser inspection.
 
     V2 currently applies one shared observation mask to every unit. Read that
     mask directly, without materializing the NWB spike trains for a display.
     """
+    return review_timeline_from_inputs(
+        resolve_review_timeline_inputs(curation_key)
+    )
+
+
+def review_timeline_from_inputs(inputs: ReviewTimelineInputs):
+    """Build :func:`review_timeline` from resolved inputs; no DB access."""
     from pynwb import NWBHDF5IO
 
-    from spyglass.common import AnalysisNwbfile
+    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
     from spyglass.spikesorting.v2._signal_math import (
         _segment_times_at,
         base_intervals_and_gaps,
@@ -143,19 +254,16 @@ def review_timeline(curation_key):
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
         artifact_frame_ranges,
     )
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        RecordingSelection,
+    from spyglass.spikesorting.v2._source_resolution import (
+        read_effective_recording,
     )
-    from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    recording = CurationV2.get_recording(curation_key)
-    fs = recording.sampling_frequency
-    path = AnalysisNwbfile.get_abs_path(
-        (CurationV2 & curation_key).fetch1("analysis_file_name")
+    recording = read_effective_recording(
+        inputs.traces_path,
+        inputs.traces._replace(apply_artifact_mask=False),
     )
-    with NWBHDF5IO(path, "r", load_namespaces=True) as io:
+    fs = recording.sampling_frequency
+    with NWBHDF5IO(inputs.units_path, "r", load_namespaces=True) as io:
         units = io.read().units
         valid = units["obs_intervals"][0] if len(units) else None
     excluded = (
@@ -166,7 +274,6 @@ def review_timeline(curation_key):
         if valid is not None
         else np.empty((0, 2))
     )
-    source = SortingSelection.resolve_source(curation_key)
     mappings = []
 
     def add_member(member, name, offset):
@@ -187,32 +294,20 @@ def review_timeline(curation_key):
                 )
             )
 
-    if source.kind == "concatenated_recording":
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecording,
-            ConcatenatedRecordingSelection,
-        )
-
-        rows = (
-            ConcatenatedRecordingSelection.MemberSnapshot
-            * ConcatenatedRecording.MemberBoundary
-            & source.key
-        ).fetch(as_dict=True, order_by="member_index")
+    if inputs.concatenated:
         offset = 0
-        for row in rows:
-            member = Recording().get_recording(
-                {"recording_id": row["recording_id"]}
+        for entry in inputs.members:
+            member = read_recording_nwb(
+                entry["path"],
+                electrical_series_path=entry["electrical_series_path"],
             )
-            add_member(member, row["nwb_file_name"], offset)
-            offset = row["end_sample"]
+            member.annotate(is_filtered=True)
+            add_member(member, entry["name"], offset)
+            offset = entry["end_sample"]
     else:
-        add_member(
-            recording,
-            (RecordingSelection & source.key).fetch1("nwb_file_name"),
-            0,
-        )
+        add_member(recording, inputs.members[0]["name"], 0)
     return {
         "excluded": excluded,
         "mappings": mappings,
-        "concatenated": source.kind == "concatenated_recording",
+        "concatenated": inputs.concatenated,
     }

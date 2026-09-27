@@ -107,6 +107,18 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2: every computed table keeps heavy work out of its insert transaction
+
+- `FigPackCuration` now uses DataJoint's tri-part make with
+  `_parallel_make = True`. The display analyzer (built, rebuilt or extended as
+  needed) and the review timeline's inputs are resolved before the insert
+  transaction; the view build, bundle write and upload no longer hold it.
+  This fixes a populate that failed with "Populate cannot be called during a
+  transaction" when the sort's display analyzer folder had been reclaimed
+  while its `SortingAnalyzerVersions` row remained (the rebuild re-inventories
+  the analyzer through a nested populate). Rows and bundle contents are
+  unchanged.
+
 #### Spike Sorting v2: optional motion correction, independent of concatenation
 
 Motion correction is now a stage independent of concatenation: `off`

@@ -30,6 +30,7 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, NamedTuple
 
 import datajoint as dj
 
@@ -44,6 +45,7 @@ from spyglass.spikesorting.v2._figpack_curation import (
     pack_display_config,
     unpack_display_config,
 )
+from spyglass.spikesorting.v2._observation_io import ReviewTimelineInputs
 from spyglass.spikesorting.v2._review_view import (
     coerce_units_table_ids as _coerce_units_table_ids,
 )
@@ -68,6 +70,9 @@ from spyglass.spikesorting.v2.utils import (
     SelectionMasterInsertGuard,
 )
 from spyglass.utils import SpyglassMixin
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 schema = dj.schema("spikesorting_v2_figpack_curation")
 
@@ -308,9 +313,50 @@ def _assert_displayed_unit_properties_available(
         )
 
 
+def _resolve_curation_view_inputs(
+    curation_key: dict, display_options
+) -> tuple[str, ReviewTimelineInputs]:
+    """Resolve the DB inputs of :func:`_build_curation_view`.
+
+    Resolves the sort's display analyzer carrying the curation-view
+    extensions -- building, rebuilding, or extending the published cache as
+    needed (see ``curation_analyzer_with_extensions``) -- and the review
+    timeline's inputs. Returns ``(analyzer_folder, timeline_inputs)``.
+    ``display_options`` is validated first so a malformed display budget fails
+    before any analyzer work.
+    """
+    from spyglass.spikesorting.v2 import _visualization as _viz
+    from spyglass.spikesorting.v2._curation_analyzer import (
+        curation_analyzer_with_extensions,
+    )
+    from spyglass.spikesorting.v2._observation_io import (
+        resolve_review_timeline_inputs,
+    )
+    from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
+
+    _require_figpack()
+    ReviewDisplayOptions.from_mapping(display_options)
+
+    sorting_key = {"sorting_id": curation_key["sorting_id"]}
+    waveform_recipe = (Sorting & sorting_key).fetch1(
+        "display_waveform_params_name"
+    )
+    required = _viz.DISPLAY_WIDGET_EXTENSIONS["plot_sorting_summary"]
+    with curation_analyzer_with_extensions(
+        curation_key,
+        waveform_recipe,
+        "display",
+        extra_extensions={name: {} for name in required},
+    ) as analyzer:
+        analyzer_folder = str(analyzer.folder)
+    return analyzer_folder, resolve_review_timeline_inputs(curation_key)
+
+
 def _build_curation_view(
+    analyzer,
     curation_key: dict,
     *,
+    timeline: dict,
     label_options,
     displayed_unit_properties,
     seed_labels=None,
@@ -320,11 +366,14 @@ def _build_curation_view(
     """Build the FigPack curation view for a curation (minimal-attach).
 
     Composes individual SpikeInterface inspection widgets over the sort's
-    display analyzer (ensuring the curation-view extensions and any explicitly
-    requested unit-table columns are available), then attaches only the
-    Spyglass draft control as a sibling. ``display_options``
+    display ``analyzer`` (which already carries the curation-view extensions;
+    see :func:`_resolve_curation_view_inputs`), checking that any explicitly
+    requested unit-table columns are available, then attaches only the
+    Spyglass draft control as a sibling. ``timeline`` is the
+    ``review_timeline`` of the curation. ``display_options``
     (:class:`ReviewDisplayOptions`) bounds the bundle payload -- the per-unit
     amplitude sample and the correlogram pair filter -- and is display-only.
+    No DB access.
 
     A profile-backed review passes ``review_table`` (the selected
     evaluation's metrics, annotation columns and proposals, indexed by unit
@@ -335,11 +384,6 @@ def _build_curation_view(
     when the display analyzer carries a same-named property. Returns the
     composed ``figpack.views`` object.
     """
-    from spyglass.spikesorting.v2 import _visualization as _viz
-    from spyglass.spikesorting.v2._curation_analyzer import (
-        curation_analyzer_with_extensions,
-    )
-    from spyglass.spikesorting.v2._observation_io import review_timeline
     from spyglass.spikesorting.v2._review_inspection import (
         defer_time_views,
         inspection_view,
@@ -353,45 +397,29 @@ def _build_curation_view(
         curation_control,
     )
 
-    _require_figpack()
     display = ReviewDisplayOptions.from_mapping(display_options)
-
-    sorting_key = {"sorting_id": curation_key["sorting_id"]}
-    waveform_recipe = (Sorting & sorting_key).fetch1(
-        "display_waveform_params_name"
+    if review_table is not None:
+        # Profile-backed: exactly the review columns, no SI defaults.
+        analyzer_properties: list[str] | None = []
+        extra_properties = review_unit_properties(
+            review_table, analyzer.unit_ids
+        )
+    else:
+        # Expert path: analyzer-native SI unit properties (or SI's
+        # defaults when None).
+        analyzer_properties = displayed_unit_properties
+        extra_properties = None
+    _assert_displayed_unit_properties_available(analyzer, analyzer_properties)
+    deferred = defer_time_views(analyzer, display)
+    summary = inspection_view(
+        analyzer,
+        display,
+        timeline=timeline,
+        deferred=deferred,
+        displayed_unit_properties=analyzer_properties,
+        extra_unit_properties=extra_properties,
+        min_similarity_for_correlograms=display.min_similarity_for_correlograms,
     )
-    required = _viz.DISPLAY_WIDGET_EXTENSIONS["plot_sorting_summary"]
-    with curation_analyzer_with_extensions(
-        curation_key,
-        waveform_recipe,
-        "display",
-        extra_extensions={name: {} for name in required},
-    ) as analyzer:
-        if review_table is not None:
-            # Profile-backed: exactly the review columns, no SI defaults.
-            analyzer_properties: list[str] | None = []
-            extra_properties = review_unit_properties(
-                review_table, analyzer.unit_ids
-            )
-        else:
-            # Expert path: analyzer-native SI unit properties (or SI's
-            # defaults when None).
-            analyzer_properties = displayed_unit_properties
-            extra_properties = None
-        _assert_displayed_unit_properties_available(
-            analyzer, analyzer_properties
-        )
-        deferred = defer_time_views(analyzer, display)
-        timeline = review_timeline(curation_key)
-        summary = inspection_view(
-            analyzer,
-            display,
-            timeline=timeline,
-            deferred=deferred,
-            displayed_unit_properties=analyzer_properties,
-            extra_unit_properties=extra_properties,
-            min_similarity_for_correlograms=display.min_similarity_for_correlograms,
-        )
 
     control = curation_control(label_options, seed_labels)
     summary_title = "Sorting summary"
@@ -417,8 +445,8 @@ def _build_curation_view(
 def _assert_figpack_curatable(curation_key: dict) -> None:
     """Assert a curation is committed before building its exact analyzer.
 
-    Enforced at BOTH ``insert_selection`` (early, friendly) and ``make`` (the
-    integrity boundary): ``SelectionMasterInsertGuard`` has an
+    Enforced at BOTH ``insert_selection`` (early, friendly) and ``make_fetch``
+    (the integrity boundary): ``SelectionMasterInsertGuard`` has an
     ``allow_direct_insert`` escape hatch, so a row bypassing ``insert_selection``
     must still be re-validated before the view is built -- otherwise a preview
     could be rendered as though it had a final unit namespace. Mirrors
@@ -688,6 +716,58 @@ def _publish_view(
     return str(bundle)
 
 
+class FigPackCurationFetched(NamedTuple):
+    """DB inputs of :meth:`FigPackCuration.make_compute`.
+
+    Attributes
+    ----------
+    curation_key : dict
+        ``{"sorting_id": str, "curation_id": int}`` of the curation viewed.
+    label_options : list of str
+        Curation label palette, in display order.
+    displayed_unit_properties : list of str or None
+        Requested SpikeInterface unit-table columns (``None``: SI defaults).
+    display_options : dict or None
+        A profile-backed review's display budget (``None``: the defaults).
+    upload, ephemeral : bool
+        Publish mode of the selection.
+    seed_labels : dict
+        The curation's committed labels, ``{unit_id: [label, ...]}``.
+    annotations : dict
+        FigPack annotations seeded from ``seed_labels``.
+    figure_config : dict
+        The Spyglass identity (and review snapshot) sidecar content.
+    review_table : pandas.DataFrame or None
+        A profile-backed review's evaluation table, indexed by ``unit_id``.
+    analyzer_folder : str
+        The resolved display analyzer folder, carrying the view extensions.
+    timeline_inputs : ReviewTimelineInputs
+        Resolved inputs of the curation's review timeline.
+    """
+
+    curation_key: dict
+    label_options: list
+    displayed_unit_properties: list | None
+    display_options: dict | None
+    upload: bool
+    ephemeral: bool
+    seed_labels: dict
+    annotations: dict
+    figure_config: dict
+    review_table: "pd.DataFrame | None"
+    analyzer_folder: str
+    timeline_inputs: ReviewTimelineInputs
+
+
+class FigPackCurationComputed(NamedTuple):
+    """The ``FigPackCuration`` secondary fields make_compute returns."""
+
+    figpack_uri: str
+    figpack_version: str
+    figpack_spike_sorting_version: str
+    spikeinterface_version: str
+
+
 # ---- tables --------------------------------------------------------------
 
 
@@ -861,7 +941,7 @@ class FigPackCurationSelection(
 class FigPackCuration(SpyglassMixin, dj.Computed):
     """A built FigPack curation view (URI) for one ``FigPackCurationSelection``.
 
-    ``make`` builds the view, publishes it (hosted figpack.org figure when
+    Populating builds the view, publishes it (hosted figpack.org figure when
     ``upload``, else a durable local bundle), and stores the URI plus the
     package versions used. A zero-unit sort raises ``ZeroUnitAnalyzerError``
     (from ``Sorting.get_analyzer``): there is no analyzer to summarize.
@@ -876,22 +956,30 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
     spikeinterface_version: varchar(32)
     """
 
-    def make(self, key):
-        """Build, publish, and record one FigPack curation view.
+    # ``_parallel_make = True`` + the tri-part ``make_fetch`` /
+    # ``make_compute`` / ``make_insert`` split keep the analyzer resolution,
+    # view build, bundle write and upload OUTSIDE the populate transaction.
+    # The analyzer self-heal (which re-inventories a rebuilt analyzer through
+    # ``SortingAnalyzerVersions.populate``) runs in ``make_fetch``; DataJoint
+    # calls that first outside any transaction, so the second, in-transaction
+    # call finds the analyzer valid and does not populate again. The inherited
+    # ``AutoPopulate.make`` generator is left in place so DataJoint routes
+    # through tri-part dispatch.
+    _parallel_make = True
 
-        Monolithic ``make`` BY DESIGN -- this is a deliberate exception to the
-        v2 tri-part (``make_fetch`` / ``make_compute`` / ``make_insert``)
-        convention, recorded in
-        ``test_integrity.test_tripart_dispatch_active_on_all_v2_computed_tables``.
-        Tri-part exists to keep heavy work OUTSIDE the DataJoint transaction so
-        it can roll back cleanly, but ``_publish_view`` performs a NETWORK upload
-        when ``upload=True`` that cannot be transactionally rolled back, so
-        splitting the work buys nothing here. Keeping it monolithic is the honest
-        shape; do not "fix" it into tri-part to match the other tables.
+    def make_fetch(self, key) -> FigPackCurationFetched:
+        """Validate the selection and resolve every input the view needs.
+
+        Re-validates at the integrity boundary -- ``insert_selection``'s guard
+        is bypassable (``allow_direct_insert``), so the curation namespace and
+        the content-addressed identity are re-checked before any view input is
+        resolved. Resolves (building or repairing as needed) the display
+        analyzer, and the review timeline's inputs.
         """
-        import figpack
-        import figpack_spike_sorting
-        import spikeinterface
+        # Fail before resolving (and possibly building) an analyzer when the
+        # optional FigPack packages are absent.
+        import figpack  # noqa: F401
+        import figpack_spike_sorting  # noqa: F401
 
         selection = (FigPackCurationSelection & key).fetch1()
         curation_key = {
@@ -902,12 +990,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         displayed_unit_properties, review_config = unpack_display_config(
             selection["displayed_unit_properties"]
         )
-        upload = bool(selection["upload"])
 
-        # Re-validate at the integrity boundary: insert_selection's guard is
-        # bypassable (allow_direct_insert), so re-check everything it enforced
-        # before any view is built -- the curation namespace and the content-
-        # addressed identity.
         _assert_figpack_curatable(curation_key)
         _assert_selection_identity(selection, key)
 
@@ -924,17 +1007,79 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         }
         if review_config is not None:
             figure_config["review"] = review_config
+        # Profile-backed reviews persist their display budget in the review
+        # configuration (part of the selection identity); an expert selection
+        # uses the defaults.
+        display_options = (review_config or {}).get("display")
+        review_table = _review_context_table(curation_key, review_config)
+        analyzer_folder, timeline_inputs = _resolve_curation_view_inputs(
+            curation_key, display_options
+        )
+        return FigPackCurationFetched(
+            curation_key={
+                "sorting_id": str(curation_key["sorting_id"]),
+                "curation_id": int(curation_key["curation_id"]),
+            },
+            label_options=label_options,
+            displayed_unit_properties=displayed_unit_properties,
+            display_options=display_options,
+            upload=bool(selection["upload"]),
+            ephemeral=bool(selection["ephemeral"]),
+            seed_labels=seed_labels,
+            annotations=annotations,
+            figure_config=figure_config,
+            review_table=review_table,
+            analyzer_folder=analyzer_folder,
+            timeline_inputs=timeline_inputs,
+        )
 
+    def make_compute(
+        self,
+        key,
+        curation_key,
+        label_options,
+        displayed_unit_properties,
+        display_options,
+        upload,
+        ephemeral,
+        seed_labels,
+        annotations,
+        figure_config,
+        review_table,
+        analyzer_folder,
+        timeline_inputs,
+    ) -> FigPackCurationComputed:
+        """Build the view and publish it; no DB access.
+
+        Loads the resolved display analyzer, builds the review timeline from
+        its resolved files, composes the view, and publishes it (a hosted
+        figpack.org figure when ``upload``, else a durable local bundle).
+        """
+        import figpack
+        import figpack_spike_sorting
+        import spikeinterface
+
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_lock,
+            load_analyzer_folder,
+        )
+        from spyglass.spikesorting.v2._observation_io import (
+            review_timeline_from_inputs,
+        )
+
+        # Load under the per-sort cache lock, as the resolver does, so the
+        # load never observes a concurrent atomic publish mid-move.
+        with analyzer_cache_lock(curation_key["sorting_id"]):
+            analyzer = load_analyzer_folder(analyzer_folder)
         view = _build_curation_view(
+            analyzer,
             curation_key,
+            timeline=review_timeline_from_inputs(timeline_inputs),
             label_options=label_options,
             displayed_unit_properties=displayed_unit_properties,
             seed_labels=seed_labels,
-            review_table=_review_context_table(curation_key, review_config),
-            # Profile-backed reviews persist their display budget in the
-            # review configuration (part of the selection identity); an expert
-            # selection uses the defaults.
-            display_options=(review_config or {}).get("display"),
+            review_table=review_table,
+            display_options=display_options,
         )
         title = (
             f"Spyglass curation {curation_key['sorting_id']}"
@@ -943,24 +1088,22 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         uri = _publish_view(
             view,
             upload=upload,
-            ephemeral=bool(selection["ephemeral"]),
+            ephemeral=ephemeral,
             title=title,
             figpack_curation_id=key["figpack_curation_id"],
             annotations=annotations,
             figure_config=figure_config,
         )
-
-        self.insert1(
-            {
-                **key,
-                "figpack_uri": uri,
-                "figpack_version": figpack.__version__,
-                "figpack_spike_sorting_version": (
-                    figpack_spike_sorting.__version__
-                ),
-                "spikeinterface_version": spikeinterface.__version__,
-            }
+        return FigPackCurationComputed(
+            figpack_uri=uri,
+            figpack_version=figpack.__version__,
+            figpack_spike_sorting_version=figpack_spike_sorting.__version__,
+            spikeinterface_version=spikeinterface.__version__,
         )
+
+    def make_insert(self, key, *computed) -> None:
+        """Record the published view's URI and package versions."""
+        self.insert1({**key, **FigPackCurationComputed(*computed)._asdict()})
 
     @classmethod
     def build_curation_view(

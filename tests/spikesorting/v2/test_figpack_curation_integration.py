@@ -133,6 +133,76 @@ def test_selection_and_view_are_idempotent(populated_sorting_with_curation):
     assert Path(rebuilt.uri).is_dir()
 
 
+def test_populate_rebuilds_reclaimed_inventoried_analyzer(
+    populated_sorting_with_curation,
+):
+    """A reclaimed display analyzer with an inventory row still builds a view.
+
+    Rebuilding the display analyzer re-inventories it through
+    ``SortingAnalyzerVersions.populate``, which DataJoint refuses inside a
+    transaction. The view's populate must therefore resolve (and self-heal)
+    the analyzer before its insert transaction opens.
+    """
+    import shutil
+
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCuration,
+        FigPackCurationSelection,
+    )
+    from spyglass.spikesorting.v2.recompute import SortingAnalyzerVersions
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_id = populated_sorting_with_curation["sorting_id"]
+    recipe = (Sorting & {"sorting_id": sorting_id}).fetch1(
+        "display_waveform_params_name"
+    )
+    inventory_key = {"sorting_id": sorting_id, "waveform_params_name": recipe}
+    SortingAnalyzerVersions.populate(inventory_key, reserve_jobs=False)
+    assert SortingAnalyzerVersions & inventory_key
+
+    selection = FigPackCurationSelection.insert_selection(
+        populated_sorting_with_curation
+    )
+    (FigPackCuration & selection).delete(safemode=False)
+    folder = analyzer_path(sorting_id, recipe)
+    shutil.rmtree(folder)
+
+    FigPackCuration.populate(selection, reserve_jobs=False)
+
+    assert Path((FigPackCuration & selection).fetch1("figpack_uri")).is_dir()
+    assert folder.is_dir()
+    assert SortingAnalyzerVersions & inventory_key
+
+
+def test_make_compute_touches_no_database(
+    populated_sorting_with_curation, monkeypatch
+):
+    """The view build and publish run on fetched inputs with no DB access."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCuration,
+        FigPackCurationSelection,
+    )
+
+    selection = FigPackCurationSelection.insert_selection(
+        populated_sorting_with_curation, displayed_unit_properties=["x", "y"]
+    )
+    table = FigPackCuration()
+    fetched = table.make_fetch(selection)
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("FigPackCuration.make_compute queried the DB")
+
+    monkeypatch.setattr(dj.Connection, "query", _boom)
+    computed = table.make_compute(selection, *fetched)
+    monkeypatch.undo()
+
+    assert Path(computed.figpack_uri).is_dir()
+    assert (Path(computed.figpack_uri) / "spyglass_curation.json").exists()
+
+
 def test_edited_curation_round_trips(populated_sorting_with_curation):
     """A user's edited annotations.json round-trips to (labels, merge_groups)."""
     from spyglass.spikesorting.v2._figpack_curation import (
