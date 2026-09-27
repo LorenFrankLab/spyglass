@@ -586,10 +586,10 @@ def test_describe_parameter_rows_columns_and_usage(dj_conn):
 def test_describe_parameter_rows_covers_all_seeded_tables(dj_conn):
     """The report lists every parameter Lookup ``initialize_v2_defaults`` seeds.
 
-    Pins the report against operational drift: it must cover all SEVEN seeded
-    parameter tables, not just the three preset-referenced ones. The four
-    downstream / cross-session tables carry blank preset-fold columns but still
-    appear so a user can audit every row they can populate.
+    Pins the report against operational drift: it must cover all TEN seeded
+    parameter tables, not just the three preset-referenced ones. The
+    downstream / cross-session / motion tables carry blank preset-fold columns
+    but still appear so a user can audit every row they can populate.
     """
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2._pipeline_reporting import (
@@ -606,6 +606,9 @@ def test_describe_parameter_rows_covers_all_seeded_tables(dj_conn):
         "QualityMetricParameters",
         "AutoCurationRules",
         "MatcherParameters",
+        "MotionEstimationParameters",
+        "MotionInterpolationParameters",
+        "MotionCorrectionParameters",
     } <= tables
 
 

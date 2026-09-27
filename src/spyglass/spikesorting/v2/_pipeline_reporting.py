@@ -42,12 +42,14 @@ _PARAMETER_ROW_COLUMNS = [
 def describe_parameter_rows() -> "pd.DataFrame":
     """Catalog the parameter-Lookup rows currently in the database.
 
-    One row per parameter-Lookup row across ALL seven v2 parameter tables that
+    One row per parameter-Lookup row across ALL ten v2 parameter tables that
     ``initialize_v2_defaults`` seeds -- the three preset-referenced tables
     (``PreprocessingParameters`` / ``ArtifactDetectionParameters`` /
-    ``SorterParameters``) plus the downstream / cross-session ones
+    ``SorterParameters``) plus the downstream / cross-session / motion ones
     (``AnalyzerWaveformParameters`` / ``QualityMetricParameters`` /
-    ``AutoCurationRules`` / ``MatcherParameters``)
+    ``AutoCurationRules`` / ``MatcherParameters`` /
+    ``MotionEstimationParameters`` / ``MotionInterpolationParameters`` /
+    ``MotionCorrectionParameters``)
     -- each with its content fingerprint (the row name excluded;
     ``SorterParameters`` scoped per sorter), whether it is a shipped catalog
     default, which pipeline presets reference it, and -- when its content
@@ -265,15 +267,21 @@ def describe_parameter_rows() -> "pd.DataFrame":
         )
 
     # The remaining parameter Lookups are not referenced by the pipeline
-    # PRESETS (they are resolved downstream of preset selection, or used only by
-    # cross-session matching), so the preset-fold columns (probe_type /
-    # sampling_rate_hz / adjacency_radius_um / used_by_pipeline_presets /
-    # recommendation_status) stay blank. They ARE content-addressed by name and
-    # user-populatable, so listing them keeps this report aligned with the full
-    # ``initialize_v2_defaults`` surface (seven Lookups, not three).
+    # PRESETS (they are resolved downstream of preset selection, used only by
+    # cross-session matching, or chosen per run as a motion recipe), so the
+    # preset-fold columns (probe_type / sampling_rate_hz / adjacency_radius_um /
+    # used_by_pipeline_presets / recommendation_status) stay blank. They ARE
+    # content-addressed by name and user-populatable, so listing them keeps this
+    # report aligned with the full ``initialize_v2_defaults`` surface (ten
+    # Lookups, not three).
     from spyglass.spikesorting.v2.metric_curation import (
         AutoCurationRules,
         QualityMetricParameters,
+    )
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectionParameters,
+        MotionEstimationParameters,
+        MotionInterpolationParameters,
     )
     from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
@@ -378,6 +386,45 @@ def describe_parameter_rows() -> "pd.DataFrame":
         "matcher_params_name",
         {r["matcher_params_name"] for r in MatcherParameters._default_rows()},
         lambda r: f"matcher {r.get('matcher', '')!r}",
+    )
+
+    def _motion_estimation_summary(row) -> str:
+        params = _jsonable_blob(row["params"])
+        return (
+            f"preset {params.get('preset')!r}, max_gap_s "
+            f"{_num(params.get('max_gap_s'))}"
+        )
+
+    def _motion_interpolation_summary(row) -> str:
+        params = _jsonable_blob(row["params"])
+        return (
+            f"{params.get('spatial_interpolation_method')}, border_mode "
+            f"{params.get('border_mode')!r}"
+        )
+
+    _append_simple_param_records(
+        MotionEstimationParameters,
+        "MotionEstimationParameters",
+        "motion_estimation_params_name",
+        {r[0] for r in MotionEstimationParameters._DEFAULT_CONTENTS},
+        _motion_estimation_summary,
+    )
+    _append_simple_param_records(
+        MotionInterpolationParameters,
+        "MotionInterpolationParameters",
+        "motion_interpolation_params_name",
+        {r[0] for r in MotionInterpolationParameters._DEFAULT_CONTENTS},
+        _motion_interpolation_summary,
+    )
+    _append_simple_param_records(
+        MotionCorrectionParameters,
+        "MotionCorrectionParameters",
+        "motion_correction_params_name",
+        {r[0] for r in MotionCorrectionParameters._DEFAULT_CONTENTS},
+        lambda r: (
+            f"{r['motion_estimation_params_name']} + "
+            f"{r['motion_interpolation_params_name']}"
+        ),
     )
 
     # Duplicate-content detection: rows sharing a fingerprint within the same

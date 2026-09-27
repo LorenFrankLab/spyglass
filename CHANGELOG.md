@@ -340,8 +340,9 @@ available.
   is the estimator's temporal prior alone) is not refused: it is listed in
   `motion_spans_without_evidence`, adds a run warning, and
   `MotionEstimate.get_spans_without_evidence` reports it for any estimate.
-  `initialize_v2_defaults` installs the shipped motion recipes, and
-  `verify_v2_default_catalog` audits them.
+  `initialize_v2_defaults` installs the shipped motion recipes,
+  `verify_v2_default_catalog` audits them, and `describe_parameter_rows`
+  lists the rows of all three motion parameter tables.
 - Every consumer of a corrected sort reads the corrected recording, with its
   channels (a `remove_channels` recipe's reduced set included): analyzer
   builds and rebuilds, merged and derivative curation analyzers,
