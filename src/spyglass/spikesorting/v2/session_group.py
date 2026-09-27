@@ -1096,7 +1096,6 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         )
         from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
         from spyglass.spikesorting.v2._sorting_artifact_mask import (
-            silence_frame_ranges,
             statistics_spans,
         )
         from spyglass.spikesorting.v2._units_nwb import (
@@ -1156,10 +1155,6 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 "wrong."
             )
         sampling_frequency = float(concatenated.get_sampling_frequency())
-        # Re-apply the excluded frames on the stitched recording so the written
-        # traces are exactly zero there (0 uV: the members' offsets are 0 by
-        # now, so this silences in the stored units).
-        concatenated = silence_frame_ranges(concatenated, artifact_ranges)
         obs_intervals = observation_intervals(
             concat_n_samples, sampling_frequency, artifact_ranges
         )
