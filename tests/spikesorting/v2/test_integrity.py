@@ -52,38 +52,55 @@ pytestmark = pytest.mark.usefixtures("dj_conn")
 _MONOLITHIC_MAKE_EXCLUSIONS = {
     # DB reads plus a bounded pure-Python clique partition (``max_strict_nodes``
     # budget enforced); no SpikeInterface, NWB, or file I/O.
-    "TrackedUnit",
+    "spyglass.spikesorting.v2.unit_matching.TrackedUnit",
 }
 
 
-def _v2_autopopulate_tables() -> dict[str, type]:
-    """Import every v2 module and return its declared ``AutoPopulate`` tables.
+def _autopopulate_tables_in(package) -> dict[str, type]:
+    """Return the ``AutoPopulate`` tables declared under ``package``.
 
-    Discovery walks the package instead of trusting a hand-written list, so a
-    new ``dj.Computed`` / ``dj.Imported`` table cannot escape the gate. Only
-    classes defined in the module being scanned count (re-exports are skipped),
-    keyed by class name.
+    Discovery imports every module in the package, subpackages included,
+    instead of trusting a hand-written list, so a new ``dj.Computed`` /
+    ``dj.Imported`` table cannot escape the gate. Only classes defined in the
+    module being scanned count (re-exports are skipped). Tables are keyed by
+    ``f"{obj.__module__}.{obj.__qualname__}"`` so two same-named classes in
+    different modules stay apart; two distinct classes with one key (for
+    example two classes built by one factory function) fail here instead of
+    one silently replacing the other.
     """
     import importlib
     import pkgutil
 
     from datajoint.autopopulate import AutoPopulate
 
-    import spyglass.spikesorting.v2 as v2
-
     tables: dict[str, type] = {}
-    for info in pkgutil.iter_modules(v2.__path__):
-        if info.ispkg:
-            continue
-        module = importlib.import_module(f"{v2.__name__}.{info.name}")
+    clashes: list[str] = []
+    for info in pkgutil.walk_packages(
+        package.__path__, prefix=f"{package.__name__}."
+    ):
+        module = importlib.import_module(info.name)
         for obj in vars(module).values():
-            if (
+            if not (
                 inspect.isclass(obj)
                 and issubclass(obj, AutoPopulate)
                 and obj.__module__ == module.__name__
             ):
-                tables[obj.__name__] = obj
+                continue
+            key = f"{obj.__module__}.{obj.__qualname__}"
+            if tables.setdefault(key, obj) is not obj:
+                clashes.append(key)
+    assert not clashes, (
+        f"Distinct AutoPopulate tables share the discovery key(s) {clashes}; "
+        "give each table its own module-level class."
+    )
     return tables
+
+
+def _v2_autopopulate_tables() -> dict[str, type]:
+    """Return every ``AutoPopulate`` table declared in the v2 package."""
+    import spyglass.spikesorting.v2 as v2
+
+    return _autopopulate_tables_in(v2)
 
 
 def test_tripart_dispatch_active_on_all_v2_computed_tables():
@@ -112,7 +129,11 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
         "remove them from _MONOLITHIC_MAKE_EXCLUSIONS."
     )
     # A discovery that silently found nothing would pass every loop below.
-    assert {"Recording", "Sorting", "CurationEvaluation"} <= set(tables)
+    assert {
+        "spyglass.spikesorting.v2.recording.Recording",
+        "spyglass.spikesorting.v2.sorting.Sorting",
+        "spyglass.spikesorting.v2.metric_curation.CurationEvaluation",
+    } <= set(tables)
 
     not_tripart = []
     for name, cls in sorted(tables.items()):
@@ -146,6 +167,87 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
         "the inherited generator make) or, for a table that does only bounded "
         "DB bookkeeping, add it to _MONOLITHIC_MAKE_EXCLUSIONS with a reason."
     )
+
+
+def _write_package(root, name: str, files: dict[str, str]):
+    """Write a throwaway package under ``root`` and import it."""
+    import importlib
+    import textwrap
+
+    for rel, body in {"__init__.py": "", **files}.items():
+        path = root / name / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(textwrap.dedent(body))
+    return importlib.import_module(name)
+
+
+def test_table_discovery_walks_subpackages_and_keys_by_module_path(
+    tmp_path, monkeypatch
+):
+    """Discovery reaches subpackage modules and keeps same-named tables apart.
+
+    Two tables share the class name ``Table``: keyed by name, one would
+    silently replace the other. A re-export and a same-module alias of an
+    already-found table are not new tables.
+    """
+    monkeypatch.syspath_prepend(str(tmp_path))
+    package = _write_package(
+        tmp_path,
+        "gate_walk_pkg",
+        {
+            "a.py": """
+                from datajoint.autopopulate import AutoPopulate
+
+                class Table(AutoPopulate):
+                    pass
+
+                Alias = Table
+            """,
+            "sub/__init__.py": "",
+            "sub/b.py": """
+                from datajoint.autopopulate import AutoPopulate
+
+                from gate_walk_pkg.a import Table as Reexported
+
+                class Table(AutoPopulate):
+                    pass
+            """,
+        },
+    )
+
+    tables = _autopopulate_tables_in(package)
+
+    assert set(tables) == {"gate_walk_pkg.a.Table", "gate_walk_pkg.sub.b.Table"}
+    assert (
+        tables["gate_walk_pkg.a.Table"]
+        is not tables["gate_walk_pkg.sub.b.Table"]
+    )
+
+
+def test_table_discovery_rejects_two_tables_with_one_key(tmp_path, monkeypatch):
+    """Two distinct tables with one ``module.qualname`` key fail discovery."""
+    monkeypatch.syspath_prepend(str(tmp_path))
+    package = _write_package(
+        tmp_path,
+        "gate_clash_pkg",
+        {
+            "factory.py": """
+                from datajoint.autopopulate import AutoPopulate
+
+                def make():
+                    class Table(AutoPopulate):
+                        pass
+
+                    return Table
+
+                First = make()
+                Second = make()
+            """,
+        },
+    )
+
+    with pytest.raises(AssertionError, match=r"make\.<locals>\.Table"):
+        _autopopulate_tables_in(package)
 
 
 def test_v2_dispatch_classes_wired_into_merge_table():
