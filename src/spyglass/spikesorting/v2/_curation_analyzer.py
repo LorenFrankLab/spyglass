@@ -214,23 +214,21 @@ def _source_artifact_hashes(sorting_id) -> dict[str, str]:
     the ``MotionCorrectedRecording``'s for a sort of corrected traces, so a
     cache built from other effective traces never validates.
     """
-    from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
-    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2.sorting import _TRACE_TABLES, SortingSelection
 
     lineage, traces = SortingSelection.resolve_effective_source(
         {"sorting_id": sorting_id}
     )
-    if lineage.kind == "recording":
-        content_hash = (Recording & lineage.key).fetch1("content_hash")
-    else:
-        content_hash = (ConcatenatedRecording & lineage.key).fetch1(
-            "content_hash"
-        )
-    hashes = {lineage.kind: str(content_hash)}
-    if traces.kind != lineage.kind:
-        hashes[traces.kind] = str(traces.row["content_hash"])
-    return hashes
+    if traces.kind == lineage.kind:
+        # The traces are the lineage source's own row, fetched just now.
+        return {lineage.kind: str(traces.row["content_hash"])}
+    lineage_hash = (_TRACE_TABLES[lineage.kind] & lineage.key).fetch1(
+        "content_hash"
+    )
+    return {
+        lineage.kind: str(lineage_hash),
+        traces.kind: str(traces.row["content_hash"]),
+    }
 
 
 def _raw_contributor_map(key) -> dict[str, list[int]]:
