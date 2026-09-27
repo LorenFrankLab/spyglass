@@ -1329,12 +1329,16 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         corrected = None
         border_mode = None
         if corrected_key is not None:
-            corrected_key = (
+            corrected = (
                 MotionCorrectedRecording
                 & _id_restriction(
                     corrected_key, "motion_corrected_recording_id"
                 )
-            ).fetch1("KEY")
+            ).fetch1()
+            corrected_key = {
+                name: corrected[name]
+                for name in MotionCorrectedRecording.primary_key
+            }
             selection = (
                 MotionCorrectedRecordingSelection & corrected_key
             ).fetch1()
@@ -1348,7 +1352,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
                     f"{selection['motion_estimate_id']}, not "
                     f"{estimate_key['motion_estimate_id']}."
                 )
-            corrected = (MotionCorrectedRecording & corrected_key).fetch1()
             border_mode = _motion.resolve_interpolation_params(
                 (
                     MotionInterpolationParameters
