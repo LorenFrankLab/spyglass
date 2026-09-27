@@ -199,8 +199,63 @@ def test_make_compute_touches_no_database(
     computed = table.make_compute(selection, *fetched)
     monkeypatch.undo()
 
-    assert Path(computed.figpack_uri).is_dir()
-    assert (Path(computed.figpack_uri) / "spyglass_curation.json").exists()
+    # The offline bundle is staged privately; make_insert moves it to the URI.
+    staged = Path(computed.staged_bundle)
+    try:
+        assert staged.parent == Path(computed.figpack_uri).parent
+        assert staged.is_dir()
+        assert (staged / "spyglass_curation.json").exists()
+    finally:
+        import shutil
+
+        shutil.rmtree(staged, ignore_errors=True)
+
+
+def test_changed_second_fetch_leaves_bundles_untouched(
+    populated_sorting_with_curation, monkeypatch
+):
+    """A view populate DataJoint refuses after compute leaves no bundle.
+
+    The offline bundle is saved in ``make_compute``, outside the insert
+    transaction. When the in-transaction ``make_fetch`` differs, DataJoint
+    raises before ``make_insert`` runs: the staged bundle must be removed and
+    whatever already sits at the durable path (here a stand-in for a
+    concurrent committed bundle) must be left alone. A later populate
+    replaces it.
+    """
+    from datajoint.errors import DataJointError
+
+    from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCuration,
+        FigPackCurationSelection,
+        figpack_bundle_path,
+    )
+    from tests.spikesorting.v2._tripart_helpers import change_second_fetch
+
+    selection = FigPackCurationSelection.insert_selection(
+        populated_sorting_with_curation
+    )
+    (FigPackCuration & selection).delete(safemode=False)
+    bundle = figpack_bundle_path(selection["figpack_curation_id"])
+    if bundle.exists():
+        import shutil
+
+        shutil.rmtree(bundle)
+    bundle.mkdir(parents=True)
+    (bundle / "sentinel.txt").write_text("committed elsewhere")
+
+    with monkeypatch.context() as patch:
+        change_second_fetch(patch, FigPackCuration)
+        with pytest.raises(DataJointError, match="Referential integrity"):
+            FigPackCuration.populate(selection, reserve_jobs=False)
+    assert not (FigPackCuration & selection)
+    assert (bundle / "sentinel.txt").read_text() == "committed elsewhere"
+    assert not list(bundle.parent.glob(f".{bundle.name}.build-*"))
+
+    FigPackCuration.populate(selection, reserve_jobs=False)
+    assert (FigPackCuration & selection).fetch1("figpack_uri") == str(bundle)
+    assert (bundle / "index.html").exists()
+    assert not (bundle / "sentinel.txt").exists()
 
 
 def test_edited_curation_round_trips(populated_sorting_with_curation):

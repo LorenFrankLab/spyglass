@@ -56,6 +56,10 @@ from spyglass.spikesorting.v2._selection_identity import (
     assert_supplied_id_matches,
     deterministic_id,
 )
+from spyglass.spikesorting.v2._staged_outputs import (
+    StagedOutputCleanupMixin,
+    StagedOutputs,
+)
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.exceptions import (
     DuplicateSelectionError,
@@ -674,12 +678,14 @@ def _publish_view(
     figpack_curation_id,
     annotations: dict,
     figure_config: dict,
-) -> str:
-    """Publish a built view and return its URI (cloud URL or saved bundle path).
+) -> tuple[str, str | None]:
+    """Publish a built view; return its URI and any privately staged bundle.
 
     ``upload=True`` publishes to figpack.org and requires ``FIGPACK_API_KEY``
-    (unless ``ephemeral``); ``upload=False`` saves a durable static bundle and
-    returns its folder path.
+    (unless ``ephemeral``); it returns ``(url, None)``. ``upload=False`` saves
+    the static bundle into a private sibling of its durable folder and returns
+    ``(durable folder, staged folder)``; :func:`_install_bundle` moves it into
+    place once the row that records the URI is inserted.
     """
     if upload:
         api_key = os.environ.get("FIGPACK_API_KEY")
@@ -699,21 +705,40 @@ def _publish_view(
         with tempfile.TemporaryDirectory(prefix="spyglass-figpack-") as tmp:
             view.save(tmp, title=title)
             _write_figure_sidecars(Path(tmp), annotations, figure_config)
-            return _upload_bundle(
+            url = _upload_bundle(
                 tmp,
                 api_key=api_key,
                 title=title,
                 ephemeral=ephemeral,
                 use_consolidated_metadata_only=True,
             )
+        return url, None
 
     bundle = figpack_bundle_path(figpack_curation_id)
     bundle.parent.mkdir(parents=True, exist_ok=True)
-    if bundle.exists():
-        shutil.rmtree(bundle)
-    view.save(str(bundle), title=title)
-    _write_figure_sidecars(bundle, annotations, figure_config)
-    return str(bundle)
+    # A hidden, attempt-unique sibling: a concurrent populate of the same
+    # figure, or a stale bundle already in the durable folder, is untouched
+    # until this attempt's row is inserted.
+    staged = bundle.parent / f".{bundle.name}.build-{uuid.uuid4().hex}"
+    try:
+        view.save(str(staged), title=title)
+        _write_figure_sidecars(staged, annotations, figure_config)
+    except BaseException:
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
+    return str(bundle), str(staged)
+
+
+def _install_bundle(staged: str, bundle: str) -> None:
+    """Move a staged bundle into its durable folder, replacing a stale one.
+
+    Called only after the row recording ``bundle`` is inserted, so the
+    durable folder never holds a bundle whose populate was refused.
+    """
+    bundle_path = Path(bundle)
+    if bundle_path.exists():
+        shutil.rmtree(bundle_path)
+    os.replace(staged, bundle_path)
 
 
 class FigPackCurationFetched(NamedTuple):
@@ -760,12 +785,24 @@ class FigPackCurationFetched(NamedTuple):
 
 
 class FigPackCurationComputed(NamedTuple):
-    """The ``FigPackCuration`` secondary fields make_compute returns."""
+    """The ``FigPackCuration`` secondary fields make_compute returns.
+
+    ``staged_bundle`` is not a column: it is the private folder an offline
+    bundle was saved into (``None`` for a hosted figure), moved to
+    ``figpack_uri`` by ``make_insert``.
+    """
 
     figpack_uri: str
     figpack_version: str
     figpack_spike_sorting_version: str
     spikeinterface_version: str
+    staged_bundle: str | None
+
+    def staged_outputs(self) -> StagedOutputs:
+        """The staged offline bundle ``make_insert`` moves into place."""
+        return StagedOutputs(
+            folders=(self.staged_bundle,) if self.staged_bundle else ()
+        )
 
 
 # ---- tables --------------------------------------------------------------
@@ -938,7 +975,7 @@ class FigPackCurationSelection(
 
 
 @schema
-class FigPackCuration(SpyglassMixin, dj.Computed):
+class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     """A built FigPack curation view (URI) for one ``FigPackCurationSelection``.
 
     Populating builds the view, publishes it (hosted figpack.org figure when
@@ -1053,7 +1090,8 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
 
         Loads the resolved display analyzer, builds the review timeline from
         its resolved files, composes the view, and publishes it (a hosted
-        figpack.org figure when ``upload``, else a durable local bundle).
+        figpack.org figure when ``upload``, else a local bundle staged in a
+        private folder that ``make_insert`` moves to the durable path).
         """
         import figpack
         import figpack_spike_sorting
@@ -1085,7 +1123,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
             f"Spyglass curation {curation_key['sorting_id']}"
             f" / {curation_key['curation_id']}"
         )
-        uri = _publish_view(
+        uri, staged_bundle = _publish_view(
             view,
             upload=upload,
             ephemeral=ephemeral,
@@ -1099,11 +1137,21 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
             figpack_version=figpack.__version__,
             figpack_spike_sorting_version=figpack_spike_sorting.__version__,
             spikeinterface_version=spikeinterface.__version__,
+            staged_bundle=staged_bundle,
         )
 
     def make_insert(self, key, *computed) -> None:
-        """Record the published view's URI and package versions."""
-        self.insert1({**key, **FigPackCurationComputed(*computed)._asdict()})
+        """Record the published view's URI and package versions.
+
+        An offline bundle is moved into its durable folder only after the
+        insert succeeds, so a refused or duplicate populate never replaces
+        the bundle of a committed row.
+        """
+        row = FigPackCurationComputed(*computed)._asdict()
+        staged_bundle = row.pop("staged_bundle")
+        self.insert1({**key, **row})
+        if staged_bundle is not None:
+            _install_bundle(staged_bundle, row["figpack_uri"])
 
     @classmethod
     def build_curation_view(
