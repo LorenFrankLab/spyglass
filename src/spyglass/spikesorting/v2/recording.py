@@ -2371,9 +2371,20 @@ class Recording(SpyglassMixin, dj.Computed):
 
 
 class DriftFetched(NamedTuple):
-    """``make_fetch`` output for :class:`DriftEstimate` (no trace/SI I/O)."""
+    """``make_fetch`` output for :class:`DriftEstimate` (no trace/SI I/O).
+
+    Attributes
+    ----------
+    preset : str
+        The ``compute_motion`` preset.
+    traces : StoredTraces
+        The recording's cached artifact, resolved (and rebuilt if missing).
+        Its ``content_hash`` puts the recording row under DataJoint's
+        fetch-integrity check.
+    """
 
     preset: str
+    traces: StoredTraces
 
 
 class DriftComputed(NamedTuple):
@@ -2448,26 +2459,33 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
     _DEFAULT_PRESET = "dredge_fast"
 
     def make_fetch(self, key) -> DriftFetched:
-        """Return only the preset -- no trace/SI I/O.
+        """Return the preset and the resolved recording artifact.
 
-        The recording is loaded in ``make_compute``; this method does no
-        SpikeInterface or NWB I/O so the tri-part contract's two
-        ``make_fetch`` calls stay DeepHash-stable (a constant string).
+        Rebuilds a missing recording file through ``Recording``'s own
+        verified self-heal. No SpikeInterface or NWB I/O: the carrier holds
+        strings only, so the tri-part contract's two ``make_fetch`` calls
+        stay DeepHash-stable (the second finds the file the first rebuilt).
         """
-        return DriftFetched(preset=self._DEFAULT_PRESET)
+        return DriftFetched(
+            preset=self._DEFAULT_PRESET,
+            traces=Recording().resolve_stored_traces(key),
+        )
 
-    def make_compute(self, key, preset) -> DriftComputed:
-        """Run ``compute_motion`` outside any DB transaction.
+    def make_compute(self, key, preset, traces) -> DriftComputed:
+        """Run ``compute_motion`` outside any DB transaction; no DB access.
 
-        Loads the cached preprocessed recording, estimates motion with the
-        given preset, and flattens the resulting ``Motion`` to a storable
-        dict plus the summary metrics. The long-running step (peak detect +
-        localize + estimate) returns before the framework opens its commit
-        transaction, so it never holds a DB lock.
+        Reads the cached preprocessed recording ``make_fetch`` resolved,
+        estimates motion with the given preset, and flattens the resulting
+        ``Motion`` to a storable dict plus the summary metrics. The
+        long-running step (peak detect + localize + estimate) returns before
+        the framework opens its commit transaction, so it never holds a DB
+        lock.
         """
         import spikeinterface.preprocessing as sip
 
-        recording = Recording().get_recording(key)
+        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
+
+        recording = read_stored_traces(traces)
         # The NWB reader keeps the timestamps as a lazy HDF5 dataset, and
         # DREDge maps every peak frame to time with one fancy index
         # (sortingcomponents/motion/dredge.py:227), which h5py refuses when two

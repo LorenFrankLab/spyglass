@@ -121,6 +121,36 @@ def test_drift_estimate_populate_writes_qc_row(drift_recording_key):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_drift_estimate_fetch_pins_recording_and_compute_needs_no_db(
+    drift_recording_key, monkeypatch
+):
+    """``make_fetch`` carries the recording's resolved file and content hash,
+    so DataJoint's fetch-integrity check covers the recording row, and
+    ``make_compute`` estimates from that file with no DB access."""
+    from spyglass.spikesorting.v2.recording import DriftEstimate, Recording
+    from tests.spikesorting.v2._tripart_helpers import (
+        fetch_hash,
+        forbid_db_queries,
+    )
+
+    key = drift_recording_key
+    table = DriftEstimate()
+    fetched = table.make_fetch(key)
+    assert fetched.traces == Recording().resolve_stored_traces(key)
+    assert fetched.traces.content_hash == (Recording & key).fetch1(
+        "content_hash"
+    )
+    assert fetch_hash(table.make_fetch(key)) == fetch_hash(fetched)
+
+    with forbid_db_queries(monkeypatch, "DriftEstimate.make_compute"):
+        computed = table.make_compute(key, *fetched)
+    assert computed.preset == DriftEstimate._DEFAULT_PRESET
+    assert np.isfinite(computed.max_abs_displacement_um)
+    assert computed.n_temporal_bins >= 1
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_drift_estimate_not_applied(drift_recording_key):
     """Estimating drift does NOT modify the recording: the upstream
     ``Recording``'s ``content_hash`` and the bytes from ``get_recording`` are
@@ -189,7 +219,8 @@ def test_drift_estimate_survives_peaks_sharing_a_frame(
     from spikeinterface.preprocessing.motion import motion_options_preset
     from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
-    from spyglass.spikesorting.v2.recording import DriftEstimate, Recording
+    from spyglass.spikesorting.v2 import _recording_nwb
+    from spyglass.spikesorting.v2.recording import DriftEstimate
     from tests.spikesorting.v2._motion_fixtures import (
         hdf5_timed_recording_with_shared_peak_frame,
     )
@@ -210,10 +241,10 @@ def test_drift_estimate_survives_peaks_sharing_a_frame(
         with pytest.raises(TypeError, match="increasing order"):
             recording.sample_index_to_time(np.repeat(shared[:1], 2))
         monkeypatch.setattr(
-            Recording, "get_recording", lambda self, key: recording
+            _recording_nwb, "read_stored_traces", lambda traces: recording
         )
 
-        computed = DriftEstimate().make_compute({}, "dredge_fast")
+        computed = DriftEstimate().make_compute({}, "dredge_fast", None)
 
     centers = computed.motion["temporal_bins_s"][0]
     assert centers[0] == pytest.approx(timestamps[0] + 0.5)

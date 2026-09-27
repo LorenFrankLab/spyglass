@@ -122,11 +122,12 @@ DLCProject().alter()
   `_parallel_make = True`: the curated Units read, the member's full timestamp
   read and the member Units NWB write run before the insert transaction opens.
   Rows, merge entries and file contents are unchanged.
-- `RecordingArtifactDetection` and `SharedGroupArtifactDetection` resolve
-  their cached recording files in `make_fetch`, rebuilding a missing file
-  there, and `make_compute` reads them by path with no DB access. The
-  recording rows are therefore covered by
-  DataJoint's check that the fetched inputs did not change before the insert.
+- `RecordingArtifactDetection`, `SharedGroupArtifactDetection` and
+  `DriftEstimate` resolve their cached recording files in `make_fetch`,
+  rebuilding a missing file there, and `make_compute` reads them by path with
+  no DB access. The recording rows are therefore covered by DataJoint's check
+  that the fetched inputs did not change before the insert (`DriftEstimate`'s
+  fetch previously carried only its preset).
   `Recording.resolve_stored_traces(key)` returns the resolved file.
   Results are unchanged.
 
