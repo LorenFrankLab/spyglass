@@ -165,6 +165,16 @@ DLCProject().alter()
   `_sorting_analyzer.resolve_canonical_recording` /
   `read_canonical_recording` are the two halves of
   `reconstruct_recording_and_sorting`'s recording.
+- A populate that DataJoint refuses after `make_compute` (its second,
+  in-transaction `make_fetch` raised or returned changed data) no longer
+  leaves the staged output on disk. `Recording`, `ConcatenatedRecording`,
+  `Sorting` (units NWB and private analyzer build, whose lock is released),
+  `MotionCorrectedRecording`, `CurationEvaluation`, `ConcatMemberCuration`,
+  `UnitMatch` and `FigPackCuration` now remove it, as they already did when
+  `make_compute` or `make_insert` failed. An offline FigPack bundle is saved
+  into a hidden sibling of its folder and moved into place only after its row
+  is inserted, so a refused or duplicate populate never replaces the bundle of
+  a committed row.
 
 #### Spike Sorting v2: optional motion correction, independent of concatenation
 
