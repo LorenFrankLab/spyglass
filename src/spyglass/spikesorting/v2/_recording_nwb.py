@@ -123,6 +123,24 @@ def install_rebuilt_recording(
         raise
 
 
+#: ``{analysis_file_name: (abs_path, file_identity)}`` for each cached trace
+#: artifact this process resolved through ``AnalysisNwbfile.get_abs_path``
+#: (which checksums the file) outside a transaction; ``file_identity`` is
+#: :func:`_file_identity` at that time. See :func:`ensure_artifact_file`.
+_VERIFIED_ARTIFACT_PATHS: dict[str, tuple[str, tuple[int, int, int]]] = {}
+
+
+def _file_identity(abs_path: str) -> tuple[int, int, int] | None:
+    """``(inode, size, mtime_ns)`` of a file, or ``None`` if it is absent."""
+    import os
+
+    try:
+        stat = os.stat(abs_path)
+    except FileNotFoundError:
+        return None
+    return stat.st_ino, stat.st_size, stat.st_mtime_ns
+
+
 def ensure_artifact_file(table, key: dict, analysis_file_name: str) -> str:
     """Absolute path of a cached trace artifact, rebuilt first if missing.
 
@@ -130,6 +148,17 @@ def ensure_artifact_file(table, key: dict, analysis_file_name: str) -> str:
     gone, ``table()._rebuild_nwb_artifact(key)`` restores it (a locked,
     content-verified rebuild; the DataJoint row is never deleted), and the
     path is resolved again.
+
+    ``AnalysisNwbfile.get_abs_path`` checksums the whole file, about 1.3 s per
+    GiB (measured on a 1 GiB file with a warm page cache, dominated by
+    DataJoint's ``uuid_from_file``). DataJoint runs a tri-part ``make_fetch``
+    twice, the second time inside the insert transaction, so that checksum
+    would run twice per populate, once while the transaction is open. A
+    resolution outside a transaction always goes through ``get_abs_path``.
+    Inside a transaction, a file this process already resolved that way and
+    whose inode, size and modification time are unchanged reuses that result:
+    in a populate, that is the first ``make_fetch``'s check of the same file.
+    A rebuilt or rewritten file differs and is checked again.
 
     Parameters
     ----------
@@ -151,10 +180,19 @@ def ensure_artifact_file(table, key: dict, analysis_file_name: str) -> str:
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
 
+    in_transaction = AnalysisNwbfile().connection.in_transaction
+    if in_transaction and analysis_file_name in _VERIFIED_ARTIFACT_PATHS:
+        abs_path, identity = _VERIFIED_ARTIFACT_PATHS[analysis_file_name]
+        if _file_identity(abs_path) == identity:
+            return abs_path
+
     abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
     if not Path(abs_path).exists():
         table()._rebuild_nwb_artifact(key)
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+    identity = _file_identity(abs_path)
+    if not in_transaction and identity is not None:
+        _VERIFIED_ARTIFACT_PATHS[analysis_file_name] = (abs_path, identity)
     return abs_path
 
 

@@ -1085,3 +1085,63 @@ def test_write_refuses_unnormalized_3d_geometry(xz_probe_session):
     assert (
         set(staged_dir.glob("*.nwb")) == before
     ), "the refused write must not leave a staged artifact behind"
+
+
+# ---------------------------------------------------------------------------
+# Cached-artifact path resolution
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.database
+def test_artifact_path_reverified_outside_transactions_reused_inside(
+    dj_conn, tmp_path, monkeypatch
+):
+    """The in-transaction re-fetch reuses this process's check of a file.
+
+    DataJoint runs a tri-part ``make_fetch`` twice: once before compute and
+    once inside the insert transaction. ``AnalysisNwbfile.get_abs_path``
+    checksums the whole file each time. A resolution outside a transaction
+    always goes through it; inside one, a file this process already checked
+    and whose size and modification time have not changed since is not
+    checksummed again. A changed file is checked again even in a transaction.
+    """
+    import datajoint as dj
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._recording_nwb import ensure_artifact_file
+
+    artifact = tmp_path / "artifact.nwb"
+    artifact.write_bytes(b"x" * 16)
+    checked = []
+
+    def counting_get_abs_path(name, **kwargs):
+        checked.append(name)
+        return str(artifact)
+
+    monkeypatch.setattr(
+        AnalysisNwbfile, "get_abs_path", staticmethod(counting_get_abs_path)
+    )
+
+    class _PresentArtifact:
+        def _rebuild_nwb_artifact(self, key):
+            raise AssertionError("a present artifact is never rebuilt")
+
+    # Unique per test run: the verified-path record lives for the process.
+    name = f"{tmp_path.name}_artifact.nwb"
+
+    def resolve():
+        return ensure_artifact_file(_PresentArtifact, {}, name)
+
+    assert resolve() == str(artifact)
+    assert len(checked) == 1
+    with dj.conn().transaction:
+        assert resolve() == str(artifact)
+    assert len(checked) == 1, "the in-transaction re-fetch re-checksummed"
+
+    assert resolve() == str(artifact)
+    assert len(checked) == 2, "a resolution outside a transaction must verify"
+
+    artifact.write_bytes(b"y" * 32)
+    with dj.conn().transaction:
+        assert resolve() == str(artifact)
+    assert len(checked) == 3, "a file changed since its check must be verified"
