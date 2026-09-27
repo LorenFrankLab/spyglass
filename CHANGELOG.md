@@ -417,6 +417,16 @@ available.
   `motion_estimate_supplied`. `estimate_motion` skips the sorter-only preflight
   checks (`preflight_v2_pipeline` / the concat preflight take
   `sort_checks=False`), so the preset's sorter need not be available.
+- `MotionEstimate.report(key, corrected_key=None, trace_window_s=None)` takes
+  an estimate (a restriction, its id or an `estimate_motion` receipt) and
+  returns a figure and a summary dict built from the stored arrays:
+  displacement over source time and depth, masked intervals, acquisition gaps
+  and member joins (capped gaps marked), kept peaks per continuity span with
+  the spans that kept none flagged (corrected from the temporal prior alone),
+  and the contacts the displacement moves past the probe's ends. A corrected
+  recording of that estimate adds its removed or extrapolated channels and,
+  with a source-clock window, original vs corrected traces. The DB-free
+  `_motion_report` module computes both from arrays.
 - Every consumer of a corrected sort reads the corrected recording, with its
   channels (a `remove_channels` recipe's reduced set included): analyzer
   builds and rebuilds, merged and derivative curation analyzers,

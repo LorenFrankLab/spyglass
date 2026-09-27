@@ -1523,10 +1523,8 @@ receipt["motion_diagnostics"]
 #  'n_temporal_bins': ...}
 receipt["motion_spans_without_evidence"]  # [] when every span kept a peak
 
-# 3. Inspect it with the MotionEstimate accessors (see "Inspecting a saved
-# estimate" below).
-estimate_key = {"motion_estimate_id": receipt["motion_estimate_id"]}
-mapped = MotionEstimate().get_displacement_on_source_clock(estimate_key)
+# 3. Inspect it (see "Inspecting an estimate" below).
+fig, report = MotionEstimate().report(receipt)
 
 # 4. Apply exactly that estimate: correct the recording with the recipe's
 # interpolation row and sort the corrected recording.
@@ -1627,9 +1625,46 @@ sorting_key = SortingSelection.insert_selection(
 Sorting.populate(sorting_key)
 ```
 
-**Inspecting a saved estimate.** `MotionEstimate` stores the SpikeInterface
-`Motion`, its resolved configuration, the spans it estimated from, and
-peak-count diagnostics -- never a raw peak array.
+**Inspecting an estimate.** `MotionEstimate.report` draws one figure and
+returns a summary dict from the stored arrays. Pass an `estimate_motion`
+receipt, a `motion_estimate_id` or a restriction; add a corrected recording made
+from the estimate to see what applying it did, and a short window on the
+source's own clock (seconds, the clock of `get_spans_without_evidence`) to
+compare traces:
+
+```python
+fig, report = MotionEstimate().report(
+    receipt,
+    corrected_key=corrected_key,  # optional MotionCorrectedRecording
+    trace_window_s=(t_start, t_start + 0.2),  # optional; needs corrected_key
+)
+report["spans_without_evidence"]  # spans corrected from the prior alone
+report["max_abs_displacement_um"], report["rms_displacement_um"]
+report["masked_fraction"], report["gaps"], report["capped_gap_s"]
+report["border_channel_ids"], report["removed_channel_ids"]
+```
+
+- **(a) displacement** over source time: a heatmap over depth for a nonrigid
+  estimate, one line for a rigid one; gaps between continuity spans stay empty.
+- **(b) timeline** on the same axis: masked intervals (not evidence),
+  acquisition gaps and concatenation member joins, hatched where the gap was
+  shortened to the recipe's `max_gap_s` on the estimation clock, and the spans
+  without evidence.
+- **(c) evidence**: kept peaks per continuity span. A span marked "no evidence"
+  kept no peak: its displacement, and any correction applied there, comes from
+  the estimator's temporal prior alone, not from spikes recorded in it. Check
+  these before applying an estimate.
+- **(d) border channels**: each contact on the depth axis with the range the
+  displacement moves it over; contacts moved past the probe's ends in some bin
+  are circled (extrapolated under `force_extrapolate`) or crossed (dropped by
+  `remove_channels`).
+- **(e) traces** (with `trace_window_s`): original and corrected traces in µV
+  for four channels near the middle of the probe (`trace_channel_ids` to
+  choose).
+
+**Reading a saved estimate directly.** `MotionEstimate` stores the
+SpikeInterface `Motion`, its resolved configuration, the spans it estimated
+from, and peak-count diagnostics -- never a raw peak array.
 
 ```python
 motion = MotionEstimate().get_motion(estimate_key)
