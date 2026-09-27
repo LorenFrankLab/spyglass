@@ -223,6 +223,36 @@ def test_frame_and_source_time_maps_invert_each_other():
     assert int(frame_of_source_time(clock, 107.0)) == 5000
 
 
+def test_time_maps_follow_a_span_whose_timestamps_run_fast():
+    """Span 1's timestamps advance 1.001 s per nominal second (10 000 frames
+    at 1 kHz over 10.01 s): frame 10 000, 5 000 frames into the span, is at
+    110 + 5 * 1.001 s, not the nominal 115 s, and the inverse map undoes
+    that scale."""
+    from spyglass.spikesorting.v2._motion import build_estimation_clock
+    from spyglass.spikesorting.v2._motion_report import (
+        frame_of_source_time,
+        source_time_of_frames,
+    )
+
+    clock = build_estimation_clock(
+        [[0, 5000], [5000, 15000]],
+        [100.0, 110.0],
+        [104.999, 110.0 + 10.01 - 1.0 / FS],
+        FS,
+        MAX_GAP_S,
+    )
+    assert float(source_time_of_frames(clock, 10000)) == pytest.approx(
+        115.005, abs=1e-9
+    )
+    assert int(frame_of_source_time(clock, 115.005)) == 10000
+    # The nominal 115 s is 5 ms early: 4995 frames into the span.
+    assert int(frame_of_source_time(clock, 115.0)) == 9995
+    # The nominal-rate span 0 is unaffected.
+    assert float(source_time_of_frames(clock, 2500)) == pytest.approx(
+        102.5, abs=1e-9
+    )
+
+
 def test_default_trace_channels_are_the_middle_of_the_probe():
     from spyglass.spikesorting.v2._motion_report import default_trace_channels
 
