@@ -1491,21 +1491,73 @@ filter (`bandpass_filter=None`, the shipped `no_filter` row; for a
 preflight raises `PreflightError`). Whitening is never part of a
 preprocessing recipe, so the traces are always unwhitened.
 
-```python
-from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+**Estimate, inspect, then apply that estimate.** To look at an estimate before
+sorting anything, save it with `estimate_motion`, which takes the same source
+arguments as `run_v2_pipeline` (single-session or concat, preset, manual
+exclusions) plus the recipe. It runs the same preflight, recording and
+artifact-detection stages and saves only the `MotionEstimate`: nothing is sorted
+or curated. Then pass its `motion_estimate_id` to an `"apply"` run, which
+corrects and sorts with exactly that estimate (never recomputing it) using the
+recipe's interpolation row.
 
-# Single session, saving an estimate for inspection but sorting uncorrected
-# traces (same sorting_id you would get with motion_mode="off").
-summary = run_v2_pipeline(
+```python
+from spyglass.spikesorting.v2.motion import MotionEstimate
+from spyglass.spikesorting.v2.pipeline import estimate_motion, run_v2_pipeline
+
+# 1. Prepare the session as for any run (defaults, team, sort groups).
+source = dict(
     nwb_file_name=nwb_file_name,
     sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
     team_name="my_team",
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
+)
+
+# 2. Save the estimate of the source this run would sort. No sort, no
+# curation. (Concat: pass concat_session_group_owner /
+# concat_session_group_name instead of the single-session fields.)
+receipt = estimate_motion(**source, motion_correction_params_name="dredge_fast_v1")
+receipt["motion_estimate_id"], receipt["motion_estimation_preset"]
+receipt["motion_diagnostics"]
+# {'n_peaks_detected': ..., 'n_peaks_kept': ..., 'max_abs_displacement_um': ...,
+#  'n_temporal_bins': ...}
+receipt["motion_spans_without_evidence"]  # [] when every span kept a peak
+
+# 3. Inspect it with the MotionEstimate accessors (see "Inspecting a saved
+# estimate" below).
+estimate_key = {"motion_estimate_id": receipt["motion_estimate_id"]}
+mapped = MotionEstimate().get_displacement_on_source_clock(estimate_key)
+
+# 4. Apply exactly that estimate: correct the recording with the recipe's
+# interpolation row and sort the corrected recording.
+summary = run_v2_pipeline(
+    **source,
+    motion_mode="apply",
+    motion_correction_params_name="dredge_fast_v1",
+    motion_estimate_id=receipt["motion_estimate_id"],
+)
+summary["motion_estimate_supplied"]  # True; motion_estimate_status "reused"
+```
+
+The supplied estimate must be a populated estimate of this run's source and
+artifact mask, made with the recipe's **estimation** row; any mismatch is an
+error naming the estimate's value and the run's, before anything is corrected or
+sorted -- from preflight (for concat, preflight compares the session group and
+preprocessing recipe, and the run then compares the member masks) or, with
+`preflight=False`, from the `motion_estimate` stage (`PipelineStageError`).
+`motion_estimate_id` with `"off"` or `"estimate"` is a `PipelineInputError`. The
+receipt and `describe_run` show `motion_estimate_supplied`.
+
+`motion_mode` also works without an explicit estimate id:
+
+```python
+# Single session, saving an estimate for inspection but sorting uncorrected
+# traces (same sorting_id you would get with motion_mode="off").
+summary = run_v2_pipeline(
+    **source,
     motion_mode="estimate",
     motion_correction_params_name="dredge_fast_v1",
 )
-print(summary["motion_estimate_id"], summary["motion_estimation_preset"])
 
 # Apply it: sort the motion-corrected recording. The same source, mask and
 # estimation row resolve to the same motion_estimate_id, so this reuses the
@@ -1515,11 +1567,7 @@ print(summary["motion_estimate_id"], summary["motion_estimation_preset"])
 # Works the same way on a concat run
 # (concat_session_group_owner / concat_session_group_name).
 summary = run_v2_pipeline(
-    nwb_file_name=nwb_file_name,
-    sort_group_id=sort_group_id,
-    interval_list_name="raw data valid times",
-    team_name="my_team",
-    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
+    **source,
     motion_mode="apply",
     motion_correction_params_name="dredge_fast_v1",
 )
@@ -1605,11 +1653,12 @@ row["peaks_per_temporal_bin"], row["peaks_per_continuity_span"]
 row["max_abs_displacement_um"], row["noise_levels"]
 ```
 
-**Resolved presets.** Every recipe is DREDge's AP registration
-(`estimate_motion(..., method="dredge_ap")`); the shipped `dredge_v1` /
-`dredge_fast_v1` rows differ only in peak-localization method (accuracy vs
-speed), and `rigid_fast` -- allowed, but with no shipped default row -- is a
-**rigid** DREDge estimator, not a different algorithm:
+**Resolved presets.** Every recipe is DREDge's AP registration (SpikeInterface's
+`estimate_motion(..., method="dredge_ap")`, not the pipeline's `estimate_motion`
+above); the shipped `dredge_v1` / `dredge_fast_v1` rows differ only in
+peak-localization method (accuracy vs speed), and `rigid_fast` -- allowed, but
+with no shipped default row -- is a **rigid** DREDge estimator, not a different
+algorithm:
 
 | recipe | estimator | peak localization | interpolation border mode |
 | --- | --- | --- | --- |

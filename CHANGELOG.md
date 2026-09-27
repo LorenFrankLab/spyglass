@@ -402,6 +402,18 @@ available.
   `initialize_v2_defaults` installs the shipped motion recipes,
   `verify_v2_default_catalog` audits them, and `describe_parameter_rows`
   lists the rows of all three motion parameter tables.
+- `estimate_motion` (in `spyglass.spikesorting.v2.pipeline` and the package
+  root) takes `run_v2_pipeline`'s source arguments and a motion recipe, runs
+  the same preflight, recording and artifact stages, and saves only the
+  source's `MotionEstimate` -- nothing is sorted or curated. Its receipt gives
+  the estimate id, the resolved estimation preset, the spans without evidence
+  and a diagnostics summary (peaks detected and kept, largest displacement,
+  temporal bins). `run_v2_pipeline(motion_mode="apply", motion_estimate_id=...)`
+  then corrects and sorts with exactly that estimate, never recomputing it; an
+  estimate of another source or mask, or made with an estimation row other
+  than the recipe's, fails preflight (or the `motion_estimate` stage) naming
+  both, and the id with any other mode is a `PipelineInputError`. Receipts and
+  `describe_run` add `motion_estimate_supplied`.
 - Every consumer of a corrected sort reads the corrected recording, with its
   channels (a `remove_channels` recipe's reduced set included): analyzer
   builds and rebuilds, merged and derivative curation analyzers,
