@@ -1488,6 +1488,129 @@ def test_remove_channels_records_the_removed_contacts(discontinuous_sources):
     )
 
 
+def test_report_reads_the_stored_estimate_and_corrected_recording(
+    discontinuous_sources,
+):
+    """``MotionEstimate.report`` on a gapped recording (corrected with
+    ``remove_channels``, with a trace window) and on a concatenation
+    (``force_extrapolate``): the summary's evidence counts, displacement and
+    spans without evidence are the stored row's; the removed channels are
+    the corrected row's and equal the border contacts SpikeInterface's
+    criterion names; the concatenation's member join is told apart from
+    member B's own acquisition gap; the trace panel plots the corrected
+    recording's traces, which differ from the original's. A corrected
+    recording of another estimate, or a trace window without one, is
+    refused."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from spyglass.spikesorting.v2._motion_report import frame_of_source_time
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionEstimate,
+    )
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    def _assert_stored(summary, estimate, corrected_key):
+        row = (MotionEstimate & estimate).fetch1()
+        assert [s["n_peaks_kept"] for s in summary["continuity_spans"]] == (
+            row["peaks_per_continuity_span"].tolist()
+        )
+        assert summary["spans_without_evidence"] == (
+            MotionEstimate().get_spans_without_evidence(estimate)
+        )
+        assert summary["max_abs_displacement_um"] == (
+            row["max_abs_displacement_um"]
+        )
+        assert summary["n_temporal_bins"] == row["n_temporal_bins"]
+        assert summary["motion_estimate_id"] == estimate["motion_estimate_id"]
+        corrected = (MotionCorrectedRecording & corrected_key).fetch1()
+        assert summary["removed_channel_ids"] == list(
+            corrected["removed_channel_ids"]
+        )
+        return row
+
+    try:
+        gapped = populated_estimate(
+            recording_id=discontinuous_sources["member_b"]["recording_id"]
+        )
+        removed_key = populated_corrected(gapped, "kriging_remove_channels_v1")
+        clock = MotionEstimate().get_estimation_clock(gapped)
+        window = (clock.source_start_s[0] + 1.0, clock.source_start_s[0] + 1.1)
+        kept = list(
+            (MotionCorrectedRecording & removed_key).fetch1("channel_ids")
+        )
+        channel = kept[len(kept) // 2]
+        fig, summary = MotionEstimate().report(
+            gapped["motion_estimate_id"],
+            removed_key["motion_corrected_recording_id"],
+            trace_window_s=window,
+            trace_channel_ids=[channel],
+        )
+        _assert_stored(summary, gapped, removed_key)
+        assert summary["border_mode"] == "remove_channels"
+        assert summary["removed_channel_ids"]
+        assert summary["border_channel_ids"] == summary["removed_channel_ids"]
+        assert summary["extrapolated_channel_ids"] == []
+        [gap] = summary["gaps"]
+        assert gap["kind"] == "acquisition_gap"
+        assert gap["source_gap_s"] == pytest.approx(1.0, abs=1e-3)
+
+        axes = {ax.get_label(): ax for ax in fig.axes}
+        traces = axes["traces"]
+        assert [t.get_text() for t in traces.get_yticklabels()] == [
+            str(channel)
+        ]
+        start, end = (int(f) for f in frame_of_source_time(clock, window))
+        expected = (
+            MotionCorrectedRecording()
+            .get_recording(removed_key)
+            .get_traces(start_frame=start, end_frame=end, channel_ids=[channel])
+        )
+        original_line, corrected_line = traces.get_lines()[:2]
+        np.testing.assert_array_equal(
+            corrected_line.get_ydata(), expected[:, 0]
+        )
+        assert (
+            np.max(
+                np.abs(original_line.get_ydata() - corrected_line.get_ydata())
+            )
+            > 1.0
+        )
+
+        concat_key = discontinuous_sources["concat_key"]
+        concat = populated_estimate(
+            concat_recording_id=concat_key["concat_recording_id"]
+        )
+        extrapolated_key = populated_corrected(concat)
+        _, summary = MotionEstimate().report(
+            {**concat, "warnings": []}, extrapolated_key
+        )
+        _assert_stored(summary, concat, extrapolated_key)
+        assert summary["border_mode"] == "force_extrapolate"
+        assert summary["removed_channel_ids"] == []
+        assert summary["extrapolated_channel_ids"] == (
+            summary["border_channel_ids"]
+        )
+        member_a_end = (
+            ConcatenatedRecording.MemberBoundary
+            & concat_key
+            & {"member_index": 0}
+        ).fetch1("end_sample")
+        joins = [g for g in summary["gaps"] if g["kind"] == "member_join"]
+        assert [g["frame"] for g in joins] == [member_a_end]
+        assert summary["n_acquisition_gaps"] == 1
+
+        with pytest.raises(ValueError, match="was made from motion estimate"):
+            MotionEstimate().report(concat, removed_key)
+        with pytest.raises(ValueError, match="pass corrected_key too"):
+            MotionEstimate().report(concat, trace_window_s=window)
+    finally:
+        plt.close("all")
+
+
 def test_masked_frames_of_the_corrected_recording_are_zero(drift_recording):
     """A masked estimate's corrected recording is zero exactly outside the
     estimate's statistics spans and nonzero inside them."""
@@ -2823,6 +2946,27 @@ def test_estimate_motion_then_apply_that_estimate(drift_recording, monkeypatch):
         # A +/-25 um drift was planted; the estimate must see it.
         assert receipt["motion_diagnostics"]["n_peaks_kept"] > 0
         assert receipt["motion_diagnostics"]["max_abs_displacement_um"] > 10.0
+        # The receipt itself selects the estimate to report; the report
+        # shows the exclusion as masked.
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        _, summary = MotionEstimate().report(receipt)
+        plt.close("all")
+        assert summary["motion_estimate_id"] == receipt["motion_estimate_id"]
+        assert summary["spans_without_evidence"] == (
+            receipt["motion_spans_without_evidence"]
+        )
+        assert summary["max_abs_displacement_um"] == (
+            receipt["motion_diagnostics"]["max_abs_displacement_um"]
+        )
+        assert any(
+            interval["source_start_s"] <= t0 + 6.0 + 1e-3
+            and interval["source_end_s"] >= t0 + 6.5 - 1e-3
+            for interval in summary["masked_intervals"]
+        )
         assert set(receipt["stage_seconds"]) == {
             "recording",
             "artifact_detection",
