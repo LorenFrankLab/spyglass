@@ -169,6 +169,49 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
     )
 
 
+#: v2 tri-part tables whose ``make_compute`` stages a file or folder that only
+#: ``make_insert`` registers.
+_STAGING_TABLES = {
+    "spyglass.spikesorting.v2.recording.Recording",
+    "spyglass.spikesorting.v2.session_group.ConcatenatedRecording",
+    "spyglass.spikesorting.v2.sorting.Sorting",
+    "spyglass.spikesorting.v2.motion.MotionCorrectedRecording",
+    "spyglass.spikesorting.v2.metric_curation.CurationEvaluation",
+    "spyglass.spikesorting.v2.concat_member_curation.ConcatMemberCuration",
+    "spyglass.spikesorting.v2.figpack_curation.FigPackCuration",
+    "spyglass.spikesorting.v2.unit_matching.UnitMatch",
+}
+
+
+def test_staging_tables_remove_outputs_of_failed_populates():
+    """Every staging table cleans up after a populate that stops short.
+
+    DataJoint re-runs ``make_fetch`` inside the insert transaction and can
+    refuse the insert after ``make_compute`` has staged its output; only
+    ``StagedOutputCleanupMixin`` removes that output. Its ``_populate1``
+    must run around DataJoint's, so the mixin must precede the DataJoint
+    bases.
+    """
+    from datajoint.autopopulate import AutoPopulate
+
+    from spyglass.spikesorting.v2._staged_outputs import (
+        StagedOutputCleanupMixin,
+    )
+
+    tables = _v2_autopopulate_tables()
+    assert _STAGING_TABLES <= set(tables)
+    wrong = [
+        name
+        for name in sorted(_STAGING_TABLES)
+        if not issubclass(tables[name], StagedOutputCleanupMixin)
+        or tables[name].__mro__.index(StagedOutputCleanupMixin)
+        > tables[name].__mro__.index(AutoPopulate)
+    ]
+    assert (
+        not wrong
+    ), f"{wrong} do not use StagedOutputCleanupMixin ahead of AutoPopulate"
+
+
 def _write_package(root, name: str, files: dict[str, str]):
     """Write a throwaway package under ``root`` and import it."""
     import importlib
