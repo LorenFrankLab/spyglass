@@ -1082,6 +1082,87 @@ def test_recording_recompute_regen_failure_records_matched_zero(
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_recording_recompute_fetch_resolves_inputs_and_compute_only_stages(
+    populated_sorting, clean_recompute, monkeypatch
+):
+    """``make_fetch`` resolves the canonical artifact and the Recording
+    rebuild inputs (its hash is stable across DataJoint's two fetches), and
+    ``make_compute`` fingerprints both with no DB access beyond staging the
+    fresh rebuild; the fresh rebuild reproduces the stored content_hash."""
+    _assert_temp_base_dir()
+    from spyglass.spikesorting.v2 import recompute as rc
+    from spyglass.spikesorting.v2._recompute import combined_hash
+    from spyglass.spikesorting.v2.recording import Recording
+    from tests.spikesorting.v2._tripart_helpers import (
+        fetch_hash,
+        forbid_db_queries,
+    )
+
+    rec_key = _recording_key(populated_sorting)
+    rc.RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+    rc.RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    sel_key = (rc.RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
+    table = rc.RecordingArtifactRecompute()
+
+    fetched = table.make_fetch(sel_key)
+    parent_key = {"recording_id": str(rec_key["recording_id"])}
+    assert fetched.regen_inputs.current == Recording().resolve_stored_traces(
+        parent_key
+    )
+    assert fetched.regen_inputs.recording.raw_path == (
+        Recording().make_fetch(parent_key).raw_path
+    )
+    assert fetch_hash(table.make_fetch(sel_key)) == fetch_hash(fetched)
+    with forbid_db_queries(
+        monkeypatch, "RecordingArtifactRecompute", allow_staging=True
+    ):
+        computed = table.make_compute(sel_key, *fetched)
+    assert computed.outcome == "compare", computed.err_msg
+    assert combined_hash(computed.new_hashes) == (
+        (Recording & rec_key).fetch1("content_hash")
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_recording_recompute_fetch_failure_records_matched_zero(
+    populated_sorting, clean_recompute, monkeypatch
+):
+    """An input ``make_fetch`` cannot resolve is still a recorded matched=0
+    outcome carrying the failure's message, as when compute resolved it."""
+    _assert_temp_base_dir()
+    from spyglass.spikesorting.v2 import recompute as rc
+    from spyglass.spikesorting.v2.recording import Recording
+    from tests.spikesorting.v2._tripart_helpers import fetch_hash
+
+    rec_key = _recording_key(populated_sorting)
+    rc.RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+    rc.RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    sel_key = (rc.RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
+    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
+
+    def _boom(self, key):
+        raise RuntimeError("simulated missing probe geometry")
+
+    monkeypatch.setattr(Recording, "make_fetch", _boom)
+    table = rc.RecordingArtifactRecompute()
+    fetched = table.make_fetch(sel_key)
+    assert fetched.regen_inputs.recording == rc.FetchFailure(
+        "simulated missing probe geometry"
+    )
+    assert fetch_hash(table.make_fetch(sel_key)) == fetch_hash(fetched)
+
+    rc.RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
+    row = (rc.RecordingArtifactRecompute & sel_key).fetch1()
+    assert row["matched"] == 0
+    assert row["err_msg"] == "simulated missing probe geometry"
+    assert not (rc.RecordingArtifactRecompute.Name & sel_key)
+    assert not (rc.RecordingArtifactRecompute.Hash & sel_key)
+    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_recording_recompute_xfail_records_matched_zero(
     populated_sorting, clean_recompute
 ):

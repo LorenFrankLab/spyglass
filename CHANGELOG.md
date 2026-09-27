@@ -149,6 +149,13 @@ DLCProject().alter()
   `SortingSelection.resolve_stored_units` and `_units_nwb.read_stored_units`
   split `get_sorting`'s readback into its DB and file halves. Pairs are
   unchanged.
+- `RecordingArtifactRecompute.make_fetch` resolves the canonical artifact
+  (rebuilding a missing one there) and the parent's `Recording.make_fetch`
+  inputs, carried in the new `RecomputeFetched.regen_inputs` field;
+  `make_compute` fingerprints the file and a fresh rebuild with no DB queries
+  apart from staging that rebuild. An input that cannot be resolved is still
+  recorded as a `matched=0` row with the same `err_msg`, not a failed
+  populate. `Recording._compute_recording_artifact` is now a classmethod.
 
 #### Spike Sorting v2: optional motion correction, independent of concatenation
 

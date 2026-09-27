@@ -2039,8 +2039,9 @@ class Recording(SpyglassMixin, dj.Computed):
 
     # ---- Implementation helpers -----------------------------------------
 
+    @classmethod
     def _compute_recording_artifact(
-        self,
+        cls,
         *,
         raw_path: str,
         raw_object_id: str,
@@ -2073,6 +2074,8 @@ class Recording(SpyglassMixin, dj.Computed):
         (``existing_analysis_file_name=None``). The rebuild path installs that
         staged file into the canonical slot via ``os.replace`` only after a
         verified ``content_hash`` match -- it does not overwrite in place.
+        A classmethod so ``RecordingArtifactRecompute.make_compute`` can run it
+        without a table instance (constructing one queries the DB).
 
         Parameters
         ----------
@@ -2239,7 +2242,7 @@ class Recording(SpyglassMixin, dj.Computed):
                 analysis_file_name,
                 object_id,
                 content_hash,
-            ) = self._write_nwb_artifact(
+            ) = cls._write_nwb_artifact(
                 recording=recording,
                 nwb_file_name=nwb_file_name,
                 existing_analysis_file_name=existing_analysis_file_name,
@@ -2355,7 +2358,7 @@ class Recording(SpyglassMixin, dj.Computed):
         Thin delegator to
         :func:`._recording_nwb.write_nwb_artifact`; kept as a
         ``Recording`` staticmethod because ``_compute_recording_artifact``
-        calls ``self._write_nwb_artifact(...)`` and the v2 tests both
+        calls ``cls._write_nwb_artifact(...)`` and the v2 tests both
         monkeypatch ``Recording._write_nwb_artifact`` (the staged-file
         cleanup probe) and call it directly (the heterogeneous-gain +
         electrode-table-region guards). The streamed (chunk-iterator) NWB

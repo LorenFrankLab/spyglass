@@ -30,7 +30,7 @@ from typing import NamedTuple, Optional
 
 import datajoint as dj
 
-from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_user import UserEnvironment
 from spyglass.spikesorting.v2._analyzer_cache import (
     analyzer_cache_lock,
@@ -90,16 +90,65 @@ def _current_env_id() -> Optional[str]:
 
 
 class RecomputeFetched(NamedTuple):
-    """DB inputs for a recompute table's ``make_compute`` (no regen I/O).
+    """DB inputs for a recompute table's ``make_compute``.
+
+    No regeneration I/O, except the self-heal rebuild of a missing traces file
+    while resolving ``regen_inputs``.
 
     ``parent_key`` carries its UUID PK (``recording_id`` / ``sorting_id``) as a
     str so the carrier is DeepHash-stable for the tri-part integrity check.
+    ``regen_inputs`` is the table's regeneration inputs, resolved only when the
+    row is neither ``xfail`` nor ``unverifiable`` (``None`` otherwise).
     """
 
     parent_key: dict
     rounding: int
     xfail_reason: Optional[str]
     unverifiable_reason: Optional[str]
+    regen_inputs: Optional[tuple]
+
+
+class FetchFailure(NamedTuple):
+    """A regeneration input ``make_fetch`` could not resolve.
+
+    A regeneration failure is a recorded ``'error'`` outcome (``matched=0``),
+    not a failed populate. Resolving an input in ``make_fetch`` keeps that:
+    the failure's message is carried in place of the input, and
+    :func:`_resolved` raises it in ``make_compute`` where the input is used,
+    so ``_recompute_compute`` records the same ``err_msg`` at the same point
+    of the regeneration as when compute resolved the input itself.
+
+    Attributes
+    ----------
+    message : str
+        ``str()`` of the exception the resolution raised.
+    """
+
+    message: str
+
+
+def _resolve_or_failure(resolve, *, what, parent_key):
+    """Return ``resolve()``, or a :class:`FetchFailure` if it raises.
+
+    The traceback is logged here, where the original exception is caught;
+    ``make_compute`` only re-raises its message.
+    """
+    try:
+        return resolve()
+    except Exception as err:  # noqa: BLE001 - recorded as the 'error' outcome
+        logger.error(
+            f"{what} could not resolve its regeneration inputs for "
+            f"{parent_key}; recording matched=0 (retryable).",
+            exc_info=True,
+        )
+        return FetchFailure(str(err))
+
+
+def _resolved(value):
+    """Return a fetched regeneration input, raising a carried failure."""
+    if isinstance(value, FetchFailure):
+        raise RuntimeError(value.message)
+    return value
 
 
 class RecomputeComputed(NamedTuple):
@@ -119,6 +168,23 @@ class RecomputeComputed(NamedTuple):
     stored_hashes: dict
     new_hashes: dict
     parent_key: dict
+
+
+class RecordingRegenInputs(NamedTuple):
+    """What ``RecordingArtifactRecompute.make_compute`` regenerates from.
+
+    Attributes
+    ----------
+    current : StoredTraces or FetchFailure
+        The canonical artifact, rebuilt first if it was missing (the
+        ``Recording.get_recording`` self-heal).
+    recording : RecordingFetched, FetchFailure or None
+        ``Recording.make_fetch`` of the parent, for the fresh rebuild;
+        ``None`` when ``current`` failed (the rebuild inputs were never read).
+    """
+
+    current: object
+    recording: object
 
 
 class RecordingVersionsFetched(NamedTuple):
@@ -559,7 +625,13 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
     _parallel_make = True
 
     def make_fetch(self, key) -> RecomputeFetched:
-        """Read the recompute inputs (no regeneration I/O).
+        """Read the recompute inputs (no regeneration I/O except the
+        self-heal rebuild of a missing artifact).
+
+        Unless the row is ``xfail``, resolves the canonical artifact (rebuilt
+        if missing) and ``Recording.make_fetch`` for the fresh rebuild; a
+        failure is carried as a :class:`FetchFailure` and recorded as the
+        ``'error'`` outcome.
 
         There is no per-attempt ``rounding`` -- the content fingerprint's
         precision is fixed (``TRACE_ROUNDING`` / ``TIMESTAMP_ROUNDING``). The
@@ -570,12 +642,18 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
             "xfail_reason"
         )
         parent = self.get_parent_key(key)
+        # str the recording_id UUID for a DeepHash-stable carrier.
+        parent_key = {"recording_id": str(parent["recording_id"])}
         return RecomputeFetched(
-            # str the recording_id UUID for a DeepHash-stable carrier.
-            parent_key={"recording_id": str(parent["recording_id"])},
+            parent_key=parent_key,
             rounding=TRACE_ROUNDING,
             xfail_reason=xfail_reason,
             unverifiable_reason=None,
+            regen_inputs=(
+                None
+                if xfail_reason
+                else _resolve_recording_regen_inputs(parent_key)
+            ),
         )
 
     def make_compute(
@@ -585,28 +663,34 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
         rounding,
         xfail_reason,
         unverifiable_reason,
+        regen_inputs,
     ) -> RecomputeComputed:
         """Fingerprint the current file + a fresh rebuild, off the transaction.
 
         ``stored_hashes`` is the CURRENT on-disk file's fingerprint components
-        (``get_recording`` self-heals a missing file first) and ``new_hashes``
-        is an independent FRESH temp rebuild's components. ``make_insert``
-        anchors ``matched`` on ``combined_hash(new) == Recording.content_hash``
+        (``make_fetch`` self-healed a missing file) and ``new_hashes`` is an
+        independent FRESH temp rebuild's components. ``make_insert`` anchors
+        ``matched`` on ``combined_hash(new) == Recording.content_hash``
         (recoverability) and reports the current-vs-fresh component diff.
+        Reads only ``regen_inputs``; the one DB access left is staging the
+        fresh rebuild (see :mod:`._recording_nwb`).
         """
+        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
 
         def _regen():
-            # Self-heal a missing/deleted file first (and fail closed on drift),
-            # then fingerprint the canonical file; fingerprint a fresh,
-            # independent temp rebuild for the match authority.
-            Recording().get_recording(parent_key)
-            current_abs = AnalysisNwbfile.get_abs_path(
-                (Recording & parent_key).fetch1("analysis_file_name")
-            )
+            # Open the canonical file (healed in make_fetch, which failed
+            # closed on drift) as get_recording does, and fingerprint it;
+            # fingerprint a fresh, independent temp rebuild for the match
+            # authority.
+            current_traces = _resolved(regen_inputs.current)
+            read_stored_traces(current_traces)
             current = recording_content_fingerprint(
-                current_abs, electrical_series_path=_ELECTRICAL_SERIES_PATH
+                current_traces.abs_path,
+                electrical_series_path=_ELECTRICAL_SERIES_PATH,
             )
-            fresh = _recompute_recording_fingerprint(parent_key)
+            fresh = _recompute_recording_fingerprint(
+                _resolved(regen_inputs.recording)
+            )
             return current, fresh
 
         return _recompute_compute(
@@ -714,18 +798,41 @@ def _recording_missing_probe_info(nwb_file_name: str) -> bool:
     return not bool(Electrode * Probe & {"nwb_file_name": nwb_file_name})
 
 
-def _recompute_recording_fingerprint(rec_key: dict) -> dict:
+def _resolve_recording_regen_inputs(parent_key: dict) -> RecordingRegenInputs:
+    """Resolve what a recording recompute regenerates from (DB, self-heal).
+
+    In the order compute used them: the canonical artifact (rebuilt if
+    missing), then ``Recording.make_fetch`` for the fresh rebuild. A failure
+    stops the resolution and is carried as a :class:`FetchFailure`.
+    """
+    what = "RecordingArtifactRecompute"
+    current = _resolve_or_failure(
+        lambda: Recording().resolve_stored_traces(parent_key),
+        what=what,
+        parent_key=parent_key,
+    )
+    if isinstance(current, FetchFailure):
+        return RecordingRegenInputs(current=current, recording=None)
+    return RecordingRegenInputs(
+        current=current,
+        recording=_resolve_or_failure(
+            lambda: Recording().make_fetch(parent_key),
+            what=what,
+            parent_key=parent_key,
+        ),
+    )
+
+
+def _recompute_recording_fingerprint(fetched) -> dict:
     """Recompute a recording to a fresh (unregistered) temp file and return its
     content-fingerprint component dict.
 
-    The fresh temp is unlinked on success, mismatch, and error -- it never
-    enters the canonical slot.
+    ``fetched`` is ``Recording.make_fetch`` of the recording
+    (``RecordingFetched``). The fresh temp is unlinked on success, mismatch,
+    and error -- it never enters the canonical slot.
     """
-    recording_table = Recording()
-    fetched = recording_table.make_fetch(rec_key)
-    raw_path = Nwbfile().get_abs_path(fetched.sel["nwb_file_name"])
-    result = recording_table._compute_recording_artifact(
-        raw_path=raw_path,
+    result = Recording._compute_recording_artifact(
+        raw_path=fetched.raw_path,
         raw_object_id=fetched.raw_object_id,
         nwb_file_name=fetched.sel["nwb_file_name"],
         interval_list_name=fetched.sel["interval_list_name"],
@@ -1124,6 +1231,7 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
             rounding=int(rounding),
             xfail_reason=xfail_reason,
             unverifiable_reason=unverifiable_reason,
+            regen_inputs=None,
         )
 
     def make_compute(
@@ -1133,6 +1241,7 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
         rounding,
         xfail_reason,
         unverifiable_reason,
+        regen_inputs,
     ) -> RecomputeComputed:
         """Regenerate the analyzer folder + hash extensions off the transaction."""
         return _recompute_compute(
