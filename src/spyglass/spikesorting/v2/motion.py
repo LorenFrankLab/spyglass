@@ -981,9 +981,8 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
 
         resolved = _motion.resolve_estimation_params(params)
         resolved_hash = _motion.resolved_params_hash(resolved)
-        stale = [
-            f"{name} {now!r} != selected {then!r}"
-            for name, now, then in (
+        stale = _stale_fields(
+            [
                 (
                     "resolved configuration hash",
                     resolved_hash,
@@ -999,9 +998,8 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
                     _motion.MOTION_ALGORITHM_VERSION,
                     selection["motion_algorithm_version"],
                 ),
-            )
-            if now != then
-        ]
+            ]
+        )
         if stale:
             raise ValueError(
                 f"MotionEstimate {key}: the selection is stale ({'; '.join(stale)}). "
@@ -1171,6 +1169,26 @@ _ESTIMATE_APPLICATION_FIELDS = (
     "channel_ids",
     "channel_locations",
 )
+
+
+def _stale_fields(checks) -> list[str]:
+    """Describe each ``(name, current, selected)`` check whose values differ.
+
+    Parameters
+    ----------
+    checks : iterable of (str, object, object)
+        A field's name, its value now and its value on the selection.
+
+    Returns
+    -------
+    list[str]
+        One ``"<name> <current> != selected <selected>"`` per stale field.
+    """
+    return [
+        f"{name} {now!r} != selected {then!r}"
+        for name, now, then in checks
+        if now != then
+    ]
 
 
 def _live_source_row(
@@ -1632,31 +1650,29 @@ class MotionCorrectedRecording(SpyglassMixin, dj.Computed):
         )
 
         resolved = _motion.resolve_interpolation_params(interpolation_params)
-        stale = [
-            f"{name} {now!r} != selected {then!r}"
-            for name, now, then in (
-                (
-                    "resolved interpolation hash",
-                    _motion.resolved_params_hash(resolved),
-                    selection["resolved_params_hash"],
-                ),
+        checks = [
+            (
+                "resolved interpolation hash",
+                _motion.resolved_params_hash(resolved),
+                selection["resolved_params_hash"],
+            )
+        ]
+        if not allow_spikeinterface_version_change:
+            checks.append(
                 (
                     "SpikeInterface version",
-                    (
-                        selection["spikeinterface_version"]
-                        if allow_spikeinterface_version_change
-                        else si.__version__
-                    ),
+                    si.__version__,
                     selection["spikeinterface_version"],
-                ),
-                (
-                    "motion interpolation algorithm version",
-                    _motion.MOTION_INTERPOLATION_ALGORITHM_VERSION,
-                    selection["motion_interpolation_algorithm_version"],
-                ),
+                )
             )
-            if now != then
-        ]
+        checks.append(
+            (
+                "motion interpolation algorithm version",
+                _motion.MOTION_INTERPOLATION_ALGORITHM_VERSION,
+                selection["motion_interpolation_algorithm_version"],
+            )
+        )
+        stale = _stale_fields(checks)
         if stale:
             raise ValueError(
                 f"MotionCorrectedRecording {key}: the selection is stale "
