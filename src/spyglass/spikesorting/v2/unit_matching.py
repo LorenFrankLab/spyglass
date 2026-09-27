@@ -101,7 +101,9 @@ class UnitMatchFetched(NamedTuple):
     ``units`` locate that artifact and the curated units NWB, so compute reads
     them without the DB (:func:`_member_match_files`); they are present only
     for a group of two or more members (a single-member group extracts no
-    bundle).
+    bundle). ``sorting_id`` is a str, but ``traces`` keeps the fetched keys'
+    ``uuid.UUID`` values, which DataJoint's DeepHash hashes by value, so both
+    fetches still agree.
     """
 
     matcher_name: str

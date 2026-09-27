@@ -95,9 +95,11 @@ class RecomputeFetched(NamedTuple):
     while resolving ``regen_inputs``.
 
     ``parent_key`` carries its UUID PK (``recording_id`` / ``sorting_id``) as a
-    str so the carrier is DeepHash-stable for the tri-part integrity check.
-    ``regen_inputs`` is the table's regeneration inputs, resolved only when the
-    row is neither ``xfail`` nor ``unverifiable`` (``None`` otherwise).
+    str. ``regen_inputs`` is the table's regeneration inputs, resolved only
+    when the row is neither ``xfail`` nor ``unverifiable`` (``None``
+    otherwise); it keeps fetched UUIDs as ``uuid.UUID`` (e.g.
+    ``AnalyzerRegenInputs.sorting_id``, the effective traces' keys), which
+    DataJoint's DeepHash hashes by value, so both fetches still agree.
     """
 
     parent_key: dict
@@ -224,7 +226,8 @@ class AnalyzerRegenInputs(NamedTuple):
     Attributes
     ----------
     sorting_id : uuid.UUID
-        The sort, as stored (named in the no-rebuild loader's errors).
+        The sort, as stored (named in the no-rebuild loader's errors). Kept a
+        ``uuid.UUID``: DeepHash hashes it by value.
     waveform_params_name : str
         The recipe verified.
     n_units : int
