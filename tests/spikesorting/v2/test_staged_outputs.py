@@ -257,6 +257,50 @@ def test_each_key_is_cleaned_independently(tmp_path):
     assert table._staged_output_scopes == []
 
 
+@pytest.mark.parametrize("outer_fails", [False, True])
+def test_nested_populate_removes_only_its_own_outputs(tmp_path, outer_fails):
+    """An inner populate that fails on the same instance removes only its
+    outputs; the outer key's staged outputs wait for the outer outcome."""
+    from datajoint.errors import DataJointError
+
+    seen = {}
+
+    class Nested(_table_class(tmp_path)):
+        def make_fetch(self, key):
+            self.fetch_calls += 1
+            if key["id"] == "inner":
+                # The inner key's second fetch differs, so it is refused.
+                return ("parent", self.fetch_calls)
+            if self.fetch_calls == 2:
+                # The outer key's in-transaction fetch runs a nested populate
+                # after the outer compute has staged its outputs.
+                seen["inner"] = _populate1(
+                    self, {"id": "inner"}, suppress_errors=True
+                )
+                seen["outer_staged"] = (tmp_path / "outer.nwb").exists()
+                seen["inner_staged"] = (tmp_path / "inner.nwb").exists()
+                if outer_fails:
+                    return ("parent", "changed")
+            return ("parent", "same")
+
+    table = Nested()
+
+    if outer_fails:
+        with pytest.raises(DataJointError, match="Referential integrity"):
+            _populate1(table, {"id": "outer"})
+    else:
+        assert _populate1(table, {"id": "outer"}) is True
+
+    assert seen["inner"][0] == {"id": "inner"}
+    assert seen["inner_staged"] is False
+    assert seen["outer_staged"] is True
+    assert (tmp_path / "outer.nwb").exists() is not outer_fails
+    assert (tmp_path / "outer.bundle").exists() is not outer_fails
+    assert table.owners["outer.nwb"].closed == int(outer_fails)
+    assert table.owners["inner.nwb"].closed == 1
+    assert table._staged_output_scopes == []
+
+
 def test_direct_compute_outside_populate_records_nothing(tmp_path):
     """Only ``_populate1`` records; a direct ``make_compute`` is untouched."""
     table = _table_class(tmp_path)()
