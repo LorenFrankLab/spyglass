@@ -858,7 +858,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             here before any file is read.
         """
         from spyglass.spikesorting.v2._artifact_intervals import (
-            read_artifact_removed_intervals,
+            read_recording_artifact_valid_times,
         )
         from spyglass.spikesorting.v2._motion import unfiltered_source_problem
         from spyglass.spikesorting.v2._recording_nwb import (
@@ -915,21 +915,11 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
 
         artifact_valid_times = None
         if lineage.artifact_detection_id is not None:
-            nwb_file_name = (RecordingSelection & lineage.key).fetch1(
-                "nwb_file_name"
+            artifact_valid_times = read_recording_artifact_valid_times(
+                lineage.artifact_detection_id,
+                (RecordingSelection & lineage.key).fetch1("nwb_file_name"),
+                caller="MotionEstimate.make_fetch",
             )
-            by_nwb = read_artifact_removed_intervals(
-                {"artifact_detection_id": lineage.artifact_detection_id},
-                as_dict=True,
-            )
-            if nwb_file_name not in by_nwb:
-                raise ValueError(
-                    "MotionEstimate: artifact-removed intervals for "
-                    f"{nwb_file_name!r} not found for artifact_detection_id="
-                    f"{lineage.artifact_detection_id}; the detection may be "
-                    "partially deleted."
-                )
-            artifact_valid_times = by_nwb[nwb_file_name]
 
         return MotionEstimateFetched(
             lineage=lineage,

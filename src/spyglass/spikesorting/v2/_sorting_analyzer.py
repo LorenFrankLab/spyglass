@@ -475,31 +475,17 @@ def reconstruct_recording_and_sorting(sorting_table, key):
     valid_times = None
     if traces.apply_artifact_mask:
         # Route the artifact mask through the ownership-validated helper -- the
-        # same one Sorting.make_fetch uses -- NOT a direct IntervalList-by-name
-        # fetch. The direct fetch would accept a partially-deleted artifact (no
-        # RemovedInterval part rows owning the IntervalList) or a
-        # hand-inserted same-name IntervalList that populate rejects, so a
-        # rebuilt analyzer would diverge from what Sorting.make wrote.
+        # same one Sorting.make_fetch uses -- so a rebuilt analyzer never
+        # diverges from what Sorting.make wrote.
         from spyglass.spikesorting.v2._artifact_intervals import (
-            read_artifact_removed_intervals,
+            read_recording_artifact_valid_times,
         )
 
-        nwb_file_name = (RecordingSelection & lineage.key).fetch1(
-            "nwb_file_name"
+        valid_times = read_recording_artifact_valid_times(
+            lineage.artifact_detection_id,
+            (RecordingSelection & lineage.key).fetch1("nwb_file_name"),
+            caller="reconstruct_recording_and_sorting",
         )
-        intervals_by_nwb = read_artifact_removed_intervals(
-            {"artifact_detection_id": lineage.artifact_detection_id},
-            as_dict=True,
-        )
-        if nwb_file_name not in intervals_by_nwb:
-            raise ValueError(
-                "reconstruct_recording_and_sorting: artifact-removed intervals "
-                f"for nwb_file_name={nwb_file_name!r} not found among "
-                f"{sorted(intervals_by_nwb)} for artifact_detection_id="
-                f"{lineage.artifact_detection_id!r}; the ArtifactDetection may "
-                "be partially deleted."
-            )
-        valid_times = intervals_by_nwb[nwb_file_name]
     SortingSelection.ensure_effective_traces(traces)
     recording = load_effective_recording(
         traces,

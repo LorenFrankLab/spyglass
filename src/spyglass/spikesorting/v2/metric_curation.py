@@ -993,7 +993,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         """
         from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
         from spyglass.spikesorting.v2._artifact_intervals import (
-            read_artifact_removed_intervals,
+            read_recording_artifact_valid_times,
         )
         from spyglass.spikesorting.v2._observed_time import OBSERVATION_VERSION
         from spyglass.spikesorting.v2._sorting_analyzer import (
@@ -1062,22 +1062,13 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         if traces.apply_artifact_mask:
             from spyglass.spikesorting.v2.recording import RecordingSelection
 
-            nwb_file_name = (
-                RecordingSelection & {"recording_id": recording_id}
-            ).fetch1("nwb_file_name")
-            intervals_by_nwb = read_artifact_removed_intervals(
-                {"artifact_detection_id": artifact_detection_id},
-                as_dict=True,
+            artifact_valid_times = read_recording_artifact_valid_times(
+                artifact_detection_id,
+                (RecordingSelection & {"recording_id": recording_id}).fetch1(
+                    "nwb_file_name"
+                ),
+                caller="CurationEvaluation.make_fetch",
             )
-            if nwb_file_name not in intervals_by_nwb:
-                raise ValueError(
-                    "CurationEvaluation.make_fetch: artifact-removed intervals "
-                    f"for nwb_file_name={nwb_file_name!r} not found among "
-                    f"{sorted(intervals_by_nwb)} for artifact_detection_id="
-                    f"{artifact_detection_id!r}; the ArtifactDetection may be "
-                    "partially deleted."
-                )
-            artifact_valid_times = intervals_by_nwb[nwb_file_name]
 
         raw_units_abs_path = AnalysisNwbfile.get_abs_path(
             (Sorting & sorting_key).fetch1("analysis_file_name")

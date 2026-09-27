@@ -5,7 +5,8 @@ building the artifact-removed ``valid_times`` from a preprocessed
 recording (``scan_artifact_frames`` -> ``detect_artifacts``), building the
 ``IntervalList`` row contents (``build_artifact_interval_rows``), building
 the ownership part rows (``build_artifact_interval_part_rows``), reading
-those rows back (``read_artifact_removed_intervals``), and the delete-time
+those rows back (``read_artifact_removed_intervals``, and for one recording
+``read_recording_artifact_valid_times``), and the delete-time
 IntervalList cleanup policy (``collect_artifact_interval_rows_to_remove``
 + ``remove_artifact_interval_rows``). The construction functions are
 pure (non-DB) compute over SpikeInterface objects -- aside from
@@ -26,7 +27,8 @@ services" direction as ``_artifact_compute`` / ``_selection_identity`` /
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all numpy / SpikeInterface / spyglass dependencies
 are imported lazily inside the functions. The persistence functions
-(``read_artifact_removed_intervals``, ``collect_artifact_interval_rows_to_remove``,
+(``read_artifact_removed_intervals``, ``read_recording_artifact_valid_times``,
+``collect_artifact_interval_rows_to_remove``,
 ``remove_artifact_interval_rows``) DO touch the DB at call time -- they
 lazy-import ``common.IntervalList`` plus the split result tables
 ``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection`` back from
@@ -666,6 +668,51 @@ def read_artifact_removed_intervals(key, as_dict=False):
         "or SharedGroupArtifactDetection. Populate the artifact detection "
         "before reading its removed intervals."
     )
+
+
+def read_recording_artifact_valid_times(
+    artifact_detection_id, nwb_file_name: str, *, caller: str
+):
+    """Return one recording's artifact-removed ``valid_times``.
+
+    Reads through :func:`read_artifact_removed_intervals`, which validates
+    that the detection's ``RemovedInterval`` part rows own the
+    ``IntervalList``, rather than fetching the ``IntervalList`` by its
+    reconstructed name: that direct fetch would accept a partially deleted
+    detection or a hand-inserted same-name ``IntervalList``. The per-nwb dict
+    form covers single-recording and shared-group detections alike.
+
+    Parameters
+    ----------
+    artifact_detection_id : uuid.UUID
+        The per-source detection id.
+    nwb_file_name : str
+        The recording's parent NWB file.
+    caller : str
+        Prefix of the error message.
+
+    Returns
+    -------
+    np.ndarray
+        The ``(n_intervals, 2)`` artifact-removed valid times in seconds.
+
+    Raises
+    ------
+    ValueError
+        If the detection holds no intervals for ``nwb_file_name``.
+    """
+    intervals_by_nwb = read_artifact_removed_intervals(
+        {"artifact_detection_id": artifact_detection_id}, as_dict=True
+    )
+    if nwb_file_name not in intervals_by_nwb:
+        raise ValueError(
+            f"{caller}: artifact-removed intervals for "
+            f"nwb_file_name={nwb_file_name!r} not found among "
+            f"{sorted(intervals_by_nwb)} for artifact_detection_id="
+            f"{artifact_detection_id!r}; the ArtifactDetection may be "
+            "partially deleted."
+        )
+    return intervals_by_nwb[nwb_file_name]
 
 
 def read_owned_artifact_intervals(detection_cls, key):

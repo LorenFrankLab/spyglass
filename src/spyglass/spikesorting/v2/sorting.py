@@ -1705,31 +1705,18 @@ class Sorting(SpyglassMixin, dj.Computed):
             # gaps between disjoint source intervals.
             if sel_row.get("artifact_detection_id") is not None:
                 # Route through the strict ownership helper instead of
-                # fetching the IntervalList directly by reconstructed name. The
-                # direct fetch would accept a partially-deleted artifact (no
-                # ownership part rows) or a hand-inserted same-name IntervalList;
-                # read_artifact_removed_intervals validates the
-                # RemovedInterval part rows own the IntervalList and
-                # raises otherwise. as_dict=True so a shared-group source returns
-                # the per-nwb dict uniformly; select this recording's array (and
-                # raise clearly if absent rather than feeding a dict to the mask).
+                # fetching the IntervalList directly by reconstructed name, and
+                # raise clearly if this recording's intervals are absent rather
+                # than feeding a dict to the mask.
                 from spyglass.spikesorting.v2._artifact_intervals import (
-                    read_artifact_removed_intervals,
+                    read_recording_artifact_valid_times,
                 )
 
-                intervals_by_nwb = read_artifact_removed_intervals(
-                    {"artifact_detection_id": sel_row["artifact_detection_id"]},
-                    as_dict=True,
+                obs_intervals = read_recording_artifact_valid_times(
+                    sel_row["artifact_detection_id"],
+                    nwb_file_name,
+                    caller="Sorting.make_fetch",
                 )
-                if nwb_file_name not in intervals_by_nwb:
-                    raise ValueError(
-                        "Sorting.make_fetch: artifact-removed intervals for "
-                        f"nwb_file_name={nwb_file_name!r} not found among "
-                        f"{sorted(intervals_by_nwb)} for artifact_detection_id="
-                        f"{sel_row['artifact_detection_id']!r}; the "
-                        "ArtifactDetection may be partially deleted."
-                    )
-                obs_intervals = intervals_by_nwb[nwb_file_name]
             else:
                 obs_intervals = None
             concat_statistics_spans = None
