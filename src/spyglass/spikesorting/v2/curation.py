@@ -2018,7 +2018,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         # the materialized ConcatenatedRecording cache; a corrected sort reads
         # its MotionCorrectedRecording. The traces load as persisted, so a
         # single recording comes back WITHOUT the sort's artifact mask (the
-        # reusable preprocessed traces).
+        # reusable preprocessed traces), while a corrected recording comes back
+        # already masked: it was written with the sort's mask applied, and its
+        # ``apply_artifact_mask=False`` means "do not mask again", not
+        # "unmasked".
         return SortingSelection.load_stored_traces(traces)
 
     @classmethod
