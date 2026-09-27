@@ -3015,6 +3015,70 @@ def test_estimate_motion_does_not_need_the_sorter(
         _pipeline_preflight.assert_concat_preflight(*concat, **motion)
 
 
+def test_concat_preflight_refuses_an_estimate_of_other_member_masks(
+    discontinuous_sources,
+):
+    """For a concat run, preflight compares a supplied estimate's frozen
+    members with the member recordings and masks the run would select: the
+    estimate of the concatenation it builds passes, and the same
+    estimate for a run that adds a manual exclusion to member 0 is refused,
+    naming member 0's two detections, before anything is built or sorted."""
+    from spyglass.spikesorting.v2 import _pipeline_preflight
+    from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.spikesorting.v2.pipeline import (
+        estimate_motion,
+        run_v2_pipeline,
+    )
+
+    concat = {
+        "concat_session_group_owner": MOTION_TEAM,
+        "concat_session_group_name": CONCAT_GROUP,
+        "pipeline_preset": PIPELINE_PRESET,
+    }
+    motion = {
+        "motion_mode": "apply",
+        "motion_correction_params_name": MOTION_RECIPE,
+    }
+    t0 = discontinuous_sources["t0"]
+    receipt = None
+    try:
+        receipt = estimate_motion(
+            **concat, motion_correction_params_name=MOTION_RECIPE
+        )
+        estimate_id = receipt["motion_estimate_id"]
+        _pipeline_preflight.assert_concat_preflight(
+            MOTION_TEAM,
+            CONCAT_GROUP,
+            _PIPELINE_PRESETS[PIPELINE_PRESET],
+            **motion,
+            motion_estimate_id=estimate_id,
+        )
+        frozen = {
+            row["member_index"]: row["artifact_detection_id"]
+            for row in receipt["member_artifacts"]
+        }
+        before = _row_counts()
+        with pytest.raises(PreflightError) as raised:
+            run_v2_pipeline(
+                **concat,
+                **motion,
+                motion_estimate_id=estimate_id,
+                # Inside member 0's interval (session seconds 16-20).
+                manual_excluded_times={0: [[t0 + 17.0, t0 + 17.5]]},
+            )
+        message = str(raised.value)
+        assert f"motion estimate {estimate_id}" in message
+        assert f"member 0: its artifact_detection_id {frozen[0]} != " in message
+        assert "member 1:" not in message
+        assert _row_counts() == before
+    finally:
+        if receipt is not None:
+            drop_motion_selections(
+                {"concat_recording_id": receipt["concat_recording_id"]}
+            )
+
+
 @pytest.fixture
 def self_correcting_preset(dj_conn):
     """A registered preset whose sorter row (spykingcircus2 ``default``)

@@ -786,8 +786,8 @@ def assert_concat_preflight(
     sorter's own motion correction, as in :func:`preflight_v2_pipeline`.
     A supplied ``motion_estimate_id`` must be a populated estimate, made with
     the recipe's estimation row, of a concatenation of this session group
-    under the preset's preprocessing recipe (the run compares the member
-    masks once it has built the concatenation). ``sort_checks=False`` skips
+    under the preset's preprocessing recipe whose frozen members are the
+    member recordings and artifact detections this run would select. ``sort_checks=False`` skips
     the sorter-only checks (the sorter rows and runtime, the display analyzer
     recipe and each member's preset sampling rate), as in
     :func:`preflight_v2_pipeline`. Fails before
@@ -821,7 +821,12 @@ def assert_concat_preflight(
     # a partially-ingested or empty-sort-group member would otherwise fail deep
     # in the member populate with an opaque error.
     members = (SessionGroup.Member & group_key).fetch(
-        "member_index", "nwb_file_name", "sort_group_id", as_dict=True
+        "member_index",
+        "nwb_file_name",
+        "sort_group_id",
+        "interval_list_name",
+        "team_name",
+        as_dict=True,
     )
     for member in members:
         nwb = member["nwb_file_name"]
@@ -966,6 +971,27 @@ def assert_concat_preflight(
             if problem is not None:
                 raise PreflightError(f"{caller}: {problem}")
         if motion_estimate_id is not None:
+            # The member recordings and masks the run would select, derived
+            # like the single-session preview (manual exclusions per member).
+            concat_members = []
+            for member in members:
+                recording_id, artifact_detection_id = expected_source_ids(
+                    bundle,
+                    nwb_file_name=member["nwb_file_name"],
+                    sort_group_id=int(member["sort_group_id"]),
+                    interval_list_name=member["interval_list_name"],
+                    team_name=member["team_name"],
+                    manual_excluded_times=(manual_excluded_times or {}).get(
+                        int(member["member_index"]), []
+                    ),
+                )
+                concat_members.append(
+                    {
+                        "member_index": int(member["member_index"]),
+                        "recording_id": recording_id,
+                        "artifact_detection_id": artifact_detection_id,
+                    }
+                )
             problem = supplied_motion_estimate_problem(
                 motion_estimate_id,
                 motion_recipe,
@@ -975,6 +1001,7 @@ def assert_concat_preflight(
                         bundle.preprocessing_params_name
                     ),
                 },
+                concat_members=concat_members,
             )
             if problem is not None:
                 raise PreflightError(f"{caller}: {problem}")
@@ -1311,12 +1338,127 @@ def sorter_motion_correction_problem(
     return None
 
 
+def _concat_member_mismatch(concat_key: dict, expected: list[dict]) -> list:
+    """Describe how a concatenation's frozen members differ from a run's.
+
+    Parameters
+    ----------
+    concat_key : dict
+        ``{"concat_recording_id": ...}`` of the saved concatenation.
+    expected : list of dict
+        The run's members: ``member_index``, ``recording_id`` and
+        ``artifact_detection_id`` (``None`` for an unmasked member).
+
+    Returns
+    -------
+    list of str
+        One description per differing member set or field; empty when they
+        agree.
+    """
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+
+    def _id(value):
+        return None if value is None else uuid.UUID(str(value))
+
+    fields = ("recording_id", "artifact_detection_id")
+    frozen = {
+        int(row["member_index"]): row
+        for row in (
+            ConcatenatedRecordingSelection.MemberSnapshot & concat_key
+        ).fetch("member_index", *fields, as_dict=True)
+    }
+    wanted = {int(row["member_index"]): row for row in expected}
+    if set(frozen) != set(wanted):
+        return [
+            f"its concatenation has members {sorted(frozen)}, but this "
+            f"run's has {sorted(wanted)}"
+        ]
+    return [
+        f"member {index}: its {name} {_id(frozen[index][name])} != the run's "
+        f"{_id(wanted[index][name])}"
+        for index in sorted(wanted)
+        for name in fields
+        if _id(frozen[index][name]) != _id(wanted[index][name])
+    ]
+
+
+def expected_source_ids(
+    bundle,
+    *,
+    nwb_file_name: str,
+    sort_group_id: int,
+    interval_list_name: str,
+    team_name: str,
+    manual_excluded_times,
+) -> tuple:
+    """Preview the recording and artifact-detection ids a run would mint.
+
+    Uses the same DB-free builders ``RecordingSelection.insert_selection`` and
+    ``RecordingArtifactSelection.insert_selection`` use, so the preview cannot
+    drift from the insert; only the recording's input hash is resolved from
+    the live sort-group, electrode and preprocessing rows (they must exist).
+
+    Parameters
+    ----------
+    bundle : _PipelinePreset
+        The preset (its preprocessing and artifact rows).
+    nwb_file_name, sort_group_id, interval_list_name, team_name
+        The recording's selection fields.
+    manual_excluded_times : list
+        The normalized manual exclusions of this recording.
+
+    Returns
+    -------
+    recording_id : uuid.UUID
+    artifact_detection_id : uuid.UUID or None
+        ``None`` when the preset runs no artifact detection.
+    """
+    from spyglass.spikesorting.v2._selection_identity import (
+        artifact_detection_identity_payload,
+        deterministic_id,
+    )
+    from spyglass.spikesorting.v2._selection_plan import (
+        build_recording_selection_plan,
+    )
+    from spyglass.spikesorting.v2.recording import resolve_recording_input_hash
+
+    recording_id = build_recording_selection_plan(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": interval_list_name,
+            "preprocessing_params_name": bundle.preprocessing_params_name,
+            "team_name": team_name,
+        },
+        recording_input_hash=resolve_recording_input_hash(
+            nwb_file_name, sort_group_id, bundle.preprocessing_params_name
+        ),
+    ).recording_id
+    # A None artifact name means no artifact-detection pass: the sort's
+    # identity carries artifact_detection_id=None (matching
+    # build_sorting_selection_plan), so there is no RecordingArtifactSelection
+    # PK to expect.
+    if bundle.artifact_detection_params_name is None:
+        return recording_id, None
+    return recording_id, deterministic_id(
+        "artifact_detection",
+        artifact_detection_identity_payload(
+            artifact_detection_params_name=bundle.artifact_detection_params_name,
+            recording_id=recording_id,
+            manual_excluded_times=manual_excluded_times,
+        ),
+    )
+
+
 def supplied_motion_estimate_problem(
     motion_estimate_id,
     motion_recipe: MotionRecipe,
     *,
     source_lineage=None,
     concat_source: "dict | None" = None,
+    concat_members: "list[dict] | None" = None,
 ) -> "str | None":
     """Say why a saved motion estimate cannot be applied by a run.
 
@@ -1324,8 +1466,8 @@ def supplied_motion_estimate_problem(
     row, and made from the run's source: exactly its source and artifact
     mask (``source_lineage``), or, before a concat run has built its
     concatenation, a concatenation of the same session group under the same
-    preprocessing recipe (``concat_source``; the member masks are compared
-    once the concatenation exists, through ``source_lineage``).
+    preprocessing recipe (``concat_source``) whose frozen members are the
+    run's members, recordings and artifact detections (``concat_members``).
 
     Parameters
     ----------
@@ -1338,6 +1480,10 @@ def supplied_motion_estimate_problem(
     concat_source : dict, optional
         ``session_group_owner``, ``session_group_name`` and
         ``preprocessing_params_name`` of a concat run.
+    concat_members : list of dict, optional
+        The concat run's expected members, each ``member_index``,
+        ``recording_id`` and ``artifact_detection_id`` (``None`` unmasked),
+        compared with the estimate's concatenation's ``MemberSnapshot``.
 
     Returns
     -------
@@ -1398,6 +1544,10 @@ def supplied_motion_estimate_problem(
                         f"its concatenation has {name} {value!r}, but this "
                         f"run's has {concat_source[name]!r}"
                     )
+            if concat_members is not None:
+                problems.extend(
+                    _concat_member_mismatch(lineage.key, concat_members)
+                )
     if not problems:
         return None
     return (
@@ -1677,12 +1827,7 @@ def preflight_v2_pipeline(
     import spikeinterface.sorters as sis
 
     from spyglass.common import IntervalList, LabTeam, Raw, Session
-    from spyglass.spikesorting.v2._selection_identity import (
-        artifact_detection_identity_payload,
-        deterministic_id,
-    )
     from spyglass.spikesorting.v2._selection_plan import (
-        build_recording_selection_plan,
         build_sorting_selection_plan,
     )
     from spyglass.spikesorting.v2.artifact import (
@@ -1695,7 +1840,6 @@ def preflight_v2_pipeline(
         Recording,
         RecordingSelection,
         SortGroupV2,
-        resolve_recording_input_hash,
     )
     from spyglass.spikesorting.v2._recipe_catalog import (
         waveform_params_for_preprocessing,
@@ -2086,38 +2230,14 @@ def preflight_v2_pipeline(
     if not (sort_group_exists and preprocessing_params_exist):
         expected_ids = {}
     else:
-        # The SAME DB-free builders insert_selection uses assemble the ids, so
-        # the preview cannot drift from the insert; only the input hash is
-        # resolved here (it needs the live sort-group / electrode rows).
-        recording_id = build_recording_selection_plan(
-            {
-                "nwb_file_name": nwb_file_name,
-                "sort_group_id": sort_group_id,
-                "interval_list_name": interval_list_name,
-                "preprocessing_params_name": bundle.preprocessing_params_name,
-                "team_name": team_name,
-            },
-            recording_input_hash=resolve_recording_input_hash(
-                nwb_file_name,
-                sort_group_id,
-                bundle.preprocessing_params_name,
-            ),
-        ).recording_id
-        # A None artifact name means no artifact-detection pass: the sort's
-        # identity carries artifact_detection_id=None (matching
-        # build_sorting_selection_plan), so the expected sorting_id derives from
-        # None and there is no RecordingArtifactSelection PK to expect.
-        if bundle.artifact_detection_params_name is None:
-            artifact_detection_id = None
-        else:
-            artifact_detection_id = deterministic_id(
-                "artifact_detection",
-                artifact_detection_identity_payload(
-                    artifact_detection_params_name=bundle.artifact_detection_params_name,
-                    recording_id=recording_id,
-                    manual_excluded_times=manual_excluded_times,
-                ),
-            )
+        recording_id, artifact_detection_id = expected_source_ids(
+            bundle,
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            interval_list_name=interval_list_name,
+            team_name=team_name,
+            manual_excluded_times=manual_excluded_times,
+        )
         if motion_estimate_id is not None and motion_recipe is not None:
             from spyglass.spikesorting.v2._source_resolution import (
                 SourceLineage,
