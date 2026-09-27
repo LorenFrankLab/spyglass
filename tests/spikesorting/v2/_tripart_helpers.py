@@ -49,11 +49,22 @@ def forbid_db_queries(monkeypatch, label: str, *, allow_staging=False):
     label : str
         Names the code under test in the failure message.
     allow_staging : bool, optional
-        Let through queries made inside an ``AnalysisNwbfile`` method
-        (``AnalysisNwbfile().create`` / ``get_abs_path``): staging an output
-        file is the one DB access a ``make_compute`` may keep.
+        Allow staging an output file, the one DB access a ``make_compute``
+        may keep. Two rules apply:
+
+        - Queries are let through when ANY frame up the stack is an
+          ``AnalysisNwbfile`` method (bound ``self`` or ``cls``). This is
+          stack-based: it covers ``AnalysisNwbfile()`` construction,
+          ``create`` (and the ``Nwbfile`` lookup it makes) and
+          ``get_abs_path``, whatever the caller.
+        - ``AnalysisNwbfile.get_abs_path`` may resolve only a file that
+          ``AnalysisNwbfile().create`` returned inside the block (or be called
+          from within ``create``). Resolving any other analysis file -- an
+          input that belongs in ``make_fetch`` -- raises.
     """
     import datajoint as dj
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
 
     real = dj.Connection.query
 
@@ -64,4 +75,31 @@ def forbid_db_queries(monkeypatch, label: str, *, allow_staging=False):
 
     with monkeypatch.context() as patch:
         patch.setattr(dj.Connection, "query", _guard)
+        if allow_staging:
+            staged: set = set()
+            creating = [0]
+            real_create = AnalysisNwbfile.create
+            real_get_abs_path = AnalysisNwbfile.get_abs_path.__func__
+
+            def _create(self, *args, **kwargs):
+                creating[0] += 1
+                try:
+                    name = real_create(self, *args, **kwargs)
+                finally:
+                    creating[0] -= 1
+                staged.add(name)
+                return name
+
+            def _get_abs_path(cls, name, *args, **kwargs):
+                if not creating[0] and name not in staged:
+                    raise AssertionError(
+                        f"{label} resolved an analysis file it did not "
+                        f"stage: {name}"
+                    )
+                return real_get_abs_path(cls, name, *args, **kwargs)
+
+            patch.setattr(AnalysisNwbfile, "create", _create)
+            patch.setattr(
+                AnalysisNwbfile, "get_abs_path", classmethod(_get_abs_path)
+            )
         yield
