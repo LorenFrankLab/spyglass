@@ -17,11 +17,21 @@ private analyzer build, a figure bundle) leaves registering it to
    or returned as ``(key, error)`` when ``suppress_errors`` (lines 443-447).
 
 A table's own ``make_compute`` / ``make_insert`` cleanup covers failures inside
-those two methods, not step 2 or a failed transaction. The
-:class:`StagedOutputCleanupMixin` covers the whole gap: it records the staged
-outputs of each computed result when ``make_compute`` returns, forgets them
-once ``make_insert`` returns (they are registered from then on), and removes
-whatever is still recorded when ``_populate1`` ends without success.
+those two methods, not step 2. The :class:`StagedOutputCleanupMixin` covers
+everything from ``make_compute`` returning until ``make_insert`` returns: it
+records the staged outputs of each computed result when ``make_compute``
+returns, forgets them once ``make_insert`` returns (they are registered from
+then on), and removes whatever is still recorded when ``_populate1`` ends
+without success.
+
+Not covered: a failed COMMIT after ``make_insert`` has returned (DataJoint's
+``else`` clause, line 449). The registration rolls back but the outputs were
+already forgotten, so they stay on disk -- including what ``make_insert``
+moved into place before the commit (``Sorting``'s analyzer publish,
+``FigPackCuration``'s bundle install). Forgetting at that point is what keeps
+a failure after a successful commit (``jobs.complete``, line 452) from
+removing a committed row's files. Nor is a process killed between
+``make_compute`` and ``make_insert``; its staging stays until swept.
 
 This module is DB-free; removing an ``AnalysisNwbfile`` imports its helper
 lazily.

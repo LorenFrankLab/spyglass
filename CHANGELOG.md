@@ -174,7 +174,9 @@ DLCProject().alter()
   `make_compute` or `make_insert` failed. An offline FigPack bundle is saved
   into a hidden sibling of its folder and moved into place only after its row
   is inserted, so a refused or duplicate populate never replaces the bundle of
-  a committed row.
+  a committed row. Outputs still stay behind when the commit itself fails after
+  `make_insert` returns, or when the process is killed between compute and
+  insert.
 
 #### Spike Sorting v2: optional motion correction, independent of concatenation
 
