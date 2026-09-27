@@ -1139,7 +1139,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         artifact_detection_id,
         deterministic_id,
         source_part,
-        motion_corrected_recording_id=None,
+        motion_corrected_recording_id,
     ) -> dict | None:
         """Return the canonical master PK for this sort selection, or None.
 
