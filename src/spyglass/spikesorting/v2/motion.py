@@ -1506,7 +1506,7 @@ def _stale_fields(checks) -> list[str]:
 
 def _stale_corrected_selection_fields(
     selection: dict,
-    interpolation_params: dict,
+    resolved_interpolation_params: dict,
     *,
     check_spikeinterface_version: bool,
 ) -> list[str]:
@@ -1516,8 +1516,9 @@ def _stale_corrected_selection_fields(
     ----------
     selection : dict
         The ``MotionCorrectedRecordingSelection`` row.
-    interpolation_params : dict
-        Its ``MotionInterpolationParameters`` row's ``params`` blob.
+    resolved_interpolation_params : dict
+        Its ``MotionInterpolationParameters`` row's ``params`` blob, resolved
+        by ``_motion.resolve_interpolation_params``.
     check_spikeinterface_version : bool
         Also compare the installed SpikeInterface version.
 
@@ -1531,11 +1532,10 @@ def _stale_corrected_selection_fields(
 
     from spyglass.spikesorting.v2 import _motion
 
-    resolved = _motion.resolve_interpolation_params(interpolation_params)
     checks = [
         (
             "resolved interpolation hash",
-            _motion.resolved_params_hash(resolved),
+            _motion.resolved_params_hash(resolved_interpolation_params),
             selection["resolved_params_hash"],
         )
     ]
@@ -2034,7 +2034,7 @@ class MotionCorrectedRecording(
         resolved = _motion.resolve_interpolation_params(interpolation_params)
         stale = _stale_corrected_selection_fields(
             selection,
-            interpolation_params,
+            resolved,
             check_spikeinterface_version=(
                 not allow_spikeinterface_version_change
             ),
@@ -2282,6 +2282,7 @@ class MotionCorrectedRecording(
 
         from spyglass.spikesorting.v2._motion import (
             motion_corrected_recording_artifact_lock,
+            resolve_interpolation_params,
         )
         from spyglass.spikesorting.v2._recording_nwb import (
             install_rebuilt_recording,
@@ -2318,7 +2319,7 @@ class MotionCorrectedRecording(
             # resolution or application algorithm cannot reproduce them.
             stale = _stale_corrected_selection_fields(
                 fetched.selection,
-                fetched.interpolation_params,
+                resolve_interpolation_params(fetched.interpolation_params),
                 check_spikeinterface_version=False,
             )
             if stale:
