@@ -14,7 +14,8 @@ temporal prior alone; both the summary and the figure name such spans.
 Times are on the source's own acquisition clock (s). Inside continuity span
 ``i`` a frame ``s`` is placed at ``t_i + (s - a_i) / fs * r_i``, the affine
 map :func:`._motion.displacement_on_source_clock` uses for the temporal bins
-(``r_i`` scales the span's nominal duration onto its real extent); the
+(``r_i``, :func:`._motion.span_scales`, scales the span's nominal duration
+onto its real extent); the
 timestamps' own jitter inside a span is not shown.
 
 DB-FREE AT IMPORT. matplotlib is imported inside the plotting function.
@@ -30,6 +31,8 @@ from spyglass.spikesorting.v2._motion import (
     EstimationClock,
     displacement_on_source_clock,
     motion_max_abs_displacement_um,
+    span_nominal_durations,
+    span_scales,
     spans_without_evidence,
 )
 from spyglass.spikesorting.v2._sorting_artifact_mask import (
@@ -120,14 +123,6 @@ class TraceWindow(NamedTuple):
     corrected_uv: np.ndarray
 
 
-def _span_scales(clock: EstimationClock) -> np.ndarray:
-    """``(n_spans,)`` real extent over nominal duration of each span."""
-    fs = clock.sampling_frequency
-    nominal = (clock.spans[:, 1] - clock.spans[:, 0]) / fs
-    real = clock.source_end_s + 1.0 / fs - clock.source_start_s
-    return real / nominal
-
-
 def _span_of_frames(clock: EstimationClock, frames) -> np.ndarray:
     """Continuity span holding each frame (clipped to the first / last)."""
     return np.clip(
@@ -158,7 +153,7 @@ def source_time_of_frames(clock: EstimationClock, frames) -> np.ndarray:
         clock.source_start_s[span]
         + (frames - clock.spans[span, 0])
         / clock.sampling_frequency
-        * _span_scales(clock)[span]
+        * span_scales(clock)[span]
     )
 
 
@@ -188,7 +183,7 @@ def frame_of_source_time(clock: EstimationClock, time_s) -> np.ndarray:
     offset = np.round(
         (time_s - clock.source_start_s[span])
         * clock.sampling_frequency
-        / _span_scales(clock)[span]
+        / span_scales(clock)[span]
     )
     return np.clip(
         clock.spans[span, 0] + offset,
@@ -283,8 +278,9 @@ def _gaps(inputs: MotionReportInputs) -> list[dict]:
     """
     clock = inputs.clock
     fs = clock.sampling_frequency
-    nominal = (clock.spans[:, 1] - clock.spans[:, 0]) / fs
-    on_clock = np.diff(clock.estimation_start_s) - nominal[:-1]
+    on_clock = (
+        np.diff(clock.estimation_start_s) - span_nominal_durations(clock)[:-1]
+    )
     joins = {int(f) for f in inputs.member_join_frames}
     gaps = []
     for i in range(len(clock.spans) - 1):
@@ -449,7 +445,7 @@ def _draw_displacement(ax, fig, inputs: MotionReportInputs, t0: float) -> None:
     clock = inputs.clock
     on_source = displacement_on_source_clock(inputs.motion, clock)
     fs = clock.sampling_frequency
-    scales = _span_scales(clock)
+    scales = span_scales(clock)
     bins = np.asarray(inputs.motion.temporal_bins_s[0], dtype=np.float64)
     bin_s = float(np.median(np.diff(bins))) if len(bins) > 1 else 1.0
     rigid = on_source.displacement_um.shape[1] == 1

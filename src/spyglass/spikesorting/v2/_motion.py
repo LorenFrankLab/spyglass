@@ -1069,6 +1069,27 @@ def estimation_clock_from_blob(blob: dict) -> EstimationClock:
     )
 
 
+def span_nominal_durations(clock: EstimationClock) -> np.ndarray:
+    """``(n_spans,)`` nominal duration ``(b_i - a_i) / fs`` of each span (s).
+
+    A span's length on the estimation clock.
+    """
+    return (clock.spans[:, 1] - clock.spans[:, 0]) / clock.sampling_frequency
+
+
+def span_scales(clock: EstimationClock) -> np.ndarray:
+    """``(n_spans,)`` real extent over nominal duration of each span.
+
+    ``r_i = (u_i + 1 / fs - t_i) / ((b_i - a_i) / fs)``: the factor that maps
+    a span's estimation-clock interval affinely onto its real extent on the
+    source clock (first timestamp to one sample after the last).
+    """
+    real = (
+        clock.source_end_s + 1.0 / clock.sampling_frequency
+    ) - clock.source_start_s
+    return real / span_nominal_durations(clock)
+
+
 def estimation_times(clock: EstimationClock, sample_index):
     """Estimation-clock times (s) of source frames.
 
@@ -1156,15 +1177,12 @@ def displacement_on_source_clock(
     SourceClockDisplacement
     """
     centers = np.asarray(motion.temporal_bins_s[0], dtype=np.float64)
-    fs = clock.sampling_frequency
     starts = clock.estimation_start_s
-    nominal = (clock.spans[:, 1] - clock.spans[:, 0]) / fs
-    real = clock.source_end_s + 1.0 / fs - clock.source_start_s
-    ends = starts + nominal
+    ends = starts + span_nominal_durations(clock)
     span = np.clip(np.searchsorted(starts, centers, side="right") - 1, 0, None)
     in_gap = (centers >= ends[span]) & (span < len(starts) - 1)
     source = clock.source_start_s[span] + (centers - starts[span]) * (
-        real[span] / nominal[span]
+        span_scales(clock)[span]
     )
     source[in_gap] = np.nan
     return SourceClockDisplacement(
