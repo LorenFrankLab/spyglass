@@ -1930,12 +1930,8 @@ def motion_estimate_selection_identity(
         motion_estimate_identity_payload(
             source_kind=source_kind,
             source_id=source_id,
-            source_content_hash=master_row["source_content_hash"],
             artifact_detection_id=artifact_detection_id,
-            motion_estimation_params_name=motion_estimation_params_name,
-            resolved_params_hash=master_row["resolved_params_hash"],
-            spikeinterface_version=master_row["spikeinterface_version"],
-            motion_algorithm_version=MOTION_ALGORITHM_VERSION,
+            **master_row,
         ),
     )
     return MotionSelectionIdentity(selection_id, master_row)
