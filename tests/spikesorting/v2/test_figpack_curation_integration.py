@@ -256,6 +256,7 @@ def test_changed_second_fetch_leaves_bundles_untouched(
     assert (FigPackCuration & selection).fetch1("figpack_uri") == str(bundle)
     assert (bundle / "index.html").exists()
     assert not (bundle / "sentinel.txt").exists()
+    assert not list(bundle.parent.glob(f".{bundle.name}.*"))
 
 
 def test_bundle_install_keeps_old_bundle_when_replace_fails(
