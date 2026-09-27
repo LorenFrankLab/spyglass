@@ -274,12 +274,17 @@ def _masked_intervals(inputs: MotionReportInputs) -> list[dict]:
 def _gaps(inputs: MotionReportInputs) -> list[dict]:
     """Every join between consecutive continuity spans.
 
-    The real gap and its length on the estimation clock follow
-    :func:`._motion.build_estimation_clock`: ``g_i = t_{i+1} - (u_i + 1 /
-    fs)`` clamped at 0, shortened to ``max_gap_s``.
+    The real gap is ``g_i = t_{i+1} - (u_i + 1 / fs)`` clamped at 0, as
+    :func:`._motion.build_estimation_clock` measures it; its length on the
+    estimation clock is read from the stored clock, ``e_{i+1} - e_i - (b_i -
+    a_i) / fs``, so it is the gap the estimate was actually computed with.
+    The clock shortened ``g_i`` to ``max_gap_s`` when it exceeds that cap
+    (``capped``).
     """
     clock = inputs.clock
     fs = clock.sampling_frequency
+    nominal = (clock.spans[:, 1] - clock.spans[:, 0]) / fs
+    on_clock = np.diff(clock.estimation_start_s) - nominal[:-1]
     joins = {int(f) for f in inputs.member_join_frames}
     gaps = []
     for i in range(len(clock.spans) - 1):
@@ -297,7 +302,7 @@ def _gaps(inputs: MotionReportInputs) -> list[dict]:
                     "member_join" if frame in joins else "acquisition_gap"
                 ),
                 "source_gap_s": source_gap,
-                "estimation_gap_s": min(source_gap, float(inputs.max_gap_s)),
+                "estimation_gap_s": float(on_clock[i]),
                 "capped": source_gap > float(inputs.max_gap_s),
             }
         )
