@@ -117,6 +117,13 @@ class FetchFailure(NamedTuple):
     so ``_recompute_compute`` records the same ``err_msg`` at the same point
     of the regeneration as when compute resolved the input itself.
 
+    DataJoint runs ``make_fetch`` twice and refuses the insert if the two
+    results differ, so the carried message must be the same on both fetches.
+    A self-heal rebuild that failed on the first fetch is attempted again on
+    the second, inside the insert transaction. A message that differs between
+    the two (one naming a random temp file, say) surfaces as DataJoint's
+    integrity error and no row is recorded.
+
     Attributes
     ----------
     message : str
