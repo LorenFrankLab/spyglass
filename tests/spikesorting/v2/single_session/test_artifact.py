@@ -1171,6 +1171,62 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_shared_group_make_compute_reads_fetched_members_without_db(
+    populated_recording, monkeypatch
+):
+    """``make_fetch`` resolves each member's cached file (hash-stable across
+    DataJoint's two fetches) and ``make_compute`` scans the members with no
+    DB access, matching a scan of ``Recording().get_recording``."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        SharedArtifactGroup,
+        SharedGroupArtifactDetection,
+        SharedGroupArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+    from tests.spikesorting.v2._tripart_helpers import (
+        fetch_hash,
+        forbid_db_queries,
+    )
+
+    ArtifactDetectionParameters.insert_default()
+    group_name = "v2_shared_group_compute_guard"
+    group = SharedArtifactGroup & {"shared_artifact_group_name": group_name}
+    group.super_delete(warn=False)
+    rec_key = {"recording_id": populated_recording["recording_id"]}
+    try:
+        SharedArtifactGroup.insert_group(group_name, [rec_key])
+        art_pk = SharedGroupArtifactSelection.insert_selection(
+            {
+                "shared_artifact_group_name": group_name,
+                "artifact_detection_params_name": "default",
+            }
+        )
+        table = SharedGroupArtifactDetection()
+        fetched = table.make_fetch(art_pk)
+        assert fetched.member_traces == (
+            Recording().resolve_stored_traces(rec_key),
+        )
+        assert fetch_hash(table.make_fetch(art_pk)) == fetch_hash(fetched)
+        with forbid_db_queries(monkeypatch, "SharedGroupArtifactDetection"):
+            computed = table.make_compute(art_pk, *fetched)
+
+        expected = table._run_artifact_scan(
+            Recording().get_recording(rec_key),
+            fetched.validated,
+            fetched.artifact_job_kwargs,
+            context="",
+            manual_excluded_times=fetched.manual_excluded_times,
+        )
+        np.testing.assert_array_equal(computed.valid_times, expected)
+    finally:
+        group.super_delete(warn=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_shared_artifact_group_populate_end_to_end(
     populated_recording, polymer_smoke_session
 ):

@@ -181,3 +181,35 @@ def test_sorting_make_fetch_heals_the_traces_file_idempotently(
     healed = Sorting().make_fetch(populated_sorting)
     assert Path(healed.traces_abs_path).exists()
     assert fetch_hash(healed) == fetch_hash(fetched)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_sorting_make_compute_queries_db_only_to_stage_output(
+    populated_sorting, monkeypatch
+):
+    """``make_compute`` sorts the traces file ``make_fetch`` resolved and
+    queries the DB only while staging its units NWB (no traces-row fetch,
+    self-heal or input path lookup)."""
+    from spyglass.spikesorting.v2.recording import (
+        _unlink_staged_analysis_file,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._tripart_helpers import forbid_db_queries
+
+    table = Sorting()
+    fetched = table.make_fetch(populated_sorting)
+    with forbid_db_queries(
+        monkeypatch, "Sorting.make_compute", allow_staging=True
+    ):
+        computed = table.make_compute(populated_sorting, *fetched)
+    try:
+        assert computed.analysis_file_name
+        assert len(computed.unit_rows) == int(
+            (Sorting & populated_sorting).fetch1("n_units")
+        )
+    finally:
+        computed.staged_analyzer.close()
+        _unlink_staged_analysis_file(
+            computed.analysis_file_name, context="test"
+        )

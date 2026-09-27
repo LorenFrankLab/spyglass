@@ -1197,6 +1197,66 @@ def test_final_snr_peak_sign_uses_sorter_polarity(
         clear_curations_for(planted_two_unit_sort)
 
 
+@pytest.mark.slow
+@pytest.mark.integration
+def test_make_compute_reads_fetched_traces_and_only_stages_output(
+    planted_two_unit_sort, curation_evaluation_defaults, monkeypatch
+):
+    """``make_fetch`` resolves the sort's traces file (hash-stable across
+    DataJoint's two fetches); ``make_compute`` evaluates from it and queries
+    the DB only while staging its output file."""
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        _unlink_staged_analysis_file,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+    from tests.spikesorting.v2._tripart_helpers import (
+        fetch_hash,
+        forbid_db_queries,
+    )
+
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(
+            sorting_key=dict(planted_two_unit_sort)
+        )
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        table = CurationEvaluation()
+        fetched = table.make_fetch(sel)
+        traces = fetched.recording_inputs.traces
+        assert fetched.recording_inputs.traces_abs_path == (
+            AnalysisNwbfile.get_abs_path(traces.row["analysis_file_name"])
+        )
+        assert fetch_hash(table.make_fetch(sel)) == fetch_hash(fetched)
+        with forbid_db_queries(
+            monkeypatch, "CurationEvaluation.make_compute", allow_staging=True
+        ):
+            computed = table.make_compute(sel, *fetched)
+        try:
+            assert Path(
+                AnalysisNwbfile.get_abs_path(computed.analysis_file_name)
+            ).exists()
+        finally:
+            _unlink_staged_analysis_file(
+                computed.analysis_file_name, context="test"
+            )
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
 @pytest.fixture(scope="package")
 def planted_zero_unit_sort(dj_conn):
     """A populated Sorting with ZERO units (an empty planted sorting).

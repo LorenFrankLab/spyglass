@@ -1301,6 +1301,48 @@ def test_concat_make_raises_on_sample_count_drift(same_day_group, monkeypatch):
     assert not (ConcatenatedRecording & concat_pk)
 
 
+@pytest.mark.slow
+def test_make_compute_reads_fetched_members_and_only_stages_output(
+    same_day_group, monkeypatch
+):
+    """``make_fetch`` resolves each member's cached file (hash-stable across
+    DataJoint's two fetches); ``make_compute`` reads those files and queries
+    the DB only to stage its output, reproducing the stored content hash."""
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        _unlink_staged_analysis_file,
+    )
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+    from tests.spikesorting.v2._tripart_helpers import (
+        fetch_hash,
+        forbid_db_queries,
+    )
+
+    grp = same_day_group
+    concat_pk = _populate_concat(
+        grp["group_key"], grp["preprocessing_params_name"]
+    )
+    table = ConcatenatedRecording()
+    fetched = table.make_fetch(concat_pk)
+    assert fetched.member_traces == tuple(
+        Recording().resolve_stored_traces(plan["recording_pk"])
+        for plan in fetched.member_plan
+    )
+    assert fetch_hash(table.make_fetch(concat_pk)) == fetch_hash(fetched)
+    with forbid_db_queries(
+        monkeypatch, "ConcatenatedRecording.make_compute", allow_staging=True
+    ):
+        computed = table.make_compute(concat_pk, *fetched)
+    try:
+        assert computed.content_hash == (
+            ConcatenatedRecording & concat_pk
+        ).fetch1("content_hash")
+    finally:
+        _unlink_staged_analysis_file(
+            computed.analysis_file_name, context="test"
+        )
+
+
 # ---------- concat-backed Sorting end-to-end ------------------------------
 
 
