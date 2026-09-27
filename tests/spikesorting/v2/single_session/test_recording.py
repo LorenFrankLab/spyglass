@@ -406,11 +406,13 @@ def test_rebuild_double_check_skips_when_present(
     calls = {"n": 0}
     real = Recording._compute_recording_artifact
 
-    def _counting(self, *args, **kwargs):
+    def _counting(*args, **kwargs):
         calls["n"] += 1
-        return real(self, *args, **kwargs)
+        return real(*args, **kwargs)
 
-    monkeypatch.setattr(Recording, "_compute_recording_artifact", _counting)
+    monkeypatch.setattr(
+        Recording, "_compute_recording_artifact", staticmethod(_counting)
+    )
     # File is present (populated), so the under-lock existence re-check short-
     # circuits before any rebuild.
     Recording()._rebuild_nwb_artifact(populated_recording)
