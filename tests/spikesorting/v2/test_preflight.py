@@ -397,6 +397,19 @@ def test_estimate_motion_rejects_a_bad_request_before_any_query(
         estimate_motion(**inputs)
 
 
+@pytest.mark.unit
+def test_estimate_motion_options_are_keyword_only():
+    """Only the single-session source fields are positional, so a preset or
+    a preflight flag passed by position (as ``run_v2_pipeline`` accepts them)
+    is refused instead of landing on another parameter."""
+    from spyglass.spikesorting.v2.pipeline import estimate_motion
+
+    with pytest.raises(TypeError, match="positional"):
+        estimate_motion(
+            "x.nwb", 0, _INTERVAL, "team", "franklab_clusterless_2026_06"
+        )
+
+
 def _resolved_motion_recipe(name: str) -> dict:
     from spyglass.spikesorting.v2._motion import resolve_estimation_params
     from spyglass.spikesorting.v2._recipe_catalog import (

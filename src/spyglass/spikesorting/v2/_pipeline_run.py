@@ -1754,9 +1754,9 @@ def estimate_motion(
     sort_group_id: "int | None" = None,
     interval_list_name: "str | None" = None,
     team_name: "str | None" = None,
+    *,
     pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
     preflight: bool = True,
-    *,
     concat_session_group_owner: "str | None" = None,
     concat_session_group_name: "str | None" = None,
     manual_excluded_times=None,
@@ -1789,7 +1789,8 @@ def estimate_motion(
     Parameters
     ----------
     nwb_file_name, sort_group_id, interval_list_name, team_name
-        Single-session mode, as in :func:`run_v2_pipeline`.
+        Single-session mode, as in :func:`run_v2_pipeline`. The only
+        positional parameters; every other one is keyword-only.
     concat_session_group_owner, concat_session_group_name
         Concat mode, as in :func:`run_v2_pipeline` (mutually exclusive with
         the single-session fields).
