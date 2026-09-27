@@ -2240,6 +2240,10 @@ def test_make_compute_reads_fetched_members_and_only_stages_output(
             assert list(recording.channel_ids) == list(
                 expected_recording.channel_ids
             )
+            np.testing.assert_array_equal(
+                recording.get_channel_locations(),
+                expected_recording.get_channel_locations(),
+            )
             assert (
                 recording.get_sampling_frequency()
                 == expected_recording.get_sampling_frequency()
