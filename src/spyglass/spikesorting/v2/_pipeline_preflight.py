@@ -883,8 +883,9 @@ def assert_concat_preflight(
 
     assert_preset_compute_rows(bundle)
     if motion_mode != "off":
-        from spyglass.spikesorting.v2._motion import unfiltered_source_problem
-        from spyglass.spikesorting.v2.recording import PreprocessingParameters
+        from spyglass.spikesorting.v2.motion import (
+            preprocessing_filter_problem,
+        )
         from spyglass.spikesorting.v2.sorting import SorterParameters
 
         try:
@@ -893,15 +894,7 @@ def assert_concat_preflight(
             raise PreflightError(f"run_v2_pipeline: {exc}") from exc
         # The concatenation is built with the preset's preprocessing recipe
         # (checked to exist by assert_preset_compute_rows above).
-        problem = unfiltered_source_problem(
-            bundle.preprocessing_params_name,
-            (
-                PreprocessingParameters
-                & {
-                    "preprocessing_params_name": bundle.preprocessing_params_name
-                }
-            ).fetch1("params"),
-        )
+        problem = preprocessing_filter_problem(bundle.preprocessing_params_name)
         if problem is not None:
             raise PreflightError(
                 f"run_v2_pipeline: motion_mode={motion_mode!r}: {problem}"
@@ -1862,19 +1855,13 @@ def preflight_v2_pipeline(
     # correction.
     motion_recipe = None
     if motion_mode != "off":
-        from spyglass.spikesorting.v2._motion import unfiltered_source_problem
+        from spyglass.spikesorting.v2.motion import (
+            preprocessing_filter_problem,
+        )
 
         if preprocessing_params_exist:
-            unfiltered = unfiltered_source_problem(
-                bundle.preprocessing_params_name,
-                (
-                    PreprocessingParameters
-                    & {
-                        "preprocessing_params_name": (
-                            bundle.preprocessing_params_name
-                        )
-                    }
-                ).fetch1("params"),
+            unfiltered = preprocessing_filter_problem(
+                bundle.preprocessing_params_name
             )
             _check(
                 "motion_source_filtered",

@@ -50,7 +50,11 @@ from spyglass.spikesorting.v2._recipe_catalog import (
 )
 from spyglass.spikesorting.v2._source_resolution import SourceLineage
 from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
-from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+from spyglass.spikesorting.v2.recording import (
+    PreprocessingParameters,
+    Recording,
+    RecordingSelection,
+)
 from spyglass.spikesorting.v2.session_group import (
     ConcatenatedRecording,
     ConcatenatedRecordingSelection,
@@ -241,6 +245,51 @@ _SOURCE_TABLES = {
     "concatenated_recording": ConcatenatedRecording,
 }
 
+#: The selection table naming each source kind's preprocessing recipe.
+_SOURCE_SELECTION_TABLES = {
+    "recording": RecordingSelection,
+    "concatenated_recording": ConcatenatedRecordingSelection,
+}
+
+
+def preprocessing_filter_problem(preprocessing_params_name: str) -> str | None:
+    """Say why a preprocessing recipe's traces cannot be motion-estimated.
+
+    Fetches the recipe's ``params`` and applies
+    :func:`._motion.unfiltered_source_problem`.
+
+    Parameters
+    ----------
+    preprocessing_params_name : str
+        A ``PreprocessingParameters`` row name.
+
+    Returns
+    -------
+    str or None
+        The problem, or ``None`` when the recipe applies a temporal filter.
+    """
+    from spyglass.spikesorting.v2._motion import unfiltered_source_problem
+
+    return unfiltered_source_problem(
+        preprocessing_params_name,
+        (
+            PreprocessingParameters
+            & {"preprocessing_params_name": preprocessing_params_name}
+        ).fetch1("params"),
+    )
+
+
+def _source_filter_problem(source_kind: str, source_key: dict) -> str | None:
+    """:func:`preprocessing_filter_problem` of a motion source's recipe.
+
+    A concatenation's recipe is the one it was built with.
+    """
+    return preprocessing_filter_problem(
+        (_SOURCE_SELECTION_TABLES[source_kind] & source_key).fetch1(
+            "preprocessing_params_name"
+        )
+    )
+
 
 def _assert_concat_tables_current() -> None:
     """Refuse concat tables whose live heading predates motion's removal."""
@@ -351,12 +400,10 @@ class MotionEstimateSelection(
         """
         from spyglass.spikesorting.v2._motion import (
             motion_estimate_selection_identity,
-            unfiltered_source_problem,
         )
         from spyglass.spikesorting.v2.artifact import (
             assert_artifact_detection_covers_recording,
         )
-        from spyglass.spikesorting.v2.recording import PreprocessingParameters
         from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
 
         caller = "MotionEstimateSelection.insert_selection"
@@ -417,21 +464,7 @@ class MotionEstimateSelection(
                 f"{caller}: {source_key} is not in {source_table.__name__}. "
                 "Populate it before selecting a motion estimate on it."
             )
-        selection_table = (
-            RecordingSelection
-            if source_kind == "recording"
-            else ConcatenatedRecordingSelection
-        )
-        preprocessing_name = (selection_table & source_key).fetch1(
-            "preprocessing_params_name"
-        )
-        problem = unfiltered_source_problem(
-            preprocessing_name,
-            (
-                PreprocessingParameters
-                & {"preprocessing_params_name": preprocessing_name}
-            ).fetch1("params"),
-        )
+        problem = _source_filter_problem(source_kind, source_key)
         if problem is not None:
             raise ValueError(
                 f"{caller}: {source_key} cannot be motion-estimated: {problem}"
@@ -860,29 +893,13 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._artifact_intervals import (
             read_recording_artifact_valid_times,
         )
-        from spyglass.spikesorting.v2._motion import unfiltered_source_problem
         from spyglass.spikesorting.v2._recording_nwb import (
             ensure_artifact_file,
         )
-        from spyglass.spikesorting.v2.recording import PreprocessingParameters
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         lineage = MotionEstimateSelection.resolve_source(key)
-        source_selection_table = (
-            RecordingSelection
-            if lineage.kind == "recording"
-            else ConcatenatedRecordingSelection
-        )
-        preprocessing_name = (source_selection_table & lineage.key).fetch1(
-            "preprocessing_params_name"
-        )
-        problem = unfiltered_source_problem(
-            preprocessing_name,
-            (
-                PreprocessingParameters
-                & {"preprocessing_params_name": preprocessing_name}
-            ).fetch1("params"),
-        )
+        problem = _source_filter_problem(lineage.kind, lineage.key)
         if problem is not None:
             raise ValueError(
                 f"MotionEstimate: {lineage.key} cannot be motion-estimated: "
