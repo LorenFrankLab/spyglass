@@ -70,6 +70,7 @@ from spyglass.spikesorting.v2._params.artifact_detection import (
     ArtifactDetectionParamsSchema,
 )
 from spyglass.spikesorting.v2._recipe_catalog import artifact_default_contents
+from spyglass.spikesorting.v2._recording_nwb import StoredTraces
 from spyglass.spikesorting.v2._signal_math import timestamp_fingerprint
 from spyglass.spikesorting.v2.recording import Recording
 from spyglass.spikesorting.v2.utils import (
@@ -694,13 +695,15 @@ class RecordingArtifactFetched(NamedTuple):
 
     The single-recording source is structural, so the fetched shape carries
     just the resolved ``recording_id`` + its parent ``nwb_file_name`` (no
-    source-kind branch, no member tuples).
+    source-kind branch, no member tuples), and the recording's cached
+    artifact resolved (and rebuilt if missing) for ``make_compute`` to read.
     """
 
     validated: ArtifactDetectionParamsSchema
     recording_id: object
     nwb_file_name: str
     artifact_job_kwargs: dict | None
+    traces: StoredTraces
     manual_excluded_times: object = None
 
 
@@ -1103,11 +1106,15 @@ class RecordingArtifactDetection(
     def make_fetch(self, key):
         """Read the params blob, resolved recording, and parent session.
 
+        Also resolves the recording's cached artifact, rebuilding a missing
+        file through ``Recording``'s own verified self-heal.
+
         Returns
         -------
         RecordingArtifactFetched
             Validated params, the resolved ``recording_id``, its parent
-            ``nwb_file_name``, and the per-row job kwargs.
+            ``nwb_file_name``, the per-row job kwargs and the resolved
+            artifact.
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
@@ -1124,6 +1131,9 @@ class RecordingArtifactDetection(
             recording_id=recording_id,
             nwb_file_name=nwb_file_name,
             artifact_job_kwargs=artifact_job_kwargs,
+            traces=Recording().resolve_stored_traces(
+                {"recording_id": recording_id}
+            ),
             manual_excluded_times=(RecordingArtifactSelection & key).fetch1(
                 "manual_excluded_times"
             ),
@@ -1136,16 +1146,19 @@ class RecordingArtifactDetection(
         recording_id,
         nwb_file_name,
         artifact_job_kwargs,
+        traces,
         manual_excluded_times=None,
     ):
-        """Load the single recording and scan it for artifacts.
+        """Read the single recording and scan it for artifacts; no DB access.
 
         Returns
         -------
         ArtifactComputed
             The ``valid_times`` plus the one-element per-member target list.
         """
-        recording = Recording().get_recording({"recording_id": recording_id})
+        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
+
+        recording = read_stored_traces(traces)
         valid_times = self._run_artifact_scan(
             recording,
             validated,

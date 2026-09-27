@@ -33,6 +33,32 @@ path resolution + file create). It also lazily imports the
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
+
+class StoredTraces(NamedTuple):
+    """A cached trace artifact resolved for a read that needs no DB.
+
+    A tri-part ``make_fetch`` builds it with :func:`stored_traces` (after the
+    self-heal) and ``make_compute`` opens it with :func:`read_stored_traces`.
+    Strings only, so DataJoint's hash of the fetched inputs is the same on
+    both of its fetches; ``content_hash`` puts the row's content under that
+    check.
+
+    Attributes
+    ----------
+    abs_path : str
+        Absolute path of the artifact's analysis NWB (present on disk).
+    electrical_series_path : str
+        The row's in-file path of the persisted ``ElectricalSeries``.
+    content_hash : str
+        The row's content fingerprint.
+    """
+
+    abs_path: str
+    electrical_series_path: str
+    content_hash: str
+
 
 def read_recording_nwb(
     path, *, electrical_series_path: str, load_time_vector: bool = True
@@ -118,6 +144,56 @@ def ensure_artifact_file(table, key: dict, analysis_file_name: str) -> str:
         table()._rebuild_nwb_artifact(key)
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
     return abs_path
+
+
+def stored_traces(table, key: dict, row: dict) -> StoredTraces:
+    """Self-heal a cached trace artifact and resolve it for a DB-free read.
+
+    Idempotent: a missing file is rebuilt on the first call, so a second call
+    (DataJoint's in-transaction re-fetch) finds it and returns equal values.
+
+    Parameters
+    ----------
+    table : type
+        The owning table class; see :func:`ensure_artifact_file`.
+    key : dict
+        The artifact row's primary key.
+    row : dict
+        The artifact row (``analysis_file_name``, ``electrical_series_path``,
+        ``content_hash``).
+
+    Returns
+    -------
+    StoredTraces
+    """
+    return StoredTraces(
+        abs_path=ensure_artifact_file(table, key, row["analysis_file_name"]),
+        electrical_series_path=row["electrical_series_path"],
+        content_hash=row["content_hash"],
+    )
+
+
+def read_stored_traces(traces: StoredTraces):
+    """Open resolved stored traces; no DB access.
+
+    Reads the stored ``electrical_series_path`` (authoritative, not an
+    auto-detect hint) and annotates ``is_filtered=True``: the persisted traces
+    are already bandpass-filtered and referenced, so a downstream
+    SpikeInterface consumer must not filter them again.
+
+    Parameters
+    ----------
+    traces : StoredTraces
+
+    Returns
+    -------
+    si.BaseRecording
+    """
+    recording = read_recording_nwb(
+        traces.abs_path, electrical_series_path=traces.electrical_series_path
+    )
+    recording.annotate(is_filtered=True)
+    return recording
 
 
 def raw_eseries_path_and_timestamp_mode(

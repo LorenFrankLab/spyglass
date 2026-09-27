@@ -139,7 +139,6 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
         RecordingArtifactDetection,
         RecordingArtifactSelection,
     )
-    from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
         Sorting,
@@ -151,9 +150,11 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
 
     import spikeinterface as si
 
+    from spyglass.spikesorting.v2 import _recording_nwb
+
     # Substitute the loaded preprocessed recording with the synthetic one
-    # carrying a known transient. Both RecordingArtifactDetection and Sorting
-    # load via Recording().get_recording, so one patch covers both populates.
+    # carrying a known transient. RecordingArtifactDetection reads the
+    # resolved artifact via _recording_nwb.read_stored_traces.
     # Save it to disk first: production recordings are file-backed, and the
     # sorting analyzer stores a reloadable reference to its recording. An
     # in-memory NumpyRecording is not pickle-serializable, so SI would build
@@ -161,9 +162,9 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
     synthetic_folder = tmp_path / "synthetic_recording"
     _synth_recording_with_transient().save(folder=synthetic_folder, n_jobs=1)
     monkeypatch.setattr(
-        Recording,
-        "get_recording",
-        lambda self, key: si.load(synthetic_folder),
+        _recording_nwb,
+        "read_stored_traces",
+        lambda traces: si.load(synthetic_folder),
     )
 
     # A detect=True preset whose amplitude threshold sits between the
@@ -421,7 +422,11 @@ def test_artifact_masking_preserves_clean_gt_spikes(
     inj_rec.set_channel_offsets([0.0] * n_ch)
     inj_rec = inj_rec.set_probe(orig.get_probe())
 
-    monkeypatch.setattr(Recording, "get_recording", lambda self, key: inj_rec)
+    from spyglass.spikesorting.v2 import _recording_nwb
+
+    monkeypatch.setattr(
+        _recording_nwb, "read_stored_traces", lambda traces: inj_rec
+    )
 
     params_name = "v2_gt_artifact_1500"
     ArtifactDetectionParameters().insert1(
@@ -736,6 +741,51 @@ def test_artifact_compute_kernels_import_without_db():
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_make_fetch_heals_recording_and_compute_needs_no_db(
+    artifact_e2e_session, monkeypatch
+):
+    """``make_fetch`` rebuilds a missing cached recording and resolves it to
+    the same values on DataJoint's second fetch; ``make_compute`` then scans
+    that file with no DB access and finds what a scan of
+    ``Recording().get_recording`` finds."""
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+    from tests.spikesorting.v2._tripart_helpers import (
+        fetch_hash,
+        forbid_db_queries,
+    )
+
+    rec_key = {"recording_id": artifact_e2e_session["recording_id"]}
+    art_pk = RecordingArtifactSelection.insert_selection(
+        {**rec_key, "artifact_detection_params_name": "default"}
+    )
+    table = RecordingArtifactDetection()
+    Path(Recording().resolve_stored_traces(rec_key).abs_path).unlink()
+
+    fetched = table.make_fetch(art_pk)
+    assert Path(fetched.traces.abs_path).exists()
+    assert fetch_hash(table.make_fetch(art_pk)) == fetch_hash(fetched)
+    with forbid_db_queries(monkeypatch, "RecordingArtifactDetection"):
+        computed = table.make_compute(art_pk, *fetched)
+
+    expected = table._run_artifact_scan(
+        Recording().get_recording(rec_key),
+        fetched.validated,
+        fetched.artifact_job_kwargs,
+        context="",
+        manual_excluded_times=fetched.manual_excluded_times,
+    )
+    np.testing.assert_array_equal(computed.valid_times, expected)
+    assert computed.per_member_nwb_files == (
+        artifact_e2e_session["nwb_file_name"],
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_make_fetch_routes_through_ownership_helper(artifact_e2e_session):
     """Sorting.make_fetch resolves artifact-removed intervals via the
     strict ownership helper (read_artifact_removed_intervals, as_dict=True).
@@ -903,10 +953,12 @@ def test_manual_exclusions_are_persisted_and_compose_with_detection(
         RecordingArtifactDetection,
         RecordingArtifactSelection,
     )
-    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2 import _recording_nwb
 
     recording = _synth_recording_with_transient()
-    monkeypatch.setattr(Recording, "get_recording", lambda *a, **kw: recording)
+    monkeypatch.setattr(
+        _recording_nwb, "read_stored_traces", lambda traces: recording
+    )
     name = "manual_and_automatic_test"
     ArtifactDetectionParameters.insert1(
         {

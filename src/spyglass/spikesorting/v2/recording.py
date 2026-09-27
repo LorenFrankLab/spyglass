@@ -48,6 +48,7 @@ from spyglass.spikesorting.v2._recording_geometry import (
     normalize_channel_locations,
 )
 from spyglass.spikesorting.v2._recording_nwb import (
+    StoredTraces,
     raw_eseries_path_and_timestamp_mode,
     write_nwb_artifact,
 )
@@ -1823,32 +1824,32 @@ class Recording(SpyglassMixin, dj.Computed):
             The preprocessed (bandpass-filtered, common-referenced)
             recording, annotated ``is_filtered=True``.
         """
-        from spyglass.spikesorting.v2._recording_nwb import (
-            ensure_artifact_file,
-            read_recording_nwb,
-        )
+        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
 
-        row = (self & key).fetch1()
-        abs_path = ensure_artifact_file(
-            type(self), key, row["analysis_file_name"]
-        )
-        # Honor the stored ``electrical_series_path`` rather than
-        # letting SI auto-detect the series. A future writer that
-        # places more than one ``ElectricalSeries`` in the analysis
-        # NWB (e.g., LFP next to raw) would silently pick the wrong
-        # source under auto-detect. The stored ``electrical_series_path``
-        # is the authoritative pointer to the persisted series, not a hint.
-        rec = read_recording_nwb(
-            abs_path,
-            electrical_series_path=row["electrical_series_path"],
-        )
-        # The cached preprocessed artifact is bandpass-filtered + common-
-        # referenced; without this annotation a downstream SI
-        # consumer (e.g. a sorter that auto-applies a bandpass) may
-        # re-filter the already-filtered recording. The same call
-        # exists on ``CurationV2.get_recording``.
-        rec.annotate(is_filtered=True)
-        return rec
+        return read_stored_traces(self.resolve_stored_traces(key))
+
+    def resolve_stored_traces(self, key: dict) -> StoredTraces:
+        """Resolve the cached artifact for a read that needs no DB.
+
+        The DB half of :meth:`get_recording`: fetches the row and rebuilds a
+        missing file (the same self-heal). A tri-part ``make_fetch`` calls
+        this and its ``make_compute`` opens the result with
+        ``_recording_nwb.read_stored_traces``.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Recording`` row.
+
+        Returns
+        -------
+        StoredTraces
+            The present file's absolute path, the stored
+            ``electrical_series_path`` and the row's ``content_hash``.
+        """
+        from spyglass.spikesorting.v2._recording_nwb import stored_traces
+
+        return stored_traces(type(self), key, (self & key).fetch1())
 
     # ---- visualization delegates (see v2.visualization facade) -----------
 
