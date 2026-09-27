@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 # The best-effort advisory lock now lives in the DB-free ``_db_locking`` leaf
 # (so domain tables can serialize without importing this orchestration module);
@@ -164,6 +164,724 @@ def _populate_once(table, key) -> None:
     """
     with _advisory_key_lock(table, key):
         _populate_tolerating_concurrent_duplicate(table, key)
+
+
+def _validate_run_request(
+    caller: str,
+    *,
+    nwb_file_name,
+    sort_group_id,
+    interval_list_name,
+    team_name,
+    concat_session_group_owner,
+    concat_session_group_name,
+    pipeline_preset: str,
+    motion_mode,
+    motion_correction_params_name,
+    manual_excluded_times,
+) -> tuple[bool, Any, Any]:
+    """Validate a run request without touching the database.
+
+    Determines the input mode, checks the preset name and the motion request,
+    and folds manual exclusions into the preset's artifact recipe. Runs before
+    any DataJoint table import (importing them activates ``@schema`` and needs
+    a live connection), so a bad request fails fast even offline.
+
+    Parameters
+    ----------
+    caller : str
+        The public entry point, named in every error message.
+    nwb_file_name, sort_group_id, interval_list_name, team_name
+        The single-session inputs (all or none).
+    concat_session_group_owner, concat_session_group_name
+        The concat inputs (both or neither).
+    pipeline_preset : str
+        A ``_PIPELINE_PRESETS`` name.
+    motion_mode, motion_correction_params_name
+        The motion request (see :func:`motion_request_problem`).
+    manual_excluded_times
+        The caller's manual exclusions (intervals, or a member-index mapping
+        for concat).
+
+    Returns
+    -------
+    is_concat : bool
+        True for concat mode, False for single-session mode.
+    bundle : _PipelinePreset
+        The preset, with a ``"none"`` artifact recipe when manual exclusions
+        need a detection output and the preset scans for none.
+    manual_excluded_times : list or dict
+        The normalized manual exclusions.
+
+    Raises
+    ------
+    PipelineInputError
+        On an incomplete or mixed input mode, an unknown preset, or a
+        contradictory motion request.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+
+    # Exactly one COMPLETE mode is required: all single-session fields and no
+    # concat fields, or both concat fields and no single-session field
+    # (team_name is a single-session field, so it is rejected in concat mode --
+    # member teams come from SessionGroup.Member).
+    single_named = {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+        "interval_list_name": interval_list_name,
+        "team_name": team_name,
+    }
+    concat_named = {
+        "concat_session_group_owner": concat_session_group_owner,
+        "concat_session_group_name": concat_session_group_name,
+    }
+    single_set = {k for k, v in single_named.items() if v is not None}
+    concat_set = {k for k, v in concat_named.items() if v is not None}
+    is_single = len(single_set) == len(single_named) and not concat_set
+    is_concat = len(concat_set) == len(concat_named) and not single_set
+
+    if not (is_single or is_concat):
+        # When the caller clearly started ONE mode but left it incomplete, name
+        # the missing field(s) instead of the generic two-mode explanation --
+        # the common first-run slip (e.g. forgetting sort_group_id) otherwise
+        # misreads as if single-session and concat inputs were mixed.
+        if single_set and not concat_set:
+            missing = [k for k in single_named if k not in single_set]
+            raise PipelineInputError(
+                f"{caller}: single-session mode is missing required "
+                f"field(s): {', '.join(missing)}. Provide all of "
+                f"{', '.join(single_named)}, or switch to concat mode "
+                "(concat_session_group_owner + concat_session_group_name)."
+            )
+        if concat_set and not single_set:
+            missing = [k for k in concat_named if k not in concat_set]
+            raise PipelineInputError(
+                f"{caller}: concat mode is missing required field(s): "
+                f"{', '.join(missing)}. Provide both of "
+                f"{', '.join(concat_named)}, or switch to single-session mode "
+                "(nwb_file_name, sort_group_id, interval_list_name, team_name)."
+            )
+        # Nothing set, or fields from BOTH modes set (a genuine mode clash):
+        # explain the two available input modes.
+        raise PipelineInputError(
+            f"{caller} requires exactly one input mode: either "
+            "single-session fields (nwb_file_name, sort_group_id, "
+            "interval_list_name, team_name) or concat fields "
+            "(concat_session_group_owner, concat_session_group_name)"
+        )
+
+    if pipeline_preset not in _PIPELINE_PRESETS:
+        raise PipelineInputError(
+            f"{caller}: unknown pipeline_preset {pipeline_preset!r}. "
+            f"Available pipeline presets: {sorted(_PIPELINE_PRESETS)}. "
+            "Call spyglass.spikesorting.v2.pipeline.describe_pipeline_presets() to see "
+            "what each preset does, or list_pipeline_presets() for just the names."
+        )
+    motion_problem = motion_request_problem(
+        motion_mode, motion_correction_params_name
+    )
+    if motion_problem is not None:
+        raise PipelineInputError(f"{caller}: {motion_problem}")
+    from spyglass.spikesorting.v2._manual_artifacts import (
+        artifact_recipe_with_manual_exclusions,
+        resolve_manual_exclusions,
+    )
+
+    manual_excluded_times = resolve_manual_exclusions(
+        manual_excluded_times, concat=is_concat
+    )
+    bundle = artifact_recipe_with_manual_exclusions(
+        _PIPELINE_PRESETS[pipeline_preset], manual_excluded_times
+    )
+    return is_concat, bundle, manual_excluded_times
+
+
+def _run_preflight(
+    caller: str,
+    *,
+    is_concat: bool,
+    source_inputs: dict,
+    bundle,
+    pipeline_preset: str,
+    auto_curate: bool,
+    manual_excluded_times,
+    motion_mode,
+    motion_correction_params_name,
+) -> list[str]:
+    """Run the mode's read-only preflight; return its advisories.
+
+    Single-session mode runs the full :func:`preflight_v2_pipeline`; concat
+    mode runs :func:`assert_concat_preflight` (the full preflight checks
+    single-session rows that do not apply to a concat SessionGroup).
+
+    Parameters
+    ----------
+    caller : str
+        The public entry point, prefixed to each logged advisory.
+    is_concat : bool
+        The input mode.
+    source_inputs : dict
+        The mode's source fields: ``nwb_file_name``, ``sort_group_id``,
+        ``interval_list_name`` and ``team_name``, or
+        ``concat_session_group_owner`` and ``concat_session_group_name``.
+    bundle, pipeline_preset, auto_curate, manual_excluded_times
+        As validated by :func:`_validate_run_request`.
+    motion_mode, motion_correction_params_name
+        The motion request.
+
+    Returns
+    -------
+    list[str]
+        Non-blocking advisories, each also logged.
+
+    Raises
+    ------
+    PreflightError
+        If a prerequisite is missing.
+    """
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.utils import logger
+
+    if not is_concat:
+        report = preflight_v2_pipeline(
+            **source_inputs,
+            pipeline_preset=pipeline_preset,
+            auto_curate=auto_curate,
+            manual_excluded_times=manual_excluded_times,
+            motion_mode=motion_mode,
+            motion_correction_params_name=motion_correction_params_name,
+        )
+        if not report.ok:
+            raise PreflightError("\n".join(report.errors))
+        # Non-blocking advisories are not errors, but dropping them hides real
+        # configuration smells. Log each and thread them into the run summary's
+        # ``warnings`` (programmatic access) alongside the per-stage warnings.
+        warnings = list(report.warnings)
+        for warning in warnings:
+            logger.warning(f"{caller} preflight: {warning}")
+        return warnings
+    # Concat preflight: the SessionGroup + members + each member's
+    # raw/valid-times/sort-group/rate prerequisites (+ the preset's
+    # auto-curation rows when opted in) + the compute-time param rows and
+    # sorter binary, all BEFORE the heavy member / concat populate. Raises
+    # PreflightError with the exact fix on the first missing prerequisite.
+    return assert_concat_preflight(
+        source_inputs["concat_session_group_owner"],
+        source_inputs["concat_session_group_name"],
+        bundle,
+        auto_curate=auto_curate,
+        manual_excluded_times=manual_excluded_times,
+        motion_mode=motion_mode,
+        motion_correction_params_name=motion_correction_params_name,
+    )
+
+
+class _RunSource(NamedTuple):
+    """The built source of a run, keyed for the stages that read it.
+
+    Attributes
+    ----------
+    motion_source : dict
+        The ``MotionEstimateSelection`` source: ``recording_id`` and
+        ``artifact_detection_id`` (``None`` without artifact detection), or
+        ``concat_recording_id``.
+    sort_source : dict
+        The ``SortingSelection`` source fields (the same keys: a sort and its
+        motion estimate read one source under one mask).
+    concat_key : dict or None
+        The ``ConcatenatedRecordingSelection`` PK in concat mode.
+    """
+
+    motion_source: dict
+    sort_source: dict
+    concat_key: "dict | None"
+
+
+def _build_run_source(
+    *,
+    is_concat: bool,
+    source_inputs: dict,
+    bundle,
+    manual_excluded_times,
+    motion_mode,
+    motion_recipe,
+    run_summary: dict,
+    stage_seconds: dict,
+) -> _RunSource:
+    """Select and populate the source stages a sort reads.
+
+    Single-session: the ``Recording`` and (unless the preset runs none) its
+    artifact detection. Concat: each member's ``Recording`` and artifact
+    detection, then the ``ConcatenatedRecording``. Records each stage's id,
+    status and seconds (and the mode's ``scientific_config``) in
+    ``run_summary`` / ``stage_seconds`` as it goes, so a failure's partial
+    summary carries every stage that completed.
+
+    Parameters
+    ----------
+    is_concat : bool
+        The input mode.
+    source_inputs : dict
+        The mode's source fields (see :func:`_run_preflight`).
+    bundle, manual_excluded_times
+        As validated by :func:`_validate_run_request`.
+    motion_mode, motion_recipe
+        The motion request and its resolved recipe (``None`` for ``"off"``),
+        for the scientific-setup description.
+    run_summary, stage_seconds : dict
+        The run's accumulating summary and per-stage seconds (mutated).
+
+    Returns
+    -------
+    _RunSource
+
+    Raises
+    ------
+    PipelineStageError
+        If a source stage's populate fails.
+    PipelineInputError
+        If concat manual exclusions name an absent member.
+    """
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        describe_scientific_setup,
+    )
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+
+    if not is_concat:
+        nwb_file_name = source_inputs["nwb_file_name"]
+        sort_group_id = source_inputs["sort_group_id"]
+        run_summary["scientific_config"] = describe_scientific_setup(
+            bundle,
+            [{"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}],
+            run_summary["sorter_config"],
+            manual_excluded_times=manual_excluded_times,
+            motion_mode=motion_mode,
+            motion_recipe=motion_recipe,
+        )
+        # Single-session: recording (+ optional artifact detection).
+        run_summary["source_mode"] = "single_session"
+        recording_key = RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": int(sort_group_id),
+                "interval_list_name": source_inputs["interval_list_name"],
+                "preprocessing_params_name": bundle.preprocessing_params_name,
+                "team_name": source_inputs["team_name"],
+            }
+        )
+        (
+            _,
+            run_summary["recording_status"],
+            stage_seconds["recording"],
+        ) = _run_stage(
+            "recording",
+            bool(Recording & recording_key),
+            lambda: _populate_once(Recording, recording_key),
+            run_summary,
+        )
+        run_summary["recording_id"] = recording_key["recording_id"]
+
+        # A None artifact name means the preset runs no artifact detection: skip
+        # the RecordingArtifactSelection/populate stage and sort straight off the
+        # recording (no ArtifactDetectionSource row), the form concat also uses.
+        if bundle.artifact_detection_params_name is None:
+            artifact_detection_id = None
+            run_summary["artifact_detection_status"] = "skipped"
+            stage_seconds["artifact_detection"] = 0.0
+        else:
+            artifact_detection_key = RecordingArtifactSelection.insert_selection(
+                {
+                    "recording_id": recording_key["recording_id"],
+                    "artifact_detection_params_name": bundle.artifact_detection_params_name,
+                    "manual_excluded_times": manual_excluded_times,
+                }
+            )
+            (
+                _,
+                run_summary["artifact_detection_status"],
+                stage_seconds["artifact_detection"],
+            ) = _run_stage(
+                "artifact_detection",
+                bool(RecordingArtifactDetection & artifact_detection_key),
+                lambda: _populate_once(
+                    RecordingArtifactDetection, artifact_detection_key
+                ),
+                run_summary,
+            )
+            artifact_detection_id = artifact_detection_key[
+                "artifact_detection_id"
+            ]
+        run_summary["artifact_detection_id"] = artifact_detection_id
+        source = {
+            "recording_id": recording_key["recording_id"],
+            "artifact_detection_id": artifact_detection_id,
+        }
+        return _RunSource(source, dict(source), None)
+
+    # Member detections are inputs to the masked concat.
+    run_summary["source_mode"] = "concat"
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+
+    concat_session_group_owner = source_inputs["concat_session_group_owner"]
+    concat_session_group_name = source_inputs["concat_session_group_name"]
+    group_key = {
+        "session_group_owner": concat_session_group_owner,
+        "session_group_name": concat_session_group_name,
+    }
+    # ConcatenatedRecordingSelection requires every member's Recording to be
+    # populated under the preset's preprocessing recipe; build them here so a
+    # single concat call is as self-contained as a single-session run. The
+    # member-recording build is its own stage so a member populate failure
+    # surfaces as a PipelineStageError with timing + partial run summary,
+    # the same contract as every other stage. Order by member_index so
+    # member_recording_ids is deterministic and matches the concat
+    # identity/snapshot ordering, not the implicit DB fetch order.
+    members = (SessionGroup.Member & group_key).fetch(
+        as_dict=True, order_by="member_index"
+    )
+    unknown_members = set(manual_excluded_times) - {
+        int(m["member_index"]) for m in members
+    }
+    if unknown_members:
+        raise PipelineInputError(
+            f"Manual exclusions name absent concat members: {sorted(unknown_members)}"
+        )
+    run_summary["scientific_config"] = describe_scientific_setup(
+        bundle,
+        [
+            {
+                "nwb_file_name": member["nwb_file_name"],
+                "sort_group_id": member["sort_group_id"],
+            }
+            for member in members
+        ],
+        run_summary["sorter_config"],
+        manual_excluded_times=manual_excluded_times,
+        concat=True,
+        motion_mode=motion_mode,
+        motion_recipe=motion_recipe,
+    )
+    member_recording_keys = [
+        RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": member["nwb_file_name"],
+                "sort_group_id": int(member["sort_group_id"]),
+                "interval_list_name": member["interval_list_name"],
+                "preprocessing_params_name": bundle.preprocessing_params_name,
+                "team_name": member["team_name"],
+            }
+        )
+        for member in members
+    ]
+
+    def _populate_member_recordings():
+        for key in member_recording_keys:
+            if not (Recording & key):
+                _populate_once(Recording, key)
+
+    (
+        _,
+        run_summary["member_recording_status"],
+        stage_seconds["member_recording"],
+    ) = _run_stage(
+        "member_recording",
+        all(bool(Recording & key) for key in member_recording_keys),
+        _populate_member_recordings,
+        run_summary,
+    )
+    run_summary["member_recording_ids"] = [
+        key["recording_id"] for key in member_recording_keys
+    ]
+
+    artifact_ids = {int(member["member_index"]): None for member in members}
+    run_summary["member_artifacts"] = []
+    if bundle.artifact_detection_params_name is None:
+        run_summary["member_artifact_detection_status"] = "skipped"
+        stage_seconds["member_artifact_detection"] = 0.0
+    else:
+        artifact_keys = [
+            RecordingArtifactSelection.insert_selection(
+                {
+                    **recording_key,
+                    "artifact_detection_params_name": bundle.artifact_detection_params_name,
+                    "manual_excluded_times": manual_excluded_times.get(
+                        int(member["member_index"]), []
+                    ),
+                }
+            )
+            for member, recording_key in zip(
+                members, member_recording_keys, strict=True
+            )
+        ]
+
+        def _populate_member_artifacts():
+            from spyglass.spikesorting.v2._sorting_artifact_mask import (
+                artifact_frame_ranges,
+            )
+
+            for member, artifact_key, recording_key in zip(
+                members, artifact_keys, member_recording_keys, strict=True
+            ):
+                reused = bool(RecordingArtifactDetection & artifact_key)
+                _populate_once(RecordingArtifactDetection, artifact_key)
+                artifact_id = artifact_key["artifact_detection_id"]
+                artifact_ids[int(member["member_index"])] = artifact_id
+                member_recording = Recording().get_recording(recording_key)
+                kept = (
+                    RecordingArtifactDetection().get_artifact_removed_intervals(
+                        artifact_key
+                    )
+                )
+                # Count frames actually masked, excluding wall-clock gaps.
+                excluded = artifact_frame_ranges(
+                    member_recording,
+                    kept,
+                    artifact_detection_id=artifact_id,
+                    recording_id=recording_key["recording_id"],
+                )
+                masked_duration = (
+                    sum(end - start for start, end in excluded)
+                    / member_recording.get_sampling_frequency()
+                )
+                run_summary["member_artifacts"].append(
+                    {
+                        "member_index": int(member["member_index"]),
+                        "artifact_detection_id": artifact_id,
+                        "status": "reused" if reused else "computed",
+                        "masked_duration_s": masked_duration,
+                    }
+                )
+
+        (
+            _,
+            run_summary["member_artifact_detection_status"],
+            stage_seconds["member_artifact_detection"],
+        ) = _run_stage(
+            "member_artifact_detection",
+            all(
+                bool(RecordingArtifactDetection & key) for key in artifact_keys
+            ),
+            _populate_member_artifacts,
+            run_summary,
+        )
+
+    concat_key = ConcatenatedRecordingSelection.insert_selection(
+        {
+            "session_group_owner": concat_session_group_owner,
+            "session_group_name": concat_session_group_name,
+            "preprocessing_params_name": bundle.preprocessing_params_name,
+        },
+        artifact_detection_ids=artifact_ids,
+    )
+    (
+        _,
+        run_summary["concat_recording_status"],
+        stage_seconds["concat_recording"],
+    ) = _run_stage(
+        "concat_recording",
+        bool(ConcatenatedRecording & concat_key),
+        lambda: _populate_once(ConcatenatedRecording, concat_key),
+        run_summary,
+    )
+    run_summary["concat_recording_id"] = concat_key["concat_recording_id"]
+    concat_row = (ConcatenatedRecording & concat_key).fetch1()
+    valid_duration = sum(
+        end - start for start, end in concat_row["obs_intervals"]
+    )
+    run_summary["artifact_masked_duration_s"] = float(
+        concat_row["total_duration_s"] - valid_duration
+    )
+    source = {"concat_recording_id": concat_key["concat_recording_id"]}
+    return _RunSource(source, dict(source), dict(concat_key))
+
+
+def _run_motion_estimate(
+    source: dict,
+    motion_recipe,
+    run_summary: dict,
+    stage_seconds: dict,
+    warnings_list: list,
+) -> dict:
+    """Select and populate the motion estimate of a run's source.
+
+    Records the estimate id, its resolved SpikeInterface preset, its status
+    and seconds, and its continuity spans without evidence (a non-empty list
+    also appends a logged warning) in ``run_summary`` / ``stage_seconds``.
+
+    Parameters
+    ----------
+    source : dict
+        The ``MotionEstimateSelection`` source (``_RunSource.motion_source``).
+    motion_recipe : MotionRecipe
+        The resolved ``MotionCorrectionParameters`` recipe.
+    run_summary, stage_seconds : dict
+        The run's accumulating summary and per-stage seconds (mutated).
+    warnings_list : list
+        The run's warnings (appended to).
+
+    Returns
+    -------
+    dict
+        ``{"motion_estimate_id": ...}``.
+
+    Raises
+    ------
+    PipelineStageError
+        If the selection is refused or the estimation fails (stage
+        ``"motion_estimate"``).
+    """
+    from spyglass.spikesorting.v2.motion import (
+        MotionEstimate,
+        MotionEstimateSelection,
+    )
+    from spyglass.utils import logger
+
+    # The selection insert runs inside ``_run_stage`` too, so a refused
+    # selection (e.g. a source whose content hash drifted) is a
+    # PipelineStageError with the partial summary like a failed populate.
+    estimate_key, _, _ = _run_stage(
+        "motion_estimate",
+        False,
+        lambda: MotionEstimateSelection.insert_selection(
+            {
+                **source,
+                "motion_estimation_params_name": motion_recipe.recipe[
+                    "motion_estimation_params_name"
+                ],
+            }
+        ),
+        run_summary,
+    )
+
+    # The stage's work populates AND reads back its row, so a row that is
+    # missing afterwards is a stage failure with the partial summary.
+    def _estimate() -> str:
+        _populate_once(MotionEstimate, estimate_key)
+        return (MotionEstimate & estimate_key).fetch1("resolved_params")[
+            "preset"
+        ]
+
+    (
+        run_summary["motion_estimation_preset"],
+        run_summary["motion_estimate_status"],
+        stage_seconds["motion_estimate"],
+    ) = _run_stage(
+        "motion_estimate",
+        bool(MotionEstimate & estimate_key),
+        _estimate,
+        run_summary,
+    )
+    run_summary["motion_estimate_id"] = estimate_key["motion_estimate_id"]
+    # Surfaced, not refused: dropped-frame gaps can leave spans too short to
+    # hold a peak, and the estimate there is the temporal prior alone.
+    empty_spans = MotionEstimate().get_spans_without_evidence(estimate_key)
+    run_summary["motion_spans_without_evidence"] = empty_spans
+    if empty_spans:
+        empty_span_warning = (
+            f"Motion estimate {estimate_key['motion_estimate_id']}: "
+            f"{len(empty_spans)} continuity span(s) kept no peaks "
+            "(source times "
+            + ", ".join(
+                f"{span['source_start_s']:.3f}-{span['source_end_s']:.3f} s"
+                for span in empty_spans
+            )
+            + "); the displacement there rests on the estimator's "
+            "temporal prior only, so a correction applied to them is not "
+            "evidence-based. See run_summary"
+            "['motion_spans_without_evidence'] or "
+            "MotionEstimate().get_spans_without_evidence(...)."
+        )
+        logger.warning(empty_span_warning)
+        warnings_list.append(empty_span_warning)
+    return dict(estimate_key)
+
+
+def _run_motion_correction(
+    estimate_key: dict,
+    motion_recipe,
+    run_summary: dict,
+    stage_seconds: dict,
+) -> dict:
+    """Select and populate the corrected recording of a saved estimate.
+
+    Records the corrected recording id, the channels its border mode removed,
+    its status and seconds in ``run_summary`` / ``stage_seconds``.
+
+    Parameters
+    ----------
+    estimate_key : dict
+        ``{"motion_estimate_id": ...}`` of a populated ``MotionEstimate``.
+    motion_recipe : MotionRecipe
+        The resolved ``MotionCorrectionParameters`` recipe, whose
+        interpolation row is applied.
+    run_summary, stage_seconds : dict
+        The run's accumulating summary and per-stage seconds (mutated).
+
+    Returns
+    -------
+    dict
+        ``{"motion_corrected_recording_id": ...}``, the key fragment the sort
+        selection needs.
+
+    Raises
+    ------
+    PipelineStageError
+        If the selection is refused or the interpolation fails (stage
+        ``"motion_corrected_recording"``).
+    """
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionCorrectedRecordingSelection,
+    )
+
+    corrected_key, _, _ = _run_stage(
+        "motion_corrected_recording",
+        False,
+        lambda: MotionCorrectedRecordingSelection.insert_selection(
+            {
+                "motion_estimate_id": estimate_key["motion_estimate_id"],
+                "motion_interpolation_params_name": motion_recipe.recipe[
+                    "motion_interpolation_params_name"
+                ],
+            }
+        ),
+        run_summary,
+    )
+
+    def _correct() -> list:
+        _populate_once(MotionCorrectedRecording, corrected_key)
+        return list(
+            (MotionCorrectedRecording & corrected_key).fetch1(
+                "removed_channel_ids"
+            )
+        )
+
+    (
+        run_summary["motion_removed_channel_ids"],
+        run_summary["motion_corrected_recording_status"],
+        stage_seconds["motion_corrected_recording"],
+    ) = _run_stage(
+        "motion_corrected_recording",
+        bool(MotionCorrectedRecording & corrected_key),
+        _correct,
+        run_summary,
+    )
+    run_summary["motion_corrected_recording_id"] = corrected_key[
+        "motion_corrected_recording_id"
+    ]
+    return dict(corrected_key)
 
 
 def run_v2_pipeline(
@@ -483,85 +1201,38 @@ def run_v2_pipeline(
         surfaces untranslated. ``preflight=True`` catches these earlier
         as a ``PreflightError`` with the exact fix.
     """
-    # Validate the preset DB-free, BEFORE importing the DataJoint table modules
+    # Validate the request DB-free, BEFORE importing the DataJoint table modules
     # (importing them activates @schema and needs a live connection). An unknown
-    # preset then fails fast with PipelineInputError
-    # even when the database is offline, rather than an opaque connection error.
+    # preset, an incomplete input mode or a contradictory motion request then
+    # fails fast with PipelineInputError even when the database is offline,
+    # rather than an opaque connection error.
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
-    # Determine + validate the input mode (database-free, before the table
-    # imports). Exactly one COMPLETE mode is required: all single-session fields
-    # and no concat fields, or both concat fields and no single-session field
-    # (team_name is a single-session field, so it is rejected in concat mode --
-    # member teams come from SessionGroup.Member).
-    single_named = {
-        "nwb_file_name": nwb_file_name,
-        "sort_group_id": sort_group_id,
-        "interval_list_name": interval_list_name,
-        "team_name": team_name,
-    }
-    concat_named = {
-        "concat_session_group_owner": concat_session_group_owner,
-        "concat_session_group_name": concat_session_group_name,
-    }
-    single_set = {k for k, v in single_named.items() if v is not None}
-    concat_set = {k for k, v in concat_named.items() if v is not None}
-    is_single = len(single_set) == len(single_named) and not concat_set
-    is_concat = len(concat_set) == len(concat_named) and not single_set
-
-    if not (is_single or is_concat):
-        # When the caller clearly started ONE mode but left it incomplete, name
-        # the missing field(s) instead of the generic two-mode explanation --
-        # the common first-run slip (e.g. forgetting sort_group_id) otherwise
-        # misreads as if single-session and concat inputs were mixed.
-        if single_set and not concat_set:
-            missing = [k for k in single_named if k not in single_set]
-            raise PipelineInputError(
-                "run_v2_pipeline: single-session mode is missing required "
-                f"field(s): {', '.join(missing)}. Provide all of "
-                f"{', '.join(single_named)}, or switch to concat mode "
-                "(concat_session_group_owner + concat_session_group_name)."
-            )
-        if concat_set and not single_set:
-            missing = [k for k in concat_named if k not in concat_set]
-            raise PipelineInputError(
-                "run_v2_pipeline: concat mode is missing required field(s): "
-                f"{', '.join(missing)}. Provide both of "
-                f"{', '.join(concat_named)}, or switch to single-session mode "
-                "(nwb_file_name, sort_group_id, interval_list_name, team_name)."
-            )
-        # Nothing set, or fields from BOTH modes set (a genuine mode clash):
-        # explain the two available input modes.
-        raise PipelineInputError(
-            "run_v2_pipeline requires exactly one input mode: either "
-            "single-session fields (nwb_file_name, sort_group_id, "
-            "interval_list_name, team_name) or concat fields "
-            "(concat_session_group_owner, concat_session_group_name)"
-        )
-
-    if pipeline_preset not in _PIPELINE_PRESETS:
-        raise PipelineInputError(
-            f"run_v2_pipeline: unknown pipeline_preset {pipeline_preset!r}. "
-            f"Available pipeline presets: {sorted(_PIPELINE_PRESETS)}. "
-            "Call spyglass.spikesorting.v2.pipeline.describe_pipeline_presets() to see "
-            "what each preset does, or list_pipeline_presets() for just the names."
-        )
-    motion_problem = motion_request_problem(
-        motion_mode, motion_correction_params_name
+    is_concat, bundle, manual_excluded_times = _validate_run_request(
+        "run_v2_pipeline",
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name=interval_list_name,
+        team_name=team_name,
+        concat_session_group_owner=concat_session_group_owner,
+        concat_session_group_name=concat_session_group_name,
+        pipeline_preset=pipeline_preset,
+        motion_mode=motion_mode,
+        motion_correction_params_name=motion_correction_params_name,
+        manual_excluded_times=manual_excluded_times,
     )
-    if motion_problem is not None:
-        raise PipelineInputError(f"run_v2_pipeline: {motion_problem}")
-    bundle = _PIPELINE_PRESETS[pipeline_preset]
-    from spyglass.spikesorting.v2._manual_artifacts import (
-        artifact_recipe_with_manual_exclusions,
-        resolve_manual_exclusions,
-    )
-
-    manual_excluded_times = resolve_manual_exclusions(
-        manual_excluded_times, concat=is_concat
-    )
-    bundle = artifact_recipe_with_manual_exclusions(
-        bundle, manual_excluded_times
+    source_inputs = (
+        {
+            "concat_session_group_owner": concat_session_group_owner,
+            "concat_session_group_name": concat_session_group_name,
+        }
+        if is_concat
+        else {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": interval_list_name,
+            "team_name": team_name,
+        }
     )
 
     # Fail fast (still DB-free, before the table imports) if a FigPack view was
@@ -584,10 +1255,6 @@ def run_v2_pipeline(
             )
 
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-        RecordingArtifactSelection,
-    )
     from spyglass.spikesorting.v2.curation import (
         CONCAT_MERGE_GATE_MESSAGE,
         CurationV2,
@@ -595,14 +1262,7 @@ def run_v2_pipeline(
     from spyglass.spikesorting.v2.concat_member_curation import (
         ConcatMemberCuration,
     )
-    from spyglass.spikesorting.v2.exceptions import (
-        PreflightError,
-        ZeroUnitSortError,
-    )
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        RecordingSelection,
-    )
+    from spyglass.spikesorting.v2.exceptions import ZeroUnitSortError
     from spyglass.spikesorting.v2.sorting import (
         Sorting,
         SortingSelection,
@@ -614,37 +1274,13 @@ def run_v2_pipeline(
     # full preflight checks single-session rows that do not apply to a concat
     # SessionGroup). Bypass either with preflight=False.
     preflight_warnings: list[str] = []
-    if preflight and is_single:
-        report = preflight_v2_pipeline(
-            nwb_file_name=nwb_file_name,
-            sort_group_id=sort_group_id,
-            interval_list_name=interval_list_name,
-            team_name=team_name,
+    if preflight:
+        preflight_warnings = _run_preflight(
+            "run_v2_pipeline",
+            is_concat=is_concat,
+            source_inputs=source_inputs,
+            bundle=bundle,
             pipeline_preset=pipeline_preset,
-            auto_curate=auto_curate,
-            manual_excluded_times=manual_excluded_times,
-            motion_mode=motion_mode,
-            motion_correction_params_name=motion_correction_params_name,
-        )
-        if not report.ok:
-            raise PreflightError("\n".join(report.errors))
-        # Non-blocking advisories are not errors, but dropping them hides real
-        # configuration smells. Log each and thread them into the run summary's
-        # ``warnings`` (programmatic access) alongside the per-stage warnings.
-        preflight_warnings = list(report.warnings)
-        for warning in preflight_warnings:
-            logger.warning(f"run_v2_pipeline preflight: {warning}")
-    elif preflight and is_concat:
-        # Concat preflight: the SessionGroup + members + each member's
-        # raw/valid-times/sort-group/rate prerequisites (+ the preset's
-        # auto-curation rows when opted in) + the
-        # compute-time param rows and sorter binary, all
-        # BEFORE the heavy member / concat populate. Raises PreflightError with
-        # the exact fix on the first missing prerequisite.
-        preflight_warnings = assert_concat_preflight(
-            concat_session_group_owner,
-            concat_session_group_name,
-            bundle,
             auto_curate=auto_curate,
             manual_excluded_times=manual_excluded_times,
             motion_mode=motion_mode,
@@ -679,19 +1315,6 @@ def run_v2_pipeline(
     # ``None`` only when the preset's SorterParameters row is absent (the
     # preflight above already failed, or preflight=False bypassed it).
     run_summary["sorter_config"] = resolve_preset_sort_config(bundle)
-    from spyglass.spikesorting.v2._pipeline_preflight import (
-        describe_scientific_setup,
-    )
-
-    if is_single:
-        run_summary["scientific_config"] = describe_scientific_setup(
-            bundle,
-            [{"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}],
-            run_summary["sorter_config"],
-            manual_excluded_times=manual_excluded_times,
-            motion_mode=motion_mode,
-            motion_recipe=motion_recipe,
-        )
     stage_seconds: dict[str, float] = {}
     # Point the run summary at the live stage_seconds dict NOW (not only at the
     # end) so a PipelineStageError's partial run summary -- a shallow copy --
@@ -732,379 +1355,41 @@ def run_v2_pipeline(
         ).fetch("merge_id", "member_index", as_dict=True)
         return {int(row["member_index"]): row["merge_id"] for row in rows}
 
-    def _run_motion_stages(source: dict) -> dict:
-        """Run the requested motion stages on the sort's source.
-
-        ``source`` is the ``MotionEstimateSelection`` source (and, for a
-        single recording, its artifact mask). Returns the key fragment the
-        sort selection needs: the corrected recording for ``"apply"``, else
-        nothing, so an ``"estimate"`` sort is exactly the ``"off"`` sort. A
-        stage failure raises ``PipelineStageError`` before any sort.
-        """
-        if motion_recipe is None:
-            return {}
-        from spyglass.spikesorting.v2.motion import (
-            MotionCorrectedRecording,
-            MotionCorrectedRecordingSelection,
-            MotionEstimate,
-            MotionEstimateSelection,
-        )
-
-        # The selection inserts run inside ``_run_stage`` too, so a refused
-        # selection (e.g. a source whose content hash drifted) is a
-        # PipelineStageError with the partial summary like a failed populate.
-        estimate_key, _, _ = _run_stage(
-            "motion_estimate",
-            False,
-            lambda: MotionEstimateSelection.insert_selection(
-                {
-                    **source,
-                    "motion_estimation_params_name": motion_recipe.recipe[
-                        "motion_estimation_params_name"
-                    ],
-                }
-            ),
+    source = _build_run_source(
+        is_concat=is_concat,
+        source_inputs=source_inputs,
+        bundle=bundle,
+        manual_excluded_times=manual_excluded_times,
+        motion_mode=motion_mode,
+        motion_recipe=motion_recipe,
+        run_summary=run_summary,
+        stage_seconds=stage_seconds,
+    )
+    # The motion stages run on the sort's source. Only ``"apply"`` changes
+    # what the sort reads (the corrected recording), so an ``"estimate"``
+    # sort is exactly the ``"off"`` sort. A motion stage failure raises
+    # PipelineStageError before any sort.
+    corrected: dict = {}
+    if motion_recipe is not None:
+        estimate_key = _run_motion_estimate(
+            source.motion_source,
+            motion_recipe,
             run_summary,
+            stage_seconds,
+            warnings_list,
         )
-
-        # Each stage's work populates AND reads back its row, so a row that
-        # is missing afterwards is a stage failure with the partial summary.
-        def _estimate() -> str:
-            _populate_once(MotionEstimate, estimate_key)
-            return (MotionEstimate & estimate_key).fetch1("resolved_params")[
-                "preset"
-            ]
-
-        (
-            run_summary["motion_estimation_preset"],
-            run_summary["motion_estimate_status"],
-            stage_seconds["motion_estimate"],
-        ) = _run_stage(
-            "motion_estimate",
-            bool(MotionEstimate & estimate_key),
-            _estimate,
-            run_summary,
-        )
-        run_summary["motion_estimate_id"] = estimate_key["motion_estimate_id"]
-        # Surfaced, not refused: dropped-frame gaps can leave spans too short
-        # to hold a peak, and the estimate there is the temporal prior alone.
-        empty_spans = MotionEstimate().get_spans_without_evidence(estimate_key)
-        run_summary["motion_spans_without_evidence"] = empty_spans
-        if empty_spans:
-            empty_span_warning = (
-                f"Motion estimate {estimate_key['motion_estimate_id']}: "
-                f"{len(empty_spans)} continuity span(s) kept no peaks "
-                "(source times "
-                + ", ".join(
-                    f"{span['source_start_s']:.3f}-{span['source_end_s']:.3f} s"
-                    for span in empty_spans
-                )
-                + "); the displacement there rests on the estimator's "
-                "temporal prior only, so a correction applied to them is not "
-                "evidence-based. See run_summary"
-                "['motion_spans_without_evidence'] or "
-                "MotionEstimate().get_spans_without_evidence(...)."
+        if motion_mode == "apply":
+            corrected = _run_motion_correction(
+                estimate_key, motion_recipe, run_summary, stage_seconds
             )
-            logger.warning(empty_span_warning)
-            warnings_list.append(empty_span_warning)
-        if motion_mode == "estimate":
-            return {}
-
-        corrected_key, _, _ = _run_stage(
-            "motion_corrected_recording",
-            False,
-            lambda: MotionCorrectedRecordingSelection.insert_selection(
-                {
-                    "motion_estimate_id": estimate_key["motion_estimate_id"],
-                    "motion_interpolation_params_name": motion_recipe.recipe[
-                        "motion_interpolation_params_name"
-                    ],
-                }
-            ),
-            run_summary,
-        )
-
-        def _correct() -> list:
-            _populate_once(MotionCorrectedRecording, corrected_key)
-            return list(
-                (MotionCorrectedRecording & corrected_key).fetch1(
-                    "removed_channel_ids"
-                )
-            )
-
-        (
-            run_summary["motion_removed_channel_ids"],
-            run_summary["motion_corrected_recording_status"],
-            stage_seconds["motion_corrected_recording"],
-        ) = _run_stage(
-            "motion_corrected_recording",
-            bool(MotionCorrectedRecording & corrected_key),
-            _correct,
-            run_summary,
-        )
-        run_summary["motion_corrected_recording_id"] = corrected_key[
-            "motion_corrected_recording_id"
-        ]
-        return dict(corrected_key)
-
-    if is_single:
-        # Single-session: recording (+ optional artifact detection) -> sort.
-        run_summary["source_mode"] = "single_session"
-        recording_key = RecordingSelection.insert_selection(
-            {
-                "nwb_file_name": nwb_file_name,
-                "sort_group_id": int(sort_group_id),
-                "interval_list_name": interval_list_name,
-                "preprocessing_params_name": bundle.preprocessing_params_name,
-                "team_name": team_name,
-            }
-        )
-        (
-            _,
-            run_summary["recording_status"],
-            stage_seconds["recording"],
-        ) = _run_stage(
-            "recording",
-            bool(Recording & recording_key),
-            lambda: _populate_once(Recording, recording_key),
-            run_summary,
-        )
-        run_summary["recording_id"] = recording_key["recording_id"]
-
-        # A None artifact name means the preset runs no artifact detection: skip
-        # the RecordingArtifactSelection/populate stage and sort straight off the
-        # recording (no ArtifactDetectionSource row), the form concat also uses.
-        if bundle.artifact_detection_params_name is None:
-            artifact_detection_id = None
-            run_summary["artifact_detection_status"] = "skipped"
-            stage_seconds["artifact_detection"] = 0.0
-        else:
-            artifact_detection_key = RecordingArtifactSelection.insert_selection(
-                {
-                    "recording_id": recording_key["recording_id"],
-                    "artifact_detection_params_name": bundle.artifact_detection_params_name,
-                    "manual_excluded_times": manual_excluded_times,
-                }
-            )
-            (
-                _,
-                run_summary["artifact_detection_status"],
-                stage_seconds["artifact_detection"],
-            ) = _run_stage(
-                "artifact_detection",
-                bool(RecordingArtifactDetection & artifact_detection_key),
-                lambda: _populate_once(
-                    RecordingArtifactDetection, artifact_detection_key
-                ),
-                run_summary,
-            )
-            artifact_detection_id = artifact_detection_key[
-                "artifact_detection_id"
-            ]
-        run_summary["artifact_detection_id"] = artifact_detection_id
-
-        corrected = _run_motion_stages(
-            {
-                "recording_id": recording_key["recording_id"],
-                "artifact_detection_id": artifact_detection_id,
-            }
-        )
-        sorting_key = SortingSelection.insert_selection(
-            {
-                "recording_id": recording_key["recording_id"],
-                "sorter": bundle.sorter,
-                "sorter_params_name": bundle.sorter_params_name,
-                "artifact_detection_id": artifact_detection_id,
-                **corrected,
-            }
-        )
-    else:
-        # Member detections are inputs to the masked concat.
-        run_summary["source_mode"] = "concat"
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecording,
-            ConcatenatedRecordingSelection,
-            SessionGroup,
-        )
-
-        group_key = {
-            "session_group_owner": concat_session_group_owner,
-            "session_group_name": concat_session_group_name,
+    sorting_key = SortingSelection.insert_selection(
+        {
+            **source.sort_source,
+            "sorter": bundle.sorter,
+            "sorter_params_name": bundle.sorter_params_name,
+            **corrected,
         }
-        # ConcatenatedRecordingSelection requires every member's Recording to be
-        # populated under the preset's preprocessing recipe; build them here so a
-        # single concat call is as self-contained as a single-session run. The
-        # member-recording build is its own stage so a member populate failure
-        # surfaces as a PipelineStageError with timing + partial run summary,
-        # the same contract as every other stage. Order by member_index so
-        # member_recording_ids is deterministic and matches the concat
-        # identity/snapshot ordering, not the implicit DB fetch order.
-        members = (SessionGroup.Member & group_key).fetch(
-            as_dict=True, order_by="member_index"
-        )
-        unknown_members = set(manual_excluded_times) - {
-            int(m["member_index"]) for m in members
-        }
-        if unknown_members:
-            raise PipelineInputError(
-                f"Manual exclusions name absent concat members: {sorted(unknown_members)}"
-            )
-        run_summary["scientific_config"] = describe_scientific_setup(
-            bundle,
-            [
-                {
-                    "nwb_file_name": member["nwb_file_name"],
-                    "sort_group_id": member["sort_group_id"],
-                }
-                for member in members
-            ],
-            run_summary["sorter_config"],
-            manual_excluded_times=manual_excluded_times,
-            concat=True,
-            motion_mode=motion_mode,
-            motion_recipe=motion_recipe,
-        )
-        member_recording_keys = [
-            RecordingSelection.insert_selection(
-                {
-                    "nwb_file_name": member["nwb_file_name"],
-                    "sort_group_id": int(member["sort_group_id"]),
-                    "interval_list_name": member["interval_list_name"],
-                    "preprocessing_params_name": bundle.preprocessing_params_name,
-                    "team_name": member["team_name"],
-                }
-            )
-            for member in members
-        ]
-
-        def _populate_member_recordings():
-            for key in member_recording_keys:
-                if not (Recording & key):
-                    _populate_once(Recording, key)
-
-        (
-            _,
-            run_summary["member_recording_status"],
-            stage_seconds["member_recording"],
-        ) = _run_stage(
-            "member_recording",
-            all(bool(Recording & key) for key in member_recording_keys),
-            _populate_member_recordings,
-            run_summary,
-        )
-        run_summary["member_recording_ids"] = [
-            key["recording_id"] for key in member_recording_keys
-        ]
-
-        artifact_ids = {int(member["member_index"]): None for member in members}
-        run_summary["member_artifacts"] = []
-        if bundle.artifact_detection_params_name is None:
-            run_summary["member_artifact_detection_status"] = "skipped"
-            stage_seconds["member_artifact_detection"] = 0.0
-        else:
-            artifact_keys = [
-                RecordingArtifactSelection.insert_selection(
-                    {
-                        **recording_key,
-                        "artifact_detection_params_name": bundle.artifact_detection_params_name,
-                        "manual_excluded_times": manual_excluded_times.get(
-                            int(member["member_index"]), []
-                        ),
-                    }
-                )
-                for member, recording_key in zip(
-                    members, member_recording_keys, strict=True
-                )
-            ]
-
-            def _populate_member_artifacts():
-                from spyglass.spikesorting.v2._sorting_artifact_mask import (
-                    artifact_frame_ranges,
-                )
-
-                for member, artifact_key, recording_key in zip(
-                    members, artifact_keys, member_recording_keys, strict=True
-                ):
-                    reused = bool(RecordingArtifactDetection & artifact_key)
-                    _populate_once(RecordingArtifactDetection, artifact_key)
-                    artifact_id = artifact_key["artifact_detection_id"]
-                    artifact_ids[int(member["member_index"])] = artifact_id
-                    member_recording = Recording().get_recording(recording_key)
-                    kept = RecordingArtifactDetection().get_artifact_removed_intervals(
-                        artifact_key
-                    )
-                    # Count frames actually masked, excluding wall-clock gaps.
-                    excluded = artifact_frame_ranges(
-                        member_recording,
-                        kept,
-                        artifact_detection_id=artifact_id,
-                        recording_id=recording_key["recording_id"],
-                    )
-                    masked_duration = (
-                        sum(end - start for start, end in excluded)
-                        / member_recording.get_sampling_frequency()
-                    )
-                    run_summary["member_artifacts"].append(
-                        {
-                            "member_index": int(member["member_index"]),
-                            "artifact_detection_id": artifact_id,
-                            "status": "reused" if reused else "computed",
-                            "masked_duration_s": masked_duration,
-                        }
-                    )
-
-            (
-                _,
-                run_summary["member_artifact_detection_status"],
-                stage_seconds["member_artifact_detection"],
-            ) = _run_stage(
-                "member_artifact_detection",
-                all(
-                    bool(RecordingArtifactDetection & key)
-                    for key in artifact_keys
-                ),
-                _populate_member_artifacts,
-                run_summary,
-            )
-
-        concat_key = ConcatenatedRecordingSelection.insert_selection(
-            {
-                "session_group_owner": concat_session_group_owner,
-                "session_group_name": concat_session_group_name,
-                "preprocessing_params_name": bundle.preprocessing_params_name,
-            },
-            artifact_detection_ids=artifact_ids,
-        )
-        (
-            _,
-            run_summary["concat_recording_status"],
-            stage_seconds["concat_recording"],
-        ) = _run_stage(
-            "concat_recording",
-            bool(ConcatenatedRecording & concat_key),
-            lambda: _populate_once(ConcatenatedRecording, concat_key),
-            run_summary,
-        )
-        run_summary["concat_recording_id"] = concat_key["concat_recording_id"]
-        concat_row = (ConcatenatedRecording & concat_key).fetch1()
-        valid_duration = sum(
-            end - start for start, end in concat_row["obs_intervals"]
-        )
-        run_summary["artifact_masked_duration_s"] = float(
-            concat_row["total_duration_s"] - valid_duration
-        )
-
-        corrected = _run_motion_stages(
-            {"concat_recording_id": concat_key["concat_recording_id"]}
-        )
-        sorting_key = SortingSelection.insert_selection(
-            {
-                "concat_recording_id": concat_key["concat_recording_id"],
-                "sorter": bundle.sorter,
-                "sorter_params_name": bundle.sorter_params_name,
-                **corrected,
-            }
-        )
+    )
     _, run_summary["sorting_status"], stage_seconds["sorting"] = _run_stage(
         "sorting",
         bool(Sorting & sorting_key),
@@ -1275,6 +1560,10 @@ def run_v2_pipeline(
     # frozen member. Populate each full member PK separately so the advisory
     # lock and benign-duplicate recovery retain their single-key guarantee.
     if is_concat:
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecordingSelection,
+        )
+
         member_curation_key = {
             "sorting_id": sorting_key["sorting_id"],
             "curation_id": (
@@ -1286,7 +1575,8 @@ def run_v2_pipeline(
         member_indices = [
             int(index)
             for index in (
-                ConcatenatedRecordingSelection.MemberSnapshot & concat_key
+                ConcatenatedRecordingSelection.MemberSnapshot
+                & source.concat_key
             ).fetch("member_index", order_by="member_index")
         ]
         member_keys = [
