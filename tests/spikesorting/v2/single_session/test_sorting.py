@@ -727,6 +727,109 @@ def test_sorting_make_rollback_cleans_units_nwb(
     (SortingSelection & sort_pk).super_delete(warn=False)
 
 
+@pytest.mark.slow
+def test_changed_second_fetch_leaves_no_staged_sort_outputs(
+    polymer_smoke_session, monkeypatch
+):
+    """A sort DataJoint refuses after compute leaves no NWB, build or lock.
+
+    ``make_compute`` stages the units NWB and a private analyzer build
+    (holding its ownership lock) outside the insert transaction. When the
+    in-transaction ``make_fetch`` differs, DataJoint raises before
+    ``make_insert`` runs; the NWB, the build folder and its lock file must
+    all go, and no canonical analyzer may be published.
+    """
+    import numpy as np
+    import spikeinterface as si
+    from datajoint.errors import DataJointError
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from tests.spikesorting.v2._tripart_helpers import (
+        assert_no_staged_analysis_files,
+        change_second_fetch,
+        record_created_analysis_files,
+    )
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": "raw data valid times",
+            "preprocessing_params_name": "default",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+    art_pk = RecordingArtifactSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_detection_params_name": "none",
+        }
+    )
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "mountainsort5",
+            "sorter_params_name": "franklab_30khz_ms5_2026_06",
+            "artifact_detection_id": art_pk["artifact_detection_id"],
+        }
+    )
+    (Sorting & sort_pk).super_delete(warn=False)
+    canonical = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
+    assert not canonical.exists()
+
+    def _plant(sorter, sorter_params, recording, sorting_id, **kwargs):
+        # A known two-unit sorting stands in for the sorter run.
+        frames = np.arange(1_000, 40_000, 1_500, dtype=np.int64)
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[frames],
+            labels_list=[np.arange(len(frames)) % 2],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    monkeypatch.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+    created = record_created_analysis_files(monkeypatch)
+    change_second_fetch(monkeypatch, Sorting)
+    try:
+        with pytest.raises(DataJointError, match="Referential integrity"):
+            Sorting.populate(sort_pk, reserve_jobs=False)
+        assert not (Sorting & sort_pk)
+        assert_no_staged_analysis_files(created)
+        assert not canonical.exists(), "a refused sort published its analyzer"
+        leftovers = sorted(
+            path.name
+            for path in canonical.parent.glob(f".{sort_pk['sorting_id']}__*")
+        )
+        assert not leftovers, f"analyzer staging left behind: {leftovers}"
+    finally:
+        (Sorting & sort_pk).super_delete(warn=False)
+        (SortingSelection & sort_pk).super_delete(warn=False)
+
+
 def test_run_si_sorter_restores_global_job_kwargs(dj_conn, monkeypatch):
     """``_run_si_sorter`` leaves SI's global job kwargs byte-identical to
     their pre-sort state.

@@ -77,6 +77,10 @@ from spyglass.spikesorting.v2._source_resolution import (
     effective_source_from_correction,
     sorting_parts_mismatch,
 )
+from spyglass.spikesorting.v2._staged_outputs import (
+    StagedOutputCleanupMixin,
+    StagedOutputs,
+)
 from spyglass.spikesorting.v2._units_nwb import (
     STATISTICS_SPANS_FIELD,
     StoredUnits,
@@ -258,6 +262,13 @@ class SortingComputed(NamedTuple):
     sorter_version: str | None
     unit_rows: list[dict]
     staged_analyzer: StagedAnalyzer
+
+    def staged_outputs(self) -> StagedOutputs:
+        """The staged units NWB and private analyzer ``make_insert`` takes."""
+        return StagedOutputs(
+            analysis_file_names=(self.analysis_file_name,),
+            owners=(self.staged_analyzer,),
+        )
 
 
 schema = dj.schema("spikesorting_v2_sorting")
@@ -1635,7 +1646,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
 
 @schema
-class Sorting(SpyglassMixin, dj.Computed):
+class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     """Sorted units NWB + SortingAnalyzer folder.
 
     ``make()`` resolves the source recording, applies sorter-owned
