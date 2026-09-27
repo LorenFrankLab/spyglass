@@ -803,7 +803,13 @@ def estimation_noise_levels(
     -------
     numpy.ndarray
         ``(n_channels,)`` float64 noise levels in the units of
-        ``recording``'s traces.
+        ``recording``'s traces (microvolts).
+
+    Raises
+    ------
+    ValueError
+        If any channel's noise level is non-finite or not positive (a dead,
+        flat or NaN channel): the detection threshold is a multiple of it.
     """
     from spikeinterface.core import get_noise_levels
 
@@ -836,7 +842,18 @@ def estimation_noise_levels(
             n_jobs=1,
             progress_bar=False,
         )
-    return np.asarray(levels, dtype=np.float64)
+    levels = np.asarray(levels, dtype=np.float64)
+    bad = ~(np.isfinite(levels) & (levels > 0))
+    if bad.any():
+        raise ValueError(
+            "Motion estimation: channel(s) "
+            f"{np.asarray(recording.channel_ids)[bad].tolist()} have a "
+            "non-finite or non-positive noise level "
+            f"({levels[bad].tolist()}); the detection threshold is a "
+            "multiple of it. Exclude dead, flat or NaN channels from the "
+            "source recording before estimating motion."
+        )
+    return levels
 
 
 class EstimationClock(NamedTuple):

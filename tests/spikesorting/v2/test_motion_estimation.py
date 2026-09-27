@@ -513,6 +513,37 @@ def test_masked_noise_levels_come_from_the_statistics_spans():
     assert np.mean(contaminated) < np.mean(diagnostics.noise_levels)
 
 
+@pytest.mark.parametrize("masked", [False, True])
+def test_non_positive_or_non_finite_noise_level_is_an_error(masked):
+    """A dead (all-zero) channel has zero MAD and a NaN channel a NaN MAD;
+    either would scale the detection threshold to nonsense, so the noise
+    estimate is refused and names both channels, on SpikeInterface's
+    estimator (one span) and on the span sampler (masked frames)."""
+    from spikeinterface.core import NumpyRecording
+
+    from spyglass.spikesorting.v2._motion import (
+        estimation_noise_levels,
+        resolve_estimation_params,
+    )
+    from spyglass.spikesorting.v2._recipe_catalog import MOTION_MAX_GAP_S
+
+    fs = 30_000.0
+    n = int(12 * fs)
+    traces = np.random.default_rng(0).normal(size=(n, 4)).astype(np.float32)
+    traces[:, 1] = 0.0
+    traces[:, 3] = np.nan
+    recording = NumpyRecording(
+        [traces], fs, channel_ids=np.array(["a", "b", "c", "d"])
+    )
+    spans = [(0, int(4 * fs)), (int(6 * fs), n)] if masked else [(0, n)]
+    noise_kwargs = resolve_estimation_params(
+        {"preset": "rigid_fast", "max_gap_s": MOTION_MAX_GAP_S}
+    )["noise_levels_kwargs"]
+
+    with pytest.raises(ValueError, match=r"\['b', 'd'\]"):
+        estimation_noise_levels(recording, spans, noise_kwargs)
+
+
 @pytest.mark.parametrize("preset", ["rigid_fast", "dredge_fast"])
 def test_integer_calibrations_of_one_voltage_estimate_identically(preset):
     """Two int16 encodings of the same microvolts (0.25 uV per count with
