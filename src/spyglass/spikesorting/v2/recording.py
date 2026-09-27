@@ -1692,9 +1692,10 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         without re-opening when a transaction is active). The wrap
         is kept defensively: if ``make_insert`` is ever called
         outside ``populate()``, the ``AnalysisNwbfile`` registration
-        and the ``self.insert1`` still commit atomically. A failed populate's
-        staged file (a truncation refusal included) is removed by
-        ``StagedOutputCleanupMixin``.
+        and the ``self.insert1`` still commit atomically. Removing a failed
+        attempt's staged file (a truncation refusal included) is
+        ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
+        call leaves that to its caller.
 
         The truncation check fires when the requested valid_times exceed
         the raw recording coverage (#1585), or when interval

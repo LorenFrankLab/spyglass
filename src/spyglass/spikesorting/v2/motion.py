@@ -2214,8 +2214,9 @@ class MotionCorrectedRecording(
     def make_insert(self, key, *computed) -> None:
         """Register the staged artifact and insert the row atomically.
 
-        A failed populate's staged file is removed by
-        ``StagedOutputCleanupMixin``.
+        Removing a failed attempt's staged file is
+        ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
+        call leaves that to its caller.
         """
         from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_PATH
 

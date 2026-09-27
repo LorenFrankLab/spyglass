@@ -1201,8 +1201,9 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         are read back from the staged NWB (the canonical written pairs) rather
         than threaded through the compute carrier, mirroring ``CurationEvaluation``;
         ``matchable_units`` is the frozen node universe snapshot carried from
-        ``make_compute``. A failed populate's staged file is removed by
-        ``StagedOutputCleanupMixin``.
+        ``make_compute``. Removing a failed attempt's staged file is
+        ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
+        call leaves that to its caller.
         """
         from spyglass.spikesorting.v2._unitmatch_nwb import read_pairs
 

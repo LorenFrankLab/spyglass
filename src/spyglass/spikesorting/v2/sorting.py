@@ -2437,8 +2437,9 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         The successful master insert establishes publication ownership. Only
         that attempt renames its completed analyzer into the shared cache,
         before the surrounding transaction commits. A duplicate insert never
-        publishes. Every exit closes this attempt's staged analyzer; a failed
-        populate's staged NWB is removed by ``StagedOutputCleanupMixin``.
+        publishes. Every exit closes this attempt's staged analyzer. Removing
+        a failed attempt's staged NWB is ``StagedOutputCleanupMixin``'s job
+        during ``populate()``; a direct call leaves that to its caller.
         Previously published caches are never deleted by a losing attempt.
 
         Parameters

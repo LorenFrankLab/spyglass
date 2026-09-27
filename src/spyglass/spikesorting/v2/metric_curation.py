@@ -1513,8 +1513,9 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         ``AnalysisNwbfile().add`` + ``insert1`` run inside
         ``transaction_or_noop`` so a failed insert never orphans a registered
-        AnalysisNwbfile row (mirrors Sorting). A failed populate's staged
-        analysis file is removed by ``StagedOutputCleanupMixin``.
+        AnalysisNwbfile row (mirrors Sorting). Removing a failed attempt's
+        staged analysis file is ``StagedOutputCleanupMixin``'s job during
+        ``populate()``; a direct call leaves that to its caller.
         """
         from spyglass.spikesorting.v2.utils import transaction_or_noop
 

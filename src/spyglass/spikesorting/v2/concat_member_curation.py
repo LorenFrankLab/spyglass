@@ -586,8 +586,9 @@ class ConcatMemberCuration(
     def make_insert(self, key, *computed) -> None:
         """Register the staged file, insert the row and its merge entry.
 
-        A failed populate's staged file is removed by
-        ``StagedOutputCleanupMixin``.
+        Removing a failed attempt's staged file is
+        ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
+        call leaves that to its caller.
         """
         from spyglass.spikesorting.spikesorting_merge import (
             SpikeSortingOutput,

@@ -1305,9 +1305,10 @@ class ConcatenatedRecording(
 
         DataJoint's tri-part dispatch already opens the master transaction
         around this method, so ``transaction_or_noop`` is a no-op here; it is
-        kept so a direct (non-populate) call still commits atomically. A failed
-        populate's staged ``ElectricalSeries`` is removed by
-        ``StagedOutputCleanupMixin``.
+        kept so a direct (non-populate) call still commits atomically.
+        Removing a failed attempt's staged ``ElectricalSeries`` is
+        ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
+        call leaves that to its caller.
         """
         from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_PATH
         from spyglass.spikesorting.v2.utils import transaction_or_noop
