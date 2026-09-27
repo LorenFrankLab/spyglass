@@ -1012,27 +1012,19 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
     def make_fetch(self, key) -> AnalyzerVersionsFetched:
         """Read the unit count and resolve the analyzer folder.
 
-        Validates the recipe (path-safe name, existing row) for a sort with
-        units, as ``Sorting.get_analyzer`` does, before any folder is read.
+        Validates the recipe (:func:`_validated_analyzer_recipe`) for a sort
+        with units before any folder is read.
         """
-        from spyglass.spikesorting.v2._analyzer_cache import (
-            assert_path_safe_waveform_params_name,
+        sorting_id = key["sorting_id"]
+        name = key["waveform_params_name"]
+        n_units = int((Sorting & {"sorting_id": sorting_id}).fetch1("n_units"))
+        analyzer_folder = (
+            _validated_analyzer_recipe(sorting_id, name).analyzer_folder
+            if n_units > 0
+            else str(_analyzer_folder(sorting_id, name))
         )
-        from spyglass.spikesorting.v2._sorting_analyzer import (
-            fetch_waveform_params,
-        )
-
-        n_units = int(
-            (Sorting & {"sorting_id": key["sorting_id"]}).fetch1("n_units")
-        )
-        if n_units > 0:
-            assert_path_safe_waveform_params_name(key["waveform_params_name"])
-            fetch_waveform_params(key["waveform_params_name"])
         return AnalyzerVersionsFetched(
-            n_units=n_units,
-            analyzer_folder=str(
-                _analyzer_folder(key["sorting_id"], key["waveform_params_name"])
-            ),
+            n_units=n_units, analyzer_folder=analyzer_folder
         )
 
     def make_compute(
@@ -1418,6 +1410,29 @@ def _analyzer_folder(sorting_id, waveform_params_name):
     return analyzer_path(sorting_id, waveform_params_name)
 
 
+def _validated_analyzer_recipe(
+    sorting_id, waveform_params_name: str
+) -> AnalyzerRecipe:
+    """Validate a sort's analyzer recipe and resolve its cache folder.
+
+    Checks the name is path-safe and names a tracked
+    ``AnalyzerWaveformParameters`` row, as ``Sorting.get_analyzer`` does,
+    before any folder is read.
+    """
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        assert_path_safe_waveform_params_name,
+    )
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        fetch_waveform_params,
+    )
+
+    assert_path_safe_waveform_params_name(waveform_params_name)
+    return AnalyzerRecipe(
+        analyzer_folder=str(_analyzer_folder(sorting_id, waveform_params_name)),
+        waveform_params=fetch_waveform_params(waveform_params_name),
+    )
+
+
 def invalidate_sorting_analyzer_inventory(
     sorting_id, waveform_params_name
 ) -> bool:
@@ -1471,11 +1486,7 @@ def _resolve_analyzer_regen_inputs(
     the sorter row. A failure stops the resolution and is carried as a
     :class:`FetchFailure`.
     """
-    from spyglass.spikesorting.v2._analyzer_cache import (
-        assert_path_safe_waveform_params_name,
-    )
     from spyglass.spikesorting.v2._sorting_analyzer import (
-        fetch_waveform_params,
         resolve_canonical_recording,
     )
     from spyglass.spikesorting.v2.sorting import (
@@ -1488,16 +1499,6 @@ def _resolve_analyzer_regen_inputs(
     if int(n_units) == 0:
         return AnalyzerRegenInputs(
             sorting_id, waveform_params_name, 0, recipe=None, source=None
-        )
-
-    def _recipe():
-        assert_path_safe_waveform_params_name(waveform_params_name)
-        waveform_params = fetch_waveform_params(waveform_params_name)
-        return AnalyzerRecipe(
-            analyzer_folder=str(
-                _analyzer_folder(sorting_id, waveform_params_name)
-            ),
-            waveform_params=waveform_params,
         )
 
     def _source():
@@ -1519,7 +1520,11 @@ def _resolve_analyzer_regen_inputs(
             ).fetch1(),
         )
 
-    recipe = _resolve_or_failure(_recipe, what=what, parent_key=sort_key)
+    recipe = _resolve_or_failure(
+        lambda: _validated_analyzer_recipe(sorting_id, waveform_params_name),
+        what=what,
+        parent_key=sort_key,
+    )
     source = None
     if (
         not isinstance(recipe, FetchFailure)
