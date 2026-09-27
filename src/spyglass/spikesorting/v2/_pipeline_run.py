@@ -429,8 +429,6 @@ def _build_run_source(
     source_inputs: dict,
     bundle,
     manual_excluded_times,
-    motion_mode,
-    motion_recipe,
     run_summary: dict,
     stage_seconds: dict,
 ) -> _RunSource:
@@ -439,9 +437,8 @@ def _build_run_source(
     Single-session: the ``Recording`` and (unless the preset runs none) its
     artifact detection. Concat: each member's ``Recording`` and artifact
     detection, then the ``ConcatenatedRecording``. Records each stage's id,
-    status and seconds (and the mode's ``scientific_config``) in
-    ``run_summary`` / ``stage_seconds`` as it goes, so a failure's partial
-    summary carries every stage that completed.
+    status and seconds in ``run_summary`` / ``stage_seconds`` as it goes, so a
+    failure's partial summary carries every stage that completed.
 
     Parameters
     ----------
@@ -451,9 +448,6 @@ def _build_run_source(
         The mode's source fields (see :func:`_run_preflight`).
     bundle, manual_excluded_times
         As validated by :func:`_validate_run_request`.
-    motion_mode, motion_recipe
-        The motion request and its resolved recipe (``None`` for ``"off"``),
-        for the scientific-setup description.
     run_summary, stage_seconds : dict
         The run's accumulating summary and per-stage seconds (mutated).
 
@@ -468,9 +462,6 @@ def _build_run_source(
     PipelineInputError
         If concat manual exclusions name an absent member.
     """
-    from spyglass.spikesorting.v2._pipeline_preflight import (
-        describe_scientific_setup,
-    )
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -484,14 +475,6 @@ def _build_run_source(
     if not is_concat:
         nwb_file_name = source_inputs["nwb_file_name"]
         sort_group_id = source_inputs["sort_group_id"]
-        run_summary["scientific_config"] = describe_scientific_setup(
-            bundle,
-            [{"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}],
-            run_summary["sorter_config"],
-            manual_excluded_times=manual_excluded_times,
-            motion_mode=motion_mode,
-            motion_recipe=motion_recipe,
-        )
         # Single-session: recording (+ optional artifact detection).
         run_summary["source_mode"] = "single_session"
         recording_key = RecordingSelection.insert_selection(
@@ -584,21 +567,6 @@ def _build_run_source(
         raise PipelineInputError(
             f"Manual exclusions name absent concat members: {sorted(unknown_members)}"
         )
-    run_summary["scientific_config"] = describe_scientific_setup(
-        bundle,
-        [
-            {
-                "nwb_file_name": member["nwb_file_name"],
-                "sort_group_id": member["sort_group_id"],
-            }
-            for member in members
-        ],
-        run_summary["sorter_config"],
-        manual_excluded_times=manual_excluded_times,
-        concat=True,
-        motion_mode=motion_mode,
-        motion_recipe=motion_recipe,
-    )
     member_recording_keys = [
         RecordingSelection.insert_selection(
             {
@@ -1426,13 +1394,45 @@ def run_v2_pipeline(
         ).fetch("merge_id", "member_index", as_dict=True)
         return {int(row["member_index"]): row["merge_id"] for row in rows}
 
+    # The scientific setup states the rows the run's stages execute for every
+    # sort group its sort reads (a concat's members, in member order).
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        describe_scientific_setup,
+    )
+
+    if is_concat:
+        from spyglass.spikesorting.v2.session_group import SessionGroup
+
+        group_keys = (
+            SessionGroup.Member
+            & {
+                "session_group_owner": concat_session_group_owner,
+                "session_group_name": concat_session_group_name,
+            }
+        ).fetch(
+            "nwb_file_name",
+            "sort_group_id",
+            as_dict=True,
+            order_by="member_index",
+        )
+    else:
+        group_keys = [
+            {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
+        ]
+    run_summary["scientific_config"] = describe_scientific_setup(
+        bundle,
+        group_keys,
+        run_summary["sorter_config"],
+        manual_excluded_times=manual_excluded_times,
+        concat=is_concat,
+        motion_mode=motion_mode,
+        motion_recipe=motion_recipe,
+    )
     source = _build_run_source(
         is_concat=is_concat,
         source_inputs=source_inputs,
         bundle=bundle,
         manual_excluded_times=manual_excluded_times,
-        motion_mode=motion_mode,
-        motion_recipe=motion_recipe,
         run_summary=run_summary,
         stage_seconds=stage_seconds,
     )
@@ -1884,17 +1884,11 @@ def estimate_motion(
         "warnings": warnings_list,
     }
     motion_recipe = resolve_motion_recipe(motion_correction_params_name)
-    # The source builder records the run's scientific setup, which states
-    # the preset's sorter configuration; neither describes an estimate, so
-    # both are dropped from the receipt below.
-    run_summary["sorter_config"] = resolve_preset_sort_config(bundle)
     source = _build_run_source(
         is_concat=is_concat,
         source_inputs=source_inputs,
         bundle=bundle,
         manual_excluded_times=manual_excluded_times,
-        motion_mode="estimate",
-        motion_recipe=motion_recipe,
         run_summary=run_summary,
         stage_seconds=stage_seconds,
     )
@@ -1923,8 +1917,6 @@ def estimate_motion(
         ),
         "n_temporal_bins": int(diagnostics["n_temporal_bins"]),
     }
-    for key in ("sorter_config", "scientific_config"):
-        run_summary.pop(key, None)
     return cast("EstimateMotionReceipt", run_summary)
 
 
