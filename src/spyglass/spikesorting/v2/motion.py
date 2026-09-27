@@ -914,18 +914,9 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
                 ]
             }
         ).fetch1("params", "job_kwargs")
-        if lineage.kind == "concatenated_recording":
-            _assert_concat_tables_current()
-        table = _SOURCE_TABLES[lineage.kind]
-        source_row = (table & lineage.key).fetch1()
-        if source_row["content_hash"] != selection["source_content_hash"]:
-            raise ValueError(
-                f"MotionEstimate: {table.__name__} {lineage.key} changed "
-                "since this estimate was selected (content_hash "
-                f"{source_row['content_hash']} != "
-                f"{selection['source_content_hash']}). Select a new estimate "
-                "with MotionEstimateSelection.insert_selection."
-            )
+        table, source_row = _live_source_row(
+            lineage, key["motion_estimate_id"], selection["source_content_hash"]
+        )
         source_path = ensure_artifact_file(
             table, lineage.key, source_row["analysis_file_name"]
         )
@@ -1182,24 +1173,22 @@ _ESTIMATE_APPLICATION_FIELDS = (
 )
 
 
-def _estimate_source(motion_estimate_id) -> tuple:
-    """The source table, lineage and live row of a saved estimate.
+def _live_source_row(
+    lineage: SourceLineage, motion_estimate_id, selected_hash: str
+) -> tuple:
+    """The source table and live row of an estimate's resolved lineage.
 
     Raises
     ------
     ValueError
-        If the source artifact's ``content_hash`` changed since the estimate
-        was selected: the saved motion no longer describes those traces.
+        If the source artifact's ``content_hash`` differs from
+        ``selected_hash``, the one the estimate was selected on: the saved
+        motion no longer describes those traces.
     """
-    estimate_key = {"motion_estimate_id": motion_estimate_id}
-    lineage = MotionEstimateSelection.resolve_source(estimate_key)
     if lineage.kind == "concatenated_recording":
         _assert_concat_tables_current()
     table = _SOURCE_TABLES[lineage.kind]
     source_row = (table & lineage.key).fetch1()
-    selected_hash = (MotionEstimateSelection & estimate_key).fetch1(
-        "source_content_hash"
-    )
     if source_row["content_hash"] != selected_hash:
         raise ValueError(
             f"{table.__name__} {lineage.key} changed since motion estimate "
@@ -1208,6 +1197,25 @@ def _estimate_source(motion_estimate_id) -> tuple:
             "motion no longer describes these traces. Select and populate a "
             "new estimate."
         )
+    return table, source_row
+
+
+def _estimate_source(motion_estimate_id) -> tuple:
+    """The source table, lineage and live row of a saved estimate.
+
+    Raises
+    ------
+    ValueError
+        If the source artifact's ``content_hash`` changed since the estimate
+        was selected (see :func:`_live_source_row`).
+    """
+    estimate_key = {"motion_estimate_id": motion_estimate_id}
+    lineage = MotionEstimateSelection.resolve_source(estimate_key)
+    table, source_row = _live_source_row(
+        lineage,
+        motion_estimate_id,
+        (MotionEstimateSelection & estimate_key).fetch1("source_content_hash"),
+    )
     return table, lineage, source_row
 
 
