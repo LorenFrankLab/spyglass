@@ -1808,15 +1808,17 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
 
         # Resolved after the concat schema-bypass check above, which must fire
-        # before any source-row fetch. A missing traces file is rebuilt here,
-        # so the second fetch finds it and resolves the same path.
+        # before any source-row fetch.
         traces = SortingSelection.resolve_effective_source(key).traces
-        traces_abs_path = SortingSelection.ensure_effective_traces(traces)
         motion_correction_provenance = source_n_samples = None
         if traces.kind == "motion_corrected_recording":
             motion_correction_provenance, source_n_samples = (
                 self._fetch_motion_correction(traces.key, sorter_row, source)
             )
+        # Last, so a fetch that raises never rebuilds a file. A missing traces
+        # file is rebuilt here, so the second fetch finds it and resolves the
+        # same path.
+        traces_abs_path = SortingSelection.ensure_effective_traces(traces)
 
         return SortingFetched(
             source=source,
