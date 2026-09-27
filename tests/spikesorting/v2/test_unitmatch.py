@@ -1640,6 +1640,51 @@ def test_degenerate_single_session_zero_pairs(two_session_curated_group):
     assert len(UnitMatch().get_pairs(pk)) == 0
 
 
+@pytest.mark.slow
+def test_degenerate_single_session_needs_no_member_traces(
+    two_session_curated_group, monkeypatch
+):
+    """A one-member group writes its zero-pair row without reading the
+    member's traces, so a traces file that is missing and cannot be rebuilt
+    does not fail the populate."""
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    grp = two_session_curated_group
+    choice = grp["choices"][0]
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"], grp["solo_name"], "unitmatch_default", {0: choice}
+    )
+    (UnitMatch & pk).super_delete(warn=False)
+    traces = SortingSelection.resolve_effective_source(
+        {"sorting_id": choice["sorting_id"]}
+    ).traces
+    assert traces.kind == "recording"
+    traces_path = Path(
+        AnalysisNwbfile.get_abs_path(traces.row["analysis_file_name"])
+    )
+    aside = traces_path.with_name(traces_path.name + ".aside")
+
+    def _unrebuildable(self, key):
+        raise RuntimeError("simulated unrebuildable traces file")
+
+    monkeypatch.setattr(Recording, "_rebuild_nwb_artifact", _unrebuildable)
+    traces_path.rename(aside)
+    try:
+        UnitMatch.populate(pk, reserve_jobs=False)
+        assert (UnitMatch & pk).fetch1("n_pairs") == 0
+    finally:
+        aside.rename(traces_path)
+        (UnitMatch & pk).super_delete(warn=False)
+
+
 @pytest.mark.usefixtures("dj_conn")
 def test_unitmatch_computed_matches_make_insert_signature():
     """The tri-part dispatch splats ``UnitMatchComputed`` POSITIONALLY into

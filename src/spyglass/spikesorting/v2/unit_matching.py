@@ -99,7 +99,9 @@ class UnitMatchFetched(NamedTuple):
     trace artifact the member's bundle is extracted from
     (:func:`_member_waveform_traces`); ``traces`` / ``traces_abs_path`` /
     ``units`` locate that artifact and the curated units NWB, so compute reads
-    them without the DB (:func:`_member_match_files`).
+    them without the DB (:func:`_member_match_files`); they are present only
+    for a group of two or more members (a single-member group extracts no
+    bundle).
     """
 
     matcher_name: str
@@ -1004,11 +1006,14 @@ class UnitMatch(SpyglassMixin, dj.Computed):
             )
             member_sources.append((curation_key, source))
         # Resolve the files last, once every member passed its checks, so a
-        # fetch that raises never rebuilds a traces file.
-        for plan, (curation_key, source) in zip(
-            member_plan, member_sources, strict=True
-        ):
-            plan.update(_member_match_files(curation_key, source))
+        # fetch that raises never rebuilds a traces file. A single-member
+        # group writes zero pairs without extracting a bundle, so it reads
+        # (and heals) no member file.
+        if len(member_plan) >= 2:
+            for plan, (curation_key, source) in zip(
+                member_plan, member_sources, strict=True
+            ):
+                plan.update(_member_match_files(curation_key, source))
         return UnitMatchFetched(
             matcher_name=matcher_name,
             params=dict(params),
