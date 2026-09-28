@@ -109,7 +109,10 @@ def apply_snr_peak_sign(
 
 
 def apply_label_rules(
-    metrics_df: pd.DataFrame, rule_rows: list[dict]
+    metrics_df: pd.DataFrame,
+    rule_rows: list[dict],
+    *,
+    expected_missing: dict[str, set | None] | None = None,
 ) -> dict[int, list[str]]:
     """Apply ordered threshold rules to a metrics table, producing labels.
 
@@ -117,14 +120,27 @@ def apply_label_rules(
     ----------
     metrics_df : pandas.DataFrame
         One row per unit (indexed by ``unit_id``), one column per quality
-        metric. NaN entries (legitimately produced for low-spike units) never
-        satisfy a threshold.
+        metric. A non-finite entry never satisfies a threshold; whether it is
+        treated as an expected, legitimately-unassessable value or as a
+        metric computation failure is decided by ``expected_missing`` (or, if
+        that is not given, by the rule's ``missing_policy`` alone, as before).
     rule_rows : list of dict
         ``AutoCurationRules.Rule`` rows, each with ``rule_index``,
         ``metric_name``, ``operator``, ``threshold``, and ``label``. Rules are
         applied in ascending ``rule_index``. ``missing_policy`` defaults to
         ``"error"``; ``"fail"`` applies the rule label to a unit whose value
-        is non-finite, while ``"pass"`` and ``"ignore"`` leave it unlabelled.
+        is non-finite, while ``"pass"`` leaves it unlabelled.
+    expected_missing : dict[str, set or None] or None, optional
+        Output of ``expected_missing_units`` for the columns these rules
+        reference. When given, a rule's ``missing_policy`` only governs units
+        whose non-finite value is in the column's expected-missing set. A
+        non-finite value for a unit NOT in that set, or any non-finite value
+        in a column with no registered eligibility rule (the column's entry
+        is ``None`` or it is absent from this mapping), is instead treated as
+        a metric computation failure and raises regardless of
+        ``missing_policy``. When ``expected_missing`` is ``None`` (the
+        default), every non-finite value follows ``missing_policy`` as if it
+        were expected -- today's behavior.
 
     Returns
     -------
@@ -137,9 +153,11 @@ def apply_label_rules(
     Raises
     ------
     ValueError
-        If a rule references a metric column absent from ``metrics_df``, or if
+        If a rule references a metric column absent from ``metrics_df``; if
         any unit has a non-finite value and the rule's missing policy is
-        ``"error"``.
+        ``"error"``; or if ``expected_missing`` classifies a unit's
+        non-finite value as a metric computation failure (regardless of
+        ``missing_policy``).
 
     Notes
     -----
@@ -154,9 +172,10 @@ def apply_label_rules(
 
     for rule in sorted(rule_rows, key=lambda r: r["rule_index"]):
         metric_name = rule["metric_name"]
+        rule_name = rule.get("rule_name", metric_name)
         if metric_name not in metrics_df.columns:
             raise ValueError(
-                f"Auto-curation rule {rule.get('rule_name', metric_name)!r} "
+                f"Auto-curation rule {rule_name!r} "
                 f"references metric column {metric_name!r}, which is not in the "
                 f"computed quality metrics {sorted(metrics_df.columns)}. Add "
                 "it to the QualityMetricParameters row's metric_names (or fix "
@@ -168,7 +187,7 @@ def apply_label_rules(
         missing_policy = rule.get("missing_policy", "error")
         if missing_policy not in {"error", "fail", "pass"}:
             raise ValueError(
-                f"Auto-curation rule {rule.get('rule_name', metric_name)!r} "
+                f"Auto-curation rule {rule_name!r} "
                 f"has invalid missing_policy {missing_policy!r}; expected "
                 "'error', 'fail', or 'pass'."
             )
@@ -181,28 +200,79 @@ def apply_label_rules(
             for unit_id, is_finite in finite_by_unit.items()
             if not is_finite
         ]
-        if missing_policy == "error" and missing_unit_ids:
+
+        if expected_missing is None:
+            # No classifier was given: every non-finite value is handled by
+            # missing_policy alone, exactly as before this parameter existed.
+            policy_missing_ids = missing_unit_ids
+        else:
+            expected_set = expected_missing.get(metric_name)
+            if expected_set is None:
+                # No registered eligibility rule for this column (or it was
+                # never classified): fail closed on any non-finite value.
+                if missing_unit_ids:
+                    raise ValueError(
+                        f"Auto-curation rule {rule_name!r}: "
+                        + _unregistered_column_message(
+                            metric_name, missing_unit_ids
+                        )
+                    )
+                policy_missing_ids = []
+            else:
+                unexpected_ids = [
+                    unit_id
+                    for unit_id in missing_unit_ids
+                    if unit_id not in expected_set
+                ]
+                if unexpected_ids:
+                    raise ValueError(
+                        f"Auto-curation rule {rule_name!r}: "
+                        + _computation_failure_message(
+                            metric_name, unexpected_ids
+                        )
+                    )
+                policy_missing_ids = [
+                    unit_id
+                    for unit_id in missing_unit_ids
+                    if unit_id in expected_set
+                ]
+
+        if missing_policy == "error" and policy_missing_ids:
             raise ValueError(
-                f"Auto-curation rule {rule.get('rule_name', metric_name)!r} "
+                f"Auto-curation rule {rule_name!r} "
                 f"references metric {metric_name!r}, which has non-finite "
-                f"values for unit_id(s) {missing_unit_ids}. Fix the metric "
+                f"values for unit_id(s) {policy_missing_ids}. Fix the metric "
                 "computation or choose an explicit missing_policy ('fail' "
                 "or 'pass') for this rule."
             )
         if (
-            missing_policy == "pass"
-            and missing_unit_ids
-            and len(missing_unit_ids) == len(metrics_df.index)
+            missing_policy in {"pass", "fail"}
+            and policy_missing_ids
+            and len(policy_missing_ids) == len(metrics_df.index)
         ):
             # A per-unit NaN is an expected low-spike skip, but a metric that
-            # is missing for EVERY unit means the rule labelled nothing at all
-            # -- the silently-inert-rule regression. Say so without raising.
-            logger.warning(
-                f"Auto-curation rule {rule.get('rule_name', metric_name)!r} "
-                f"was inert: metric {metric_name!r} is non-finite for all "
-                f"{len(missing_unit_ids)} unit(s), so the rule applied no "
-                f"{label!r} labels. Check the metric computation."
-            )
+            # is missing for EVERY unit means the rule made no real
+            # comparison at all -- the silently-inert-rule regression. Say so
+            # without raising: "pass" applied no labels; "fail" applied its
+            # label to everyone for that reason, not because any unit
+            # crossed the threshold.
+            if missing_policy == "pass":
+                logger.warning(
+                    f"Auto-curation rule {rule_name!r} "
+                    f"was inert: metric {metric_name!r} is non-finite for "
+                    f"all {len(policy_missing_ids)} unit(s), so the rule "
+                    f"applied no {label!r} labels. Check the metric "
+                    "computation."
+                )
+            else:
+                logger.warning(
+                    f"Auto-curation rule {rule_name!r} "
+                    f"applied its {label!r} label to all "
+                    f"{len(policy_missing_ids)} unit(s) because metric "
+                    f"{metric_name!r} is non-finite for every one of them, "
+                    "not because any unit crossed the threshold. Check the "
+                    "metric computation."
+                )
         for unit_id in metrics_df.index:
             value = column.loc[unit_id]
             if not finite_by_unit[unit_id]:
@@ -472,6 +542,29 @@ def expected_missing_units(
     return expected
 
 
+def _unregistered_column_message(column: str, unit_ids: list) -> str:
+    """Message: a column with no eligibility rule is non-finite somewhere."""
+    return (
+        f"Metric column {column!r} is non-finite for unit_id(s) "
+        f"{unit_ids}, and it has no registered eligibility "
+        "rule, so a NaN cannot be classified as an expected "
+        "unassessable unit rather than a computation failure. "
+        "Register an eligibility rule for this metric, or "
+        "threshold a metric that has one."
+    )
+
+
+def _computation_failure_message(column: str, unit_ids: list) -> str:
+    """Message: a column is non-finite for a unit that should compute fine."""
+    return (
+        f"Metric column {column!r} is non-finite for unit_id(s) "
+        f"{unit_ids}, which meet the metric's preconditions: this is a "
+        "metric computation failure, not an unassessable unit. Check "
+        "the quality-metric computation (SpikeInterface replaces a "
+        "failing metric with NaN and only warns)."
+    )
+
+
 def assert_rule_metrics_computed(
     metrics_df: pd.DataFrame,
     rule_columns: Iterable[str],
@@ -510,23 +603,12 @@ def assert_rule_metrics_computed(
         if expected is None:
             if non_finite:
                 raise ValueError(
-                    f"Metric column {column!r} is non-finite for unit_id(s) "
-                    f"{non_finite}, and it has no registered eligibility "
-                    "rule, so a NaN cannot be classified as an expected "
-                    "unassessable unit rather than a computation failure. "
-                    "Register an eligibility rule for this metric, or "
-                    "threshold a metric that has one."
+                    _unregistered_column_message(column, non_finite)
                 )
             continue
         failed = [unit_id for unit_id in non_finite if unit_id not in expected]
         if failed:
-            raise ValueError(
-                f"Metric column {column!r} is non-finite for unit_id(s) "
-                f"{failed}, which meet the metric's preconditions: this is a "
-                "metric computation failure, not an unassessable unit. Check "
-                "the quality-metric computation (SpikeInterface replaces a "
-                "failing metric with NaN and only warns)."
-            )
+            raise ValueError(_computation_failure_message(column, failed))
 
 
 def rules_payloads_match(

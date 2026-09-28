@@ -642,3 +642,114 @@ def test_snr_inf_is_a_failure():
     metrics = pd.DataFrame({"snr": [5.0, np.inf]}, index=[3, 17])
     with pytest.raises(ValueError, match=r"'snr'.*\[17\]"):
         assert_rule_metrics_computed(metrics, {"snr"}, expected)
+
+
+# ---------- apply_label_rules consuming expected_missing --------------------
+
+
+@pytest.mark.parametrize(
+    ("policy", "labels_when_only_expected"),
+    [("pass", {}), ("fail", {42: ["noise"]})],
+)
+def test_apply_label_rules_unexpected_nan_raises_regardless_of_policy(
+    policy, labels_when_only_expected
+):
+    """A non-finite value outside the eligibility set is a computation failure.
+
+    Unit 42's NaN is in the column's expected-missing set (e.g. below
+    min_spikes); unit 99's is not, so it must raise under BOTH ``"pass"`` and
+    ``"fail"``. With only the expected unit missing, the same NaN instead
+    follows missing_policy as usual.
+    """
+    expected_missing = {"nn_noise_overlap": {42}}
+    rules = [_rule(0, "nn_noise_overlap", ">", 0.1, "noise")]
+    rules[0]["missing_policy"] = policy
+
+    unexpected = pd.DataFrame(
+        {"nn_noise_overlap": [np.nan, np.nan]}, index=[42, 99]
+    )
+    with pytest.raises(ValueError, match=r"unit_id\(s\) \[99\]"):
+        apply_label_rules(unexpected, rules, expected_missing=expected_missing)
+
+    only_expected = pd.DataFrame({"nn_noise_overlap": [np.nan]}, index=[42])
+    assert (
+        apply_label_rules(
+            only_expected, rules, expected_missing=expected_missing
+        )
+        == labels_when_only_expected
+    )
+
+
+def test_apply_label_rules_unregistered_column_nan_fails_closed_with_expected_missing():
+    """``expected_missing={col: None}`` fails closed on any non-finite value.
+
+    No eligibility rule is registered for ``trough_half_width``, so a NaN
+    cannot be classified -- even under the lenient ``"pass"`` policy.
+    """
+    expected_missing = {"trough_half_width": None}
+    rules = [_rule(0, "trough_half_width", ">", 0.5, "wide")]
+    rules[0]["missing_policy"] = "pass"
+
+    with_nan = pd.DataFrame({"trough_half_width": [0.6, np.nan]}, index=[3, 17])
+    with pytest.raises(ValueError, match="no registered eligibility rule"):
+        apply_label_rules(with_nan, rules, expected_missing=expected_missing)
+
+    finite = pd.DataFrame({"trough_half_width": [0.6, 0.4]}, index=[3, 17])
+    assert apply_label_rules(
+        finite, rules, expected_missing=expected_missing
+    ) == {3: ["wide"]}
+
+
+def test_apply_label_rules_fail_policy_all_missing_warns(caplog):
+    """``"fail"`` is inert (every unit labelled for the same reason) too.
+
+    The existing warning only covered ``"pass"``; ``"fail"`` silently applied
+    its label to every unit with no indication the metric itself was broken.
+    """
+    metrics = pd.DataFrame({"nn_noise_overlap": [np.nan, np.nan]}, index=[4, 5])
+    rules = [_rule(0, "nn_noise_overlap", ">", 0.1, "noise")]
+    rules[0]["missing_policy"] = "fail"
+    with caplog.at_level("WARNING"):
+        labels = apply_label_rules(metrics, rules)
+    assert labels == {4: ["noise"], 5: ["noise"]}
+    assert any(
+        "nn_noise_overlap" in record.getMessage() for record in caplog.records
+    ), "an all-missing rule under 'fail' was inert without saying so"
+
+
+def test_isi_violation_one_spike_unit_follows_missing_policy():
+    """The real ``isi_violation_fraction`` NaN is expected-missing, not failed.
+
+    A 1-spike unit's fraction is undefined (NaN); 2- and 50-spike units get a
+    real (zero) value. The shipped isi rule (``isi_violation > 0.02 ->
+    "reject"``) must treat the 1-spike unit's NaN per missing_policy, and must
+    never raise or label the two ordinary units.
+    """
+    n_spikes_by_unit = {3: 1, 17: 2, 42: 50}
+    unit_ids = list(n_spikes_by_unit)
+    isi_violation = isi_violation_fraction(
+        [0, 0, 0], [n_spikes_by_unit[u] for u in unit_ids]
+    )
+    assert np.isnan(isi_violation[0]) and list(isi_violation[1:]) == [0.0, 0.0]
+    metrics = pd.DataFrame({"isi_violation": isi_violation}, index=unit_ids)
+    expected_missing = _expected(
+        {"isi_violation"}, n_spikes_by_unit, duration_s=60.0
+    )
+    assert expected_missing == {"isi_violation": {3}}
+
+    rule = _rule(0, "isi_violation", ">", 0.02, "reject")
+
+    rule["missing_policy"] = "pass"
+    assert (
+        apply_label_rules(metrics, [rule], expected_missing=expected_missing)
+        == {}
+    )
+
+    rule["missing_policy"] = "fail"
+    assert apply_label_rules(
+        metrics, [rule], expected_missing=expected_missing
+    ) == {3: ["reject"]}
+
+    rule["missing_policy"] = "error"
+    with pytest.raises(ValueError, match=r"unit_id\(s\) \[3\]"):
+        apply_label_rules(metrics, [rule], expected_missing=expected_missing)
