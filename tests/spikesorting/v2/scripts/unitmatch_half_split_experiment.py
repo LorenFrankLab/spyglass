@@ -307,8 +307,7 @@ def extract_per_unit_bundle(session_dir, recording, sorting) -> list[int]:
     Returns
     -------
     list of int
-        Unit ids the production builder reports as excluded from the bundle
-        (empty when it reports none or returns ``None``).
+        Unit ids the production builder reports as excluded from the bundle.
     """
     from spyglass.spikesorting.v2._unitmatch_backend import (
         extract_unitmatch_bundle,
@@ -324,7 +323,7 @@ def extract_per_unit_bundle(session_dir, recording, sorting) -> list[int]:
         seed=BUNDLE_SEED,
         job_kwargs=JOB_KWARGS,
     )
-    return [] if excluded is None else sorted(int(u) for u in excluded)
+    return sorted(int(u) for u in excluded)
 
 
 def build_bundle(condition, session_dir, recording, sorting) -> list[int]:
