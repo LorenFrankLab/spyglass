@@ -1,0 +1,1022 @@
+"""Measure UnitMatch recall for units that fire in only part of a session.
+
+UnitMatch compares two cross-validation templates per unit. How the spyglass
+bundle builds those two halves decides whether a unit that drifts out of (or
+into) the recording partway through a session can be matched at all: when the
+halves are the first and second half of the RECORDING, a unit with no spikes in
+one half gets an all-zero template for that half and never matches. This
+script measures that on synthetic ground truth, under two bundle
+constructions:
+
+``time_half``
+    The recording-half construction, kept here as a local copy
+    (:func:`extract_time_half_bundle`) so the comparison survives changes to
+    the production bundle builder.
+``per_unit``
+    Whatever the production
+    :func:`spyglass.spikesorting.v2._unitmatch_backend.extract_unitmatch_bundle`
+    currently builds, called with the arguments the matcher table uses.
+
+Data: one 120 s, 30 kHz, 16-channel ground-truth recording with 20 units per
+seed (SpikeInterface ``generate_ground_truth_recording``), cut into two 60 s
+sessions A and B with ``frame_slice`` so every unit's true partner is the same
+unit id in the other session. Five units per seed (the drift-out set S) are
+modified by scenario:
+
+``control``
+    No modification (S is empty for scoring).
+``driftout_A``
+    S units keep only their spikes in the first half of session A.
+``driftout_AB``
+    As ``driftout_A``, and S units also keep only their spikes in the second
+    half of session B.
+
+Every pair goes through :meth:`UnitMatchBackend.match` (a pair passes when both
+directed probabilities exceed 0.5). Scored per run: drift-out true-pair recall,
+healthy (non-S) true-pair recall, healthy false positives (non-S x non-S,
+different ids), S x S false positives and UnitMatch's fitted match prior. Each
+drift-out run is also compared with the same condition's ``control`` run on
+the same seed, restricted to that seed's non-S units and pairs. Acceptance
+gates (:func:`evaluate_gates`) are evaluated for ``per_unit``. When both
+conditions run, the bundles are compared file by file (:func:`compare_bundles`).
+
+The dataset, scoring and gate functions are importable; UnitMatchPy is
+imported only when a bundle is built or matched.
+
+Usage (from the repo root, in the spikesorting-v2 environment with the
+matching extra installed)::
+
+    python tests/spikesorting/v2/scripts/unitmatch_half_split_experiment.py \\
+        [--seeds 10] [--scenarios control driftout_A driftout_AB] \\
+        [--conditions time_half per_unit] [--out-dir DIR]
+
+``--seeds N`` runs seeds ``0 .. N-1``. Per-run JSON, ``results.json`` and
+``summary.md`` are written to ``--out-dir`` (default: a new temporary
+directory) and the summary is printed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import io
+import json
+import tempfile
+import time
+import warnings
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+import numpy as np
+
+FS = 30_000.0
+DURATION_S = 120.0
+N_CHANNELS = 16
+N_UNITS = 20
+N_DRIFT_OUT = 5
+MS_BEFORE = MS_AFTER = 1.5
+MAX_SPIKES_PER_UNIT = 100
+BUNDLE_SEED = 0
+MATCH_THRESHOLD = 0.5
+JOB_KWARGS = {"n_jobs": 1, "progress_bar": False}
+
+SCENARIOS = ("control", "driftout_A", "driftout_AB")
+DRIFT_OUT_SCENARIOS = ("driftout_A", "driftout_AB")
+CONDITIONS = ("time_half", "per_unit")
+GATED_CONDITION = "per_unit"
+BASELINE_CONDITION = "time_half"
+SESSIONS = ("A", "B")
+
+G1_MIN_DRIFT_OUT_RECALL = 0.80
+G2_MAX_SXS_FALSE_RATE = 0.015
+G3A_MAX_HEALTHY_RECALL_DROP = 0.04
+G3B_MAX_EXCESS_RECALL_DROP = 0.04
+G4_MAX_HEALTHY_FP_INCREASE = 0.005
+
+
+# ----------------------------------------------------------------------------
+# Synthetic data
+# ----------------------------------------------------------------------------
+def make_dataset(seed: int):
+    """Generate one ground-truth recording + sorting with integer unit ids.
+
+    Parameters
+    ----------
+    seed : int
+        SpikeInterface generator seed.
+
+    Returns
+    -------
+    recording : spikeinterface BaseRecording
+        ``DURATION_S`` s at ``FS`` Hz, ``N_CHANNELS`` channels.
+    sorting : spikeinterface BaseSorting
+        ``N_UNITS`` units renamed to ids ``0 .. N_UNITS-1``.
+    """
+    import spikeinterface as si
+
+    rec, sort = si.generate_ground_truth_recording(
+        durations=[DURATION_S],
+        sampling_frequency=FS,
+        num_channels=N_CHANNELS,
+        num_units=N_UNITS,
+        generate_probe_kwargs={
+            "num_columns": 2,
+            "xpitch": 20,
+            "ypitch": 20,
+            "contact_shapes": "circle",
+            "contact_shape_params": {"radius": 6},
+        },
+        generate_sorting_kwargs={
+            "firing_rates": 10.0,
+            "refractory_period_ms": 4.0,
+        },
+        noise_kwargs={"noise_levels": 5.0, "strategy": "on_the_fly"},
+        seed=seed,
+    )
+    # SI generates string unit ids; the bundle names files with
+    # ``np.asarray(unit_ids, dtype=int)``, so use int ids throughout.
+    sort = sort.rename_units(np.arange(len(sort.get_unit_ids()), dtype=int))
+    return rec, sort
+
+
+def choose_drift_out_units(seed: int) -> list[int]:
+    """Return the sorted drift-out unit ids S for ``seed``.
+
+    >>> choose_drift_out_units(0) == choose_drift_out_units(0)
+    True
+    >>> len(choose_drift_out_units(3))
+    5
+    """
+    rng = np.random.default_rng(seed)
+    return sorted(
+        int(u) for u in rng.choice(N_UNITS, size=N_DRIFT_OUT, replace=False)
+    )
+
+
+def split_sessions(recording, sorting):
+    """Cut the recording + sorting into two back-to-back sessions A and B."""
+    half = int(DURATION_S * FS) // 2
+    n = recording.get_num_samples()
+    session_a = (recording.frame_slice(0, half), sorting.frame_slice(0, half))
+    session_b = (recording.frame_slice(half, n), sorting.frame_slice(half, n))
+    return session_a, session_b
+
+
+def drop_spikes(sorting, unit_subset, keep):
+    """Keep only spikes with ``keep(frames)`` True for units in ``unit_subset``.
+
+    Other units are untouched and the unit order is kept.
+    """
+    import spikeinterface as si
+
+    trains = {}
+    for uid in sorting.get_unit_ids():
+        st = sorting.get_unit_spike_train(uid)
+        if uid in unit_subset:
+            st = st[keep(st)]
+        trains[uid] = st.astype(np.int64)
+    return si.NumpySorting.from_unit_dict(trains, sorting.sampling_frequency)
+
+
+def make_scenario_sessions(recording, sorting, scenario, drift_out_units):
+    """Return ``{"A": (rec, sort), "B": (rec, sort)}`` for ``scenario``.
+
+    ``driftout_A`` keeps only first-half spikes of session A for the drift-out
+    units; ``driftout_AB`` additionally keeps only second-half spikes of
+    session B for them. ``control`` leaves both sessions unmodified.
+    """
+    if scenario not in SCENARIOS:
+        raise ValueError(f"unknown scenario {scenario!r}")
+    (rec_a, sort_a), (rec_b, sort_b) = split_sessions(recording, sorting)
+    half_frames = rec_a.get_num_samples() // 2
+    subset = set(drift_out_units)
+    if scenario in DRIFT_OUT_SCENARIOS:
+        sort_a = drop_spikes(sort_a, subset, lambda st: st < half_frames)
+    if scenario == "driftout_AB":
+        sort_b = drop_spikes(sort_b, subset, lambda st: st >= half_frames)
+    return {"A": (rec_a, sort_a), "B": (rec_b, sort_b)}
+
+
+# ----------------------------------------------------------------------------
+# Bundle constructions
+# ----------------------------------------------------------------------------
+def extract_time_half_bundle(
+    session_dir,
+    recording,
+    sorting,
+    *,
+    ms_before: float = 1.5,
+    ms_after: float = 1.5,
+    max_spikes_per_unit: int = 100,
+    seed: int = 0,
+    job_kwargs: dict | None = None,
+) -> None:
+    """Write a UnitMatch bundle whose halves are the recording's two halves.
+
+    A local copy of the recording-half bundle construction: build a dense
+    analyzer on the first and on the second half of the recording, compute
+    templates on each, and stack them as the two cross-validation halves. A
+    unit with no spikes in one recording half gets an all-zero template for
+    that half. Writes ``RawWaveforms/Unit{id}_RawSpikes.npy`` (shape
+    ``(spike_width, n_channels, 2)``), ``channel_positions.npy`` and
+    ``cluster_group.tsv`` (every unit ``good``).
+    """
+    from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
+    from spyglass.spikesorting.v2._unitmatch_backend import _require_unitmatch
+
+    validated = UnitMatchParamsSchema(
+        ms_before=ms_before,
+        ms_after=ms_after,
+        max_spikes_per_unit=max_spikes_per_unit,
+        seed=seed,
+    )
+    ms_before = validated.ms_before
+    ms_after = validated.ms_after
+    max_spikes_per_unit = validated.max_spikes_per_unit
+    seed = validated.seed
+
+    import spikeinterface as si
+
+    um = _require_unitmatch()
+    session_dir = Path(session_dir)
+    session_dir.mkdir(parents=True, exist_ok=True)
+    random_seed = seed
+    compute_job_kwargs = dict(job_kwargs or {})
+    compute_job_kwargs.pop("random_seed", None)
+
+    probe = recording.get_probe()
+    if probe.ndim == 3:
+        recording = recording.set_probe(probe.to_2d())
+    channel_positions = recording.get_channel_locations()
+    n_channels = recording.get_num_channels()
+    if channel_positions.shape != (n_channels, 2):
+        raise ValueError(
+            "extract_time_half_bundle: channel_positions have shape "
+            f"{channel_positions.shape}, expected (n_channels, 2) = "
+            f"({n_channels}, 2)."
+        )
+
+    half = recording.get_num_samples() // 2
+    t_halves = []
+    for a0, a1 in [(0, half), (half, recording.get_num_samples())]:
+        analyzer = si.create_sorting_analyzer(
+            sorting.frame_slice(a0, a1),
+            recording.frame_slice(a0, a1),
+            sparse=False,
+        )
+        analyzer.compute(
+            "random_spikes",
+            method="uniform",
+            max_spikes_per_unit=max_spikes_per_unit,
+            seed=random_seed,
+        )
+        analyzer.compute(
+            "waveforms",
+            ms_before=ms_before,
+            ms_after=ms_after,
+            **compute_job_kwargs,
+        )
+        analyzer.compute("templates", **compute_job_kwargs)
+        t_halves.append(analyzer.get_extension("templates").get_data())
+
+    avg_waves = np.stack(t_halves, axis=-1)  # (n_units, spike_width, n_chan, 2)
+    unit_ids = np.asarray(sorting.get_unit_ids(), dtype=int)
+    np.save(session_dir / "channel_positions.npy", channel_positions)
+    um.extract_raw_data.save_avg_waveforms(
+        avg_waves,
+        str(session_dir),
+        unit_ids,
+        unit_ids,
+        extract_good_units_only=False,
+    )
+    rows = [np.array(("cluster_id", "group"))] + [
+        np.array((str(i), "good")) for i in unit_ids
+    ]
+    np.savetxt(
+        session_dir / "cluster_group.tsv",
+        np.vstack(rows),
+        fmt=["%s", "%s"],
+        delimiter="\t",
+    )
+
+
+def extract_per_unit_bundle(session_dir, recording, sorting) -> list[int]:
+    """Build the bundle with production ``extract_unitmatch_bundle``.
+
+    Returns
+    -------
+    list of int
+        Unit ids the production builder reports as excluded from the bundle
+        (empty when it reports none or returns ``None``).
+    """
+    from spyglass.spikesorting.v2._unitmatch_backend import (
+        extract_unitmatch_bundle,
+    )
+
+    excluded = extract_unitmatch_bundle(
+        session_dir,
+        recording,
+        sorting,
+        ms_before=MS_BEFORE,
+        ms_after=MS_AFTER,
+        max_spikes_per_unit=MAX_SPIKES_PER_UNIT,
+        seed=BUNDLE_SEED,
+        job_kwargs=JOB_KWARGS,
+    )
+    return [] if excluded is None else sorted(int(u) for u in excluded)
+
+
+def build_bundle(condition, session_dir, recording, sorting) -> list[int]:
+    """Build one session bundle under ``condition``; return excluded unit ids."""
+    if condition == "time_half":
+        extract_time_half_bundle(
+            session_dir,
+            recording,
+            sorting,
+            ms_before=MS_BEFORE,
+            ms_after=MS_AFTER,
+            max_spikes_per_unit=MAX_SPIKES_PER_UNIT,
+            seed=BUNDLE_SEED,
+            job_kwargs=JOB_KWARGS,
+        )
+        return []
+    if condition == "per_unit":
+        return extract_per_unit_bundle(session_dir, recording, sorting)
+    raise ValueError(f"unknown condition {condition!r}")
+
+
+def all_zero_halves(session_dir) -> dict[str, list[int]]:
+    """Unit ids whose saved template half 0 / half 1 is exactly all zeros."""
+    out = {"half0": [], "half1": []}
+    for path in sorted(Path(session_dir, "RawWaveforms").glob("Unit*.npy")):
+        unit_id = int(path.name.removeprefix("Unit").split("_")[0])
+        wave = np.load(path)
+        for k in (0, 1):
+            if np.all(wave[..., k] == 0):
+                out[f"half{k}"].append(unit_id)
+    return {key: sorted(ids) for key, ids in out.items()}
+
+
+# ----------------------------------------------------------------------------
+# Matching
+# ----------------------------------------------------------------------------
+def match_sessions(session_dirs) -> tuple[list[list], dict | None]:
+    """Run ``UnitMatchBackend.match`` on two session bundles (A first).
+
+    Also records the fitted prior UnitMatch passes to its naive-Bayes step:
+    the backend builds ``priors = (1 - p, p)`` with
+    ``p = n_expected_matches / n_units ** 2``, where ``n_expected_matches`` is
+    fitted by ``overlord.extract_metric_scores``. The recorder wraps
+    ``bayes_functions.apply_naive_bayes`` for the duration of the call.
+
+    Returns
+    -------
+    pairs : list of [int, int, float]
+        Passing pairs as ``[unit_id_in_A, unit_id_in_B, mean_probability]``.
+    fitted : dict or None
+        ``prior_match`` (match-class prior), ``n_expected_matches`` and
+        ``n_units``; ``None`` if UnitMatch never reached its naive-Bayes step.
+    """
+    from spyglass.spikesorting.v2._unitmatch_backend import (
+        UnitMatchBackend,
+        _require_unitmatch,
+    )
+    from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
+
+    inputs = [
+        SessionMatcherInput(
+            curation_key={"sorting_id": label, "curation_id": 0},
+            waveform_dir=Path(d),
+            channel_positions_path=Path(d) / "channel_positions.npy",
+        )
+        for label, d in zip(SESSIONS, session_dirs)
+    ]
+    bayes = _require_unitmatch().bayes_functions
+    original = bayes.apply_naive_bayes
+    fitted = {}
+
+    def recording_naive_bayes(
+        parameter_kernels, priors, predictors, param, cond
+    ):
+        fitted["prior_match"] = float(priors[1])
+        fitted["n_expected_matches"] = int(param["n_expected_matches"])
+        fitted["n_units"] = int(param["n_units"])
+        return original(parameter_kernels, priors, predictors, param, cond)
+
+    bayes.apply_naive_bayes = recording_naive_bayes
+    try:
+        match_pairs = UnitMatchBackend().match(
+            inputs, {"match_threshold": MATCH_THRESHOLD}
+        )
+    finally:
+        bayes.apply_naive_bayes = original
+    pairs = []
+    for p in match_pairs:
+        if (p.session_a_sorting_id, p.session_b_sorting_id) != SESSIONS:
+            raise RuntimeError(f"unexpected pair orientation: {p}")
+        pairs.append([p.unit_a_id, p.unit_b_id, p.match_probability])
+    return pairs, (fitted or None)
+
+
+# ----------------------------------------------------------------------------
+# Scoring
+# ----------------------------------------------------------------------------
+def score_pairs(passing_pairs, unit_ids, drift_out_units) -> dict[str, list]:
+    """Count passing true and false cross-session pairs by unit group.
+
+    Parameters
+    ----------
+    passing_pairs : iterable of (int, int) or (int, int, float)
+        Passing ``(unit_in_A, unit_in_B[, probability])`` pairs.
+    unit_ids : sequence of int
+        Every planted unit id (the denominators come from ground truth, so a
+        unit missing from a bundle counts as a miss).
+    drift_out_units : sequence of int
+        The drift-out set S; every other unit is healthy.
+
+    Returns
+    -------
+    dict
+        ``[n_pass, n]`` for ``drift_out_true`` (i, i) with i in S,
+        ``healthy_true`` (i, i) with i not in S, ``healthy_false`` (i, j),
+        i != j both not in S, and ``drift_out_false`` (i, j), i != j both in S.
+
+    Examples
+    --------
+    >>> score_pairs([(0, 0, 0.9), (1, 1, 0.8), (2, 3, 0.7)], range(4), [0, 1])
+    {'drift_out_true': [2, 2], 'healthy_true': [0, 2], 'healthy_false': [1, 2], 'drift_out_false': [0, 2]}
+    """
+    passed = {(int(p[0]), int(p[1])) for p in passing_pairs}
+    units = [int(u) for u in unit_ids]
+    in_s = set(int(u) for u in drift_out_units)
+    counts = {
+        "drift_out_true": [0, 0],
+        "healthy_true": [0, 0],
+        "healthy_false": [0, 0],
+        "drift_out_false": [0, 0],
+    }
+    for i in units:
+        for j in units:
+            if i == j:
+                key = "drift_out_true" if i in in_s else "healthy_true"
+            elif i in in_s and j in in_s:
+                key = "drift_out_false"
+            elif i not in in_s and j not in in_s:
+                key = "healthy_false"
+            else:
+                continue
+            counts[key][1] += 1
+            counts[key][0] += int((i, j) in passed)
+    return counts
+
+
+def run_one(seed, scenario, condition, sessions, drift_out_units, out_dir):
+    """Build both bundles under ``condition``, match, score; return a record.
+
+    ``drift_out_units`` is the seed's S (scored as empty for ``control``).
+    Bundles are written to ``out_dir/seed{seed}/{scenario}/{condition}/{A,B}``.
+    """
+    run_dir = Path(out_dir) / f"seed{seed}" / scenario / condition
+    scored_s = [] if scenario == "control" else list(drift_out_units)
+    unit_ids = [int(u) for u in sessions["A"][1].get_unit_ids()]
+    dirs, excluded, zero = [], {}, {}
+    t0 = time.perf_counter()
+    # UnitMatchPy prints progress on every save and match; keep it out of the
+    # summary.
+    with contextlib.redirect_stdout(io.StringIO()):
+        for label in SESSIONS:
+            rec, sort = sessions[label]
+            d = run_dir / label
+            excluded[label] = build_bundle(condition, d, rec, sort)
+            zero[label] = all_zero_halves(d)
+            dirs.append(d)
+        t1 = time.perf_counter()
+        pairs, fitted = match_sessions(dirs)
+    t2 = time.perf_counter()
+    record = {
+        "seed": seed,
+        "scenario": scenario,
+        "condition": condition,
+        "unit_ids": unit_ids,
+        "drift_out_units": scored_s,
+        "seed_drift_out_units": list(drift_out_units),
+        "spike_counts": {
+            label: {
+                str(u): int(sessions[label][1].get_unit_spike_train(u).size)
+                for u in unit_ids
+            }
+            for label in SESSIONS
+        },
+        "excluded_unit_ids": excluded,
+        "all_zero_halves": zero,
+        "passing_pairs": pairs,
+        "fitted": fitted,
+        "counts": score_pairs(pairs, unit_ids, scored_s),
+        "timings_s": {"bundles": t1 - t0, "match": t2 - t1},
+        "bundle_dirs": {lab: str(d) for lab, d in zip(SESSIONS, dirs)},
+    }
+    with open(run_dir / "run.json", "w") as f:
+        json.dump(record, f, indent=1)
+    return record
+
+
+def _index(records) -> dict[tuple, dict]:
+    return {(r["seed"], r["scenario"], r["condition"]): r for r in records}
+
+
+def paired_counts(record, control_record) -> dict[str, list]:
+    """Healthy counts of a drift-out run and its control on the same units.
+
+    Both runs are scored with the drift-out run's S, so the control's healthy
+    true pairs and healthy false pairs cover exactly the same non-S units and
+    non-S x non-S pairs as the drift-out run.
+    """
+    s = record["seed_drift_out_units"]
+    ctrl = score_pairs(
+        control_record["passing_pairs"], control_record["unit_ids"], s
+    )
+    scen = score_pairs(record["passing_pairs"], record["unit_ids"], s)
+    return {
+        "healthy_true_control": ctrl["healthy_true"],
+        "healthy_true_scenario": scen["healthy_true"],
+        "healthy_false_control": ctrl["healthy_false"],
+        "healthy_false_scenario": scen["healthy_false"],
+    }
+
+
+def _sum(pairs) -> list[int]:
+    pairs = list(pairs)
+    return [sum(p[0] for p in pairs), sum(p[1] for p in pairs)]
+
+
+def _rate(count) -> float:
+    return count[0] / count[1] if count[1] else float("nan")
+
+
+def pooled_counts(records, scenario, condition) -> dict | None:
+    """Sum each count over the seeds of one scenario x condition."""
+    runs = [
+        r
+        for r in records
+        if r["scenario"] == scenario and r["condition"] == condition
+    ]
+    if not runs:
+        return None
+    keys = runs[0]["counts"].keys()
+    out = {k: _sum(r["counts"][k] for r in runs) for k in keys}
+    priors = [r["fitted"]["prior_match"] for r in runs if r["fitted"]]
+    out["mean_prior_match"] = float(np.mean(priors)) if priors else float("nan")
+    out["n_seeds"] = len(runs)
+    return out
+
+
+def pooled_paired_counts(records, scenario, condition) -> dict | None:
+    """Sum :func:`paired_counts` over the seeds that have a control run.
+
+    Returns ``None`` if any seed of ``scenario`` x ``condition`` lacks the same
+    condition's control run (the paired comparison is then not evaluable).
+    """
+    index = _index(records)
+    runs = [
+        r
+        for r in records
+        if r["scenario"] == scenario and r["condition"] == condition
+    ]
+    if not runs:
+        return None
+    per_seed = []
+    for r in runs:
+        ctrl = index.get((r["seed"], "control", condition))
+        if ctrl is None:
+            return None
+        per_seed.append(paired_counts(r, ctrl))
+    out = {k: _sum(p[k] for p in per_seed) for k in per_seed[0]}
+    out["healthy_recall_drop"] = _rate(out["healthy_true_control"]) - _rate(
+        out["healthy_true_scenario"]
+    )
+    out["healthy_fp_increase"] = _rate(out["healthy_false_scenario"]) - _rate(
+        out["healthy_false_control"]
+    )
+    out["seeds"] = sorted(r["seed"] for r in runs)
+    return out
+
+
+# ----------------------------------------------------------------------------
+# Gates
+# ----------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Gate:
+    """One acceptance gate outcome; ``passed`` is ``None`` if not evaluable."""
+
+    name: str
+    scenario: str
+    value: float
+    threshold: float
+    comparison: str
+    passed: bool | None
+    detail: str
+
+
+def _gate(name, scenario, value, threshold, comparison, detail) -> Gate:
+    if value is None or np.isnan(value):
+        return Gate(
+            name, scenario, float("nan"), threshold, comparison, None, detail
+        )
+    ok = value >= threshold if comparison == ">=" else value <= threshold
+    return Gate(
+        name, scenario, float(value), threshold, comparison, bool(ok), detail
+    )
+
+
+def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
+    """Evaluate the acceptance gates for ``condition``, per drift-out scenario.
+
+    Pooled over every seed present. G1 drift-out recall >= 0.80; G2 S x S
+    false-pair rate <= 0.015; G3a paired healthy recall drop (control ->
+    scenario, same non-S units per seed) <= 0.04; G3b that drop minus the
+    ``time_half`` paired drop on the same seeds <= 0.04 (only when
+    ``time_half`` ran on exactly the same seeds); G4 paired healthy false
+    positive rate increase <= 0.005.
+    """
+    gates = []
+    for scenario in DRIFT_OUT_SCENARIOS:
+        pooled = pooled_counts(records, scenario, condition)
+        if pooled is None:
+            continue
+        s_true = pooled["drift_out_true"]
+        s_false = pooled["drift_out_false"]
+        gates.append(
+            _gate(
+                "G1 drift-out recall",
+                scenario,
+                _rate(s_true),
+                G1_MIN_DRIFT_OUT_RECALL,
+                ">=",
+                f"{s_true[0]}/{s_true[1]}",
+            )
+        )
+        gates.append(
+            _gate(
+                "G2 SxS false-pair rate",
+                scenario,
+                _rate(s_false),
+                G2_MAX_SXS_FALSE_RATE,
+                "<=",
+                f"{s_false[0]}/{s_false[1]}",
+            )
+        )
+        paired = pooled_paired_counts(records, scenario, condition)
+        if paired is None:
+            drop = fp_inc = None
+            drop_detail = fp_detail = "no control run for some seed"
+        else:
+            drop = paired["healthy_recall_drop"]
+            fp_inc = paired["healthy_fp_increase"]
+            c, s = (
+                paired["healthy_true_control"],
+                paired["healthy_true_scenario"],
+            )
+            drop_detail = f"control {c[0]}/{c[1]} -> scenario {s[0]}/{s[1]}"
+            c, s = (
+                paired["healthy_false_control"],
+                paired["healthy_false_scenario"],
+            )
+            fp_detail = f"control {c[0]}/{c[1]} -> scenario {s[0]}/{s[1]}"
+        gates.append(
+            _gate(
+                "G3a paired healthy recall drop",
+                scenario,
+                drop,
+                G3A_MAX_HEALTHY_RECALL_DROP,
+                "<=",
+                drop_detail,
+            )
+        )
+        baseline = (
+            pooled_paired_counts(records, scenario, BASELINE_CONDITION)
+            if condition != BASELINE_CONDITION
+            else None
+        )
+        if paired is None or baseline is None:
+            excess, excess_detail = None, "time_half paired run not available"
+        elif baseline["seeds"] != paired["seeds"]:
+            excess, excess_detail = None, "time_half ran on different seeds"
+        else:
+            excess = drop - baseline["healthy_recall_drop"]
+            excess_detail = (
+                f"{condition} drop {drop:.4f} - time_half drop "
+                f"{baseline['healthy_recall_drop']:.4f}"
+            )
+        gates.append(
+            _gate(
+                "G3b excess recall drop vs time_half",
+                scenario,
+                excess,
+                G3B_MAX_EXCESS_RECALL_DROP,
+                "<=",
+                excess_detail,
+            )
+        )
+        gates.append(
+            _gate(
+                "G4 paired healthy FP increase",
+                scenario,
+                fp_inc,
+                G4_MAX_HEALTHY_FP_INCREASE,
+                "<=",
+                fp_detail,
+            )
+        )
+    return gates
+
+
+# ----------------------------------------------------------------------------
+# Bundle fidelity
+# ----------------------------------------------------------------------------
+def compare_bundles(dir_1, dir_2) -> dict[str, bool]:
+    """Whether two bundle directories hold byte-identical files.
+
+    Returns ``raw_waveforms`` (same ``RawWaveforms/*.npy`` file set, every
+    file byte-identical), ``channel_positions`` and ``cluster_group``.
+    """
+    dir_1, dir_2 = Path(dir_1), Path(dir_2)
+
+    def same(rel) -> bool:
+        a, b = dir_1 / rel, dir_2 / rel
+        return a.is_file() and b.is_file() and a.read_bytes() == b.read_bytes()
+
+    names_1 = sorted(p.name for p in (dir_1 / "RawWaveforms").glob("*.npy"))
+    names_2 = sorted(p.name for p in (dir_2 / "RawWaveforms").glob("*.npy"))
+    raw = names_1 == names_2 and all(
+        same(Path("RawWaveforms") / n) for n in names_1
+    )
+    return {
+        "raw_waveforms": raw,
+        "channel_positions": same("channel_positions.npy"),
+        "cluster_group": same("cluster_group.tsv"),
+    }
+
+
+def bundle_fidelity(records) -> list[dict]:
+    """Compare the two conditions' bundles for every run that has both."""
+    index = _index(records)
+    rows = []
+    for (seed, scenario, condition), rec in sorted(index.items()):
+        if condition != CONDITIONS[0]:
+            continue
+        other = index.get((seed, scenario, CONDITIONS[1]))
+        if other is None:
+            continue
+        for label in SESSIONS:
+            rows.append(
+                {
+                    "seed": seed,
+                    "scenario": scenario,
+                    "session": label,
+                    **compare_bundles(
+                        rec["bundle_dirs"][label], other["bundle_dirs"][label]
+                    ),
+                }
+            )
+    return rows
+
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+def _frac(count) -> str:
+    return f"{count[0]}/{count[1]} ({_rate(count):.3f})"
+
+
+def _fmt_prior(fitted) -> str:
+    return f"{fitted['prior_match']:.4f}" if fitted else "n/a"
+
+
+def format_summary(records, gates, fidelity) -> str:
+    """Render pooled, per-seed, paired, gate and fidelity tables as markdown."""
+    seeds = sorted({r["seed"] for r in records})
+    scenarios = [
+        s for s in SCENARIOS if any(r["scenario"] == s for r in records)
+    ]
+    conditions = [
+        c for c in CONDITIONS if any(r["condition"] == c for r in records)
+    ]
+    lines = [
+        "# UnitMatch half-split experiment",
+        "",
+        f"Seeds: {seeds} (n={len(seeds)}); {N_UNITS} units/session, "
+        f"|S|={N_DRIFT_OUT} drift-out units per seed; pass = both directed "
+        f"probabilities > {MATCH_THRESHOLD}. `control` scores every unit as "
+        "healthy.",
+        "",
+        "## Pooled over seeds",
+        "",
+        "| scenario | condition | drift-out recall | healthy recall | "
+        "healthy FP | SxS FP | mean fitted prior (match) |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for scenario in scenarios:
+        for condition in conditions:
+            p = pooled_counts(records, scenario, condition)
+            if p is None:
+                continue
+            lines.append(
+                f"| {scenario} | {condition} | {_frac(p['drift_out_true'])} | "
+                f"{_frac(p['healthy_true'])} | {_frac(p['healthy_false'])} | "
+                f"{_frac(p['drift_out_false'])} | {p['mean_prior_match']:.4f} |"
+            )
+
+    lines += [
+        "",
+        "## Paired against the same condition's control (same non-S units)",
+        "",
+        "| scenario | condition | healthy recall control -> scenario | "
+        "drop | healthy FP control -> scenario | FP increase |",
+        "|---|---|---|---|---|---|",
+    ]
+    for scenario in (s for s in DRIFT_OUT_SCENARIOS if s in scenarios):
+        for condition in conditions:
+            p = pooled_paired_counts(records, scenario, condition)
+            if p is None:
+                continue
+            lines.append(
+                f"| {scenario} | {condition} | "
+                f"{_frac(p['healthy_true_control'])} -> "
+                f"{_frac(p['healthy_true_scenario'])} | "
+                f"{p['healthy_recall_drop']:+.4f} | "
+                f"{_frac(p['healthy_false_control'])} -> "
+                f"{_frac(p['healthy_false_scenario'])} | "
+                f"{p['healthy_fp_increase']:+.4f} |"
+            )
+
+    index = _index(records)
+    lines += [
+        "",
+        "## Per seed",
+        "",
+        "| seed | S | scenario | condition | drift-out | healthy | healthy FP "
+        "| SxS FP | fitted prior | excluded A / B | paired healthy ctrl->scen "
+        "| paired FP ctrl->scen |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for seed in seeds:
+        for scenario in scenarios:
+            for condition in conditions:
+                r = index.get((seed, scenario, condition))
+                if r is None:
+                    continue
+                c = r["counts"]
+                paired_true = paired_fp = ""
+                ctrl = index.get((seed, "control", condition))
+                if scenario != "control" and ctrl is not None:
+                    pc = paired_counts(r, ctrl)
+                    paired_true = (
+                        f"{pc['healthy_true_control'][0]} -> "
+                        f"{pc['healthy_true_scenario'][0]} "
+                        f"/{pc['healthy_true_control'][1]}"
+                    )
+                    paired_fp = (
+                        f"{pc['healthy_false_control'][0]} -> "
+                        f"{pc['healthy_false_scenario'][0]} "
+                        f"/{pc['healthy_false_control'][1]}"
+                    )
+                ex = r["excluded_unit_ids"]
+                lines.append(
+                    f"| {seed} | {r['seed_drift_out_units']} | {scenario} | "
+                    f"{condition} | {c['drift_out_true'][0]}/"
+                    f"{c['drift_out_true'][1]} | {c['healthy_true'][0]}/"
+                    f"{c['healthy_true'][1]} | {c['healthy_false'][0]}/"
+                    f"{c['healthy_false'][1]} | {c['drift_out_false'][0]}/"
+                    f"{c['drift_out_false'][1]} | {_fmt_prior(r['fitted'])} | "
+                    f"{ex['A']} / {ex['B']} | {paired_true} | {paired_fp} |"
+                )
+
+    lines += [
+        "",
+        f"## Acceptance gates ({GATED_CONDITION}, pooled over seeds)",
+        "",
+    ]
+    if not gates:
+        lines.append("Not evaluated (no drift-out runs for this condition).")
+    for g in gates:
+        verdict = {True: "PASS", False: "FAIL", None: "N/A"}[g.passed]
+        lines.append(
+            f"- {verdict} {g.name} [{g.scenario}]: {g.value:.4f} "
+            f"{g.comparison} {g.threshold} ({g.detail})"
+        )
+
+    lines += ["", "## Bundle fidelity (time_half vs per_unit)", ""]
+    if not fidelity:
+        lines.append("Not evaluated (both conditions did not run).")
+    else:
+        n = len(fidelity)
+        for key in ("raw_waveforms", "channel_positions", "cluster_group"):
+            k = sum(row[key] for row in fidelity)
+            lines.append(f"- {key}: bit-identical in {k}/{n} session bundles")
+        differing = sorted(
+            {
+                (row["seed"], row["scenario"], row["session"])
+                for row in fidelity
+                if not all(
+                    row[k]
+                    for k in (
+                        "raw_waveforms",
+                        "channel_positions",
+                        "cluster_group",
+                    )
+                )
+            }
+        )
+        if differing:
+            lines.append(f"- differing (seed, scenario, session): {differing}")
+
+    lines += ["", "## All-zero template halves", ""]
+    for condition in conditions:
+        runs = [r for r in records if r["condition"] == condition]
+        n_zero = sum(
+            len(set(r["all_zero_halves"][lab]["half0"]))
+            + len(set(r["all_zero_halves"][lab]["half1"]))
+            for r in runs
+            for lab in SESSIONS
+        )
+        lines.append(
+            f"- {condition}: {n_zero} all-zero unit halves across "
+            f"{len(runs)} runs"
+        )
+    return "\n".join(lines) + "\n"
+
+
+# ----------------------------------------------------------------------------
+# CLI
+# ----------------------------------------------------------------------------
+def main(argv=None) -> None:
+    """Run the experiment from the command line."""
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument(
+        "--seeds", type=int, default=10, help="seed count (runs 0..N-1)"
+    )
+    ap.add_argument(
+        "--scenarios", nargs="+", choices=SCENARIOS, default=list(SCENARIOS)
+    )
+    ap.add_argument(
+        "--conditions", nargs="+", choices=CONDITIONS, default=list(CONDITIONS)
+    )
+    ap.add_argument("--out-dir", type=Path, default=None)
+    args = ap.parse_args(argv)
+    if args.seeds < 1:
+        ap.error("--seeds must be >= 1")
+    warnings.filterwarnings("ignore")
+    # save_avg_waveforms changes the working directory; keep paths absolute.
+    out_dir = (
+        Path(tempfile.mkdtemp(prefix="unitmatch_half_split_"))
+        if args.out_dir is None
+        else args.out_dir
+    ).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"out-dir: {out_dir}", flush=True)
+
+    records = []
+    for seed in range(args.seeds):
+        t0 = time.perf_counter()
+        recording, sorting = make_dataset(seed)
+        drift_out_units = choose_drift_out_units(seed)
+        for scenario in args.scenarios:
+            sessions = make_scenario_sessions(
+                recording, sorting, scenario, drift_out_units
+            )
+            for condition in args.conditions:
+                records.append(
+                    run_one(
+                        seed,
+                        scenario,
+                        condition,
+                        sessions,
+                        drift_out_units,
+                        out_dir,
+                    )
+                )
+        print(
+            f"seed {seed} (S={drift_out_units}) done in "
+            f"{time.perf_counter() - t0:.1f} s",
+            flush=True,
+        )
+
+    gates = evaluate_gates(records)
+    fidelity = bundle_fidelity(records)
+    summary = format_summary(records, gates, fidelity)
+    with open(out_dir / "results.json", "w") as f:
+        json.dump(
+            {
+                "records": records,
+                "gates": [asdict(g) for g in gates],
+                "fidelity": fidelity,
+            },
+            f,
+            indent=1,
+        )
+    (out_dir / "summary.md").write_text(summary)
+    print(summary, flush=True)
+
+
+if __name__ == "__main__":
+    main()
