@@ -42,6 +42,32 @@ def _build_documented_upgrade_script(tmp_path: Path) -> tuple[Path, Path]:
     return script, config_file
 
 
+def _column_data_type(table, column: str) -> str:
+    """The column's MySQL ``DATA_TYPE`` (e.g. ``'double'``, ``'float'``)."""
+    return table.connection.query(
+        "SELECT DATA_TYPE FROM information_schema.COLUMNS WHERE "
+        "TABLE_SCHEMA=%s AND TABLE_NAME=%s AND COLUMN_NAME=%s",
+        args=(table.database, table.table_name, column),
+    ).fetchone()[0]
+
+
+def _column_ddl(table, column: str) -> str:
+    """The column's full definition from ``SHOW CREATE TABLE``.
+
+    Includes its type, nullability, default and comment, so
+    ``ALTER TABLE ... MODIFY COLUMN <ddl>`` restores it exactly.
+    """
+    create = table.connection.query(
+        f"SHOW CREATE TABLE {table.full_table_name}"
+    ).fetchone()[1]
+    (ddl,) = [
+        line.strip().rstrip(",")
+        for line in create.splitlines()
+        if line.strip().startswith(f"`{column}` ")
+    ]
+    return ddl
+
+
 def _run_script(script: Path) -> subprocess.CompletedProcess:
     """Run ``script`` from a fresh interpreter so no cached heading hides
     the old DDL the script is about to alter."""
@@ -85,6 +111,9 @@ def test_documented_upgrade_widens_single_precision_threshold_columns(
         QualityMetricParameters: "observed_presence_bin_duration_s",
     }
     snapshots = {table: table.fetch(as_dict=True) for table in altered}
+    declared = {
+        table: _column_ddl(table, column) for table, column in altered.items()
+    }
     script, config_file = _build_documented_upgrade_script(tmp_path)
     try:
         for table, column in altered.items():
@@ -96,16 +125,7 @@ def test_documented_upgrade_widens_single_precision_threshold_columns(
         assert result.returncode == 0, result.stdout + result.stderr
 
         for table, column in altered.items():
-            data_type = table.connection.query(
-                "SELECT DATA_TYPE FROM information_schema.COLUMNS WHERE "
-                "TABLE_SCHEMA=%s AND TABLE_NAME=%s AND COLUMN_NAME=%s",
-                args=(
-                    table.database,
-                    table.table_name,
-                    column,
-                ),
-            ).fetchone()[0]
-            assert data_type == "double"
+            assert _column_data_type(table, column) == "double"
 
         widened = float(np.float32(0.1))
         assert widened != 0.1  # the widening is real, not a no-op
@@ -114,6 +134,14 @@ def test_documented_upgrade_widens_single_precision_threshold_columns(
         ) == widened
     finally:
         config_file.unlink(missing_ok=True)
+        # A failed upgrade must not leave the persistent test database with
+        # single-precision columns that would silently change later tests.
+        for table, column in altered.items():
+            if _column_data_type(table, column) != "double":
+                table.connection.query(
+                    f"ALTER TABLE {table.full_table_name} "
+                    f"MODIFY COLUMN {declared[table]}"
+                )
         for table, rows in snapshots.items():
             restored = dj.FreeTable(dj.conn(), table.full_table_name)
             for row in rows:

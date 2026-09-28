@@ -600,25 +600,41 @@ def _franklab_evaluation(curation_key, metric_params_name="franklab_default"):
 
 
 def _ensure_franklab_with_sd_ratio_metric_params():
-    """The shipped Frank-lab metric row plus ``sd_ratio``, which no rule uses."""
+    """The shipped Frank-lab metric row plus ``sd_ratio``, which no rule uses.
+
+    The row persists in the test database, so a stored row is reused only if
+    its content still equals the current ``franklab_default`` plus
+    ``sd_ratio``; otherwise ``DuplicateParameterContentError`` names it.
+    """
+    from spyglass.spikesorting.v2._lookup_validation import (
+        reject_stale_quality_metric_defaults,
+    )
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        prepare_quality_metric_row,
+    )
     from spyglass.spikesorting.v2.metric_curation import (
         QualityMetricParameters,
     )
 
     name = "franklab_default_with_sd_ratio"
-    if not (QualityMetricParameters & {"metric_params_name": name}):
-        (franklab,) = [
-            row
-            for row in QualityMetricParameters._default_rows()
-            if row["metric_params_name"] == "franklab_default"
-        ]
-        QualityMetricParameters.insert1(
-            {
-                **franklab,
-                "metric_params_name": name,
-                "metric_names": [*franklab["metric_names"], "sd_ratio"],
-            }
-        )
+    (franklab,) = [
+        row
+        for row in QualityMetricParameters._default_rows()
+        if row["metric_params_name"] == "franklab_default"
+    ]
+    row = {
+        **franklab,
+        "metric_params_name": name,
+        "metric_names": [*franklab["metric_names"], "sd_ratio"],
+    }
+    stored = (QualityMetricParameters & {"metric_params_name": name}).fetch(
+        as_dict=True
+    )
+    reject_stale_quality_metric_defaults(
+        stored, [prepare_quality_metric_row(row)]
+    )
+    if not stored:
+        QualityMetricParameters.insert1(row)
     return name
 
 

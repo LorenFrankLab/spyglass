@@ -770,9 +770,9 @@ def test_params_lookup_rejects_replace(dj_conn):
     QualityMetricParameters.insert_default()
     qmp_key = {"metric_params_name": "franklab_default"}
     qmp_before = (QualityMetricParameters & qmp_key).fetch1()
-    with pytest.raises(dj.errors.DataJointError):
+    with pytest.raises(dj.errors.DataJointError, match="replace=True"):
         QualityMetricParameters().insert(dict(qmp_before), replace=True)
-    with pytest.raises(dj.errors.DataJointError):
+    with pytest.raises(dj.errors.DataJointError, match="replace=True"):
         QualityMetricParameters().insert1(dict(qmp_before), replace=True)
     assert (QualityMetricParameters & qmp_key).fetch1() == qmp_before
 
@@ -782,9 +782,9 @@ def test_params_lookup_rejects_replace(dj_conn):
         "sorter_params_name": "default",
     }
     sorter_before = (SorterParameters & sorter_key).fetch1()
-    with pytest.raises(dj.errors.DataJointError):
+    with pytest.raises(dj.errors.DataJointError, match="replace=True"):
         SorterParameters().insert([dict(sorter_before)], replace=True)
-    with pytest.raises(dj.errors.DataJointError):
+    with pytest.raises(dj.errors.DataJointError, match="replace=True"):
         SorterParameters().insert1(dict(sorter_before), replace=True)
     assert (SorterParameters & sorter_key).fetch1() == sorter_before
 
