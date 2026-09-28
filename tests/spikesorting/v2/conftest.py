@@ -78,6 +78,26 @@ def _disable_datajoint_safemode(request):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _isolate_si_metric_defaults():
+    """Keep SpikeInterface's metric defaults from leaking between tests.
+
+    A direct ``compute_quality_metrics`` / ``compute_template_metrics`` call
+    merges its ``metric_params`` into the metric classes' shared default
+    dicts, so a kwarg one test sets would silently apply to every later
+    compute in the process, and a test reading SI's defaults would depend on
+    test order. Each test runs inside ``isolated_si_metric_defaults``: it
+    sees (and may change) a copy of every quality- and template-metric
+    class's defaults, and the original dicts are restored afterwards.
+    """
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        isolated_si_metric_defaults,
+    )
+
+    with isolated_si_metric_defaults():
+        yield
+
+
 # The per-PR smoke fixture. Fetched lazily -- only when a collected test needs
 # the database (see ``pytest_collection_modifyitems``), never unconditionally.
 _SMOKE_FIXTURE = "mearec_polymer_smoke"

@@ -63,26 +63,6 @@ _PCA_PARAMS = {
 }
 
 
-@pytest.fixture(autouse=True)
-def _restore_si_metric_defaults():
-    """Undo SI's in-place update of its class-level metric defaults.
-
-    ``compute_quality_metrics`` merges custom kwargs into the metric classes'
-    ``metric_params`` dicts, so a ``min_fr`` set by one test would silently
-    apply to every later compute in the process.
-    """
-    from spikeinterface.metrics.quality import ComputeQualityMetrics
-
-    saved = [
-        (metric, copy.deepcopy(metric.metric_params))
-        for metric in ComputeQualityMetrics.metric_list
-    ]
-    yield
-    for metric, params in saved:
-        metric.metric_params.clear()
-        metric.metric_params.update(params)
-
-
 def _analyzer(duration_s, spikes_by_unit, *, whiten, gap_s=0.0, seed=0):
     """Analyzer over a ground-truth recording with chosen per-unit counts.
 
