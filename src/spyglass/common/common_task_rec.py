@@ -316,12 +316,20 @@ class TaskRecording(SpyglassIngestion, dj.Manual):
             )
 
         _ = self.ensure_single_entry()
-        # fetch_nwb resolves each `<name>_object_id` attribute to the table it
-        # points at, already as a DataFrame. A null id yields no key at all.
-        table = self.fetch_nwb()[0].get(table_name)
-        if table is None:
+
+        # Every column here is nullable, and fetch_nwb resolves each
+        # `<name>_object_id` it is handed -- guarding only against `""`, so a
+        # NULL id reaches `nwbf.objects[None]` and raises TypeError. Ask for
+        # the one id wanted, so a recording that stored no trials table can
+        # still return its actions.
+        id_attr = f"{table_name}_object_id"
+        if not self.fetch1(id_attr):
             raise ValueError(
                 f"No {table_name} recorded for {self.fetch1('KEY')}."
             )
 
-        return table
+        # fetch_nwb resolves the id to the table it points at, already as a
+        # DataFrame, keyed by the attribute name without its `_object_id`. The
+        # primary key rides along because fetch_nwb resolves the file path
+        # from it; only the `_object_id` attrs are turned into objects.
+        return self.fetch_nwb(*self.primary_key, id_attr)[0][table_name]

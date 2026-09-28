@@ -58,9 +58,25 @@ def task_rec(common):
     return common_task_rec
 
 
-@pytest.fixture(scope="module")
-def import_task_recording_nwb(verbose_context):
-    """Write and ingest a file holding a minimal structured-behavior task."""
+def _ingested(file_stem, with_trials, verbose_context):
+    """Write and ingest a minimal structured-behavior file, then clean up.
+
+    Parameters
+    ----------
+    file_stem : str
+        Basename for the raw file, without extension.
+    with_trials : bool
+        Whether the file gets a trials table. A file without one leaves
+        `TaskRecording.trials_object_id` null, which is the case that must not
+        break fetching the tables it does have.
+    verbose_context : context manager
+        The suite's teardown-logging context.
+
+    Yields
+    ------
+    dict
+        Key of the ingested copy.
+    """
     from pynwb import NWBHDF5IO
     from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 
@@ -69,7 +85,7 @@ def import_task_recording_nwb(verbose_context):
     from spyglass.settings import raw_dir
 
     nwbfile = mock_NWBFile(
-        identifier="structured_behavior_import_demo",
+        identifier=f"structured_behavior_{file_stem}",
         session_description="Mock NWB file demonstrating TaskRecording import",
     )
     mock_Subject(nwbfile=nwbfile)
@@ -117,25 +133,28 @@ def import_task_recording_nwb(verbose_context):
     states.add_state(state_type=0, start_time=0.0, stop_time=0.1)
     states.add_state(state_type=1, start_time=0.1, stop_time=0.3)
 
-    trials = TrialsTable(
-        description="recorded trials",
-        states_table=states,
-        events_table=events,
-        actions_table=actions,
-    )
-    trials.add_trial(
-        start_time=0.0, stop_time=0.8, states=[0, 1], events=[0], actions=[0, 1]
-    )
-    nwbfile.trials = trials
+    if with_trials:
+        trials = TrialsTable(
+            description="recorded trials",
+            states_table=states,
+            events_table=events,
+            actions_table=actions,
+        )
+        trials.add_trial(
+            start_time=0.0,
+            stop_time=0.8,
+            states=[0, 1],
+            events=[0],
+            actions=[0, 1],
+        )
+        nwbfile.trials = trials
 
     nwbfile.add_acquisition(
         TaskRecording(actions=actions, states=states, events=events)
     )
 
-    raw_file_name = "test_task_recording.nwb"
-    copy_file_name = "test_task_recording_.nwb"
-    file_path = Path(raw_dir) / raw_file_name
-    nwb_dict = dict(nwb_file_name=copy_file_name)
+    file_path = Path(raw_dir) / f"{file_stem}.nwb"
+    nwb_dict = dict(nwb_file_name=f"{file_stem}_.nwb")
     file_path.unlink(missing_ok=True)
 
     with NWBHDF5IO(file_path, mode="w") as io:
@@ -148,6 +167,18 @@ def import_task_recording_nwb(verbose_context):
     with verbose_context:
         file_path.unlink(missing_ok=True)
         (Nwbfile & nwb_dict).delete(safemode=False)
+
+
+@pytest.fixture(scope="module")
+def import_task_recording_nwb(verbose_context):
+    """A file with every table, trials included."""
+    yield from _ingested("test_task_recording", True, verbose_context)
+
+
+@pytest.fixture(scope="module")
+def import_no_trials_nwb(verbose_context):
+    """A file whose recording has no trials table, leaving that id null."""
+    yield from _ingested("test_task_rec_no_trials", False, verbose_context)
 
 
 def test_recording_types_descriptions(task_rec, import_task_recording_nwb):
@@ -222,3 +253,34 @@ def test_fetch1_dataframe_rejects_unknown(task_rec, import_task_recording_nwb):
 
     with pytest.raises(ValueError, match="Invalid table name"):
         query.fetch1_dataframe("trials_object_id")
+
+
+def test_no_trials_is_null(task_rec, import_no_trials_nwb):
+    """A file with no trials table stores a null id, not a failed ingest."""
+    entry = (task_rec.TaskRecording & import_no_trials_nwb).fetch1()
+
+    assert entry["trials_object_id"] is None
+    assert entry["actions_object_id"], "actions should still be ingested"
+
+
+@pytest.mark.parametrize("table_name", ["actions", "events", "states"])
+def test_fetch1_dataframe_ignores_null_siblings(
+    task_rec, import_no_trials_nwb, table_name
+):
+    """A null id must not break fetching the tables that were recorded.
+
+    fetch_nwb resolves every `*_object_id` it is handed and guards only
+    against `""`, so passing all four columns would look up
+    `nwbf.objects[None]` and raise TypeError for a file with no trials.
+    """
+    query = task_rec.TaskRecording & import_no_trials_nwb
+
+    assert len(query.fetch1_dataframe(table_name)) > 0
+
+
+def test_fetch1_dataframe_missing_table(task_rec, import_no_trials_nwb):
+    """Asking for a table this entry did not record raises, not KeyError."""
+    query = task_rec.TaskRecording & import_no_trials_nwb
+
+    with pytest.raises(ValueError, match="No trials recorded"):
+        query.fetch1_dataframe("trials")

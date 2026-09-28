@@ -103,7 +103,7 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         return np.asarray([[start_time, stop_time]])
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
-        """Namespace the rows that came from `invalid_times`. See #1336.
+        """Namespace and group the rows that came from `invalid_times`. #1336.
 
         `epochs` and `invalid_times` share a mapping but not a namespace: both
         name their rows from tags, so an untagged row of either is
@@ -111,6 +111,14 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         prefix is applied here, on the table, rather than in
         `interval_name_from_tags`, because a row knows its id but not which
         table it was read from.
+
+        Rows that share a tag then share a name, and a name is the primary
+        key. They are collected into one entry whose `valid_times` holds every
+        interval, rather than left as separate entries for the same key -- the
+        attribute is an (n, 2) array precisely so one list can hold many
+        intervals, and a tag on `invalid_times` names a reason ("artifact")
+        that a session is expected to hit more than once. Left ungrouped they
+        would raise `DuplicateError` and abort the file.
 
         Parameters
         ----------
@@ -123,7 +131,7 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         Returns
         -------
         IngestionEntries
-            Planned entries, with `invalid_times` names prefixed.
+            Planned entries, prefixed and grouped by name.
         """
         entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
 
@@ -131,11 +139,23 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         # entries are renamed here, once, when the recursion returns.
         if getattr(nwb_obj, "name", None) != "invalid_times":
             return entries
+        if self not in entries:
+            return entries
 
-        for entry in entries.get(self, []):
-            entry["interval_list_name"] = (
-                self._invalid_times_prefix + entry["interval_list_name"]
+        grouped = dict()  # interval_list_name -> entry, in first-seen order
+        for entry in entries[self]:
+            name = self._invalid_times_prefix + entry["interval_list_name"]
+            entry["interval_list_name"] = name
+
+            if (first := grouped.get(name)) is None:
+                grouped[name] = entry
+                continue
+
+            first["valid_times"] = np.vstack(
+                (first["valid_times"], entry["valid_times"])
             )
+
+        entries[self] = list(grouped.values())
 
         return entries
 

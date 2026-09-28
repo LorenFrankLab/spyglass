@@ -12,6 +12,8 @@ import pytest
 from pynwb import NWBHDF5IO
 from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 
+SHARED_TAG = "artifact"
+
 
 @pytest.fixture(scope="module")
 def import_invalid_times_nwb(verbose_context):
@@ -32,8 +34,17 @@ def import_invalid_times_nwb(verbose_context):
 
     # Untagged, so these name themselves `interval_0` and `interval_1` --
     # the same names epochs row 0 and row 1 would take without their tags.
-    nwbfile.add_invalid_time_interval(start_time=3.0, stop_time=4.0)
-    nwbfile.add_invalid_time_interval(start_time=15.0, stop_time=16.0)
+    nwbfile.add_invalid_time_interval(start_time=3.0, stop_time=4.0, tags=[])
+    nwbfile.add_invalid_time_interval(start_time=15.0, stop_time=16.0, tags=[])
+
+    # Two rows sharing a tag, so both derive the same name. A tag names a
+    # reason, which a session is expected to hit more than once.
+    nwbfile.add_invalid_time_interval(
+        start_time=5.0, stop_time=5.5, tags=[SHARED_TAG]
+    )
+    nwbfile.add_invalid_time_interval(
+        start_time=17.0, stop_time=17.5, tags=[SHARED_TAG]
+    )
 
     raw_file_name = "test_invalid_times.nwb"
     copy_file_name = "test_invalid_times_.nwb"
@@ -63,6 +74,7 @@ def test_invalid_times_imported(common, import_invalid_times_nwb):
         "interval_1",
         "invalid_interval_0",
         "invalid_interval_1",
+        f"invalid_{SHARED_TAG}",
     }
     assert expected <= names, (
         f"Missing interval list names {expected - names}. "
@@ -80,3 +92,25 @@ def test_invalid_times_values(common, import_invalid_times_nwb):
     assert valid_times.tolist() == [
         [3.0, 4.0]
     ], f"Unexpected valid_times for invalid_interval_0: {valid_times}"
+
+
+def test_repeated_tag_grouped(common, import_invalid_times_nwb):
+    """Rows sharing a tag become one list holding every interval.
+
+    They share a derived name, which is the primary key. Ungrouped they would
+    raise DuplicateError during ingestion and abort the whole file.
+    """
+    key = import_invalid_times_nwb
+    query = (
+        common.IntervalList
+        & key
+        & {"interval_list_name": f"invalid_{SHARED_TAG}"}
+    )
+
+    assert len(query) == 1, f"Expected one row for the shared tag, got {query}"
+
+    valid_times = query.fetch1("valid_times")
+    assert valid_times.tolist() == [
+        [5.0, 5.5],
+        [17.0, 17.5],
+    ], f"Shared-tag intervals were not grouped in order: {valid_times}"
