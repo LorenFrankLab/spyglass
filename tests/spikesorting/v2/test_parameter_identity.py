@@ -435,24 +435,19 @@ def test_quality_metric_insert_rejects_duplicate_content(dj_conn):
 
 @pytest.mark.database
 def test_qmp_duplicate_content_detected_after_double_column(dj_conn):
-    """A fractional ``observed_presence_bin_duration_s`` still fingerprints
-    identically once fetched back, so a second name for the same content is
-    caught.
+    """A fractional ``observed_presence_bin_duration_s`` that needs more than
+    single precision still fingerprints identically once fetched back, so a
+    second name for the same content is caught.
 
     The QMP fingerprint hashes the stored value directly (not a tolerant
-    comparison), so a value read back with more digits than it was written
-    with -- e.g. ``0.10000000149011612`` for a row that stored a
-    single-precision ``0.1`` -- would no longer hash the same as an incoming
-    exact ``0.1`` and would defeat this guard. This particular value round-
-    trips losslessly through a plain insert/fetch even on a single-precision
-    column, because MySQL's ``FLOAT`` text output already renders the
-    shortest decimal that reproduces the stored value, which for ``0.1``
-    is ``"0.1"`` itself; that mismatch is only observed for values stored
-    before a column is altered from ``float`` to ``double`` in place (see
-    the migration rehearsal test, and the tolerance kept in
-    ``rules_payloads_match`` for ``AutoCurationRules.Rule.threshold``, which
-    goes through exactly that alter). This test still guards that a
-    fractional bin duration does not defeat duplicate-content detection.
+    comparison). A single-precision column rounds any value that needs more
+    than about 7 significant decimal digits, so a value like ``1 / 3``
+    (``0.3333333333333333``) is stored as the nearest float32 and read back
+    as ``0.3333333432674408`` -- no longer bit-equal to a freshly validated
+    exact ``1 / 3``, so the fingerprint of the stored row no longer matches
+    an identical value re-entered under a new name and this guard misses the
+    duplicate. A ``double`` column stores ``1 / 3`` exactly, so the two
+    fingerprints match and the duplicate is caught.
     """
     from spyglass.spikesorting.v2.exceptions import (
         DuplicateParameterContentError,
@@ -467,7 +462,7 @@ def test_qmp_duplicate_content_detected_after_double_column(dj_conn):
         "metric_kwargs": {"snr": {"peak_sign": "neg"}},
         "template_metric_columns": [],
         "skip_pc_metrics": True,
-        "observed_presence_bin_duration_s": 0.1,
+        "observed_presence_bin_duration_s": 1 / 3,
     }
     dup = {**first, "metric_params_name": "bin_duration_fraction_b"}
     keys = [
