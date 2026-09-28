@@ -477,13 +477,21 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     so the master row and its rule rows are validated together; direct
     ``insert1`` is unsupported.
 
-    Each rule persists a Spyglass ``missing_policy``: ``error`` is fail-fast,
-    ``fail`` applies the rule label, and ``pass`` leaves the unit unlabelled by
-    that rule. The shipped rule sets below use ``pass`` because their metrics
-    have validity floors, so NaN means "not assessable for this unit", not
-    "computation broken" -- ``pass`` still warns if a metric is missing for
-    EVERY unit, which does mean broken. This is distinct from SpikeInterface's
-    ``nan_policy`` (its ``fail`` mode labels and never raises).
+    Each rule persists a Spyglass ``missing_policy`` for units SpikeInterface
+    cannot assess for the rule's metric (e.g. fewer spikes than
+    ``nn_advanced``'s ``min_spikes``; ``expected_missing_units`` in
+    ``_metric_curation`` lists every registered column and condition):
+    ``error`` raises, ``fail`` applies the rule label, and ``pass`` leaves the
+    unit unlabelled by that rule. Any other non-finite value raises regardless
+    of the policy: a NaN for a unit that meets the metric's conditions, and
+    any NaN in a column with no registered conditions (template metrics,
+    custom metrics, ``observed_*`` columns). A SpikeInterface error in a
+    metric a rule references aborts the evaluation; one in an unreferenced
+    metric is only logged. The shipped rule sets below use ``pass`` because
+    their metrics have validity floors; ``pass`` and ``fail`` both warn if a
+    metric is missing for EVERY unit, since the rule then made no real
+    comparison. This is distinct from SpikeInterface's ``nan_policy`` (its
+    ``fail`` mode labels and never raises).
     """
 
     definition = """

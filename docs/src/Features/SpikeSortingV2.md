@@ -1070,17 +1070,38 @@ Notes:
 - `AutoCurationRules` is inserted via `insert_rules(master, rule_rows)` (direct
     `insert1` is blocked) so the master row and its ordered rule rows validate
     together.
-- Every rule stores a `missing_policy`. `error` is fail-fast when any unit has a
-    non-finite value for the referenced metric, `fail` applies the rule's label
-    to that unit, and `pass` leaves it unlabelled by that rule. These are
-    Spyglass semantics, not SpikeInterface's `nan_policy` (SI's `fail` labels a
-    NaN unit and does not raise).
+- Every rule stores a `missing_policy`, which governs only units SpikeInterface
+    cannot assess for the rule's metric, i.e. a NaN SpikeInterface leaves on
+    purpose. For such a unit, `error` raises, `fail` applies the rule's label,
+    and `pass` leaves it unlabelled by that rule. These are Spyglass semantics,
+    not SpikeInterface's `nan_policy` (SI's `fail` labels a NaN unit and does
+    not raise). The registered columns and the conditions under which their NaN
+    is expected (SpikeInterface 0.104.3's own NaN conditions;
+    `expected_missing_units` in `spyglass.spikesorting.v2._metric_curation`):
+    - `nn_isolation` / `nn_noise_overlap`: fewer than `nn_advanced`'s `min_spikes`
+        spikes, or a firing rate below its `min_fr`;
+    - `presence_ratio`: a recording shorter than one `bin_duration_s` bin (every
+        unit), or a unit with no spikes;
+    - `amplitude_cutoff`: fewer than
+        `num_histogram_bins * amplitudes_bins_min_ratio` spikes (500 by default);
+    - `isi_violation`: one spike or fewer;
+    - `firing_rate`: no spikes;
+    - `snr` and `num_spikes`: never.
+- Any other non-finite rule value raises `ValueError` regardless of
+    `missing_policy`: a NaN for a unit that meets its column's conditions is a
+    metric computation failure, and a rule on a column with no registered
+    conditions (a template metric such as `trough_half_width`, a custom metric,
+    or an `observed_*` column) fails closed on any non-finite value.
+- SpikeInterface catches an error inside a metric, warns, and fills that
+    metric's columns with NaN. If a rule references one of those columns, the
+    evaluation aborts, naming the metric and SpikeInterface's error; an error in
+    a metric no rule references is logged at WARNING and its columns stay NaN.
 - The shipped rule sets use `pass`, because their metrics have validity floors
     (`nn_advanced`'s `min_spikes: 10`): NaN there means "not assessable for this
     unit", so `error` would abort the whole sort over a legitimately short
-    train, and v1 left such a unit unlabelled. `pass` is silent per unit but
-    warns when a metric is non-finite for EVERY unit, which means the rule
-    labelled nothing at all and the metric computation is the thing to check.
+    train, and v1 left such a unit unlabelled. `pass` and `fail` are silent per
+    unit but warn when a metric is non-finite for EVERY unit: the rule then made
+    no real comparison (`pass` labelled nothing, `fail` labelled every unit).
 - Metric persistence accepts only zero-dimensional numeric scalars. A legitimate
     scalar NaN remains valid for a low-spike unit, while arrays (including a
     one-element array) and non-numeric objects raise

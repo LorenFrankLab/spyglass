@@ -314,13 +314,19 @@ class AutoCurationRuleSchema(BaseModel):
     ``nn_noise_overlap`` column produced by the ``nn_advanced`` metric. A rule
     that references a column absent from the computed metrics raises a clear
     error at populate time, not here. ``missing_policy`` records Spyglass's
-    handling for non-finite values: ``error`` is fail-fast; ``fail`` applies the
-    label; and ``pass`` leaves the unit unlabelled by this rule. ``pass`` is the
+    handling for a unit SpikeInterface cannot assess for this metric (see
+    ``expected_missing_units`` in ``_metric_curation`` for the registered
+    columns and conditions): ``error`` raises; ``fail`` applies the label; and
+    ``pass`` leaves the unit unlabelled by this rule. It does not cover any
+    other non-finite value: a NaN for a unit that meets the metric's
+    conditions, any NaN in a column with no registered conditions (template,
+    custom and ``observed_*`` columns), and a SpikeInterface error in the
+    metric all abort the evaluation regardless of the policy. ``pass`` is the
     right choice whenever the metric has a validity floor (``nn_advanced``'s
-    ``min_spikes``, say), where NaN means "not assessable" rather than "wrong";
-    it stays silent per unit but warns if the metric is missing for EVERY unit,
-    since the rule then applied no labels at all. These names do not inherit
-    SpikeInterface ``nan_policy`` semantics.
+    ``min_spikes``, say), where NaN means "not assessable" rather than
+    "wrong"; ``pass`` and ``fail`` both warn if the metric is missing for EVERY
+    unit, since the rule then made no real comparison. These names do not
+    inherit SpikeInterface ``nan_policy`` semantics.
     """
 
     model_config = ConfigDict(extra="forbid")
