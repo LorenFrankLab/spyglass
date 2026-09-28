@@ -772,6 +772,66 @@ def test_shipped_rules_still_label_on_smoke_fixture(
         )
 
 
+@pytest.mark.slow
+@pytest.mark.integration
+def test_shipped_rules_pass_units_below_the_nn_spike_floor(
+    planted_two_unit_sort, curation_evaluation_defaults, caplog
+):
+    """Units too small for ``nn_advanced`` follow the rule's ``"pass"``.
+
+    Each planted unit has 5 spikes, below ``nn_advanced``'s ``min_spikes``
+    of 10, so SpikeInterface leaves ``nn_noise_overlap`` NaN for both. That
+    NaN is expected, not a computation failure: populate succeeds, the
+    ``"pass"`` noise rule labels neither unit and warns that it was inert.
+    ``isi_violation`` is defined for 5 spikes and is 0 for both planted
+    trains (every ISI is 1000 samples, far above the 2 ms threshold), so
+    the reject rule labels neither unit either.
+    """
+    import numpy as np
+
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids, n_spikes = (Sorting.Unit & sorting_key).fetch(
+        "unit_id", "n_spikes"
+    )
+    n_spikes_by_unit = dict(zip(map(int, unit_ids), map(int, n_spikes)))
+    assert n_spikes_by_unit == {0: 5, 1: 5}
+
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+        sel = _franklab_evaluation(root)
+        with caplog.at_level("WARNING"):
+            CurationEvaluation.populate(sel, reserve_jobs=False)
+        assert CurationEvaluation & sel, "populate stored no evaluation"
+
+        metrics = CurationEvaluation.get_metrics(sel)
+        assert sorted(int(u) for u in metrics.index) == [0, 1]
+        nn = pd.to_numeric(metrics["nn_noise_overlap"]).to_numpy(float)
+        assert np.isnan(nn).all(), nn
+        for unit_id in metrics.index:
+            assert n_spikes_by_unit[int(unit_id)] < 10, unit_id
+
+        isi = pd.to_numeric(metrics["isi_violation"]).to_numpy(float)
+        assert np.array_equal(isi, [0.0, 0.0]), isi
+
+        labels = CurationEvaluation.get_labels(sel)
+        assert labels == _franklab_label_oracle(metrics)
+        assert labels == {}
+        assert any(
+            "was inert" in record.getMessage()
+            and "'nn_noise_overlap'" in record.getMessage()
+            for record in caplog.records
+        ), [record.getMessage() for record in caplog.records]
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
 def _small_in_memory_analyzer():
     """A sparse in-memory analyzer (10 s, 4 channels, 2 units) with waveforms.
 
