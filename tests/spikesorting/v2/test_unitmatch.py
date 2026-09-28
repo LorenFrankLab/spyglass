@@ -666,10 +666,15 @@ def test_driftout_units_recovered_pooled(tmp_path):
     thresholds, seeds, scenarios or scoring to make it pass, and do not
     xfail/skip it: a failure here is a reported result about the current
     per-unit construction, not a test bug. At the current construction, G3a
-    is expected to FAIL for driftout_AB (a unit that drifts out of *both*
-    sessions costs its healthy neighbors slightly more matched recall than
-    the 4% budget allows: 133 -> 126 of 150 = 0.0467 > 0.04); every other
-    gate is expected to PASS. The checked gates are selected by a positive
+    is expected to FAIL for driftout_AB: the healthy-unit recall drop is
+    133 -> 126 of 150 = 0.0467, over the 0.04 limit. Every flipped unit's
+    templates are bit-identical to its no-drift control halves, so the drop
+    is not a template-construction effect; it comes from UnitMatch refitting
+    its match-probability distributions on the whole population on each
+    call, and the same metric is <= 0 at other bundle seeds. Whether this
+    gate should be evaluated across bundle seeds, relaxed, or accepted as is
+    remains an open decision; every other gate is expected to PASS. The
+    checked gates are selected by a positive
     allowlist of (gate id, scenario) pairs -- G1/G2/G3a/G4 x driftout_A/
     driftout_AB -- and their presence is asserted before their pass/fail, so
     a construction that silently drops a scenario (``pooled_counts`` or
