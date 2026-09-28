@@ -2187,6 +2187,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         from spikeinterface.metrics.quality import compute_quality_metrics
 
         from spyglass.spikesorting.v2._si_metric_patches import (
+            isolated_si_metric_defaults,
             noise_cluster_spans,
         )
         from spyglass.spikesorting.v2._sorting_analyzer import (
@@ -2253,7 +2254,12 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     method="std",
                 )
                 patch_sd_ratio_statistics_spans()
-            with noise_cluster_spans(statistics_spans):
+            # SI would otherwise keep this row's kwargs as its defaults for
+            # every later compute in the process.
+            with (
+                noise_cluster_spans(statistics_spans),
+                isolated_si_metric_defaults(),
+            ):
                 voltage_df = compute_quality_metrics(
                     display_analyzer,
                     metric_names=voltage_names,
@@ -2330,7 +2336,10 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     "principal_components": _PCA_EXTENSION_PARAMS
                 },
             )
-            with noise_cluster_spans(statistics_spans):
+            with (
+                noise_cluster_spans(statistics_spans),
+                isolated_si_metric_defaults(),
+            ):
                 pc_df = compute_quality_metrics(
                     metric_analyzer,
                     metric_names=pc_names,

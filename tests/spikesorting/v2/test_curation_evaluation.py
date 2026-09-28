@@ -649,6 +649,39 @@ def test_compute_metrics_scopes_noise_cluster_spans_to_metric_computes(
     assert _NOISE_CLUSTER_SPANS.get() is None
 
 
+@pytest.mark.db_unit
+def test_compute_metrics_leaves_si_metric_defaults_unchanged(dj_conn):
+    """A row's metric kwargs do not become SI's defaults for later computes.
+
+    Called directly, SI merges ``metric_params`` into its class-level
+    defaults; ``_compute_metrics`` must leave them as they were, for both
+    the voltage and the PC/NN compute, while still applying the kwargs.
+    """
+    import copy
+
+    from spikeinterface.metrics.quality import (
+        get_default_quality_metrics_params,
+    )
+
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+    names = ["presence_ratio", "nn_advanced"]
+    before = copy.deepcopy(get_default_quality_metrics_params(names))
+    kwargs = {
+        "presence_ratio": {"bin_duration_s": 2.0},
+        "nn_advanced": {"min_spikes": 1_000_000, "seed": 0},
+    }
+    analyzer = _small_in_memory_analyzer()
+    metrics = CurationEvaluation._compute_metrics(
+        analyzer, analyzer, names, kwargs, False, {}
+    )
+    # The kwargs were applied: 2 s bins give a finite presence ratio on a
+    # 10 s recording (60 s bins would not), and no unit reaches min_spikes.
+    assert metrics["presence_ratio"].notna().all()
+    assert metrics["nn_noise_overlap"].isna().all()
+    assert get_default_quality_metrics_params(names) == before
+
+
 def _sd_ratio_analyzer(fill):
     """In-memory display analyzer over a 30%-masked 10 s, 4-channel recording.
 

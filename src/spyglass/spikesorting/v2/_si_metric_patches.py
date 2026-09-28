@@ -35,12 +35,18 @@ masked ones included, so it under-subtracts and biases ``sd_ratio`` low.
 :func:`patch_sd_ratio_statistics_spans` takes that correction over the spikes
 and samples inside the spans set by :func:`noise_cluster_spans`; without
 spans (or with one covering the recording) it is SI's function, unchanged.
+
+SI also writes each compute's ``metric_params`` into its class-level metric
+defaults, so a later compute in the same process inherits them.
+:func:`isolated_si_metric_defaults` keeps those defaults unchanged across a
+compute.
 """
 
 from __future__ import annotations
 
 import contextlib
 import contextvars
+import copy
 
 import spikeinterface as si
 import spikeinterface.metrics.quality.misc_metrics as _mm
@@ -92,6 +98,51 @@ def noise_cluster_spans(spans):
         yield
     finally:
         _NOISE_CLUSTER_SPANS.reset(token)
+
+
+@contextlib.contextmanager
+def isolated_si_metric_defaults():
+    """Keep SpikeInterface's metric defaults unchanged across this block.
+
+    In SI 0.104.3, ``BaseMetricExtension.get_default_metric_params`` returns
+    the metric classes' own ``metric_params`` dicts
+    (``core/analyzer_extension_core.py:943``) and ``_set_params`` ``update()``s
+    them with the caller's ``metric_params`` (1172-1178). Every
+    ``compute_quality_metrics`` call therefore rewrites SI's defaults for the
+    rest of the process: a later row that omits a kwarg (e.g. ``min_fr``)
+    silently runs with an earlier row's value.
+
+    Inside the block each quality- and template-metric class holds a deep
+    copy of its ``metric_params``; SI merges the caller's kwargs into that
+    copy, and the computed extension keeps it by reference as its record of
+    the params applied (``params["metric_params"]``, 1190-1197). On exit,
+    including on an exception, every class gets its original, unmodified
+    dict object back. Two classes (``Synchrony``, ``AmplitudeMedian``)
+    inherit ``BaseMetric``'s shared dict rather than defining their own;
+    their copies are removed again so they keep inheriting it.
+    """
+    from spikeinterface.metrics.quality import ComputeQualityMetrics
+    from spikeinterface.metrics.template import ComputeTemplateMetrics
+
+    metric_classes = {
+        metric
+        for extension in (ComputeQualityMetrics, ComputeTemplateMetrics)
+        for metric in extension.metric_list
+    }
+    own_params = {
+        metric: metric.__dict__.get("metric_params")
+        for metric in metric_classes
+    }
+    for metric in metric_classes:
+        metric.metric_params = copy.deepcopy(metric.metric_params)
+    try:
+        yield
+    finally:
+        for metric, params in own_params.items():
+            if params is None:
+                del metric.metric_params
+            else:
+                metric.metric_params = params
 
 
 def _draw_noise_cluster(recording, *, n_snippets, nsamples, seed, return_in_uV):

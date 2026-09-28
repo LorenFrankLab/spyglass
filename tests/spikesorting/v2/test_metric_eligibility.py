@@ -406,3 +406,136 @@ def test_isi_violation_one_spike_unit_is_expected_missing(
         short_voltage_analyzer, ["isi_violation"], _SHIPPED_VOLTAGE_KWARGS
     )
     assert expected == {"isi_violation": {3}}
+
+
+# ---------- SI metric defaults do not leak between computes -------------------
+
+# Two rows' kwargs, each overriding parameters the other leaves at SI's
+# defaults, so a leak from the first into the second is visible.
+_LEAKING_KWARGS = (
+    {
+        "nn_advanced": {"min_fr": 3.0, "n_neighbors": 6},
+        "presence_ratio": {"bin_duration_s": 2.0},
+    },
+    {
+        "nn_advanced": {"min_spikes": 12},
+        "presence_ratio": {"mean_fr_ratio_thresh": 0.5},
+    },
+)
+
+
+def _applied_metric_params(analyzer, metric_kwargs):
+    """Compute presence ratio + nn metrics; return the params SI applied.
+
+    Returns the extension's own ``params["metric_params"]`` for the two
+    metrics (live dicts, not copies).
+    """
+    from spikeinterface.metrics.quality import compute_quality_metrics
+
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        patch_nn_noise_overlap_sparsity,
+    )
+
+    patch_nn_noise_overlap_sparsity()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        compute_quality_metrics(
+            analyzer,
+            metric_names=["presence_ratio", "nn_advanced"],
+            metric_params=metric_kwargs,
+            skip_pc_metrics=False,
+            delete_existing_metrics=True,
+            n_jobs=1,
+        )
+    applied = analyzer.get_extension("quality_metrics").params["metric_params"]
+    return {name: applied[name] for name in ("presence_ratio", "nn_advanced")}
+
+
+def _current_defaults():
+    from spikeinterface.metrics.quality import (
+        get_default_quality_metrics_params,
+    )
+
+    return copy.deepcopy(
+        get_default_quality_metrics_params(["presence_ratio", "nn_advanced"])
+    )
+
+
+def _merged(defaults, metric_kwargs):
+    return {
+        name: {**params, **metric_kwargs.get(name, {})}
+        for name, params in defaults.items()
+    }
+
+
+def test_si_metric_defaults_leak_between_computes_without_isolation(
+    nn_analyzer,
+):
+    """Upstream behaviour the isolation guards against.
+
+    Called directly, SI keeps the first compute's kwargs as defaults for
+    every later compute: a compute with no kwargs runs with ``min_fr=3``
+    and a 2 s presence bin. If this starts failing, SI stopped leaking and
+    ``isolated_si_metric_defaults`` can go.
+    """
+    pristine = _current_defaults()
+    applied = [
+        copy.deepcopy(_applied_metric_params(nn_analyzer, kwargs))
+        for kwargs in (*_LEAKING_KWARGS, None)
+    ]
+    assert applied[1]["nn_advanced"]["min_fr"] == 3.0
+    assert applied[2]["nn_advanced"]["min_fr"] == 3.0
+    assert applied[2]["presence_ratio"]["bin_duration_s"] == 2.0
+    assert applied[2]["presence_ratio"]["mean_fr_ratio_thresh"] == 0.5
+    assert _current_defaults() != pristine
+
+
+def test_isolated_si_metric_defaults_keeps_each_compute_on_pristine_defaults(
+    nn_analyzer,
+):
+    """Each isolated compute applies SI's own defaults plus its kwargs only.
+
+    The kwargs of an earlier compute never reach a later one, a compute with
+    no kwargs runs on SI's shipped defaults, SI's defaults are unchanged
+    afterwards, and each computed extension keeps the params it applied.
+    """
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        isolated_si_metric_defaults,
+    )
+
+    pristine = _current_defaults()
+    # SI 0.104.3 class defaults (metrics/quality/pca_metrics.py:270-280,
+    # misc_metrics.py:137): the values the kwargs above override.
+    assert pristine["nn_advanced"]["min_fr"] == 0.0
+    assert pristine["nn_advanced"]["n_neighbors"] == 4
+    assert pristine["nn_advanced"]["min_spikes"] == 10
+    assert pristine["presence_ratio"] == {
+        "bin_duration_s": 60,
+        "mean_fr_ratio_thresh": 0.0,
+    }
+
+    applied = []
+    for kwargs in (*_LEAKING_KWARGS, None):
+        with isolated_si_metric_defaults():
+            applied.append(_applied_metric_params(nn_analyzer, kwargs))
+
+    assert applied[0] == _merged(pristine, _LEAKING_KWARGS[0])
+    assert applied[1] == _merged(pristine, _LEAKING_KWARGS[1])
+    assert applied[2] == pristine
+    assert _current_defaults() == pristine
+
+
+def test_isolated_si_metric_defaults_restores_after_a_failed_compute(
+    nn_analyzer,
+):
+    """A compute that raises still leaves SI's defaults untouched."""
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        isolated_si_metric_defaults,
+    )
+
+    pristine = _current_defaults()
+    with pytest.raises(RuntimeError, match="after the params were merged"):
+        with isolated_si_metric_defaults():
+            _applied_metric_params(nn_analyzer, _LEAKING_KWARGS[0])
+            raise RuntimeError("after the params were merged")
+    assert _current_defaults() == pristine

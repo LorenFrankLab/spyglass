@@ -482,11 +482,13 @@ def _si_metric_params(si_metric: str, metric_kwargs: Mapping) -> dict:
 
     Mirrors the merge in ``core/analyzer_extension_core.py:1172-1178``. SI
     reads its defaults from the metric classes' ``metric_params`` (943) and
-    that merge updates those class dicts in place, so a compute with custom
-    kwargs changes the defaults for later computes in the same process.
-    Reading them here at call time, rather than a fixed copy, keeps the
-    classifier on the params SI actually applies. The defaults are copied,
-    never mutated.
+    that merge updates those class dicts in place, so a direct compute with
+    custom kwargs changes the defaults for later computes in the same
+    process. ``CurationEvaluation`` computes inside
+    ``isolated_si_metric_defaults``, which leaves them unchanged; reading
+    them here at call time, rather than a fixed copy, keeps the classifier
+    on the params SI applies either way. The defaults are copied, never
+    mutated.
     """
     from spikeinterface.metrics.quality import (
         get_default_quality_metrics_params,
