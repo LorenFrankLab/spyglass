@@ -387,6 +387,104 @@ def test_quality_metric_duplicate_escape_hatch():
     )  # no raise
 
 
+def test_reject_stale_quality_metric_defaults_flags_edited_row():
+    """A stored row under a shipped default's name but different content raises."""
+    from spyglass.spikesorting.v2._lookup_validation import (
+        reject_stale_quality_metric_defaults,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+
+    stored = [_qmp_row("franklab_default", metric_names=["snr"])]
+    shipped = [
+        _qmp_row("franklab_default", metric_names=["snr", "isi_violation"])
+    ]
+    with pytest.raises(
+        DuplicateParameterContentError, match="franklab_default"
+    ):
+        reject_stale_quality_metric_defaults(stored, shipped)
+
+
+def test_reject_stale_quality_metric_defaults_matches_identical_content():
+    """A stored row identical to the shipped default is not stale."""
+    from spyglass.spikesorting.v2._lookup_validation import (
+        reject_stale_quality_metric_defaults,
+    )
+
+    stored = [_qmp_row("franklab_default", metric_names=["snr"])]
+    shipped = [_qmp_row("franklab_default", metric_names=["snr"])]
+    reject_stale_quality_metric_defaults(stored, shipped)  # no raise
+
+
+def test_reject_stale_quality_metric_defaults_accepts_old_schema_version():
+    """Identical content under an older ``params_schema_version`` is not stale.
+
+    Rows seeded before ``observed_presence_bin_duration_s`` became a column
+    keep ``params_schema_version=1`` by design (the migration doc promises
+    existing recipes are not overwritten), so the version alone must not
+    trip this check.
+    """
+    from spyglass.spikesorting.v2._lookup_validation import (
+        reject_stale_quality_metric_defaults,
+    )
+
+    stored = [
+        _qmp_row(
+            "franklab_default", metric_names=["snr"], params_schema_version=1
+        )
+    ]
+    shipped = [
+        _qmp_row(
+            "franklab_default", metric_names=["snr"], params_schema_version=2
+        )
+    ]
+    reject_stale_quality_metric_defaults(stored, shipped)  # no raise
+
+
+def test_reject_stale_quality_metric_defaults_tolerates_widened_bin_duration():
+    """A single-precision-widened ``observed_presence_bin_duration_s`` still
+    matches the shipped default within the ``rules_payloads_match`` tolerance.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._lookup_validation import (
+        reject_stale_quality_metric_defaults,
+    )
+
+    exact = 1 / 3
+    widened = float(np.float32(exact))
+    assert widened != exact  # the widening is real, not a no-op
+    stored = [
+        _qmp_row(
+            "franklab_default",
+            metric_names=["snr"],
+            observed_presence_bin_duration_s=widened,
+        )
+    ]
+    shipped = [
+        _qmp_row(
+            "franklab_default",
+            metric_names=["snr"],
+            observed_presence_bin_duration_s=exact,
+        )
+    ]
+    reject_stale_quality_metric_defaults(stored, shipped)  # no raise
+
+
+def test_reject_stale_quality_metric_defaults_ignores_other_names():
+    """A stored row under a name outside the shipped catalog is untouched."""
+    from spyglass.spikesorting.v2._lookup_validation import (
+        reject_stale_quality_metric_defaults,
+    )
+
+    stored = [_qmp_row("my_custom_recipe", metric_names=["snr"])]
+    shipped = [
+        _qmp_row("franklab_default", metric_names=["snr", "isi_violation"])
+    ]
+    reject_stale_quality_metric_defaults(stored, shipped)  # no raise
+
+
 # ---------------------------------------------------------------------------
 # Duplicate-content guard + describe_parameter_rows (DB-backed). Each imports
 # the v2 schema modules lazily and takes ``dj_conn`` so the schema's
@@ -478,6 +576,88 @@ def test_qmp_duplicate_content_detected_after_double_column(dj_conn):
             QualityMetricParameters().insert(dup)
     finally:
         (QualityMetricParameters & keys).delete_quick()
+
+
+@pytest.mark.database
+def test_insert_default_is_idempotent(dj_conn):
+    """Two consecutive calls succeed and leave exactly one shipped row."""
+    from spyglass.spikesorting.v2.metric_curation import (
+        QualityMetricParameters,
+    )
+
+    QualityMetricParameters.insert_default()
+    QualityMetricParameters.insert_default()
+    assert (
+        len(
+            QualityMetricParameters & {"metric_params_name": "franklab_default"}
+        )
+        == 1
+    )
+
+
+@pytest.mark.database
+def test_insert_default_raises_on_stale_same_name_row(dj_conn):
+    """A stored ``franklab_default`` whose content has drifted from the
+    shipped default blocks ``insert_default`` instead of being silently kept
+    under ``skip_duplicates=True``."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+    from spyglass.spikesorting.v2.metric_curation import (
+        QualityMetricParameters,
+    )
+
+    QualityMetricParameters.insert_default()
+    original = (
+        QualityMetricParameters & {"metric_params_name": "franklab_default"}
+    ).fetch1()
+    edited = dict(original, metric_kwargs={"snr": {"peak_sign": "pos"}})
+    free_table = dj.FreeTable(
+        dj.conn(), QualityMetricParameters.full_table_name
+    )
+    try:
+        free_table.update1(edited)
+        with pytest.raises(
+            DuplicateParameterContentError, match="franklab_default"
+        ):
+            QualityMetricParameters.insert_default()
+    finally:
+        free_table.update1(original)
+    assert (
+        QualityMetricParameters & {"metric_params_name": "franklab_default"}
+    ).fetch1("metric_kwargs") == original["metric_kwargs"]
+
+
+@pytest.mark.database
+def test_insert_default_accepts_old_schema_version_row(dj_conn):
+    """A stored row identical in content but at an older
+    ``params_schema_version`` is not treated as stale, so ``insert_default``
+    stays re-runnable against a database seeded before
+    ``observed_presence_bin_duration_s`` became a column."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.metric_curation import (
+        QualityMetricParameters,
+    )
+
+    QualityMetricParameters.insert_default()
+    original = (
+        QualityMetricParameters & {"metric_params_name": "franklab_default"}
+    ).fetch1()
+    downgraded = dict(original, params_schema_version=1)
+    free_table = dj.FreeTable(
+        dj.conn(), QualityMetricParameters.full_table_name
+    )
+    try:
+        free_table.update1(downgraded)
+        QualityMetricParameters.insert_default()  # must not raise
+        assert (
+            QualityMetricParameters & {"metric_params_name": "franklab_default"}
+        ).fetch1("params_schema_version") == 1
+    finally:
+        free_table.update1(original)
 
 
 @pytest.mark.database

@@ -55,6 +55,7 @@ from spyglass.spikesorting.v2._lookup_validation import (  # noqa: F401
     _validate_params,
     reject_duplicate_parameter_content,
     reject_duplicate_quality_metric_content,
+    reject_stale_quality_metric_defaults,
     validate_lookup_rows,
 )
 from spyglass.spikesorting.v2._nwb_metadata_helpers import (  # noqa: F401

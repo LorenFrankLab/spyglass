@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from numbers import Integral
 from typing import TYPE_CHECKING
 
+from spyglass.spikesorting.v2._metric_curation import rules_payloads_match
 from spyglass.spikesorting.v2._parameter_identity import parameter_fingerprint
 from spyglass.spikesorting.v2.exceptions import (
     DuplicateParameterContentError,
@@ -304,6 +305,29 @@ def reject_duplicate_parameter_content(
         claimed.setdefault(fingerprint, name)
 
 
+def _quality_metric_content(row: dict) -> dict:
+    """Extract one ``QualityMetricParameters`` row's ``params``-like content.
+
+    Excludes ``metric_params_name`` (identity, not content),
+    ``params_schema_version`` and ``job_kwargs`` -- mirroring the sibling
+    parameter Lookups, where ``params_schema_version`` and ``job_kwargs`` are
+    fingerprinted as their own fields alongside (not inside) the ``params``
+    blob. Shared by :func:`reject_duplicate_quality_metric_content` (whose
+    fingerprint must stay exactly as before -- do not add fields here) and
+    :func:`reject_stale_quality_metric_defaults`, which separately folds
+    ``job_kwargs`` back in for its own comparison.
+    """
+    return {
+        "metric_names": row["metric_names"],
+        "metric_kwargs": row["metric_kwargs"],
+        "template_metric_columns": row["template_metric_columns"],
+        "observed_presence_bin_duration_s": row[
+            "observed_presence_bin_duration_s"
+        ],
+        "skip_pc_metrics": bool(row["skip_pc_metrics"]),
+    }
+
+
 def reject_duplicate_quality_metric_content(
     stored_rows,
     incoming_rows,
@@ -339,17 +363,7 @@ def reject_duplicate_quality_metric_content(
     def _fingerprint(row: dict) -> str:
         return parameter_fingerprint(
             "QualityMetricParameters",
-            params=_jsonable_blob(
-                {
-                    "metric_names": row["metric_names"],
-                    "metric_kwargs": row["metric_kwargs"],
-                    "template_metric_columns": row["template_metric_columns"],
-                    "observed_presence_bin_duration_s": row[
-                        "observed_presence_bin_duration_s"
-                    ],
-                    "skip_pc_metrics": bool(row["skip_pc_metrics"]),
-                }
-            ),
+            params=_jsonable_blob(_quality_metric_content(row)),
             params_schema_version=int(row["params_schema_version"]),
             job_kwargs=_jsonable_blob(row.get("job_kwargs")),
         )
@@ -374,6 +388,61 @@ def reject_duplicate_quality_metric_content(
                 "allow_duplicate_params=True to insert it anyway."
             )
         claimed.setdefault(fingerprint, name)
+
+
+def reject_stale_quality_metric_defaults(stored_rows, default_rows) -> None:
+    """Raise if a stored row claims a shipped default's name with stale content.
+
+    ``QualityMetricParameters.insert_default`` ships fixed-content rows under
+    fixed names (``franklab_default``, ``neuropixels_default``, ``minimal``).
+    Its ``insert(..., skip_duplicates=True)`` call silently keeps any stored
+    row that already has that name, including one whose content was edited in
+    place since it was seeded (e.g. a hand-patched ``franklab_default``) -- so
+    without this check, a caller believes it is running the shipped recipe
+    while actually running something else. This compares each shipped
+    default's content against a same-name stored row (if any) BEFORE that
+    insert runs, and raises
+    :class:`~spyglass.spikesorting.v2.exceptions.DuplicateParameterContentError`
+    naming the row on a mismatch.
+
+    ``params_schema_version`` is excluded from the comparison: a row seeded
+    before ``observed_presence_bin_duration_s`` became a column keeps an
+    older version by design (see
+    ``docs/src/Features/SpikeSortingV2_Migration.md``), and that alone must
+    not be treated as stale content. Values are compared with
+    :func:`~spyglass.spikesorting.v2._metric_curation.rules_payloads_match`'s
+    tolerance (rather than the exact comparison
+    :func:`reject_duplicate_quality_metric_content` uses) so a stored
+    ``observed_presence_bin_duration_s`` widened from single to double
+    precision in place still matches the shipped value. Identical content is
+    a silent no-op, so ``insert_default`` stays idempotent.
+
+    Parameters
+    ----------
+    stored_rows : list[dict]
+        Already-stored ``QualityMetricParameters`` rows
+        (``table.fetch(as_dict=True)``).
+    default_rows : list[dict]
+        The shipped default rows in stored shape (validated through
+        ``prepare_quality_metric_row``).
+    """
+    stored_by_name = {row["metric_params_name"]: row for row in stored_rows}
+    for default in default_rows:
+        name = default["metric_params_name"]
+        stored = stored_by_name.get(name)
+        if stored is None:
+            continue
+        expected = _jsonable_blob(_quality_metric_content(default))
+        actual = _jsonable_blob(_quality_metric_content(stored))
+        expected["job_kwargs"] = _jsonable_blob(default.get("job_kwargs"))
+        actual["job_kwargs"] = _jsonable_blob(stored.get("job_kwargs"))
+        if not rules_payloads_match(expected, actual):
+            raise DuplicateParameterContentError(
+                f"QualityMetricParameters {name!r} already exists with "
+                "content that differs from the shipped default. Insert your "
+                "variant under a new metric_params_name, or delete the "
+                f"existing {name!r} row first if nothing depends on it."
+            )
 
 
 def _insert_row_to_dict(row, attr_names) -> dict:

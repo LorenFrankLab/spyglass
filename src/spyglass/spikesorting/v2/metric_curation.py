@@ -87,6 +87,7 @@ from spyglass.spikesorting.v2.utils import (
     _jsonable_blob,
     _resolved_job_kwargs,
     reject_duplicate_quality_metric_content,
+    reject_stale_quality_metric_defaults,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
@@ -403,13 +404,27 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
 
     @classmethod
     def insert_default(cls):
-        """Insert the default quality-metric parameter rows (idempotent)."""
+        """Insert the default quality-metric parameter rows (idempotent).
+
+        Raises ``DuplicateParameterContentError`` naming the row if a stored
+        row already claims one of the shipped names (``franklab_default``,
+        ``neuropixels_default``, ``minimal``) but holds different scientific
+        content -- e.g. a hand-edited row -- so a caller never silently runs
+        something other than the shipped recipe under a name it expects to be
+        the default.
+        """
         # franklab_default and neuropixels_default deliberately ship identical
         # content under two names (kept separate so a probe-specific divergence
         # can be expressed later), so the shipped defaults opt out of the
         # duplicate-content guard.
+        default_rows = [
+            prepare_quality_metric_row(row) for row in cls._default_rows()
+        ]
+        reject_stale_quality_metric_defaults(
+            cls().fetch(as_dict=True), default_rows
+        )
         cls().insert(
-            cls._default_rows(),
+            default_rows,
             skip_duplicates=True,
             allow_duplicate_params=True,
         )
