@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import fractions
 import io
 import json
 import tempfile
@@ -549,8 +550,21 @@ def _sum(pairs) -> list[int]:
     return [sum(p[0] for p in pairs), sum(p[1] for p in pairs)]
 
 
+def _rate_exact(count) -> fractions.Fraction | None:
+    """Exact match rate ``count[0] / count[1]``; ``None`` if the pool is empty."""
+    return fractions.Fraction(count[0], count[1]) if count[1] else None
+
+
 def _rate(count) -> float:
-    return count[0] / count[1] if count[1] else float("nan")
+    exact = _rate_exact(count)
+    return float(exact) if exact is not None else float("nan")
+
+
+def _exact_diff(
+    a: fractions.Fraction | None, b: fractions.Fraction | None
+) -> fractions.Fraction | None:
+    """Exact ``a - b``; ``None`` if either operand is unavailable."""
+    return None if a is None or b is None else a - b
 
 
 def pooled_counts(records, scenario, condition) -> dict | None:
@@ -617,14 +631,27 @@ class Gate:
     detail: str
 
 
-def _gate(name, scenario, value, threshold, comparison, detail) -> Gate:
-    if value is None or np.isnan(value):
+def _gate(name, scenario, exact, threshold, comparison, detail) -> Gate:
+    """Build one ``Gate``; ``exact`` (a ``Fraction`` or ``None``) decides ``passed``.
+
+    The pass/fail comparison is always done in ``Fraction`` arithmetic against
+    ``Fraction(str(threshold))``, so a value that is exactly on the boundary
+    (e.g. 7/150 - 1/150 == 1/25 == 0.04) can never flip by float rounding.
+    ``value`` on the returned ``Gate`` is ``float(exact)``, kept only for
+    display. ``exact is None`` means the gate is not evaluable (empty pool).
+    """
+    if exact is None:
         return Gate(
             name, scenario, float("nan"), threshold, comparison, None, detail
         )
-    ok = value >= threshold if comparison == ">=" else value <= threshold
+    exact_threshold = fractions.Fraction(str(threshold))
+    ok = (
+        exact >= exact_threshold
+        if comparison == ">="
+        else exact <= exact_threshold
+    )
     return Gate(
-        name, scenario, float(value), threshold, comparison, bool(ok), detail
+        name, scenario, float(exact), threshold, comparison, bool(ok), detail
     )
 
 
@@ -636,7 +663,9 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
     scenario, same non-S units per seed) <= 0.04; G3b that drop minus the
     ``time_half`` paired drop on the same seeds <= 0.04 (only when
     ``time_half`` ran on exactly the same seeds); G4 paired healthy false
-    positive rate increase <= 0.005.
+    positive rate increase <= 0.005. Every comparison is evaluated exactly
+    from the underlying integer counts with :mod:`fractions`; only the
+    printed/stored ``value`` is a float.
     """
     gates = []
     for scenario in DRIFT_OUT_SCENARIOS:
@@ -649,7 +678,7 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
             _gate(
                 "G1 drift-out recall",
                 scenario,
-                _rate(s_true),
+                _rate_exact(s_true),
                 G1_MIN_DRIFT_OUT_RECALL,
                 ">=",
                 f"{s_true[0]}/{s_true[1]}",
@@ -659,7 +688,7 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
             _gate(
                 "G2 SxS false-pair rate",
                 scenario,
-                _rate(s_false),
+                _rate_exact(s_false),
                 G2_MAX_SXS_FALSE_RATE,
                 "<=",
                 f"{s_false[0]}/{s_false[1]}",
@@ -667,26 +696,26 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
         )
         paired = pooled_paired_counts(records, scenario, condition)
         if paired is None:
-            drop = fp_inc = None
+            exact_drop = exact_fp_inc = None
             drop_detail = fp_detail = "no control run for some seed"
         else:
-            drop = paired["healthy_recall_drop"]
-            fp_inc = paired["healthy_fp_increase"]
             c, s = (
                 paired["healthy_true_control"],
                 paired["healthy_true_scenario"],
             )
+            exact_drop = _exact_diff(_rate_exact(c), _rate_exact(s))
             drop_detail = f"control {c[0]}/{c[1]} -> scenario {s[0]}/{s[1]}"
             c, s = (
                 paired["healthy_false_control"],
                 paired["healthy_false_scenario"],
             )
+            exact_fp_inc = _exact_diff(_rate_exact(s), _rate_exact(c))
             fp_detail = f"control {c[0]}/{c[1]} -> scenario {s[0]}/{s[1]}"
         gates.append(
             _gate(
                 "G3a paired healthy recall drop",
                 scenario,
-                drop,
+                exact_drop,
                 G3A_MAX_HEALTHY_RECALL_DROP,
                 "<=",
                 drop_detail,
@@ -698,20 +727,27 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
             else None
         )
         if paired is None or baseline is None:
-            excess, excess_detail = None, "time_half paired run not available"
+            exact_excess = None
+            excess_detail = "time_half paired run not available"
         elif baseline["seeds"] != paired["seeds"]:
-            excess, excess_detail = None, "time_half ran on different seeds"
+            exact_excess = None
+            excess_detail = "time_half ran on different seeds"
         else:
-            excess = drop - baseline["healthy_recall_drop"]
+            c, s = (
+                baseline["healthy_true_control"],
+                baseline["healthy_true_scenario"],
+            )
+            exact_baseline_drop = _exact_diff(_rate_exact(c), _rate_exact(s))
+            exact_excess = _exact_diff(exact_drop, exact_baseline_drop)
             excess_detail = (
-                f"{condition} drop {drop:.4f} - time_half drop "
-                f"{baseline['healthy_recall_drop']:.4f}"
+                f"{condition} drop {float(exact_drop):.4f} - time_half drop "
+                f"{float(exact_baseline_drop):.4f}"
             )
         gates.append(
             _gate(
                 "G3b excess recall drop vs time_half",
                 scenario,
-                excess,
+                exact_excess,
                 G3B_MAX_EXCESS_RECALL_DROP,
                 "<=",
                 excess_detail,
@@ -721,7 +757,7 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
             _gate(
                 "G4 paired healthy FP increase",
                 scenario,
-                fp_inc,
+                exact_fp_inc,
                 G4_MAX_HEALTHY_FP_INCREASE,
                 "<=",
                 fp_detail,

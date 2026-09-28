@@ -817,3 +817,132 @@ def test_match_recovers_planted_correspondences(two_session_inputs):
     assert (
         recovered >= len(shared) - 1
     ), f"recovered only {recovered}/{len(shared)} planted correspondences"
+
+
+def _gate_test_record(seed, scenario, unit_ids, drift_out_units, matched):
+    """Build one hand-built ``evaluate_gates`` input record.
+
+    ``matched`` is the set of ``(i, j)`` pairs that pass matching; every other
+    ``(i, j)`` pair over ``unit_ids`` counts as a miss. No UnitMatchPy or DB
+    access happens here -- ``score_pairs`` is pure counting.
+    """
+    from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
+        score_pairs,
+    )
+
+    scored_s = [] if scenario == "control" else list(drift_out_units)
+    passing_pairs = [(i, j, 1.0) for i, j in matched]
+    return {
+        "seed": seed,
+        "scenario": scenario,
+        "condition": "per_unit",
+        "unit_ids": list(unit_ids),
+        "drift_out_units": scored_s,
+        "seed_drift_out_units": list(drift_out_units),
+        "counts": score_pairs(passing_pairs, unit_ids, scored_s),
+        "fitted": None,
+        "passing_pairs": passing_pairs,
+    }
+
+
+def _gate(gates, name, scenario):
+    return next(g for g in gates if g.name == name and g.scenario == scenario)
+
+
+def test_evaluate_gates_g1_g2_are_exact_at_their_boundary():
+    """G1 (>=) and G2 (<=) pass exactly on the threshold, fail one count over.
+
+    |S| = 25 makes both the diagonal denominator (25) and the off-diagonal
+    denominator (25 * 24 = 600) exact multiples of the thresholds' reduced
+    denominators (5 and 200), so 0.80 and 0.015 land on an exact fraction
+    instead of a repeating binary float.
+    """
+    from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
+        evaluate_gates,
+    )
+
+    s_units = list(range(25))
+    off_diag = [(i, j) for i in s_units for j in s_units if i != j]
+
+    def matched(n_diag, n_off_diag):
+        return {(i, i) for i in s_units[:n_diag]} | set(off_diag[:n_off_diag])
+
+    # G1 20/25 == 0.80 exactly; G2 9/600 == 0.015 exactly.
+    passing = _gate_test_record(
+        0, "driftout_A", s_units, s_units, matched(20, 9)
+    )
+    gates = evaluate_gates([passing], "per_unit")
+    g1, g2 = (
+        _gate(gates, "G1 drift-out recall", "driftout_A"),
+        _gate(gates, "G2 SxS false-pair rate", "driftout_A"),
+    )
+    assert g1.passed is True, g1
+    assert g2.passed is True, g2
+
+    # One fewer drift-out true pair (19/25 == 0.76) and one more S x S false
+    # pair (10/600 == 0.01667) each move one count past the boundary.
+    failing = _gate_test_record(
+        0, "driftout_A", s_units, s_units, matched(19, 10)
+    )
+    gates = evaluate_gates([failing], "per_unit")
+    g1, g2 = (
+        _gate(gates, "G1 drift-out recall", "driftout_A"),
+        _gate(gates, "G2 SxS false-pair rate", "driftout_A"),
+    )
+    assert g1.passed is False, g1
+    assert g2.passed is False, g2
+
+
+def test_evaluate_gates_g3a_g4_are_exact_at_their_boundary():
+    """G3a and G4 (paired against control) pass exactly on the threshold.
+
+    25 non-S units make the paired denominators 25 (recall) and 600 (false
+    positives), exact multiples of the thresholds' reduced denominators (25
+    and 200): 1/25 == 0.04 and 3/600 == 0.005 land on an exact fraction.
+    """
+    from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
+        evaluate_gates,
+    )
+
+    s_units = [999]  # a single drift-out unit; irrelevant to G3a/G4
+    non_s = list(range(1000, 1025))
+    unit_ids = s_units + non_s
+    off_diag = [(a, b) for a in non_s for b in non_s if a != b]
+
+    def healthy(n_true, n_false):
+        return {(u, u) for u in non_s[:n_true]} | set(off_diag[:n_false])
+
+    control = _gate_test_record(1, "control", unit_ids, s_units, healthy(25, 0))
+
+    # control 25/25 -> scenario 24/25: drop == 1/25 == 0.04 exactly.
+    # control 0/600 -> scenario 3/600: increase == 3/600 == 0.005 exactly.
+    passing = _gate_test_record(
+        1, "driftout_A", unit_ids, s_units, healthy(24, 3)
+    )
+    gates = evaluate_gates([control, passing], "per_unit")
+    g3a, g4 = (
+        _gate(gates, "G3a paired healthy recall drop", "driftout_A"),
+        _gate(gates, "G4 paired healthy FP increase", "driftout_A"),
+    )
+    assert g3a.passed is True, g3a
+    assert g4.passed is True, g4
+
+    # One fewer paired recall match (23/25) pushes the drop to 2/25 == 0.08.
+    failing_g3a = _gate_test_record(
+        1, "driftout_A", unit_ids, s_units, healthy(23, 3)
+    )
+    gates = evaluate_gates([control, failing_g3a], "per_unit")
+    assert (
+        _gate(gates, "G3a paired healthy recall drop", "driftout_A").passed
+        is False
+    ), gates
+
+    # One more false positive (4/600) pushes the increase to 4/600 == 0.00667.
+    failing_g4 = _gate_test_record(
+        1, "driftout_A", unit_ids, s_units, healthy(24, 4)
+    )
+    gates = evaluate_gates([control, failing_g4], "per_unit")
+    assert (
+        _gate(gates, "G4 paired healthy FP increase", "driftout_A").passed
+        is False
+    ), gates
