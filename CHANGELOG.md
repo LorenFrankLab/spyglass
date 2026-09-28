@@ -107,6 +107,36 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2: UnitMatch cross-validation halves are built per unit, not per recording
+
+UnitMatch bundles now split each unit's own sampled spikes into temporal
+halves instead of splitting the recording into two halves and building each
+unit's template from whichever half it happened to fire in. The recording-half
+split zero-filled the template of any unit absent from one half, so a unit
+that dropped out or drifted in partway through a session could not match
+across sessions and the match calibration shifted. Spikes are still sampled
+only where the full waveform window fits inside the recording, and every
+unit's sampled spike subset itself changes (`2 * max_spikes_per_unit` are now
+drawn per unit, then split into the two halves), so bundles -- and therefore
+matched pairs -- differ from before even for a stationary unit. A unit with
+fewer than two sampled spikes is excluded from the bundle and logged, and
+stays unmatched in the matchable universe; a session where every unit is
+excluded raises.
+
+- **Magnitude, measured on a 10-seed synthetic benchmark (20 units/session, 5
+  drift-out units per seed):** drift-out units went from 0/50 to 42/50 pooled
+  recall when cut from the second half of one session, and to 45/50 when cut
+  from one half of each session; false pairs among drift-out units were 2/200
+  in both scenarios. Paired recall of units present throughout the session,
+  against the same construction's no-drift control, dropped by 4/150 and
+  7/150 respectively; the healthy-unit recall drop in the
+  one-half-of-each-session scenario (7/150) exceeds the benchmark's 6/150
+  limit -- see
+  `tests/spikesorting/v2/scripts/unitmatch_half_split_experiment.py`.
+- **Existing `UnitMatch` rows must be deleted and repopulated.** See the
+  [preproduction database upgrade sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database)
+  for the recreation order.
+
 #### Spike Sorting v2: every computed table keeps heavy work out of its insert transaction
 
 - `FigPackCuration` now uses DataJoint's tri-part make with

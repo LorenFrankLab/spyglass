@@ -2148,10 +2148,15 @@ Key behaviors and caveats:
     re-checks that provenance (raising `UnitMatchSelectionIntegrityError`) so a
     direct-insert bypass cannot silently match the wrong units.
 - **The matcher never sees Spyglass internals.** `UnitMatch.make()` extracts a
-    dense split-half waveform bundle per session from the curated recording +
-    sorting and hands the matcher self-contained directories — never a
-    recording, a `SortingAnalyzer`, or a table key. A new backend implements
-    `MatcherProtocol` and registers via `register_matcher()`.
+    waveform bundle per session from the curated recording + sorting: each
+    unit's own sampled spikes (drawn only where the full waveform window fits
+    in the recording) are split in temporal order into two cross-validation
+    halves (UnitMatch's split-half templates), so a unit present in only part
+    of a session is still matchable. A unit with fewer than two such spikes is
+    excluded from the bundle, logged, and left unmatched (it stays in the
+    matchable universe). The bundle hands the matcher self-contained
+    directories — never a recording, a `SortingAnalyzer`, or a table key. A new
+    backend implements `MatcherProtocol` and registers via `register_matcher()`.
 - **Tracked units are a strict partition.** `TrackedUnit` groups units that
     match *every* other member of the group, derived as a greedy maximal-clique
     cover of the pair graph (largest clique first, ties broken by highest median
