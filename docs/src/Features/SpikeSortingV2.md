@@ -2162,10 +2162,10 @@ Key behaviors and caveats:
     each run, so with few units per session (about 20 or fewer) results can
     change noticeably from run to run and occasionally include bursts of
     false matches, including a unit matched to two partners. Match only
-    well-isolated curated units
-    (https://github.com/EnnyvanBeest/UnitMatch/issues/146) and treat results
-    from small groups with caution
-    (https://github.com/EnnyvanBeest/UnitMatch/issues/87).
+    well-isolated curated units ([UnitMatch issue
+    #146](https://github.com/EnnyvanBeest/UnitMatch/issues/146)) and treat
+    results from small groups with caution ([UnitMatch issue
+    #87](https://github.com/EnnyvanBeest/UnitMatch/issues/87)).
 - **Tracked units are a strict partition.** `TrackedUnit` groups units that
     match *every* other member of the group, derived as a greedy maximal-clique
     cover of the pair graph (largest clique first, ties broken by highest median
