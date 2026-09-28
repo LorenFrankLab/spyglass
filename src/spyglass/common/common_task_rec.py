@@ -306,7 +306,8 @@ class TaskRecording(SpyglassIngestion, dj.Manual):
         Raises
         ------
         ValueError
-            If `table_name` is not one this table stores.
+            If `table_name` is not one this table stores, or if this entry did
+            not record it.
         """
         valid = ("actions", "events", "states", "trials")
         if table_name not in valid:
@@ -315,4 +316,12 @@ class TaskRecording(SpyglassIngestion, dj.Manual):
             )
 
         _ = self.ensure_single_entry()
-        return self.fetch_nwb()[0][table_name]
+        # fetch_nwb resolves each `<name>_object_id` attribute to the table it
+        # points at, already as a DataFrame. A null id yields no key at all.
+        table = self.fetch_nwb()[0].get(table_name)
+        if table is None:
+            raise ValueError(
+                f"No {table_name} recorded for {self.fetch1('KEY')}."
+            )
+
+        return table
