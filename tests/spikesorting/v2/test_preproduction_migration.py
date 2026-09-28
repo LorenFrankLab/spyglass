@@ -14,7 +14,110 @@ import uuid
 from pathlib import Path
 
 import datajoint as dj
+import numpy as np
 import pytest
+
+
+def _build_documented_upgrade_script(tmp_path: Path) -> tuple[Path, Path]:
+    """Extract the doc's upgrade code block into a runnable script.
+
+    Shared by every rehearsal test in this module. Returns
+    ``(script_path, config_path)``; the caller runs the script (possibly more
+    than once, to check resumability) and removes ``config_path`` afterward.
+    """
+    config_file = tmp_path / "test-db.json"
+    dj.config.save(str(config_file))
+    config_file.chmod(0o600)
+    repo = Path(__file__).resolve().parents[3]
+    document = (
+        repo / "docs/src/Features/SpikeSortingV2_Migration.md"
+    ).read_text()
+    section = document.split("### Upgrading a preproduction v2 database", 1)[1]
+    code = re.search(r"```python\n(.*?)\n```", section, re.DOTALL).group(1)
+    code = code.replace(".alter(context=", ".alter(prompt=False, context=")
+    script = tmp_path / "upgrade.py"
+    script.write_text(
+        f"import datajoint as dj\ndj.config.load({str(config_file)!r})\n" + code
+    )
+    return script, config_file
+
+
+def _run_script(script: Path) -> subprocess.CompletedProcess:
+    """Run ``script`` from a fresh interpreter so no cached heading hides
+    the old DDL the script is about to alter."""
+    repo = Path(__file__).resolve().parents[3]
+    return subprocess.run(
+        [sys.executable, str(script)],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+    )
+
+
+def test_documented_upgrade_widens_single_precision_threshold_columns(
+    dj_conn, tmp_path
+):
+    """Columns downgraded to ``float`` (simulating a database predating the
+    double-precision change) come back as ``double`` after the documented
+    alter loop, and a value stored while the column was ``float`` keeps its
+    single-precision value once widened -- exactly the case the
+    ``math.isclose`` tolerance in ``rules_payloads_match`` exists for: the
+    loop's call to ``initialize_v2_defaults()`` re-runs ``insert_rules``
+    against the widened shipped row, which would raise without it.
+    """
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
+
+    initialize_v2_defaults()  # ensure the shipped rows read below exist
+    rule_key = {
+        "auto_curation_rules_name": "v1_default_nn_noise_2026_09",
+        "rule_index": 0,
+    }
+    assert (AutoCurationRules.Rule & rule_key).fetch1("threshold") == 0.1
+
+    altered = {
+        AutoCurationRules.Rule: "threshold",
+        QualityMetricParameters: "observed_presence_bin_duration_s",
+    }
+    snapshots = {table: table.fetch(as_dict=True) for table in altered}
+    script, config_file = _build_documented_upgrade_script(tmp_path)
+    try:
+        for table, column in altered.items():
+            table.connection.query(
+                f"ALTER TABLE {table.full_table_name} "
+                f"MODIFY COLUMN `{column}` FLOAT"
+            )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+        for table, column in altered.items():
+            data_type = table.connection.query(
+                "SELECT DATA_TYPE FROM information_schema.COLUMNS WHERE "
+                "TABLE_SCHEMA=%s AND TABLE_NAME=%s AND COLUMN_NAME=%s",
+                args=(
+                    table.database,
+                    table.table_name,
+                    column,
+                ),
+            ).fetchone()[0]
+            assert data_type == "double"
+
+        widened = float(np.float32(0.1))
+        assert widened != 0.1  # the widening is real, not a no-op
+        assert (AutoCurationRules.Rule & rule_key).fetch1(
+            "threshold"
+        ) == widened
+    finally:
+        config_file.unlink(missing_ok=True)
+        for table, rows in snapshots.items():
+            restored = dj.FreeTable(dj.conn(), table.full_table_name)
+            for row in rows:
+                restored.update1(row)
 
 
 @pytest.mark.parametrize("interrupted_uuid_add", [False, True])
@@ -86,20 +189,7 @@ def test_documented_upgrade_preserves_retained_data(
         table: table.proj(*names).fetch(as_dict=True)
         for table, names in columns.items()
     }
-    config_file = tmp_path / "test-db.json"
-    dj.config.save(str(config_file))
-    config_file.chmod(0o600)
-    repo = Path(__file__).resolve().parents[3]
-    document = (
-        repo / "docs/src/Features/SpikeSortingV2_Migration.md"
-    ).read_text()
-    section = document.split("### Upgrading a preproduction v2 database", 1)[1]
-    code = re.search(r"```python\n(.*?)\n```", section, re.DOTALL).group(1)
-    code = code.replace(".alter(context=", ".alter(prompt=False, context=")
-    script = tmp_path / "upgrade.py"
-    script.write_text(
-        f"import datajoint as dj\ndj.config.load({str(config_file)!r})\n" + code
-    )
+    script, config_file = _build_documented_upgrade_script(tmp_path)
     try:
         for table, names in columns.items():
             table.connection.query(
@@ -121,17 +211,9 @@ def test_documented_upgrade_preserves_retained_data(
                     root["curation_id"],
                 ),
             )
-        # Run from a fresh interpreter so no cached heading hides the old DDL.
         # Repeat the complete published procedure to prove it is resumable.
         for _ in range(2):
-            result = subprocess.run(
-                [sys.executable, str(script)],
-                cwd=repo,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=180,
-            )
+            result = _run_script(script)
             assert result.returncode == 0, result.stdout + result.stderr
         current = dj.FreeTable(dj.conn(), CurationV2.full_table_name)
         actual_uuids = current.fetch("curation_uuid")

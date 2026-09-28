@@ -86,6 +86,13 @@ The schema changes covered here are:
   `CurationEvaluationSelection.observation_version` (old rows default to 0).
   Newly normalized metric parameter rows use schema version 2; existing recipes
   are not overwritten.
+- `QualityMetricParameters.observed_presence_bin_duration_s` and
+  `AutoCurationRules.Rule.threshold` are now `double` precision (previously
+  single-precision `float`). The alter loop below converts both columns in
+  place; a value stored before the conversion keeps its single-precision
+  value once widened (a stored `0.1` reads back as `0.10000000149011612`), so
+  shipped defaults still compare equal to their existing rows through the
+  tolerance already used to re-run `insert_rules`.
 - `RecordingArtifactSelection.manual_excluded_times` and
   `SharedGroupArtifactSelection.manual_excluded_times`: nullable interval blobs;
   an existing null means no manual exclusions.
@@ -153,8 +160,8 @@ CurationV2 = reload(curation_module).CurationV2
 # Add every newer field BEFORE seeding defaults or reading artifact selections.
 for table in (
     CurationV2,  # finalize UUID; add created_at / created_by
-    AutoCurationRules.Rule,  # existing missing_policy defaults to error
-    QualityMetricParameters,  # presence-bin width; new parameter rows use v2
+    AutoCurationRules.Rule,  # missing_policy defaults to error; threshold -> double
+    QualityMetricParameters,  # presence-bin width -> double; new rows use v2
     CurationEvaluationSelection,  # old evaluations retain observation_version=0
     RecordingArtifactSelection,  # nullable manual_excluded_times
     SharedGroupArtifactSelection,  # nullable manual_excluded_times
