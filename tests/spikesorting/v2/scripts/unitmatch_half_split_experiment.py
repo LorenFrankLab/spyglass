@@ -542,6 +542,41 @@ def match_sessions(
     return pairs, (fitted or None), true_pair_probs
 
 
+def assert_true_pair_probs_consistent(
+    pairs, true_pair_probs, match_threshold, *, seed, scenario, condition
+) -> None:
+    """Self-check: captured probabilities must agree with the emitted pairs.
+
+    UnitMatch emits a true (same-id) cross-session pair ``(u, u)`` in
+    ``pairs`` iff BOTH its directed probabilities clear ``match_threshold``
+    (``UnitMatchBackend._pairs_from_matrix``), i.e. iff
+    ``min(p_ab, p_ba) > match_threshold``. Comparing the two independently
+    derived sets -- one from the captured probability matrix, one from
+    UnitMatch's own emitted pairs -- catches a capture bug (wrong indices, a
+    stale wrap, ...) at the point of use rather than trusting the capture
+    silently. Raises ``RuntimeError`` naming the seed/scenario/condition and
+    the exact symmetric difference on any mismatch.
+    """
+    passed_true_pairs = {int(a) for a, b, _ in pairs if int(a) == int(b)}
+    probability_true_pairs = {
+        u
+        for u, (p_ab, p_ba) in true_pair_probs.items()
+        if min(p_ab, p_ba) > match_threshold
+    }
+    if passed_true_pairs != probability_true_pairs:
+        only_by_probability = sorted(probability_true_pairs - passed_true_pairs)
+        only_by_pairs = sorted(passed_true_pairs - probability_true_pairs)
+        raise RuntimeError(
+            "assert_true_pair_probs_consistent: captured true-pair "
+            "probabilities disagree with UnitMatchBackend.match's emitted "
+            f"pairs for seed={seed} scenario={scenario!r} "
+            f"condition={condition!r} (match_threshold={match_threshold}): "
+            f"units passing by captured probability but not emitted "
+            f"{only_by_probability}; units emitted but not passing by "
+            f"captured probability {only_by_pairs}."
+        )
+
+
 # ----------------------------------------------------------------------------
 # Scoring
 # ----------------------------------------------------------------------------
@@ -616,6 +651,14 @@ def run_one(seed, scenario, condition, sessions, drift_out_units, out_dir):
             dirs.append(d)
         t1 = time.perf_counter()
         pairs, fitted, true_pair_probs = match_sessions(dirs, unit_ids)
+    assert_true_pair_probs_consistent(
+        pairs,
+        true_pair_probs,
+        MATCH_THRESHOLD,
+        seed=seed,
+        scenario=scenario,
+        condition=condition,
+    )
     t2 = time.perf_counter()
     record = {
         "seed": seed,
@@ -743,30 +786,57 @@ def pooled_paired_counts(records, scenario, condition) -> dict | None:
 
 def paired_true_pair_probs(
     record, control_record
-) -> list[tuple[int, float, float]]:
+) -> tuple[list[tuple[int, float, float]], int]:
     """Non-S ``(unit, q_control, q_scenario)`` triples paired against control.
 
     ``q_u = min(p(A_u -> B_u), p(B_u -> A_u))`` -- the same min
     ``UnitMatchBackend._pairs_from_matrix`` uses to decide whether to emit a
-    pair. Restricted to ``record``'s non-S units that have a recorded
-    true-pair probability in BOTH ``record`` and ``control_record`` (present
-    in both sessions' bundle for both runs).
+    pair.
+
+    Returns
+    -------
+    pairs : list of (int, float, float)
+        One triple per ``record``'s non-S unit that has a recorded true-pair
+        probability in BOTH ``record`` and ``control_record`` (present in
+        both sessions' bundle for both runs).
+    n_unpaired : int
+        The number of ``record``'s non-S units dropped because a probability
+        is missing on either side (excluded from a bundle in that run, or
+        the whole run's probability capture never ran) -- symmetric: a unit
+        missing from the control side or from the scenario side is dropped
+        and counted the same way.
     """
     s = set(int(u) for u in record["seed_drift_out_units"])
     non_s = [u for u in record["unit_ids"] if u not in s]
     ctrl_probs = control_record.get("true_pair_probs", {})
     scen_probs = record.get("true_pair_probs", {})
-    out = []
+    pairs, n_unpaired = [], 0
     for u in non_s:
         key = str(u)
         if key not in ctrl_probs or key not in scen_probs:
+            n_unpaired += 1
             continue
-        out.append((u, min(ctrl_probs[key]), min(scen_probs[key])))
-    return out
+        pairs.append((u, min(ctrl_probs[key]), min(scen_probs[key])))
+    return pairs, n_unpaired
+
+
+def _capture_missing(record) -> bool:
+    """A run had non-S units to capture but ``true_pair_probs`` is empty.
+
+    A proxy for "the probability-matrix capture never ran for this run" --
+    either ``UnitMatchBackend.match`` returned early (fewer than two
+    sessions, or zero good units) or the capture wraps in
+    :func:`match_sessions` never observed a naive-Bayes call. Every non-S
+    unit of a run like this is already counted in
+    :func:`paired_true_pair_probs`'s ``n_unpaired``; this flags WHY, so a
+    wholesale capture failure is not silently indistinguishable from
+    ordinary per-unit bundle exclusions (a unit with too few sampled spikes).
+    """
+    return bool(record["unit_ids"]) and not record.get("true_pair_probs")
 
 
 def pooled_true_pair_prob_drop(records, scenario, condition) -> dict | None:
-    """G3a-prob's pooled quantities: the two means and their drop.
+    """G3a-prob's pooled quantities: the two means, their drop, and coverage.
 
     Pools every non-S unit paired (present in both the scenario run and that
     seed's control run) over every seed of ``scenario`` x ``condition`` that
@@ -784,11 +854,19 @@ def pooled_true_pair_prob_drop(records, scenario, condition) -> dict | None:
     if not runs:
         return None
     q_control, q_scenario, seeds = [], [], []
+    n_unpaired = 0
+    n_capture_missing_runs = 0
     for r in runs:
         ctrl = index.get((r["seed"], "control", condition))
         if ctrl is None:
             return None
-        for _, c, s in paired_true_pair_probs(r, ctrl):
+        if _capture_missing(r):
+            n_capture_missing_runs += 1
+        if _capture_missing(ctrl):
+            n_capture_missing_runs += 1
+        pairs, unpaired = paired_true_pair_probs(r, ctrl)
+        n_unpaired += unpaired
+        for _, c, s in pairs:
             q_control.append(c)
             q_scenario.append(s)
         seeds.append(r["seed"])
@@ -801,6 +879,8 @@ def pooled_true_pair_prob_drop(records, scenario, condition) -> dict | None:
         "mean_scenario": mean_scenario,
         "drop": mean_control - mean_scenario,
         "n_paired": len(q_control),
+        "n_unpaired": n_unpaired,
+        "n_capture_missing_runs": n_capture_missing_runs,
         "seeds": sorted(seeds),
     }
 
@@ -965,7 +1045,10 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
             prob_detail = (
                 f"control mean {prob_pooled['mean_control']:.4f} -> "
                 f"scenario mean {prob_pooled['mean_scenario']:.4f} "
-                f"(n={prob_pooled['n_paired']})"
+                f"(n_paired={prob_pooled['n_paired']}, "
+                f"n_unpaired={prob_pooled['n_unpaired']}, "
+                f"n_capture_missing_runs="
+                f"{prob_pooled['n_capture_missing_runs']})"
             )
         gates.append(
             _gate_float(
@@ -1147,12 +1230,16 @@ def non_s_bit_identical_halves(records, condition) -> dict[str, list[int]]:
     For every seed with both a ``scenario`` and that seed's ``control`` run of
     ``condition``, compares each non-S unit's two saved raw-waveform halves
     (``RawWaveforms/Unit{id}_*.npy[..., 0]`` and ``[..., 1]``), session by
-    session. A unit missing from either bundle (excluded) contributes no
-    comparisons for that session. This quantifies how much of the paired
-    healthy comparison (G3a, G4) reflects an S-unit effect versus resampling
-    noise from SpikeInterface's shared per-analyzer RNG, which can perturb a
-    non-S unit's randomly chosen spike subset merely because another unit's
-    available spike count changed.
+    session. A unit present in one bundle but excluded from the other (fewer
+    than two sampled spikes in one run but not the other) counts as NOT
+    identical for both of that session's halves -- it is not skipped: a
+    unit's bundle presence itself changing between the scenario and control
+    run is exactly the kind of drift-out-induced difference this check (and
+    the G3a-exact gate built on it) exists to catch. This quantifies how much
+    of the paired healthy comparison (G3a, G4) reflects an S-unit effect
+    versus resampling noise from SpikeInterface's shared per-analyzer RNG,
+    which can perturb a non-S unit's randomly chosen spike subset merely
+    because another unit's available spike count changed.
 
     Returns
     -------
@@ -1181,6 +1268,11 @@ def non_s_bit_identical_halves(records, condition) -> dict[str, list[int]]:
                 ctrl_waves = _unit_waveform_paths(ctrl["bundle_dirs"][label])
                 for uid in non_s:
                     if uid not in scen_waves or uid not in ctrl_waves:
+                        # Present on one side only: both halves count as NOT
+                        # identical (the templates cannot be compared, and a
+                        # unit whose bundle presence changed is itself a
+                        # difference), rather than being skipped.
+                        n_total += 2
                         continue
                     scen_wave = np.load(scen_waves[uid])
                     ctrl_wave = np.load(ctrl_waves[uid])
@@ -1267,8 +1359,8 @@ def format_summary(records, gates, fidelity) -> str:
         "## Healthy true-pair mean probability (paired)",
         "",
         "| scenario | condition | control mean q | scenario mean q | drop | "
-        "n paired |",
-        "|---|---|---|---|---|---|",
+        "n paired | n unpaired | n capture-missing runs |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for scenario in (s for s in DRIFT_OUT_SCENARIOS if s in scenarios):
         for condition in conditions:
@@ -1278,7 +1370,8 @@ def format_summary(records, gates, fidelity) -> str:
             lines.append(
                 f"| {scenario} | {condition} | {p['mean_control']:.4f} | "
                 f"{p['mean_scenario']:.4f} | {p['drop']:+.4f} | "
-                f"{p['n_paired']} |"
+                f"{p['n_paired']} | {p['n_unpaired']} | "
+                f"{p['n_capture_missing_runs']} |"
             )
 
     index = _index(records)
