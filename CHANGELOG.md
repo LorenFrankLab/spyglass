@@ -114,8 +114,10 @@ halves instead of splitting the recording into two halves and building each
 unit's template from whichever half it happened to fire in. The recording-half
 split zero-filled the template of any unit absent from one half, so a unit
 that dropped out or drifted in partway through a session could not match
-across sessions and the match calibration shifted. Spikes are still sampled
-only where the full waveform window fits inside the recording, and every
+across sessions and the match calibration shifted. Spikes are now sampled
+only where the full waveform window fits inside the recording (the old
+construction had no such margin and zero-filled any spike drawn too close to
+a segment border), and every
 unit's sampled spike subset itself changes (`2 * max_spikes_per_unit` are now
 drawn per unit, then split into the two halves), so bundles -- and therefore
 matched pairs -- differ from before even for a stationary unit. A unit with
