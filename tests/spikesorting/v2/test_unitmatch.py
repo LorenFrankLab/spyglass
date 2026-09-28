@@ -644,6 +644,84 @@ def test_external_matcher_satisfies_protocol_and_runs():
     assert matcher.match(inputs[:1], {}) == []
 
 
+@pytest.mark.slow
+def test_driftout_units_recovered_pooled(tmp_path):
+    """Preregistered 10-seed acceptance run for the production ``per_unit``
+    bundle construction (:func:`extract_unitmatch_bundle`).
+
+    Builds the synthetic control / driftout_A / driftout_AB scenarios (see
+    ``tests/spikesorting/v2/scripts/unitmatch_half_split_experiment.py`` for
+    the dataset, scoring and gate definitions -- this test imports them
+    rather than duplicating them) for seeds 0..9, condition ``per_unit``
+    only, and asserts the pooled acceptance gates for each drift-out
+    scenario: G1 drift-out recall >= 0.80, G2 S x S false-pair rate <= 0.015,
+    G3a paired healthy recall drop vs control on the same non-S units <=
+    0.04, G4 paired healthy false-positive rate increase vs control <= 0.005.
+    (G3b, the drop relative to the old ``time_half`` construction, is not
+    evaluated here because ``time_half`` does not run in this test; it is not
+    part of the CI acceptance surface.)
+
+    This is the preregistered acceptance configuration (same seeds, scenarios
+    and thresholds as the acceptance script's default run). Do not change the
+    thresholds, seeds, scenarios or scoring to make it pass, and do not
+    xfail/skip it: a failure here is a reported result about the current
+    per-unit construction, not a test bug. At the current construction, G3a
+    is expected to FAIL for driftout_AB (a unit that drifts out of *both*
+    sessions costs its healthy neighbors slightly more matched recall than
+    the 4% budget allows: 133 -> 126 of 150 = 0.0467 > 0.04); every other
+    gate is expected to PASS. The assertion message lists every scenario's
+    gates so a regression elsewhere stays visible.
+
+    DB-free: this test requests no ``dj_conn`` fixture and the functions it
+    imports (:func:`make_dataset`, :func:`make_scenario_sessions`,
+    :func:`run_one`, :func:`evaluate_gates`) reach a database only through
+    ``spyglass.spikesorting.v2._unitmatch_backend`` and ``.matcher_protocol``,
+    neither of which opens a DataJoint connection at import time or at call
+    time here -- ``run_one`` builds bundles on disk and matches them through
+    ``UnitMatchBackend.match``, with no table access. pytest fixtures are
+    resolved per test at setup, not at collection, so the ``dj_conn``-taking
+    tests elsewhere in this module do not force a database for this one.
+    """
+    pytest.importorskip("UnitMatchPy")
+    from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
+        SCENARIOS,
+        choose_drift_out_units,
+        evaluate_gates,
+        make_dataset,
+        make_scenario_sessions,
+        run_one,
+    )
+
+    condition = "per_unit"
+    records = []
+    for seed in range(10):
+        recording, sorting = make_dataset(seed)
+        drift_out_units = choose_drift_out_units(seed)
+        for scenario in SCENARIOS:
+            sessions = make_scenario_sessions(
+                recording, sorting, scenario, drift_out_units
+            )
+            records.append(
+                run_one(
+                    seed,
+                    scenario,
+                    condition,
+                    sessions,
+                    drift_out_units,
+                    tmp_path,
+                )
+            )
+
+    gates = evaluate_gates(records, condition)
+    table = "\n".join(
+        f"{'PASS' if g.passed else 'FAIL'} {g.name} [{g.scenario}]: "
+        f"{g.value:.4f} {g.comparison} {g.threshold} ({g.detail})"
+        for g in gates
+    )
+    checked = [g for g in gates if not g.name.startswith("G3b")]
+    assert all(g.passed for g in checked), table
+
+
 # --------------------------------------------------------------------------- #
 # Table-wiring goals (database): registry-validating insert (goal 1), the       #
 # explicit per-member selection (goals 4/5), the make() provenance recheck      #
