@@ -1022,3 +1022,44 @@ def test_a_one_shot_iterable_of_algorithms_still_digests(tmp_path):
     digests = nwb_hash.digest_file(target, algorithms=(n for n in ["sha256"]))
 
     assert set(digests) == {"sha256"}
+
+
+def test_a_derivative_can_be_public_while_its_raw_is_private(
+    store, declared, build_analysis, broker_configured, fake_client
+):
+    """Inheritance sets a default; it does not constrain what you may declare.
+
+    `share_file` consults no parent, so a small result can be published while
+    the session it came from stays private.
+    """
+    analysis = build_analysis()
+    key = {"analysis_file_name": analysis}
+
+    assert (store.AnalysisFileSelection & key).fetch1("scope") == "private"
+
+    store.share_file(analysis, scope="public")
+
+    assert (store.AnalysisFileSelection & key).fetch1("scope") == "public"
+    assert (store.SharedAnalysisFile & key).fetch1("file_id") == "f1"
+    assert (store.RawFileSelection & declared).fetch1("scope") == "private"
+
+
+def test_a_hand_set_scope_survives_a_parent_rescope(
+    store, declared, build_analysis, broker_configured, fake_client
+):
+    """Declaring a derivative directly is a choice, not a default to re-derive.
+
+    The builder had queued this row as inherited; `share_file` replaced the
+    scope, so the re-sync cascade must no longer treat it as derivable.
+    """
+    analysis = build_analysis()
+    key = {"analysis_file_name": analysis}
+
+    store.share_file(analysis, scope="public", populate=False)
+
+    store.SharedRawFile.populate(declared)
+    store.SharedRawFile().update_visibility(declared, scope="private")
+
+    assert (store.AnalysisFileSelection & key).fetch1(
+        "scope"
+    ) == "public", "Re-derivation overrode a hand-set scope"

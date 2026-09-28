@@ -36,6 +36,9 @@ def most_restrictive(scopes) -> str:
     means a file assembled from a public and a private source is private:
     combining data must never be a way to widen access to any part of it.
 
+    This governs the inherited *default* only. `share_file` consults no
+    parent, so a derivative may be declared more widely than its sources.
+
     Parameters
     ----------
     scopes : iterable of str
@@ -59,6 +62,37 @@ def most_restrictive(scopes) -> str:
     known = [s for s in scopes if s in SCOPES]
 
     return min(known, key=SCOPES.index) if known else "private"
+
+
+def _scope_row(selection, key: dict, scope: str, inherited: bool) -> dict:
+    """Return the selection row for a scope, marking how it was arrived at.
+
+    Only `AnalysisFileSelection` carries `inherited`; raw files have no
+    parents to inherit from.
+
+    Parameters
+    ----------
+    selection : dj.Table
+        The selection table being written.
+    key : dict
+        Selection key.
+    scope : str
+        Scope to record.
+    inherited : bool
+        False where a user named this scope, so a later re-derivation leaves
+        it alone.
+
+    Returns
+    -------
+    dict
+        Row to insert or update.
+    """
+    row = {**key, "scope": scope}
+
+    if "inherited" in selection.heading.names:
+        row["inherited"] = int(inherited)
+
+    return row
 
 
 class _SharedFile:
@@ -336,7 +370,11 @@ class _UploadMixin(_SharedFile):
         )
 
     def update_visibility(
-        self, key: dict, scope: str, teams: Optional[List[str]] = None
+        self,
+        key: dict,
+        scope: str,
+        teams: Optional[List[str]] = None,
+        _inherited: bool = False,
     ):
         """Change who may read an already-uploaded file.
 
@@ -356,6 +394,10 @@ class _UploadMixin(_SharedFile):
             "private", "group", or "public".
         teams : list of str, optional
             `LabTeam` names. Required when `scope` is "group".
+        _inherited : bool, optional
+            Whether the new scope was derived rather than chosen. Only
+            `_rederive` passes True; a direct call is a choice, and marking it
+            so is what stops a later cascade from undoing it.
 
         Raises
         ------
@@ -394,7 +436,9 @@ class _UploadMixin(_SharedFile):
         # Only now is the declaration true. One transaction, so a failure
         # cannot leave a 'group' row naming no team.
         with self.connection.transaction:
-            self._selection.update1({**selection_key, "scope": scope})
+            self._selection.update1(
+                _scope_row(self._selection, selection_key, scope, _inherited)
+            )
             (self._selection.Team & selection_key).delete_quick()
             self._selection.Team.insert(
                 [{**selection_key, "team_name": t} for t in teams]
@@ -474,11 +518,13 @@ class _UploadMixin(_SharedFile):
         try:
             if SharedAnalysisFile & key:  # uploaded, so the Broker must agree
                 SharedAnalysisFile().update_visibility(
-                    key, scope=scope, teams=teams
+                    key, scope=scope, teams=teams, _inherited=True
                 )
             else:  # not uploaded; the next populate carries the new scope
                 with self.connection.transaction:
-                    AnalysisFileSelection.update1({**key, "scope": scope})
+                    AnalysisFileSelection.update1(
+                        _scope_row(AnalysisFileSelection, key, scope, True)
+                    )
                     (AnalysisFileSelection.Team & key).delete_quick()
                     AnalysisFileSelection.Team.insert(
                         [{**key, "team_name": t} for t in teams]
@@ -757,10 +803,12 @@ def share_file(
     # *narrows* a share they declared too widely, and skipping the duplicate
     # would leave the old scope and the old teams in place while returning as
     # though it had worked.
+    row = _scope_row(selection, key, scope, inherited=False)
+
     if selection & key:
-        selection.update1({**key, "scope": scope})
+        selection.update1(row)
     else:
-        selection.insert1({**key, "scope": scope})
+        selection.insert1(row)
 
     # Teams are replaced, not added to, and only a group scope keeps any:
     # a row left behind from an earlier group declaration would take effect
