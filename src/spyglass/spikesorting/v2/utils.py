@@ -434,7 +434,7 @@ class ImmutableParamsLookup:
             )
         super().update1(row)
 
-    def insert(self, rows, *args, replace=False, **kwargs):
+    def insert(self, rows, replace=False, *args, **kwargs):
         """Reject ``replace=True``; otherwise forward to the next ``insert``.
 
         DataJoint's ``insert(..., replace=True)`` overwrites a row's content
@@ -453,12 +453,20 @@ class ImmutableParamsLookup:
         (``UnitAnnotationDefinition``, ``CurationReviewProfile``) is already
         covered without reaching here.
 
+        ``replace`` takes DataJoint's own position (second), so a positional
+        ``insert(rows, True)`` is rejected like ``replace=True`` on a subclass
+        without an ``insert`` override (e.g. ``MotionCorrectionParameters``).
+        Subclass overrides forward only ``rows`` and keyword arguments here.
+
         Parameters
         ----------
         rows
             Forwarded to ``super().insert`` unchanged.
         replace : bool, optional
             Must be ``False`` (the default); ``True`` raises.
+        *args
+            DataJoint's later positional flags (``skip_duplicates``, ...),
+            forwarded after ``replace`` so they keep their positions.
 
         Raises
         ------
@@ -473,7 +481,7 @@ class ImmutableParamsLookup:
                 "it in place under the same key silently re-defines what "
                 "existing ids mean. Insert a NEW named row instead."
             )
-        super().insert(rows, *args, **kwargs)
+        super().insert(rows, replace, *args, **kwargs)
 
 
 # ``CurationSource`` and ``CurationLabel`` are defined in the stdlib-only

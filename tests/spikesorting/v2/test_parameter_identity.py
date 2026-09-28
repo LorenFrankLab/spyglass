@@ -790,6 +790,32 @@ def test_params_lookup_rejects_replace(dj_conn):
 
 
 @pytest.mark.database
+def test_params_lookup_rejects_positional_replace(dj_conn):
+    """A positional ``replace`` is rejected like ``replace=True``.
+
+    ``MotionCorrectionParameters`` has no ``insert`` override, so the
+    second positional argument of its ``insert`` is DataJoint's ``replace``.
+    Passing it positionally must not overwrite the stored row. DataJoint's
+    later positional flags keep their meaning (``skip_duplicates`` third).
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.motion import MotionCorrectionParameters
+
+    MotionCorrectionParameters.insert_default()
+    key = {"motion_correction_params_name": "dredge_v1"}
+    before = (MotionCorrectionParameters & key).fetch1()
+    overwrite = {**before, "motion_estimation_params_name": "dredge_fast_v1"}
+    assert overwrite != before
+    with pytest.raises(dj.errors.DataJointError, match="replace=True"):
+        MotionCorrectionParameters().insert([overwrite], True)
+    assert (MotionCorrectionParameters & key).fetch1() == before
+
+    MotionCorrectionParameters().insert([dict(before)], False, True)
+    assert (MotionCorrectionParameters & key).fetch1() == before
+
+
+@pytest.mark.database
 def test_describe_parameter_rows_columns_and_usage(dj_conn):
     """Documented columns + correct ``used_by_pipeline_presets`` per row."""
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
