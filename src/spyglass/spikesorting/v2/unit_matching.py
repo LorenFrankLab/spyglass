@@ -1082,7 +1082,9 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         anchor_nwb_file_name = member_plan[0]["nwb_file_name"]
         # Snapshot the frozen matchable universe from member_plan (resolved +
         # validated in make_fetch) so make_insert persists exactly the node set
-        # the matcher saw -- independent of the matcher path taken below.
+        # handed to the matcher path -- independent of the path taken below,
+        # and including units a bundle leaves out (they get no pairs and
+        # become unmatched tracked units).
         matchable_units = [
             {
                 "member_index": int(plan["member_index"]),
@@ -1256,6 +1258,18 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         sorting + recording (resolving ``MatcherParameters.job_kwargs`` into the
         analyzer compute calls) and feeds the matcher self-contained directories;
         the matcher never sees a recording, analyzer, or Spyglass key.
+
+        A matchable unit with fewer than two sampled spikes with full waveform
+        support is left out of its member's bundle, so it gets no match pair;
+        one warning per member names those units. They stay in the frozen
+        matchable universe (``make_insert`` writes ``MatchableUnit`` from the
+        plan, not the bundles) and become unmatched tracked units.
+
+        Raises
+        ------
+        NoMatchableUnitsError
+            Every matchable unit of a member was left out of its bundle; the
+            message names the member.
         """
         import tempfile
         from pathlib import Path
@@ -1269,6 +1283,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             read_persisted_traces,
         )
         from spyglass.spikesorting.v2._unitmatch_backend import (
+            NoMatchableUnitsError,
             extract_unitmatch_bundle,
         )
         from spyglass.spikesorting.v2._units_nwb import read_stored_units
@@ -1277,6 +1292,14 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             get_matcher,
         )
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+
+        def _member_label(plan):
+            return (
+                f"member_index {plan['member_index']} "
+                f"({plan['nwb_file_name']}, "
+                f"sorting_id={plan['sorting_id']}, "
+                f"curation_id={plan['curation_id']})"
+            )
 
         resolved_job_kwargs = _resolved_job_kwargs(job_kwargs)
         member_index_by_curation = {
@@ -1324,13 +1347,31 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     )
                     if key in params
                 }
-                extract_unitmatch_bundle(
-                    session_dir,
-                    recording,
-                    sorting,
-                    **bundle_kwargs,
-                    job_kwargs=resolved_job_kwargs,
-                )
+                try:
+                    excluded = extract_unitmatch_bundle(
+                        session_dir,
+                        recording,
+                        sorting,
+                        **bundle_kwargs,
+                        job_kwargs=resolved_job_kwargs,
+                    )
+                except NoMatchableUnitsError as exc:
+                    raise NoMatchableUnitsError(
+                        f"UnitMatch.make: {_member_label(plan)} has no unit "
+                        "that can enter a UnitMatch bundle -- every matchable "
+                        "unit had fewer than two sampled spikes with full "
+                        "waveform support, so none has two cross-validation "
+                        "halves. Re-curate so a unit with more spikes "
+                        "survives, or drop the member from the SessionGroup."
+                    ) from exc
+                if excluded:
+                    logger.warning(
+                        f"UnitMatch.make: {_member_label(plan)}: units "
+                        f"{excluded} have fewer than two sampled spikes with "
+                        "full waveform support and will have no match pairs; "
+                        "they remain in the matchable universe as unmatched "
+                        "units."
+                    )
                 session_inputs.append(
                     SessionMatcherInput(
                         curation_key={

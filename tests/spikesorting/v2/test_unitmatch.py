@@ -18,6 +18,7 @@ skips cleanly when either is absent.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -1962,8 +1963,17 @@ def _install_fixture_pairer(
     pairs: list[list[int]],
     probability: float = 0.99,
     seen_unit_ids: list[list[int]] | None = None,
+    read_bundles: bool = False,
 ):
-    """Register a lightweight matcher and stub bundle extraction for DB tests."""
+    """Register a lightweight matcher for DB tests.
+
+    By default bundle extraction is stubbed and the matcher emits every listed
+    ``(unit_a, unit_b)`` pair. With ``read_bundles=True`` the real
+    ``extract_unitmatch_bundle`` runs, the matcher reads each session's bundle
+    ``cluster_group.tsv`` (appending its unit ids to ``seen_unit_ids``), and it
+    emits only the listed pairs whose units are both in the bundles -- so the
+    pairs follow what the bundles contain, as UnitMatchPy's loader does.
+    """
     from pydantic import BaseModel, ConfigDict, Field
 
     from spyglass.spikesorting.v2 import _unitmatch_backend
@@ -1982,6 +1992,14 @@ def _install_fixture_pairer(
         pairs: list = Field(default_factory=list)
         schema_version: int = 1
 
+    def _bundle_unit_ids(session_input) -> set[int]:
+        lines = (
+            (Path(session_input.waveform_dir) / "cluster_group.tsv")
+            .read_text()
+            .splitlines()
+        )
+        return {int(line.split("\t")[0]) for line in lines[1:]}
+
     class _FixturePairer:
         """Emits the listed (unit_a, unit_b) pairs."""
 
@@ -1990,6 +2008,19 @@ def _install_fixture_pairer(
         def match(self, session_inputs, params):
             left = session_inputs[0].curation_key
             right = session_inputs[1].curation_key
+            listed = params.get("pairs", [])
+            if read_bundles:
+                left_ids, right_ids = (
+                    _bundle_unit_ids(session_input)
+                    for session_input in session_inputs[:2]
+                )
+                if seen_unit_ids is not None:
+                    seen_unit_ids.extend([sorted(left_ids), sorted(right_ids)])
+                listed = [
+                    (pair_a, pair_b)
+                    for pair_a, pair_b in listed
+                    if pair_a in left_ids and pair_b in right_ids
+                ]
             return [
                 MatchPair(
                     session_a_sorting_id=str(left["sorting_id"]),
@@ -2000,7 +2031,7 @@ def _install_fixture_pairer(
                     unit_b_id=int(pair_b),
                     match_probability=float(params.get("probability", 0.99)),
                 )
-                for pair_a, pair_b in params.get("pairs", [])
+                for pair_a, pair_b in listed
             ]
 
     def _noop_extract(session_dir, recording, sorting, **kwargs):
@@ -2009,9 +2040,10 @@ def _install_fixture_pairer(
             seen_unit_ids.append([int(u) for u in sorting.get_unit_ids()])
         return []
 
-    monkeypatch.setattr(
-        _unitmatch_backend, "extract_unitmatch_bundle", _noop_extract
-    )
+    if not read_bundles:
+        monkeypatch.setattr(
+            _unitmatch_backend, "extract_unitmatch_bundle", _noop_extract
+        )
 
     saved = (dict(mp._MATCHER_REGISTRY), dict(mp._SCHEMA_REGISTRY))
     register_matcher(_FixturePairer(), _FixtureMatcherParams)
@@ -2568,6 +2600,272 @@ def test_unitmatch_populate_with_committed_merged_child_member(
         (
             SorterParameters & {"sorter_params_name": two_unit_params}
         ).super_delete(warn=False)
+
+
+#: Member 0's planted sort for the bundle-exclusion tests: unit 0 fires once
+#: mid-session (one sampled spike -> no two cross-validation halves, so the
+#: bundle leaves it out); unit 1 fires 35 times across the session (kept).
+_ONE_SPIKE_BESIDE_KEPT_UNIT = [[75_000], list(range(3_000, 140_000, 4_000))]
+#: Member 0's planted sort where every unit fires once (all left out).
+_ALL_ONE_SPIKE_UNITS = [[50_000], [100_000]]
+
+
+@contextmanager
+def _real_bundle_selection(
+    grp, monkeypatch, *, name, samples_by_unit, pairs, seen_unit_ids=None
+):
+    """A two-member UnitMatch selection built from real bundles.
+
+    Plants ``samples_by_unit`` as member 0's sort (member 1 keeps the fixture's
+    single-unit sort), registers a bundle-reading pairer that emits the listed
+    ``pairs`` only between units present in the bundles, and inserts the
+    selection. Yields ``selection_pk``, member ``choices``, and member 0's
+    ``unit_spike_counts``; tears it all down afterwards.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorter_params_name = f"minirec_ms5_{name}"
+    matcher_params_name = f"{name}_pairer_params"
+    sort_key, _ = _plant_sort_on_first_member(
+        grp, sorter_params_name, samples_by_unit
+    )
+    sorting_key = {"sorting_id": sort_key["sorting_id"]}
+    clear_curations_for(sort_key)
+    saved_registry = None
+    selection_pk = None
+    try:
+        root0 = CurationV2.insert_curation(sorting_key=sorting_key)
+        choice0 = {
+            "sorting_id": root0["sorting_id"],
+            "curation_id": root0["curation_id"],
+        }
+        sorting0 = CurationV2.get_sorting(choice0)
+        unit_spike_counts = {
+            int(u): len(sorting0.get_unit_spike_train(u))
+            for u in sorting0.unit_ids
+        }
+        assert sorted(unit_spike_counts.values()) == sorted(
+            len(unit) for unit in samples_by_unit
+        ), "precondition: the curated sort keeps every planted spike"
+        saved_registry = _install_fixture_pairer(
+            monkeypatch,
+            matcher_name=f"{name}_pairer",
+            matcher_params_name=matcher_params_name,
+            pairs=pairs(unit_spike_counts),
+            seen_unit_ids=seen_unit_ids,
+            read_bundles=True,
+        )
+        choices = {0: choice0, 1: grp["choices"][1]}
+        selection_pk = UnitMatchSelection.insert_selection(
+            grp["owner"], grp["group_name"], matcher_params_name, choices
+        )
+        yield {
+            "selection_pk": selection_pk,
+            "choices": choices,
+            "unit_spike_counts": unit_spike_counts,
+        }
+    finally:
+        if selection_pk is not None:
+            (UnitMatch & selection_pk).super_delete(warn=False)
+            (UnitMatchSelection & selection_pk).super_delete(warn=False)
+        (
+            MatcherParameters & {"matcher_params_name": matcher_params_name}
+        ).super_delete(warn=False)
+        if saved_registry is not None:
+            _restore_matcher_registry(saved_registry)
+        clear_curations_for(sort_key)
+        (Sorting & sorting_key).super_delete(warn=False)
+        (SortingSelection & sorting_key).super_delete(warn=False)
+        (
+            SorterParameters & {"sorter_params_name": sorter_params_name}
+        ).super_delete(warn=False)
+
+
+def _units_with_spike_count(unit_spike_counts, n_spikes):
+    """Unit ids of member 0's planted sort that fire exactly ``n_spikes``."""
+    return [u for u, n in unit_spike_counts.items() if n == n_spikes]
+
+
+def _member_identity(grp, member_index, choice):
+    """The member identity fields a UnitMatch message must name."""
+    return [
+        f"member_index {member_index}",
+        grp["members"][member_index]["nwb_file_name"],
+        f"sorting_id={choice['sorting_id']}",
+        f"curation_id={choice['curation_id']}",
+    ]
+
+
+@pytest.mark.slow
+def test_make_logs_exclusions_per_session(
+    two_session_curated_group, monkeypatch, caplog
+):
+    """A member whose bundle leaves a unit out gets exactly one warning.
+
+    Member 0 plants a one-spike unit beside a 35-spike unit; member 1's single
+    unit fires 30 times. The real bundle extraction leaves member 0's
+    one-spike unit out, and ``UnitMatch.populate`` warns once, naming member
+    0's identity and the excluded unit id, and never for member 1.
+    """
+    import logging
+
+    pytest.importorskip("UnitMatchPy")
+    from spyglass.spikesorting.v2.unit_matching import UnitMatch
+
+    grp = two_session_curated_group
+    with _real_bundle_selection(
+        grp,
+        monkeypatch,
+        name="exclusion_log",
+        samples_by_unit=_ONE_SPIKE_BESIDE_KEPT_UNIT,
+        pairs=lambda counts: [],
+    ) as run:
+        (excluded,) = _units_with_spike_count(run["unit_spike_counts"], 1)
+        with caplog.at_level(logging.WARNING, logger="spyglass"):
+            UnitMatch.populate(run["selection_pk"], reserve_jobs=False)
+        assert UnitMatch & run["selection_pk"]
+
+    exclusion_warnings = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.WARNING
+        and "fewer than two sampled spikes" in r.getMessage()
+    ]
+    assert len(exclusion_warnings) == 1, exclusion_warnings
+    (message,) = exclusion_warnings
+    for field in _member_identity(grp, 0, run["choices"][0]):
+        assert field in message, (field, message)
+    assert f"[{excluded}]" in message, message
+    member1 = run["choices"][1]
+    assert f"sorting_id={member1['sorting_id']}" not in message
+    assert grp["members"][1]["nwb_file_name"] not in message
+
+
+@pytest.mark.slow
+def test_excluded_bundle_units_stay_in_frozen_universe(
+    two_session_curated_group, monkeypatch
+):
+    """A unit the bundle leaves out stays in the frozen matchable universe.
+
+    Planted correspondence: both of member 0's units match member 1's unit.
+    The pairer reads the real bundles, so only the kept 35-spike unit can pair;
+    the one-spike unit is absent from its bundle, is still a ``MatchableUnit``
+    row, is in no ``Pair`` row, and becomes a singleton ``TrackedUnit``.
+    """
+    pytest.importorskip("UnitMatchPy")
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.unit_matching import (
+        TrackedUnit,
+        UnitMatch,
+    )
+
+    grp = two_session_curated_group
+    (unit_b,) = [
+        int(u) for u in CurationV2().get_matchable_unit_ids(grp["choices"][1])
+    ]
+    seen_unit_ids: list[list[int]] = []
+    with _real_bundle_selection(
+        grp,
+        monkeypatch,
+        name="exclusion_universe",
+        samples_by_unit=_ONE_SPIKE_BESIDE_KEPT_UNIT,
+        pairs=lambda counts: [[u, unit_b] for u in sorted(counts)],
+        seen_unit_ids=seen_unit_ids,
+    ) as run:
+        pk = run["selection_pk"]
+        choice0 = run["choices"][0]
+        (excluded,) = _units_with_spike_count(run["unit_spike_counts"], 1)
+        (kept,) = _units_with_spike_count(run["unit_spike_counts"], 35)
+        UnitMatch.populate(pk, reserve_jobs=False)
+
+        # The bundles hold exactly the units with two halves.
+        assert seen_unit_ids == [[kept], [unit_b]]
+
+        member0_universe = {
+            int(r["unit_id"])
+            for r in (UnitMatch.MatchableUnit & pk & choice0).fetch(
+                as_dict=True
+            )
+        }
+        assert member0_universe == {excluded, kept}
+
+        pairs = (UnitMatch.Pair & pk).fetch(as_dict=True)
+        assert [(int(p["unit_a_id"]), int(p["unit_b_id"])) for p in pairs] == [
+            (kept, unit_b)
+        ]
+        assert str(pairs[0]["session_a_sorting_id"]) == str(
+            choice0["sorting_id"]
+        )
+
+        TrackedUnit.populate(pk, reserve_jobs=False)
+        members = (TrackedUnit.Member & pk).fetch(as_dict=True)
+        tracked_of = {
+            (str(m["sorting_id"]), int(m["unit_id"])): m["tracked_unit_id"]
+            for m in members
+        }
+        sid0 = str(choice0["sorting_id"])
+        sid1 = str(run["choices"][1]["sorting_id"])
+        excluded_tracked = tracked_of[(sid0, excluded)]
+        assert tracked_of[(sid0, kept)] == tracked_of[(sid1, unit_b)]
+        assert excluded_tracked != tracked_of[(sid0, kept)]
+        excluded_row = (
+            TrackedUnit & pk & {"tracked_unit_id": excluded_tracked}
+        ).fetch1()
+        assert excluded_row["n_sessions_observed"] == 1
+        assert excluded_row["median_match_probability"] is None
+
+
+@pytest.mark.slow
+def test_all_excluded_member_raises_with_member_identity(
+    two_session_curated_group, monkeypatch
+):
+    """A member whose every unit is left out of its bundle fails the populate.
+
+    The error names the member (not the temporary bundle directory), keeps
+    the reason, and no UnitMatch row or staged pairs NWB is left behind.
+    """
+    pytest.importorskip("UnitMatchPy")
+    from spyglass.spikesorting.v2._unitmatch_backend import (
+        NoMatchableUnitsError,
+    )
+    from spyglass.spikesorting.v2.unit_matching import UnitMatch
+    from tests.spikesorting.v2._tripart_helpers import (
+        assert_no_staged_analysis_files,
+        record_created_analysis_files,
+    )
+
+    grp = two_session_curated_group
+    with _real_bundle_selection(
+        grp,
+        monkeypatch,
+        name="all_excluded",
+        samples_by_unit=_ALL_ONE_SPIKE_UNITS,
+        pairs=lambda counts: [],
+    ) as run:
+        with monkeypatch.context() as patch:
+            created = record_created_analysis_files(patch)
+            with pytest.raises(NoMatchableUnitsError) as excinfo:
+                UnitMatch.populate(run["selection_pk"], reserve_jobs=False)
+            assert not (UnitMatch & run["selection_pk"])
+            assert_no_staged_analysis_files(created)
+
+    message = str(excinfo.value)
+    for field in _member_identity(grp, 0, run["choices"][0]):
+        assert field in message, (field, message)
+    assert "fewer than two sampled spikes" in message
+    assert "unitmatch_" not in message, "names the temp dir, not the member"
+    assert isinstance(excinfo.value.__cause__, NoMatchableUnitsError)
 
 
 # --------------------------------------------------------------------------- #
