@@ -1701,56 +1701,77 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ``ValueError`` instead of leaving the rule silently inert. A NaN for a
         unit SpikeInterface cannot assess (e.g. below ``nn_advanced``'s
         ``min_spikes``) follows the rule's ``missing_policy``.
+
+        The whole evaluation holds ``SI_METRIC_STATE_LOCK``
+        (``_si_metric_patches``), taken after any ``analyzer_cache_lock``
+        the caller holds, so evaluations on different threads of one process
+        run one after another.
         """
-        rule_columns = frozenset(row["metric_name"] for row in rule_rows)
-        metrics_df = self._compute_metrics(
-            display_analyzer,
-            metric_analyzer,
-            metric_names,
-            metric_kwargs,
-            skip_pc_metrics,
-            metric_job_kwargs,
-            template_metric_columns=template_metric_columns,
-            statistics_spans=statistics_spans,
-            rule_columns=rule_columns,
+        from spyglass.spikesorting.v2._si_metric_patches import (
+            SI_METRIC_STATE_LOCK,
         )
-        self._assert_unit_namespace(metrics_df, expected_unit_ids)
-        if observation_metrics is not None:
-            metrics_df = metrics_df.join(observation_metrics)
-        n_spikes_by_unit = self._spike_counts(display_analyzer, metric_analyzer)
-        total_samples = display_analyzer.get_total_samples()
-        if (
-            metric_analyzer is not None
-            and metric_analyzer.get_total_samples() != total_samples
-        ):
-            raise ValueError(
-                "The display and metric analyzers disagree on the recording's "
-                f"total samples (display={total_samples}, "
-                f"metric={metric_analyzer.get_total_samples()}); both must be "
-                "built from the same traces, since the eligibility classifier "
-                "rates every metric's spikes over one duration."
+
+        # SpikeInterface's metric defaults (which the classifier reads) and
+        # Spyglass's capture of SpikeInterface warnings are process-wide:
+        # hold the lock from the computes through the classification so no
+        # evaluation on another thread changes them in between. The merge
+        # suggestions stay inside too: SI's auto-merge can compute
+        # quality_metrics itself (spikeinterface/curation/auto_merge.py:256).
+        with SI_METRIC_STATE_LOCK:
+            rule_columns = frozenset(row["metric_name"] for row in rule_rows)
+            metrics_df = self._compute_metrics(
+                display_analyzer,
+                metric_analyzer,
+                metric_names,
+                metric_kwargs,
+                skip_pc_metrics,
+                metric_job_kwargs,
+                template_metric_columns=template_metric_columns,
+                statistics_spans=statistics_spans,
+                rule_columns=rule_columns,
             )
-        expected_missing = expected_missing_units(
-            rule_columns,
-            n_spikes_by_unit=n_spikes_by_unit,
-            # SI rates spikes over total samples / fs, not the time-vector
-            # span (spikeinterface/metrics/utils.py:100-126).
-            total_samples=total_samples,
-            sampling_frequency=display_analyzer.sampling_frequency,
-            metric_kwargs=metric_kwargs or {},
-        )
-        assert_rule_metrics_computed(metrics_df, rule_columns, expected_missing)
-        labels_by_unit = apply_label_rules(
-            metrics_df, rule_rows, expected_missing=expected_missing
-        )
-        merge_groups = self._compute_merge_groups(
-            display_analyzer,
-            auto_merge_preset,
-            auto_merge_kwargs,
-            metric_job_kwargs,
-        )
-        self._assert_merge_membership(merge_groups, expected_unit_ids)
-        return metrics_df, labels_by_unit, merge_groups
+            self._assert_unit_namespace(metrics_df, expected_unit_ids)
+            if observation_metrics is not None:
+                metrics_df = metrics_df.join(observation_metrics)
+            n_spikes_by_unit = self._spike_counts(
+                display_analyzer, metric_analyzer
+            )
+            total_samples = display_analyzer.get_total_samples()
+            if (
+                metric_analyzer is not None
+                and metric_analyzer.get_total_samples() != total_samples
+            ):
+                raise ValueError(
+                    "The display and metric analyzers disagree on the "
+                    f"recording's total samples (display={total_samples}, "
+                    f"metric={metric_analyzer.get_total_samples()}); both "
+                    "must be built from the same traces, since the "
+                    "eligibility classifier rates every metric's spikes over "
+                    "one duration."
+                )
+            expected_missing = expected_missing_units(
+                rule_columns,
+                n_spikes_by_unit=n_spikes_by_unit,
+                # SI rates spikes over total samples / fs, not the time-vector
+                # span (spikeinterface/metrics/utils.py:100-126).
+                total_samples=total_samples,
+                sampling_frequency=display_analyzer.sampling_frequency,
+                metric_kwargs=metric_kwargs or {},
+            )
+            assert_rule_metrics_computed(
+                metrics_df, rule_columns, expected_missing
+            )
+            labels_by_unit = apply_label_rules(
+                metrics_df, rule_rows, expected_missing=expected_missing
+            )
+            merge_groups = self._compute_merge_groups(
+                display_analyzer,
+                auto_merge_preset,
+                auto_merge_kwargs,
+                metric_job_kwargs,
+            )
+            self._assert_merge_membership(merge_groups, expected_unit_ids)
+            return metrics_df, labels_by_unit, merge_groups
 
     @staticmethod
     def _spike_counts(display_analyzer, metric_analyzer) -> dict[int, int]:

@@ -65,10 +65,12 @@ _PATCH_FLAG = "_spyglass_v2_nn_noise_overlap_sparsity_patched"
 _SD_RATIO_PATCH_FLAG = "_spyglass_v2_sd_ratio_statistics_spans_patched"
 
 #: Reentrant lock guarding SpikeInterface's class-level metric params (the
-#: ``metric_params`` dicts every metric compute reads and updates). Spyglass
-#: holds it around each such compute, so computes Spyglass runs on different
-#: threads of one process are serialized. SpikeInterface calls made directly
-#: by other (non-Spyglass) threads do not take it and are not serialized.
+#: ``metric_params`` dicts every metric compute reads and updates) and
+#: Spyglass's capture of SpikeInterface warnings (``warnings.catch_warnings``
+#: swaps process-wide state). Spyglass holds it around each such compute and
+#: capture, so those Spyglass runs on different threads of one process are
+#: serialized. SpikeInterface calls made directly by other (non-Spyglass)
+#: threads do not take it and are not serialized.
 #: Lock order: acquire it after ``_analyzer_cache.analyzer_cache_lock``, never
 #: before; code holding it acquires no other Spyglass lock.
 SI_METRIC_STATE_LOCK = threading.RLock()

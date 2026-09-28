@@ -491,14 +491,20 @@ def _si_metric_params(si_metric: str, metric_kwargs: Mapping) -> dict:
     ``isolated_si_metric_defaults``, which leaves them unchanged; reading
     them here at call time, rather than a fixed copy, keeps the classifier
     on the params SI applies either way. The defaults are copied, never
-    mutated.
+    mutated, under ``SI_METRIC_STATE_LOCK`` so no isolated compute on
+    another thread swaps them mid-read.
     """
     from spikeinterface.metrics.quality import (
         get_default_quality_metrics_params,
     )
 
-    defaults = get_default_quality_metrics_params([si_metric])[si_metric]
-    return {**defaults, **(metric_kwargs.get(si_metric) or {})}
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        SI_METRIC_STATE_LOCK,
+    )
+
+    with SI_METRIC_STATE_LOCK:
+        defaults = get_default_quality_metrics_params([si_metric])[si_metric]
+        return {**defaults, **(metric_kwargs.get(si_metric) or {})}
 
 
 def expected_missing_units(
@@ -741,21 +747,33 @@ def escalate_si_metric_errors(rule_columns: Collection[str]):
     propagates unchanged: metric errors are then only logged and other
     warnings are still re-emitted.
 
+    ``warnings.catch_warnings`` swaps process-wide state, so the block
+    holds ``SI_METRIC_STATE_LOCK`` (``_si_metric_patches``) from before the
+    capture starts until its warnings are reported: captures on different
+    threads run one after another and each records only its own thread's
+    warnings. Warnings raised meanwhile by other (non-Spyglass) threads are
+    still recorded here.
+
     Parameters
     ----------
     rule_columns : collection of str
         Metric columns referenced by auto-curation rules; empty escalates
         nothing.
     """
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        SI_METRIC_STATE_LOCK,
+    )
+
     caught: list[warnings.WarningMessage] = []
-    try:
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            yield
-    except BaseException:
-        report_si_metric_errors(caught, frozenset())
-        raise
-    report_si_metric_errors(caught, rule_columns)
+    with SI_METRIC_STATE_LOCK:
+        try:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                yield
+        except BaseException:
+            report_si_metric_errors(caught, frozenset())
+            raise
+        report_si_metric_errors(caught, rule_columns)
 
 
 def rules_payloads_match(

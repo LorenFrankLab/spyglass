@@ -15,6 +15,7 @@ from __future__ import annotations
 import threading
 import time
 
+import numpy as np
 import pytest
 
 _TIMEOUT_S = 30.0
@@ -192,3 +193,96 @@ def test_concurrent_metric_computes_keep_their_own_defaults(
     assert applied["B"] == _PRISTINE_PRESENCE
     assert mm.PresenceRatio.metric_params is defaults_before
     assert mm.PresenceRatio.metric_params == _PRISTINE_PRESENCE
+
+
+@pytest.mark.parametrize(
+    "rules, a_raises",
+    [
+        # A's firing_rate failure is unreferenced by A's rules: A logs it.
+        # B's rules reference firing_rate, which B computes fine.
+        ({"A": {"num_spikes"}, "B": {"firing_rate"}}, False),
+        # A's rules reference its failed firing_rate: A raises. B's rules
+        # do not reference firing_rate.
+        ({"A": {"firing_rate"}, "B": {"num_spikes"}}, True),
+    ],
+    ids=["unreferenced-failure", "referenced-failure"],
+)
+def test_concurrent_si_warning_capture_is_attributed_to_its_own_evaluation(
+    analyzers, lock_requests, monkeypatch, caplog, rules, a_raises
+):
+    """A metric error is escalated or logged only by the thread it hit.
+
+    SI's ``firing_rate`` raises in thread A (SI turns that into an "Error
+    computing metric" warning and a NaN column) and succeeds in thread B.
+    B enters its warning capture while A is inside its compute, and A's
+    error is emitted before B's capture ends.
+    """
+    import spikeinterface.metrics.quality.misc_metrics as mm
+    from spikeinterface.metrics.quality import compute_quality_metrics
+
+    from spyglass.spikesorting.v2._metric_curation import (
+        escalate_si_metric_errors,
+    )
+
+    a_inside = threading.Event()
+    a_computed = threading.Event()
+    b_inside = threading.Event()
+    b_done = threading.Event()
+    b_waiting = lock_requests.requested("B")
+    compute_firing_rates = mm.FiringRate.metric_function
+
+    def firing_rate(*args, **kwargs):
+        if threading.current_thread().name == "A":
+            a_inside.set()
+            _wait_any(b_inside, b_waiting)
+            raise RuntimeError("thread A firing-rate failure")
+        b_inside.set()
+        # A's error is emitted before B's capture ends.
+        _wait(a_computed, "A to finish its compute")
+        return compute_firing_rates(*args, **kwargs)
+
+    monkeypatch.setattr(mm.FiringRate, "metric_function", firing_rate)
+
+    def compute(name):
+        return compute_quality_metrics(
+            analyzers[name],
+            metric_names=["firing_rate", "num_spikes"],
+            skip_pc_metrics=True,
+            delete_existing_metrics=True,
+        )
+
+    def run_a():
+        with escalate_si_metric_errors(rules["A"]):
+            metrics = compute("A")
+            a_computed.set()
+            # Leave A's capture after B's when both can be open at once.
+            _wait_any(b_done, b_waiting)
+        return metrics
+
+    def run_b():
+        _wait(a_inside, "A to enter its compute")
+        try:
+            with escalate_si_metric_errors(rules["B"]):
+                return compute("B")
+        finally:
+            b_done.set()
+
+    with caplog.at_level("WARNING"):
+        outcome = _run_threads({"A": run_a, "B": run_b})
+
+    failure_logs = [
+        record.threadName
+        for record in caplog.records
+        if "failed to compute metric 'firing_rate'" in record.getMessage()
+    ]
+    assert not isinstance(outcome["B"], BaseException), outcome["B"]
+    assert np.isfinite(outcome["B"]["firing_rate"].astype(float)).all()
+    if a_raises:
+        assert isinstance(outcome["A"], ValueError), outcome["A"]
+        assert "'firing_rate'" in str(outcome["A"])
+        assert "thread A firing-rate failure" in str(outcome["A"])
+        assert failure_logs == []
+    else:
+        assert not isinstance(outcome["A"], BaseException), outcome["A"]
+        assert outcome["A"]["firing_rate"].isna().all()
+        assert failure_logs == ["A"]
