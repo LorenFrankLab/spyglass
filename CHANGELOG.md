@@ -125,15 +125,21 @@ fewer than two sampled spikes is excluded from the bundle and logged, and
 stays unmatched in the matchable universe; a session where every unit is
 excluded raises.
 
-- **Magnitude, measured on a 10-seed synthetic benchmark (20 units/session, 5
-  drift-out units per seed):** drift-out units went from 0/50 to 42/50 pooled
-  recall when cut from the second half of one session, and to 45/50 when cut
-  from one half of each session; false pairs among drift-out units were 2/200
-  in both scenarios. Paired recall of units present throughout the session,
-  against the same construction's no-drift control, dropped by 4/150 and
-  7/150 respectively; the healthy-unit recall drop in the
-  one-half-of-each-session scenario (7/150) exceeds the benchmark's 6/150
-  limit -- see
+- **Magnitude, measured on the preregistered 10-seed acceptance run (seeds
+  10-19, 20 units/session, 5 drift-out units per seed):**
+    - Drift-out recall: 42/50 (0.84) cut from one session, 43/50 (0.86) cut
+      from both -- the previous construction scored 0/50 in both.
+    - Healthy (non-drift-out) units: cross-validation-half templates stayed
+      bit-identical to the no-drift control in 600/600 pairs in both
+      scenarios; mean true-pair match probability moved by 0.0032 and
+      -0.0118 respectively (limit 0.04), and the healthy false-positive rate
+      increased by 0.0010 and 0.0038 (limit 0.005).
+    - False pairs among drift-out units: 4/200 in both scenarios (limit
+      0.015), all four from one dataset (seed 12).
+- UnitMatch fits its match threshold, prior and score distributions from the
+  units in each run; with about 20 units per session that per-run
+  calibration is unstable and can occasionally accept a burst of false
+  pairs, with or without this change -- see
   `tests/spikesorting/v2/scripts/unitmatch_half_split_experiment.py`.
 - **Existing `UnitMatch` rows must be deleted and repopulated.** See the
   [preproduction database upgrade sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database)
