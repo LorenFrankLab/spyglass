@@ -86,15 +86,19 @@ def _isolate_si_metric_defaults():
     merges its ``metric_params`` into the metric classes' shared default
     dicts, so a kwarg one test sets would silently apply to every later
     compute in the process, and a test reading SI's defaults would depend on
-    test order. Each test runs inside ``isolated_si_metric_defaults``: it
-    sees (and may change) a copy of every quality- and template-metric
-    class's defaults, and the original dicts are restored afterwards.
+    test order. Each test sees (and may change) a copy of every quality-
+    and template-metric class's defaults, and the original dicts are
+    restored afterwards.
+
+    The copies are made without ``isolated_si_metric_defaults``'s lock:
+    holding that lock on the main thread for a whole test would block every
+    worker thread the test starts that computes metrics through Spyglass.
     """
     from spyglass.spikesorting.v2._si_metric_patches import (
-        isolated_si_metric_defaults,
+        _si_metric_param_copies,
     )
 
-    with isolated_si_metric_defaults():
+    with _si_metric_param_copies():
         yield
 
 

@@ -834,3 +834,60 @@ def test_compute_request_on_copy_restores_invalidated_dependents(tmp_path):
     assert (
         tmp_path / "c3.analyzer/extensions/waveforms/waveforms.npy"
     ).stat().st_mtime_ns == wf_mtime
+
+
+def test_compute_request_on_copy_keeps_si_metric_defaults(tmp_path):
+    """Recomputing stored template metrics leaves SI's defaults alone (real SI).
+
+    ``templates`` is recomputed, so SI drops the dependent
+    ``template_metrics`` and it is recomputed at its stored params, which
+    carry a non-default ``recovery_window_ms``. SI merges those params into
+    ``RecoverySlope``'s class-level defaults unless the compute is isolated.
+    """
+    import spikeinterface as si
+    from spikeinterface.metrics.template.metrics import RecoverySlope
+
+    from spyglass.spikesorting.v2._analyzer_cache import load_analyzer_folder
+    from spyglass.spikesorting.v2._curation_analyzer import (
+        _compute_request_on_copy,
+    )
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        isolated_si_metric_defaults,
+    )
+
+    # SI 0.104.3 default (spikeinterface/metrics/template/metrics.py:1084).
+    assert RecoverySlope.metric_params == {"recovery_window_ms": 0.7}
+    defaults_before = RecoverySlope.metric_params
+    rec, sort = si.generate_ground_truth_recording(
+        durations=[10.0], num_units=4, num_channels=4, seed=0
+    )
+    analyzer = si.create_sorting_analyzer(
+        sort, rec, format="binary_folder", folder=tmp_path / "a.analyzer"
+    )
+    analyzer.compute(
+        ["random_spikes", "noise_levels", "waveforms", "templates"],
+        n_jobs=1,
+        progress_bar=False,
+    )
+    with isolated_si_metric_defaults():
+        analyzer.compute(
+            "template_metrics",
+            metric_names=["recovery_slope"],
+            metric_params={"recovery_slope": {"recovery_window_ms": 0.5}},
+        )
+    analyzer = load_analyzer_folder(tmp_path / "a.analyzer")
+
+    request = {
+        "templates": {"operators": ["average", "median"]},
+        "template_metrics": {},
+    }
+    _compute_request_on_copy(
+        analyzer, request, {"templates": request["templates"]}, job_kwargs={}
+    )
+
+    applied = analyzer.get_extension("template_metrics").params
+    assert applied["metric_params"]["recovery_slope"] == {
+        "recovery_window_ms": 0.5
+    }
+    assert RecoverySlope.metric_params is defaults_before
+    assert RecoverySlope.metric_params == {"recovery_window_ms": 0.7}

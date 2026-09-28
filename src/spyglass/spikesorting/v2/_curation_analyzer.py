@@ -799,8 +799,17 @@ def _compute_request_on_copy(analyzer, request, needs_compute, *, job_kwargs):
     plan by dependency. Only descendants of the recomputed set are touched, so
     a correlogram-only change never re-extracts waveforms. The result is
     checked against the whole request before returning.
+
+    The compute runs inside ``isolated_si_metric_defaults``: recomputing
+    ``template_metrics`` (or ``quality_metrics``) passes its stored
+    ``metric_params``, which SpikeInterface would otherwise merge into its
+    class-level metric defaults for the rest of the process.
     """
     from spikeinterface.core.sortinganalyzer import _get_children_dependencies
+
+    from spyglass.spikesorting.v2._si_metric_patches import (
+        isolated_si_metric_defaults,
+    )
 
     required = set(BASE_ANALYZER_EXTENSIONS) | set(request)
     plan = {name: dict(params) for name, params in needs_compute.items()}
@@ -822,7 +831,8 @@ def _compute_request_on_copy(analyzer, request, needs_compute, *, job_kwargs):
     for name in plan:
         if analyzer.has_extension(name):
             analyzer.delete_extension(name)
-    analyzer.compute(list(plan), extension_params=plan, **compute_kwargs)
+    with isolated_si_metric_defaults():
+        analyzer.compute(list(plan), extension_params=plan, **compute_kwargs)
     missing = sorted(
         name for name in required if not analyzer.has_extension(name)
     )

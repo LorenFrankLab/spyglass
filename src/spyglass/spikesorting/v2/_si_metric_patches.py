@@ -39,7 +39,8 @@ spans (or with one covering the recording) it is SI's function, unchanged.
 SI also writes each compute's ``metric_params`` into its class-level metric
 defaults, so a later compute in the same process inherits them.
 :func:`isolated_si_metric_defaults` keeps those defaults unchanged across a
-compute.
+compute, and holds :data:`SI_METRIC_STATE_LOCK` so that computes Spyglass runs
+on different threads of one process do not see each other's params.
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import copy
+import threading
 
 import spikeinterface as si
 import spikeinterface.metrics.quality.misc_metrics as _mm
@@ -61,6 +63,15 @@ _VALIDATED_SI_PREFIXES = ("0.104",)
 
 _PATCH_FLAG = "_spyglass_v2_nn_noise_overlap_sparsity_patched"
 _SD_RATIO_PATCH_FLAG = "_spyglass_v2_sd_ratio_statistics_spans_patched"
+
+#: Reentrant lock guarding SpikeInterface's class-level metric params (the
+#: ``metric_params`` dicts every metric compute reads and updates). Spyglass
+#: holds it around each such compute, so computes Spyglass runs on different
+#: threads of one process are serialized. SpikeInterface calls made directly
+#: by other (non-Spyglass) threads do not take it and are not serialized.
+#: Lock order: acquire it after ``_analyzer_cache.analyzer_cache_lock``, never
+#: before; code holding it acquires no other Spyglass lock.
+SI_METRIC_STATE_LOCK = threading.RLock()
 
 #: Statistics spans the nn noise cluster is drawn from and ``sd_ratio``'s
 #: template correction counts over, as a tuple of half-open ``(start, end)``
@@ -120,6 +131,23 @@ def isolated_si_metric_defaults():
     dict object back. Two classes (``Synchrony``, ``AmplitudeMedian``)
     inherit ``BaseMetric``'s shared dict rather than defining their own;
     their copies are removed again so they keep inheriting it.
+
+    The class dicts are shared by every thread, so the block holds
+    :data:`SI_METRIC_STATE_LOCK` from before the copies are made until the
+    originals are back: blocks on different threads run one after another.
+    SpikeInterface calls made directly by other (non-Spyglass) threads do
+    not take the lock and are not serialized.
+    """
+    with SI_METRIC_STATE_LOCK, _si_metric_param_copies():
+        yield
+
+
+@contextlib.contextmanager
+def _si_metric_param_copies():
+    """Swap in copies of SI's metric-param dicts; restore them on exit.
+
+    The body of :func:`isolated_si_metric_defaults` without its lock; the
+    caller must ensure no other thread computes metrics meanwhile.
     """
     from spikeinterface.metrics.quality import ComputeQualityMetrics
     from spikeinterface.metrics.template import ComputeTemplateMetrics

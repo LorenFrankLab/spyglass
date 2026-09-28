@@ -147,7 +147,8 @@ apart from one it legitimately leaves NaN for a given unit, and lets
   silently inherit the value an earlier row set in the same process.
   `CurationEvaluation`'s metric computes no longer change SpikeInterface's
   defaults, so one row's `metric_kwargs` never leak into a later row's
-  metrics.
+  metrics, including when evaluations run on different threads of one
+  process.
 - **Schema change:** `QualityMetricParameters.observed_presence_bin_duration_s`
   and `AutoCurationRules.Rule.threshold` are now `double` (previously
   single-precision `float`); see the
