@@ -90,9 +90,14 @@ The schema changes covered here are:
   `AutoCurationRules.Rule.threshold` are now `double` precision (previously
   single-precision `float`). The alter loop below converts both columns in
   place; a value stored before the conversion keeps its single-precision
-  value once widened (a stored `0.1` reads back as `0.10000000149011612`), so
-  shipped defaults still compare equal to their existing rows through the
-  tolerance already used to re-run `insert_rules`.
+  value once widened (a stored `0.1` reads back as `0.10000000149011612`).
+  For `AutoCurationRules.Rule.threshold`, this is harmless: the tolerance
+  already used to re-run `insert_rules` treats the widened value as equal to
+  its shipped default. `QualityMetricParameters`' duplicate-content check
+  compares stored values exactly, with no such tolerance, so a QMP row whose
+  fractional `observed_presence_bin_duration_s` was widened by this upgrade
+  is no longer recognized as a duplicate of the same value re-entered under
+  a new name.
 - `RecordingArtifactSelection.manual_excluded_times` and
   `SharedGroupArtifactSelection.manual_excluded_times`: nullable interval blobs;
   an existing null means no manual exclusions.
@@ -160,7 +165,7 @@ CurationV2 = reload(curation_module).CurationV2
 # Add every newer field BEFORE seeding defaults or reading artifact selections.
 for table in (
     CurationV2,  # finalize UUID; add created_at / created_by
-    AutoCurationRules.Rule,  # missing_policy defaults to error; threshold -> double
+    AutoCurationRules.Rule,  # missing_policy->error; threshold->double
     QualityMetricParameters,  # presence-bin width -> double; new rows use v2
     CurationEvaluationSelection,  # old evaluations retain observation_version=0
     RecordingArtifactSelection,  # nullable manual_excluded_times
