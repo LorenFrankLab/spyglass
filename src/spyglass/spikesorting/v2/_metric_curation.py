@@ -2,8 +2,9 @@
 
 Pure logic shared by ``CurationEvaluation`` (the ``@schema`` table lives in
 ``metric_curation.py``): turning quality-metric columns into per-unit labels,
-sanitizing non-finite metric values before serialization, and reproducing
-Spyglass's ``isi_violation`` fraction. Keeping these here -- importable with
+sanitizing non-finite metric values before serialization, reproducing
+Spyglass's ``isi_violation`` fraction, and telling a legitimately unassessable
+unit's NaN metric apart from a failed metric computation. Keeping these here -- importable with
 only NumPy / pandas, no DataJoint connection and no SpikeInterface analyzer --
 lets them be unit-tested without a database.
 """
@@ -11,6 +12,8 @@ lets them be unit-tested without a database.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -266,6 +269,264 @@ def isi_violation_fraction(isi_violations_count, num_spikes) -> np.ndarray:
     valid = n > 1.0
     fraction[valid] = counts[valid] / denom[valid]
     return fraction
+
+
+# ---------- metric eligibility: which NaNs SpikeInterface leaves on purpose --
+#
+# SpikeInterface swallows a failing metric to NaN (per metric in
+# ``core/analyzer_extension_core.py:1281-1286``; per unit for ``nn_advanced``
+# in ``metrics/quality/pca_metrics.py:180-181,193-194``), so a NaN alone does
+# not say whether the unit was simply not assessable or the computation broke.
+# Each predicate below reproduces the exact condition under which SI 0.104.3
+# (and Spyglass's ``isi_violation`` fraction) returns NaN without any error.
+# Paths are relative to the installed ``spikeinterface`` package.
+
+
+def _nn_advanced_missing(
+    n_spikes: np.ndarray, *, total_samples: int, fs: float, params: dict
+) -> np.ndarray:
+    """``nn_isolation`` / ``nn_noise_overlap``: below the spike or rate floor.
+
+    SI returns NaN when ``n_spikes < min_spikes`` or ``firing_rate < min_fr``
+    (``metrics/quality/pca_metrics.py:619-630`` isolation, ``825-836`` noise
+    overlap; Spyglass's patched noise overlap keeps both checks,
+    ``spyglass/spikesorting/v2/_si_metric_patches.py:224-227``). The rate is
+    ``n_spikes / (total_samples / fs)`` (``metrics/spiketrain/metrics.py:69-77``
+    with ``metrics/utils.py:100-125``). A zero-spike unit fails every nn
+    computation, so it is expected-missing even with ``min_spikes=0``.
+    """
+    duration_s = total_samples / fs
+    below_floor = n_spikes < max(params["min_spikes"], 1)
+    below_rate = n_spikes / duration_s < params["min_fr"]
+    return below_floor | below_rate
+
+
+def _presence_ratio_missing(
+    n_spikes: np.ndarray, *, total_samples: int, fs: float, params: dict
+) -> np.ndarray:
+    """``presence_ratio``: shorter than one bin (all units), else silent units.
+
+    ``metrics/quality/misc_metrics.py:79-80,97-101`` (sample-based bin floor)
+    and ``105-106`` (zero-spike unit).
+    """
+    if total_samples < int(params["bin_duration_s"] * fs):
+        return np.ones(n_spikes.shape, dtype=bool)
+    return n_spikes == 0
+
+
+def _amplitude_cutoff_missing(
+    n_spikes: np.ndarray, *, total_samples: int, fs: float, params: dict
+) -> np.ndarray:
+    """``amplitude_cutoff``: too few amplitudes for the histogram.
+
+    ``metrics/quality/misc_metrics.py:1670-1671`` is the only NaN path (the
+    result below it is always finite, 1673-1686); the amplitudes are every
+    spike of the unit (1005-1011).
+    """
+    return (
+        n_spikes / params["num_histogram_bins"]
+        < params["amplitudes_bins_min_ratio"]
+    )
+
+
+def _isi_violation_missing(
+    n_spikes: np.ndarray, *, total_samples: int, fs: float, params: dict
+) -> np.ndarray:
+    """Spyglass ``isi_violation`` fraction: undefined for <= 1 spike.
+
+    See ``isi_violation_fraction`` above.
+    """
+    return n_spikes <= 1
+
+
+def _firing_rate_missing(
+    n_spikes: np.ndarray, *, total_samples: int, fs: float, params: dict
+) -> np.ndarray:
+    """``firing_rate``: NaN for a zero-spike unit.
+
+    ``metrics/spiketrain/metrics.py:74-75``.
+    """
+    return n_spikes == 0
+
+
+def _never_missing(
+    n_spikes: np.ndarray, *, total_samples: int, fs: float, params: dict
+) -> np.ndarray:
+    """``snr`` / ``num_spikes``: never legitimately missing.
+
+    ``num_spikes`` is an integer count (``metrics/spiketrain/metrics.py:7-34``).
+    ``snr`` is ``abs(amplitude) / noise`` (``metrics/quality/misc_metrics.py:
+    205-209``); it is non-finite only when the extremum channel's noise level is
+    zero, which is a degenerate recording, not an unassessable unit.
+    """
+    return np.zeros(n_spikes.shape, dtype=bool)
+
+
+class _EligibilityRule(NamedTuple):
+    """One registered column's NaN predicate.
+
+    Attributes
+    ----------
+    si_metric : str
+        SI metric name whose ``metric_kwargs`` entry (merged over SI's
+        defaults) parameterises the predicate.
+    is_missing : Callable
+        ``(n_spikes, *, total_samples, fs, params) -> bool mask``;
+        ``n_spikes`` has shape ``(n_units,)``.
+    """
+
+    si_metric: str
+    is_missing: Callable[..., np.ndarray]
+
+
+# Keyed by OUTPUT column name. Deliberately absent: SI's
+# ``isi_violations_ratio`` / ``isi_violations_count``, template metrics (e.g.
+# ``trough_half_width``), Spyglass's ``observed_*`` columns and custom metrics;
+# a rule on any of them fails closed on NaN.
+_METRIC_ELIGIBILITY: dict[str, _EligibilityRule] = {
+    "nn_isolation": _EligibilityRule("nn_advanced", _nn_advanced_missing),
+    "nn_noise_overlap": _EligibilityRule("nn_advanced", _nn_advanced_missing),
+    "presence_ratio": _EligibilityRule(
+        "presence_ratio", _presence_ratio_missing
+    ),
+    "amplitude_cutoff": _EligibilityRule(
+        "amplitude_cutoff", _amplitude_cutoff_missing
+    ),
+    "isi_violation": _EligibilityRule("isi_violation", _isi_violation_missing),
+    "firing_rate": _EligibilityRule("firing_rate", _firing_rate_missing),
+    "snr": _EligibilityRule("snr", _never_missing),
+    "num_spikes": _EligibilityRule("num_spikes", _never_missing),
+}
+
+
+def _si_metric_params(si_metric: str, metric_kwargs: Mapping) -> dict:
+    """SI's defaults for one metric merged with the caller's kwargs.
+
+    Mirrors the merge in ``core/analyzer_extension_core.py:1172-1178``. SI
+    reads its defaults from the metric classes' ``metric_params`` (943) and
+    that merge updates those class dicts in place, so a compute with custom
+    kwargs changes the defaults for later computes in the same process.
+    Reading them here at call time, rather than a fixed copy, keeps the
+    classifier on the params SI actually applies. The defaults are copied,
+    never mutated.
+    """
+    from spikeinterface.metrics.quality import (
+        get_default_quality_metrics_params,
+    )
+
+    defaults = get_default_quality_metrics_params([si_metric])[si_metric]
+    return {**defaults, **(metric_kwargs.get(si_metric) or {})}
+
+
+def expected_missing_units(
+    rule_columns: Iterable[str],
+    *,
+    n_spikes_by_unit: Mapping[Any, int],
+    total_samples: int,
+    sampling_frequency: float,
+    metric_kwargs: Mapping[str, Mapping[str, Any]],
+) -> dict[str, set | None]:
+    """Units for which SpikeInterface legitimately leaves each column NaN.
+
+    Parameters
+    ----------
+    rule_columns : iterable of str
+        Metric output columns referenced by auto-curation rules.
+    n_spikes_by_unit : Mapping
+        ``unit_id -> spike count``, as returned by
+        ``sorting.count_num_spikes_per_unit()``.
+    total_samples : int
+        Total samples across segments (``analyzer.get_total_samples()``). SI
+        derives firing rates from ``total_samples / sampling_frequency``, not
+        from the recording's time vector, so a recording whose timestamps
+        have gaps must still pass its sample count here.
+    sampling_frequency : float
+        Sampling frequency in Hz.
+    metric_kwargs : Mapping
+        ``QualityMetricParameters.metric_kwargs`` (``{si_metric: {...}}``);
+        each predicate merges its SI metric's entry over SI's defaults.
+
+    Returns
+    -------
+    dict[str, set or None]
+        ``column -> set of unit ids`` whose NaN is expected, for every
+        column in ``rule_columns``. ``None`` marks a column with no
+        registered eligibility rule, for which no NaN can be classified as
+        expected.
+    """
+    unit_ids = list(n_spikes_by_unit)
+    n_spikes = np.array([n_spikes_by_unit[u] for u in unit_ids], dtype=float)
+    expected: dict[str, set | None] = {}
+    for column in rule_columns:
+        rule = _METRIC_ELIGIBILITY.get(column)
+        if rule is None:
+            expected[column] = None
+            continue
+        missing = rule.is_missing(
+            n_spikes,
+            total_samples=total_samples,
+            fs=sampling_frequency,
+            params=_si_metric_params(rule.si_metric, metric_kwargs),
+        )
+        expected[column] = {u for u, m in zip(unit_ids, missing) if m}
+    return expected
+
+
+def assert_rule_metrics_computed(
+    metrics_df: pd.DataFrame,
+    rule_columns: Iterable[str],
+    expected_missing: Mapping[str, set | None],
+) -> None:
+    """Raise if a rule-referenced metric is non-finite where it should not be.
+
+    Parameters
+    ----------
+    metrics_df : pandas.DataFrame
+        One row per unit (indexed by ``unit_id``), one column per metric.
+    rule_columns : iterable of str
+        Metric columns referenced by auto-curation rules. No other column is
+        inspected. A rule column absent from ``metrics_df`` is skipped here
+        (``apply_label_rules`` rejects it).
+    expected_missing : Mapping
+        Output of ``expected_missing_units`` for the same ``rule_columns``.
+
+    Raises
+    ------
+    ValueError
+        If a registered column is non-finite (NaN or +/-inf) for a unit
+        outside its expected-missing set, or an unregistered column is
+        non-finite for any unit.
+    """
+    for column in sorted(rule_columns):
+        if column not in metrics_df.columns:
+            continue
+        values = metrics_df[column]
+        non_finite = [
+            unit_id
+            for unit_id in metrics_df.index
+            if not _is_finite_metric_value(values.loc[unit_id])
+        ]
+        expected = expected_missing[column]
+        if expected is None:
+            if non_finite:
+                raise ValueError(
+                    f"Metric column {column!r} is non-finite for unit_id(s) "
+                    f"{non_finite}, and it has no registered eligibility "
+                    "rule, so a NaN cannot be classified as an expected "
+                    "unassessable unit rather than a computation failure. "
+                    "Register an eligibility rule for this metric, or "
+                    "threshold a metric that has one."
+                )
+            continue
+        failed = [unit_id for unit_id in non_finite if unit_id not in expected]
+        if failed:
+            raise ValueError(
+                f"Metric column {column!r} is non-finite for unit_id(s) "
+                f"{failed}, which meet the metric's preconditions: this is a "
+                "metric computation failure, not an unassessable unit. Check "
+                "the quality-metric computation (SpikeInterface replaces a "
+                "failing metric with NaN and only warns)."
+            )
 
 
 def rules_payloads_match(

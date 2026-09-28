@@ -3,7 +3,8 @@
 These exercise the pure logic in
 ``spyglass.spikesorting.v2._metric_curation`` -- label-rule application
 (the three #1513 bug-class invariants), NaN sanitization for serialization
-(#1556), and the Spyglass ``isi_violation`` fraction -- with no DataJoint
+(#1556), the Spyglass ``isi_violation`` fraction, and the classification of
+expected-missing versus failed metric values -- with no DataJoint
 server and no SpikeInterface analyzer. Importing the service module never
 opens a database connection.
 """
@@ -17,6 +18,8 @@ import pytest
 from spyglass.spikesorting.v2._metric_curation import (
     apply_label_rules,
     apply_snr_peak_sign,
+    assert_rule_metrics_computed,
+    expected_missing_units,
     isi_violation_fraction,
     rules_payloads_match,
     sanitize_for_json,
@@ -466,3 +469,176 @@ def test_apply_label_rules_rejects_retired_ignore_policy():
     rules[0]["missing_policy"] = "ignore"
     with pytest.raises(ValueError, match="invalid missing_policy"):
         apply_label_rules(metrics, rules)
+
+
+# ---------- metric eligibility: expected-missing vs failed metrics ----------
+
+_FS = 30_000.0
+# The shipped ``nn_advanced`` kwargs of the default QualityMetricParameters.
+_SHIPPED_NN_KWARGS = {
+    "n_components": 7,
+    "n_neighbors": 5,
+    "max_spikes": 20000,
+    "min_spikes": 10,
+    "seed": 0,
+}
+
+
+def _expected(rule_columns, n_spikes_by_unit, duration_s, metric_kwargs=None):
+    return expected_missing_units(
+        rule_columns,
+        n_spikes_by_unit=n_spikes_by_unit,
+        total_samples=int(duration_s * _FS),
+        sampling_frequency=_FS,
+        metric_kwargs=metric_kwargs or {},
+    )
+
+
+def test_expected_missing_nn_below_floor():
+    """nn_* are expected-missing below ``min_spikes`` or below ``min_fr``."""
+    nn_columns = {"nn_isolation", "nn_noise_overlap"}
+    n_spikes = {3: 5, 17: 50, 58: 9, 61: 10, 80: 0}
+    expected = _expected(
+        nn_columns,
+        n_spikes,
+        duration_s=10.0,
+        metric_kwargs={"nn_advanced": _SHIPPED_NN_KWARGS},
+    )
+    assert expected == {
+        "nn_isolation": {3, 58, 80},
+        "nn_noise_overlap": {3, 58, 80},
+    }
+
+    # A silent unit cannot be assessed even when min_spikes allows it.
+    no_floor = _expected(
+        nn_columns,
+        n_spikes,
+        duration_s=10.0,
+        metric_kwargs={"nn_advanced": {**_SHIPPED_NN_KWARGS, "min_spikes": 0}},
+    )
+    assert no_floor == {"nn_isolation": {80}, "nn_noise_overlap": {80}}
+
+    min_fr_kwargs = {"nn_advanced": {**_SHIPPED_NN_KWARGS, "min_fr": 1.0}}
+    # 20 spikes over 100 s is 0.2 Hz (below min_fr); over 10 s it is 2 Hz.
+    slow = _expected(nn_columns, {42: 20}, 100.0, min_fr_kwargs)
+    fast = _expected(nn_columns, {42: 20}, 10.0, min_fr_kwargs)
+    assert slow == {"nn_isolation": {42}, "nn_noise_overlap": {42}}
+    assert fast == {"nn_isolation": set(), "nn_noise_overlap": set()}
+
+
+def test_expected_missing_presence_ratio_short_recording():
+    """A recording shorter than one presence bin leaves every unit NaN."""
+    n_spikes = {3: 0, 17: 1, 42: 50, 58: 2}
+    rule_columns = {"presence_ratio", "isi_violation"}
+    short = expected_missing_units(
+        rule_columns,
+        n_spikes_by_unit=n_spikes,
+        total_samples=int(60 * _FS) - 1,
+        sampling_frequency=_FS,
+        metric_kwargs={},
+    )
+    assert short == {
+        "presence_ratio": {3, 17, 42, 58},
+        # Only the <=1-spike units; the short recording does not leak here.
+        "isi_violation": {3, 17},
+    }
+
+    # Exactly one bin of samples is long enough: only the silent unit is NaN.
+    long = expected_missing_units(
+        {"presence_ratio"},
+        n_spikes_by_unit=n_spikes,
+        total_samples=int(60 * _FS),
+        sampling_frequency=_FS,
+        metric_kwargs={},
+    )
+    assert long == {"presence_ratio": {3}}
+
+
+def test_expected_missing_amplitude_cutoff_spike_floor():
+    """amplitude_cutoff is NaN below ``num_histogram_bins * ratio`` spikes."""
+    default = _expected({"amplitude_cutoff"}, {3: 499, 17: 500}, 60.0)
+    assert default == {"amplitude_cutoff": {3}}
+
+    custom = _expected(
+        {"amplitude_cutoff"},
+        {3: 19, 17: 20},
+        60.0,
+        {
+            "amplitude_cutoff": {
+                "num_histogram_bins": 10,
+                "amplitudes_bins_min_ratio": 2,
+            }
+        },
+    )
+    assert custom == {"amplitude_cutoff": {3}}
+
+    metrics = pd.DataFrame({"amplitude_cutoff": [np.nan, 0.01]}, index=[42, 3])
+    expected = _expected({"amplitude_cutoff"}, {42: 600, 3: 700}, 60.0)
+    with pytest.raises(ValueError, match=r"amplitude_cutoff.*\[42\]"):
+        assert_rule_metrics_computed(metrics, {"amplitude_cutoff"}, expected)
+
+
+def test_unreferenced_columns_never_inspected():
+    """All-NaN columns outside the rule columns are not checked."""
+    metrics = pd.DataFrame(
+        {
+            "snr": [4.0, 6.0],
+            "my_custom_metric": [np.nan, np.nan],
+            "trough_half_width": [np.nan, np.nan],
+        },
+        index=[3, 17],
+    )
+    expected = _expected({"snr"}, {3: 50, 17: 60}, 60.0)
+    assert expected == {"snr": set()}
+    assert assert_rule_metrics_computed(metrics, {"snr"}, expected) is None
+
+    # The same frame fails once a rule does reference an all-NaN column.
+    expected = _expected({"snr", "my_custom_metric"}, {3: 50, 17: 60}, 60.0)
+    with pytest.raises(ValueError, match="my_custom_metric"):
+        assert_rule_metrics_computed(
+            metrics, {"snr", "my_custom_metric"}, expected
+        )
+
+
+def test_unregistered_rule_column_with_nan_fails_closed():
+    """A NaN in a column with no eligibility rule cannot be classified."""
+    expected = _expected({"trough_half_width"}, {3: 50, 17: 60}, 60.0)
+    assert expected == {"trough_half_width": None}
+
+    with_nan = pd.DataFrame({"trough_half_width": [0.2, np.nan]}, index=[3, 17])
+    with pytest.raises(ValueError, match="no registered eligibility rule"):
+        assert_rule_metrics_computed(with_nan, {"trough_half_width"}, expected)
+
+    finite = pd.DataFrame({"trough_half_width": [0.2, 0.3]}, index=[3, 17])
+    assert (
+        assert_rule_metrics_computed(finite, {"trough_half_width"}, expected)
+        is None
+    )
+
+
+def test_assert_metrics_computed_raises_on_unexpected_nan():
+    """A NaN for a unit that meets the metric's preconditions is a failure."""
+    n_spikes = {3: 1, 17: 50, 42: 80}
+    expected = _expected({"isi_violation"}, n_spikes, 60.0)
+    assert expected == {"isi_violation": {3}}
+
+    legit = pd.DataFrame(
+        {"isi_violation": [np.nan, 0.0, 0.01]}, index=[3, 17, 42]
+    )
+    assert (
+        assert_rule_metrics_computed(legit, {"isi_violation"}, expected) is None
+    )
+
+    failed = legit.copy()
+    failed.loc[17, "isi_violation"] = np.nan
+    with pytest.raises(ValueError, match=r"'isi_violation'.*\[17\]"):
+        assert_rule_metrics_computed(failed, {"isi_violation"}, expected)
+
+
+def test_snr_inf_is_a_failure():
+    """snr is never legitimately missing, and +/-inf counts as missing."""
+    expected = _expected({"snr"}, {3: 50, 17: 60}, 60.0)
+    assert expected == {"snr": set()}
+    metrics = pd.DataFrame({"snr": [5.0, np.inf]}, index=[3, 17])
+    with pytest.raises(ValueError, match=r"'snr'.*\[17\]"):
+        assert_rule_metrics_computed(metrics, {"snr"}, expected)
