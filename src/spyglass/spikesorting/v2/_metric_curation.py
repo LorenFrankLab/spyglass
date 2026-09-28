@@ -127,9 +127,10 @@ def apply_label_rules(
     rule_rows : list of dict
         ``AutoCurationRules.Rule`` rows, each with ``rule_index``,
         ``metric_name``, ``operator``, ``threshold``, and ``label``. Rules are
-        applied in ascending ``rule_index``. ``missing_policy`` defaults to
-        ``"error"``; ``"fail"`` applies the rule label to a unit whose value
-        is non-finite, while ``"pass"`` leaves it unlabelled.
+        applied in ascending ``rule_index``. ``threshold`` must be finite.
+        ``missing_policy`` defaults to ``"error"``; ``"fail"`` applies the
+        rule label to a unit whose value is non-finite, while ``"pass"``
+        leaves it unlabelled.
     expected_missing : dict[str, set or None] or None, optional
         Output of ``expected_missing_units`` for the columns these rules
         reference. When given, a rule's ``missing_policy`` only governs units
@@ -153,11 +154,11 @@ def apply_label_rules(
     Raises
     ------
     ValueError
-        If a rule references a metric column absent from ``metrics_df``; if
-        any unit has a non-finite value and the rule's missing policy is
-        ``"error"``; or if ``expected_missing`` classifies a unit's
-        non-finite value as a metric computation failure (regardless of
-        ``missing_policy``).
+        If a rule references a metric column absent from ``metrics_df``; if a
+        rule's ``threshold`` is non-finite; if any unit has a non-finite
+        value and the rule's missing policy is ``"error"``; or if
+        ``expected_missing`` classifies a unit's non-finite value as a metric
+        computation failure (regardless of ``missing_policy``).
 
     Notes
     -----
@@ -184,6 +185,13 @@ def apply_label_rules(
         compare = _COMPARISON_TO_FUNCTION[rule["operator"]]
         column = metrics_df[metric_name]
         label = rule["label"]
+        threshold = rule["threshold"]
+        if not math.isfinite(threshold):
+            raise ValueError(
+                f"Auto-curation rule {rule_name!r} has a non-finite "
+                f"threshold ({threshold!r}); a rule's threshold must be a "
+                "finite number."
+            )
         missing_policy = rule.get("missing_policy", "error")
         if missing_policy not in {"error", "fail", "pass"}:
             raise ValueError(
@@ -281,7 +289,7 @@ def apply_label_rules(
                     if label not in unit_labels:
                         unit_labels.append(label)
                 continue
-            if not compare(value, rule["threshold"]):
+            if not compare(value, threshold):
                 continue
             unit_labels = labels.setdefault(int(unit_id), [])
             if label not in unit_labels:

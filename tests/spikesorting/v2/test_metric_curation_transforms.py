@@ -14,6 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
 from spyglass.spikesorting.v2._metric_curation import (
     apply_label_rules,
@@ -715,6 +716,34 @@ def test_apply_label_rules_fail_policy_all_missing_warns(caplog):
     assert any(
         "nn_noise_overlap" in record.getMessage() for record in caplog.records
     ), "an all-missing rule under 'fail' was inert without saying so"
+
+
+def test_nan_threshold_rejected():
+    """A non-finite threshold is rejected both at validation and at apply time.
+
+    Today, a NaN threshold silently labels nobody under ``<`` and everybody
+    under ``!=`` instead of surfacing the malformed rule.
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        AutoCurationRuleSchema,
+    )
+
+    base = {
+        "rule_index": 0,
+        "rule_name": "snr_noise",
+        "metric_name": "snr",
+        "operator": "<",
+        "label": "noise",
+    }
+    for bad_threshold in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValidationError):
+            AutoCurationRuleSchema(**base, threshold=bad_threshold)
+
+    metrics = pd.DataFrame({"snr": [0.5, 5.0]}, index=[1, 2])
+    for operator in ("<", "!="):
+        rules = [_rule(0, "snr", operator, float("nan"), "noise")]
+        with pytest.raises(ValueError, match="non-finite threshold"):
+            apply_label_rules(metrics, rules)
 
 
 def test_isi_violation_one_spike_unit_follows_missing_policy():

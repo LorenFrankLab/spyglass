@@ -328,7 +328,7 @@ class AutoCurationRuleSchema(BaseModel):
     rule_name: str = Field(min_length=1, max_length=64)
     metric_name: str = Field(min_length=1, max_length=64)
     operator: RuleOperator
-    threshold: float
+    threshold: float = Field(allow_inf_nan=False)
     label: str = Field(min_length=1, max_length=32)
     missing_policy: MissingMetricPolicy = "error"
 
