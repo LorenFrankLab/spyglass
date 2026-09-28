@@ -7,10 +7,11 @@
 Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references. For spike sorting v2, use the
 [preproduction database upgrade/recreation sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database);
-it includes curation identity, observed-time metrics, and manual exclusions.
-It now also requires recreating every v2 `Recording` row and its artifact,
-because this release changes both the preprocessed traces and the electrode
-geometry stored in the artifact. It also requires recreating every
+it includes curation identity, observed-time metrics, manual exclusions, and
+metric-threshold precision. It now also requires recreating every v2
+`Recording` row and its artifact, because this release changes both the
+preprocessed traces and the electrode geometry stored in the artifact. It
+also requires recreating every
 `ConcatenatedRecording` row, repopulating any pre-existing sort whose
 analyzer needs rebuilding, and recreating any evaluation selection stamped
 with the prior observation version, because noise, whitening, and the
@@ -106,6 +107,62 @@ DLCProject().alter()
 ```
 
 ### Breaking Changes
+
+#### Spike Sorting v2: auto-curation rules fail closed on an uncomputed metric
+
+`CurationEvaluation` now tells a metric SpikeInterface could not compute
+apart from one it legitimately leaves NaN for a given unit, and lets
+`missing_policy` govern only the latter.
+
+- A rule-referenced metric that is non-finite for a unit that meets
+  SpikeInterface's own eligibility conditions for that metric now raises
+  `ValueError` instead of silently following `missing_policy`. Previously
+  such a failure was indistinguishable from an expected NaN, so
+  `missing_policy="pass"` applied no label and `missing_policy="fail"`
+  mislabeled the unit (`"error"`, the default, already raised either way).
+  Registered eligibility conditions, reproducing SpikeInterface 0.104.3's
+  own NaN conditions: `nn_isolation` / `nn_noise_overlap` (fewer than
+  `min_spikes` spikes, or firing rate below `min_fr`), `presence_ratio`
+  (recording shorter than one `bin_duration_s` bin, or a unit with no
+  spikes), `amplitude_cutoff` (fewer than `num_histogram_bins *
+  amplitudes_bins_min_ratio` spikes, 500 by default), `isi_violation` (a
+  unit with one spike or fewer), and `firing_rate` (no spikes); `snr` and
+  `num_spikes` are never expected to be missing. A rule on any other
+  column -- a template metric, a custom metric, or an `observed_*` column
+  -- now fails closed whenever that column is non-finite for any unit,
+  naming the metric and pointing at registering an eligibility rule or
+  thresholding a metric that already has one.
+- A metric that raises inside SpikeInterface now aborts the evaluation,
+  naming the metric, only when an evaluated rule references one of its
+  output columns; otherwise the column stays NaN and a WARNING names the
+  metric, as before.
+- The "rule was inert" warning (every unit non-finite for a rule's metric)
+  now also fires under `missing_policy="fail"`, not only `"pass"`.
+- A rule's `threshold` must be finite; a NaN or +/-inf threshold is now
+  rejected both at schema validation and when a rule is evaluated, instead
+  of silently comparing as always-false (`<`) or always-true (`!=`).
+- SpikeInterface 0.104.3 merges each `compute_quality_metrics` call's
+  `metric_kwargs` into its metric classes' shared default dicts, so a
+  `QualityMetricParameters` row that omitted a kwarg (e.g. `min_fr`) could
+  silently inherit the value an earlier row set in the same process. Every
+  quality-metric compute in `CurationEvaluation` now runs against
+  SpikeInterface's unmodified defaults plus that row's own `metric_kwargs`.
+- **Schema change:** `QualityMetricParameters.observed_presence_bin_duration_s`
+  and `AutoCurationRules.Rule.threshold` are now `double` (previously
+  single-precision `float`); see the
+  [preproduction database upgrade sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database),
+  whose `alter()` loop converts both columns. A value stored before the
+  conversion keeps its single-precision value once widened;
+  `params_schema_version` is unchanged.
+- `QualityMetricParameters.insert_default()` now raises
+  `DuplicateParameterContentError` naming the row when a stored
+  `franklab_default` / `neuropixels_default` / `minimal` row has been
+  edited in place since it was seeded, instead of silently keeping it as
+  the shipped default; identical content stays a no-op.
+- Every immutable v2 parameter table now also rejects
+  `insert(..., replace=True)` (previously only `update1` was guarded),
+  which likewise overwrote a row's content in place under its existing
+  primary key. Insert a new row under a new name instead.
 
 #### Spike Sorting v2: UnitMatch cross-validation halves are built per unit, not per recording
 
