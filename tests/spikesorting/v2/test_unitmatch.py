@@ -669,8 +669,14 @@ def test_driftout_units_recovered_pooled(tmp_path):
     is expected to FAIL for driftout_AB (a unit that drifts out of *both*
     sessions costs its healthy neighbors slightly more matched recall than
     the 4% budget allows: 133 -> 126 of 150 = 0.0467 > 0.04); every other
-    gate is expected to PASS. The assertion message lists every scenario's
-    gates so a regression elsewhere stays visible.
+    gate is expected to PASS. The checked gates are selected by a positive
+    allowlist of (gate id, scenario) pairs -- G1/G2/G3a/G4 x driftout_A/
+    driftout_AB -- and their presence is asserted before their pass/fail, so
+    a construction that silently drops a scenario (``pooled_counts`` or
+    ``pooled_paired_counts`` returning ``None``) fails loudly instead of
+    passing vacuously on an empty or incomplete selection. The assertion
+    message lists every scenario's gates so a regression elsewhere stays
+    visible.
 
     DB-free: this test requests no ``dj_conn`` fixture and the functions it
     imports (:func:`make_dataset`, :func:`make_scenario_sessions`,
@@ -684,6 +690,7 @@ def test_driftout_units_recovered_pooled(tmp_path):
     """
     pytest.importorskip("UnitMatchPy")
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
+        DRIFT_OUT_SCENARIOS,
         SCENARIOS,
         choose_drift_out_units,
         evaluate_gates,
@@ -718,7 +725,21 @@ def test_driftout_units_recovered_pooled(tmp_path):
         f"{g.value:.4f} {g.comparison} {g.threshold} ({g.detail})"
         for g in gates
     )
-    checked = [g for g in gates if not g.name.startswith("G3b")]
+    # Positive allowlist, not a G3b exclusion: a name-based exclusion would
+    # pass vacuously if evaluate_gates silently dropped a scenario (e.g.
+    # pooled_counts/pooled_paired_counts returning None), leaving `checked`
+    # empty or short. Gate.name always starts with its short id ("G1 drift-out
+    # recall", "G3a paired healthy recall drop", ...); Gate.scenario is a
+    # dataclass field, not parsed.
+    expected = {
+        (gate_id, scenario)
+        for gate_id in ("G1", "G2", "G3a", "G4")
+        for scenario in DRIFT_OUT_SCENARIOS
+    }
+    by_pair = {(g.name.split()[0], g.scenario): g for g in gates}
+    missing = expected - by_pair.keys()
+    assert not missing, f"missing gates {sorted(missing)}\n{table}"
+    checked = [by_pair[pair] for pair in expected]
     assert all(g.passed for g in checked), table
 
 
