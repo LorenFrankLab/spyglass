@@ -360,14 +360,93 @@ def all_zero_halves(session_dir) -> dict[str, list[int]]:
 # ----------------------------------------------------------------------------
 # Matching
 # ----------------------------------------------------------------------------
-def match_sessions(session_dirs) -> tuple[list[list], dict | None]:
+def _session_index_from_switch(session_switch, n) -> np.ndarray:
+    """Stacked-index -> session index (0 = A, 1 = B for a two-session match).
+
+    Exactly the construction ``UnitMatchBackend._pairs_from_matrix`` uses
+    (``spyglass/spikesorting/v2/_unitmatch_backend.py:568-570``) to turn
+    ``session_switch`` (the stacked boundary between sessions) into a
+    per-row session index.
+    """
+    boundaries = np.asarray(session_switch).ravel()
+    return np.searchsorted(boundaries, np.arange(n), side="right") - 1
+
+
+def true_pair_directed_probs(
+    prob_matrix, session_switch, original_ids, unit_id
+):
+    """The two directed probabilities of one unit's same-id cross-session pair.
+
+    ``prob_matrix`` is UnitMatch's full ``(n, n)`` naive-Bayes probability
+    array, built the same way ``UnitMatchBackend.match`` builds it
+    (``_unitmatch_backend.py:522-524``: ``probability[:,
+    1].reshape(n_units, n_units)``). ``original_ids`` stacks each session's
+    kept unit ids in the same order UnitMatch loaded them
+    (``_unitmatch_backend.py:501-502``: ``clus_info["original_ids"] =
+    np.concatenate(good_units)``); ``session_switch`` marks the stacked
+    boundary between sessions, converted to a per-row session index the same
+    way ``_pairs_from_matrix`` does it (``_unitmatch_backend.py:568-570``).
+    Session 0 is session A, session 1 is session B (the order
+    ``UnitMatchBackend.match`` receives ``session_inputs``). Looking a unit up
+    by a boolean mask on its id (not by position) is what makes this correct
+    for sparse or reordered ids: a unit excluded from one session, or ranked
+    differently among kept units between sessions, still resolves to the
+    right stacked index.
+
+    Returns
+    -------
+    (float, float) or None
+        ``(p(A_u -> B_u), p(B_u -> A_u))``, i.e. ``(prob_matrix[i, j],
+        prob_matrix[j, i])`` for the stacked indices ``i``/``j`` of
+        ``unit_id`` in session 0 / session 1 -- the same two directed values
+        ``UnitMatchBackend._pairs_from_matrix`` requires both above threshold
+        to emit a pair. ``None`` if ``unit_id`` is missing from either
+        session (excluded from that session's bundle).
+
+    Examples
+    --------
+    >>> pm = np.array([[0.0, 0.1, 0.9], [0.2, 0.0, 0.3], [0.8, 0.4, 0.0]])
+    >>> true_pair_directed_probs(pm, [0, 2, 3], [5, 9, 5], 5)
+    (0.9, 0.8)
+    >>> true_pair_directed_probs(pm, [0, 2, 3], [5, 9, 5], 9) is None
+    True
+    """
+    # ``original_ids`` may be a column vector (UnitMatchPy's per-session
+    # ``good_units`` entries are ``(n_i, 1)``, so ``np.concatenate`` stacks
+    # them into ``(n, 1)``, not ``(n,)``); flatten before comparing against
+    # the 1D ``session_ids`` so the two boolean masks combine element-wise
+    # instead of broadcasting into an (n, n) array.
+    original_ids = np.asarray(original_ids).reshape(-1)
+    n = original_ids.shape[0]
+    session_ids = _session_index_from_switch(session_switch, n)
+    idx_a = np.flatnonzero((session_ids == 0) & (original_ids == unit_id))
+    idx_b = np.flatnonzero((session_ids == 1) & (original_ids == unit_id))
+    if idx_a.size == 0 or idx_b.size == 0:
+        return None
+    i, j = int(idx_a[0]), int(idx_b[0])
+    return float(prob_matrix[i, j]), float(prob_matrix[j, i])
+
+
+def match_sessions(
+    session_dirs, unit_ids
+) -> tuple[list[list], dict | None, dict[int, list[float]]]:
     """Run ``UnitMatchBackend.match`` on two session bundles (A first).
 
     Also records the fitted prior UnitMatch passes to its naive-Bayes step:
     the backend builds ``priors = (1 - p, p)`` with
     ``p = n_expected_matches / n_units ** 2``, where ``n_expected_matches`` is
     fitted by ``overlord.extract_metric_scores``. The recorder wraps
-    ``bayes_functions.apply_naive_bayes`` for the duration of the call.
+    ``bayes_functions.apply_naive_bayes`` for the duration of the call, and
+    from the SAME wrapped call also captures the full probability matrix
+    (reshaped exactly as ``UnitMatchBackend.match`` does it) so every
+    requested unit's true cross-session pair directed probabilities
+    (:func:`true_pair_directed_probs`) can be recovered without changing
+    production code. That lookup also needs the stacked-index ->
+    (session, unit id) mapping, which is not returned by ``match()``; a
+    second wrap of ``UnitMatchPy.utils.load_good_waveforms`` (the call inside
+    ``UnitMatchBackend.match`` that produces ``session_switch`` and
+    ``good_units``) records those. Both wraps only observe values the real
+    call already computes; neither changes what UnitMatch does.
 
     Returns
     -------
@@ -377,6 +456,10 @@ def match_sessions(session_dirs) -> tuple[list[list], dict | None]:
         ``match_class_prior`` (the match-class prior, ``priors[1]``),
         ``n_expected_matches`` and ``n_units``; ``None`` if UnitMatch never
         reached its naive-Bayes step.
+    true_pair_probs : dict[int, list[float]]
+        ``{unit_id: [p(A_u -> B_u), p(B_u -> A_u)]}`` for every ``unit_id``
+        in ``unit_ids`` present in both sessions' loaded bundle. Empty if
+        UnitMatch never reached its naive-Bayes step.
     """
     from spyglass.spikesorting.v2._unitmatch_backend import (
         UnitMatchBackend,
@@ -392,9 +475,18 @@ def match_sessions(session_dirs) -> tuple[list[list], dict | None]:
         )
         for label, d in zip(SESSIONS, session_dirs)
     ]
-    bayes = _require_unitmatch().bayes_functions
-    original = bayes.apply_naive_bayes
+    um = _require_unitmatch()
+    original_bayes = um.bayes_functions.apply_naive_bayes
+    original_load = um.utils.load_good_waveforms
     fitted = {}
+    captured = {}
+
+    def recording_load_good_waveforms(*args, **kwargs):
+        result = original_load(*args, **kwargs)
+        _, _, session_switch, _, good_units, _ = result
+        captured["session_switch"] = session_switch
+        captured["original_ids"] = np.concatenate(good_units)
+        return result
 
     def recording_naive_bayes(
         parameter_kernels, priors, predictors, param, cond
@@ -402,21 +494,41 @@ def match_sessions(session_dirs) -> tuple[list[list], dict | None]:
         fitted["match_class_prior"] = float(priors[1])
         fitted["n_expected_matches"] = int(param["n_expected_matches"])
         fitted["n_units"] = int(param["n_units"])
-        return original(parameter_kernels, priors, predictors, param, cond)
+        probability = original_bayes(
+            parameter_kernels, priors, predictors, param, cond
+        )
+        captured["prob_matrix"] = probability[:, 1].reshape(
+            param["n_units"], param["n_units"]
+        )
+        return probability
 
-    bayes.apply_naive_bayes = recording_naive_bayes
+    um.utils.load_good_waveforms = recording_load_good_waveforms
+    um.bayes_functions.apply_naive_bayes = recording_naive_bayes
     try:
         match_pairs = UnitMatchBackend().match(
             inputs, {"match_threshold": MATCH_THRESHOLD}
         )
     finally:
-        bayes.apply_naive_bayes = original
+        um.utils.load_good_waveforms = original_load
+        um.bayes_functions.apply_naive_bayes = original_bayes
     pairs = []
     for p in match_pairs:
         if (p.session_a_sorting_id, p.session_b_sorting_id) != SESSIONS:
             raise RuntimeError(f"unexpected pair orientation: {p}")
         pairs.append([p.unit_a_id, p.unit_b_id, p.match_probability])
-    return pairs, (fitted or None)
+
+    true_pair_probs: dict[int, list[float]] = {}
+    if "prob_matrix" in captured and "session_switch" in captured:
+        for uid in unit_ids:
+            probs = true_pair_directed_probs(
+                captured["prob_matrix"],
+                captured["session_switch"],
+                captured["original_ids"],
+                uid,
+            )
+            if probs is not None:
+                true_pair_probs[int(uid)] = list(probs)
+    return pairs, (fitted or None), true_pair_probs
 
 
 # ----------------------------------------------------------------------------
@@ -492,7 +604,7 @@ def run_one(seed, scenario, condition, sessions, drift_out_units, out_dir):
             zero[label] = all_zero_halves(d)
             dirs.append(d)
         t1 = time.perf_counter()
-        pairs, fitted = match_sessions(dirs)
+        pairs, fitted, true_pair_probs = match_sessions(dirs, unit_ids)
     t2 = time.perf_counter()
     record = {
         "seed": seed,
@@ -512,6 +624,7 @@ def run_one(seed, scenario, condition, sessions, drift_out_units, out_dir):
         "all_zero_halves": zero,
         "passing_pairs": pairs,
         "fitted": fitted,
+        "true_pair_probs": {str(u): p for u, p in true_pair_probs.items()},
         "counts": score_pairs(pairs, unit_ids, scored_s),
         "timings_s": {"bundles": t1 - t0, "match": t2 - t1},
         "bundle_dirs": {lab: str(d) for lab, d in zip(SESSIONS, dirs)},
