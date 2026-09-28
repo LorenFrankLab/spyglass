@@ -39,6 +39,7 @@ from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
 from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import TaskEpoch
+from spyglass.common.common_task_rec import TaskRecording, TaskRecordingTypes
 from spyglass.common.common_usage import InsertError
 from spyglass.settings import base_dir
 from spyglass.utils import logger
@@ -198,6 +199,12 @@ def populate_all_common(
             SensorData,  # Depends on Session
             IntervalList,  # Depends on Session
             TaskEpoch,  # Depends on Session, Task, CamearaDevice, IntervalList
+            TaskRecordingTypes,  # Depends on Nwbfile
+            TaskRecordingTypes.ActionTypes,  # Depends on TaskRecordingTypes
+            TaskRecordingTypes.EventTypes,  # Depends on TaskRecordingTypes
+            TaskRecordingTypes.StateTypes,  # Depends on TaskRecordingTypes
+            TaskRecordingTypes.Arguments,  # Depends on TaskRecordingTypes
+            TaskRecording,  # Depends on TaskRecordingTypes
             # NwbfileKachery, # Not used by default
         ],
         [  # Tables that depend on above transaction
