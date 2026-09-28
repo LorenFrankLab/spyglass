@@ -1718,12 +1718,24 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         if observation_metrics is not None:
             metrics_df = metrics_df.join(observation_metrics)
         n_spikes_by_unit = self._spike_counts(display_analyzer, metric_analyzer)
+        total_samples = display_analyzer.get_total_samples()
+        if (
+            metric_analyzer is not None
+            and metric_analyzer.get_total_samples() != total_samples
+        ):
+            raise ValueError(
+                "The display and metric analyzers disagree on the recording's "
+                f"total samples (display={total_samples}, "
+                f"metric={metric_analyzer.get_total_samples()}); both must be "
+                "built from the same traces, since the eligibility classifier "
+                "rates every metric's spikes over one duration."
+            )
         expected_missing = expected_missing_units(
             rule_columns,
             n_spikes_by_unit=n_spikes_by_unit,
             # SI rates spikes over total samples / fs, not the time-vector
             # span (spikeinterface/metrics/utils.py:100-126).
-            total_samples=display_analyzer.get_total_samples(),
+            total_samples=total_samples,
             sampling_frequency=display_analyzer.sampling_frequency,
             metric_kwargs=metric_kwargs or {},
         )
