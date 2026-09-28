@@ -472,7 +472,7 @@ class AnalysisMixin(BaseMixin):
         }
         self.insert1(key)
 
-    def build(self, nwb_file_name: str):
+    def build(self, nwb_file_name: str, share_parents=None):
         """Create a builder for safe analysis file creation.
 
         Returns context manager that handles CREATE → POPULATE → REGISTER
@@ -483,11 +483,16 @@ class AnalysisMixin(BaseMixin):
         - Prevents modification of registered files (state checks)
         - Logs failed files for cleanup on exceptions
         - Provides clear error messages for invalid operations
+        - Inherits shared-store visibility from the parent file, narrowing
+          rather than widening where there is more than one parent
 
         Parameters
         ----------
         nwb_file_name : str
             Parent NWB file name
+        share_parents : list of str, optional
+            Additional analysis files this result derives from. Used only to
+            inherit shared-store visibility, and only ever to narrow it.
 
         Returns
         -------
@@ -521,7 +526,9 @@ class AnalysisMixin(BaseMixin):
         """
         from spyglass.utils.mixins.analysis_builder import AnalysisFileBuilder
 
-        return AnalysisFileBuilder(self, nwb_file_name)
+        return AnalysisFileBuilder(
+            self, nwb_file_name, share_parents=share_parents
+        )
 
     @classmethod
     def get_abs_path(

@@ -1,0 +1,961 @@
+"""Tests for the shared-storage broker client.
+
+Everything here runs against a fake transport rather than a live broker. The
+client's job is to turn the broker's vocabulary of status codes into a typed
+answer, so what is worth testing is that translation, not HTTP.
+"""
+
+import json
+import os
+import stat
+from types import SimpleNamespace
+
+import pytest
+
+from spyglass.sharing import store_client as sc
+
+BROKER = "https://store.example.org"
+TOKEN = {"access_token": "tok", "tier": "verified", "github_login": "someone"}
+
+
+class _FakeResponse:
+    """Minimal stand-in for `requests.Response`."""
+
+    def __init__(self, status_code=200, payload=None, headers=None, text=""):
+        self.status_code = status_code
+        self._payload = payload
+        self.headers = headers or {}
+        self.text = text if text else json.dumps(payload or {})
+
+    @property
+    def ok(self):
+        return self.status_code < 400
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json")
+        return self._payload
+
+
+@pytest.fixture
+def token_file(tmp_path, monkeypatch):
+    """Point the token cache at a temporary file."""
+    path = tmp_path / "store_token.json"
+    monkeypatch.setenv("SPYGLASS_STORE_TOKEN", str(path))
+    return path
+
+
+@pytest.fixture
+def client(token_file):
+    """A logged-in client for a fake broker.
+
+    `/info` is pre-seeded, so tests about upload mechanics need not script a
+    response for it. Tests about `/info` itself use `fresh_client`.
+    """
+    client = sc.StoreClient(base_url=BROKER, token="tok")
+    client._info = {"upload_digests": ["sha256", "md5"]}
+
+    return client
+
+
+@pytest.fixture
+def fresh_client(token_file):
+    """A client that has not yet asked the broker anything."""
+    return sc.StoreClient(base_url=BROKER, token="tok")
+
+
+@pytest.fixture
+def transport(monkeypatch):
+    """Replace `requests.request` with a scripted responder.
+
+    Returns a list to append responses to, and records each call so a test can
+    assert on the method, URL, and headers the client chose.
+    """
+    import requests
+
+    scripted, calls = [], []
+
+    def _fake(method, url, **kwargs):
+        calls.append(SimpleNamespace(method=method, url=url, **kwargs))
+        return scripted.pop(0)
+
+    monkeypatch.setattr(requests, "request", _fake)
+
+    return SimpleNamespace(scripted=scripted, calls=calls)
+
+
+# --------------------------------- urls ---------------------------------
+
+
+def test_url_is_versioned(client):
+    """Every route sits below the versioned prefix."""
+    assert client.url("/file/resolve") == f"{BROKER}/api/v1/file/resolve"
+
+
+def test_trailing_slash_does_not_double(token_file):
+    """A configured URL written with a slash still builds one clean path."""
+    assert sc.StoreClient(base_url=BROKER + "/").url("/file") == (
+        f"{BROKER}/api/v1/file"
+    )
+
+
+def test_unconfigured_client_refuses_to_build_a_url(token_file):
+    """An instance with no broker says so rather than calling nothing."""
+    unset = sc.StoreClient(base_url="")
+
+    assert unset.configured is False
+    with pytest.raises(sc.StoreNotConfigured):
+        unset.url("/file/resolve")
+
+
+def test_content_url_is_the_stable_one(client):
+    """The client holds the broker URL, not a signature that can expire."""
+    assert client.content_url("f1") == f"{BROKER}/api/v1/file/f1/content"
+
+
+# --------------------------------- token --------------------------------
+
+
+def test_token_file_is_owner_only(token_file):
+    """A broker credential is written at 0600, never world-readable."""
+    sc._write_token(BROKER, TOKEN)
+
+    mode = stat.S_IMODE(token_file.stat().st_mode)
+    assert mode == stat.S_IRUSR | stat.S_IWUSR
+
+
+def test_tokens_are_kept_per_broker(token_file):
+    """A second broker does not overwrite the first one's token."""
+    sc._write_token(BROKER, TOKEN)
+    sc._write_token("https://other.org", {"access_token": "other"})
+
+    assert sc.StoreClient(base_url=BROKER).token == "tok"
+    assert sc.StoreClient(base_url="https://other.org").token == "other"
+
+
+def test_unreadable_token_cache_is_ignored(token_file):
+    """A corrupted cache sends the user back to login, it does not raise."""
+    token_file.write_text("{ not json")
+
+    assert sc.StoreClient(base_url=BROKER).logged_in is False
+
+
+def test_logout_forgets_only_this_broker(token_file):
+    """Logging out of one broker leaves the other credential in place."""
+    sc._write_token(BROKER, TOKEN)
+    sc._write_token("https://other.org", {"access_token": "other"})
+
+    sc.StoreClient(base_url=BROKER).logout()
+
+    assert sc.StoreClient(base_url=BROKER).logged_in is False
+    assert sc.StoreClient(base_url="https://other.org").token == "other"
+
+
+def test_call_without_a_token_names_the_fix(token_file):
+    """The error tells the user to log in rather than reporting a 401."""
+    with pytest.raises(sc.StoreAuthError, match="spyglass-store login"):
+        sc.StoreClient(base_url=BROKER).auth_headers()
+
+
+# -------------------------------- statuses ------------------------------
+
+
+@pytest.mark.parametrize(
+    "status, expected",
+    [
+        (401, sc.StoreAuthError),
+        (403, sc.StoreForbidden),
+        (404, sc.StoreNotFound),
+        (428, sc.StorePending),
+        (429, sc.StoreQuotaExceeded),
+        (500, sc.StoreError),
+    ],
+)
+def test_status_becomes_a_typed_error(client, transport, status, expected):
+    """Each status the broker uses maps to one exception type."""
+    transport.scripted.append(
+        _FakeResponse(status, {"detail": "nope"}, {"Retry-After": "7"})
+    )
+
+    with pytest.raises(expected):
+        client.resolve(name="a.nwb")
+
+
+def test_quota_error_carries_the_brokers_own_retry_estimate(client, transport):
+    """Retry-After beats a fixed interval that stampedes every client."""
+    transport.scripted.append(
+        _FakeResponse(429, {"detail": "exhausted"}, {"Retry-After": "42"})
+    )
+
+    with pytest.raises(sc.StoreQuotaExceeded) as err:
+        client.resolve(name="a.nwb")
+
+    assert err.value.retry_after == 42
+
+
+def test_transport_failure_is_a_store_error(client, monkeypatch):
+    """A broker that cannot be reached is not a missing file."""
+    import requests
+
+    def _boom(*args, **kwargs):
+        raise requests.ConnectionError("no route")
+
+    monkeypatch.setattr(requests, "request", _boom)
+
+    with pytest.raises(sc.StoreError, match="Could not reach the broker"):
+        client.resolve(name="a.nwb")
+
+
+# --------------------------------- files --------------------------------
+
+
+def test_resolve_prefers_hash_over_name(client, transport):
+    """A hash is unambiguous; a Spyglass name is not unique across owners."""
+    transport.scripted.append(_FakeResponse(200, {"file_id": "f1"}))
+
+    client.resolve(name="a.nwb", sha256="ab" * 32)
+
+    assert transport.calls[0].params == {"sha256": "ab" * 32}
+
+
+def test_resolve_needs_one_of_name_or_hash(client):
+    """Neither argument is a caller bug, not a broker round trip."""
+    with pytest.raises(ValueError, match="name or sha256"):
+        client.resolve()
+
+
+def test_bearer_token_is_sent(client, transport):
+    """Every authenticated route carries the broker token."""
+    transport.scripted.append(_FakeResponse(200, {"file_id": "f1"}))
+
+    client.resolve(name="a.nwb")
+
+    assert transport.calls[0].headers["Authorization"] == "Bearer tok"
+
+
+@pytest.mark.parametrize(
+    "status", [404, 403, 401]
+)  # missing, refused, logged out
+def test_find_collapses_miss_and_refusal(client, transport, status):
+    """The resolution chain moves on from all three the same way."""
+    transport.scripted.append(_FakeResponse(status, {"detail": "no"}))
+
+    assert client.find(name="a.nwb") is None
+
+
+def test_find_returns_none_when_the_broker_is_down(client, transport):
+    """An unreachable broker must not stop the chain from trying DANDI."""
+    transport.scripted.append(_FakeResponse(503, {"detail": "down"}))
+
+    assert client.find(name="a.nwb") is None
+
+
+def test_register_declares_visibility(client, transport):
+    """Scope and teams travel with the registration, not afterward."""
+    transport.scripted.append(_FakeResponse(201, {"file_id": "f1"}))
+
+    client.register(
+        sha256="ab" * 32,
+        size_bytes=10,
+        spyglass_name="a.nwb",
+        file_class="raw",
+        scope="group",
+        teams=["My Team"],
+    )
+
+    body = transport.calls[0].json
+    assert body["visibility"] == {"scope": "group", "teams": ["My Team"]}
+    assert body["file_class"] == "raw"
+
+
+def test_upload_skips_transfer_when_deduplicated(client, transport, tmp_path):
+    """Identical bytes already in the store need a registration only."""
+    path = tmp_path / "a.nwb"
+    path.write_bytes(b"payload")
+
+    transport.scripted.append(
+        _FakeResponse(201, {"file_id": "f1", "deduplicated": True})
+    )
+
+    result = client.upload(str(path))
+
+    assert result["deduplicated"] is True
+    assert len(transport.calls) == 1  # register only, no PUT
+
+
+def test_upload_sends_the_signed_checksum_headers(
+    client, transport, tmp_path, monkeypatch
+):
+    """Upload headers are covered by the signature and cannot be dropped."""
+    import requests
+
+    path = tmp_path / "a.nwb"
+    path.write_bytes(b"payload")
+
+    transport.scripted.append(
+        _FakeResponse(
+            201,
+            {
+                "file_id": "f1",
+                "deduplicated": False,
+                "upload_url": "https://obj.example.org/put",
+                "upload_headers": {"x-amz-checksum-sha256": "abc="},
+            },
+        )
+    )
+
+    puts = []
+
+    def _fake_put(url, **kwargs):
+        puts.append(SimpleNamespace(url=url, **kwargs))
+        return _FakeResponse(200, {})
+
+    monkeypatch.setattr(requests, "put", _fake_put)
+
+    client.upload(str(path))
+
+    assert puts[0].headers == {"x-amz-checksum-sha256": "abc="}
+
+
+def test_upload_reports_a_refused_object(
+    client, transport, tmp_path, monkeypatch
+):
+    """A checksum mismatch surfaces as an error, not a silent success."""
+    import requests
+
+    path = tmp_path / "a.nwb"
+    path.write_bytes(b"payload")
+
+    transport.scripted.append(
+        _FakeResponse(
+            201,
+            {
+                "file_id": "f1",
+                "deduplicated": False,
+                "upload_url": "https://obj.example.org/put",
+                "upload_headers": {},
+            },
+        )
+    )
+    monkeypatch.setattr(
+        requests, "put", lambda url, **kw: _FakeResponse(400, text="bad digest")
+    )
+
+    with pytest.raises(sc.StoreError, match="refused"):
+        client.upload(str(path))
+
+
+def test_upload_of_a_missing_file_says_so(client, tmp_path):
+    """The client checks before hashing a file that is not there."""
+    with pytest.raises(FileNotFoundError):
+        client.upload(str(tmp_path / "absent.nwb"))
+
+
+def test_set_visibility_sends_scope_and_teams(client, transport):
+    """Widening access is one PATCH against the file the broker knows."""
+    transport.scripted.append(_FakeResponse(200, {"file_id": "f1"}))
+
+    client.set_visibility("f1", scope="public")
+
+    assert transport.calls[0].method == "PATCH"
+    assert transport.calls[0].json == {"scope": "public", "teams": []}
+
+
+# --------------------------------- login --------------------------------
+
+
+def test_login_polls_until_approved(client, transport, token_file, monkeypatch):
+    """428 is 'still waiting', and is the only status the loop continues on."""
+    monkeypatch.setattr(sc.time, "sleep", lambda _: None)
+
+    transport.scripted.extend(
+        [
+            _FakeResponse(
+                200,
+                {
+                    "device_code": "dc",
+                    "user_code": "WXYZ-1234",
+                    "verification_uri": "https://github.com/login/device",
+                    "interval": 1,
+                    "expires_in": 900,
+                },
+            ),
+            _FakeResponse(428, {"detail": "pending"}, {"Retry-After": "1"}),
+            _FakeResponse(200, TOKEN),
+        ]
+    )
+
+    record = client.login()
+
+    assert record["access_token"] == "tok"
+    assert json.loads(token_file.read_text())[BROKER] == TOKEN
+
+
+def test_login_stops_on_a_real_refusal(client, transport, monkeypatch):
+    """A too-young GitHub account fails now, not after fifteen minutes."""
+    monkeypatch.setattr(sc.time, "sleep", lambda _: None)
+
+    transport.scripted.extend(
+        [
+            _FakeResponse(
+                200,
+                {
+                    "device_code": "dc",
+                    "user_code": "WXYZ-1234",
+                    "verification_uri": "https://github.com/login/device",
+                    "interval": 1,
+                    "expires_in": 900,
+                },
+            ),
+            _FakeResponse(403, {"detail": "account is 2 days old"}),
+        ]
+    )
+
+    with pytest.raises(sc.StoreForbidden, match="2 days old"):
+        client.login()
+
+
+def test_login_does_not_send_a_token(client, transport, monkeypatch):
+    """The two auth routes are what produce a token; they cannot need one."""
+    monkeypatch.setattr(sc.time, "sleep", lambda _: None)
+
+    transport.scripted.extend(
+        [
+            _FakeResponse(
+                200,
+                {
+                    "device_code": "dc",
+                    "user_code": "WXYZ-1234",
+                    "verification_uri": "https://github.com/login/device",
+                    "interval": 1,
+                    "expires_in": 900,
+                },
+            ),
+            _FakeResponse(200, TOKEN),
+        ]
+    )
+
+    sc.StoreClient(base_url=BROKER).login()  # no token at all
+
+    assert "Authorization" not in transport.calls[0].headers
+
+
+def test_cli_status_reports_not_logged_in(token_file, capsys):
+    """`spyglass-store status` exits non-zero before a first login."""
+    assert sc.login_cli(["status", "--url", BROKER]) == 1
+
+
+# -------------------------------- config --------------------------------
+
+
+def test_store_url_round_trips_through_settings():
+    """The broker URL is a session setting like any other custom key."""
+    from spyglass.settings import sg_config
+
+    prior = sg_config.store_url
+    try:
+        sg_config.store_url = "https://store.example.org/"
+        assert sg_config.store_url == "https://store.example.org"
+        assert sg_config.config["store_url"] == "https://store.example.org"
+
+        sg_config.store_url = None  # detaching is not an error
+        assert sg_config.store_url == ""
+    finally:
+        sg_config.store_url = prior
+
+
+@pytest.mark.parametrize("truthy", [True, "true", "True", 1, "1"])
+def test_auto_upload_accepts_the_forms_a_config_file_uses(truthy):
+    """This is typed into `dj_local_conf.json` by hand, so it is forgiving."""
+    from spyglass.settings import sg_config
+
+    prior = sg_config.store_auto_upload
+    try:
+        sg_config.store_auto_upload = truthy
+        assert sg_config.store_auto_upload is True
+        assert sg_config.config["store_auto_upload"] is True
+    finally:
+        sg_config.store_auto_upload = prior
+
+
+def test_auto_upload_reads_from_the_store_block(monkeypatch, tmp_path):
+    """The flag lives under `custom.backends.store`, and defaults off."""
+    import datajoint as dj
+
+    from spyglass.settings import SpyglassConfig
+
+    custom = dj.config.setdefault("custom", {})
+    monkeypatch.setitem(
+        dj.config, "stores", dict(dj.config.get("stores") or {})
+    )
+
+    base = tmp_path / "tests" / "_data"  # the test-mode sandbox wants 'tests'
+    cfg = SpyglassConfig(test_mode=True)
+
+    def load():
+        cfg.load_config(base_dir=str(base), test_mode=True, force_reload=True)
+
+    monkeypatch.setitem(custom, "backends", {})
+    load()
+    assert cfg.store_auto_upload is False, "A new key must default off"
+
+    monkeypatch.setitem(custom, "backends", {"store": {"auto_upload": "true"}})
+    load()
+    assert cfg.store_auto_upload is True
+    emitted = cfg._generate_dj_config()["custom"]["backends"]["store"]
+    assert emitted["auto_upload"] == "true"
+
+
+def test_store_url_survives_a_reload(monkeypatch, tmp_path):
+    """A reload re-reads the URL, because the setter wrote it to `dj.config`.
+
+    `load_config` resolves every custom key from `dj.config` alone, so a
+    setter that only touched the instance lost the value on the next
+    `force_reload` — and wrote "" to disk on the next `save_dj_config`.
+
+    The load must actually reach its commit phase for this to mean anything,
+    hence the explicit sandbox base dir.
+    """
+    import datajoint as dj
+
+    from spyglass.settings import SpyglassConfig
+
+    custom = dj.config.setdefault("custom", {})
+    monkeypatch.setitem(custom, "backends", {})
+    # A committed load rewrites the global stores; keep it to this test.
+    monkeypatch.setitem(
+        dj.config, "stores", dict(dj.config.get("stores") or {})
+    )
+
+    # The test-mode sandbox requires a 'tests' component in the base path.
+    base = tmp_path / "tests" / "_data"
+
+    def load():
+        cfg.load_config(base_dir=str(base), test_mode=True, force_reload=True)
+
+    cfg = SpyglassConfig(test_mode=True)
+    load()
+    assert cfg._config, "Precondition: the first load must succeed"
+
+    cfg.store_url = BROKER + "/"
+    load()
+
+    assert cfg.store_url == BROKER, "Reload lost the broker URL"
+    emitted = cfg._generate_dj_config()["custom"]["backends"]["store"]
+    assert emitted["url"] == BROKER
+
+
+def test_store_url_set_before_a_base_dir_leaves_the_cache_empty(monkeypatch):
+    """Setting the URL on an unloadable config must not seed `_config`.
+
+    A non-empty `_config` is the cache sentinel. Seeding it after a failed
+    load would make every later `load_config` return that one key at once,
+    resolving no directories and skipping the test-mode base-dir guard.
+    """
+    import datajoint as dj
+
+    from spyglass.settings import SpyglassConfig
+
+    custom = dj.config.setdefault("custom", {})
+    monkeypatch.setitem(custom, "backends", {})
+    monkeypatch.setitem(custom, "spyglass_dirs", {})
+    monkeypatch.delenv("SPYGLASS_BASE_DIR", raising=False)
+
+    cfg = SpyglassConfig()  # no base dir anywhere, so the load fails
+    cfg.store_url = BROKER
+
+    assert cfg.store_url == BROKER, "Setter did not hold the value"
+    assert cfg._config == {}, "A failed load left a poisoned cache"
+    assert cfg.load_failed is True
+
+
+def test_an_unset_store_url_is_the_default(token_file):
+    """Most instances are attached to no broker; that is not a failure."""
+    from spyglass.settings import sg_config
+
+    prior = sg_config.store_url
+    try:
+        sg_config.store_url = ""
+        assert sc.StoreClient().configured is False
+    finally:
+        sg_config.store_url = prior
+
+
+def test_find_lets_a_quota_refusal_through(client, transport):
+    """Throttled is not missing.
+
+    A 429 means the file exists and is readable, only not right now.
+    Collapsing it to None would send `get_nwb_file` off to recompute
+    something it could have waited for, and would make the `except
+    StoreQuotaExceeded` the Data Sync notebook documents unreachable.
+    """
+    transport.scripted.append(
+        _FakeResponse(429, {"detail": "exhausted"}, {"Retry-After": "30"})
+    )
+
+    with pytest.raises(sc.StoreQuotaExceeded) as err:
+        client.find(name="a.nwb")
+
+    assert err.value.retry_after == 30
+
+
+@pytest.fixture
+def loaded_config(monkeypatch, tmp_path):
+    """Build a `SpyglassConfig` that has actually reached its commit phase.
+
+    `tests/sharing/` runs with no base dir, so a bare `SpyglassConfig()` fails
+    its load and reads none of `custom` — every setting would read as its
+    default and every assertion below would pass for the wrong reason.
+    """
+    import datajoint as dj
+
+    from spyglass.settings import SpyglassConfig
+
+    # A committed load rewrites the global stores; keep it to this test.
+    monkeypatch.setitem(
+        dj.config, "stores", dict(dj.config.get("stores") or {})
+    )
+    base = tmp_path / "tests" / "_data"  # the sandbox wants a 'tests' component
+
+    def _load():
+        cfg = SpyglassConfig(test_mode=True)
+        cfg.load_config(base_dir=str(base), test_mode=True, force_reload=True)
+        assert cfg._config, "Precondition: the load must succeed"
+        return cfg
+
+    return _load
+
+
+@pytest.mark.parametrize("name", ["dandi", "Dandi", "DANDI"])
+def test_a_backend_block_is_found_whatever_its_case(
+    monkeypatch, loaded_config, name
+):
+    """`DandiBackend.name` is capitalized; the config is written by hand."""
+    import datajoint as dj
+
+    custom = dj.config.setdefault("custom", {})
+    monkeypatch.setitem(custom, "backends", {name: {"prefer_download": True}})
+
+    cfg = loaded_config()
+
+    assert cfg.backend_prefers_download("Dandi") is True
+    assert cfg.backend_prefers_download("dandi") is True
+
+
+@pytest.mark.parametrize("default, override", [(False, True), (True, False)])
+def test_a_backend_overrides_the_instance_default(
+    monkeypatch, loaded_config, default, override
+):
+    """Per-backend beats instance-wide, in both directions."""
+    import datajoint as dj
+
+    from spyglass.settings import SpyglassConfig
+
+    custom = dj.config.setdefault("custom", {})
+    monkeypatch.setitem(custom, "prefer_download", default)
+    monkeypatch.setitem(
+        custom, "backends", {"dandi": {"prefer_download": override}}
+    )
+
+    cfg = loaded_config()
+
+    assert cfg.backend_prefers_download("Dandi") is override
+    assert cfg.backend_prefers_download("store") is default, "Ignored default"
+
+
+def test_a_malformed_backends_block_is_ignored(monkeypatch, loaded_config):
+    """One bad entry must not take down every other setting on the instance."""
+    import datajoint as dj
+
+    from spyglass.settings import SpyglassConfig
+
+    custom = dj.config.setdefault("custom", {})
+    monkeypatch.setitem(custom, "backends", ["not", "a", "mapping"])
+
+    assert loaded_config().backends == {}
+
+    monkeypatch.setitem(
+        custom, "backends", {"store": "not a dict", "dandi": {"x": 1}}
+    )
+
+    assert loaded_config().backends == {"dandi": {"x": 1}}
+
+
+# ------------------------------ checksums -------------------------------
+
+
+def test_register_sends_the_md5(client, transport, tmp_path):
+    """The digest reaches the broker, which signs it into the presigned URL."""
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(b"verify me")
+
+    transport.scripted.append(
+        _FakeResponse(200, {"file_id": "f1", "deduplicated": True})
+    )
+
+    client.upload(str(target))
+
+    body = transport.calls[0].json
+
+    assert len(body["content_md5"]) == 32
+    assert len(body["sha256"]) == 64
+
+
+def test_an_unknown_md5_is_omitted_not_null(client, transport):
+    """The broker treats it as optional; a null is a worse failure than absent."""
+    transport.scripted.append(
+        _FakeResponse(200, {"file_id": "f1", "deduplicated": True})
+    )
+
+    client.register(sha256="ab" * 32, size_bytes=1, spyglass_name="a.nwb")
+
+    assert "content_md5" not in transport.calls[0].json
+
+
+def test_an_explicit_digest_is_not_recomputed(
+    client, transport, tmp_path, monkeypatch
+):
+    """A caller that already hashed the file must not pay for it twice."""
+    from spyglass.utils import nwb_hash
+
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(b"already hashed")
+
+    def _must_not_read(*args, **kwargs):
+        raise AssertionError("Re-hashed a file the caller had already hashed")
+
+    monkeypatch.setattr(nwb_hash, "digest_file", _must_not_read)
+    transport.scripted.append(
+        _FakeResponse(200, {"file_id": "f1", "deduplicated": True})
+    )
+
+    client.upload(str(target), sha256="ab" * 32, content_md5="cd" * 16)
+
+    body = transport.calls[0].json
+
+    assert body["sha256"] == "ab" * 32
+    assert body["content_md5"] == "cd" * 16
+
+
+def test_info_is_fetched_once_per_client(fresh_client, transport, tmp_path):
+    """A populate over hundreds of files asks the broker once."""
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(b"ask once")
+
+    transport.scripted.extend(
+        [
+            _FakeResponse(200, {"upload_digests": ["sha256"]}),
+            _FakeResponse(200, {"file_id": "f1", "deduplicated": True}),
+            _FakeResponse(200, {"file_id": "f2", "deduplicated": True}),
+        ]
+    )
+
+    fresh_client.upload(str(target))
+    fresh_client.upload(str(target))
+
+    info_calls = [c for c in transport.calls if c.url.endswith("/info")]
+
+    assert len(info_calls) == 1, f"Asked {len(info_calls)} times"
+
+
+def test_info_is_not_cached_across_clients(token_file, transport):
+    """A restart picks up a backend change; nothing caches this to disk."""
+    transport.scripted.extend(
+        [
+            _FakeResponse(200, {"upload_digests": ["sha256"]}),
+            _FakeResponse(200, {"upload_digests": ["sha256", "md5"]}),
+        ]
+    )
+
+    first = sc.StoreClient(base_url=BROKER, token="tok")
+    second = sc.StoreClient(base_url=BROKER, token="tok")
+
+    assert first.upload_digests() == ["sha256"]
+    assert second.upload_digests() == ["md5", "sha256"]
+
+
+def test_an_older_broker_gets_both_digests(fresh_client, transport):
+    """A broker predating /info is supported; unknown resolves to both."""
+    transport.scripted.append(_FakeResponse(404, {"detail": "no such route"}))
+
+    assert fresh_client.upload_digests() == ["md5", "sha256"]
+
+
+def test_an_unreachable_broker_still_uploads(fresh_client, monkeypatch):
+    """Being unable to ask is not a reason to refuse to share."""
+    import requests
+
+    def _boom(*args, **kwargs):
+        raise requests.ConnectionError("no route")
+
+    monkeypatch.setattr(requests, "request", _boom)
+
+    assert fresh_client.upload_digests() == ["md5", "sha256"]
+
+
+def test_an_unknown_digest_name_is_ignored(fresh_client, transport):
+    """An unknown digest name is dropped, not raised on."""
+    transport.scripted.append(
+        _FakeResponse(200, {"upload_digests": ["sha256", "blake3"]})
+    )
+
+    assert fresh_client.upload_digests() == ["sha256"]
+
+
+def test_sha256_is_always_computed(fresh_client, transport):
+    """It is the object's address, whatever the store does with the header."""
+    transport.scripted.append(_FakeResponse(200, {"upload_digests": []}))
+
+    assert fresh_client.upload_digests() == ["sha256"]
+
+
+# --------------------------- possession proof ---------------------------
+
+
+def _challenge(offset, length, sha="ab" * 32):
+    """The 428 body the broker sends for content it already holds."""
+    return _FakeResponse(
+        428,
+        {
+            "detail": {
+                "detail": "Answer the challenge to show you hold the file.",
+                "sha256": sha,
+                "offset": offset,
+                "length": length,
+            }
+        },
+    )
+
+
+def test_possession_proof_matches_the_brokers_answer(tmp_path):
+    """Digest the named range with its offset folded in."""
+    import hashlib
+
+    payload = bytes(range(256)) * 8
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(payload)
+
+    offset, length = 300, 64
+    expected = hashlib.sha256(
+        f"{offset}:".encode() + payload[offset : offset + length]
+    ).hexdigest()
+
+    assert sc.possession_proof(target, offset, length) == expected
+
+
+def test_a_challenge_is_answered_and_the_registration_retried(
+    client, transport, tmp_path
+):
+    """Claiming stored content requires holding it, not just its hash."""
+    payload = b"held locally" * 64
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(payload)
+
+    transport.scripted.extend(
+        [
+            _challenge(offset=32, length=64),
+            _FakeResponse(200, {"file_id": "f1", "deduplicated": True}),
+        ]
+    )
+
+    client.upload(str(target))
+
+    first, second = transport.calls
+
+    assert "possession_proof" not in first.json, "Proof sent unprompted"
+    assert second.json["possession_proof"] == sc.possession_proof(
+        target, 32, 64
+    )
+    assert second.json["sha256"] == first.json["sha256"]
+
+
+def test_a_second_refusal_is_not_retried(client, transport, tmp_path):
+    """One answer is the protocol; a second challenge is a real refusal."""
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(b"held locally")
+
+    transport.scripted.extend([_challenge(0, 12), _challenge(0, 12)])
+
+    with pytest.raises(sc.StorePossessionRequired):
+        client.upload(str(target))
+
+    assert len(transport.calls) == 2
+
+
+def test_a_login_pending_428_is_not_a_challenge(client, transport):
+    """The broker spends 428 on two things; only one names a byte range."""
+    transport.scripted.append(
+        _FakeResponse(428, {"detail": "authorization_pending"})
+    )
+
+    with pytest.raises(sc.StorePending):
+        client.resolve(name="a.nwb")
+
+
+def test_a_wrong_proof_surfaces_as_a_refusal(client, transport, tmp_path):
+    """Bytes that do not match the hash they were registered under."""
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(b"different bytes")
+
+    transport.scripted.extend(
+        [
+            _challenge(0, 15),
+            _FakeResponse(403, {"detail": "Possession proof did not match."}),
+        ]
+    )
+
+    with pytest.raises(sc.StoreForbidden, match="did not match"):
+        client.upload(str(target))
+
+
+def test_an_existing_cache_is_never_briefly_world_readable(
+    token_file, monkeypatch
+):
+    """O_CREAT does not narrow an existing file, so write a fresh one.
+
+    Writing in place would leave the bearer token in a 0644 file for as long
+    as it took to chmod afterward.
+    """
+    import stat as stat_mod
+
+    token_file.write_text("{}")
+    token_file.chmod(0o644)
+
+    modes = []
+    real_dump = json.dump
+
+    def _watching_dump(obj, fp, **kwargs):
+        modes.append(stat_mod.S_IMODE(os.fstat(fp.fileno()).st_mode))
+        return real_dump(obj, fp, **kwargs)
+
+    monkeypatch.setattr(json, "dump", _watching_dump)
+    sc._write_token(BROKER, TOKEN)
+
+    assert modes == [0o600], f"Token written into a {oct(modes[0])} file"
+    assert stat_mod.S_IMODE(token_file.stat().st_mode) == 0o600
+    assert sc.StoreClient(base_url=BROKER).token == "tok"
+
+
+def test_a_malformed_backends_block_can_be_repaired(monkeypatch):
+    """`load_config` ignores a malformed block, so the setter must fix it.
+
+    Otherwise `sg_config.store_url = ...` raises on exactly the configuration
+    the loader is documented to tolerate.
+    """
+    import datajoint as dj
+
+    from spyglass.settings import SpyglassConfig
+
+    custom = dj.config.setdefault("custom", {})
+    monkeypatch.setitem(custom, "backends", ["not", "a", "mapping"])
+
+    cfg = SpyglassConfig()
+    cfg.set_backend_option("store", "url", BROKER)
+
+    assert custom["backends"]["store"]["url"] == BROKER
+
+    monkeypatch.setitem(custom, "backends", {"store": "not a dict"})
+
+    cfg.set_backend_option("store", "url", BROKER)
+
+    assert custom["backends"]["store"]["url"] == BROKER

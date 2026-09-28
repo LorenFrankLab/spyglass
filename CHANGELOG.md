@@ -2,13 +2,17 @@
 
 ## [0.6.1] (Unreleased)
 
-<!--
 ### Release Notes
 
+Running draft to be removed immediately prior to release. When altering tables,
+import all foreign key references.
+
 ```python
-# Add alter commands here
+# Add `github_user_name` to LabMember.LabMemberInfo
+from spyglass.common.common_lab import LabMember
+
+LabMember.LabMemberInfo().alter()
 ```
--->
 
 ### Documentation
 
@@ -23,17 +27,18 @@
     #1662
 - Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
 - Add `prefer_download` custom config for stream-capable backends #1662
+- Add `github_user_name` to `LabMember.LabMemberInfo` for shared-store identity
+    #1686
+- Expand `custom` config to specify per-backend data store behavior #1686
+- Deprecate kachery sharing, removed in 0.7.0 #1686
 
 ### Pipelines
 
 - Spike Sorting
 
     - Store `hash` on `SpikeSortingRecording` insert, and fix the `Path`/`str`
-        comparison that skipped hash verification on recompute. A recompute that
-        does not match the stored hash now deletes the new files and raises. Rows
-        written before this have a null hash; a recompute of one warns and is
-        accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
-        #1662
+        comparison that skipped hash verification on recompute. Backfill null
+        hashes with `SpikeSortingRecording().update_ids()` #1662
 
 ## [0.6.0] (Sep 1st 2026)
 
