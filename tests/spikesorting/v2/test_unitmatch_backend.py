@@ -820,7 +820,13 @@ def test_match_recovers_planted_correspondences(two_session_inputs):
 
 
 def _gate_test_record(
-    seed, scenario, unit_ids, drift_out_units, matched, true_pair_probs=None
+    seed,
+    scenario,
+    unit_ids,
+    drift_out_units,
+    matched,
+    true_pair_probs=None,
+    condition="per_unit",
 ):
     """Build one hand-built ``evaluate_gates`` input record.
 
@@ -828,7 +834,9 @@ def _gate_test_record(
     ``(i, j)`` pair over ``unit_ids`` counts as a miss. ``true_pair_probs`` is
     an optional ``{unit_id: (p_ab, p_ba)}`` map, stored the way
     :func:`run_one` stores it (string keys, list values), for the G3a-prob
-    gate; omitted units are simply not paired. No UnitMatchPy or DB access
+    gate; omitted units are simply not paired. ``condition`` defaults to
+    ``"per_unit"`` (the gated condition); pass ``"time_half"`` to build the
+    baseline side of a G3b-prob comparison. No UnitMatchPy or DB access
     happens here -- ``score_pairs`` is pure counting.
     """
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
@@ -840,7 +848,7 @@ def _gate_test_record(
     return {
         "seed": seed,
         "scenario": scenario,
-        "condition": "per_unit",
+        "condition": condition,
         "unit_ids": list(unit_ids),
         "drift_out_units": scored_s,
         "seed_drift_out_units": list(drift_out_units),
@@ -1211,6 +1219,106 @@ def test_evaluate_gates_g3a_prob_reports_unpaired_and_capture_missing():
     assert "n_paired=1" in gate.detail, gate
     assert "n_unpaired=2" in gate.detail, gate
     assert "n_capture_missing_runs=1" in gate.detail, gate
+
+
+def _g3b_prob_gate(records):
+    from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
+        evaluate_gates,
+    )
+
+    gates = evaluate_gates(records, "per_unit")
+    return _gate(
+        gates,
+        "G3b-prob per_unit vs time_half G3a-prob drop excess",
+        "driftout_A",
+    )
+
+
+def test_evaluate_gates_g3b_prob_pass_fail_and_not_evaluated():
+    """G3b-prob is the per_unit G3a-prob drop minus the same drop measured
+    on ``time_half`` (the baseline construction) for the same seed, and is
+    not evaluated at all when no ``time_half`` run exists for that seed.
+
+    - PASS: per_unit drop (``0.5 -> 0.5``, drop ``0.0``) is no worse than the
+      time_half drop (``0.5 -> 0.5``, drop ``0.0``); excess
+      ``0.0 - 0.0 = 0.0 <= 0.04``.
+    - FAIL: per_unit drop (``0.5 -> 0.375``, drop ``0.125``) is worse than
+      the time_half drop (``0.5 -> 0.5``, drop ``0.0``) by more than the 0.04
+      limit; excess ``0.125 - 0.0 = 0.125 > 0.04``.
+    - Not evaluated: only the ``per_unit`` records exist for the seed (no
+      ``time_half`` run), so there is nothing to compare against -- unlike a
+      silent pass on an empty comparison, ``passed`` is ``None`` and the
+      detail says a time_half run is not available.
+    """
+    s_units = [99]
+    unit_ids = s_units + [1]
+
+    def per_unit_pair(scenario_q):
+        control = _gate_test_record(
+            1, "control", unit_ids, s_units, set(), {1: (0.5, 0.5)}
+        )
+        scenario = _gate_test_record(
+            1,
+            "driftout_A",
+            unit_ids,
+            s_units,
+            set(),
+            {1: (scenario_q, scenario_q)},
+        )
+        return control, scenario
+
+    def time_half_pair(scenario_q):
+        control = _gate_test_record(
+            1,
+            "control",
+            unit_ids,
+            s_units,
+            set(),
+            {1: (0.5, 0.5)},
+            condition="time_half",
+        )
+        scenario = _gate_test_record(
+            1,
+            "driftout_A",
+            unit_ids,
+            s_units,
+            set(),
+            {1: (scenario_q, scenario_q)},
+            condition="time_half",
+        )
+        return control, scenario
+
+    baseline_control, baseline_scenario = time_half_pair(0.5)
+
+    per_unit_control, per_unit_scenario = per_unit_pair(0.5)
+    passing = _g3b_prob_gate(
+        [
+            per_unit_control,
+            per_unit_scenario,
+            baseline_control,
+            baseline_scenario,
+        ]
+    )
+    assert passing.passed is True, passing
+    assert passing.value == pytest.approx(0.0, abs=0), passing
+
+    per_unit_control, per_unit_scenario = per_unit_pair(0.375)
+    failing = _g3b_prob_gate(
+        [
+            per_unit_control,
+            per_unit_scenario,
+            baseline_control,
+            baseline_scenario,
+        ]
+    )
+    assert failing.passed is False, failing
+    assert failing.value == pytest.approx(0.125, abs=0), failing
+
+    not_evaluated = _g3b_prob_gate([per_unit_control, per_unit_scenario])
+    assert not_evaluated.passed is None, not_evaluated
+    assert (
+        "time_half paired G3a-prob run not available" in not_evaluated.detail
+    ), not_evaluated
 
 
 def _write_raw_waveform(session_dir, unit_id, half0, half1):
