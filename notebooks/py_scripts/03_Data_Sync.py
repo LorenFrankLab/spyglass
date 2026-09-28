@@ -31,7 +31,7 @@
 # 5. [`populate()` is the transfer](#5-populate-is-the-transfer)
 # 6. [Reading someone else's file](#6-read-someone-elses-file)
 # 7. [Changing visibility](#7-change-visibility)
-# 8. [Inheritance](#8-derived-files-inherit-visibility)
+# 8. [Sharing derived files](#8-sharing-derived-files)
 # 9. [Quota](#9-quota)
 #
 # Kachery is being retired. Its instructions are kept in an
@@ -369,26 +369,26 @@ file_is_remote(sgc.Nwbfile.get_abs_path(nwb_copy_filename))
 # is no second place to configure it.
 #
 
-# ## 8. Derived files inherit visibility
+# ## 8. Sharing derived files
 #
 
-# Sharing a downstream result takes **no extra action beyond having shared its
-# parent**. When `AnalysisFileBuilder` registers a file, it queues a sharing
-# row inheriting the parent's visibility.
+# **Any file can be shared on its own.** `share_file` uploads the one file you
+# name and consults no parent, so a small result needs neither its raw nor any
+# intermediate shared:
 #
-# Where a file has several parents, inheritance takes the **intersection** —
-# the narrowest scope any parent declared, and the teams *every* group-scoped
-# parent named. A result built from a public source and a private one is
-# private. Combining data is never a way to widen access to any part of it.
+# ```python
+# sgs.share_file(analysis_file_name, scope="group", teams=["My Team"])
+# ```
 #
-# Two consequences worth stating:
-#
-# - A derived file of parents that were never shared is **not queued at all**.
-#   No default may widen access to something nobody asked to share.
-# - Inheritance never overrides a scope you set by hand.
+# Inheritance is a convenience on top of that. When `AnalysisFileBuilder`
+# registers a file whose parents were already shared, it queues a row at the
+# **narrowest** scope any parent declared, and the teams *every* group-scoped
+# parent named — so a result built from a public source and a private one is
+# private. A file whose parents were never shared is not queued at all, and a
+# scope you set by hand is never overridden.
 #
 # If a result draws on analysis files beyond its raw parent, name them so its
-# visibility cannot exceed theirs:
+# inherited visibility cannot exceed theirs:
 #
 # ```python
 # with AnalysisNwbfile().build(
