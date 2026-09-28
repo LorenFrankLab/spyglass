@@ -666,8 +666,8 @@ def _si_metric_error_message(
     return (
         f"SpikeInterface failed to compute metric {si_metric!r} ({error}), "
         f"so rule-referenced column(s) {rule_columns} are NaN for every "
-        "unit and every auto-curation rule on them would silently apply "
-        "no labels. SpikeInterface replaces a failing metric with NaN and "
+        "unit and every auto-curation rule on them would make no real "
+        "comparison. SpikeInterface replaces a failing metric with NaN and "
         "only warns; fix the metric computation or remove the rule."
     )
 
