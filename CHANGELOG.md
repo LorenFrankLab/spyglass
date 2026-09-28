@@ -144,9 +144,10 @@ apart from one it legitimately leaves NaN for a given unit, and lets
 - SpikeInterface 0.104.3 merges each `compute_quality_metrics` call's
   `metric_kwargs` into its metric classes' shared default dicts, so a
   `QualityMetricParameters` row that omitted a kwarg (e.g. `min_fr`) could
-  silently inherit the value an earlier row set in the same process. Every
-  quality-metric compute in `CurationEvaluation` now runs against
-  SpikeInterface's unmodified defaults plus that row's own `metric_kwargs`.
+  silently inherit the value an earlier row set in the same process.
+  `CurationEvaluation`'s metric computes no longer change SpikeInterface's
+  defaults, so one row's `metric_kwargs` never leak into a later row's
+  metrics.
 - **Schema change:** `QualityMetricParameters.observed_presence_bin_duration_s`
   and `AutoCurationRules.Rule.threshold` are now `double` (previously
   single-precision `float`); see the
