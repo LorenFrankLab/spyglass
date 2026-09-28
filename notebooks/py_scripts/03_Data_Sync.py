@@ -224,11 +224,11 @@ client.tier, client.github_login
 
 nwb_copy_filename = "minirec20230622_.nwb"
 
-sgs.SharedFileSelection.insert1(
+sgs.RawFileSelection.insert1(
     {"nwb_file_name": nwb_copy_filename, "scope": "group"},
     skip_duplicates=True,
 )
-sgs.SharedFileSelection.Team.insert1(
+sgs.RawFileSelection.Team.insert1(
     {"nwb_file_name": nwb_copy_filename, "team_name": "My Team"},
     skip_duplicates=True,
 )
@@ -255,7 +255,7 @@ sgs.SharedFileSelection.Team.insert1(
 # what a reader is actually checked against.
 #
 
-sgs.SharedFileSelection()
+sgs.RawFileSelection()
 
 # ## 5. `populate()` is the transfer
 #
@@ -264,7 +264,7 @@ sgs.SharedFileSelection()
 # The upload happens when you populate:
 #
 
-sgs.SharedFile.populate()
+sgs.SharedRawFile.populate()
 
 # That hashes the file's bytes with SHA-256, registers the hash and size with
 # the broker, and uploads to a signed URL — unless someone already stored
@@ -273,7 +273,7 @@ sgs.SharedFile.populate()
 # stored once no matter how many people share them.
 #
 
-sgs.SharedFile()
+sgs.SharedRawFile()
 
 # **Retry is just re-running it.** Because declaring and transferring are
 # separate steps, a failed upload leaves the declaration intact; `populate()`
@@ -361,7 +361,7 @@ file_is_remote(sgc.Nwbfile.get_abs_path(nwb_copy_filename))
 #
 
 # ```python
-# sgs.SharedFile().update_visibility(
+# sgs.SharedRawFile().update_visibility(
 #     {"nwb_file_name": nwb_copy_filename},
 #     scope="public",
 # )

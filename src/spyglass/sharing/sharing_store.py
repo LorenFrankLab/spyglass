@@ -117,10 +117,10 @@ class _SharedFile:
 
 
 @schema
-class SharedFileSelection(SpyglassMixin, dj.Manual):
+class RawFileSelection(SpyglassMixin, dj.Manual):
     """Raw NWB files declared for sharing, and at what visibility.
 
-    Inserting here declares intent. `SharedFile.populate()` is what uploads.
+    Inserting here declares intent. `SharedRawFile.populate()` is what uploads.
     """
 
     definition = """
@@ -493,12 +493,12 @@ class _UploadMixin(_SharedFile):
 
 
 @schema
-class SharedFile(SpyglassMixin, _UploadMixin, dj.Computed):
+class SharedRawFile(SpyglassMixin, _UploadMixin, dj.Computed):
     """Raw NWB files that have been uploaded to the shared store."""
 
     definition = """
     # Raw NWB files present in the shared store
-    -> SharedFileSelection
+    -> RawFileSelection
     ---
     file_id: varchar(64)       # the broker's id for this registration
     sha256: char(64)           # digest of the file's bytes
@@ -509,7 +509,7 @@ class SharedFile(SpyglassMixin, _UploadMixin, dj.Computed):
     _file_class = "raw"
     _name_attr = "nwb_file_name"
     _source_table = Nwbfile
-    _selection = SharedFileSelection
+    _selection = RawFileSelection
 
 
 @schema
@@ -555,7 +555,7 @@ def declared_visibility(
         Scope and team names, or None if the file was never declared.
     """
     selection = (
-        SharedFileSelection if file_class == "raw" else AnalysisFileSelection
+        RawFileSelection if file_class == "raw" else AnalysisFileSelection
     )
     key = {selection._name_attr: file_name}
     rows = (selection & key).fetch("scope")
@@ -741,8 +741,8 @@ def share_file(
         raise ValueError(f"Unknown file_class {file_class!r}.")
 
     is_raw = file_class == "raw"
-    selection = SharedFileSelection if is_raw else AnalysisFileSelection
-    shared = SharedFile if is_raw else SharedAnalysisFile
+    selection = RawFileSelection if is_raw else AnalysisFileSelection
+    shared = SharedRawFile if is_raw else SharedAnalysisFile
 
     key = {selection._name_attr: file_name}
 

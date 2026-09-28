@@ -69,13 +69,11 @@ def broker_configured():
 def declared(store, mini_copy_name):
     """A raw file declared private, cleaned up afterward."""
     key = {"nwb_file_name": mini_copy_name}
-    store.SharedFileSelection.insert1({**key, "scope": "private"})
+    store.RawFileSelection.insert1({**key, "scope": "private"})
 
     yield key
 
-    (store.SharedFileSelection & key).delete(
-        safemode=False, force_permission=True
-    )
+    (store.RawFileSelection & key).delete(safemode=False, force_permission=True)
 
 
 @pytest.fixture
@@ -130,15 +128,15 @@ def test_unknown_scope_is_not_evidence_of_permission(store):
 def test_declaring_a_share_transfers_nothing(store, declared, fake_client):
     """The insert is the declaration; populate is the transfer."""
     assert fake_client.calls == []
-    assert len(store.SharedFile & declared) == 0
+    assert len(store.SharedRawFile & declared) == 0
 
 
 def test_group_with_no_team_is_refused(store, declared, fake_client):
     """A group scope naming nobody is an error, not a silent private."""
-    store.SharedFileSelection.update1({**declared, "scope": "group"})
+    store.RawFileSelection.update1({**declared, "scope": "group"})
 
     with pytest.raises(ValueError, match="names no team"):
-        store.SharedFile()._declared_visibility(declared)
+        store.SharedRawFile()._declared_visibility(declared)
 
 
 def test_share_file_rejects_a_group_with_no_team(store):
@@ -158,7 +156,7 @@ def test_share_file_rejects_an_unknown_scope(store):
 
 def test_populate_uploads_and_records(store, declared, fake_client):
     """populate hashes the bytes, uploads, and records the broker's id."""
-    store.SharedFile.populate(declared)
+    store.SharedRawFile.populate(declared)
 
     kind, path, kwargs = fake_client.calls[0]
     assert kind == "upload"
@@ -166,7 +164,7 @@ def test_populate_uploads_and_records(store, declared, fake_client):
     assert kwargs["scope"] == "private"
     assert len(kwargs["sha256"]) == 64  # a byte digest, not an NwbfileHasher
 
-    row = (store.SharedFile & declared).fetch1()
+    row = (store.SharedRawFile & declared).fetch1()
     assert row["file_id"] == "f1"
     assert row["sha256"] == kwargs["sha256"]
 
@@ -174,7 +172,7 @@ def test_populate_uploads_and_records(store, declared, fake_client):
 def test_populate_without_a_broker_says_so(store, declared):
     """A missing store_url names itself rather than failing in transport."""
     unconfigured = SimpleNamespace(configured=False)
-    table = store.SharedFile()
+    table = store.SharedRawFile()
     fetched = table.make_fetch(declared)
 
     with patch(
@@ -194,7 +192,7 @@ def test_hash_and_upload_hold_no_transaction(store, declared, fake_client):
     """
     from datajoint.autopopulate import AutoPopulate
 
-    table = store.SharedFile()
+    table = store.SharedRawFile()
 
     # DataJoint's own `make` dispatches to the three below. Overriding it is
     # what would put the transfer back inside the transaction.
@@ -209,7 +207,7 @@ def test_hash_and_upload_hold_no_transaction(store, declared, fake_client):
         return {"file_id": "f1", "deduplicated": False}
 
     fake_client.upload = _upload
-    store.SharedFile.populate(declared)
+    store.SharedRawFile.populate(declared)
 
     assert in_transaction == [False]
 
@@ -219,13 +217,13 @@ def test_hash_and_upload_hold_no_transaction(store, declared, fake_client):
 
 def test_update_visibility_relays_to_the_broker(store, declared, fake_client):
     """The broker decides; the local row records what it accepted."""
-    store.SharedFile.populate(declared)
+    store.SharedRawFile.populate(declared)
 
-    store.SharedFile().update_visibility(declared, scope="public")
+    store.SharedRawFile().update_visibility(declared, scope="public")
 
     kind, file_id, kwargs = fake_client.calls[-1]
     assert (kind, file_id, kwargs["scope"]) == ("visibility", "f1", "public")
-    assert (store.SharedFileSelection & declared).fetch1("scope") == "public"
+    assert (store.RawFileSelection & declared).fetch1("scope") == "public"
 
 
 def test_a_refused_change_leaves_the_declaration_alone(
@@ -234,7 +232,7 @@ def test_a_refused_change_leaves_the_declaration_alone(
     """The tables must never claim a visibility the broker did not apply."""
     from spyglass.sharing.store_client import StoreForbidden
 
-    store.SharedFile.populate(declared)
+    store.SharedRawFile.populate(declared)
 
     def _refuse(file_id, **kwargs):
         raise StoreForbidden("Only the owner may change visibility.")
@@ -242,19 +240,19 @@ def test_a_refused_change_leaves_the_declaration_alone(
     fake_client.set_visibility = _refuse
 
     with pytest.raises(StoreForbidden):
-        store.SharedFile().update_visibility(declared, scope="public")
+        store.SharedRawFile().update_visibility(declared, scope="public")
 
-    assert (store.SharedFileSelection & declared).fetch1("scope") == "private"
+    assert (store.RawFileSelection & declared).fetch1("scope") == "private"
 
 
 def test_update_visibility_rejects_a_group_with_no_team(
     store, declared, fake_client
 ):
     """Refused locally, before a round trip the broker would also refuse."""
-    store.SharedFile.populate(declared)
+    store.SharedRawFile.populate(declared)
 
     with pytest.raises(ValueError, match="grants access to nobody"):
-        store.SharedFile().update_visibility(declared, scope="group")
+        store.SharedRawFile().update_visibility(declared, scope="group")
 
 
 # ----------------------------- inheritance ------------------------------
@@ -430,11 +428,11 @@ def test_share_file_narrows_an_existing_declaration(
             mini_copy_name, scope="private", file_class="raw", populate=False
         )
 
-        assert (store.SharedFileSelection & key).fetch1("scope") == "private"
+        assert (store.RawFileSelection & key).fetch1("scope") == "private"
         # A stale team row would take effect again on a flip back to group.
-        assert len(store.SharedFileSelection.Team & key) == 0
+        assert len(store.RawFileSelection.Team & key) == 0
     finally:
-        (store.SharedFileSelection & key).delete(
+        (store.RawFileSelection & key).delete(
             safemode=False, force_permission=True
         )
 
@@ -443,16 +441,16 @@ def test_update_visibility_rejects_an_unknown_team(
     store, declared, fake_client
 ):
     """Checked before the broker call, so the two cannot end up disagreeing."""
-    store.SharedFile.populate(declared)
+    store.SharedRawFile.populate(declared)
     before = len(fake_client.calls)
 
     with pytest.raises(ValueError, match="No such LabTeam"):
-        store.SharedFile().update_visibility(
+        store.SharedRawFile().update_visibility(
             declared, scope="group", teams=["Team That Does Not Exist"]
         )
 
     assert len(fake_client.calls) == before  # broker never asked
-    assert (store.SharedFileSelection & declared).fetch1("scope") == "private"
+    assert (store.RawFileSelection & declared).fetch1("scope") == "private"
 
 
 def test_an_undeclared_parent_blocks_inheritance(store):
@@ -471,15 +469,15 @@ def test_an_upload_makes_the_name_resolvable_by_hash(
 ):
     """What populate records is what settles an ambiguous name later.
 
-    `SharedFileSelection` is keyed on the file name, so one instance maps a
+    `RawFileSelection` is keyed on the file name, so one instance maps a
     name to exactly one digest. `StoreBackend` resolves by that digest rather
     than by the name the broker indexes per owner.
     """
     from spyglass.utils.file_backends import StoreBackend
 
-    store.SharedFile.populate(declared)
+    store.SharedRawFile.populate(declared)
 
-    recorded = (store.SharedFile & declared).fetch1("sha256")
+    recorded = (store.SharedRawFile & declared).fetch1("sha256")
 
     assert StoreBackend()._known_hash(declared["nwb_file_name"]) == recorded
 
@@ -632,12 +630,12 @@ def test_auto_upload_does_nothing_without_a_broker(
 def test_a_share_declared_without_a_scope_is_public(store, mini_copy_name):
     """The schema exists to share data; a default nobody can read does not."""
     key = {"nwb_file_name": mini_copy_name}
-    store.SharedFileSelection.insert1(key)
+    store.RawFileSelection.insert1(key)
 
     try:
-        assert (store.SharedFileSelection & key).fetch1("scope") == "public"
+        assert (store.RawFileSelection & key).fetch1("scope") == "public"
     finally:
-        (store.SharedFileSelection & key).delete(
+        (store.RawFileSelection & key).delete(
             safemode=False, force_permission=True
         )
 
@@ -680,16 +678,16 @@ def test_narrowing_a_raw_narrows_its_derivatives(
 ):
     """A raw re-scoped after registration must not leave derivatives behind."""
     alpha, _ = team_names
-    store.SharedFileSelection.update1({**declared, "scope": "group"})
-    store.SharedFileSelection.Team.insert1({**declared, "team_name": alpha})
+    store.RawFileSelection.update1({**declared, "scope": "group"})
+    store.RawFileSelection.Team.insert1({**declared, "team_name": alpha})
 
     analysis = build_analysis()
     key = {"analysis_file_name": analysis}
 
     assert (store.AnalysisFileSelection & key).fetch1("scope") == "group"
 
-    store.SharedFile.populate(declared)
-    store.SharedFile().update_visibility(declared, scope="private")
+    store.SharedRawFile.populate(declared)
+    store.SharedRawFile().update_visibility(declared, scope="private")
 
     assert (store.AnalysisFileSelection & key).fetch1("scope") == "private"
     assert not (store.AnalysisFileSelection.Team & key)
@@ -704,8 +702,8 @@ def test_widening_a_raw_widens_its_derivatives(
 
     assert (store.AnalysisFileSelection & key).fetch1("scope") == "private"
 
-    store.SharedFile.populate(declared)
-    store.SharedFile().update_visibility(declared, scope="public")
+    store.SharedRawFile.populate(declared)
+    store.SharedRawFile().update_visibility(declared, scope="public")
 
     assert (store.AnalysisFileSelection & key).fetch1("scope") == "public"
 
@@ -743,8 +741,8 @@ def test_widening_stops_at_another_parents_restriction(
     try:
         assert (store.AnalysisFileSelection & key).fetch1("scope") == "private"
 
-        store.SharedFile.populate(declared)
-        store.SharedFile().update_visibility(declared, scope="public")
+        store.SharedRawFile.populate(declared)
+        store.SharedRawFile().update_visibility(declared, scope="public")
 
         assert (store.AnalysisFileSelection & key).fetch1(
             "scope"
@@ -771,8 +769,8 @@ def test_a_hand_declared_derivative_is_left_alone(
     store.AnalysisFileSelection.update1({**key, "inherited": 0})
     store.AnalysisFileSelection.update1({**key, "scope": "public"})
 
-    store.SharedFile.populate(declared)
-    store.SharedFile().update_visibility(declared, scope="private")
+    store.SharedRawFile.populate(declared)
+    store.SharedRawFile().update_visibility(declared, scope="private")
 
     assert (store.AnalysisFileSelection & key).fetch1("scope") == "public"
 
@@ -783,14 +781,14 @@ def test_a_refused_narrowing_warns_and_keeps_going(
     """A refusal names the file and moves on, rather than failing the call."""
     # The derivative must start wider than where the raw is headed, or there
     # is nothing to narrow and no relay to refuse.
-    store.SharedFileSelection.update1({**declared, "scope": "public"})
+    store.RawFileSelection.update1({**declared, "scope": "public"})
 
     analysis = build_analysis()
     key = {"analysis_file_name": analysis}
 
     assert (store.AnalysisFileSelection & key).fetch1("scope") == "public"
 
-    store.SharedFile.populate(declared)
+    store.SharedRawFile.populate(declared)
     store.SharedAnalysisFile.populate(key)
 
     # The refusal lands on the derivative's relay, not the raw's own.
@@ -799,9 +797,9 @@ def test_a_refused_narrowing_warns_and_keeps_going(
     with patch.object(
         store.SharedAnalysisFile, "update_visibility", side_effect=refused
     ):
-        store.SharedFile().update_visibility(declared, scope="private")
+        store.SharedRawFile().update_visibility(declared, scope="private")
 
-    assert (store.SharedFileSelection & declared).fetch1("scope") == "private"
+    assert (store.RawFileSelection & declared).fetch1("scope") == "private"
     assert "Could not re-scope" in caplog.text
     assert analysis in caplog.text
 
@@ -870,7 +868,7 @@ def test_sha256_file_still_returns_a_string(tmp_path):
 
 def test_upload_sends_the_md5(store, declared, fake_client):
     """The digest reaches the broker, where it is signed into the URL."""
-    store.SharedFile.populate(declared)
+    store.SharedRawFile.populate(declared)
 
     _, _, kwargs = fake_client.calls[0]
 
@@ -888,14 +886,14 @@ def test_a_deduplicated_upload_still_records_what_it_declared(
         return {"file_id": "f1", "deduplicated": True}
 
     fake_client.upload = _dedup
-    store.SharedFile.populate(declared)
+    store.SharedRawFile.populate(declared)
 
-    row = (store.SharedFile & declared).fetch1()
+    row = (store.SharedRawFile & declared).fetch1()
 
     assert row["deduplicated"] == 1
     assert row["content_md5"] and len(row["content_md5"]) == 32
 
-    comment = store.SharedFile.heading.attributes["content_md5"].comment
+    comment = store.SharedRawFile.heading.attributes["content_md5"].comment
     assert (
         "NOT proof" in comment
     ), f"Column comment reassures wrongly: {comment}"
@@ -917,14 +915,14 @@ def test_only_the_requested_digests_are_computed(
         return real(path, algorithms=algorithms, **kwargs)
 
     monkeypatch.setattr(nwb_hash, "digest_file", _record)
-    store.SharedFile.populate(declared)
+    store.SharedRawFile.populate(declared)
 
     assert asked == [["sha256"]], f"Computed {asked}"
 
     _, _, kwargs = fake_client.calls[0]
 
     assert kwargs["content_md5"] is None
-    assert (store.SharedFile & declared).fetch1("content_md5") is None
+    assert (store.SharedRawFile & declared).fetch1("content_md5") is None
 
 
 def test_narrowing_an_analysis_parent_reaches_its_derivatives(
@@ -949,7 +947,7 @@ def test_narrowing_an_analysis_parent_reaches_its_derivatives(
     path = Path(common.AnalysisNwbfile.get_abs_path(derived))
 
     try:
-        store.SharedFileSelection.update1({**declared, "scope": "public"})
+        store.RawFileSelection.update1({**declared, "scope": "public"})
         store.AnalysisFileSelection.update1({**up_key, "scope": "public"})
         store.AnalysisFileSelection.update1({**key, "scope": "public"})
 
@@ -971,7 +969,7 @@ def test_share_file_on_an_upload_goes_through_the_broker(
     store, declared, fake_client, mini_copy_name
 ):
     """populate() is a no-op once uploaded, so a local write would diverge."""
-    store.SharedFile.populate(declared)
+    store.SharedRawFile.populate(declared)
     fake_client.calls.clear()
 
     store.share_file(mini_copy_name, scope="private", file_class="raw")
@@ -979,7 +977,7 @@ def test_share_file_on_an_upload_goes_through_the_broker(
     kinds = [call[0] for call in fake_client.calls]
 
     assert kinds == ["visibility"], f"Broker not told: {kinds}"
-    assert (store.SharedFileSelection & declared).fetch1("scope") == "private"
+    assert (store.RawFileSelection & declared).fetch1("scope") == "private"
 
 
 def test_a_failed_parent_insert_leaves_no_declaration(

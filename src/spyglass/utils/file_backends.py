@@ -485,7 +485,7 @@ class StoreBackend(FileBackend):
 
         A name is not unique at the broker, so it can name a different
         session held by another instance. A hash names the bytes.
-        `SharedFileSelection` is keyed on the file name, so within one
+        `RawFileSelection` is keyed on the file name, so within one
         instance a name maps to exactly one upload and one digest.
 
         Absent for a file shared from a different Spyglass instance, which is
@@ -504,11 +504,11 @@ class StoreBackend(FileBackend):
         try:
             from spyglass.sharing.sharing_store import (
                 SharedAnalysisFile,
-                SharedFile,
+                SharedRawFile,
             )
 
             for table, attr in (
-                (SharedFile, "nwb_file_name"),
+                (SharedRawFile, "nwb_file_name"),
                 (SharedAnalysisFile, "analysis_file_name"),
             ):
                 digests = (table & {attr: name}).fetch("sha256")

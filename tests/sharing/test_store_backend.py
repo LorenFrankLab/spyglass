@@ -331,7 +331,7 @@ def test_a_local_query_failure_falls_back_to_the_name(backend, tmp_path):
     target = tmp_path / "a.nwb"
 
     with patch(
-        "spyglass.sharing.sharing_store.SharedFile.fetch", side_effect=denied
+        "spyglass.sharing.sharing_store.SharedRawFile.fetch", side_effect=denied
     ):
         with _with_client(client):
             assert backend.has(str(target)) is True

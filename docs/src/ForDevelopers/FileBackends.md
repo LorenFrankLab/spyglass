@@ -242,9 +242,9 @@ Neither a name nor a hash is unique at the broker — registration is per owner 
 so `resolve` returns every matching registration and answers with the first this
 caller may read. That settles who gets what, but not *which file*: two instances
 can hold different sessions under the same `nwb_file_name`. A hash names the
-bytes, so where Spyglass recorded one it uses that. `SharedFileSelection` is
-keyed on the file name, so within one instance a name maps to exactly one upload
-and one digest. The name is the fallback for a file shared from a *different*
+bytes, so where Spyglass recorded one it uses that. `RawFileSelection` is keyed
+on the file name, so within one instance a name maps to exactly one upload and
+one digest. The name is the fallback for a file shared from a *different*
 instance, where no local row exists.
 
 Two more behaviors are worth knowing:

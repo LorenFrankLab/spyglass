@@ -18,9 +18,9 @@ _LAZY_NAMES = {
     "KacheryZone": "sharing_kachery",
     "share_data_to_kachery": "sharing_kachery",
     "AnalysisFileSelection": "sharing_store",
+    "RawFileSelection": "sharing_store",
     "SharedAnalysisFile": "sharing_store",
-    "SharedFile": "sharing_store",
-    "SharedFileSelection": "sharing_store",
+    "SharedRawFile": "sharing_store",
     "most_restrictive": "sharing_store",
     "share_file": "sharing_store",
 }
