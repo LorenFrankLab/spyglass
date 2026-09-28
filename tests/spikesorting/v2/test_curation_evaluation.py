@@ -578,6 +578,200 @@ def test_nn_noise_overlap_is_finite_not_silently_all_nan(
     )
 
 
+# ---------- rule metrics SpikeInterface failed or cannot assess --------------
+
+
+def _franklab_evaluation(curation_key, metric_params_name="franklab_default"):
+    """Selection for the shipped Frank-lab auto-curation rules."""
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        FRANKLAB_CURATION_RULES,
+    )
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluationSelection,
+    )
+
+    return CurationEvaluationSelection.insert_selection(
+        {
+            **curation_key,
+            "metric_params_name": metric_params_name,
+            "auto_curation_rules_name": FRANKLAB_CURATION_RULES,
+        }
+    )
+
+
+def _ensure_franklab_with_sd_ratio_metric_params():
+    """The shipped Frank-lab metric row plus ``sd_ratio``, which no rule uses."""
+    from spyglass.spikesorting.v2.metric_curation import (
+        QualityMetricParameters,
+    )
+
+    name = "franklab_default_with_sd_ratio"
+    if not (QualityMetricParameters & {"metric_params_name": name}):
+        (franklab,) = [
+            row
+            for row in QualityMetricParameters._default_rows()
+            if row["metric_params_name"] == "franklab_default"
+        ]
+        QualityMetricParameters.insert1(
+            {
+                **franklab,
+                "metric_params_name": name,
+                "metric_names": [*franklab["metric_names"], "sd_ratio"],
+            }
+        )
+    return name
+
+
+def _franklab_label_oracle(metrics):
+    """Labels the shipped Frank-lab rules give, computed from stored metrics.
+
+    ``nn_noise_overlap`` above the stored threshold (0.1) -> ``noise``;
+    ``isi_violation`` above it (0.02) -> ``reject``; both rules use
+    ``missing_policy="pass"``, so a non-finite value labels nothing. The
+    thresholds are read from the stored rule rows, so single-precision
+    storage cannot split a value that sits on the threshold.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        FRANKLAB_CURATION_RULES,
+    )
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+    thresholds = dict(
+        zip(
+            *(
+                AutoCurationRules.Rule
+                & {"auto_curation_rules_name": FRANKLAB_CURATION_RULES}
+            ).fetch("metric_name", "threshold")
+        )
+    )
+    assert thresholds == pytest.approx(
+        {"nn_noise_overlap": 0.1, "isi_violation": 0.02}
+    )
+    labels = {}
+    for unit_id in metrics.index:
+        unit_labels = []
+        for column, label in (
+            ("nn_noise_overlap", "noise"),
+            ("isi_violation", "reject"),
+        ):
+            value = float(pd.to_numeric(metrics.loc[unit_id, column]))
+            if np.isfinite(value) and value > thresholds[column]:
+                unit_labels.append(label)
+        if unit_labels:
+            labels[int(unit_id)] = unit_labels
+    return labels
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_evaluation_fails_when_si_swallows_metric_error(
+    populated_sorting_with_curation, curation_evaluation_defaults, monkeypatch
+):
+    """A rule metric SpikeInterface failed stops the evaluation.
+
+    SI catches the planted exception, warns and writes NaN for every unit;
+    the shipped Frank-lab rules threshold ``isi_violation``, so populate
+    raises naming the metric and SI's error, and stores no row.
+    """
+    import spikeinterface.metrics.quality.misc_metrics as misc_metrics
+
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+    calls = []
+
+    def planted(*args, **kwargs):
+        calls.append(args)
+        raise RuntimeError("planted isi failure")
+
+    # ``ISIViolation.metric_function`` is bound when the class is created;
+    # this helper is looked up when the metric runs (misc_metrics.py:422).
+    monkeypatch.setattr(misc_metrics, "isi_violations", planted)
+    sel = _franklab_evaluation(populated_sorting_with_curation)
+    with pytest.raises(ValueError, match="planted isi failure") as excinfo:
+        CurationEvaluation.populate(sel, reserve_jobs=False)
+    assert calls, "the planted isi_violations was never called"
+    assert "'isi_violation'" in str(excinfo.value)
+    assert not (CurationEvaluation & sel)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_unreferenced_metric_error_does_not_abort_evaluation(
+    populated_sorting_with_curation,
+    curation_evaluation_defaults,
+    monkeypatch,
+    caplog,
+):
+    """A failed metric no rule uses is logged; labels are unaffected."""
+    import numpy as np
+    import spikeinterface.metrics.quality.misc_metrics as misc_metrics
+
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+    calls = []
+
+    def planted(*args, **kwargs):
+        calls.append(args)
+        raise RuntimeError("planted sd_ratio failure")
+
+    # v2's sd_ratio wrapper looks this up when the metric runs
+    # (_si_metric_patches.py, _sd_ratio_statistics_spans).
+    monkeypatch.setattr(misc_metrics, "compute_sd_ratio", planted)
+    sel = _franklab_evaluation(
+        populated_sorting_with_curation,
+        _ensure_franklab_with_sd_ratio_metric_params(),
+    )
+    with caplog.at_level("WARNING"):
+        CurationEvaluation.populate(sel, reserve_jobs=False)
+    assert calls, "the planted compute_sd_ratio was never called"
+    assert any(
+        "'sd_ratio'" in record.getMessage()
+        and "planted sd_ratio failure" in record.getMessage()
+        for record in caplog.records
+    )
+    metrics = CurationEvaluation.get_metrics(sel)
+    sd_ratio = pd.to_numeric(metrics["sd_ratio"]).to_numpy(float)
+    assert np.isnan(sd_ratio).all()
+    assert CurationEvaluation.get_labels(sel) == _franklab_label_oracle(metrics)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_shipped_rules_still_label_on_smoke_fixture(
+    populated_sorting_with_curation, curation_evaluation_defaults
+):
+    """The shipped metrics and rules evaluate a real sort as specified.
+
+    Every stored label equals the rules applied by hand to the stored
+    metrics, and every non-finite rule value belongs to a unit below the
+    metric's spike floor (fewer than 10 spikes for the nn metrics, at most
+    one for the ISI fraction) -- the only NaNs the shipped params allow.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+    sel = _franklab_evaluation(populated_sorting_with_curation)
+    CurationEvaluation.populate(sel, reserve_jobs=False)
+    metrics = CurationEvaluation.get_metrics(sel)
+    assert len(metrics) > 0
+    assert CurationEvaluation.get_labels(sel) == _franklab_label_oracle(metrics)
+
+    n_spikes = pd.to_numeric(metrics["num_spikes"]).to_numpy(float)
+    for column, below_floor in (
+        ("nn_noise_overlap", n_spikes < 10),
+        ("isi_violation", n_spikes <= 1),
+    ):
+        values = pd.to_numeric(metrics[column]).to_numpy(float)
+        assert not (~np.isfinite(values) & ~below_floor).any(), (
+            f"{column} is non-finite for unit(s) "
+            f"{list(metrics.index[~np.isfinite(values) & ~below_floor])} "
+            "that meet its spike floor"
+        )
+
+
 def _small_in_memory_analyzer():
     """A sparse in-memory analyzer (10 s, 4 channels, 2 units) with waveforms.
 

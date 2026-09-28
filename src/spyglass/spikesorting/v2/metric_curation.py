@@ -37,7 +37,9 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v2._metric_curation import (
     apply_label_rules,
     apply_snr_peak_sign,
+    assert_rule_metrics_computed,
     escalate_si_metric_errors,
+    expected_missing_units,
     isi_violation_fraction,
     rules_payloads_match,
 )
@@ -1668,7 +1670,16 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         preview row that slipped past selection. ``statistics_spans`` (the
         sort's persisted spans; ``None`` = the whole recording) are forwarded
         to ``_compute_metrics``.
+
+        Rule-referenced metrics must be computed wherever SpikeInterface can
+        compute them: a metric SpikeInterface failed (``_compute_metrics``'s
+        ``rule_columns``), or a non-finite value for a unit that meets the
+        metric's preconditions (``expected_missing_units``), raises
+        ``ValueError`` instead of leaving the rule silently inert. A NaN for a
+        unit SpikeInterface cannot assess (e.g. below ``nn_advanced``'s
+        ``min_spikes``) follows the rule's ``missing_policy``.
         """
+        rule_columns = frozenset(row["metric_name"] for row in rule_rows)
         metrics_df = self._compute_metrics(
             display_analyzer,
             metric_analyzer,
@@ -1678,11 +1689,25 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             metric_job_kwargs,
             template_metric_columns=template_metric_columns,
             statistics_spans=statistics_spans,
+            rule_columns=rule_columns,
         )
         self._assert_unit_namespace(metrics_df, expected_unit_ids)
         if observation_metrics is not None:
             metrics_df = metrics_df.join(observation_metrics)
-        labels_by_unit = apply_label_rules(metrics_df, rule_rows)
+        n_spikes_by_unit = self._spike_counts(display_analyzer, metric_analyzer)
+        expected_missing = expected_missing_units(
+            rule_columns,
+            n_spikes_by_unit=n_spikes_by_unit,
+            # SI rates spikes over total samples / fs, not the time-vector
+            # span (spikeinterface/metrics/utils.py:100-126).
+            total_samples=display_analyzer.get_total_samples(),
+            sampling_frequency=display_analyzer.sampling_frequency,
+            metric_kwargs=metric_kwargs or {},
+        )
+        assert_rule_metrics_computed(metrics_df, rule_columns, expected_missing)
+        labels_by_unit = apply_label_rules(
+            metrics_df, rule_rows, expected_missing=expected_missing
+        )
         merge_groups = self._compute_merge_groups(
             display_analyzer,
             auto_merge_preset,
@@ -1691,6 +1716,36 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
         self._assert_merge_membership(merge_groups, expected_unit_ids)
         return metrics_df, labels_by_unit, merge_groups
+
+    @staticmethod
+    def _spike_counts(display_analyzer, metric_analyzer) -> dict[int, int]:
+        """Per-unit spike counts, identical on both analyzers.
+
+        The voltage metrics count spikes on the display analyzer and the
+        PC/NN metrics on the whitened metric analyzer (when there is one).
+        Both are built from the same sorting, so their full per-unit counts
+        must agree; the eligibility classifier uses one set for both.
+        """
+        counts = {
+            int(unit_id): int(n)
+            for unit_id, n in (
+                display_analyzer.sorting.count_num_spikes_per_unit().items()
+            )
+        }
+        if metric_analyzer is not None:
+            metric_counts = {
+                int(unit_id): int(n)
+                for unit_id, n in (
+                    metric_analyzer.sorting.count_num_spikes_per_unit().items()
+                )
+            }
+            if metric_counts != counts:
+                raise ValueError(
+                    "The display and metric analyzers disagree on per-unit "
+                    f"spike counts (display={counts}, metric={metric_counts}); "
+                    "both must be built from the same sorting."
+                )
+        return counts
 
     @staticmethod
     def _assert_unit_namespace(metrics_df, expected_unit_ids) -> None:
