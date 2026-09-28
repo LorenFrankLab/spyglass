@@ -374,8 +374,9 @@ def match_sessions(session_dirs) -> tuple[list[list], dict | None]:
     pairs : list of [int, int, float]
         Passing pairs as ``[unit_id_in_A, unit_id_in_B, mean_probability]``.
     fitted : dict or None
-        ``prior_match`` (match-class prior), ``n_expected_matches`` and
-        ``n_units``; ``None`` if UnitMatch never reached its naive-Bayes step.
+        ``match_class_prior`` (the match-class prior, ``priors[1]``),
+        ``n_expected_matches`` and ``n_units``; ``None`` if UnitMatch never
+        reached its naive-Bayes step.
     """
     from spyglass.spikesorting.v2._unitmatch_backend import (
         UnitMatchBackend,
@@ -398,7 +399,7 @@ def match_sessions(session_dirs) -> tuple[list[list], dict | None]:
     def recording_naive_bayes(
         parameter_kernels, priors, predictors, param, cond
     ):
-        fitted["prior_match"] = float(priors[1])
+        fitted["match_class_prior"] = float(priors[1])
         fitted["n_expected_matches"] = int(param["n_expected_matches"])
         fitted["n_units"] = int(param["n_units"])
         return original(parameter_kernels, priors, predictors, param, cond)
@@ -577,8 +578,10 @@ def pooled_counts(records, scenario, condition) -> dict | None:
         return None
     keys = runs[0]["counts"].keys()
     out = {k: _sum(r["counts"][k] for r in runs) for k in keys}
-    priors = [r["fitted"]["prior_match"] for r in runs if r["fitted"]]
-    out["mean_prior_match"] = float(np.mean(priors)) if priors else float("nan")
+    priors = [r["fitted"]["match_class_prior"] for r in runs if r["fitted"]]
+    out["mean_match_class_prior"] = (
+        float(np.mean(priors)) if priors else float("nan")
+    )
     out["n_seeds"] = len(runs)
     return out
 
@@ -880,7 +883,7 @@ def _frac(count) -> str:
 
 
 def _fmt_prior(fitted) -> str:
-    return f"{fitted['prior_match']:.4f}" if fitted else "n/a"
+    return f"{fitted['match_class_prior']:.4f}" if fitted else "n/a"
 
 
 def format_summary(records, gates, fidelity) -> str:
@@ -903,7 +906,7 @@ def format_summary(records, gates, fidelity) -> str:
         "## Pooled over seeds",
         "",
         "| scenario | condition | drift-out recall | healthy recall | "
-        "healthy FP | SxS FP | mean fitted prior (match) |",
+        "healthy FP | SxS FP | mean fitted match-class prior |",
         "|---|---|---|---|---|---|---|",
     ]
     for scenario in scenarios:
@@ -914,7 +917,8 @@ def format_summary(records, gates, fidelity) -> str:
             lines.append(
                 f"| {scenario} | {condition} | {_frac(p['drift_out_true'])} | "
                 f"{_frac(p['healthy_true'])} | {_frac(p['healthy_false'])} | "
-                f"{_frac(p['drift_out_false'])} | {p['mean_prior_match']:.4f} |"
+                f"{_frac(p['drift_out_false'])} | "
+                f"{p['mean_match_class_prior']:.4f} |"
             )
 
     lines += [
