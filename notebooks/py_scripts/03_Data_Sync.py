@@ -80,9 +80,7 @@ warnings.filterwarnings("ignore")
 # }}}}
 # ```
 #
-# `auto_upload` is for a shared compute host: it uploads a derived file as it
-# is declared, so a reader is not told the file was never transferred because
-# nobody ran `populate()` there. Leave it off on a laptop.
+# `auto_upload` automatically uploads analysis files from a shared raw file.
 #
 
 sg_config.store_url
