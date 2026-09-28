@@ -1055,6 +1055,42 @@ def test_evaluate_gates_g3a_prob_is_exact_at_its_boundary():
     assert clearly_failing.value == pytest.approx(0.046875, abs=0)
 
 
+def test_evaluate_gates_g3a_prob_uses_min_of_directed_probabilities():
+    """G3a-prob's ``q_u = min(p_ab, p_ba)`` -- not ``max`` or a mean -- is
+    what decides the drop. Every other G3a-prob fixture in this module uses
+    ``p_ab == p_ba``, so a change from ``min`` to ``max`` or to a mean would
+    pass every one of them unnoticed; this fixture uses asymmetric directed
+    probabilities so the three choices disagree.
+
+    Control ``(p_ab, p_ba) = (0.5, 0.75)`` -> ``q = min = 0.5``. Scenario
+    ``(0.4375, 0.9375)`` -> ``q = min = 0.4375``. Every value here is dyadic
+    (a binary fraction), so the drop is bit-exact:
+
+    - ``min``: drop ``0.5 - 0.4375 = 0.0625`` -- clearly above the 0.04
+      limit: FAIL.
+    - ``max`` (wrong): drop ``0.75 - 0.9375 = -0.1875`` -- a rise, passes
+      trivially.
+    - mean of the two directions (wrong): drop
+      ``0.625 - 0.6875 = -0.0625`` -- also passes trivially.
+
+    Both wrong implementations pass where the correct one fails, so this
+    case would catch a ``min`` -> ``max``/mean swap that every symmetric
+    fixture here misses.
+    """
+    s_units = [99]
+    unit_ids = s_units + [1]
+
+    control = _gate_test_record(
+        1, "control", unit_ids, s_units, set(), {1: (0.5, 0.75)}
+    )
+    scenario = _gate_test_record(
+        1, "driftout_A", unit_ids, s_units, set(), {1: (0.4375, 0.9375)}
+    )
+    gate = _g3a_prob_gate([control, scenario])
+    assert gate.value == pytest.approx(0.0625, abs=0), gate
+    assert gate.passed is False, gate
+
+
 def test_evaluate_gates_g3a_prob_pools_units_not_per_seed_means():
     """The pooled mean is ONE mean over every paired unit, not a mean of
     per-seed means -- the two differ whenever seeds contribute unequal
