@@ -817,6 +817,62 @@ def bundle_fidelity(records) -> list[dict]:
     return rows
 
 
+def _unit_waveform_paths(session_dir) -> dict[int, Path]:
+    """Map unit id -> its saved ``RawWaveforms/Unit{id}_*.npy`` path."""
+    return {
+        int(path.name.removeprefix("Unit").split("_")[0]): path
+        for path in Path(session_dir, "RawWaveforms").glob("Unit*.npy")
+    }
+
+
+def non_s_bit_identical_halves(records, condition) -> dict[str, list[int]]:
+    """Per drift-out scenario, non-S template halves bit-identical to control.
+
+    For every seed with both a ``scenario`` and that seed's ``control`` run of
+    ``condition``, compares each non-S unit's two saved raw-waveform halves
+    (``RawWaveforms/Unit{id}_*.npy[..., 0]`` and ``[..., 1]``), session by
+    session. A unit missing from either bundle (excluded) contributes no
+    comparisons for that session. This quantifies how much of the paired
+    healthy comparison (G3a, G4) reflects an S-unit effect versus resampling
+    noise from SpikeInterface's shared per-analyzer RNG, which can perturb a
+    non-S unit's randomly chosen spike subset merely because another unit's
+    available spike count changed.
+
+    Returns
+    -------
+    dict
+        ``scenario -> [n_identical, n_total]`` for each of
+        :data:`DRIFT_OUT_SCENARIOS` with at least one comparable seed.
+    """
+    index = _index(records)
+    out = {}
+    for scenario in DRIFT_OUT_SCENARIOS:
+        n_identical = n_total = 0
+        for r in records:
+            if r["scenario"] != scenario or r["condition"] != condition:
+                continue
+            ctrl = index.get((r["seed"], "control", condition))
+            if ctrl is None:
+                continue
+            in_s = set(r["seed_drift_out_units"])
+            non_s = [u for u in r["unit_ids"] if u not in in_s]
+            for label in SESSIONS:
+                scen_waves = _unit_waveform_paths(r["bundle_dirs"][label])
+                ctrl_waves = _unit_waveform_paths(ctrl["bundle_dirs"][label])
+                for uid in non_s:
+                    if uid not in scen_waves or uid not in ctrl_waves:
+                        continue
+                    scen_wave = np.load(scen_waves[uid])
+                    ctrl_wave = np.load(ctrl_waves[uid])
+                    for k in (0, 1):
+                        n_total += 1
+                        if np.array_equal(scen_wave[..., k], ctrl_wave[..., k]):
+                            n_identical += 1
+        if n_total:
+            out[scenario] = [n_identical, n_total]
+    return out
+
+
 # ----------------------------------------------------------------------------
 # Summary
 # ----------------------------------------------------------------------------
@@ -979,6 +1035,22 @@ def format_summary(records, gates, fidelity) -> str:
             f"- {condition}: {n_zero} all-zero unit halves across "
             f"{len(runs)} runs"
         )
+
+    lines += [
+        "",
+        "## Non-S template halves bit-identical to same-seed control",
+        "",
+    ]
+    for condition in conditions:
+        per_scenario = non_s_bit_identical_halves(records, condition)
+        if not per_scenario:
+            lines.append(f"- {condition}: no scenario had a control run")
+            continue
+        for scenario, count in per_scenario.items():
+            lines.append(
+                f"- {condition} {scenario}: {count[0]}/{count[1]} non-S "
+                "template halves bit-identical to control"
+            )
     return "\n".join(lines) + "\n"
 
 
