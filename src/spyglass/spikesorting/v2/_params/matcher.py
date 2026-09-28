@@ -38,7 +38,9 @@ class UnitMatchParamsSchema(BaseModel):
         ``extract_unitmatch_bundle`` function defaults). Default ``1.5`` each.
     max_spikes_per_unit : int
         Random-spike cap per unit per cross-validation half when building the
-        bundle. Identity-bearing. Default ``100``.
+        bundle: up to twice this many spikes are drawn per unit and split in
+        spike-time order into the two halves. Identity-bearing. Default
+        ``100``.
     seed : int
         Seed for the bundle's random-spike subsample. Identity-bearing and
         authoritative -- a ``random_seed`` in ``job_kwargs`` never overrides it.

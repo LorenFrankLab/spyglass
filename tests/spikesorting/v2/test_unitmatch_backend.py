@@ -305,6 +305,347 @@ def test_bundle_rejects_non_2d_positions(tmp_path, monkeypatch):
         )
 
 
+# --------------------------------------------------------------------------- #
+# Bundle construction on planted units                                         #
+# --------------------------------------------------------------------------- #
+
+#: Planted-session sampling rate (Hz) and channel count. At 10 kHz the default
+#: 1.5 ms window is 15 samples on each side of the spike.
+_FS = 10_000.0
+_N_CH = 4
+_HALF_WIDTH = 15
+_SPIKE_WIDTH = 2 * _HALF_WIDTH
+
+
+def _planted_template(channel: int, amplitude: float = 20.0) -> np.ndarray:
+    """A spike template with its trough at the window centre on ``channel``.
+
+    Returns
+    -------
+    template : np.ndarray, shape (spike_width, n_channels)
+        Aligned with SpikeInterface's waveform window: row ``_HALF_WIDTH`` is
+        the spike sample.
+    """
+    t = np.arange(-_HALF_WIDTH, _HALF_WIDTH, dtype=float)
+    shape = -np.exp(-0.5 * (t / 2.0) ** 2) + 0.3 * np.exp(
+        -0.5 * ((t - 6.0) / 3.0) ** 2
+    )
+    spatial = np.exp(-0.5 * ((np.arange(_N_CH) - channel) / 0.7) ** 2)
+    return amplitude * shape[:, None] * spatial[None, :]
+
+
+def _planted_session(duration_s, units, *, noise_std=1.0, seed=0):
+    """A recording + sorting with each unit's template added at its spikes.
+
+    Parameters
+    ----------
+    duration_s : float
+    units : dict
+        ``{unit_id: (spike_samples, template, scales)}``, in sorting order.
+        ``template`` is ``(spike_width, n_channels)`` or ``None`` (spikes with
+        no signal); ``scales`` is a per-spike amplitude factor or ``None``
+        (all 1).
+    noise_std : float
+        Standard deviation of the white background noise (0 for none).
+    seed : int
+        Noise seed.
+    """
+    import probeinterface as pi
+    import spikeinterface as si
+
+    n_samples = int(duration_s * _FS)
+    rng = np.random.default_rng(seed)
+    traces = noise_std * rng.standard_normal((n_samples, _N_CH))
+    for samples, template, scales in units.values():
+        if template is None:
+            continue
+        scales = np.ones(len(samples)) if scales is None else scales
+        for sample, scale in zip(samples, scales):
+            lo, hi = sample - _HALF_WIDTH, sample + _HALF_WIDTH
+            t_lo, t_hi = max(0, -lo), _SPIKE_WIDTH - max(0, hi - n_samples)
+            traces[max(lo, 0) : min(hi, n_samples)] += (
+                scale * template[t_lo:t_hi]
+            )
+    recording = si.NumpyRecording(
+        [traces.astype(np.float32)], sampling_frequency=_FS
+    )
+    recording.set_channel_gains([1.0] * _N_CH)
+    recording.set_channel_offsets([0.0] * _N_CH)
+    probe = pi.generate_linear_probe(num_elec=_N_CH, ypitch=20)
+    probe.set_device_channel_indices(np.arange(_N_CH))
+    recording = recording.set_probe(probe)
+    sorting = si.NumpySorting.from_unit_dict(
+        {
+            uid: np.asarray(samples, dtype=np.int64)
+            for uid, (samples, _, _) in units.items()
+        },
+        sampling_frequency=_FS,
+    )
+    return recording, sorting
+
+
+def _train(start_s: float, stop_s: float, period_s: float = 0.5):
+    """Regularly spaced spike samples in ``[start_s, stop_s)``."""
+    return np.round(np.arange(start_s, stop_s, period_s) * _FS).astype(int)
+
+
+@pytest.fixture
+def saved_bundles(monkeypatch):
+    """Fake UnitMatchPy whose ``save_avg_waveforms`` records what it would save.
+
+    Returns a dict ``{session_dir: {"waveforms": (n_units, spike_width,
+    n_channels, 2), "unit_ids": [int, ...]}}`` filled by each save call.
+    """
+    import types
+
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    saved = {}
+
+    def _save(avg_waveforms, save_dir, all_unit_ids, good_units, **kwargs):
+        assert kwargs == {"extract_good_units_only": False}
+        assert list(all_unit_ids) == list(good_units)
+        saved[Path(save_dir)] = {
+            "waveforms": np.array(avg_waveforms),
+            "unit_ids": [int(u) for u in all_unit_ids],
+        }
+
+    fake_um = types.SimpleNamespace(
+        extract_raw_data=types.SimpleNamespace(save_avg_waveforms=_save)
+    )
+    monkeypatch.setattr(backend, "_require_unitmatch", lambda: fake_um)
+    return saved
+
+
+def _good_unit_ids(session_dir) -> list[int]:
+    """Unit ids labelled ``good`` in a bundle's ``cluster_group.tsv``."""
+    rows = np.loadtxt(
+        Path(session_dir) / "cluster_group.tsv", dtype=str, delimiter="\t"
+    )
+    assert tuple(rows[0]) == ("cluster_id", "group")
+    assert set(rows[1:, 1]) == {"good"}
+    return [int(u) for u in rows[1:, 0]]
+
+
+#: Unit 12 fires only in the first 30 s of a 60 s session; its amplitude ramps
+#: from 0.8x to 1.2x across its spikes so a temporal split is distinguishable
+#: from a random one. Units 7 and 3 fire throughout. Ids are sparse and not
+#: sorted so an index/id mix-up changes which template lands where.
+_DRIFT_OUT_TEMPLATES = {
+    7: _planted_template(0),
+    3: _planted_template(3),
+    12: _planted_template(1, amplitude=25.0),
+}
+_DRIFT_OUT_SAMPLES = {
+    7: _train(0.1, 60.0),
+    3: _train(0.25, 60.0),
+    12: _train(0.4, 30.0),
+}
+_DRIFT_OUT_SCALES = np.linspace(0.8, 1.2, len(_DRIFT_OUT_SAMPLES[12]))
+
+
+@pytest.fixture(scope="module")
+def drift_out_session():
+    """60 s session with a unit that fires only in its first half."""
+    return _planted_session(
+        60.0,
+        {
+            uid: (
+                _DRIFT_OUT_SAMPLES[uid],
+                _DRIFT_OUT_TEMPLATES[uid],
+                _DRIFT_OUT_SCALES if uid == 12 else None,
+            )
+            for uid in (7, 3, 12)
+        },
+    )
+
+
+def test_bundle_halves_are_per_unit_temporal(
+    tmp_path, saved_bundles, drift_out_session
+):
+    """A unit firing only early in the session still gets two real halves,
+    split in spike-time order.
+
+    Unit 12 has 60 spikes, all within the 200-spike draw (2 x the default
+    per-half cap of 100), so cv0 is exactly its first 30 spikes and cv1 its
+    last 30. Its planted amplitude ramps 0.8 -> 1.2, so each half's projection
+    onto the planted template must equal that half's mean planted scale; a
+    random split would give two means near 1.0.
+    """
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    recording, sorting = drift_out_session
+    session_dir = tmp_path / "sess"
+    excluded = backend.extract_unitmatch_bundle(
+        session_dir, recording, sorting, seed=0
+    )
+
+    assert excluded == []
+    saved = saved_bundles[session_dir]
+    assert saved["unit_ids"] == [7, 3, 12] == _good_unit_ids(session_dir)
+    waveforms = saved["waveforms"]
+    assert waveforms.shape == (3, _SPIKE_WIDTH, _N_CH, 2)
+
+    template = _DRIFT_OUT_TEMPLATES[12]
+    cv0, cv1 = waveforms[2, ..., 0], waveforms[2, ..., 1]
+    assert np.any(cv0 != 0) and np.any(cv1 != 0)
+
+    # Unit-to-noise distance: how far the planted unit's mean waveform sits from
+    # the noise floor's mean (zero). Unit-to-unit: from each other planted unit.
+    unit_to_noise = np.linalg.norm(template)
+    unit_to_unit = min(
+        np.linalg.norm(template - _DRIFT_OUT_TEMPLATES[other])
+        for other in (7, 3)
+    )
+    half_to_half = np.linalg.norm(cv0 - cv1)
+    assert half_to_half < 0.5 * min(unit_to_noise, unit_to_unit), (
+        half_to_half,
+        unit_to_noise,
+        unit_to_unit,
+    )
+
+    n_half = len(_DRIFT_OUT_SCALES) // 2
+    for cv, planted_scales in (
+        (cv0, _DRIFT_OUT_SCALES[:n_half]),
+        (cv1, _DRIFT_OUT_SCALES[n_half:]),
+    ):
+        projection = np.sum(cv * template) / np.sum(template * template)
+        assert projection == pytest.approx(planted_scales.mean(), abs=0.02)
+        residual = cv - planted_scales.mean() * template
+        assert np.linalg.norm(residual) < 0.1 * unit_to_noise
+
+
+def test_bundle_no_zero_halves_invariant(tmp_path, saved_bundles):
+    """A kept unit whose half is exactly all-zero fails loudly, naming the unit.
+
+    The recording is silent except for unit 7's planted spikes, so unit 12's
+    interior spikes (full waveform support, >= 2 sampled) average to exact
+    zeros on every channel in both halves.
+    """
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    recording, sorting = _planted_session(
+        10.0,
+        {
+            7: (_train(0.1, 10.0), _planted_template(0), None),
+            12: (_train(0.3, 10.0), None, None),
+        },
+        noise_std=0.0,
+    )
+    with pytest.raises(RuntimeError, match="all-zero") as excinfo:
+        backend.extract_unitmatch_bundle(
+            tmp_path / "sess", recording, sorting, seed=0
+        )
+    message = str(excinfo.value)
+    assert "unit 12 half 0" in message and "unit 12 half 1" in message
+    assert "unit 7 " not in message
+    assert saved_bundles == {}
+
+
+def test_bundle_excludes_units_with_fewer_than_two_sampled_spikes(
+    tmp_path, saved_bundles
+):
+    """Units without two sampled full-support spikes are left out and returned.
+
+    Unit 7 has one interior spike. Unit 12 has two spikes, both closer to a
+    recording border than the waveform half-width: without a sampling margin
+    they would be drawn and zero-filled (an all-zero half); with it they are
+    never sampled. Units 3 and 5 are healthy, and their saved arrays must be
+    their own planted templates.
+    """
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    duration_s = 10.0
+    n_samples = int(duration_s * _FS)
+    templates = {3: _planted_template(0), 5: _planted_template(3)}
+    recording, sorting = _planted_session(
+        duration_s,
+        {
+            7: (np.array([n_samples // 2]), _planted_template(1), None),
+            3: (_train(0.1, duration_s), templates[3], None),
+            12: (np.array([3, n_samples - 3]), _planted_template(2), None),
+            5: (_train(0.3, duration_s), templates[5], None),
+        },
+    )
+    session_dir = tmp_path / "sess"
+    excluded = backend.extract_unitmatch_bundle(
+        session_dir, recording, sorting, seed=0
+    )
+
+    assert excluded == [7, 12]
+    assert _good_unit_ids(session_dir) == [3, 5]
+    saved = saved_bundles[session_dir]
+    assert saved["unit_ids"] == [3, 5]
+    assert saved["waveforms"].shape == (2, _SPIKE_WIDTH, _N_CH, 2)
+    for row, uid in enumerate(saved["unit_ids"]):
+        for k in (0, 1):
+            residual = saved["waveforms"][row, ..., k] - templates[uid]
+            assert np.linalg.norm(residual) < 0.15 * np.linalg.norm(
+                templates[uid]
+            ), (uid, k)
+
+
+def test_bundle_all_units_excluded_raises(tmp_path, saved_bundles):
+    """A session with no matchable unit raises before writing any file."""
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    duration_s = 10.0
+    n_samples = int(duration_s * _FS)
+    recording, sorting = _planted_session(
+        duration_s,
+        {
+            7: (np.array([n_samples // 2]), _planted_template(1), None),
+            12: (np.array([3, n_samples - 3]), _planted_template(2), None),
+        },
+    )
+    session_dir = tmp_path / "sess"
+    with pytest.raises(backend.NoMatchableUnitsError) as excinfo:
+        backend.extract_unitmatch_bundle(
+            session_dir, recording, sorting, seed=0
+        )
+    assert isinstance(excinfo.value, ValueError)
+    assert str(session_dir) in str(excinfo.value)
+    assert "fewer than two" in str(excinfo.value)
+    assert not session_dir.exists() or not any(session_dir.iterdir())
+    assert saved_bundles == {}
+
+
+def test_bundle_writes_kept_units_raw_waveforms(tmp_path):
+    """With real UnitMatchPy, the on-disk bundle holds exactly the kept units,
+    each file carrying that unit's own two halves."""
+    pytest.importorskip("UnitMatchPy")
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    duration_s = 10.0
+    n_samples = int(duration_s * _FS)
+    templates = {3: _planted_template(0), 5: _planted_template(3)}
+    recording, sorting = _planted_session(
+        duration_s,
+        {
+            7: (np.array([n_samples // 2]), _planted_template(1), None),
+            3: (_train(0.1, duration_s), templates[3], None),
+            5: (_train(0.3, duration_s), templates[5], None),
+        },
+    )
+    session_dir = tmp_path / "sess"
+    excluded = backend.extract_unitmatch_bundle(
+        session_dir, recording, sorting, seed=0
+    )
+
+    assert excluded == [7]
+    assert _good_unit_ids(session_dir) == [3, 5]
+    files = sorted(p.name for p in (session_dir / "RawWaveforms").iterdir())
+    assert files == ["Unit3_RawSpikes.npy", "Unit5_RawSpikes.npy"]
+    for uid, template in templates.items():
+        wave = np.load(
+            session_dir / "RawWaveforms" / f"Unit{uid}_RawSpikes.npy"
+        )
+        assert wave.shape == (_SPIKE_WIDTH, _N_CH, 2)
+        for k in (0, 1):
+            residual = wave[..., k] - template
+            assert np.linalg.norm(residual) < 0.15 * np.linalg.norm(template)
+
+
 def test_get_matcher_bootstraps_default_after_clear():
     """get_matcher re-registers the built-in backend even if the registry was cleared."""
     from spyglass.spikesorting.v2 import matcher_protocol as mp

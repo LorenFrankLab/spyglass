@@ -468,6 +468,7 @@ def test_all_consumers_resolve_selected_correction(
     def _record_bundle(session_dir, recording, sorting, **kwargs):
         bundle_inputs[session_dir.name] = recording
         session_dir.mkdir(parents=True, exist_ok=True)
+        return []
 
     class _NoPairs:
         def match(self, session_inputs, params):

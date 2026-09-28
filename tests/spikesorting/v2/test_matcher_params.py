@@ -172,6 +172,7 @@ def test_bundle_params_reach_extract(monkeypatch):
 
     def fake_extract(session_dir, recording, sorting, **kwargs):
         captured.update(kwargs)
+        return []
 
     class _DummySorting:
         def select_units(self, ids):

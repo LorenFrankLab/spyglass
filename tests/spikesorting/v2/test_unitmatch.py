@@ -1987,6 +1987,7 @@ def _install_fixture_pairer(
         Path(session_dir).mkdir(parents=True, exist_ok=True)
         if seen_unit_ids is not None:
             seen_unit_ids.append([int(u) for u in sorting.get_unit_ids()])
+        return []
 
     monkeypatch.setattr(
         _unitmatch_backend, "extract_unitmatch_bundle", _noop_extract
@@ -2088,6 +2089,7 @@ def test_make_runs_full_matcher_table_path(
     # needs no real waveform bundle (and thus no UnitMatchPy).
     def _noop_extract(session_dir, recording, sorting, **kwargs):
         Path(session_dir).mkdir(parents=True, exist_ok=True)
+        return []
 
     monkeypatch.setattr(
         _unitmatch_backend, "extract_unitmatch_bundle", _noop_extract
@@ -2225,6 +2227,7 @@ def test_make_compute_reads_fetched_members_and_only_stages_output(
     def _capture(session_dir, recording, sorting, **kwargs):
         Path(session_dir).mkdir(parents=True, exist_ok=True)
         bundle_inputs[Path(session_dir).name] = (recording, sorting)
+        return []
 
     monkeypatch.setattr(
         _unitmatch_backend, "extract_unitmatch_bundle", _capture
@@ -3189,6 +3192,7 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
 
     def _noop_extract(session_dir, recording, sorting, **kwargs):
         Path(session_dir).mkdir(parents=True, exist_ok=True)
+        return []
 
     monkeypatch.setattr(
         _unitmatch_backend, "extract_unitmatch_bundle", _noop_extract
