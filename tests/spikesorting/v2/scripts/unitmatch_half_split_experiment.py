@@ -90,8 +90,10 @@ SESSIONS = ("A", "B")
 
 G1_MIN_DRIFT_OUT_RECALL = 0.80
 G2_MAX_SXS_FALSE_RATE = 0.015
-G3A_MAX_HEALTHY_RECALL_DROP = 0.04
-G3B_MAX_EXCESS_RECALL_DROP = 0.04
+G3A_MAX_HEALTHY_RECALL_DROP = 0.04  # count-based; diagnostic only, not gated
+G3B_MAX_EXCESS_RECALL_DROP = 0.04  # count-based; diagnostic only, not gated
+G3A_PROB_MAX_DROP = 0.04
+G3B_PROB_MAX_EXCESS_DROP = 0.04
 G4_MAX_HEALTHY_FP_INCREASE = 0.005
 
 
@@ -730,6 +732,70 @@ def pooled_paired_counts(records, scenario, condition) -> dict | None:
     return out
 
 
+def paired_true_pair_probs(
+    record, control_record
+) -> list[tuple[int, float, float]]:
+    """Non-S ``(unit, q_control, q_scenario)`` triples paired against control.
+
+    ``q_u = min(p(A_u -> B_u), p(B_u -> A_u))`` -- the same min
+    ``UnitMatchBackend._pairs_from_matrix`` uses to decide whether to emit a
+    pair. Restricted to ``record``'s non-S units that have a recorded
+    true-pair probability in BOTH ``record`` and ``control_record`` (present
+    in both sessions' bundle for both runs).
+    """
+    s = set(int(u) for u in record["seed_drift_out_units"])
+    non_s = [u for u in record["unit_ids"] if u not in s]
+    ctrl_probs = control_record.get("true_pair_probs", {})
+    scen_probs = record.get("true_pair_probs", {})
+    out = []
+    for u in non_s:
+        key = str(u)
+        if key not in ctrl_probs or key not in scen_probs:
+            continue
+        out.append((u, min(ctrl_probs[key]), min(scen_probs[key])))
+    return out
+
+
+def pooled_true_pair_prob_drop(records, scenario, condition) -> dict | None:
+    """G3a-prob's pooled quantities: the two means and their drop.
+
+    Pools every non-S unit paired (present in both the scenario run and that
+    seed's control run) over every seed of ``scenario`` x ``condition`` that
+    has a control run -- ONE mean over all pooled units, not a mean of
+    per-seed means. Returns ``None`` if there is no run of ``scenario`` x
+    ``condition``, any such seed lacks a control run, or no unit is ever
+    paired.
+    """
+    index = _index(records)
+    runs = [
+        r
+        for r in records
+        if r["scenario"] == scenario and r["condition"] == condition
+    ]
+    if not runs:
+        return None
+    q_control, q_scenario, seeds = [], [], []
+    for r in runs:
+        ctrl = index.get((r["seed"], "control", condition))
+        if ctrl is None:
+            return None
+        for _, c, s in paired_true_pair_probs(r, ctrl):
+            q_control.append(c)
+            q_scenario.append(s)
+        seeds.append(r["seed"])
+    if not q_control:
+        return None
+    mean_control = float(np.mean(q_control))
+    mean_scenario = float(np.mean(q_scenario))
+    return {
+        "mean_control": mean_control,
+        "mean_scenario": mean_scenario,
+        "drop": mean_control - mean_scenario,
+        "n_paired": len(q_control),
+        "seeds": sorted(seeds),
+    }
+
+
 # ----------------------------------------------------------------------------
 # Gates
 # ----------------------------------------------------------------------------
@@ -770,19 +836,74 @@ def _gate(name, scenario, exact, threshold, comparison, detail) -> Gate:
     )
 
 
+def _gate_float(name, scenario, value, threshold, comparison, detail) -> Gate:
+    """Build one ``Gate`` from a plain float ``value`` (mean-probability gates).
+
+    Unlike :func:`_gate`, this compares floats directly rather than exact
+    ``Fraction`` counts: the value averages continuous probabilities, so
+    there is no integer pool to be exact about. ``value is None`` means the
+    gate is not evaluable (no paired unit).
+    """
+    if value is None:
+        return Gate(
+            name, scenario, float("nan"), threshold, comparison, None, detail
+        )
+    ok = value >= threshold if comparison == ">=" else value <= threshold
+    return Gate(name, scenario, value, threshold, comparison, bool(ok), detail)
+
+
+def _as_diagnostic(gate: Gate) -> Gate:
+    """Relabel a computed count-based :class:`Gate` as a printed diagnostic.
+
+    G3a-count and G3b-count (the former G3a/G3b acceptance gates) keep their
+    computed value/detail for display, but :attr:`Gate.passed` is forced to
+    ``None`` -- they are no longer part of acceptance, superseded by
+    G3a-exact, G3a-prob and G3b-prob.
+    """
+    return Gate(
+        f"{gate.name} (diagnostic, not gated)",
+        gate.scenario,
+        gate.value,
+        gate.threshold,
+        gate.comparison,
+        None,
+        gate.detail,
+    )
+
+
 def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
     """Evaluate the acceptance gates for ``condition``, per drift-out scenario.
 
-    Pooled over every seed present. G1 drift-out recall >= 0.80; G2 S x S
-    false-pair rate <= 0.015; G3a paired healthy recall drop (control ->
-    scenario, same non-S units per seed) <= 0.04; G3b that drop minus the
-    ``time_half`` paired drop on the same seeds <= 0.04 (only when
-    ``time_half`` ran on exactly the same seeds); G4 paired healthy false
-    positive rate increase <= 0.005. Every comparison is evaluated exactly
-    from the underlying integer counts with :mod:`fractions`; only the
-    printed/stored ``value`` is a float.
+    Pooled over every seed present.
+
+    - G1 drift-out recall >= 0.80.
+    - G2 S x S false-pair rate <= 0.015.
+    - G3a-exact: every non-S unit's saved cross-validation-half templates
+      (:func:`non_s_bit_identical_halves`) are bit-identical to the same
+      seed's control run, pooled over seeds. PASS iff identical == total.
+    - G3a-prob: for each non-S unit, ``q_u = min(p(A_u -> B_u), p(B_u ->
+      A_u))`` of its true cross-session pair (:func:`paired_true_pair_probs`);
+      the drop is the pooled mean ``q_u`` in the control run minus the
+      pooled mean ``q_u`` in the scenario run, over the same paired non-S
+      units, pooled over all seeds (:func:`pooled_true_pair_prob_drop`).
+      PASS iff drop <= 0.04.
+    - G3b-prob: the G3a-prob drop for ``condition`` minus the G3a-prob drop
+      for ``time_half`` on the same seeds <= 0.04 (only when ``time_half``
+      ran on exactly the same seeds).
+    - G4 paired healthy false-positive rate increase <= 0.005.
+
+    G3a-count and G3b-count (the former G3a/G3b acceptance gates, a paired
+    count of healthy recall before/after) are still computed and returned,
+    labelled "(diagnostic, not gated)" -- :attr:`Gate.passed` is always
+    ``None`` for them; they are printed for context only.
+
+    G1, G2, G3a-count, G3b-count and G4 are evaluated exactly from the
+    underlying integer counts with :mod:`fractions`; only the printed/stored
+    ``value`` is a float. G3a-prob and G3b-prob average continuous
+    probabilities, so they are plain float comparisons.
     """
     gates = []
+    bit_identical = non_s_bit_identical_halves(records, condition)
     for scenario in DRIFT_OUT_SCENARIOS:
         pooled = pooled_counts(records, scenario, condition)
         if pooled is None:
@@ -809,6 +930,73 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
                 f"{s_false[0]}/{s_false[1]}",
             )
         )
+
+        bi_counts = bit_identical.get(scenario)
+        gates.append(
+            _gate(
+                "G3a-exact non-S template bit-identity",
+                scenario,
+                _rate_exact(bi_counts) if bi_counts else None,
+                1.0,
+                ">=",
+                (
+                    f"{bi_counts[0]}/{bi_counts[1]}"
+                    if bi_counts
+                    else "no comparable seed"
+                ),
+            )
+        )
+
+        prob_pooled = pooled_true_pair_prob_drop(records, scenario, condition)
+        if prob_pooled is None:
+            prob_value = None
+            prob_detail = "no paired non-S unit with a recorded probability"
+        else:
+            prob_value = prob_pooled["drop"]
+            prob_detail = (
+                f"control mean {prob_pooled['mean_control']:.4f} -> "
+                f"scenario mean {prob_pooled['mean_scenario']:.4f} "
+                f"(n={prob_pooled['n_paired']})"
+            )
+        gates.append(
+            _gate_float(
+                "G3a-prob healthy true-pair mean probability drop",
+                scenario,
+                prob_value,
+                G3A_PROB_MAX_DROP,
+                "<=",
+                prob_detail,
+            )
+        )
+
+        prob_baseline = (
+            pooled_true_pair_prob_drop(records, scenario, BASELINE_CONDITION)
+            if condition != BASELINE_CONDITION
+            else None
+        )
+        if prob_pooled is None or prob_baseline is None:
+            excess_prob_value = None
+            excess_prob_detail = "time_half paired G3a-prob run not available"
+        elif prob_baseline["seeds"] != prob_pooled["seeds"]:
+            excess_prob_value = None
+            excess_prob_detail = "time_half ran on different seeds"
+        else:
+            excess_prob_value = prob_pooled["drop"] - prob_baseline["drop"]
+            excess_prob_detail = (
+                f"{condition} drop {prob_pooled['drop']:.4f} - time_half "
+                f"drop {prob_baseline['drop']:.4f}"
+            )
+        gates.append(
+            _gate_float(
+                "G3b-prob per_unit vs time_half G3a-prob drop excess",
+                scenario,
+                excess_prob_value,
+                G3B_PROB_MAX_EXCESS_DROP,
+                "<=",
+                excess_prob_detail,
+            )
+        )
+
         paired = pooled_paired_counts(records, scenario, condition)
         if paired is None:
             exact_drop = exact_fp_inc = None
@@ -827,13 +1015,15 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
             exact_fp_inc = _exact_diff(_rate_exact(s), _rate_exact(c))
             fp_detail = f"control {c[0]}/{c[1]} -> scenario {s[0]}/{s[1]}"
         gates.append(
-            _gate(
-                "G3a paired healthy recall drop",
-                scenario,
-                exact_drop,
-                G3A_MAX_HEALTHY_RECALL_DROP,
-                "<=",
-                drop_detail,
+            _as_diagnostic(
+                _gate(
+                    "G3a-count paired healthy recall drop",
+                    scenario,
+                    exact_drop,
+                    G3A_MAX_HEALTHY_RECALL_DROP,
+                    "<=",
+                    drop_detail,
+                )
             )
         )
         baseline = (
@@ -859,13 +1049,15 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
                 f"{float(exact_baseline_drop):.4f}"
             )
         gates.append(
-            _gate(
-                "G3b excess recall drop vs time_half",
-                scenario,
-                exact_excess,
-                G3B_MAX_EXCESS_RECALL_DROP,
-                "<=",
-                excess_detail,
+            _as_diagnostic(
+                _gate(
+                    "G3b-count excess recall drop vs time_half",
+                    scenario,
+                    exact_excess,
+                    G3B_MAX_EXCESS_RECALL_DROP,
+                    "<=",
+                    excess_detail,
+                )
             )
         )
         gates.append(
@@ -958,6 +1150,8 @@ def non_s_bit_identical_halves(records, condition) -> dict[str, list[int]]:
     dict
         ``scenario -> [n_identical, n_total]`` for each of
         :data:`DRIFT_OUT_SCENARIOS` with at least one comparable seed.
+        Records without a ``bundle_dirs`` (e.g. hand-built gate-test records
+        with no bundles on disk) are skipped rather than raising.
     """
     index = _index(records)
     out = {}
@@ -966,8 +1160,10 @@ def non_s_bit_identical_halves(records, condition) -> dict[str, list[int]]:
         for r in records:
             if r["scenario"] != scenario or r["condition"] != condition:
                 continue
+            if "bundle_dirs" not in r:
+                continue
             ctrl = index.get((r["seed"], "control", condition))
-            if ctrl is None:
+            if ctrl is None or "bundle_dirs" not in ctrl:
                 continue
             in_s = set(r["seed_drift_out_units"])
             non_s = [u for u in r["unit_ids"] if u not in in_s]
@@ -1055,6 +1251,25 @@ def format_summary(records, gates, fidelity) -> str:
                 f"{_frac(p['healthy_false_control'])} -> "
                 f"{_frac(p['healthy_false_scenario'])} | "
                 f"{p['healthy_fp_increase']:+.4f} |"
+            )
+
+    lines += [
+        "",
+        "## Healthy true-pair mean probability (paired)",
+        "",
+        "| scenario | condition | control mean q | scenario mean q | drop | "
+        "n paired |",
+        "|---|---|---|---|---|---|",
+    ]
+    for scenario in (s for s in DRIFT_OUT_SCENARIOS if s in scenarios):
+        for condition in conditions:
+            p = pooled_true_pair_prob_drop(records, scenario, condition)
+            if p is None:
+                continue
+            lines.append(
+                f"| {scenario} | {condition} | {p['mean_control']:.4f} | "
+                f"{p['mean_scenario']:.4f} | {p['drop']:+.4f} | "
+                f"{p['n_paired']} |"
             )
 
     index = _index(records)

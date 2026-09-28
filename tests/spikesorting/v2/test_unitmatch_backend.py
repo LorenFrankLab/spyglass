@@ -819,12 +819,17 @@ def test_match_recovers_planted_correspondences(two_session_inputs):
     ), f"recovered only {recovered}/{len(shared)} planted correspondences"
 
 
-def _gate_test_record(seed, scenario, unit_ids, drift_out_units, matched):
+def _gate_test_record(
+    seed, scenario, unit_ids, drift_out_units, matched, true_pair_probs=None
+):
     """Build one hand-built ``evaluate_gates`` input record.
 
     ``matched`` is the set of ``(i, j)`` pairs that pass matching; every other
-    ``(i, j)`` pair over ``unit_ids`` counts as a miss. No UnitMatchPy or DB
-    access happens here -- ``score_pairs`` is pure counting.
+    ``(i, j)`` pair over ``unit_ids`` counts as a miss. ``true_pair_probs`` is
+    an optional ``{unit_id: (p_ab, p_ba)}`` map, stored the way
+    :func:`run_one` stores it (string keys, list values), for the G3a-prob
+    gate; omitted units are simply not paired. No UnitMatchPy or DB access
+    happens here -- ``score_pairs`` is pure counting.
     """
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
         score_pairs,
@@ -842,6 +847,9 @@ def _gate_test_record(seed, scenario, unit_ids, drift_out_units, matched):
         "counts": score_pairs(passing_pairs, unit_ids, scored_s),
         "fitted": None,
         "passing_pairs": passing_pairs,
+        "true_pair_probs": {
+            str(u): list(p) for u, p in (true_pair_probs or {}).items()
+        },
     }
 
 
@@ -893,18 +901,23 @@ def test_evaluate_gates_g1_g2_are_exact_at_their_boundary():
     assert g2.passed is False, g2
 
 
-def test_evaluate_gates_g3a_g4_are_exact_at_their_boundary():
-    """G3a and G4 (paired against control) pass exactly on the threshold.
+def test_evaluate_gates_g4_is_exact_at_its_boundary():
+    """G4 (paired healthy FP increase against control) passes exactly on the
+    threshold.
 
-    25 non-S units make the paired denominators 25 (recall) and 600 (false
-    positives), exact multiples of the thresholds' reduced denominators (25
-    and 200): 1/25 == 0.04 and 3/600 == 0.005 land on an exact fraction.
+    25 non-S units make the paired false-positive denominator 600, an exact
+    multiple of 0.005's reduced denominator (200): 3/600 == 0.005 lands on an
+    exact fraction. (The former G3a boundary check on this same fixture --
+    the count-based paired healthy recall drop -- moved to
+    ``test_evaluate_gates_g3a_prob_is_exact_at_its_boundary`` /
+    ``test_evaluate_gates_g3a_exact_fails_on_one_differing_half``: G3a-count
+    is a printed diagnostic now, not an asserted gate.)
     """
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
         evaluate_gates,
     )
 
-    s_units = [999]  # a single drift-out unit; irrelevant to G3a/G4
+    s_units = [999]  # a single drift-out unit; irrelevant to G4
     non_s = list(range(1000, 1025))
     unit_ids = s_units + non_s
     off_diag = [(a, b) for a in non_s for b in non_s if a != b]
@@ -914,28 +927,13 @@ def test_evaluate_gates_g3a_g4_are_exact_at_their_boundary():
 
     control = _gate_test_record(1, "control", unit_ids, s_units, healthy(25, 0))
 
-    # control 25/25 -> scenario 24/25: drop == 1/25 == 0.04 exactly.
     # control 0/600 -> scenario 3/600: increase == 3/600 == 0.005 exactly.
     passing = _gate_test_record(
         1, "driftout_A", unit_ids, s_units, healthy(24, 3)
     )
     gates = evaluate_gates([control, passing], "per_unit")
-    g3a, g4 = (
-        _gate(gates, "G3a paired healthy recall drop", "driftout_A"),
-        _gate(gates, "G4 paired healthy FP increase", "driftout_A"),
-    )
-    assert g3a.passed is True, g3a
+    g4 = _gate(gates, "G4 paired healthy FP increase", "driftout_A")
     assert g4.passed is True, g4
-
-    # One fewer paired recall match (23/25) pushes the drop to 2/25 == 0.08.
-    failing_g3a = _gate_test_record(
-        1, "driftout_A", unit_ids, s_units, healthy(23, 3)
-    )
-    gates = evaluate_gates([control, failing_g3a], "per_unit")
-    assert (
-        _gate(gates, "G3a paired healthy recall drop", "driftout_A").passed
-        is False
-    ), gates
 
     # One more false positive (4/600) pushes the increase to 4/600 == 0.00667.
     failing_g4 = _gate_test_record(
@@ -946,3 +944,184 @@ def test_evaluate_gates_g3a_g4_are_exact_at_their_boundary():
         _gate(gates, "G4 paired healthy FP increase", "driftout_A").passed
         is False
     ), gates
+
+
+def test_evaluate_gates_g3a_count_is_a_diagnostic_not_a_gate():
+    """The old count-based G3a is still printed but never gates acceptance.
+
+    Same fixture as the G4 boundary test, with a recall drop that would have
+    failed the old count-based threshold (2/25 == 0.08 > 0.04): G3a-count
+    reports that value but ``passed`` is always ``None``.
+    """
+    from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
+        evaluate_gates,
+    )
+
+    s_units = [999]
+    non_s = list(range(1000, 1025))
+    unit_ids = s_units + non_s
+
+    control = _gate_test_record(
+        1, "control", unit_ids, s_units, {(u, u) for u in non_s}
+    )
+    scenario = _gate_test_record(
+        1, "driftout_A", unit_ids, s_units, {(u, u) for u in non_s[:23]}
+    )
+    gates = evaluate_gates([control, scenario], "per_unit")
+    g3a_count = _gate(
+        gates,
+        "G3a-count paired healthy recall drop (diagnostic, not gated)",
+        "driftout_A",
+    )
+    assert g3a_count.passed is None, g3a_count
+    assert g3a_count.value == pytest.approx(2 / 25)
+
+
+def test_evaluate_gates_g3a_prob_is_exact_at_its_boundary():
+    """G3a-prob passes with a drop exactly at 0.04, fails just above it.
+
+    One paired non-S unit whose true-pair ``q = min(p_ab, p_ba)`` is 0.05 in
+    the control run and 0.01 in the scenario run: the pooled drop is
+    ``0.05 - 0.01``, a float subtraction that lands on exactly the same
+    double as the literal ``0.04`` (verified: ``0.05 - 0.01 <= 0.04`` is
+    ``True`` in IEEE 754 double precision, while ``0.07 - 0.03`` rounds to
+    just above 0.04 and fails).
+    """
+    from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
+        evaluate_gates,
+    )
+
+    s_units = [99]
+    unit_ids = s_units + [1]
+
+    control = _gate_test_record(
+        1, "control", unit_ids, s_units, set(), {1: (0.05, 0.05)}
+    )
+    passing = _gate_test_record(
+        1, "driftout_A", unit_ids, s_units, set(), {1: (0.01, 0.01)}
+    )
+    gates = evaluate_gates([control, passing], "per_unit")
+    g3a_prob = _gate(
+        gates,
+        "G3a-prob healthy true-pair mean probability drop",
+        "driftout_A",
+    )
+    assert g3a_prob.passed is True, g3a_prob
+    assert g3a_prob.value == pytest.approx(0.04)
+
+    failing = _gate_test_record(
+        1, "driftout_A", unit_ids, s_units, set(), {1: (0.03, 0.03)}
+    )
+    control_wide = _gate_test_record(
+        1, "control", unit_ids, s_units, set(), {1: (0.07, 0.07)}
+    )
+    gates = evaluate_gates([control_wide, failing], "per_unit")
+    g3a_prob = _gate(
+        gates,
+        "G3a-prob healthy true-pair mean probability drop",
+        "driftout_A",
+    )
+    assert g3a_prob.passed is False, g3a_prob
+
+
+def _write_raw_waveform(session_dir, unit_id, half0, half1):
+    """Write one unit's ``RawWaveforms/Unit{id}_RawSpikes.npy`` (shape
+    ``(spike_width, n_channels, 2)``) so :func:`non_s_bit_identical_halves`
+    has a file to compare."""
+    (session_dir / "RawWaveforms").mkdir(parents=True, exist_ok=True)
+    wave = np.stack([half0, half1], axis=-1)
+    np.save(session_dir / "RawWaveforms" / f"Unit{unit_id}_RawSpikes.npy", wave)
+
+
+def test_evaluate_gates_g3a_exact_fails_on_one_differing_half(tmp_path):
+    """G3a-exact fails as soon as one non-S template half differs from control.
+
+    Two non-S units (3 and 5) with identical A/B bundles between the control
+    and scenario run except unit 5's session-B half 1, which differs by one
+    value: 7/8 halves (2 units x 2 sessions x 2 halves) are bit-identical, so
+    G3a-exact must fail (identical != total). A companion bundle pair with
+    every half identical passes.
+    """
+    from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
+        evaluate_gates,
+    )
+
+    half_shape = (4, 2)  # (spike_width, n_channels)
+    unit_ids = [3, 5]
+    s_units = []
+
+    def build(root, *, unit5_half1_delta=0.0):
+        for label in ("A", "B"):
+            d = root / label
+            for uid in unit_ids:
+                base0 = np.full(half_shape, float(uid))
+                base1 = np.full(half_shape, float(uid) + 1.0)
+                if uid == 5 and label == "B":
+                    base1 = base1 + unit5_half1_delta
+                _write_raw_waveform(d, uid, base0, base1)
+        return {label: str(root / label) for label in ("A", "B")}
+
+    control_dirs = build(tmp_path / "control")
+    failing_dirs = build(tmp_path / "failing", unit5_half1_delta=1.0)
+    passing_dirs = build(tmp_path / "passing")
+
+    def record(scenario, bundle_dirs):
+        r = _gate_test_record(1, scenario, unit_ids, s_units, set())
+        r["bundle_dirs"] = bundle_dirs
+        return r
+
+    control = record("control", control_dirs)
+    failing = record("driftout_A", failing_dirs)
+    gates = evaluate_gates([control, failing], "per_unit")
+    g3a_exact = _gate(
+        gates, "G3a-exact non-S template bit-identity", "driftout_A"
+    )
+    assert g3a_exact.passed is False, g3a_exact
+    assert g3a_exact.detail == "7/8", g3a_exact
+
+    passing = record("driftout_A", passing_dirs)
+    gates = evaluate_gates([control, passing], "per_unit")
+    g3a_exact = _gate(
+        gates, "G3a-exact non-S template bit-identity", "driftout_A"
+    )
+    assert g3a_exact.passed is True, g3a_exact
+    assert g3a_exact.detail == "8/8", g3a_exact
+
+
+def test_true_pair_probability_lookup_sparse_reordered_ids():
+    """The true-pair lookup resolves each unit by id, not by position.
+
+    Session 0 (A) keeps units ``[7, 3]`` (not sorted); session 1 (B) keeps
+    ``[12, 7, 3]`` -- unit 12 has no partner in A, and the shared units 7/3
+    sit at different ranks in each session. Every cell of the probability
+    matrix is a distinct value, so a wrong index would read the wrong cell.
+    """
+    from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
+        true_pair_directed_probs,
+    )
+
+    original_ids = np.array([7, 3, 12, 7, 3])
+    session_switch = np.array([0, 2, 5])  # session 0: idx 0-1; session 1: 2-4
+    n = 5
+    prob_matrix = np.arange(n * n, dtype=float).reshape(n, n)
+
+    # unit 7: A index 0, B index 3 -> (prob[0, 3], prob[3, 0]).
+    assert true_pair_directed_probs(
+        prob_matrix, session_switch, original_ids, 7
+    ) == (3.0, 15.0)
+    # unit 3: A index 1, B index 4 -> (prob[1, 4], prob[4, 1]).
+    assert true_pair_directed_probs(
+        prob_matrix, session_switch, original_ids, 3
+    ) == (9.0, 21.0)
+    # unit 12 is only in B -> no true cross-session pair.
+    assert (
+        true_pair_directed_probs(prob_matrix, session_switch, original_ids, 12)
+        is None
+    )
+
+    # A column-vector original_ids (UnitMatchPy's per-session good_units
+    # shape) must resolve the same way, not broadcast into an (n, n) mask.
+    column_ids = original_ids.reshape(-1, 1)
+    assert true_pair_directed_probs(
+        prob_matrix, session_switch, column_ids, 7
+    ) == (3.0, 15.0)
