@@ -944,10 +944,11 @@ def _gate_float(name, scenario, value, threshold, comparison, detail) -> Gate:
 def _as_diagnostic(gate: Gate) -> Gate:
     """Relabel a computed count-based :class:`Gate` as a printed diagnostic.
 
-    G3a-count and G3b-count (the former G3a/G3b acceptance gates) keep their
-    computed value/detail for display, but :attr:`Gate.passed` is forced to
-    ``None`` -- they are no longer part of acceptance, superseded by
-    G3a-exact, G3a-prob and G3b-prob.
+    Used by G2 (S x S false-pair rate, unstable under UnitMatch's per-run
+    calibration), G3a-count and G3b-count (the former G3a/G3b acceptance
+    gates). Each keeps its computed value/detail for display, but
+    :attr:`Gate.passed` is forced to ``None`` -- they are no longer part of
+    acceptance, superseded by G3a-exact, G3a-prob and G3b-prob.
     """
     return Gate(
         f"{gate.name} (diagnostic, not gated)",
@@ -1242,10 +1243,10 @@ def non_s_bit_identical_halves(records, condition) -> dict[str, list[int]]:
     unit's bundle presence itself changing between the scenario and control
     run is exactly the kind of drift-out-induced difference this check (and
     the G3a-exact gate built on it) exists to catch. This quantifies how much
-    of the paired healthy comparison (G3a, G4) reflects an S-unit effect
-    versus resampling noise from SpikeInterface's shared per-analyzer RNG,
-    which can perturb a non-S unit's randomly chosen spike subset merely
-    because another unit's available spike count changed.
+    of the paired healthy comparison (G3a-count, G3a-prob, G4) reflects an
+    S-unit effect versus resampling noise from SpikeInterface's shared
+    per-analyzer RNG, which can perturb a non-S unit's randomly chosen spike
+    subset merely because another unit's available spike count changed.
 
     Returns
     -------
