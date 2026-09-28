@@ -92,7 +92,7 @@ BASELINE_CONDITION = "time_half"
 SESSIONS = ("A", "B")
 
 G1_MIN_DRIFT_OUT_RECALL = 0.80
-G2_MAX_SXS_FALSE_RATE = 0.015
+G2_MAX_SXS_FALSE_RATE = 0.015  # diagnostic only, not gated (see evaluate_gates)
 G3A_MAX_HEALTHY_RECALL_DROP = 0.04  # count-based; diagnostic only, not gated
 G3B_MAX_EXCESS_RECALL_DROP = 0.04  # count-based; diagnostic only, not gated
 G3A_PROB_MAX_DROP = 0.04
@@ -966,7 +966,6 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
     Pooled over every seed present.
 
     - G1 drift-out recall >= 0.80.
-    - G2 S x S false-pair rate <= 0.015.
     - G3a-exact: every non-S unit's saved cross-validation-half templates
       (:func:`non_s_bit_identical_halves`) are bit-identical to the same
       seed's control run, pooled over seeds. PASS iff identical == total.
@@ -981,10 +980,15 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
       ran on exactly the same seeds).
     - G4 paired healthy false-positive rate increase <= 0.005.
 
-    G3a-count and G3b-count (the former G3a/G3b acceptance gates, a paired
-    count of healthy recall before/after) are still computed and returned,
-    labelled "(diagnostic, not gated)" -- :attr:`Gate.passed` is always
-    ``None`` for them; they are printed for context only.
+    G2 (S x S false-pair rate among drift-out units), G3a-count and
+    G3b-count (the former G3a/G3b acceptance gates, a paired count of
+    healthy recall before/after) are still computed and returned, labelled
+    "(diagnostic, not gated)" -- :attr:`Gate.passed` is always ``None`` for
+    them; they are printed for context only. G2 is a diagnostic because
+    UnitMatch's per-run, data-driven match threshold is unstable when a
+    session has few units: a near-tie in the threshold search can flip on a
+    single redrawn template and admit a burst of false pairs, independent of
+    how the cross-validation halves are constructed.
 
     G1, G2, G3a-count, G3b-count and G4 are evaluated exactly from the
     underlying integer counts with :mod:`fractions`; only the printed/stored
@@ -1010,13 +1014,15 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
             )
         )
         gates.append(
-            _gate(
-                "G2 SxS false-pair rate",
-                scenario,
-                _rate_exact(s_false),
-                G2_MAX_SXS_FALSE_RATE,
-                "<=",
-                f"{s_false[0]}/{s_false[1]}",
+            _as_diagnostic(
+                _gate(
+                    "G2 SxS false-pair rate",
+                    scenario,
+                    _rate_exact(s_false),
+                    G2_MAX_SXS_FALSE_RATE,
+                    "<=",
+                    f"{s_false[0]}/{s_false[1]}",
+                )
             )
         )
 

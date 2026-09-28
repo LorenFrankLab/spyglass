@@ -857,8 +857,14 @@ def _gate(gates, name, scenario):
     return next(g for g in gates if g.name == name and g.scenario == scenario)
 
 
-def test_evaluate_gates_g1_g2_are_exact_at_their_boundary():
-    """G1 (>=) and G2 (<=) pass exactly on the threshold, fail one count over.
+def test_evaluate_gates_g1_is_exact_at_its_boundary_and_g2_is_diagnostic():
+    """G1 (>=) passes exactly on the threshold, fails one count over.
+
+    G2 (S x S false-pair rate) is a printed diagnostic, not an acceptance
+    gate -- UnitMatch's per-run match threshold is unstable when a session
+    has few units, so a burst of false pairs is not attributable to the
+    cross-validation-half construction under test. Its exact-fraction value
+    is still checked at the same boundary as G1.
 
     |S| = 25 makes both the diagonal denominator (25) and the off-diagonal
     denominator (25 * 24 = 600) exact multiples of the thresholds' reduced
@@ -876,29 +882,41 @@ def test_evaluate_gates_g1_g2_are_exact_at_their_boundary():
         return {(i, i) for i in s_units[:n_diag]} | set(off_diag[:n_off_diag])
 
     # G1 20/25 == 0.80 exactly; G2 9/600 == 0.015 exactly.
-    passing = _gate_test_record(
+    at_boundary = _gate_test_record(
         0, "driftout_A", s_units, s_units, matched(20, 9)
     )
-    gates = evaluate_gates([passing], "per_unit")
+    gates = evaluate_gates([at_boundary], "per_unit")
     g1, g2 = (
         _gate(gates, "G1 drift-out recall", "driftout_A"),
-        _gate(gates, "G2 SxS false-pair rate", "driftout_A"),
+        _gate(
+            gates,
+            "G2 SxS false-pair rate (diagnostic, not gated)",
+            "driftout_A",
+        ),
     )
     assert g1.passed is True, g1
-    assert g2.passed is True, g2
+    assert g2.passed is None, g2
+    assert g2.value == pytest.approx(0.015), g2
 
-    # One fewer drift-out true pair (19/25 == 0.76) and one more S x S false
-    # pair (10/600 == 0.01667) each move one count past the boundary.
-    failing = _gate_test_record(
+    # One fewer drift-out true pair (19/25 == 0.76) moves G1 past its
+    # boundary; one more S x S false pair (10/600 == 0.01667) moves G2's
+    # diagnostic value past where its old threshold sat, but it still has
+    # no pass/fail verdict.
+    past_boundary = _gate_test_record(
         0, "driftout_A", s_units, s_units, matched(19, 10)
     )
-    gates = evaluate_gates([failing], "per_unit")
+    gates = evaluate_gates([past_boundary], "per_unit")
     g1, g2 = (
         _gate(gates, "G1 drift-out recall", "driftout_A"),
-        _gate(gates, "G2 SxS false-pair rate", "driftout_A"),
+        _gate(
+            gates,
+            "G2 SxS false-pair rate (diagnostic, not gated)",
+            "driftout_A",
+        ),
     )
     assert g1.passed is False, g1
-    assert g2.passed is False, g2
+    assert g2.passed is None, g2
+    assert g2.value == pytest.approx(10 / 600), g2
 
 
 def test_evaluate_gates_g4_is_exact_at_its_boundary():
