@@ -725,8 +725,9 @@ def test_driftout_units_recovered_pooled(tmp_path):
             )
 
     gates = evaluate_gates(records, condition)
+    verdict = {True: "PASS", False: "FAIL", None: "N/A (not evaluated)"}
     table = "\n".join(
-        f"{'PASS' if g.passed else 'FAIL'} {g.name} [{g.scenario}]: "
+        f"{verdict[g.passed]} {g.name} [{g.scenario}]: "
         f"{g.value:.4f} {g.comparison} {g.threshold} ({g.detail})"
         for g in gates
     )
