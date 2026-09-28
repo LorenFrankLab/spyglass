@@ -1047,17 +1047,16 @@ def test_unitmatch_selection_accepts_curation_evaluation_committed_children(
             (CurationV2 & child).super_delete(warn=False)
 
 
-def _plant_two_unit_sort_on_first_member(grp):
-    """Plant a deterministic 2-unit mountainsort5 sort on member 0's recording.
+def _plant_sort_on_first_member(grp, sorter_params_name, samples_by_unit):
+    """Plant a deterministic mountainsort5 sort on member 0's recording.
 
-    The chronic fixture's sort yields a single unit; a real merge (or a real
-    proposed merge) needs >=2. A distinct params name gives a distinct
-    content-addressed sort on the SAME recording, so the planted sort shares
-    member 0's identity without colliding with the fixture's single-unit sort.
-    The sort is PLANTED (``_run_sorter`` monkeypatched), so the params are never
-    run; a real sorter name keeps the units ``sorted_units``. Returns
-    ``(two_unit_sort_key, sorted_unit_ids, sorter_params_name)``; the caller owns
-    teardown (clear_curations_for + dropping the sort/params).
+    Unit ``i`` fires at ``samples_by_unit[i]`` (frame indices). A distinct
+    params name gives a distinct content-addressed sort on the SAME recording,
+    so the planted sort shares member 0's identity without colliding with the
+    fixture's single-unit sort. The sort is PLANTED (``_run_sorter``
+    monkeypatched), so the params are never run; a real sorter name keeps the
+    units ``sorted_units``. Returns ``(sort_key, sorted_unit_ids)``; the caller
+    owns teardown (clear_curations_for + dropping the sort/params).
     """
     import numpy as np
     import spikeinterface as si
@@ -1071,7 +1070,6 @@ def _plant_two_unit_sort_on_first_member(grp):
     rec_id = SortingSelection.resolve_source(grp["sort_pks"][0]).key[
         "recording_id"
     ]
-    two_unit_params = "minirec_ms5_two_unit"
     default_ms5 = (
         SorterParameters
         & {"sorter": "mountainsort5", "sorter_params_name": _MINIREC_MS5_PARAMS}
@@ -1079,11 +1077,20 @@ def _plant_two_unit_sort_on_first_member(grp):
     SorterParameters.insert1(
         {
             "sorter": "mountainsort5",
-            "sorter_params_name": two_unit_params,
+            "sorter_params_name": sorter_params_name,
             "params": dict(default_ms5),
         },
         skip_duplicates=True,
         allow_duplicate_params=True,
+    )
+    samples = np.concatenate(
+        [np.asarray(unit, dtype=np.int64) for unit in samples_by_unit]
+    )
+    labels = np.concatenate(
+        [
+            np.full(len(unit), label, dtype=np.int32)
+            for label, unit in enumerate(samples_by_unit)
+        ]
     )
 
     def _plant(
@@ -1096,30 +1103,43 @@ def _plant_two_unit_sort_on_first_member(grp):
         execution_params=None,
         statistics_spans=None,
     ):
-        samples = np.array([500, 1000, 1500, 600, 1100, 1600], dtype=np.int64)
-        labels = np.array([0, 0, 0, 1, 1, 1], dtype=np.int32)
         return si.NumpySorting.from_samples_and_labels(
             samples_list=[samples],
             labels_list=[labels],
             sampling_frequency=recording.get_sampling_frequency(),
         )
 
-    two_unit_sort = SortingSelection.insert_selection(
+    sort_key = SortingSelection.insert_selection(
         {
             "recording_id": rec_id,
             "sorter": "mountainsort5",
-            "sorter_params_name": two_unit_params,
+            "sorter_params_name": sorter_params_name,
         }
     )
     mp = pytest.MonkeyPatch()
     try:
         mp.setattr(Sorting, "_run_sorter", staticmethod(_plant))
-        if not (Sorting & two_unit_sort):
-            Sorting.populate(two_unit_sort, reserve_jobs=False)
+        if not (Sorting & sort_key):
+            Sorting.populate(sort_key, reserve_jobs=False)
     finally:
         mp.undo()
     unit_ids = sorted(
-        int(u) for u in (Sorting.Unit & two_unit_sort).fetch("unit_id")
+        int(u) for u in (Sorting.Unit & sort_key).fetch("unit_id")
+    )
+    return sort_key, unit_ids
+
+
+def _plant_two_unit_sort_on_first_member(grp):
+    """Plant a deterministic 2-unit mountainsort5 sort on member 0's recording.
+
+    The chronic fixture's sort yields a single unit; a real merge (or a real
+    proposed merge) needs >=2. Returns
+    ``(two_unit_sort_key, sorted_unit_ids, sorter_params_name)``; the caller owns
+    teardown (clear_curations_for + dropping the sort/params).
+    """
+    two_unit_params = "minirec_ms5_two_unit"
+    two_unit_sort, unit_ids = _plant_sort_on_first_member(
+        grp, two_unit_params, [[500, 1000, 1500], [600, 1100, 1600]]
     )
     assert len(unit_ids) >= 2, "planted sort must yield >=2 units"
     return two_unit_sort, unit_ids, two_unit_params
