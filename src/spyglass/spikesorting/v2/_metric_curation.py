@@ -769,15 +769,17 @@ def rules_payloads_match(
 
     Compares the ``{master, rules}`` payloads built by
     ``AutoCurationRules._payload_for_compare`` for the idempotency guard.
-    Numbers are compared with ``math.isclose`` rather than ``==`` because the
-    ``Rule.threshold`` column is single precision: a threshold such as ``0.1``
-    round-trips from the database as ``0.10000000149...``, which is not
-    bit-equal to the freshly validated Python float. An exact comparison would
-    raise a spurious "different payload" error when re-inserting identical
-    rules (e.g. a second ``insert_default()`` run), breaking idempotency. The
-    default ``rel_tol`` comfortably exceeds float32 round-off (~6e-8) while
-    still distinguishing thresholds that differ by more than one part per
-    million.
+    Numbers are compared with ``math.isclose`` rather than ``==`` because rows
+    stored before the ``Rule.threshold`` column became ``double`` keep their
+    single-precision values: a threshold such as ``0.1`` stored while the
+    column was still ``float`` reads back as ``0.10000000149...`` after the
+    column is widened, which is not bit-equal to the freshly validated Python
+    float. An exact comparison would raise a spurious "different payload"
+    error when re-inserting identical rules against such a row (e.g. running
+    ``insert_default()`` after the documented column upgrade), breaking
+    idempotency. The default ``rel_tol`` comfortably exceeds float32
+    round-off (~6e-8) while still distinguishing thresholds that differ by
+    more than one part per million.
     """
     return _values_match(expected, stored, rel_tol=rel_tol, abs_tol=abs_tol)
 

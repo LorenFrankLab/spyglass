@@ -308,7 +308,7 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     metric_kwargs: blob             # dict[str, dict] per-metric kwargs
     template_metric_columns: blob   # list[str] of SI template output columns
     skip_pc_metrics=1: bool
-    observed_presence_bin_duration_s=60: float
+    observed_presence_bin_duration_s=60: double
     params_schema_version=2: int
     job_kwargs=null: blob
     """
@@ -488,7 +488,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         rule_name: varchar(64)
         metric_name: varchar(64)
         operator: enum('<', '<=', '>', '>=', '==', '!=')
-        threshold: float
+        threshold: double
         label: varchar(32)
         missing_policy='error': enum('error', 'fail', 'pass')
         """

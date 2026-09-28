@@ -434,6 +434,58 @@ def test_quality_metric_insert_rejects_duplicate_content(dj_conn):
 
 
 @pytest.mark.database
+def test_qmp_duplicate_content_detected_after_double_column(dj_conn):
+    """A fractional ``observed_presence_bin_duration_s`` still fingerprints
+    identically once fetched back, so a second name for the same content is
+    caught.
+
+    The QMP fingerprint hashes the stored value directly (not a tolerant
+    comparison), so a value read back with more digits than it was written
+    with -- e.g. ``0.10000000149011612`` for a row that stored a
+    single-precision ``0.1`` -- would no longer hash the same as an incoming
+    exact ``0.1`` and would defeat this guard. This particular value round-
+    trips losslessly through a plain insert/fetch even on a single-precision
+    column, because MySQL's ``FLOAT`` text output already renders the
+    shortest decimal that reproduces the stored value, which for ``0.1``
+    is ``"0.1"`` itself; that mismatch is only observed for values stored
+    before a column is altered from ``float`` to ``double`` in place (see
+    the migration rehearsal test, and the tolerance kept in
+    ``rules_payloads_match`` for ``AutoCurationRules.Rule.threshold``, which
+    goes through exactly that alter). This test still guards that a
+    fractional bin duration does not defeat duplicate-content detection.
+    """
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+    from spyglass.spikesorting.v2.metric_curation import (
+        QualityMetricParameters,
+    )
+
+    first = {
+        "metric_params_name": "bin_duration_fraction_a",
+        "metric_names": ["snr"],
+        "metric_kwargs": {"snr": {"peak_sign": "neg"}},
+        "template_metric_columns": [],
+        "skip_pc_metrics": True,
+        "observed_presence_bin_duration_s": 0.1,
+    }
+    dup = {**first, "metric_params_name": "bin_duration_fraction_b"}
+    keys = [
+        {"metric_params_name": first["metric_params_name"]},
+        {"metric_params_name": dup["metric_params_name"]},
+    ]
+    (QualityMetricParameters & keys).delete_quick()
+    try:
+        QualityMetricParameters().insert(first)
+        with pytest.raises(
+            DuplicateParameterContentError, match="duplicates the content"
+        ):
+            QualityMetricParameters().insert(dup)
+    finally:
+        (QualityMetricParameters & keys).delete_quick()
+
+
+@pytest.mark.database
 def test_duplicate_parameter_content_rejected(dj_conn):
     """A second name for an existing preproc blob is rejected by default."""
     from spyglass.spikesorting.v2.exceptions import (
