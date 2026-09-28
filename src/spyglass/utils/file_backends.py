@@ -454,9 +454,16 @@ class StoreBackend(FileBackend):
         # each pay a round trip. Safe against a revoked share: a file id is
         # not a capability, and the broker re-authorizes every content fetch.
         self._resolved = {}
+        # Brokers already warned about, so the notice is once per session.
+        self._warned_logged_out = set()
 
     def _client(self):
         """Return a broker client, or None if this instance has no broker.
+
+        An instance with no `store_url` is silent: most are attached to no
+        broker. One that has a broker but no token is warned about once per
+        session, since that is a configuration the user meant to finish and
+        would otherwise see only a file quietly resolving elsewhere.
 
         Returns
         -------
@@ -472,10 +479,14 @@ class StoreBackend(FileBackend):
             return None
 
         if not client.logged_in:
-            logger.debug(
-                "Shared store configured but not logged in; run "
-                + "`spyglass-store login` to read from it."
-            )
+            # Once per broker: `has` runs per file, so a bare warning would
+            # bury a populate over hundreds of them.
+            if client.base_url not in self._warned_logged_out:
+                self._warned_logged_out.add(client.base_url)
+                logger.warning(
+                    f"Shared store {client.base_url} is configured but not "
+                    + "logged in. Run `spyglass-store login` to read from it."
+                )
             return None
 
         return client

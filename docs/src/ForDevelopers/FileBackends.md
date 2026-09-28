@@ -251,7 +251,9 @@ Two more behaviors are worth knowing:
 
 - **An unconfigured instance holds nothing.** With no `store_url` set, or with
     the user not logged in, `has` returns `False` and the chain moves on. Most
-    instances are attached to no broker; that is not a misconfiguration.
+    instances are attached to no broker; that is not a misconfiguration. A
+    broker set but not logged in *is* half-finished, so that one warns — once
+    per session, since `has` runs per file.
 - **A refusal is indistinguishable from a miss.** The broker answers 404 both
     for "no such file" and for "none you may read" — saying otherwise would
     confirm a file exists to someone with no right to know — and `has` treats it

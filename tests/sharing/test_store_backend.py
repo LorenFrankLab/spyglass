@@ -26,6 +26,7 @@ def _client(**kwargs):
     defaults = dict(
         configured=True,
         logged_in=True,
+        base_url="https://store.example.org",
         find=lambda name=None, sha256=None: RECORD,
         content_url=lambda file_id: f"https://s.org/api/v1/file/{file_id}/content",
         auth_headers=lambda: {"Authorization": "Bearer tok"},
@@ -337,3 +338,32 @@ def test_a_local_query_failure_falls_back_to_the_name(backend, tmp_path):
             assert backend.has(str(target)) is True
 
     assert asked == [{"name": target.name}], "Did not fall back to the name"
+
+
+def test_a_configured_broker_with_no_login_warns_once(
+    backend, caplog, tmp_path
+):
+    """Silence would leave the user watching files resolve elsewhere.
+
+    Once per broker, because `has` runs per file and a populate walks
+    hundreds of them.
+    """
+    client = _client(logged_in=False)
+
+    with _with_client(client):
+        for i in range(5):
+            assert backend.has(str(tmp_path / f"{i}.nwb")) is False
+
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    said = [r.message for r in warnings if "spyglass-store login" in r.message]
+
+    assert len(said) == 1, f"Warned {len(said)} times"
+    assert "store.example.org" in said[0]
+
+
+def test_an_unconfigured_instance_stays_quiet(backend, caplog, tmp_path):
+    """Most instances are attached to no broker; that is not a problem."""
+    with _with_client(_client(configured=False, logged_in=False)):
+        assert backend.has(str(tmp_path / "a.nwb")) is False
+
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
