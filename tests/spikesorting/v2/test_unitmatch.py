@@ -729,6 +729,7 @@ def test_driftout_units_recovered_pooled(tmp_path):
         SCENARIOS,
         choose_drift_out_units,
         evaluate_gates,
+        format_gate_line,
         make_dataset,
         make_scenario_sessions,
         run_one,
@@ -755,12 +756,7 @@ def test_driftout_units_recovered_pooled(tmp_path):
             )
 
     gates = evaluate_gates(records, condition)
-    verdict = {True: "PASS", False: "FAIL", None: "N/A (not evaluated)"}
-    table = "\n".join(
-        f"{verdict[g.passed]} {g.name} [{g.scenario}]: "
-        f"{g.value:.4f} {g.comparison} {g.threshold} ({g.detail})"
-        for g in gates
-    )
+    table = "\n".join(format_gate_line(g) for g in gates)
     # Positive allowlist: a name-based exclusion would pass vacuously if
     # evaluate_gates silently dropped a scenario (e.g. pooled_counts,
     # pooled_paired_counts or pooled_true_pair_prob_drop returning None),

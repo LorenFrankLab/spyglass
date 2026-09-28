@@ -1303,6 +1303,26 @@ def _fmt_prior(fitted) -> str:
     return f"{fitted['match_class_prior']:.4f}" if fitted else "n/a"
 
 
+def format_gate_line(g: Gate) -> str:
+    """Render one ``Gate`` as a single printed line.
+
+    A diagnostic (``passed is None``) never prints ``value <= threshold`` --
+    that reads as an asserted comparison result, which it is not. It prints
+    the value next to the limit it is reported against instead, e.g.
+    ``0.0200 (limit 0.015, not gated)``. A gated ``Gate`` keeps the original
+    ``value <= threshold`` form, since that comparison was actually made.
+    """
+    verdict = {True: "PASS", False: "FAIL", None: "N/A"}[g.passed]
+    if g.passed is None:
+        comparison = f"(limit {g.threshold}, not gated)"
+    else:
+        comparison = f"{g.comparison} {g.threshold}"
+    return (
+        f"- {verdict} {g.name} [{g.scenario}]: {g.value:.4f} {comparison} "
+        f"({g.detail})"
+    )
+
+
 def format_summary(records, gates, fidelity) -> str:
     """Render pooled, per-seed, paired, gate and fidelity tables as markdown."""
     seeds = sorted({r["seed"] for r in records})
@@ -1431,11 +1451,7 @@ def format_summary(records, gates, fidelity) -> str:
     if not gates:
         lines.append("Not evaluated (no drift-out runs for this condition).")
     for g in gates:
-        verdict = {True: "PASS", False: "FAIL", None: "N/A"}[g.passed]
-        lines.append(
-            f"- {verdict} {g.name} [{g.scenario}]: {g.value:.4f} "
-            f"{g.comparison} {g.threshold} ({g.detail})"
-        )
+        lines.append(format_gate_line(g))
 
     lines += ["", "## Bundle fidelity (time_half vs per_unit)", ""]
     if not fidelity:
