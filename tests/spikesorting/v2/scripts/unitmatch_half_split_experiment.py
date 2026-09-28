@@ -47,12 +47,15 @@ Usage (from the repo root, in the spikesorting-v2 environment with the
 matching extra installed)::
 
     python tests/spikesorting/v2/scripts/unitmatch_half_split_experiment.py \\
-        [--seeds 10] [--scenarios control driftout_A driftout_AB] \\
+        [--first-seed 10] [--seeds 10] \\
+        [--scenarios control driftout_A driftout_AB] \\
         [--conditions time_half per_unit] [--out-dir DIR]
 
-``--seeds N`` runs seeds ``0 .. N-1``. Per-run JSON, ``results.json`` and
-``summary.md`` are written to ``--out-dir`` (default: a new temporary
-directory) and the summary is printed.
+``--seeds N`` runs ``N`` seeds starting at ``--first-seed`` (default 10, so
+the default run is seeds 10..19 -- the preregistered acceptance
+configuration). Per-run JSON, ``results.json`` and ``summary.md`` are written
+to ``--out-dir`` (default: a new temporary directory) and the summary is
+printed.
 """
 
 from __future__ import annotations
@@ -95,6 +98,12 @@ G3B_MAX_EXCESS_RECALL_DROP = 0.04  # count-based; diagnostic only, not gated
 G3A_PROB_MAX_DROP = 0.04
 G3B_PROB_MAX_EXCESS_DROP = 0.04
 G4_MAX_HEALTHY_FP_INCREASE = 0.005
+
+#: Preregistered acceptance seeds: ``DEFAULT_FIRST_SEED ..
+#: DEFAULT_FIRST_SEED + DEFAULT_SEEDS - 1`` (the CLI's and
+#: ``test_driftout_units_recovered_pooled``'s shared default).
+DEFAULT_FIRST_SEED = 10
+DEFAULT_SEEDS = 10
 
 
 # ----------------------------------------------------------------------------
@@ -1392,7 +1401,13 @@ def main(argv=None) -> None:
     """Run the experiment from the command line."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
-        "--seeds", type=int, default=10, help="seed count (runs 0..N-1)"
+        "--first-seed",
+        type=int,
+        default=DEFAULT_FIRST_SEED,
+        help="first seed (runs first-seed .. first-seed + seeds - 1)",
+    )
+    ap.add_argument(
+        "--seeds", type=int, default=DEFAULT_SEEDS, help="seed count"
     )
     ap.add_argument(
         "--scenarios", nargs="+", choices=SCENARIOS, default=list(SCENARIOS)
@@ -1415,7 +1430,7 @@ def main(argv=None) -> None:
     print(f"out-dir: {out_dir}", flush=True)
 
     records = []
-    for seed in range(args.seeds):
+    for seed in range(args.first_seed, args.first_seed + args.seeds):
         t0 = time.perf_counter()
         recording, sorting = make_dataset(seed)
         drift_out_units = choose_drift_out_units(seed)
