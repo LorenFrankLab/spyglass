@@ -1,0 +1,30 @@
+# Minimal Spyglass Environment - Core Dependencies Only
+# 1. Install: `mamba env create -f environment_min.yml`
+# 2. Activate: `conda activate spyglass`
+# 3. For full features, use environment.yml instead
+#
+# This environment includes only the essential dependencies needed for basic
+# spyglass functionality. Optional dependencies for specific pipelines
+# (LFP analysis, spike sorting, etc.) are excluded.
+
+name: spyglass
+channels:
+  - conda-forge
+  - franklab
+  - edeno
+dependencies:
+  # Core Python scientific stack
+  - python>=3.10,<3.13
+  - pip
+  - numpy
+  - matplotlib
+  - bottleneck
+  - seaborn
+
+  # Core Jupyter environment for notebooks
+  - jupyterlab>=3.*
+  - ipympl
+
+  # Essential spyglass dependencies (installed via pip for development mode)
+  - pip:
+      - ..

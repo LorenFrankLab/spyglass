@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 
+@pytest.mark.very_slow
 def test_fetch_results(clusterless_pop, result_coordinates):
     results = clusterless_pop.fetch_results()
     assert result_coordinates.issubset(
@@ -19,6 +20,7 @@ def test_fetch_model(clusterless_pop):
     ), "Model is not ClusterlessDetector"
 
 
+@pytest.mark.slow
 def test_fetch_environments(clusterless_pop, clusterless_key):
     from non_local_detector.environment import Environment
 
@@ -33,6 +35,7 @@ def test_fetch_linearized_position(clusterless_pop, clusterless_key):
 
 
 # NOTE: Impacts spikesorting merge tests
+@pytest.mark.slow
 def test_fetch_spike_by_interval(decode_v1, clusterless_pop, clusterless_key):
     begin, end = decode_v1.clusterless._get_interval_range(clusterless_key)
     spikes = clusterless_pop.fetch_spike_data(
@@ -47,6 +50,7 @@ def test_get_orientation_col(clusterless_pop):
     assert ret == "orientation", "Orientation column not found"
 
 
+@pytest.mark.slow
 def test_get_firing_rate(
     common, decode_interval, clusterless_pop, clusterless_key
 ):
@@ -57,6 +61,7 @@ def test_get_firing_rate(
     assert rate.shape == (2, 1), "Incorrect firing rate shape"
 
 
+@pytest.mark.very_slow
 def test_clusterless_estimated(clusterless_pop_estimated, result_coordinates):
     results = clusterless_pop_estimated.fetch_results()
     assert result_coordinates.issubset(
@@ -70,9 +75,9 @@ def test_get_ahead(clusterless_pop):
     assert dist is not None, "Distance is None"
 
 
-def test_insert_existing_group(caplog, group_unitwave):
+def test_insert_existing_group(group_unitwave):
     file, group = group_unitwave.fetch1(
         "nwb_file_name", "waveform_features_group_name"
     )
-    group_unitwave.create_group(file, group, ["dummy_data"])
-    assert "already exists" in caplog.text, "No warning issued."
+    ret = group_unitwave.create_group(file, group, ["dummy_data"])
+    assert ret is None, "Duplicate create_group should return None."

@@ -1,5 +1,4 @@
 import warnings
-from os import environ as os_environ
 from typing import Dict, List
 
 import datajoint as dj
@@ -48,7 +47,12 @@ def get_group_by_shank(
     ).fetch()
 
     e_groups = list(np.unique(electrodes["electrode_group_name"]))
-    e_groups.sort(key=int)  # sort electrode groups numerically
+    try:
+        e_groups.sort(key=int)  # sort electrode groups numerically
+    except ValueError:
+        # electrode group names are not all numeric (e.g. "probe1_shank1");
+        # fall back to lexicographic ordering
+        e_groups.sort()
 
     sort_group = 0
     sg_keys, sge_keys = list(), list()
@@ -76,7 +80,7 @@ def get_group_by_shank(
 
             if references:  # Use 'references' if passed
                 sort_ref_id = references.get(e_group, None)
-                if not sort_ref_id:
+                if sort_ref_id is None:
                     raise Exception(
                         f"electrode group {e_group} not a key in "
                         + "references, so cannot set reference"

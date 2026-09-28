@@ -224,6 +224,10 @@ disk. There are several tables that retain lists of files that have been
 generated during analyses. If someone deletes analysis entries, files will still
 be on disk.
 
+**NOTE**: This means that directories like analysis and recording are managed
+resources. Adding files to these directories outside of Spyglass will not
+automatically register them in the database, and they will be deleted.
+
 Additionally, there are key tables such as `IntervalList` and `AnalysisNwbfile`,
 which are used to store entries created by downstream tables. These entries are
 not always deleted when the downstream entry is removed, creating 'orphans'.
@@ -240,7 +244,178 @@ removing all `IntervalList` orphan entries with each delete call.
 
 Similar orphan cleanups for `Nwbfile`, `AnalysisNwbfile`, `SpikeSorting`, and
 `DecodingOutput` are not as critical and can be run less frequently.
-[this script](https://github.com/LorenFrankLab/spyglass/blob/master/maintenance_scripts/run_jobs.sh)
-in our cron jobs. See
-[this README](https://github.com/LorenFrankLab/spyglass/blob/master/maintenance_scripts/README.md)
-for additional information on how to set up cron jobs.
+
+### Automated Cleanup (Admin)
+
+For database administrators, Spyglass provides automated cleanup scripts
+designed to run as cron jobs. These scripts handle all cleanup operations
+including orphan detection, external file deletion, and temp directory cleanup.
+
+**Location**: `maintenance_scripts/`
+
+**Key Scripts**:
+
+- `cleanup.py` - Main cleanup script that performs:
+    - Table cleanups (`Nwbfile`, `AnalysisNwbfile`, `SpikeSorting`,
+        `DecodingOutput`, `SpikeSortingRecording`)
+    - External file deletion (unreferenced files)
+    - Temp directory cleanup (files older than 7 days)
+    - Version table updates (fetches latest from PyPI)
+- `run_jobs.sh` - Orchestration script that:
+    - Updates Spyglass repository from master branch
+    - Runs database connection check
+    - Executes `cleanup.py`
+    - Manages logging and notifications
+- `check_disk_space.sh` - Monitors disk usage and sends alerts
+
+**Setup**:
+
+1. Configure environment variables in `maintenance_scripts/.env`:
+
+    ```bash
+    SPYGLASS_BASE_PATH=/path/to/data
+    SPYGLASS_CONDA_ENV=spyglass
+    SPYGLASS_REPO_PATH=/path/to/spyglass
+    SPYGLASS_LOG=/path/to/cleanup.log
+    # Optional: email/slack notifications
+    ```
+
+2. Set up cron jobs (edit with `crontab -e`):
+
+    ```bash
+    # Run cleanup every Monday at 4:00 AM
+    0 4 * * 1 /path/to/spyglass/maintenance_scripts/run_jobs.sh
+
+    # Check disk space daily at 8:00 AM
+    0 8 * * * /path/to/spyglass/maintenance_scripts/check_disk_space.sh
+    ```
+
+**Email/Slack Notifications**: The scripts can send notifications on errors or
+disk space issues. See
+[maintenance_scripts/README.md](https://github.com/LorenFrankLab/spyglass/blob/master/maintenance_scripts/README.md)
+for detailed setup instructions.
+
+### Manual Cleanup (Programmatic)
+
+For one-off cleanup operations or testing, you can run cleanup methods directly
+from Python. This is useful for debugging or when automated scripts aren't
+appropriate.
+
+```python
+from spyglass.common import Nwbfile, AnalysisNwbfile
+from spyglass.spikesorting.v0 import SpikeSorting, SpikeSortingRecording
+from spyglass.decoding import DecodingOutput
+
+# Cleanup operations
+Nwbfile().cleanup()  # Remove unreferenced raw NWB files
+AnalysisNwbfile().cleanup()  # Remove orphaned analysis files (see below)
+SpikeSorting().cleanup(verbose=False)  # Remove unreferenced sorting directories
+SpikeSortingRecording().cleanup(verbose=False)  # Remove untracked folders
+DecodingOutput().cleanup()  # Remove unreferenced .nc and .pkl files
+```
+
+**Analysis File Cleanup**: See dedicated section below for details on
+coordinated cleanup across common and custom `AnalysisNwbfile` tables.
+
+______________________________________________________________________
+
+## Analysis File Cleanup
+
+Spyglass provides a cleanup system for managing analysis NWB files across both
+the common `AnalysisNwbfile` table and team-specific custom tables. This system
+detects and removes orphaned files that are no longer referenced by any
+downstream tables.
+
+**Note**: For automated cleanup as part of cron jobs, see "Automated Cleanup
+(Admin)" section above. This section covers the programmatic API for manual or
+scripted cleanup.
+
+### Overview
+
+The cleanup system handles:
+
+- **Orphaned files**: Files with no downstream foreign key references
+- **Uninserted files**: Files created but never added to tables
+- **Multi-table coordination**: Works across common and all custom
+    `AnalysisNwbfile` tables
+- **Empty files**: Old, untracked NWB files with 0 bytes are removed
+
+### Running Cleanup
+
+Use the common `AnalysisNwbfile` table to clean up all analysis files:
+
+```python
+from spyglass.common import AnalysisNwbfile
+
+# Preview cleanup across all tables (common + custom)
+AnalysisNwbfile().cleanup(dry_run=True)
+
+# Apply the cleanup after reviewing the dry-run output
+AnalysisNwbfile().cleanup(dry_run=False)
+```
+
+The dry run reports aggregate target counts and logical candidate bytes rather
+than a per-path manifest.
+
+**Important**: Cleanup automatically coordinates across all custom
+`AnalysisNwbfile` tables. A file is only deleted if it's not referenced by ANY
+table (common or custom).
+
+**Warning**: This is a destructive operation that permanently deletes files.
+Ensure you have backups before running cleanup on production databases. This
+operation treats the analysis directory as a managed resource.
+
+### How It Works
+
+Cleanup discovers common and custom analysis tables, snapshots tracked paths
+once, scans the filesystem, validates the complete deletion plan, and unlinks
+the candidates. It next removes orphan rows and unused DataJoint external
+entries. Files made orphaned by that database phase are handled on the next run.
+
+### Safety Features
+
+- **Tracked and recent files are retained**: tracked paths are fetched once
+    across all registered common and custom tables. Files newer than
+    `min_file_age_hours` (default 24), based on target modification time, are
+    deferred and reported. Pass `min_file_age_hours=0` only for intentional
+    immediate cleanup. This age gate applies to the `*.nwb` filesystem sweep,
+    not DataJoint's custom-table external cleanup later in the run.
+- **Deletion limits catch a wrong directory or large unexpected backlog**:
+    destructive cleanup refuses a plan above `max_delete_fraction` (default
+    0.9) or `max_delete_to_tracked_ratio` (default 10.0). These limits apply to
+    untracked or empty analysis NWB files; foreign keys continue to govern
+    orphan-row deletion.
+- **Leaf symlinks reclaim cross-volume analysis storage**: an old, untracked
+    `*.nwb` leaf symlink authorizes deletion of both its recorded regular-file
+    target and the link. Dangling links lose only the link. Directory symlinks
+    are **not** traversed (`followlinks=False`): cleanup deletes files, so it
+    must not follow a symlinked subdirectory out of `analysis_dir` into an
+    unrelated store. Only leaf `*.nwb` symlinks are eligible, and a symlinked
+    `analysis_dir` root is still scanned.
+- **The analysis directory is trusted**: cleanup intentionally follows the
+    normal Spyglass snapshot-and-delete model rather than defending against
+    concurrent filesystem or database changes. A leaf `*.nwb` symlink below
+    `analysis_dir` can authorize deletion outside that directory, including
+    beneath another configured store, because there is no protected-store
+    denylist. Restrict write access to the analysis tree and do not run
+    cleanup concurrently with analysis writers or registration.
+- **Insert blocking refuses ambiguous ownership**: cleanup checks registered
+    analysis tables for existing blockers before proceeding; a destructive run
+    then installs temporary `BEFORE INSERT` triggers. If a blocker already
+    exists, previews and destructive runs both refuse because they cannot tell
+    whether another cleanup is active or the trigger is stale. First
+    confirm that no cleanup is running; only then inspect the triggers and use
+    `AnalysisRegistry().unblock_new_inserts()` if every blocking trigger is
+    stale. That helper removes all registered analysis blocking triggers.
+
+**Concurrency limit**: the trigger check is not a database-wide cleanup lease,
+and triggers do not carry per-run ownership. Do not overlap cleanup runs.
+The tracked-path and filesystem snapshots can also become stale before unlink,
+so do not concurrently register or mutate eligible analysis paths.
+
+### Custom Tables
+
+If you've created custom `AnalysisNwbfile` tables (see
+[Custom Analysis Files](./CustomAnalysisFiles.md)), cleanup works automatically.
+No special configuration needed - just run cleanup on the common table and it
+handles all custom tables.

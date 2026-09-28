@@ -32,7 +32,7 @@ class DLCOrientationParams(SpyglassMixin, dj.Manual):
     """
     Params for determining and smoothing the orientation of a set of BodyParts
 
-    Parameters
+    Attributes
     ----------
     dlc_orientation_params_name : str
         Name for this set of parameters

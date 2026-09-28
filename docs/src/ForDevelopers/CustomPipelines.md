@@ -148,6 +148,8 @@ downstream analysis is selective to an analysis result, you might add a `result`
 field to the analysis table, and store various results associated with that
 analysis in a part table.
 
+#### Table Example
+
 Example analysis table:
 
 ```python
@@ -158,6 +160,7 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     -> IntervalList
+    data_object_id: varchar(40)
     """
 
     class MyAnalysisPart(SpyglassMixin, dj.Part):
@@ -179,28 +182,35 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
         interval = (IntervalList & key).fetch_interval()
         interval = interval.intersect(params["valid_times"])
         interval.name = my_new_name
-        analysis_file_name = AnalysisNwbfile.create(key, data)
+        test_data = [[1, 2, 3], [4, 5, 6]]
+        with self.analysis_table.build(nwb_file_name) as builder:
+            # store results in file
+            data_id = builder.add_nwb_object(test_data, "test")
+
         # 3. Insert results
         IntervalList.insert1(interval.as_dict)
         self.insert1(
             {
                 **key,
-                **interval.primary_key
-                "analysis_file_name": analysis_file_name,
+                **interval.primary_key,
+                "analysis_file_name": builder.analysis_file_name,
+                "data_object_id": data_id,
             }
         )
         self.MyAnalysisPart.insert1({**key, "result": 1})
 ```
 
-In general, `make` methods have three steps:
+### Make Method
 
-1. Collect inputs: fetch the relevant parameters and data.
-2. Run analysis: run the analysis on the inputs.
-3. Insert results: insert the results into the relevant tables.
+In general, `make` methods have three steps: collect inputs, run analysis, and
+insert results. For long-running computations, holding a DataJoint transaction
+open for the full duration can block collaborators. Spyglass supports an
+explicit three-method split (`make_fetch`, `make_compute`, `make_insert`) that
+keeps only the database write inside a transaction. See
+[Populate and Long-Running Computations](../Features/Populate.md) for the full
+pattern, rules, and a migration guide.
 
-DataJoint has protections in place to ensure that `populate` calls are treated
-as a single transaction, but separating these steps supports debugging and
-testing.
+### Time Intervals
 
 To facilitate operations on the time intervals, the `IntervalList` table has a
 `fetch_interval` method that returns the relevant `valid_times` as an `Interval`
@@ -383,15 +393,15 @@ unsure about relevant methods, please open a GitHub discussion.
 
 [^1]: For example, `externalpackage.analysis_func` renames `param_name` to
     `param_rename` in version 2.0, and adjusts the functionality to handle new
-    cases. You can either (a) run an `if/then` against the package version, and
-    rename the parameters in the relevant case(s), or (b) alter the table
+    cases. You can either (a) run an `if/then` against the package version,
+    and rename the parameters in the relevant case(s), or (b) alter the table
     definition to add a new nullable secondary field `param_rename=NULL` and
     declare new paramsets for new versions of the package.
 
 [^2]: `blob`s are MySQL-native data types, and come in
-    [various sizes](https://dev.mysql.com/doc/refman/8.0/en/blob.html). For best
-    results, select the smallest size that will fit your data. `tinyblob` is 255
-    bytes, `blob` is 64KB, `mediumblob` is 16MB, and `longblob` is 4GB.
+    [various sizes](https://dev.mysql.com/doc/refman/8.0/en/blob.html). For
+    best results, select the smallest size that will fit your data. `tinyblob`
+    is 255 bytes, `blob` is 64KB, `mediumblob` is 16MB, and `longblob` is 4GB.
 
 [^3]: See `spyglass.lfp.lfp_electrode.LFPElectrodeGroup` for an example of
     grouping electrodes into a collection.

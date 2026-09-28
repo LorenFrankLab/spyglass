@@ -21,7 +21,7 @@ schema = dj.schema("decoding_waveform_features")
 class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
     """Defines types of waveform features computed for a given spike time.
 
-    Parameters
+    Attributes
     ----------
     features_param_name : str
         Name of the waveform features parameters.

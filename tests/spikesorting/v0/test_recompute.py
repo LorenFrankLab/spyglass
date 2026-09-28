@@ -18,6 +18,7 @@ def recomp_module(pop_rec_v0):
     return recompute
 
 
+@pytest.mark.slow
 def test_recompute(pop_rec_v0):
     key = pop_rec_v0.fetch(as_dict=True)[0]
     path = key["recording_path"]
@@ -64,6 +65,7 @@ def recomp_repop(pop_rec_v0, recomp_selection, recomp_tbl):
     yield recomp_tbl
 
 
+@pytest.mark.slow
 def test_recompute_env(recomp_repop):
     """Test recompute match"""
 
@@ -71,10 +73,13 @@ def test_recompute_env(recomp_repop):
     assert ret, "Recompute failed"
 
 
-def test_selection_restr(recomp_repop, user_env_tbl, recomp_selection):
+def test_selection_restr(recomp_repop, recomp_selection):
     """Test that the selection env restriction works."""
     _ = recomp_repop  # Ensure recompute repop is used to load the recording
-    env_dict = user_env_tbl.this_env
+    # Use recomp_selection.env_dict (same source as this_env) for consistency.
+    # user_env_tbl.this_env is a cached_property that can become stale in full
+    # suite runs due to class-level _pip_custom dict contamination across tests.
+    env_dict = recomp_selection.env_dict
     manual_restr = recomp_selection & env_dict
     assert len(recomp_selection.this_env) == len(
         manual_restr
@@ -93,3 +98,12 @@ def test_get_disk_space(recomp_tbl):
     """Test get_disk_space."""
     space = recomp_tbl.get_disk_space(restr=True)
     assert "Total:" in space, "Disk space retrieval failed"
+
+
+@pytest.mark.slow
+def test_recheck(recomp_tbl, recomp_repop):
+    """Test recheck method."""
+    _ = recomp_repop  # Ensure recompute populated
+    key = recomp_tbl.fetch("KEY")[0]
+    result = recomp_tbl.recheck(key)
+    assert result, "Recheck failed"

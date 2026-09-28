@@ -80,11 +80,13 @@ def test_trodes_pose_df_error(trodes_pos_v1):
         trodes_pos_v1.fetch_pose_dataframe()
 
 
+@pytest.mark.slow
 def test_trodes_fetch_video_path(trodes_pos_v1):
     video_path = (trodes_pos_v1 & dj.Top(limit=1)).fetch_video_path()
     assert Path(video_path).exists(), "Failed to fetch video path"
 
 
+@pytest.mark.slow
 def test_trodes_video(sgp, trodes_pos_v1):
     _ = trodes_pos_v1  # ensure table is populated
     vid_tbl = sgp.v1.TrodesPosVideo()

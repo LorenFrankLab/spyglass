@@ -1,34 +1,33 @@
 import warnings
 
 import datajoint as dj
-import ndx_franklab_novela
 import numpy as np
 import pandas as pd
 import pynwb
 
 from spyglass.common.common_device import Probe  # noqa: F401
 from spyglass.common.common_filter import FirFilterParameters
-from spyglass.common.common_interval import interval_list_censor  # noqa: F401
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import test_mode
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
+from spyglass.utils.mixins.ingestion import IngestionEntries
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_config,
-    get_data_interface,
     get_electrode_indices,
     get_nwb_file,
     get_valid_intervals,
+    is_nwb_obj_type,
 )
 
 schema = dj.schema("common_ephys")
 
 
 @schema
-class ElectrodeGroup(SpyglassMixin, dj.Imported):
+class ElectrodeGroup(SpyglassIngestion, dj.Imported):
     definition = """
     # Grouping of electrodes corresponding to a physical probe.
     -> Session
@@ -40,39 +39,47 @@ class ElectrodeGroup(SpyglassMixin, dj.Imported):
     target_hemisphere = "Unknown": enum("Right", "Left", "Unknown")
     """
 
-    def make(self, key):
-        """Make without transaction
+    _source_nwb_object_type = pynwb.ecephys.ElectrodeGroup
 
-        Allows populate_all_common to work within a single transaction."""
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        for electrode_group in nwbf.electrode_groups.values():
-            key["electrode_group_name"] = electrode_group.name
-            # add electrode group location if it not exist, and fetch the row
-            key["region_id"] = BrainRegion.fetch_add(
-                region_name=electrode_group.location
-            )
-            if isinstance(electrode_group.device, ndx_franklab_novela.Probe):
-                key["probe_id"] = electrode_group.device.probe_type
-            key["description"] = electrode_group.description
-            if isinstance(
-                electrode_group, ndx_franklab_novela.NwbElectrodeGroup
-            ):
-                # Define target_hemisphere based on targeted x coordinate
-                if (
-                    electrode_group.targeted_x >= 0
-                ):  # if positive or zero x coordinate
-                    # define target location as right hemisphere
-                    key["target_hemisphere"] = "Right"
-                else:  # if negative x coordinate
-                    # define target location as left hemisphere
-                    key["target_hemisphere"] = "Left"
-            self.insert1(key, skip_duplicates=True, allow_direct_insert=True)
+    @property
+    def table_key_to_obj_attr(self):
+        """Mapping of table keys to NWB object attributes."""
+        return {
+            "self": {
+                "electrode_group_name": "name",
+                "description": "description",
+                "region_id": self.fetch_add_brain_region,
+                "target_hemisphere": self.hemisphere_from_targeted_x,
+                "probe_id": self.device_probe_type_default_none,
+            },
+        }
+
+    def device_probe_type_default_none(self, nwb_obj):
+        if not (device := getattr(nwb_obj, "device", None)):
+            return None
+        return getattr(device, "probe_type", None)
+
+    def fetch_add_brain_region(self, nwb_obj):
+        """Fetch or add the brain region from the NWB object."""
+        region_name = nwb_obj.location
+        return BrainRegion.fetch_add(region_name=region_name)
+
+    def hemisphere_from_targeted_x(self, nwb_obj):
+        """Determine hemisphere from targeted_x coordinate."""
+        targeted_x = getattr(nwb_obj, "targeted_x", None)
+        if targeted_x is not None:
+            return "Right" if float(targeted_x) >= 0 else "Left"
+        return "Unknown"
+
+    def make(self, key):
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "ElectrodeGroup.make is deprecated. Use insert_from_nwbfile."
+        )
 
 
 @schema
-class Electrode(SpyglassMixin, dj.Imported):
+class Electrode(SpyglassIngestion, dj.Imported):
     definition = """
     -> ElectrodeGroup
     electrode_id: int                      # the unique number for this electrode
@@ -93,186 +100,173 @@ class Electrode(SpyglassMixin, dj.Imported):
     contacts: varchar(200)                  # label of electrode contacts used for a bipolar signal - current workaround
     """
 
-    def make(self, key):
-        """Populate the Electrode table with data from the NWB file.
+    _single_entry_per_table = False
 
-        - Uses the electrode table from the NWB file.
-        - Adds the region_id from the BrainRegion table.
-        - Uses novela Probe.Electrode if available.
-        - Overrides with information from the config YAML based on primary key
-        """
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        config = get_config(nwb_file_abspath, calling_table=self.camel_name)
+    _source_nwb_object_type = pynwb.ecephys.ElectrodesTable
 
-        if "Electrode" in config:
-            electrode_config_dicts = {
-                electrode_dict["electrode_id"]: electrode_dict
-                for electrode_dict in config["Electrode"]
-            }
-        else:
-            electrode_config_dicts = dict()
-
-        electrode_constants = {
-            "x_warped": 0,
-            "y_warped": 0,
-            "z_warped": 0,
-            "contacts": "",
+    @property
+    def table_key_to_obj_attr(self):
+        """Mapping of table keys to NWB object attributes."""
+        return {
+            "self": {
+                "electrode_id": self.index_to_int,
+                "name": self.index_to_str,
+                "x": ("x", None),
+                "y": ("y", None),
+                "z": ("z", None),
+                "filtering": ("filtering", "unfiltered"),
+                "impedance": ("imp", None),
+                "x_warped": self.fixed_to_zero,
+                "y_warped": self.fixed_to_zero,
+                "z_warped": self.fixed_to_zero,
+                "contacts": self.fixed_to_empty_str,
+                "region_id": self.fetch_add_brain_region,
+                "electrode_group_name": "group_name",
+                # non-default columns
+                "probe_shank": ("probe_shank", None),
+                "probe_electrode": ("probe_electrode", None),
+                "original_reference_electrode": ("ref_elect_id", -1),
+                "bad_channel": self.bad_channel_as_string,
+            },
+            "group": {
+                "probe_id": self.device_probe_type_default_none,
+            },
         }
 
-        electrode_inserts = []
-        electrodes = nwbf.electrodes.to_dataframe()
+    def bad_channel_as_string(self, nwb_obj):
+        bad_channel = getattr(nwb_obj, "bad_channel", False)
+        return "True" if bad_channel else "False"
 
-        # Keep a dict of region IDs to avoid multiple fetches
-        region_ids_dict = dict()
+    def fixed_to_zero(self, nwb_obj):
+        return 0
 
-        for elect_id, elect_data in electrodes.iterrows():
-            region_name = elect_data.group.location
-            if region_name not in region_ids_dict:
-                # Only fetch if not already fetched
-                region_ids_dict[region_name] = BrainRegion.fetch_add(
-                    region_name=region_name
-                )
-            key.update(
-                {
-                    "electrode_id": elect_id,
-                    "name": str(elect_id),
-                    "electrode_group_name": elect_data.group_name,
-                    "region_id": region_ids_dict[region_name],
-                    "x": elect_data.get("x"),
-                    "y": elect_data.get("y"),
-                    "z": elect_data.get("z"),
-                    "filtering": elect_data.get("filtering", "unfiltered"),
-                    "impedance": elect_data.get("imp"),
-                    **electrode_constants,
-                }
+    def fixed_to_empty_str(self, nwb_obj):
+        return ""
+
+    def index_to_str(self, nwb_obj):
+        return str(nwb_obj[0])
+
+    def index_to_int(self, nwb_obj):
+        return nwb_obj[0]
+
+    def fetch_add_brain_region(self, nwb_obj):
+        """Fetch or add the brain region from the NWB object."""
+        region_name = nwb_obj.group.location
+        return BrainRegion.fetch_add(region_name=region_name)
+
+    def device_probe_type_default_none(self, nwb_obj):
+        """Fetch the probe type from the NWB object."""
+        if not (device := getattr(nwb_obj, "device", None)):
+            return None
+        return getattr(device, "probe_type", None)
+
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """Return the electrodes DynamicTable from the NWB file."""
+        if nwb_file.electrodes is not None:
+            return [nwb_file.electrodes]
+        return []
+
+    _cached_config = None
+
+    def insert_from_nwbfile(
+        self,
+        nwb_file_name: str,
+        config: dict = None,
+        dry_run: bool = False,
+    ):
+        """Insert Electrode entries from NWB file, using config for overrides."""
+        self._cached_config = config
+        try:
+            return_val = super().insert_from_nwbfile(
+                nwb_file_name, config, dry_run
             )
+        finally:
+            self._cached_config = None
+        return return_val
 
-            # rough check of whether the electrodes table was created by
-            # rec_to_nwb and has the appropriate custom columns used by
-            # rec_to_nwb
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None
+    ) -> IngestionEntries:
+        """Generates a list of table entries from an NWB object.
 
-            # TODO this could be better resolved by making an extension for the
-            # electrodes table
+        Overrides Base to allow integrating info from config YAML for non-default columns.
+        """
+        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
 
-            extra_cols = [
-                "probe_shank",
-                "probe_electrode",
-                "bad_channel",
-                "ref_elect_id",
+        if (self._cached_config is None) or not (
+            electrode_config := self._cached_config.get("Electrode", None)
+        ):
+            return entries
+        # map electrode id to dictof electrode information from config YAML
+        for entry in entries.get(self, []):
+            matching_configs = [
+                e
+                for e in electrode_config
+                if e["electrode_id"] == entry["electrode_id"]
             ]
-            if isinstance(
-                elect_data.group.device, ndx_franklab_novela.Probe
-            ) and all(col in elect_data for col in extra_cols):
-                key.update(
-                    {
-                        "probe_id": elect_data.group.device.probe_type,
-                        "probe_shank": elect_data.probe_shank,
-                        "probe_electrode": elect_data.probe_electrode,
-                        "bad_channel": (
-                            "True" if elect_data.bad_channel else "False"
-                        ),
-                        "original_reference_electrode": elect_data.ref_elect_id,
-                    }
-                )
-            else:
-                logger.warning(
-                    "Electrode did not match extected novela format.\nPlease "
-                    + f"ensure the following in YAML config: {extra_cols}."
-                )
-
-            # override with information from the config YAML based on primary
-            # key (electrode id)
-
-            if elect_id in electrode_config_dicts:
-                # check whether the Probe.Electrode being referenced exists
-                query = Probe.Electrode & electrode_config_dicts[elect_id]
-                if len(query) == 0:
+            if matching_configs:
+                cfg = matching_configs[0]
+                probe_fk = {
+                    k: cfg.get(k)
+                    for k in ("probe_id", "probe_shank", "probe_electrode")
+                    if k in cfg
+                }
+                if probe_fk and len(Probe.Electrode & probe_fk) == 0:
                     warnings.warn(
                         "No Probe.Electrode exists that matches the data: "
-                        + f"{electrode_config_dicts[elect_id]}. "
-                        "The config YAML for Electrode with electrode_id "
-                        + f"{elect_id} will be ignored."
+                        + f"{probe_fk}. The config YAML for Electrode with electrode_id "
+                        + f"{entry['electrode_id']} will be ignored."
                     )
                 else:
-                    key.update(electrode_config_dicts[elect_id])
-            electrode_inserts.append(key.copy())
-
-        self.insert(
-            electrode_inserts,
-            skip_duplicates=True,
-            allow_direct_insert=True,  # for no_transaction, pop_all_common
-        )
+                    entry.update(cfg)
+        return entries
 
     @classmethod
     def create_from_config(cls, nwb_file_name: str):
-        """Create/update Electrode entries using config YAML file.
+        from spyglass.common.common_usage import ActivityLog
 
-        Parameters
-        ----------
-        nwb_file_name : str
-            The name of the NWB file.
-        """
+        ActivityLog().deprecate_log("Electrode.create_from_config")
+
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
         config = get_config(nwb_file_abspath, calling_table=cls.__name__)
         if "Electrode" not in config:
             return  # See #849
+        self_table = cls()
+        entries = self_table.generate_entries_from_config(
+            config, base_key={"nwb_file_name": nwb_file_name}
+        )[self_table]
 
-        # map electrode id to dictof electrode information from config YAML
-        electrode_dicts = {
-            electrode_dict["electrode_id"]: electrode_dict
-            for electrode_dict in config["Electrode"]
-        }
-
-        electrodes = nwbf.electrodes.to_dataframe()
-        for nwbfile_elect_id, elect_data in electrodes.iterrows():
-            if nwbfile_elect_id in electrode_dicts:
-                # use the information in the electrodes table to start and then
-                # add (or overwrite) values from the config YAML
-
-                key = dict()
-                key["nwb_file_name"] = nwb_file_name
-                key["name"] = str(nwbfile_elect_id)
-                key["electrode_group_name"] = elect_data.group_name
-                key["region_id"] = BrainRegion.fetch_add(
-                    region_name=elect_data.group.location
+        inserts = []
+        updates = []
+        for entry in entries:
+            entry_pk = {
+                k: v for k, v in entry.items() if k in self_table.primary_key
+            }
+            query = cls() & entry_pk
+            if len(query):
+                updates.append(entry)
+                logger.info(
+                    f"Updated {cls.__name__} with PK {entry_pk} from config."
                 )
-                key["x"] = elect_data.x
-                key["y"] = elect_data.y
-                key["z"] = elect_data.z
-                key["x_warped"] = 0
-                key["y_warped"] = 0
-                key["z_warped"] = 0
-                key["contacts"] = ""
-                key["filtering"] = elect_data.filtering
-                key["impedance"] = elect_data.get("imp")
-                key.update(electrode_dicts[nwbfile_elect_id])
-                query = Electrode & {"electrode_id": nwbfile_elect_id}
-                if len(query):
-                    cls.update1(key)
-                    logger.info(
-                        f"Updated Electrode with ID {nwbfile_elect_id}."
-                    )
-                else:
-                    cls.insert1(
-                        key, skip_duplicates=True, allow_direct_insert=True
-                    )
-                    logger.info(
-                        f"Inserted Electrode with ID {nwbfile_elect_id}."
-                    )
             else:
-                warnings.warn(
-                    f"Electrode ID {nwbfile_elect_id} exists in the NWB file "
-                    + "but has no corresponding config YAML entry."
+                inserts.append(entry)
+                logger.info(
+                    f"Inserted {cls.__name__} with PK {entry_pk} from config."
                 )
+        cls.insert(inserts, skip_duplicates=True, allow_direct_insert=True)
+        for update in updates:
+            cls.update1(update)
+
+    def make(self, key):
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "Electrode.make is deprecated. Use insert_from_nwbfile."
+        )
 
 
 @schema
-class Raw(SpyglassMixin, dj.Imported):
-    definition = """
-    # Raw voltage timeseries data, ElectricalSeries in NWB.
+class Raw(SpyglassIngestion, dj.Imported):
+    definition = """ # Raw voltage timeseries data, ElectricalSeries in NWB.
     -> Session
     ---
     -> IntervalList
@@ -283,85 +277,76 @@ class Raw(SpyglassMixin, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    _only_ingest_first = True
+    _source_nwb_object_name = [
+        "e-series",
+        "electricalseries",
+        "ephys",
+        "electrophysiology",
+    ]
 
-    def make(self, key):
-        """Make without transaction
+    _source_nwb_object_type = pynwb.ecephys.ElectricalSeries
 
-        Allows populate_all_common to work within a single transaction."""
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        raw_interval_name = "raw data valid times"
-
-        # get the ElectricalSeries acquisition object
-        eseries_aquisitions = []
-        for obj_name, obj in nwbf.acquisition.items():
-            if isinstance(obj, pynwb.ecephys.ElectricalSeries):
-                eseries_aquisitions.append(obj)
-        if len(eseries_aquisitions) == 0:
-            warnings.warn(
-                f"Unable to get acquisition object in: {nwb_file_abspath}\n\t"
-                + f"Skipping entry in {self.full_table_name}"
-            )
-            return
-        elif len(eseries_aquisitions) > 1:
-            warnings.warn(
-                f"Multiple ElectricalSeries objects found in: {nwb_file_abspath}\n\t"
-                + f"Inserting only first entry in {self.full_table_name}\n\t"
-                + "See issue #396 for more details."
-            )
-        rawdata = eseries_aquisitions[0]
-
-        if rawdata.rate is not None:
-            key["sampling_rate"] = rawdata.rate
-        else:
-            logger.info("Estimating sampling rate...")
-            # NOTE: Only use first 1e6 timepoints to save time
-            key["sampling_rate"] = estimate_sampling_rate(
-                np.asarray(rawdata.timestamps[: int(1e6)]), 1.5, verbose=True
-            )
-
-        interval_dict = {
-            "nwb_file_name": key["nwb_file_name"],
-            "interval_list_name": raw_interval_name,
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "interval_list_name": lambda *args: "raw data valid times",
+                "raw_object_id": "object_id",
+                "sampling_rate": self._rate_fallback,
+                "comments": "comments",
+                "description": "description",
+                "valid_times": self._valid_times_from_raw,
+            },
         }
 
-        if rawdata.rate is not None:
-            interval_dict["valid_times"] = np.array(
-                [[0, len(rawdata.data) / rawdata.rate]]
-            )
-        else:
-            # get the list of valid times given the specified sampling rate.
-            interval_dict["valid_times"] = get_valid_intervals(
-                timestamps=np.asarray(rawdata.timestamps),
-                sampling_rate=key["sampling_rate"],
-                gap_proportion=1.75,
-                min_valid_len=0,
-            )
-
-        IntervalList().cautious_insert(interval_dict, update=True)
-
-        # now insert each of the electrodes as an individual row, but with the
-        # same nwb_object_id
-
-        logger.info(
-            f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz\n\t'
-            + f'Number of valid intervals:\t{len(interval_dict["valid_times"])}'
+    def _rate_fallback(self, nwb_object):
+        """Return the rate if available, otherwise None."""
+        rate = getattr(nwb_object, "rate", None)
+        if rate is not None:
+            return rate
+        timestamps = getattr(nwb_object, "timestamps", None)
+        if timestamps is None:
+            raise ValueError("Neither rate nor timestamps are available.")
+        return estimate_sampling_rate(
+            np.asarray(timestamps[: int(1e6)]), 1.5, verbose=not self._test_mode
         )
 
-        key.update(
-            {
-                "raw_object_id": rawdata.object_id,
-                "interval_list_name": raw_interval_name,
-                "comments": rawdata.comments,
-                "description": rawdata.description,
-            }
+    def _valid_times_from_raw(self, nwb_object):
+        """Return valid times from the raw data."""
+        rate = getattr(nwb_object, "rate", None)
+        if rate is not None:
+            return np.array([[0, len(nwb_object.data) / rate]])
+
+        timestamps = getattr(nwb_object, "timestamps", None)
+        if timestamps is None:
+            raise ValueError("Neither rate nor timestamps are available.")
+
+        return get_valid_intervals(
+            timestamps=np.asarray(timestamps),
+            sampling_rate=self._rate_fallback(nwb_object),
+            gap_proportion=1.75,
+            min_valid_len=0,
+            warn=not self._test_mode,
         )
 
-        self.insert1(
-            key,
-            skip_duplicates=True,
-            allow_direct_insert=True,
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Add IntervalList entry to the generated entries."""
+        super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        self_key = super_ins[self][0]
+        valid_times = self_key.pop("valid_times")  # remove from self key
+        interval_insert = {
+            k: v for k, v in self_key.items() if k in IntervalList.heading.names
+        }
+        return {
+            IntervalList: [dict(interval_insert, valid_times=valid_times)],
+            **super_ins,
+        }
+
+    def make(self, key):
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "Raw.make is deprecated. Use insert_from_nwbfile."
         )
 
     def nwb_object(self, key):
@@ -380,7 +365,7 @@ class Raw(SpyglassMixin, dj.Imported):
 
 
 @schema
-class SampleCount(SpyglassMixin, dj.Imported):
+class SampleCount(SpyglassIngestion, dj.Imported):
     definition = """
     # Sample count :s timestamp timeseries
     -> Session
@@ -389,25 +374,23 @@ class SampleCount(SpyglassMixin, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    # TODO: change name when nwb file is changed
+    _source_nwb_object_name = "sample_count"
+    _only_ingest_first = True  # first match wins, as get_data_interface did
+
+    # The enclosing ProcessingModule carries this name too, and is itself
+    # an NWBDataInterface, so a broader type here matches the module and
+    # stores its object id instead of the series'. The previous lookup
+    # searched module.data_interfaces, which never holds modules.
+    _source_nwb_object_type = pynwb.base.TimeSeries
+
+    table_key_to_obj_attr = {"self": {"sample_count_object_id": "object_id"}}
 
     def make(self, key):
-        """Make without transaction
-
-        Allows populate_all_common to work within a single transaction."""
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        # get the sample count object
-        # TODO: change name when nwb file is changed
-        sample_count = get_data_interface(nwbf, "sample_count")
-        if sample_count is None:
-            logger.info(
-                "Unable to import SampleCount: no data interface named "
-                + f'"sample_count" found in {nwb_file_name}.'
-            )
-            return  # see #849
-        key["sample_count_object_id"] = sample_count.object_id
-        self.insert1(key, allow_direct_insert=True)
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "SampleCount.make is deprecated. Use insert_from_nwbfile."
+        )
 
 
 @schema
@@ -464,9 +447,7 @@ class LFP(SpyglassMixin, dj.Imported):
     lfp_sampling_rate: float    # the sampling rate, in HZ
     """
 
-    _use_transaction, _allow_insert = False, True
-
-    def make(self, key):
+    def make_fetch(self, key):
         """Populate the LFP table with data from the NWB file.
 
         1. Fetches the raw data and sampling rate from the Raw table.
@@ -475,15 +456,14 @@ class LFP(SpyglassMixin, dj.Imported):
         4. Applies LFP 0-400 Hz filter from FirFilterParameters table.
         5. Generates a new analysis NWB file with the LFP data.
         """
-        # get the NWB object with the data; FIX: change to fetch with
-        # additional infrastructure
         lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+        lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
+        electrode_keys = (LFPSelection.LFPElectrode & key).fetch("KEY")
 
         rawdata = Raw().nwb_object(key)
         sampling_rate, interval_list_name = (Raw() & key).fetch1(
             "sampling_rate", "interval_list_name"
         )
-        sampling_rate = int(np.round(sampling_rate))
 
         valid_times = (
             IntervalList()
@@ -492,6 +472,48 @@ class LFP(SpyglassMixin, dj.Imported):
                 "interval_list_name": interval_list_name,
             }
         ).fetch_interval()
+
+        # get the LFP filter that matches the raw data
+        # there should only be one
+        filter = (
+            FirFilterParameters()
+            & dict(
+                filter_name="LFP 0-400 Hz", filter_sampling_rate=sampling_rate
+            )
+        ).fetch(as_dict=True)[0]
+
+        return [
+            lfp_file_name,
+            lfp_file_abspath,
+            electrode_keys,
+            rawdata,
+            sampling_rate,
+            interval_list_name,
+            valid_times,
+            filter,
+        ]
+
+    def make_compute(
+        self,
+        key,
+        lfp_file_name,
+        lfp_file_abspath,
+        electrode_keys,
+        rawdata,
+        sampling_rate,
+        interval_list_name,
+        valid_times,
+        filter,
+    ):
+
+        filter_coeff = filter["filter_coeff"]
+        if len(filter_coeff) == 0:
+            logger.error(
+                "Error in LFP: no filter found with data sampling rate of "
+                + f"{sampling_rate}"
+            )
+            return [None] * 2  # Number reflects expected values for make_insert
+
         # keep only the intervals > 1 second long
         orig_len = len(valid_times)
         valid_times = valid_times.by_length(min_length=1.0)
@@ -501,34 +523,13 @@ class LFP(SpyglassMixin, dj.Imported):
         )
 
         # target 1 KHz sampling rate
+        sampling_rate = int(np.round(sampling_rate))
         decimation = sampling_rate // 1000
 
-        # get the LFP filter that matches the raw data
-        filter = (
-            FirFilterParameters()
-            & {"filter_name": "LFP 0-400 Hz"}
-            & {"filter_sampling_rate": sampling_rate}
-        ).fetch(as_dict=True)
-
-        # there should only be one filter that matches, so we take the first of
-        # the dictionaries
-
-        key["filter_name"] = filter[0]["filter_name"]
-        key["filter_sampling_rate"] = filter[0]["filter_sampling_rate"]
-
-        filter_coeff = filter[0]["filter_coeff"]
-        if len(filter_coeff) == 0:
-            logger.error(
-                "Error in LFP: no filter found with data sampling rate of "
-                + f"{sampling_rate}"
-            )
-            return None
         # get the list of selected LFP Channels from LFPElectrode
-        electrode_keys = (LFPSelection.LFPElectrode & key).fetch("KEY")
         electrode_id_list = list(k["electrode_id"] for k in electrode_keys)
         electrode_id_list.sort()
 
-        lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         (
             lfp_object_id,
             timestamp_interval,
@@ -541,24 +542,33 @@ class LFP(SpyglassMixin, dj.Imported):
             decimation,
         )
 
-        # now that the LFP is filtered and in the file, add the file to the
-        # AnalysisNwbfile table
-
-        AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
-
-        key["analysis_file_name"] = lfp_file_name
-        key["lfp_object_id"] = lfp_object_id
-        key["lfp_sampling_rate"] = sampling_rate // decimation
+        # tri-part make doesn't allow modifying keys
+        added_key = dict(
+            filter_name=filter["filter_name"],
+            filter_sampling_rate=sampling_rate,
+            analysis_file_name=lfp_file_name,
+            lfp_object_id=lfp_object_id,
+            lfp_sampling_rate=sampling_rate // decimation,
+        )
 
         # finally, censor the valid times to account for the downsampling
         lfp_valid_times = valid_times.censor(timestamp_interval)
         lfp_valid_times.set_key(
             nwb=key["nwb_file_name"], name="lfp valid times", pipeline="lfp_v0"
         )
+
+        return [lfp_valid_times, added_key, lfp_file_name]
+
+    def make_insert(self, key, lfp_valid_times, added_key, lfp_file_name):
+        if lfp_valid_times is None and added_key is None:
+            return
+
+        # add the analysis nwb file entry
+        AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
         # add an interval list for the LFP valid times, skipping duplicates
         IntervalList.insert1(lfp_valid_times.as_dict, replace=True)
-        AnalysisNwbfile().log(key, table=self.full_table_name)
-        self.insert1(key)
+        AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
+        self.insert1(dict(key, **added_key))
 
     def nwb_object(self, key):
         """Return the NWB object in the raw NWB file."""

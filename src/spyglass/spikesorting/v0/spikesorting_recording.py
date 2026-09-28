@@ -1,6 +1,7 @@
+import json
 from pathlib import Path
 from shutil import rmtree as shutil_rmtree
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import datajoint as dj
 import numpy as np
@@ -255,7 +256,7 @@ class SortInterval(SpyglassMixin, dj.Manual):
 class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Manual):
     """Preprocessing parameters for spike sorting.
 
-    Parameters
+    Attributes
     ----------
     preproc_params_name : str
         Name of the preprocessing parameters.
@@ -297,6 +298,27 @@ class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Manual):
         }
         self.insert1(key, skip_duplicates=True)
 
+    def fetch_params(self, preproc_params_name: str) -> dict:
+        """Fetch preprocessing parameters for a given name.
+
+        Parameters
+        ----------
+        preproc_params_name : str
+            Name of the preprocessing parameters.
+
+        Returns
+        -------
+        dict
+            Dictionary of preprocessing parameters.
+        """
+        if isinstance(preproc_params_name, dict):
+            preproc_params_name = preproc_params_name.get("preproc_params_name")
+        if not preproc_params_name:
+            raise ValueError("preproc_params_name must be provided")
+
+        params_pk = {"preproc_params_name": preproc_params_name}
+        return (self & params_pk).fetch1("preproc_params")
+
 
 @schema
 class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
@@ -322,6 +344,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     """
 
     _parallel_make = True
+    _data_cache = dict()
 
     def make_fetch(self, key: dict) -> List[Interval]:
         """Fetch times for compute.
@@ -348,7 +371,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         ----------
         key: dict
             Key of SpikeSortingRecordingSelection table
-        sort_interval_valid_times, sort
+        sort_interval_valid_times: Interval
             Interval object of the sort
 
         Returns
@@ -366,6 +389,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             key,
             sort_interval_list_name=rec_info["name"],
             recording_path=rec_info["path"],
+            hash=rec_info["hash"],  # else null, see _hash_check
         )
         return self_insert, sort_interval_valid_times
 
@@ -412,15 +436,30 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             folder=rec_path, chunk_duration="10000ms", n_jobs=8, verbose=False
         )
 
-        if has_entry and base_dir == recording_dir:  # if recompute, check hash
+        # Verify only a rebuild of the canonical directory. `recording_dir` is
+        # a str, so this must compare Path to Path or the check never runs.
+        if has_entry and base_dir == Path(recording_dir):  # recompute
             _ = self._hash_check(key, rec_path)
 
         return {**ret, "hash": self._dir_hash(rec_path, return_hasher)}
 
     def _hash_check(self, key, rec_path):
-        """Check if the hash of the directory matches the hash in the table."""
+        """Check if the hash of the directory matches the hash in the table.
+
+        Entries written before hashes were recorded on insert have a null
+        hash. Those have no baseline to compare against, so accept the
+        recomputed directory rather than deleting it. Run `update_ids` to
+        backfill them, after which recomputes are verified normally.
+        """
         new_hash = self._dir_hash(rec_path, return_hasher=False)
         old_hash = (self & key).fetch("hash")[0]
+
+        if old_hash is None:
+            logger.warning(
+                f"No stored hash to verify against: {rec_path}\n"
+                + "Run SpikeSortingRecording().update_ids() to backfill."
+            )
+            return True
 
         if new_hash == old_hash:
             return True
@@ -446,8 +485,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         )
         return hasher if return_hasher else hasher.hash
 
-    def load_recording(self, key):
-        """Load the recording data from the file."""
+    def _fetch_recording_path(self, key):
+        """Fetch the recording path for a given key."""
         query = self & key
         if not len(query) == 1:
             query = self & {
@@ -457,24 +496,32 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             raise ValueError(f"Expected 1 entry, got {len(query)}: {query}")
 
         path = query.fetch1("recording_path")
+
+        _ = self._validate_recording_path(path, key, make_if_missing=True)
+
+        return path
+
+    def _validate_recording_path(self, path, key, make_if_missing=True):
+        """Validate that the recording path exists."""
         path_obj = Path(path)
 
-        # Protect against partial deletes, interrupted shutil.rmtree, etc.
-        # Error lets user decide if they want to backup before deleting
+        if not path_obj.exists() and make_if_missing:
+            logger.info(f"Recording path does not exist, recomputing: {path}")
+            SpikeSortingRecording()._make_file(key)
+
+        if not path_obj.exists():
+            raise FileNotFoundError(f"Recording path does not exist: {path}")
+
         normal_file_count = 21
         file_count = sum(1 for f in path_obj.rglob("*") if f.is_file())
-        if path_obj.exists() and file_count < normal_file_count:
+        if file_count < normal_file_count:
             raise RuntimeError(
                 f"Files missing! Please delete folder and rerun: {path}"
             )
 
-        if not path_obj.exists():
-            SpikeSortingRecording()._make_file(key)
-        if not path_obj.exists():
-            raise FileNotFoundError(
-                f"Recording could not be recomputed: {path}"
-            )
-
+    def load_recording(self, key):
+        """Load the recording data from the file."""
+        path = self._fetch_recording_path(key)
         return si.load_extractor(path)
 
     def update_ids(self):
@@ -499,6 +546,187 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 key["preproc_params_name"],
                 # key["team_name"], # TODO: add team name, reflect PK structure
             ]
+        )
+
+    def _key_to_path(self, key: dict) -> Path:
+        """Convert a key to a recording path."""
+        rec_name = self._get_recording_name(key)
+        rec_path = Path(recording_dir) / Path(rec_name)
+        return rec_path
+
+    def _get_n_samples(
+        self,
+        key: dict = None,
+        rec_path: Path = None,
+        make_if_missing: bool = False,
+    ) -> Optional[int]:
+        """Get number of samples in the filtered recording.
+
+        Parameters
+        ----------
+        key: dict, optional
+            specifies a entry of SpikeSortingRecording table
+        rec_path: Path, Optional
+            path to the recording folder. If not provided, key must be provided.
+        make_if_missing: bool
+            whether to create the recording file if it does not exist
+        """
+        if key is None and rec_path is None:
+            raise ValueError("Either key or rec_path must be provided")
+        if rec_path is None:
+            rec_path = self._key_to_path(key)
+        if not rec_path.exists() and make_if_missing:
+            self._make_file(key)
+
+        if rec_path in self._data_cache:
+            num_samples = self._data_cache[rec_path].get("num_samples")
+        elif (rec_path / "si_folder.json").exists():
+            with open(rec_path / "si_folder.json") as f:
+                data = json.load(f)
+                self._data_cache[rec_path] = data
+                num_samples = data.get("num_samples", None)
+        else:
+            num_samples = None
+
+        # Fallback: if num_samples is None, read from source NWB
+        if num_samples is None and key is not None:
+            try:
+                nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
+                recording = se.read_nwb_recording(
+                    nwb_file_abs_path, load_time_vector=True
+                )
+                # Get the recording for the specific interval
+                valid_sort_times = self._get_sort_interval_valid_times(
+                    key
+                ).times
+                valid_sort_times_indices = np.array(
+                    [
+                        np.searchsorted(recording.get_times(), interval)
+                        for interval in valid_sort_times
+                    ]
+                )
+                # Calculate total samples across all intervals
+                num_samples = sum(
+                    end - start for start, end in valid_sort_times_indices
+                )
+            except (FileNotFoundError, KeyError, OSError, ValueError) as e:
+                logger.warning(f"Could not read num_samples from NWB: {e}")
+                return None
+
+        return num_samples
+
+    def _get_sampling_rate(
+        self,
+        key: dict = None,
+        rec_path: Path = None,
+        make_if_missing: bool = False,
+    ) -> Optional[float]:
+        """Get sampling rate of the filtered recording.
+
+        Parameters
+        ----------
+        key: dict, optional
+            specifies a entry of SpikeSortingRecording table
+        rec_path: Path, Optional
+            path to the recording folder. If not provided, key must be provided.
+        make_if_missing: bool
+            whether to create the recording file if it does not exist
+        """
+        if key is None and rec_path is None:
+            raise ValueError("Either key or rec_path must be provided")
+        if rec_path is None:
+            rec_path = self._key_to_path(key)
+        if not rec_path.exists() and make_if_missing:
+            self._make_file(key)
+
+        if rec_path in self._data_cache:
+            samp_rate = self._data_cache[rec_path].get("sampling_rate")
+        elif (rec_path / "si_folder.json").exists():
+            with open(rec_path / "si_folder.json") as f:
+                data = json.load(f)
+                self._data_cache[rec_path] = data
+                samp_rate = data.get("sampling_rate", None)
+        else:
+            samp_rate = None
+
+        def is_invalid(x):  # checks for None, nan, or <= 0
+            return (
+                x is None
+                or (isinstance(x, (float, np.floating)) and np.isnan(x))
+                or x <= 0
+            )
+
+        # Fallback: if sampling_rate is None or invalid, read from source NWB
+        if is_invalid(samp_rate) and key is not None:
+            try:
+                nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
+                recording = se.read_nwb_recording(
+                    nwb_file_abs_path, load_time_vector=True
+                )
+                samp_rate = recording.get_sampling_frequency()
+            except (FileNotFoundError, OSError, KeyError, ValueError) as e:
+                logger.warning(f"Could not read sampling rate from NWB: {e}")
+
+        if is_invalid(samp_rate):
+            logger.warning(f"Invalid sampling rate from NWB: {samp_rate}")
+            samp_rate = None
+
+        return samp_rate
+
+    def _get_min_segment_length(
+        self, key: dict, min_threshold: Optional[int] = None
+    ) -> Tuple[Optional[int], Optional[int]]:
+        """Get minimum segment length in samples.
+
+        Examines all segments in the recording and returns the minimum length.
+        If min_threshold is provided, returns early when a segment below the
+        threshold is found (for efficiency).
+
+        Parameters
+        ----------
+        key : dict
+            Recording key with nwb_file_name, sort_interval_name, etc.
+        min_threshold : int, optional
+            If provided, return early when a segment below this threshold
+            is found. Default None (check all segments).
+
+        Returns
+        -------
+        min_length : int or None
+            Minimum segment length in samples, or None if cannot determine
+        segment_index : int or None
+            Index of the minimum segment, or None if cannot determine
+        """
+        # Get the valid sort times (segment boundaries)
+        valid_sort_times = self._get_sort_interval_valid_times(key).times
+        if len(valid_sort_times) == 0:
+            return None, None
+
+        # Get sampling rate to convert time to samples
+        samp_rate = self._get_sampling_rate(key=key)
+        if not samp_rate or samp_rate <= 0:
+            return None, None
+
+        # Check each segment length
+        min_length = float("inf")
+        min_index = None
+
+        for i, (start, end) in enumerate(valid_sort_times):
+            segment_duration = end - start  # in seconds
+            segment_samples = int(segment_duration * samp_rate)
+
+            # Early exit if below threshold
+            if min_threshold is not None and segment_samples < min_threshold:
+                return segment_samples, i
+
+            # Track minimum
+            if segment_samples < min_length:
+                min_length = segment_samples
+                min_index = i
+
+        return (
+            int(min_length) if min_length != float("inf") else None,
+            min_index,
         )
 
     @staticmethod
@@ -689,6 +917,9 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
     def cleanup(self, dry_run=False, verbose=True):
         """Removes the recording data from the recording directory."""
+        if self._test_mode:
+            verbose = False
+
         rec_dir = Path(recording_dir)
         tracked = set(self.fetch("recording_path"))
         all_dirs = {str(f) for f in rec_dir.iterdir() if f.is_dir()}

@@ -4,15 +4,21 @@ import os
 import os.path
 from itertools import groupby
 from pathlib import Path
-from typing import List
+from typing import List, Union
 
 import numpy as np
 import pynwb
 import yaml
 
+from spyglass.utils.file_backends import (
+    BackendUnavailable,
+    LocalBackend,
+    get_backends,
+)
 from spyglass.utils.logging import logger
 
-# dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
+# dict mapping file path to the `Opened` record returned by the backend that
+# read it: an NWBHDF5IO in read mode, its NWBFile, and whether it was streamed
 __open_nwb_files = dict()
 
 # dict mapping NWB file path to config after it is loaded once
@@ -22,30 +28,36 @@ global invalid_electrode_index
 invalid_electrode_index = 99999999
 
 
-def _open_nwb_file(nwb_file_path, source="local"):
-    """Open an NWB file, add to cache, return contents. Does not close file."""
-    if source == "local":
-        io = pynwb.NWBHDF5IO(path=nwb_file_path, mode="r", load_namespaces=True)
-        nwbfile = io.read()
-    elif source == "dandi":
-        from ..common.common_dandi import DandiPath
+def _open_nwb_file(nwb_file_path, source=None):
+    """Open an NWB file, add to cache, return contents. Does not close file.
 
-        io, nwbfile = DandiPath().fetch_file_from_dandi(
-            nwb_file_path=nwb_file_path
-        )
-    else:
-        raise ValueError(f"Invalid open_nwb source: {source}")
-    __open_nwb_files[nwb_file_path] = (io, nwbfile)
-    return nwbfile
+    Parameters
+    ----------
+    nwb_file_path : str
+        Absolute path to the NWB file.
+    source : FileBackend, optional
+        Backend to open the file with. Defaults to local disk.
+
+    Returns
+    -------
+    nwbfile : pynwb.NWBFile
+        The NWB file object.
+    """
+    backend = source or LocalBackend()
+
+    opened = backend.open(nwb_file_path)
+    __open_nwb_files[nwb_file_path] = opened
+
+    return opened.nwbfile
 
 
 def get_nwb_file(nwb_file_path, query_expression=None):
     """Return an NWBFile object with the given file path in read mode.
 
-    If the file is not found locally, this will check if it has been shared
-    with kachery/dandi and if so, download it and open it. If not, and the
-    query_expression has a `_make_file` method, it will call that method to
-    recompute the file.
+    If the file is not found locally, each remote backend in the resolution
+    chain is tried in order (see `spyglass.utils.file_backends`). If none holds
+    the file and the query_expression has a `_make_file` method, that method is
+    called to recompute the file.
 
     Parameters
     ----------
@@ -63,48 +75,43 @@ def get_nwb_file(nwb_file_path, query_expression=None):
     Raises
     ------
     FileNotFoundError
-        If the NWB file is not found locally or in kachery/Dandi, and cannot be
-        recomputed.
+        If the NWB file is not found locally or in any remote backend, and
+        cannot be recomputed.
+
+    Notes
+    -----
+    Only `BackendUnavailable` falls through to the next backend. A backend that
+    holds the file but fails while reading it raises the underlying error, which
+    propagates rather than being mistaken for a miss and silently recomputed.
     """
     if not Path(nwb_file_path).is_absolute():
         from spyglass.common import Nwbfile
 
         nwb_file_path = Nwbfile.get_abs_path(nwb_file_path)
 
-    _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
+    opened = __open_nwb_files.get(nwb_file_path)
 
-    if nwbfile is not None:
-        return nwbfile
+    if opened is not None:
+        return opened.nwbfile
 
-    if os.path.exists(nwb_file_path):
-        return _open_nwb_file(nwb_file_path)
+    backends = get_backends()
 
-    logger.info(
-        f"NWB file not found locally; checking kachery for {nwb_file_path}"
-    )
-
-    from ..sharing.sharing_kachery import AnalysisNwbfileKachery
-
-    kachery_success = AnalysisNwbfileKachery.download_file(
-        os.path.basename(nwb_file_path), permit_fail=True
-    )
-    if kachery_success:
-        return _open_nwb_file(nwb_file_path)
-
-    logger.info(
-        "NWB file not found in kachery; checking Dandi for "
-        + f"{nwb_file_path}"
-    )
-
-    # Dandi fallback SB 2024-04-03
-    from ..common.common_dandi import DandiPath
-
-    if DandiPath().has_file_path(file_path=nwb_file_path):
-        return _open_nwb_file(nwb_file_path, source="dandi")
-
-    if DandiPath().has_raw_path(file_path=nwb_file_path):
-        raw = DandiPath().get_raw_path(file_path=nwb_file_path)["filename"]
-        return _open_nwb_file(raw, source="dandi")
+    for backend in backends:
+        if not backend.has(nwb_file_path):
+            continue
+        if not isinstance(backend, LocalBackend):
+            logger.info(
+                f"NWB file not found locally; fetching {nwb_file_path} "
+                + f"from {backend.name}"
+            )
+        try:
+            return _open_nwb_file(nwb_file_path, source=backend)
+        except BackendUnavailable:  # expected miss, try the next backend
+            logger.debug(
+                "%s reported the file but could not supply it: %s",
+                backend.name,
+                nwb_file_path,
+            )
 
     if hasattr(query_expression, "_make_file"):
         # if the query_expression has a _make_file method, call it to
@@ -116,21 +123,51 @@ def get_nwb_file(nwb_file_path, query_expression=None):
         if nwbfile is not None:
             return nwbfile
 
+    sources = (
+        " or ".join(b.name for b in backends if not isinstance(b, LocalBackend))
+        or "any remote backend"
+    )
     raise FileNotFoundError(
-        "NWB file not found in kachery or Dandi: "
+        f"NWB file not found in {sources}: "
         + f"{os.path.basename(nwb_file_path)}."
     )
 
 
+def file_is_remote(filepath):
+    """Return True if the open file is being streamed over the network.
+
+    Reports what the backend actually did when the file was opened, so any
+    streaming backend is recognized, not only those reading over HTTP.
+
+    Parameters
+    ----------
+    filepath : str
+        Absolute path of the file as Spyglass expects it locally.
+
+    Returns
+    -------
+    bool
+        True if the file is open and was read over the network. False for
+        local reads, for files downloaded before reading, and for paths that
+        are not open.
+    """
+    opened = __open_nwb_files.get(filepath)
+
+    return bool(opened and opened.streamed)
+
+
 def file_from_dandi(filepath):
-    """helper to determine if open file is streamed from Dandi"""
-    if filepath not in __open_nwb_files:
-        return False
-    build_keys = __open_nwb_files[filepath][0]._HDF5IO__built.keys()
-    for k in build_keys:
-        if "HTTPFileSystem" in k:
-            return True
-    return False
+    """Deprecated alias for `file_is_remote`.
+
+    .. deprecated::
+        Use `file_is_remote`. The check was never DANDI-specific; it detects
+        any HTTP-backed filesystem.
+    """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("file_from_dandi", alt="file_is_remote")
+
+    return file_is_remote(filepath)
 
 
 def get_linked_nwbs(path: str) -> List[str]:
@@ -171,11 +208,12 @@ def get_config(nwb_file_path: str, calling_table: str = None) -> dict:
         obj_path.stem[:-1] + "_spyglass_config.yaml"
     )
     if not os.path.exists(config_path):
-        from spyglass.settings import base_dir  # noqa: F401
+        from spyglass.settings import base_dir, test_mode  # noqa: F401
 
         rel_path = obj_path.relative_to(base_dir)
         table = f"{calling_table}: " if calling_table else ""
-        logger.info(f"{table}No config found at {rel_path}")
+        if not test_mode:
+            logger.info(f"{table}No config found at {rel_path}")
         ret = dict()
         __configs[nwb_file_path] = ret  # cache to avoid repeated null lookups
         return ret
@@ -189,8 +227,8 @@ def get_config(nwb_file_path: str, calling_table: str = None) -> dict:
 
 def close_nwb_files():
     """Close all open NWB files."""
-    for io, _ in __open_nwb_files.values():
-        io.close()
+    for opened in __open_nwb_files.values():
+        opened.io.close()
     __open_nwb_files.clear()
 
 
@@ -259,7 +297,7 @@ def get_position_obj(nwbfile):
     pynwb.behavior.Position object
     """
     ret = []
-    for obj in nwbfile.processing["behavior"].data_interfaces.values():
+    for obj in nwbfile.objects.values():
         if isinstance(obj, pynwb.behavior.Position):
             ret.append(obj)
     if len(ret) > 1:
@@ -362,7 +400,7 @@ def estimate_sampling_rate(
 
 
 def get_valid_intervals(
-    timestamps, sampling_rate, gap_proportion=2.5, min_valid_len=0
+    timestamps, sampling_rate, gap_proportion=2.5, min_valid_len=0, warn=True
 ):
     """Finds the set of all valid intervals in a list of timestamps.
 
@@ -382,6 +420,9 @@ def get_valid_intervals(
     min_valid_len : float, optional
         Length of smallest valid interval. Default to 0. If greater
         than interval duration, log warning and use half the total time.
+    warn : bool, optional
+        Whether to log a warning if the minimum valid interval length is greater
+        than the total time of the timestamps. Default, True.
 
     Returns
     -------
@@ -395,7 +436,9 @@ def get_valid_intervals(
 
     if total_time < min_valid_len:
         half_total_time = total_time / 2
-        logger.warning(f"Setting minimum valid interval to {half_total_time}")
+        logger.warning(
+            f"Setting minimum valid interval to {half_total_time:.4f}"
+        )
         min_valid_len = half_total_time
 
     # get rid of NaN elements
@@ -481,17 +524,45 @@ def get_electrode_indices(nwb_object, electrode_ids):
     ]
 
 
-def _get_epoch_groups(position: pynwb.behavior.Position):
+def _get_epoch_groups(position: pynwb.behavior.Position) -> dict:
+    """Group spatial series indices by their epoch start time.
+
+    Supports both NWB timing conventions: explicit timestamps and
+    starting_time + rate.
+
+    Parameters
+    ----------
+    position : pynwb.behavior.Position
+        Position interface containing one or more SpatialSeries.
+
+    Returns
+    -------
+    dict
+        Mapping from epoch start time (float, seconds) to a list of
+        spatial series indices sharing that start time.
+    """
     epoch_start_time = {}
     for pos_epoch, spatial_series in enumerate(
         position.spatial_series.values()
     ):
-        epoch_start_time[pos_epoch] = spatial_series.timestamps[0]
+        timestamps = spatial_series.timestamps
+        start = (
+            timestamps[0]
+            if timestamps is not None
+            else spatial_series.starting_time
+        )
+        if start is None:
+            raise ValueError(
+                f"SpatialSeries '{spatial_series.name}' has neither "
+                "timestamps nor starting_time; cannot determine epoch start."
+            )
+        epoch_start_time[pos_epoch] = start
 
     return {
-        i: [j[0] for j in j]
-        for i, j in groupby(
-            sorted(epoch_start_time.items(), key=lambda x: x[1]), lambda x: x[1]
+        start_time: [item[0] for item in group]
+        for start_time, group in groupby(
+            sorted(epoch_start_time.items(), key=lambda x: x[1]),
+            lambda x: x[1],
         )
     }
 
@@ -529,7 +600,17 @@ def _get_pos_dict(
             spatial_series = all_spatial_series[index]
             valid_times = None
             if incl_times:  # get the valid intervals for the position data
-                timestamps = np.asarray(spatial_series.timestamps)
+                if spatial_series.timestamps is None:
+                    starting_time = spatial_series.starting_time
+                    rate = spatial_series.rate
+                    num_samples = spatial_series.data.shape[0]
+                    timestamps = np.linspace(
+                        starting_time,
+                        starting_time + (num_samples - 1) / rate,
+                        num_samples,
+                    )
+                else:
+                    timestamps = np.asarray(spatial_series.timestamps)
                 sampling_rate = estimate_sampling_rate(
                     timestamps, verbose=verbose, filename=session_id
                 )
@@ -579,13 +660,16 @@ def get_all_spatial_series(nwbf, verbose=False, incl_times=True) -> dict:
     if pos_interface is None:
         return None
 
-    return _get_pos_dict(
+    pos_dict = _get_pos_dict(
         position=pos_interface.spatial_series,
         epoch_groups=_get_epoch_groups(pos_interface),
         session_id=nwbf.session_id,
         verbose=verbose,
         incl_times=incl_times,
     )
+    if len(pos_dict) == 0:
+        return None
+    return pos_dict
 
 
 def get_nwb_copy_filename(nwb_file_name):
@@ -599,29 +683,28 @@ def get_nwb_copy_filename(nwb_file_name):
     return f"{filename}_{file_extension}"
 
 
-def change_group_permissions(
-    subject_ids, set_group_name, analysis_dir="/stelmo/nwb/analysis"
-):
-    """Change group permissions for specified subject ids in analysis dir."""
-    from spyglass.common.common_usage import ActivityLog
+def is_nwb_obj_type(
+    nwb_object: pynwb.NWBContainer, target_type: Union[type, str]
+) -> bool:
+    """Check if an NWB object is of a specified type.
 
-    ActivityLog().deprecate_log("change_group_permissions")
+    Note: This function will be moved to a method of the IngestionMixin class
+    pending completed migration of ingestion tables (see #1326)
 
-    # Change to directory with analysis nwb files
-    os.chdir(analysis_dir)
-    # Get nwb file directories with specified subject ids
-    target_contents = [
-        x
-        for x in os.listdir(analysis_dir)
-        if any([subject_id in x.split("_")[0] for subject_id in subject_ids])
-    ]
-    # Loop through nwb file directories and change group permissions
-    for target_content in target_contents:
-        logger.info(
-            f"For {target_content}, changing group to {set_group_name} "
-            + "and giving read/write/execute permissions"
-        )
-        # Change group
-        os.system(f"chgrp -R {set_group_name} {target_content}")
-        # Give read, write, execute permissions to group
-        os.system(f"chmod -R g+rwx {target_content}")
+    Parameters
+    ----------
+    nwb_object : pynwb.NWBContainer
+        The NWB object to check.
+    target_type : type or str
+        The target type to check against. Can be a class type or a string
+        representing the class name.
+
+    Returns
+    -------
+    bool
+        True if the NWB object is of the target type, False otherwise.
+    """
+    if isinstance(target_type, type):
+        return isinstance(nwb_object, target_type)
+
+    return nwb_object.__class__.__name__ == target_type

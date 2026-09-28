@@ -1,12 +1,10 @@
 # Convenience functions
 # some DLC-utils copied from datajoint element-interface utils.py
-import grp
 import logging
 import os
-import pwd
 import subprocess
 import sys
-from collections import abc
+import matplotlib.path
 from functools import reduce
 from itertools import combinations, groupby
 from operator import itemgetter
@@ -20,7 +18,7 @@ from position_tools import get_distance
 
 from spyglass.common.common_behav import VideoFile
 from spyglass.common.common_usage import ActivityLog
-from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
+from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir, test_mode
 from spyglass.utils.logging import logger, stream_handler
 
 
@@ -124,47 +122,6 @@ def validate_smooth_params(params):
     )
 
 
-def _set_permissions(directory, mode, username: str, groupname: str = None):
-    """
-    Use to recursively set ownership and permissions for
-    directories/files that result from the DLC pipeline
-
-    Parameters
-    ----------
-    directory : str or PosixPath
-        path to target directory
-    mode : stat read-out
-        list of permissions to set using stat package
-        (e.g. mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP)
-    username : str
-        username of user to set as owner and apply permissions to
-    groupname : str
-        existing Linux groupname to set as group owner
-        and apply permissions to
-
-    Returns
-    -------
-    None
-    """
-    ActivityLog().deprecate_log(  # pragma: no cover
-        "dlc_utils: _set_permissions"
-    )
-
-    directory = Path(directory)  # pragma: no cover
-    assert directory.exists(), f"Target directory: {directory} does not exist"
-    uid = pwd.getpwnam(username).pw_uid  # pragma: no cover
-    if groupname:  # pragma: no cover
-        gid = grp.getgrnam(groupname).gr_gid
-    else:  # pragma: no cover
-        gid = None
-    for dirpath, _, filenames in os.walk(directory):  # pragma: no cover
-        os.chown(dirpath, uid, gid)
-        os.chmod(dirpath, mode)
-        for filename in filenames:
-            os.chown(os.path.join(dirpath, filename), uid, gid)
-            os.chmod(os.path.join(dirpath, filename), mode)
-
-
 def file_log(logger, console=False):
     """Decorator to add a file handler to a logger.
 
@@ -207,98 +164,6 @@ def file_log(logger, console=False):
         return wrapper
 
     return decorator
-
-
-def get_dlc_root_data_dir():  # pragma: no cover
-    """Returns list of potential root directories for DLC data"""
-    ActivityLog().deprecate_log("dlc_utils: get_dlc_root_data_dir")
-    if "custom" in dj.config:
-        if "dlc_root_data_dir" in dj.config["custom"]:
-            dlc_root_dirs = dj.config.get("custom", {}).get("dlc_root_data_dir")
-    if not dlc_root_dirs:
-        return [
-            "/nimbus/deeplabcut/projects/",
-            "/nimbus/deeplabcut/output/",
-            "/cumulus/deeplabcut/",
-        ]
-    elif not isinstance(dlc_root_dirs, abc.Sequence):
-        return list(dlc_root_dirs)
-    else:
-        return dlc_root_dirs
-
-
-def get_dlc_processed_data_dir() -> str:  # pragma: no cover
-    """Returns session_dir relative to custom 'dlc_output_dir' root"""
-    ActivityLog().deprecate_log("dlc_utils: get_dlc_processed_data_dir")
-    if "custom" in dj.config:
-        if "dlc_output_dir" in dj.config["custom"]:
-            dlc_output_dir = dj.config.get("custom", {}).get("dlc_output_dir")
-    if dlc_output_dir:
-        return Path(dlc_output_dir)
-    else:
-        return Path("/nimbus/deeplabcut/output/")
-
-
-def find_full_path(root_directories, relative_path):  # pragma: no cover
-    """
-    from Datajoint Elements - unused
-    Given a relative path, search and return the full-path
-     from provided potential root directories (in the given order)
-        :param root_directories: potential root directories
-        :param relative_path: the relative path to find the valid root directory
-        :return: full-path (Path object)
-    """
-    ActivityLog().deprecate_log("dlc_utils: find_full_path")
-    relative_path = _to_Path(relative_path)
-
-    if relative_path.exists():
-        return relative_path
-
-    # Turn to list if only a single root directory is provided
-    if isinstance(root_directories, (str, Path)):
-        root_directories = [_to_Path(root_directories)]
-
-    for root_dir in root_directories:
-        if (_to_Path(root_dir) / relative_path).exists():
-            return _to_Path(root_dir) / relative_path
-
-    raise FileNotFoundError(
-        f"No valid full-path found (from {root_directories})"
-        f" for {relative_path}"
-    )
-
-
-def find_root_directory(root_directories, full_path):  # pragma: no cover
-    """
-    From datajoint elements - unused
-    Given multiple potential root directories and a full-path,
-    search and return one directory that is the parent of the given path
-        :param root_directories: potential root directories
-        :param full_path: the full path to search the root directory
-        :return: root_directory (Path object)
-    """
-    ActivityLog().deprecate_log("dlc_utils: find_full_path")
-    full_path = _to_Path(full_path)
-
-    if not full_path.exists():
-        raise FileNotFoundError(f"{full_path} does not exist!")
-
-    # Turn to list if only a single root directory is provided
-    if isinstance(root_directories, (str, Path)):
-        root_directories = [_to_Path(root_directories)]
-
-    try:
-        return next(
-            _to_Path(root_dir)
-            for root_dir in root_directories
-            if _to_Path(root_dir) in set(full_path.parents)
-        )
-
-    except StopIteration as exc:
-        raise FileNotFoundError(
-            f"No valid root directory found (from {root_directories})"
-            f" for {full_path}"
-        ) from exc
 
 
 def infer_output_dir(key, makedir=True):
@@ -364,7 +229,9 @@ def get_video_info(key):
     video_query = VideoFile & vf_key
 
     if not video_query:
-        VideoFile().make(vf_key, verbose=False)
+        if not (VideoFile & {"nwb_file_name": vf_key["nwb_file_name"]}):
+            VideoFile().insert_from_nwbfile(vf_key["nwb_file_name"])
+            video_query = VideoFile & vf_key
 
     if len(video_query) != 1:
         logger.warning(f"Found {len(video_query)} videos for {vf_key}")
@@ -589,6 +456,18 @@ def get_span_start_stop(indices):
     return span_inds
 
 
+def check_bounds_all_bodyparts(df, bounds):
+    """Checks if (x,y) position of each labeled body part in ROI"""
+    df_copy = df.copy()
+
+    xy_loc = df_copy[["x", "y"]].to_numpy()
+    inside = matplotlib.path.Path(bounds).contains_points(xy_loc)
+    logger.debug(f"Inside bounds mask: {inside.sum()}/{len(inside)}")
+    outside = ~inside
+    df_copy.loc[outside, ["x", "y"]] = np.nan
+    return df_copy
+
+
 def interp_pos(dlc_df, spans_to_interp, **kwargs):
     """Interpolate x and y positions in DLC dataframe"""
     idx = pd.IndexSlice
@@ -610,11 +489,13 @@ def interp_pos(dlc_df, spans_to_interp, **kwargs):
 
         if (span_stop + 1) >= len(dlc_df):
             dlc_df.loc[idx_span, idx[["x", "y"]]] = np.nan
-            logger.info(no_x_msg.format(ind=ind, coord="end"))
+            if not test_mode:
+                logger.info(no_x_msg.format(ind=ind, coord="end"))
             continue
         if span_start < 1:
             dlc_df.loc[idx_span, idx[["x", "y"]]] = np.nan
-            logger.info(no_x_msg.format(ind=ind, coord="start"))
+            if not test_mode:
+                logger.info(no_x_msg.format(ind=ind, coord="start"))
             continue
 
         x = [dlc_df["x"].iloc[span_start - 1], dlc_df["x"].iloc[span_stop + 1]]
@@ -627,7 +508,10 @@ def interp_pos(dlc_df, spans_to_interp, **kwargs):
 
         if span_len > max_pts_to_interp or change > max_cm_to_interp:
             dlc_df.loc[idx_span, idx[["x", "y"]]] = np.nan
-            logger.info(no_interp_msg.format(start=span_start, stop=span_stop))
+            if not test_mode:
+                logger.info(
+                    no_interp_msg.format(start=span_start, stop=span_stop)
+                )
             if change > max_cm_to_interp:
                 continue
 
@@ -650,11 +534,13 @@ def interp_orientation(df, spans_to_interp, **kwargs):
         idx_span = idx[span_start:span_stop]
         if (span_stop + 1) >= len(df):
             df.loc[idx_span, idx["orientation"]] = np.nan
-            logger.info(no_x_msg.format(ind=ind, x="stop"))
+            if not test_mode:
+                logger.info(no_x_msg.format(ind=ind, x="stop"))
             continue
         if span_start < 1:
             df.loc[idx_span, idx["orientation"]] = np.nan
-            logger.info(no_x_msg.format(ind=ind, x="start"))
+            if not test_mode:
+                logger.info(no_x_msg.format(ind=ind, x="start"))
             continue
 
         orient = [df_orient.iloc[span_start - 1], df_orient.iloc[span_stop + 1]]

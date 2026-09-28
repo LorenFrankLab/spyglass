@@ -86,7 +86,7 @@ schema = dj.schema("decoding_clusterless")
 class MarkParameters(SpyglassMixin, dj.Manual):
     """Defines the type of waveform feature computed for a given spike time.
 
-    Parameters
+    Attributes
     ----------
     mark_param_name : str
         A name for this set of parameters
@@ -503,7 +503,7 @@ class ClusterlessClassifierParameters(SpyglassMixin, dj.Manual):
     Decodes the animal's mental position and some category of interest
     from unclustered spikes and spike waveform features
 
-    Parameters
+    Attributes
     ----------
     classifier_param_name : str
     classifier_params: dict

@@ -81,7 +81,7 @@ def memo_linearize(
     y_width: float,
 ):
     """Memoized linearize function."""
-    (_, y, x) = t
+    _, y, x = t
     my_tuple = (x, y)
     if my_tuple not in location_lookup:
         lin = x_count * round((y - y_min) / y_width) + round(
@@ -125,12 +125,10 @@ def get_positions(
 
 def get_observations_per_frame(i_trim: xr.DataArray, base_slice: xr.DataArray):
     """Get the observations per frame."""
-    (times, time_counts_np) = np.unique(i_trim.time.values, return_counts=True)
+    times, time_counts_np = np.unique(i_trim.time.values, return_counts=True)
     time_counts = xr.DataArray(time_counts_np, coords={"time": times})
     raw_times = base_slice.time
-    (_, good_counts) = xr.align(
-        raw_times, time_counts, join="left", fill_value=0
-    )
+    _, good_counts = xr.align(raw_times, time_counts, join="left", fill_value=0)
     observations_per_frame = good_counts.values.astype(np.uint8)
     return observations_per_frame
 

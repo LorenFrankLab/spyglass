@@ -6,6 +6,36 @@ tests in that subdirectory.
 """
 
 import os
+
+# ---------------------------------------------------------------------------
+# Environment variables — set before any package imports so that TensorFlow,
+# CUDA, and Qt pick them up at their first import.
+# ---------------------------------------------------------------------------
+
+# Suppress TensorFlow C++ logging (0=DEBUG … 3=FATAL-only).
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+
+# Disable oneDNN fused-ops to avoid the "numerical results may differ" banner.
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+
+# Qt requires a display; offscreen keeps headless CI from crashing.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("DISPLAY", ":0")
+
+# Disable all tqdm progress bars; they pollute test output.
+os.environ.setdefault("TQDM_DISABLE", "1")
+
+# Suppress ResourceWarning at the OS level so datajoint/hash.py unclosed-file
+# warnings don't bleed through even during GC finalisation.
+_existing = os.environ.get("PYTHONWARNINGS", "")
+_rw_filter = "ignore::ResourceWarning"
+if _rw_filter not in _existing:
+    os.environ["PYTHONWARNINGS"] = (
+        f"{_existing},{_rw_filter}" if _existing else _rw_filter
+    )
+
+# ---------------------------------------------------------------------------
+
 import sys
 import warnings
 from contextlib import nullcontext
@@ -13,21 +43,168 @@ from pathlib import Path
 from shutil import rmtree as shutil_rmtree
 
 import datajoint as dj
+import datajoint.external as _dj_external
+import datajoint.hash as _dj_hash
+import hdmf.build.objectmapper as _hdmf_objectmapper
 import numpy as np
 import pynwb
+import pynwb.device as _pynwb_device
+import pynwb.io.device as _pynwb_io_device
 import pytest
+import sklearn.utils.parallel as _sklearn_parallel
 from datajoint.logging import logger as dj_logger
 from hdmf.build.warnings import MissingRequiredBuildWarning
 from numba import NumbaWarning
 from pandas.errors import PerformanceWarning
 
+from ._teardown_exit import escalate_exit_on_teardown_failure
 from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
+
+# ---------- Fix ResourceWarning from datajoint.hash.uuid_from_file -----------
+# Patch uuid_from_file to properly close file handles (upstream opens without
+# `with`, triggering ResourceWarning on GC). This is safe: the function reads
+# the whole file before returning, so closing after uuid_from_stream is fine.
+def _uuid_from_file_safe(filepath, *, init_string=""):
+    with Path(filepath).open("rb") as f:
+        return _dj_hash.uuid_from_stream(f, init_string=init_string)
+
+
+_dj_hash.uuid_from_file = _uuid_from_file_safe
+# datajoint.external uses `from .hash import uuid_from_file` at import time,
+# creating a local binding that bypasses the patch above.  Patch the external
+# module's namespace directly so both paths use the safe version.
+_dj_external.uuid_from_file = _uuid_from_file_safe
+
+# ----------- Prevent NWB-2.9 migration warnings from test NWB file -----------
+# Patch pynwb Device NWB-2.9 migration warnings triggered by the test NWB file,
+# which was written before NWB 2.9 (Device.model stored as string, manufacturer
+# as a field).  pynwb uses stacklevel= values that attribute these warnings to
+# hdmf internals (hdmf.build.objectmapper / hdmf.utils) rather than to pynwb,
+# so they bypass any module-specific filter and can defeat category-only filters
+# once an hdmf module's __warningregistry__ pre-dates the filter installation.
+#
+# Two distinct call sites require two different strategies:
+#
+#   (a) pynwb/io/device.py uses `from warnings import warn` — the `warn` name
+#       lives in pynwb.io.device's namespace, so it is directly patchable.
+#
+#   (b) pynwb/device.py uses `import warnings; warnings.warn(...)` — we cannot
+#       replace an attribute on the warnings module itself without side-effects,
+#       so we wrap Device.__init__ instead.
+
+_orig_io_device_warn = _pynwb_io_device.warn
+
+
+def _io_device_warn_filtered(message, *args, **kwargs):
+    if "Device.model was detected as a string" not in str(message):
+        _orig_io_device_warn(message, *args, **kwargs)
+
+
+_pynwb_io_device.warn = _io_device_warn_filtered
+
+_orig_device_init = _pynwb_device.Device.__init__
+
+
+def _device_init_no_field_deprecations(*args, **kwargs):
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"The '(?:manufacturer|model_number|model_name)' field is deprecated",
+            category=DeprecationWarning,
+        )
+        return _orig_device_init(*args, **kwargs)
+
+
+# hdmf's objectmapper calls get_docval(cls.__init__) to discover constructor
+# arguments.  get_docval reads the __docval__ / __docval_idx__ attributes that
+# the @docval decorator stores in func.__dict__.  Copy the original function's
+# __dict__ to the wrapper so that Device subclasses which inherit __init__
+# (e.g. ndx-franklab-novela's CameraDevice) still work correctly.
+_device_init_no_field_deprecations.__dict__.update(_orig_device_init.__dict__)
+_device_init_no_field_deprecations.__name__ = _orig_device_init.__name__
+_device_init_no_field_deprecations.__module__ = _orig_device_init.__module__
+
+_pynwb_device.Device.__init__ = _device_init_no_field_deprecations
+
+# ------ Suppress warnings that bypass Python-level filters at call-time ------
+#
+# Two remaining warnings survive even broad `filterwarnings("ignore", ...)`
+# calls because they fire inside contexts where `warnings.filters` has been
+# cleared or overridden:
+#
+#   (1) MissingRequiredBuildWarning — hdmf.build.objectmapper.__check_quantity
+#       warns when an NWB container is missing a required attribute.  The test
+#       NWB file predates NWB 2.9 and lacks 'source_script_file_name'.
+#
+#   (2) sklearn UserWarning — sklearn.utils.parallel._FuncWrapper.__call__
+#       warns when sklearn.delayed is used with non-sklearn Parallel.  Worse,
+#       that same __call__ executes ``warnings.filters = []`` inside a
+#       catch_warnings block, which clears ALL Python-level filters for the
+#       duration of every wrapped parallel task — causing (1) to escape even
+#       when our "ignore" filters are present.
+#
+# Both modules use ``import warnings; warnings.warn(...)`` style, so we cannot
+# patch the `warn` name directly in their namespace the way we did for
+# pynwb.io.device.  Instead we replace each module's `warnings` attribute with
+# a thin proxy object that:
+#   • Intercepts warn() and suppresses the specific message/category.
+#   • Stores attribute *writes* (e.g. proxy.filters = []) locally so they never
+#     propagate to the real warnings module — preventing _FuncWrapper from
+#     clearing the real warnings.filters state.
+#   • Delegates all other attribute *reads* to the real warnings module.
+
+
+class _ModuleWarningsProxy:
+    """Proxy for a module-level `warnings` reference.
+
+    Suppresses specific warn() calls before they reach the real warnings
+    module.  Attribute writes are stored locally (preventing callers like
+    sklearn._FuncWrapper from zeroing out the real warnings.filters list).
+    Attribute reads fall through to the real warnings module.
+    """
+
+    def __init__(self, suppress_fn):
+        # Use object.__setattr__ to avoid triggering our own __setattr__ logic.
+        object.__setattr__(self, "_suppress_fn", suppress_fn)
+
+    def warn(self, message, *args, **kwargs):
+        if not object.__getattribute__(self, "_suppress_fn")(
+            message, *args, **kwargs
+        ):
+            # stacklevel=2 so the warning is attributed to the caller of the
+            # module's warnings.warn(), not to this proxy line.
+            kwargs.setdefault("stacklevel", 2)
+            warnings.warn(message, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(warnings, name)
+
+
+# (1) Suppress MissingRequiredBuildWarning from hdmf objectmapper.
+_hdmf_objectmapper.warnings = _ModuleWarningsProxy(
+    lambda msg, *a, **kw: (
+        a
+        and isinstance(a[0], type)
+        and issubclass(a[0], MissingRequiredBuildWarning)
+    )
+)
+
+# (2) Suppress sklearn cross-library delayed/Parallel mismatch warning AND
+#     prevent _FuncWrapper from clearing the real warnings.filters.
+_sklearn_parallel.warnings = _ModuleWarningsProxy(
+    lambda msg, *a, **kw: (
+        "sklearn.utils.parallel.delayed" in str(msg)
+        and "sklearn.utils.parallel.Parallel" in str(msg)
+    )
+)
+
 # globals in pytest_configure:
-#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
+#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS,
+#     NO_DLC
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
@@ -41,6 +218,51 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
 warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
 
+# RuntimeWarning: os.fork() was called after os.forkserver() or JAX import.
+# JAX disables fork after parallelism starts; these are harmless in tests.
+warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*fork.*")
+warnings.filterwarnings(
+    "ignore", category=RuntimeWarning, message=".*os\\.fork.*"
+)
+
+# spikeinterface leaves mmap'd file handles open (traces_cached_seg*.raw).
+# These show up as ResourceWarning during GC; suppress by module path.
+warnings.filterwarnings(
+    "ignore",
+    category=ResourceWarning,
+    message=".*traces_cached_seg.*",
+)
+warnings.filterwarnings(
+    "ignore",
+    category=ResourceWarning,
+    module="spikeinterface",
+)
+
+# TemporaryDirectory objects may be GC'd before __exit__ is called in some
+# test teardown scenarios; suppress the resulting ResourceWarning.
+warnings.filterwarnings(
+    "ignore",
+    category=ResourceWarning,
+    message=".*TemporaryDirectory.*",
+)
+
+# numcodecs/__init__.py registers `atexit.register(blosc.destroy)` where
+# `blosc.destroy` is decorated with @deprecated (PyPI `deprecated` package).
+# This fires a DeprecationWarning at process exit.  We could filter it, but
+# ms4alg.py calls `warnings.resetwarnings()` during sorting — since pytest
+# runs with `-p no:warnings` (no catch_warnings restoration), that clears all
+# our filters and they are not restored before atexit fires.
+# Unregistering the atexit handler is cleaner: blosc._init() has already run,
+# and skipping _destroy() in the test process is harmless.
+try:
+    import atexit as _atexit
+
+    import numcodecs.blosc as _numcodecs_blosc
+
+    _atexit.unregister(_numcodecs_blosc.destroy)
+except Exception:
+    pass  # numcodecs not installed — nothing to unregister
+
 
 def pytest_addoption(parser):
     """Permit constants when calling pytest at command line
@@ -52,10 +274,14 @@ def pytest_addoption(parser):
     Parameters
     ----------
     --quiet-spy (bool):  Default False. Allow print statements from Spyglass.
-    --base-dir (str): Default './tests/test_data/'. Dir for local input file.
+    --base-dir (str): Default './tests/_data/'. Dir for local input files.
+        SPYGLASS_BASE_DIR is ignored by the test suite.
     --no-teardown (bool): Default False. Delete pipeline on close.
     --no-docker (bool): Default False. Run datajoint mysql server in Docker.
     --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
+    --container-name (str): Default None (derived from git branch as
+        'spyglass-pytest-<branch>'). Docker container name.
+    --container-port (str): Default None (uses 330[mysql_version]). Port mapping.
     """
     parser.addoption(
         "--quiet-spy",
@@ -69,7 +295,12 @@ def pytest_addoption(parser):
         action="store",
         default="./tests/_data/",
         dest="base_dir",
-        help="Directory for local input file.",
+        help=(
+            "Directory for local test input files. "
+            "Default: ./tests/_data/. SPYGLASS_BASE_DIR in the environment is "
+            "ignored by the test suite to keep destructive tests off shared "
+            "storage; pass --base-dir explicitly to override the default."
+        ),
     )
     parser.addoption(
         "--no-teardown",
@@ -92,10 +323,58 @@ def pytest_addoption(parser):
         default=False,
         help="Skip downloads for and tests of DLC-dependent features.",
     )
+    parser.addoption(  # Allows for concurrency with other pytest runs
+        "--container-name",
+        action="store",
+        default=None,
+        dest="container_name",
+        help="Docker container name for MySQL server. Default: derived from "
+        + "the current git branch, so concurrent runs on different branches "
+        + "don't share a container (or, with --container-vol-dir, a data "
+        + "dir).",
+    )
+    parser.addoption(  # Allows for concurrency with other pytest runs
+        "--container-port",
+        action="store",
+        default=None,
+        dest="container_port",
+        help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
+    )
+    parser.addoption(  # Keeps MySQL data off a potentially small root disk
+        "--container-vol-dir",
+        action="store",
+        default=None,
+        dest="container_vol_dir",
+        help="Parent dir for the container's MySQL data, bind-mounted as "
+        + "<vol-dir>/<container-name> -> /var/lib/mysql. Default: "
+        + "Docker-managed storage.",
+    )
+
+
+def _refuse_preimported_spyglass(modules=None):
+    """Refuse Spyglass imports that predate pytest's filesystem sandbox.
+
+    Cached directory values can live in module globals, imported bindings, and
+    class attributes throughout Spyglass.  Environment or DataJoint updates
+    cannot prove all of that state safe, so pytest requires a fresh process
+    rather than trying to reload an already-imported package.
+    """
+    modules = sys.modules if modules is None else modules
+    if any(
+        name == "spyglass" or name.startswith("spyglass.") for name in modules
+    ):
+        raise pytest.UsageError(
+            "Refusing to start Spyglass tests because Spyglass was imported "
+            "before pytest configured its filesystem sandbox. Cached module, "
+            "class, and DataJoint state cannot be made reliably safe by "
+            "reloading. Start pytest in a fresh Python process without "
+            "importing Spyglass first."
+        )
 
 
 def pytest_configure(config):
-    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS, NO_DLC
+    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
+    global NO_DLC
 
     TEST_FILE = "minirec20230622.nwb"
     TEARDOWN = not config.option.no_teardown
@@ -104,17 +383,66 @@ def pytest_configure(config):
     NO_DLC = config.option.no_dlc
     pytest.NO_DLC = NO_DLC
 
-    BASE_DIR = Path(config.option.base_dir).absolute()
+    # Validate the requested base dir before anything is created or
+    # downloaded. settings.py enforces this too, but only once spyglass is
+    # first imported, which happens after BASE_DIR.mkdir() and after the
+    # DataDownloader starts fetching.
+    _requested_base = Path(config.option.base_dir).expanduser().resolve()
+    if "tests" not in _requested_base.parts:
+        raise pytest.UsageError(
+            f"--base-dir {str(_requested_base)!r} does not contain a 'tests' "
+            "path component. The test suite runs Spyglass in test_mode and "
+            "performs destructive cleanup; point --base-dir inside a tests/ "
+            "directory (default: ./tests/_data/)."
+        )
+
+    # This must precede environment mutation, directory creation, Docker, and
+    # downloads. Cached module globals cannot be repaired by changing the
+    # environment after Spyglass has already been imported.
+    _refuse_preimported_spyglass()
+
+    # Tests never honor SPYGLASS_BASE_DIR — a shell-exported value pointing at
+    # shared/production storage would let destructive tests (e.g.
+    # AnalysisNwbfile.cleanup) scan and delete real analysis files. Warn once
+    # if set so the user notices, then drop it from the environment.
+    _env_base = os.environ.pop("SPYGLASS_BASE_DIR", None)
+    if _env_base:
+        warnings.warn(
+            f"Ignoring SPYGLASS_BASE_DIR={_env_base!r} in the test environment; "
+            "pass --base-dir to override the ./tests/_data/ default.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    BASE_DIR = _requested_base
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
+
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU for tests
 
     SERVER = DockerMySQLManager(
+        container_name=config.option.container_name,
+        port=config.option.container_port,
+        vol_dir=config.option.container_vol_dir,
         restart=TEARDOWN,
         shutdown=TEARDOWN,
         null_server=config.option.no_docker,
         verbose=VERBOSE,
     )
+    # Apply credentials now so that dj.config["custom"]["test_mode"] = True
+    # is visible when spyglass is first imported (triggered by fixtures such as
+    # verbose_context). settings.py reads dj.config at import time to populate
+    # the module-level `config` dict; if credentials arrive later the dict is
+    # frozen with test_mode=False.
+    dj.config.update(SERVER.credentials)
+
+    # Point spyglass_dirs.base at the resolved test base so dj.config and the
+    # resolved path agree. Non-test directory paths in dj.config["custom"] are
+    # refused by the SpyglassConfig test_mode guard at load_config time.
+    dj.config.setdefault("custom", {})["spyglass_dirs"] = {
+        "base": str(BASE_DIR)
+    }
 
     DOWNLOADS = DataDownloader(
         base_dir=BASE_DIR,
@@ -123,17 +451,137 @@ def pytest_configure(config):
     )
 
 
+def pytest_sessionfinish(session, exitstatus):
+    # Stash the session so pytest_unconfigure (which only receives ``config``)
+    # can escalate the exit status if teardown fails. wrap_session returns
+    # ``session.exitstatus`` after pytest_unconfigure runs, so a value set
+    # there is reflected in the process exit code.
+    global SESSION
+    SESSION = session
+
+
 def pytest_unconfigure(config):
+    server = globals().get("SERVER")
+    if server is None:
+        return
+
     from spyglass.utils.nwb_helper_fn import close_nwb_files
 
-    close_nwb_files()
-    if TEARDOWN:
-        SERVER.stop()
-        analysis_dir = BASE_DIR / "analysis"
-        for file in analysis_dir.glob("*.nwb"):
-            file.unlink()
-        for subdir in ["export", "moseq", "recording", "spikesorting", "tmp"]:
-            shutil_rmtree(str(BASE_DIR / subdir), ignore_errors=True)
+    base_dir = globals().get("BASE_DIR")
+    teardown = globals().get("TEARDOWN", False)
+    failures = []
+
+    # Each step runs independently: a stop failure must not skip cleanup, a
+    # cleanup failure must stay visible, and a secondary failure must not
+    # mask the first.
+    steps = [("close_nwb_files", close_nwb_files)]
+    if teardown:
+        steps.append(("server.stop", server.stop))
+        steps.append(("data cleanup", lambda: _teardown_test_data(base_dir)))
+
+    for label, action in steps:
+        try:
+            action()
+        except Exception as err:  # noqa: BLE001 - reported, not swallowed
+            failures.append(f"{label}: {err}")
+
+    if failures:
+        print("pytest teardown failures:")
+        for failure in failures:
+            print(f"  - {failure}")
+        escalate_exit_on_teardown_failure(globals().get("SESSION"))
+
+
+def _teardown_test_data(base_dir, data_root=None):
+    """Remove generated test data, but only from the canonical test base.
+
+    A 'tests' path component proves location, not ownership: a custom
+    --base-dir may hold real data, so teardown is limited to the
+    repository's own tests/_data, and every owned child is re-checked for
+    being a symlink before it is touched.
+
+    `analysis` is swept non-recursively because concurrent pytest sessions
+    are supported (--container-name / --container-port) and share this base by
+    default; without per-run ownership metadata, traversing nested session
+    directories could erase another run's active files. The other owned
+    subdirectories are removed recursively, which carries that same
+    concurrent-session race -- this function keeps teardown inside the test
+    tree, it does not make it concurrency-safe. Nested analysis cleanup would
+    need a per-base session lock or ownership manifest.
+
+    Raises
+    ------
+    RuntimeError
+        If one or more owned children could not be removed. Failures are
+        aggregated so a single unremovable entry does not strand the rest.
+    """
+    if base_dir is None:
+        return
+
+    data_root = (
+        Path(data_root) if data_root else Path(__file__).parent / "_data"
+    )
+    canonical = data_root.resolve()
+    if Path(base_dir).resolve() != canonical:
+        print(
+            f"Skipping test-data cleanup: {base_dir} is not the canonical "
+            f"test base {canonical}"
+        )
+        return
+    if data_root.is_symlink():
+        print(
+            "Skipping test-data cleanup: tests/_data is a symlink; its "
+            "target is not owned by the test suite"
+        )
+        return
+
+    owned = ["analysis", "export", "moseq", "recording", "spikesorting", "tmp"]
+
+    # Each child is re-validated without following links. A symlinked
+    # tests/_data/analysis would otherwise let glob traverse into it and
+    # unlink files outside the test tree -- the same escape the parent check
+    # closes one level up.
+    # Each child is attempted independently and failures are aggregated:
+    # one unremovable directory must not leave every later one behind.
+    child_failures = []
+    for name in owned:
+        child = Path(base_dir) / name
+        try:
+            # Inside the try: is_symlink()/exists() re-raise EACCES, which
+            # would otherwise escape before the aggregation and strand every
+            # later child.
+            if child.is_symlink():
+                print(
+                    f"Skipping test-data cleanup of {name}: it is a symlink; "
+                    "its target is not owned by the test suite"
+                )
+                continue
+            if not child.exists():
+                continue
+            if name == "analysis":
+                # unlink() on a symlink removes the LINK, never its target,
+                # so symlinks are removed here like any other entry. Leaving
+                # them would be the dangerous choice: a surviving leaf link can
+                # later authorize cleanup to delete its external target.
+                # Non-recursive (see the docstring for why): a `*.nwb` glob
+                # touches only flat leaves, each unlinked independently so one
+                # unremovable entry does not strand the rest.
+                for file in child.glob("*.nwb"):
+                    try:
+                        file.unlink()
+                    except OSError as err:
+                        child_failures.append(f"{name}/{file.name}: {err}")
+            else:
+                # No ignore_errors: failures must surface, not vanish.
+                shutil_rmtree(str(child))
+        except OSError as err:
+            child_failures.append(f"{name}: {err}")
+
+    if child_failures:
+        raise RuntimeError(
+            f"test-data cleanup: {len(child_failures)} failures "
+            "(files and/or directories): " + "; ".join(child_failures)
+        )
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------
@@ -186,26 +634,57 @@ def server(request, teardown):
 
 
 @pytest.fixture(scope="session")
-def server_credentials(server):
-    yield server.credentials
+def worker_id(request):
+    """Get unique worker ID for pytest-xdist parallelization.
+
+    Returns 'master' for serial execution, or 'gwN' for parallel workers.
+    This enables worker-specific database schema isolation.
+
+    NOTE: Not currently in use, but set up for future parallel test runs.
+    """
+    if hasattr(request.config, "workerinput"):
+        return request.config.workerinput["workerid"]
+    return "master"
 
 
 @pytest.fixture(scope="session")
-def dj_conn(request, server_credentials, verbose, teardown):
-    """Fixture for datajoint connection."""
-    config_file = "dj_local_conf.json_test"
+def dj_config(verbose):
+    """Fixture for branch-specific config name"""
+    SERVER.wait()  # ensure MySQL is ready before any test uses these credentials
+
+    # Worker-specific config file to avoid conflicts
+    config_file = "dj_local_conf.json"
+    if branch_name := SERVER.branch_name:
+        config_file = f"dj_local_conf_{branch_name}.json"
+
     if Path(config_file).exists():
         os.remove(config_file)
 
-    dj.config.update(server_credentials)
+    # Set worker-specific schema prefix for database isolation
+    dj.config.update(SERVER.credentials)
     dj.config["loglevel"] = "INFO" if verbose else "ERROR"
+    dj.config["database.prefix"] = "pytests"
     dj.config["custom"]["spyglass_dirs"] = {"base": str(BASE_DIR)}
     dj.config.save(config_file)
-    dj.conn()
+
+    return config_file
+
+
+@pytest.fixture(scope="session")
+def dj_conn(dj_config):
+    """Fixture for datajoint connection with pytest-xdist support.
+
+    For parallel execution, each worker gets its own database schema prefix
+    to avoid race conditions and ensure test isolation.
+    """
+    dj.config.load(dj_config)
+
+    try:
+        dj.conn().ping()
+    except Exception as e:  # If can't connect, exit all tests
+        pytest.exit(f"Failed to connect to database: {e}")
+
     yield dj.conn()
-    if teardown:
-        if Path(config_file).exists():
-            os.remove(config_file)
 
 
 @pytest.fixture(scope="session")
@@ -286,13 +765,13 @@ def load_config(dj_conn, base_dir):
 
 @pytest.fixture(autouse=True, scope="session")
 def mini_insert(
-    dj_conn, mini_path, mini_content, teardown, server, load_config
+    dj_conn, mini_path, mini_content, teardown, server, load_config, mini_dict
 ):
     from spyglass.common import LabMember, Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
-    from spyglass.spikesorting.spikesorting_merge import (  # noqa: E402
+    from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
-    )
+    )  # noqa: E402
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
 
     _ = SpikeSortingOutput()
@@ -302,14 +781,16 @@ def mini_insert(
         ["Root User", "email", "root", 1], skip_duplicates=True
     )
 
-    dj_logger.info("Inserting test data.")
-
-    if not server.connected:
+    if not SERVER.connected:
         raise ConnectionError("No server connection.")
 
-    if len(Nwbfile()) != 0:
+    if len(Nwbfile & mini_dict) != 0:
         dj_logger.warning("Skipping insert, use existing data.")
+
     else:
+        # Useful try/except for avoiding a full run on insert failure
+        # Should be commented out in favor of vanilla insert for debugging
+        # the insert_sessions function itself.
         try:
             insert_sessions(mini_path.name, raise_err=True)
         except Exception as e:  # If can't insert session, exit all tests
@@ -583,9 +1064,9 @@ def trodes_pos_v1(teardown, sgp, trodes_sel_keys):
 @pytest.fixture(scope="session")
 def pos_merge_tables(dj_conn):
     """Return the merge tables as activated."""
-    from spyglass.common.common_position import TrackGraph
     from spyglass.lfp.lfp_merge import LFPOutput
     from spyglass.linearization.merge import LinearizedPositionOutput
+    from spyglass.linearization.v0.main import TrackGraph
     from spyglass.position.position_merge import PositionOutput
 
     # must import common_position before LinOutput to avoid circular import
@@ -1359,6 +1840,13 @@ def spike_v1(common):
 
 
 @pytest.fixture(scope="session")
+def imported_spike(common):
+    from spyglass.spikesorting import imported
+
+    yield imported
+
+
+@pytest.fixture(scope="session")
 def pop_rec(spike_v1, mini_dict, team_name):
     spike_v1.SortGroup.set_group_by_shank(**mini_dict)
     key = {
@@ -1373,6 +1861,9 @@ def pop_rec(spike_v1, mini_dict, team_name):
         (spike_v1.SpikeSortingRecordingSelection & key).proj().fetch1("KEY")
     )
     spike_v1.SpikeSortingRecording.populate(ssr_pk)
+
+    if not spike_v1.SpikeSortingRecording() & ssr_pk:
+        raise ValueError("SpikeSortingRecording failed to populate.")
 
     yield ssr_pk
 

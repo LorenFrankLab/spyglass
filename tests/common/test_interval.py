@@ -47,13 +47,14 @@ def test_plot_intervals(interval_list, mini_dict, start_time=0):
     intervals_fig = np.array(intervals_fig, dtype="object")
 
     # extract interval times from the IntervalList table
-    intervals_fetch = interval_list.fetch("valid_times")
+    intervals_fetch = interval_query.fetch("valid_times")
 
     all_equal = True
     for i_fig, i_fetch in zip(intervals_fig, intervals_fetch):
         # permit rounding errors up to the 4th decimal place, as a result of inaccuracies during unit conversions
         i_fig = np.round(i_fig.astype("float"), 4)
-        i_fetch = np.round(i_fetch.astype("float"), 4)
+        # Normalize i_fetch: handle Python lists and 1D [start, end] arrays
+        i_fetch = np.round(np.array(i_fetch, dtype="float").reshape(-1, 2), 4)
         if not array_equal(i_fig, i_fetch):
             all_equal = False
 

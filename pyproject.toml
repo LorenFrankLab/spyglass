@@ -30,40 +30,44 @@ authors = [
   { name = "Chris Brozdowski", email = "chris.broz@ucsf.edu" },
   { name = "Samuel Bray", email = "sam.bray@ucsf.edu" },
 ]
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.10,<3.13"
 classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
 ]
 dynamic = [ "version" ]
 dependencies = [
-  "black[jupyter]",
+  # 1. jax 0.7.2 req numpy>=2/scipy>=1.13, which spikeinterface 0.99 can't use.
+  # 2. spikeinterface 0.99.x uses scipy.linalg.tril, removed in scipy 1.13.
+  # 3. spikeinterface 0.99.1 calls np.issctype (removed in numpy 2.0) but
+  #    declares an unbounded numpy, we bound here.
+  "black[jupyter]>26",
   "bottleneck",
   "dask",
-  "datajoint>=0.14.5",
-  # "ghostipy", # removed from list bc M1 users need to install pyfftw first
+  "datajoint>=0.14.5,<2.0",
   "hdmf>=3.4.6",
   "ipympl",
+  "jax<0.7.2",                    # TODO(#1609): remove with SpikeInterface bump
   "matplotlib",
-  "ndx-franklab-novela>=0.1",
-  "ndx-optogenetics",
+  "ndx-franklab-novela>=0.2.4",
+  "ndx-ophys-devices",
+  "ndx-optogenetics==0.3.0",
   "ndx-pose",
-  "ndx-structured-behavior",       # PENDING PyPI release!
   "non-local-detector",
-  "numpy",
+  "numpy<2",                      # TODO(#1609): remove with SpikeInterface bump
   "opencv-python",
   "panel>=1.4",
   "position-tools>=0.1",
-  "probeinterface<0.3",            # Bc some probes fail space checks
-  "pubnub<6.4",                    # TODO: remove this when sortingview is updated
+  "probeinterface<0.3",           # Bc some probes fail space checks
+  "pubnub<6.4",                   # TODO: remove this when sortingview is updated
   "pydotplus",
-  "pynwb>=2.5,<3",
+  "pynwb>=3.1.3",
   "ripple-detection",
+  "scipy<1.13",                   # TODO(#1609): remove with SpikeInterface bump
   "seaborn",
   "sortingview>=0.11",
   "spikeinterface>=0.99.1,<0.100",
@@ -88,6 +92,11 @@ optional-dependencies.docs = [
   "mkdocs-mermaid2-plugin", # Docs mermaid diagrams
   "mkdocstrings[python]",   # Docs API docstrings
 ]
+optional-dependencies.kachery-cloud = [
+  "kachery",
+  "kachery-client",
+  "kachery-cloud>=0.4",
+]
 optional-dependencies.moseq-cpu = [
   "jax[cpu]",
   "jax-moseq",
@@ -101,10 +110,10 @@ optional-dependencies.moseq-gpu = [
 optional-dependencies.test = [
   "codecov",                # for code coverage badge
   "docker",                 # for tests in a container
-  "ghostipy",
   "kachery",                # database access
   "kachery-client",
   "kachery-cloud>=0.4",
+  "netcdf4",                # for decoding mocking
   "opencv-python-headless", # for headless testing of Qt
   "pre-commit",             # linting
   "pytest",                 # unit testing
@@ -139,8 +148,9 @@ lint.ignore = [ "E402", "E501", "F401" ]
 
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
-ignore-words-list = 'nevers'
+ignore-words-list = 'nevers,notin'
 # Nevers - name in Citation
+# notin - UnitSelectionParams.unit_criteria operator, paired with isin
 
 [tool.pytest.ini_options]
 minversion = "7.0"
@@ -150,7 +160,7 @@ addopts = [
   # "--sw", # stepwise: resume with next test after failure
   # "--pdb", # drop into debugger on failure
   "-p no:warnings",
-  # "--no-teardown", # don't teardown the database after tests
+  # "--no-teardown",  # don't teardown the database after tests
   # "--quiet-spy",   # don't show logging from spyglass
   # "--no-dlc",      # don't run DLC tests
   "--show-capture=no",
@@ -172,7 +182,28 @@ filterwarnings = [
   "ignore::ResourceWarning:.*",
   "ignore::DeprecationWarning:.*",
   "ignore::UserWarning:.*",
+  "ignore::FutureWarning:.*",
+  "ignore::PerformanceWarning:.*",
   "ignore::MissingRequiredBuildWarning:.*",
+  # DLC training ends by cancelling a TF enqueue thread; expected, not a bug
+  "ignore::pytest.PytestUnhandledThreadExceptionWarning",
+]
+markers = [
+  # Speed-based markers (based on total time: setup + call + teardown)
+  "fast: Tests that complete in <1 second",
+  "medium: Tests that complete in 1-10 seconds",
+  "slow: Tests that complete in 10-60 seconds",
+  "very_slow: Tests that complete in >60 seconds (top bottlenecks)",
+
+  # Type-based markers
+  "unit: Pure unit tests with no I/O dependencies",
+  "integration: Integration tests involving multiple components",
+  "io_heavy: I/O-intensive tests (database and/or NWB files)",
+  "database: Tests requiring database operations",
+  "nwb: Tests requiring NWB file I/O",
+
+  # Special markers
+  "serial: Tests that must run serially (not parallel-safe)",
 ]
 
 [tool.coverage.run] # NOTE: changes need to be mirrored in tests/.coveragerc
@@ -181,12 +212,11 @@ omit = [ # which submodules have no tests
   "*/__init__.py",
   "*/_version.py",
   # "*/behavior/*",
-  "*/cli/*",
   # "*/common/*",
   "*/data_import/*",
   "*/decoding/v0/*",
-  "*/figurl_views/*",
   # "*/decoding/*",
+  "*/figurl_views/*",
   # "*/lfp/*",
   # "*/linearization/*",
   "*/lock/*",
@@ -197,5 +227,4 @@ omit = [ # which submodules have no tests
   # "*/spikesorting/*",
   # "*/utils/*",
   "settings.py",
-  "*/moseq/*",
 ]

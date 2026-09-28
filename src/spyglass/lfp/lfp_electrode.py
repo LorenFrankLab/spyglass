@@ -5,6 +5,7 @@ import numpy as np
 
 from spyglass.common.common_ephys import Electrode
 from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.settings import test_mode
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin
 
@@ -120,15 +121,28 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             # Insert part table entries
             LFPElectrodeGroup.LFPElectrode.insert(part_keys, **kwargs)
 
-        logger.info(
-            f"Successfully created/updated LFPElectrodeGroup {nwb_file_name}, {group_name} "
-            f"with {len(electrode_list)} electrodes."
-        )
+        if not test_mode:
+            logger.info(
+                "Successfully created/updated LFPElectrodeGroup "
+                + f"{nwb_file_name}, {group_name} with {len(electrode_list)} "
+                + "electrodes."
+            )
 
-    def cautious_insert(
+    def plan_cautious_insert(
         self, session_key: dict, electrode_ids: List[int], group_name: str
-    ) -> str:
-        """Insert the electrode group, or return name if it already exists.
+    ) -> tuple:
+        """Resolve an electrode group to a key plus the entries it still needs.
+
+        The read half of `cautious_insert`, split out so a caller planning an
+        ingestion can hold the entries and write them under its own gate --
+        `insert_from_nwbfile(dry_run=True)` must not write.
+
+        Every check here reads the database, so a plan is only correct against
+        what is stored. A caller planning several groups before writing any of
+        them has to dedupe electrode sets and pick names itself: this would
+        otherwise hand back the same name twice, having no way to see the
+        group the previous call planned. See
+        `ImportedLFP._plan_electrode_group`.
 
         Parameters
         ----------
@@ -140,9 +154,17 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             The name of the electrode group to insert.
 
         Returns
-        ----------
-        dictionary
-            The key of the inserted group, or the existing group if it already exists.
+        -------
+        tuple of (dict, dict)
+            The group's key, and the entries needed to create it keyed by
+            table, master before part. The entries are empty when a stored
+            group already holds these electrodes, under whatever name.
+
+        Raises
+        ------
+        ValueError
+            If the name is taken by a stored group holding different
+            electrodes.
         """
         e_ids = set(electrode_ids)  # remove duplicates
 
@@ -155,7 +177,7 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
         # group for this set of electrodes already exists
         sorted_str = ",".join(map(str, sorted(e_ids)))
         if len(query := aggregated & f"ids='{sorted_str}'"):
-            return query.fetch("KEY")[0]  # could be mult
+            return query.fetch("KEY")[0], dict()  # could be mult
 
         # group with this name already exists for a different set of electrodes
         if len(aggregated & {"lfp_electrode_group_name": group_name}):
@@ -164,7 +186,7 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
                 + "for a different set of electrode ids."
             )
 
-        # Unique group and set of electrodes, insert
+        # Unique group and set of electrodes, plan the insert
         master_insert = dict(**session_key, lfp_electrode_group_name=group_name)
         electrode_keys = (
             Electrode()
@@ -176,6 +198,36 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             dict(e_key, **e_group_dict) for e_key in electrode_keys
         ]
 
-        self.insert1(master_insert)
-        self.LFPElectrode.insert(electrode_inserts)
-        return master_insert
+        return master_insert, {
+            LFPElectrodeGroup: [master_insert],
+            LFPElectrodeGroup.LFPElectrode: electrode_inserts,
+        }
+
+    def cautious_insert(
+        self, session_key: dict, electrode_ids: List[int], group_name: str
+    ) -> dict:
+        """Insert the electrode group if not already exist. Return group key.
+
+        Parameters
+        ----------
+        session_key : dict
+            The session key associated with the electrode group.
+        electrode_ids : list
+            The set of electrode ids to insert into the group.
+        group_name : str
+            The name of the electrode group to insert.
+
+        Returns
+        -------
+        dict
+            The key of the inserted group, or of the existing group if it
+            already exists.
+        """
+        group_key, entries = self.plan_cautious_insert(
+            session_key, electrode_ids, group_name
+        )
+
+        for table, table_entries in entries.items():
+            table().insert(table_entries)
+
+        return group_key

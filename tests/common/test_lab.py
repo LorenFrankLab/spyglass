@@ -73,7 +73,7 @@ def add_member_team(common_lab, add_admin):
 
 def test_lab_member_insert_file_str(mini_insert, common_lab, mini_copy_name):
     before = common_lab.LabMember.fetch()
-    common_lab.LabMember.insert_from_nwbfile(mini_copy_name)
+    common_lab.LabMember().insert_from_nwbfile(mini_copy_name)
     after = common_lab.LabMember.fetch()
     # Already inserted, test func raises no error
     assert array_equal(before, after), "LabMember not inserted correctly"
@@ -108,3 +108,29 @@ def test_decompose_name_error(common_lab):
         common_lab.decompose_name("This Invalid Name")
     with pytest.raises(ValueError):
         common_lab.decompose_name("This, Invalid, Name")
+
+
+@pytest.fixture
+def add_member_without_info(common_lab):
+    common_lab.LabMember.insert1(
+        dict(
+            lab_member_name="This Noinfouser",
+            first_name="This",
+            last_name="Noinfouser",
+        ),
+        skip_duplicates=True,
+    )
+    yield
+
+
+def test_create_team_member_without_lab_member_info(
+    common_lab, add_member_without_info
+):
+    common_lab.LabTeam.create_new_team(
+        team_name="No Info Team",
+        team_members=["This Noinfouser"],
+    )
+    team_members = (
+        common_lab.LabTeam.LabTeamMember & {"team_name": "No Info Team"}
+    ).fetch("lab_member_name")
+    assert "This Noinfouser" in team_members

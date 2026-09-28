@@ -132,6 +132,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
         orig_key = copy.deepcopy(key)
         logger.info(f"Computing linear position for: {key}")
 
+        # Fetch position data (Spyglass logic - always tested)
         position_nwb = PositionOutput().fetch_nwb(
             {"merge_id": key["pos_merge_id"]}
         )[0]
@@ -157,6 +158,64 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
             TrackGraph & {"track_graph_name": key["track_graph_name"]}
         ).get_networkx_track_graph()
 
+        # External dependency - MOCKABLE in tests
+        linear_position_df = self._compute_linearized_position(
+            position=position,
+            time=time,
+            track_graph=track_graph,
+            track_graph_info=track_graph_info,
+            linearization_parameters=linearization_parameters,
+        )
+
+        # External I/O - MOCKABLE in tests
+        key["linearized_position_object_id"] = self._save_linearization_results(
+            linear_position_df=linear_position_df,
+            analysis_file_name=key["analysis_file_name"],
+            nwb_file_name=position_nwb["nwb_file_name"],
+        )
+
+        # Database operations (Spyglass logic - always tested)
+        self.insert1(key)
+
+        from spyglass.linearization.merge import LinearizedPositionOutput
+
+        part_name = to_camel_case(self.table_name.split("__")[-1])
+
+        LinearizedPositionOutput._merge_insert(
+            [orig_key], part_name=part_name, skip_duplicates=True
+        )
+
+    def _compute_linearized_position(
+        self,
+        position,
+        time,
+        track_graph,
+        track_graph_info,
+        linearization_parameters,
+    ):
+        """Compute linearized position (external dependency).
+
+        This method wraps the call to the track_linearization package,
+        making it easy to mock in tests for faster execution.
+
+        Parameters
+        ----------
+        position : np.ndarray
+            2D position data (n_time, 2)
+        time : np.ndarray
+            Timestamps for position data
+        track_graph : networkx.Graph
+            Track graph from TrackGraph table
+        track_graph_info : dict
+            Track graph parameters (edges, spacing, etc.)
+        linearization_parameters : dict
+            Linearization parameters (HMM, scaling, etc.)
+
+        Returns
+        -------
+        linear_position_df : pd.DataFrame
+            Linearized position with time column
+        """
         linear_position_df = get_linearized_position(
             position=position,
             track_graph=track_graph,
@@ -173,28 +232,46 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
 
         linear_position_df["time"] = time
 
-        # Insert into analysis nwb file
+        return linear_position_df
+
+    def _save_linearization_results(
+        self,
+        linear_position_df,
+        analysis_file_name,
+        nwb_file_name,
+    ):
+        """Save linearization results to NWB file (external I/O).
+
+        This method wraps all file I/O operations, making it easy to
+        mock in tests to avoid filesystem dependencies.
+
+        Parameters
+        ----------
+        linear_position_df : pd.DataFrame
+            Linearized position dataframe
+        analysis_file_name : str
+            Name of analysis NWB file
+        nwb_file_name : str
+            Name of source NWB file
+
+        Returns
+        -------
+        linearized_position_object_id : str
+            Object ID for linearized position in NWB file
+        """
         nwb_analysis_file = AnalysisNwbfile()
 
-        key["linearized_position_object_id"] = nwb_analysis_file.add_nwb_object(
-            analysis_file_name=key["analysis_file_name"],
+        linearized_position_object_id = nwb_analysis_file.add_nwb_object(
+            analysis_file_name=analysis_file_name,
             nwb_object=linear_position_df,
         )
 
         nwb_analysis_file.add(
-            nwb_file_name=position_nwb["nwb_file_name"],
-            analysis_file_name=key["analysis_file_name"],
+            nwb_file_name=nwb_file_name,
+            analysis_file_name=analysis_file_name,
         )
 
-        self.insert1(key)
-
-        from spyglass.linearization.merge import LinearizedPositionOutput
-
-        part_name = to_camel_case(self.table_name.split("__")[-1])
-
-        LinearizedPositionOutput._merge_insert(
-            [orig_key], part_name=part_name, skip_duplicates=True
-        )
+        return linearized_position_object_id
 
     def fetch1_dataframe(self) -> DataFrame:
         """Fetch a single dataframe."""

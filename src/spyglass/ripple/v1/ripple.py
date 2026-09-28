@@ -110,7 +110,7 @@ class RippleLFPSelection(SpyglassMixin, dj.Manual):
 class RippleParameters(SpyglassMixin, dj.Lookup):
     """Parameters for ripple detection
 
-    Parameters
+    Attributes
     ----------
     ripple_param_name : str
         Name of the parameter set

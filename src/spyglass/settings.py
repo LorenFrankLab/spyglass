@@ -10,6 +10,8 @@ from pymysql.err import OperationalError
 from spyglass.utils.dj_helper_fn import str_to_bool
 from spyglass.utils.logging import logger
 
+_UNSET = object()  # distinguishes "not supplied" from an explicit False
+
 
 class SpyglassConfig:
     """Gets Spyglass dirs from dj.config or environment variables.
@@ -20,6 +22,48 @@ class SpyglassConfig:
     don't exist. NOTE: when passed a base_dir, it will ignore env vars to
     facilitate testing.
     """
+
+    @staticmethod
+    def _load_directory_schema():
+        """Load directory schema from JSON file in package directory.
+
+        Returns
+        -------
+        dict
+            Directory schema with prefixes (spyglass, kachery, dlc, moseq)
+
+        Raises
+        ------
+        FileNotFoundError
+            If directory_schema.json is not found in spyglass package
+        ValueError
+            If schema is invalid or missing required keys
+
+        Notes
+        -----
+        This method reads from directory_schema.json in the spyglass package,
+        which is the single source of truth for Spyglass directory structure.
+        """
+        schema_path = Path(__file__).parent / "directory_schema.json"
+
+        if not schema_path.exists():
+            raise FileNotFoundError(
+                f"Config schema file not found at {schema_path}. "
+                "This file is required for Spyglass to function. "
+                "Please ensure you have a complete Spyglass installation."
+            )
+
+        with open(schema_path) as f:
+            schema = json.load(f)
+
+        if not isinstance(schema, dict):
+            raise ValueError(f"Schema should be a dict, got {type(schema)}")
+
+        if "directory_schema" not in schema:
+            raise ValueError("Schema missing 'directory_schema' key")
+
+        # Note: _schema_version field is informational only, not enforced
+        return schema["directory_schema"]
 
     def __init__(self, base_dir: str = None, **kwargs) -> None:
         """
@@ -47,46 +91,45 @@ class SpyglassConfig:
             Cached config settings.
         _debug_mode (bool)
             True if debug_mode is set. Supports skipping known bugs in test env.
-        _test_mode (bool)
-            True if test_mode is set. Required for pytests to run without
-            prompts.
+        _test_mode (bool or object)
+            The bound test mode, or ``_UNSET`` before the first deliberate or
+            successful load. The public ``test_mode`` property always returns
+            a bool.
+        _prefer_download (bool)
+            True if streaming backends should download whole files instead.
         """
         self.supplied_base_dir = base_dir
         self._config = dict()
         self.config_defaults = dict(prepopulate=True)
-        self._debug_mode = kwargs.get("debug_mode", False)
-        self._test_mode = kwargs.get("test_mode", False)
+        # Constructor values participate in first-load precedence. test_mode
+        # becomes instance identity once an explicit load starts or an ambient
+        # load succeeds; debug_mode remains an ordinary reloadable setting.
+        self._debug_mode_arg = kwargs.get("debug_mode", _UNSET)
+        self._initial_test_mode = kwargs.get("test_mode", _UNSET)
+        self._debug_mode = (
+            False
+            if self._debug_mode_arg is _UNSET
+            else str_to_bool(self._debug_mode_arg)
+        )
+        self._test_mode = _UNSET
+        # Readable before any load. Each load reads it from dj.config.
+        self._prefer_download = False
         self._dlc_base = None
+        # Initialized here, not only in load_config's COMMIT phase: a load
+        # that fails or returns early (e.g. no base under an ambient test
+        # mode) still leaves `_dj_custom`/`_generate_dj_config` able to read
+        # it, matching `_dlc_base`.
+        self._moseq_base = None
         self.load_failed = False
+        # A mode-change request invalidates a loaded instance permanently. Keep
+        # only the message (not an exception/traceback); recovery uses a new
+        # SpyglassConfig object with an unambiguous lifecycle.
+        self._mode_error: str | None = None
 
-        self.relative_dirs = {
-            # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
-            # NOTE: Adding new dir requires edit to HHMI hub
-            "spyglass": {
-                "raw": "raw",
-                "analysis": "analysis",
-                "recording": "recording",
-                "sorting": "spikesorting",
-                "waveforms": "waveforms",
-                "temp": "tmp",
-                "video": "video",
-                "export": "export",
-            },
-            "kachery": {
-                "cloud": ".kachery-cloud",
-                "storage": "kachery_storage",
-                "temp": "tmp",
-            },
-            "dlc": {
-                "project": "projects",
-                "video": "video",
-                "output": "output",
-            },
-            "moseq": {
-                "project": "projects",
-                "video": "video",
-            },
-        }
+        # Load directory schema from JSON file (single source of truth)
+        # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
+        # NOTE: Adding new dir requires edit to HHMI hub AND directory_schema.json
+        self.relative_dirs = self._load_directory_schema()
         self.dj_defaults = {
             "database.host": kwargs.get("database_host", "lmf-db.cin.ucsf.edu"),
             "database.user": kwargs.get("database_user"),
@@ -99,8 +142,54 @@ class SpyglassConfig:
             "FIGURL_CHANNEL": "franklab2",
             "DJ_SUPPORT_FILEPATH_MANAGEMENT": "TRUE",
             "KACHERY_CLOUD_EPHEMERAL": "TRUE",
-            "HD5_USE_FILE_LOCKING": "FALSE",
+            "HDF5_USE_FILE_LOCKING": "FALSE",
         }
+
+    def _resolve_test_mode(self, call_value, dj_custom) -> tuple[bool, bool]:
+        """Return this instance's test mode and whether it is bound.
+
+        First-load precedence is call argument, constructor argument,
+        ``dj.config['custom']``, then ``False``. A call or constructor value
+        binds before path validation, so a failed explicit test-mode load
+        cannot later retry implicitly in production mode. A successful ambient
+        load is bound during commit. Once bound, the mode is immutable.
+        """
+        if self._mode_error is not None:
+            raise ValueError(self._mode_error)
+
+        if self._test_mode is not _UNSET:
+            bound_mode = self._test_mode
+            if call_value is not _UNSET:
+                requested_mode = str_to_bool(call_value)
+                if requested_mode != bound_mode:
+                    message = (
+                        "SpyglassConfig test_mode is already bound to "
+                        f"{bound_mode} and cannot change to {requested_mode}; "
+                        "create a new SpyglassConfig instance."
+                    )
+                    # Do not leave the old paths usable after a caller has
+                    # explicitly requested a different safety mode and caught
+                    # the rejection.
+                    self._config = {}
+                    self.load_failed = True
+                    self._mode_error = message
+                    raise ValueError(message)
+            return bound_mode, True
+
+        if call_value is not _UNSET:
+            test_mode = str_to_bool(call_value)
+        elif self._initial_test_mode is not _UNSET:
+            test_mode = str_to_bool(self._initial_test_mode)
+        else:
+            # Ambient state stays unbound until a configuration commits. This
+            # lets import-time startup remain graceful when no base exists.
+            return str_to_bool(dj_custom.get("test_mode", False)), False
+
+        # Bind deliberate mode before validation. In particular, a failed
+        # explicit test load must not let a later property access consult a
+        # production SPYGLASS_BASE_DIR.
+        self._test_mode = test_mode
+        return test_mode, True
 
     def load_config(
         self,
@@ -108,15 +197,26 @@ class SpyglassConfig:
         force_reload=False,
         on_startup: bool = False,
         **kwargs,
-    ) -> None:
+    ) -> dict | None:
         """
         Loads the configuration settings for the object.
 
         Order of precedence, where X is base, raw, analysis, etc.:
-            1. SpyglassConfig(base_dir="string") for base dir only
-            2. dj.config['custom']['{spyglass/kachery}_dirs']['X']
-            3. os.environ['{SPYGLASS/KACHERY}_{X}_DIR']
-            4. resolved_base_dir/X for non-base dirs
+        1. SpyglassConfig(base_dir="string") for base dir only
+        2. dj.config['custom']['spyglass_dirs']['X']
+        3. dj.config['custom']['kachery_dirs']['X']
+        4. os.environ['{SPYGLASS/KACHERY}_{X}_DIR']
+        5. resolved_base_dir/X for non-base dirs
+
+        When test_mode=True, environment variables are not consulted for any
+        directory path, and the resolved base_dir must contain a 'tests' path
+        component.
+
+        ``test_mode`` binds to the instance on the first deliberate or
+        successful load and is then immutable. Passing a ``test_mode`` that
+        differs from the bound value (even without ``force_reload``) does not
+        transition the instance -- it invalidates it and raises. To switch
+        modes, construct a new ``SpyglassConfig``.
 
         Parameters
         ----------
@@ -129,14 +229,28 @@ class SpyglassConfig:
         Raises
         ------
         ValueError
-            If base_dir is not set in either dj.config or os.environ.
+            When a caller attempts to change the mode of a bound instance; or,
+            under test_mode, when a deliberate load cannot resolve a base_dir,
+            the resolved base_dir does not contain a 'tests' path component, or
+            any resolved directory -- including one reached through a symlink
+            -- falls outside that base_dir. A fresh ambient (dj.config-only)
+            test-mode load with no base returns gracefully instead.
 
         Returns
         -------
         dict
             list of relative_dirs and other settings (e.g., prepopulate).
         """
-        if not force_reload and self._config:
+        # Fast path for the common cached read (every directory property
+        # routes here with no kwargs). A mode-change request (explicit
+        # test_mode=) still falls through to _resolve_test_mode's binding /
+        # rejection, and a mode-wedged instance has _config == {} (falsy) so it
+        # also falls through and re-raises.
+        if (
+            not force_reload
+            and self._config
+            and kwargs.get("test_mode", _UNSET) is _UNSET
+        ):
             return self._config
 
         dj_custom = dj.config.get("custom", {})
@@ -145,46 +259,86 @@ class SpyglassConfig:
         dj_dlc = dj_custom.get("dlc_dirs", {})
         dj_moseq = dj_custom.get("moseq_dirs", {})
 
-        self._debug_mode = dj_custom.get("debug_mode", False)
-        self._test_mode = kwargs.get("test_mode") or dj_custom.get(
-            "test_mode", False
+        test_mode, test_mode_is_bound = self._resolve_test_mode(
+            kwargs.get("test_mode", _UNSET), dj_custom
         )
-        self._test_mode = str_to_bool(self._test_mode)
-        self._debug_mode = str_to_bool(self._debug_mode)
+        if not force_reload and self._config:
+            return self._config
+
+        def _resolve_debug_mode() -> bool:
+            """Resolve call > constructor > DataJoint > default precedence."""
+            call_value = kwargs.get("debug_mode", _UNSET)
+            if call_value is not _UNSET:
+                return str_to_bool(call_value)
+            if self._debug_mode_arg is not _UNSET:
+                return str_to_bool(self._debug_mode_arg)
+            return str_to_bool(dj_custom.get("debug_mode", False))
+
+        debug_mode = _resolve_debug_mode()
+        prefer_download = str_to_bool(dj_custom.get("prefer_download", False))
+
+        # Until a deliberate test-mode load commits, keep the object visibly
+        # failed. A successful commit below resets this flag. Same-mode reloads
+        # of an existing valid test config remain transactional.
+        if test_mode and test_mode_is_bound and not self._config:
+            self.load_failed = True
 
         resolved_base = (
             base_dir
             or self.supplied_base_dir
             or dj_spyglass.get("base")
-            or os.environ.get("SPYGLASS_BASE_DIR")
+            # Gated by test_mode like every other directory env var below:
+            # SPYGLASS_BASE_DIR is the exact production path this sandbox
+            # exists to keep destructive tests off, so test_mode must not
+            # inherit it. Explicit base_dir/config still resolve.
+            or (None if test_mode else os.environ.get("SPYGLASS_BASE_DIR"))
         )
 
-        if resolved_base and not Path(resolved_base).exists():
-            resolved_base = Path(resolved_base).expanduser()
-        if not resolved_base or not Path(resolved_base).exists():
+        # Log when supplied base_dir causes environment variable overrides to be ignored
+        if self.supplied_base_dir:
+            logger.info(
+                "Using supplied base_dir - ignoring SPYGLASS_* environment variable overrides"
+            )
+
+        # ---------------------------- RESOLVE ----------------------------
+        # Compute every path as a plain value. Nothing is created and no
+        # external/global state is mutated until validation passes.
+        if not resolved_base:
+            self.load_failed = True
+            if test_mode and test_mode_is_bound:
+                raise ValueError(
+                    "Refusing to load Spyglass in test_mode without an "
+                    "explicit base_dir or "
+                    "dj.config['custom']['spyglass_dirs']['base']; "
+                    "SPYGLASS_BASE_DIR is ignored in test_mode."
+                )
             if not on_startup:  # Only warn if not on startup
                 logger.error(
-                    f"Could not find SPYGLASS_BASE_DIR: {resolved_base}"
+                    "Could not find SPYGLASS_BASE_DIR"
                     + "\n\tCheck dj.config['custom']['spyglass_dirs']['base']"
                     + "\n\tand os.environ['SPYGLASS_BASE_DIR']"
                 )
-            self.load_failed = True
             return
 
-        self._dlc_base = (
+        base_path = Path(resolved_base).expanduser().resolve()
+        resolved_base = str(base_path)
+
+        def env_or_none(var: str) -> str | None:
+            """Read an env var, ignored in test_mode to keep the sandbox."""
+            return None if test_mode else os.environ.get(var)
+
+        dlc_project = env_or_none("DLC_PROJECT_PATH")
+        dlc_base = (
             dj_dlc.get("base")
-            or os.environ.get("DLC_BASE_DIR")
-            or os.environ.get("DLC_PROJECT_PATH", "").split("projects")[0]
+            or env_or_none("DLC_BASE_DIR")
+            or (dlc_project.split("projects")[0] if dlc_project else None)
             or str(Path(resolved_base) / "deeplabcut")
         )
-        Path(self._dlc_base).mkdir(exist_ok=True)
-
-        self._moseq_base = (
+        moseq_base = (
             dj_moseq.get("base")
-            or os.environ.get("MOSEQ_BASE_DIR")
+            or env_or_none("MOSEQ_BASE_DIR")
             or str(Path(resolved_base) / "moseq")
         )
-        Path(self._moseq_base).mkdir(exist_ok=True)
 
         config_dirs = {"SPYGLASS_BASE_DIR": str(resolved_base)}
         source_config_lookup = {
@@ -192,15 +346,15 @@ class SpyglassConfig:
             "moseq": dj_moseq,
             "kachery": dj_kachery,
         }
-        base_lookup = {"dlc": self._dlc_base, "moseq": self._moseq_base}
+        base_lookup = {"dlc": dlc_base, "moseq": moseq_base}
         for prefix, dirs in self.relative_dirs.items():
             this_base = base_lookup.get(prefix, resolved_base)
             for dir, dir_str in dirs.items():
                 dir_env_fmt = self.dir_to_var(dir=dir, dir_type=prefix)
 
-                env_loc = (  # Ignore env vars if base was passed to func
+                env_loc = (  # Ignore env vars if base was passed or test_mode
                     os.environ.get(dir_env_fmt)
-                    if not self.supplied_base_dir
+                    if not self.supplied_base_dir and not test_mode
                     else None
                 )
                 source_config = source_config_lookup.get(prefix, dj_spyglass)
@@ -214,11 +368,72 @@ class SpyglassConfig:
 
         kachery_zone_dict = {
             "KACHERY_ZONE": (
-                os.environ.get("KACHERY_ZONE")
+                env_or_none("KACHERY_ZONE")
                 or dj.config.get("custom", {}).get("kachery_zone")
                 or "franklab.default"
             )
         }
+
+        # ---------------------------- VALIDATE ---------------------------
+        # Both checks apply ONLY under test_mode. Production configuration
+        # is unchanged: an analysis dir anywhere, including behind a
+        # symlink, stays legal.
+        if test_mode:
+            validation_error = None
+            if "tests" not in base_path.parts:
+                validation_error = (
+                    f"Refusing to load Spyglass in test_mode with base_dir "
+                    f"{resolved_base!r}: path does not contain a 'tests' "
+                    "component. Run pytest with --base-dir pointing inside a "
+                    "tests/ directory (default: ./tests/_data/) to keep "
+                    "destructive operations off shared/production storage."
+                )
+            else:
+                # Path.resolve() is non-strict: a dir that does not exist yet
+                # resolves to its would-be path, while an EXISTING symlink
+                # resolves through to its target. That is what catches an
+                # analysis dir symlinked at production storage.
+                checked = dict(config_dirs)
+                checked["DLC_BASE_DIR"] = dlc_base
+                checked["MOSEQ_BASE_DIR"] = moseq_base
+                for var, loc in checked.items():
+                    loc_path = Path(loc).expanduser().resolve()
+                    if not loc_path.is_relative_to(base_path):
+                        validation_error = (
+                            f"Refusing to load Spyglass in test_mode: {var} "
+                            f"resolves to {str(loc_path)!r}, outside the test "
+                            f"base {resolved_base!r}. Destructive tests must "
+                            "stay within the test base directory; check "
+                            "dj.config['custom'] and any directory symlinks."
+                        )
+                        break
+
+            if validation_error is not None:
+                # A deliberate (bound) test-mode load fails loud. An ambient /
+                # implicit load must not crash unrelated code -- matching the
+                # no-base handling above -- but must also NOT commit a
+                # test-mode config whose paths escape the sandbox. So mark the
+                # load failed and return without committing, leaving the mode
+                # unbound.
+                self.load_failed = True
+                if test_mode_is_bound:
+                    raise ValueError(validation_error)
+                if not on_startup:  # Only warn if not on startup
+                    logger.error(validation_error)
+                return
+
+        # ----------------------------- COMMIT ----------------------------
+        if self._test_mode is _UNSET:
+            self._test_mode = test_mode
+        self._debug_mode = debug_mode
+        self._prefer_download = prefer_download
+        self._dlc_base = dlc_base
+        self._moseq_base = moseq_base
+
+        if not debug_mode:
+            base_path.mkdir(parents=True, exist_ok=True)
+        Path(self._dlc_base).mkdir(parents=True, exist_ok=True)
+        Path(self._moseq_base).mkdir(parents=True, exist_ok=True)
 
         loaded_env = self._load_env_vars()
         self._set_env_with_dict(
@@ -228,7 +443,8 @@ class SpyglassConfig:
 
         self._config = dict(
             debug_mode=self._debug_mode,
-            test_mode=self._test_mode,
+            test_mode=self.test_mode,
+            prefer_download=self._prefer_download,
             **self.config_defaults,
             **config_dirs,
             **kachery_zone_dict,
@@ -236,6 +452,8 @@ class SpyglassConfig:
         )
 
         self._set_dj_config_stores()
+
+        self.load_failed = False
 
         return self._config
 
@@ -256,7 +474,7 @@ class SpyglassConfig:
         if self._debug_mode:
             return
         for dir_str in dir_dict.values():
-            Path(dir_str).mkdir(exist_ok=True)
+            Path(dir_str).mkdir(parents=True, exist_ok=True)
 
     def _set_dj_config_stores(self, check_match=True, set_stores=True) -> None:
         """
@@ -264,8 +482,6 @@ class SpyglassConfig:
 
         Parameters
         ----------
-        dir_dict: dict
-            Dictionary of resolved dirs.
         check_match: bool
             Optional. Default True. Check that dj.config['stores'] match
             resolved dirs.
@@ -286,7 +502,7 @@ class SpyglassConfig:
             )
 
         if set_stores:
-            if mismatch_raw or mismatch_analysis:
+            if (mismatch_raw or mismatch_analysis) and not self.test_mode:
                 logger.warning(
                     "Setting config DJ stores to resolve mismatch.\n\t"
                     + f"raw     : {self.raw_dir}\n\t"
@@ -322,6 +538,8 @@ class SpyglassConfig:
 
         Parameters
         ----------
+        base_dir : str, optional
+            The base directory. If not provided, will use existing config.
         database_user : str, optional
             The database user. If not provided, resulting config will not
             specify.
@@ -330,7 +548,7 @@ class SpyglassConfig:
             specify.
         database_host : str, optional
             Default lmf-db.cin.ucsf.edu. MySQL host name.
-        dapabase_port : int, optional
+        database_port : int, optional
             Default 3306. Port number for MySQL server.
         database_use_tls : bool, optional
             Default True. Use TLS encryption.
@@ -372,7 +590,7 @@ class SpyglassConfig:
             datajoint builtins will be used to save.
         output_filename : str or Path, optional
             Default to datajoint global config. If save_method = 'custom', name
-            of file to generate. Must end in either be either yaml or json.
+            of file to generate. Must end in either yaml or json.
         base_dir : str, optional
             The base directory. If not provided, will default to the env var
         set_password : bool, optional
@@ -391,7 +609,9 @@ class SpyglassConfig:
         if output_filename:
             save_method = "custom"
             path = Path(output_filename).expanduser()  # Expand ~
-            filepath = path if path.is_absolute() else path.absolute()
+            filepath = (
+                path if path.is_absolute() else path.resolve()
+            )  # Resolve relative paths and symlinks
             filepath.parent.mkdir(exist_ok=True, parents=True)
             filepath = (
                 filepath.with_suffix(".json")  # ensure suffix, default json
@@ -418,7 +638,12 @@ class SpyglassConfig:
 
         user_warn = (
             f"Replace existing file? {filepath.resolve()}\n\t"
-            + "\n\t".join([f"{k}: {v}" for k, v in config.items()])
+            + "\n\t".join(
+                [
+                    f"{k}: {v if k != 'database.password' else '***'}"
+                    for k, v in dj.config.items()
+                ]
+            )
             + "\n"
         )
 
@@ -468,7 +693,8 @@ class SpyglassConfig:
         return {
             "custom": {
                 "debug_mode": str(self.debug_mode).lower(),
-                "test_mode": str(self._test_mode).lower(),
+                "test_mode": str(self.test_mode).lower(),
+                "prefer_download": str(self._prefer_download).lower(),
                 "spyglass_dirs": {
                     "base": self.base_dir,
                     "raw": self.raw_dir,
@@ -500,7 +726,9 @@ class SpyglassConfig:
                     "project": self.moseq_project_dir,
                     "video": self.moseq_video_dir,
                 },
-                "kachery_zone": "franklab.default",
+                "kachery_zone": os.environ.get(
+                    "KACHERY_ZONE", "franklab.default"
+                ),
             }
         }
 
@@ -568,7 +796,47 @@ class SpyglassConfig:
         """Returns True if test_mode is set.
 
         Required for pytests to run without prompts."""
-        return self._test_mode
+        if self._test_mode is not _UNSET:
+            return self._test_mode
+        if self._initial_test_mode is not _UNSET:
+            return str_to_bool(self._initial_test_mode)
+        return False
+
+    @property
+    def prefer_download(self) -> bool:
+        """Returns True if whole-file download is preferred over streaming.
+
+        Streaming backends honor this by fetching the file to local disk and
+        reading the copy. Backends that cannot download ignore it. Useful on
+        slow or metered connections, where many small range requests cost more
+        than one sequential transfer.
+        """
+        return self._prefer_download
+
+    @prefer_download.setter
+    def prefer_download(self, value) -> None:
+        """Set the download preference for the current session.
+
+        Parameters
+        ----------
+        value : bool or str
+            Accepts the same string forms as other boolean settings.
+
+        Notes
+        -----
+        The value is written to `dj.config` as well as the instance, so that a
+        reload or a `save_dj_config` keeps it. `_config` is only touched once a
+        load has succeeded: a non-empty `_config` is the cache sentinel, and
+        seeding it after a failed load would make every later `load_config`
+        return early with no directories resolved.
+        """
+        self.load_config()
+        self._prefer_download = str_to_bool(value)
+
+        custom = dj.config.setdefault("custom", {})
+        custom["prefer_download"] = self._prefer_download
+        if self._config:
+            self._config["prefer_download"] = self._prefer_download
 
     @property
     def dlc_project_dir(self) -> str:
@@ -600,7 +868,7 @@ sg_config = SpyglassConfig()
 sg_config.load_config(on_startup=True)
 if sg_config.load_failed:  # Failed to load
     logger.warning("Failed to load SpyglassConfig. Please set up config file.")
-    config = {}  # Let __intit__ fetch empty config for first time setup
+    config = {}  # Let __init__ fetch empty config for first time setup
     prepopulate = False
     test_mode = False
     debug_mode = False

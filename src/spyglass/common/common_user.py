@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import datajoint as dj
 import yaml
 
-from spyglass.utils import logger
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("common_user")
 
@@ -25,7 +25,7 @@ SUBPROCESS_KWARGS = dict(capture_output=True, text=True, timeout=60)
 
 
 @schema
-class UserEnvironment(dj.Manual):
+class UserEnvironment(SpyglassMixin, dj.Manual):
     definition = """ # User conda env. Default ID is User_CondaEnv_00
     env_id: varchar(127)  # Unique environment identifier
     ---
@@ -47,6 +47,7 @@ class UserEnvironment(dj.Manual):
     _pip_custom = dict()  # Custom pip installs from the environment
     _freeze_comments = dict()  # Comments from pip freeze
     _conda_conflicts = dict()  # Conda and pip conflicts in the environment
+    _env_warned = False  # Suppress repeated warnings per process
 
     def _get_conda_export(self) -> Tuple[dict, dict]:
         """Fetch the current Conda environment export.
@@ -116,14 +117,34 @@ class UserEnvironment(dj.Manual):
     def _basic_dep_format(self):
         """Regex patterns for dependency formats.
 
-        Allowable formats with suffixes: a1, b2, rc3, .post4, dev5, etc."""
+        Allowable formats with suffixes: a1, b2, rc3, .post4, dev5, etc.
+        Examples:
+        - package==1.2.3
+        - package==1.2.3a1 (alpha)
+        - package==1.2.3b2 (beta)
+        - package==1.2.3rc3 (release candidate)
+        - package==1.2.3.post4 (post-release)
+        - package==1.2.3.dev5 (developmental release)
+        - package==1.2.3+dfsg (Debian Free Software Guidelines)
+        - package==1.2.3+ds (Debian Source)
+        - package==1.2.3+ubuntu1.2 (Ubuntu-specific)
+        """
         return re.compile(  # allows suffixes like a1, dev, post1, etc.
             r"""^
                 (?P<pkg>[\w\d.-]+)                  # Package
                 ==                                  # `==` separator
                 (?P<ver>                            # Version
                     \d+(?:\.\d+)*                   # Major.Minor.Patch
-                    (?:(?:a|b|rc|\.post)\d+|dev\d*) # Suffixes
+                    (?:                             # Suffixes
+                        (?P<alpha>a\d+)|            # Alpha release (a1, a2, ...)
+                        (?P<beta>b\d+)|             # Beta release (b1, b2, ...)
+                        (?P<rc>rc\d+)|              # Release candidate (rc1, rc2, ...)
+                        (?P<post>\.post\d+)|        # Post-release (.post1, .post2, ...)
+                        (?P<dev>dev\d*)|            # Developmental release (dev, dev1, ...)
+                        (?P<dfsg>\+dfsg)|           # Debian Free Software Guidelines (+dfsg)
+                        (?P<ds>\+ds)|               # Debian Source (+ds)
+                        (?P<ubuntu>\+ubuntu\d+(?:\.\d+)*) # Ubuntu-specific (+ubuntu1.2)
+                    )
                 ?)
             $""",
             re.VERBOSE,
@@ -137,20 +158,29 @@ class UserEnvironment(dj.Manual):
         )
 
     def _warn_if_custom_or_conflict(self):
+        # NOTE: allowed editable items...
+        # spyglass - this package is often installed as editable for fetching
+        #            updates without reinstalling.
+        # jsonschema - this package is often installed as editable in a tmp dir
+
+        if UserEnvironment._env_warned:
+            return
+        UserEnvironment._env_warned = True
+
         pip_custom_no_spy = {
             k: "".join(v)
             for k, v in self._pip_custom.items()
-            if "spyglass" not in k
+            if "spyglass" not in k and "jsonschema" not in k
         }
         if pip_custom_no_spy:
             logger.warning(
                 "Custom pip installs found. "
                 + "Recompute feature may not work as expected."
             )
-            pprint(self._pip_custom, indent=4)
+            pprint(pip_custom_no_spy, indent=4)
 
         if self._conda_conflicts:
-            logger.warning(
+            logger.warning(  # pragma: no cover
                 "Conda/pip conflicts in the environment.\n"
                 + "\tRecompute feature may not work as expected.\n"
                 + "\tUse `pip uninstall pkg` to defer to conda.\n"
@@ -222,7 +252,7 @@ class UserEnvironment(dj.Manual):
                 return True  # successfully parsed basic dependency
 
             # --- if conflicting versions, log conflict, overwrite with pip ---
-            logger.info(f"Conda/pip conflict: {line}")
+            logger.debug(f"Conda/pip conflict: {line}")
             self._conda_conflicts[package] = [pip_version, conda_version]
             self._conda_pip_dict[package] = line
             return True  # successfully parsed basic dependency conflict

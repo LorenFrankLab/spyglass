@@ -8,19 +8,24 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from pynwb import NWBFile
+import pynwb
 
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.settings import test_mode
+from spyglass.utils import SpyglassIngestion, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
 
 schema = dj.schema("common_interval")
+
+_INTERVAL_DOC = (
+    "https://lorenfranklab.github.io/spyglass/latest/Features/Intervals/"
+)
 
 # TODO: ADD export to NWB function to save relevant intervals in an NWB file
 
 
 @schema
-class IntervalList(SpyglassMixin, dj.Manual):
+class IntervalList(SpyglassIngestion, dj.Manual):
     definition = """
     # Time intervals used for analysis
     -> Session
@@ -31,85 +36,108 @@ class IntervalList(SpyglassMixin, dj.Manual):
     """
 
     # See #630, #664. Excessive key length.
+    # A file's `invalid_times` is a TimeIntervals table like `epochs`, so it
+    # ingests through the same mapping. Its rows are namespaced on the way in;
+    # see `generate_entries_from_nwb_object`. Other TimeIntervals tables in a
+    # file, `trials` in particular, are not intervals of the session and are
+    # excluded by this filter.
+    _source_nwb_object_name = ["epochs", "invalid_times"]
 
-    @classmethod
-    def insert_from_nwbfile(cls, nwbf: NWBFile, *, nwb_file_name: str):
-        """Add each entry in the NWB file epochs table to the IntervalList.
+    _invalid_times_prefix = "invalid_"
 
-        For each epoch:
-        - intervalList_name is set to the first tag, or 'interval_x' if no tags
-            are present, where x is the index, derived from the tag name.
-        - valid_times is set to a numpy array of [start time, stop time]
+    @property
+    def _source_nwb_object_type(self):
+        return pynwb.epoch.TimeIntervals
 
-        For each invalid time:
-        - interval_list_name is set to 'invalid_interval_x', x is either the
-            tag or the index of the invalid time, derived from the row name.
-        - valid_times is set to a numpy array of [start time, stop time]
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "interval_list_name": self.interval_name_from_tags,
+                "valid_times": self.interval_from_start_stop_time,
+            }
+        }
+
+    @staticmethod
+    def interval_name_from_tags(epoch_row):
+        """Extract interval name from tags attribute.
+
+        This function handles both:
+        1. NWB objects (pynwb.epoch.TimeIntervals rows) with .tags attribute
+        2. Pandas namedtuples from DataFrame.itertuples()
+
+        SpyglassIngestion converts table-like NWB objects to DataFrames and
+        iterates using .itertuples(), which produces namedtuples.
+        """
+        tags = getattr(epoch_row, "tags", None)
+
+        # For namedtuples from itertuples(), the index is stored as 'Index'
+        if hasattr(epoch_row, "Index"):
+            name = epoch_row.Index
+        else:
+            name = getattr(epoch_row, "name", None)
+
+        # Handle formats: list, tuple, numpy array, single value, or None
+        if isinstance(tags, (list, tuple, np.ndarray)):
+            return tags[0] if len(tags) > 0 else f"interval_{name}"
+        elif tags:  # Single value (string or other scalar)
+            return tags
+        else:
+            return f"interval_{name}"
+
+    @staticmethod
+    def interval_from_start_stop_time(epoch_row):
+        """Extract start and stop times from epoch row.
+
+        This function handles both:
+        1. NWB objects with .start_time and .stop_time attributes
+        2. Pandas namedtuples from DataFrame.itertuples() (new ingestion pattern)
+
+        Returns
+        -------
+        np.ndarray
+            Array of shape (1, 2) containing [start_time, stop_time]
+        """
+        start_time = getattr(epoch_row, "start_time", None)
+        stop_time = getattr(epoch_row, "stop_time", None)
+        return np.asarray([[start_time, stop_time]])
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Namespace the rows that came from `invalid_times`. See #1336.
+
+        `epochs` and `invalid_times` share a mapping but not a namespace: both
+        name their rows from tags, so an untagged row of either is
+        `interval_<id>` and the two would collide on the primary key. The
+        prefix is applied here, on the table, rather than in
+        `interval_name_from_tags`, because a row knows its id but not which
+        table it was read from.
 
         Parameters
         ----------
-        nwbf : pynwb.NWBFile
-            The source NWB file object.
-        nwb_file_name : str
-            The file name of the NWB file, used as a primary key to the Session
-            table.
+        nwb_obj : object
+            A TimeIntervals table, or one of its rows on the recursive call
+            `super()` makes per row.
+        base_key : dict, optional
+            Key the generated entries build on. Default empty.
+
+        Returns
+        -------
+        IngestionEntries
+            Planned entries, with `invalid_times` names prefixed.
         """
-        _ = cls._insert_epochs_from_nwbfile(nwbf, nwb_file_name)
-        _ = cls._insert_invalid_times_from_nwbfile(nwbf, nwb_file_name)
+        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
 
-    @classmethod
-    def _insert_epochs_from_nwbfile(cls, nwbf: NWBFile, nwb_file_name: str):
-        """Insert epochs from NWB file into IntervalList."""
-        if nwbf.epochs is None:
-            logger.info("No epochs found in NWB file.")
-            return
+        # Only the table carries a name; the per-row calls do not, and their
+        # entries are renamed here, once, when the recursion returns.
+        if getattr(nwb_obj, "name", None) != "invalid_times":
+            return entries
 
-        epochs = nwbf.epochs.to_dataframe()
+        for entry in entries.get(self, []):
+            entry["interval_list_name"] = (
+                self._invalid_times_prefix + entry["interval_list_name"]
+            )
 
-        # Create a list of dictionaries to insert
-        epoch_inserts = epochs.apply(
-            lambda epoch_data: {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": (
-                    epoch_data.tags[0]
-                    if epoch_data.tags
-                    else f"interval_{epoch_data.name}"
-                ),
-                "valid_times": np.asarray(
-                    [[epoch_data.start_time, epoch_data.stop_time]]
-                ),
-            },
-            axis=1,
-        ).tolist()
-
-        cls.insert(epoch_inserts, skip_duplicates=True)
-
-    @classmethod
-    def _insert_invalid_times_from_nwbfile(
-        cls, nwbf: NWBFile, nwb_file_name: str
-    ) -> None:
-        """Insert invalid times from NWB file into IntervalList."""
-        # TODO: Add pytest for this method
-        invalid_times = getattr(nwbf, "invalid_times", None)
-        if invalid_times is None:
-            logger.info("No invalid times found in NWB file.")
-            return
-
-        prefix = "invalid_interval"
-        invalid_times_table = invalid_times.to_dataframe()
-
-        inserts = invalid_times_table.apply(
-            lambda row: {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": (
-                    f"{prefix}_{row.tag}" if row.tag else f"{prefix}_{row.name}"
-                ),
-                "valid_times": np.asarray([[row.start_time, row.stop_time]]),
-            },
-            axis=1,
-        ).tolist()
-
-        cls.insert(inserts, skip_duplicates=True)
+        return entries
 
     def fetch_interval(self):
         """Fetch interval list object for a given key."""
@@ -134,12 +162,12 @@ class IntervalList(SpyglassMixin, dj.Manual):
         Returns
         -------
         fig : matplotlib.figure.Figure or None
-            The matplotlib Figure object if `return_fig` is True. Default None.
+            The matplotlib Figure object if `return_fig` is True, otherwise None.
 
         Raises
         ------
         ValueError
-            If >1 unique `nwb_file_name` is found in the IntervalList.
+            If more than one unique `nwb_file_name` is found in the IntervalList.
             The intended use is to compare intervals within a single NWB file.
         UserWarning
             If more than 100 intervals are being plotted.
@@ -148,8 +176,9 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
         if len(interval_lists_df["nwb_file_name"].unique()) > 1:
             raise ValueError(
-                ">1 nwb_file_name found in IntervalList. This function is "
-                + "intended for comparing intervals within one nwb_file_name."
+                ">1 nwb_file_name found in IntervalList. "
+                + "the intended use of plot_intervals is to compare intervals "
+                + "within a single nwb_file_name."
             )
 
         interval_list_names = interval_lists_df["interval_list_name"].values
@@ -158,7 +187,8 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
         if n_compare > 100:
             warnings.warn(
-                f"plot_intervals is plotting {n_compare} intervals.",
+                f"plot_intervals is plotting {n_compare} intervals. "
+                + "if this is unintended, please pass in a smaller IntervalList.",
                 UserWarning,
             )
 
@@ -179,6 +209,8 @@ class IntervalList(SpyglassMixin, dj.Manual):
         for i, (intervals, color) in enumerate(
             zip(all_intervals, custom_palette)
         ):
+            if getattr(intervals, "shape", None) == (2,):
+                intervals = [intervals]
             int_range = convert_intervals_to_range(intervals, start_time)
             ax.broken_barh(
                 int_range, (10 * (i + 1), 6), facecolors=color, alpha=0.7
@@ -262,6 +294,14 @@ class IntervalList(SpyglassMixin, dj.Manual):
         if return_fig:
             return fig
 
+    def insert(self, *args, **kwargs):
+        """Insert with cautious insert by default."""
+        self.cautious_insert(*args, **kwargs)
+
+    def super_insert(self, *args, **kwargs):
+        """Insert without cautious insert."""
+        super().insert(*args, **kwargs)
+
     def cautious_insert(self, inserts, update=False, **kwargs):
         """On existing primary key, check secondary key and update if needed.
 
@@ -278,22 +318,24 @@ class IntervalList(SpyglassMixin, dj.Manual):
         **kwargs : dict
             Additional keyword arguments to pass to `insert`.
         """
-        if not isinstance(inserts, list):
+        if not isinstance(inserts, (list, tuple)):  # Table.insert1 makes tuple
             inserts = [inserts]
+        if not inserts:  # No data to insert
+            return
         if not isinstance(inserts[0], dict):
-            raise ValueError("Input must be a list of dictionaries.")
+            self.super_insert(inserts, **kwargs)  # fallback
+            return
 
         pk = self.heading.primary_key
 
         def pk_match(row):
-            match = self & {k: v for k, v in row.items() if k in pk}
+            match = self & {k: str(v) for k, v in row.items() if k in pk}
             return match.fetch(as_dict=True)[0] if match else None
 
         def sk_match(new, old):
-            return (
-                np.array_equal(new["valid_times"], old["valid_times"])
-                and new["pipeline"] == old["pipeline"]
-            )
+            return np.array_equal(
+                new["valid_times"], old["valid_times"]
+            ) and new.get("pipeline", "") == old.get("pipeline", "")
 
         basic_inserts, need_update = [], []
         for row in inserts:
@@ -303,7 +345,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
             elif existing and not sk_match(row, existing):  # diff sk, update
                 need_update.append(row)
 
-        self.insert(basic_inserts, **kwargs)
+        self.super_insert(basic_inserts, **kwargs)
 
         if update:
             for row in need_update:
@@ -344,7 +386,7 @@ class Interval:
         from_inds=False,
         no_overlap=False,
         no_duplicates=True,
-        warn=True,
+        warn=not test_mode,  # warn by default, unless running pytests
         **kwargs,
     ) -> None:
         """Initialize the Intervals class with a list of intervals.
@@ -368,6 +410,7 @@ class Interval:
             Additional keyword arguments to pass to the class, including
             "valid_times" and "interval_list_name" for times and name.
         """
+
         self.kwargs = dict(  # Returned objects will set this behavior
             kwargs,
             no_overlap=no_overlap,
@@ -418,13 +461,13 @@ class Interval:
     def __len__(self) -> int:
         return len(self.times)
 
-    def __getitem__(self, item) -> T:
+    def __getitem__(self, item: Union[int, slice, tuple]) -> np.ndarray:
         """Get item from the interval list."""
-        if isinstance(item, (slice, int)):
-            return Interval(self.times[item], **self.kwargs)
+        if isinstance(item, (slice, int, tuple)):
+            return self.times[item]
         else:
             raise ValueError(
-                f"Unrecognized item type: {type(item)}. Must be int or slice."
+                f"Unrecognized item type: {type(item)}. Must be int, slice, or tuple."
             )
 
     def __iter__(self) -> iter:
@@ -475,23 +518,39 @@ class Interval:
     def _extract(
         self, interval_list: IntervalLike, from_inds: bool = False
     ) -> np.ndarray:
-        """Extract interval_list from a given object."""
+        times = None
+
+        # extract times from interval_list based on type
         if from_inds:
-            return self.from_inds(interval_list)
+            times = self.from_inds(interval_list)
         elif hasattr(interval_list, "times"):
-            return interval_list.times
+            times = interval_list.times
         elif isinstance(interval_list, dict):
-            return self._import_from_table(interval_list)
+            times = self._import_from_table(interval_list)
         elif isinstance(
             interval_list, (np.generic, np.ndarray, list, int, float, tuple)
         ):
-            return interval_list
+            times = interval_list
         elif interval_list is None:
             return np.array([])
-        else:
+
+        # validate times format
+        if times is None:
             raise TypeError(
                 f"Unrecognized interval_list type: {type(interval_list)}"
             )
+
+        times = self._expand_1d(np.asarray(times))
+        if len(times) and not np.all(np.diff(times, axis=1) >= 0):
+            raise ValueError(
+                "All intervals must be in the form [start, stop] with start <= stop."
+            )
+        if len(times) and times.shape[1] != 2:
+            raise ValueError(
+                f"Intervals must have shape (N, 2). Got shape {times.shape}."
+            )
+
+        return np.asarray(times)
 
     @staticmethod
     def from_inds(list_frames) -> List[List[int]]:
@@ -595,7 +654,7 @@ class Interval:
     @staticmethod
     def _expand_1d(interval_list: np.ndarray) -> np.ndarray:
         """Expand a 1D interval list to 2D."""
-        if interval_list.ndim == 1:
+        if interval_list.ndim == 1 and interval_list.size > 0:
             return np.expand_dims(interval_list, 0)
         return interval_list
 
@@ -669,8 +728,8 @@ class Interval:
 
         Parameters
         ----------
-        interval_list1 : np.array, (N,2) where N = number of intervals
-        interval_list2 : np.array, (N,2) where N = number of intervals
+        other : Union[Interval, np.array, list, dict]
+            Interval list to intersect with self.
         min_length : float, optional.
             Minimum length of intervals to include, default 0
 
@@ -712,8 +771,8 @@ class Interval:
 
         Parameters
         ----------
-        interval1 : np.array
-        interval2 : np.array
+        other : Union[Interval, np.ndarray]
+            Interval list to union with self.
         """
         interval1 = np.atleast_2d(self.times)
         interval2 = np.atleast_2d(self._extract(other))
@@ -747,7 +806,7 @@ class Interval:
 
     def union(
         self,
-        other: np.ndarray,
+        other: IntervalLike,
         min_length: Optional[float] = 0.0,
         max_length: Optional[float] = 1e10,
     ) -> T:
@@ -755,10 +814,8 @@ class Interval:
 
         Parameters
         ----------
-        interval_list1 : np.ndarray
-            The first interval list [start, stop]
-        interval_list2 : np.ndarray
-            The second interval list [start, stop]
+        other : Union[Interval, np.ndarray]
+            Interval list to union with self.
         min_length : float, optional
             Minimum length of interval for inclusion in output, default 0.0
         max_length : float, optional
@@ -785,16 +842,40 @@ class Interval:
         # Concatenate the two lists so we can resort the intervals and apply the
         # same sorting to the start-end arrays
         combined_intervals = np.concatenate((il1, il2))
+        if len(combined_intervals) == 0:
+            return Interval(np.array([]), **self.kwargs)
         ss = np.concatenate((il1_start_end, il2_start_end))
-        sort_ind = np.argsort(combined_intervals)
+        sort_ind = np.lexsort((-1 * ss, combined_intervals))
         combined_intervals = combined_intervals[sort_ind]
+        ss_cumsum = np.cumsum(ss[sort_ind])
+        if np.any(ss_cumsum < 0):
+            raise ValueError(
+                "Negative cumulative sum found in union. "
+                + "This indicates an error in the interval lists, "
+                + "such as an end time before a start time. "
+                + "Please check the input interval lists for validity."
+            )
 
-        # a cumulative sum of 1 indicates the beginning of a joint interval; a
-        # cumulative sum of 0 indicates the end
-        union_starts = np.ravel(
-            np.array(np.where(np.cumsum(ss[sort_ind]) == 1))
+        # a switch of cumulative sum from 0 to 1 indicates the beginning of a
+        # joint interval; a cumulative sum of 0 indicates the end
+        cumsum_flip = np.logical_and(
+            ss_cumsum[1:] == 1,
+            ss_cumsum[:-1] == 0,
         )
-        union_stops = np.ravel(np.array(np.where(np.cumsum(ss[sort_ind]) == 0)))
+        union_starts = np.ravel(np.array(np.where(cumsum_flip)[0] + 1))
+        union_starts = (
+            np.insert(union_starts, 0, 0)
+            if ss[sort_ind][0] == 1
+            else union_starts
+        )
+        union_stops = np.ravel(np.array(np.where(ss_cumsum == 0)))
+        if union_starts.size != union_stops.size:
+            raise ValueError(
+                "Mismatched number of union starts and stops. "
+                + "This indicates an error in the interval lists, "
+                + "such as an end time before a start time. "
+                + "Please check the input interval lists for validity."
+            )
         union = [
             [combined_intervals[start], combined_intervals[stop]]
             for start, stop in zip(union_starts, union_stops)
@@ -807,8 +888,6 @@ class Interval:
 
         Parameters
         ----------
-        interval_list : numpy array of intervals [start, stop]
-            interval list from IntervalList valid times
         timestamps : numpy array or list
 
         Returns
@@ -970,260 +1049,3 @@ class Interval:
             "interval_list_name", "pipeline", "nwb_file_name", "valid_times"
         )
         return times
-
-
-def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):
-    """Select intervals of certain lengths from an interval list.
-
-    Parameters
-    ----------
-    interval_list : array_like
-        Each element is (start time, stop time), i.e. an interval in seconds.
-    min_length : float, optional
-        Minimum interval length in seconds. Defaults to 0.0.
-    max_length : float, optional
-        Maximum interval length in seconds. Defaults to 1e10.
-    """
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log("intervals_by_length", alt="Interval.by_length")
-
-    return Interval(interval_list).by_length(min_length, max_length).times
-
-
-def interval_list_contains_ind(interval_list, timestamps):
-    """Find indices of list of timestamps contained in an interval list.
-
-    Parameters
-    ----------
-    interval_list : array_like
-        Each element is (start time, stop time), i.e. an interval in seconds.
-    timestamps : array_like
-    """
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log(
-        "interval_list_contains_ind", alt="Interval.contains"
-    )
-
-    return Interval(interval_list).contains(timestamps, as_indices=True)
-
-
-def interval_list_contains(interval_list, timestamps):
-    """Find timestamps that are contained in an interval list.
-
-    Parameters
-    ----------
-    interval_list : array_like
-        Each element is (start time, stop time), i.e. an interval in seconds.
-    timestamps : array_like
-    """
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log(
-        "interval_list_contains", alt="Interval.contains"
-    )
-    return Interval(interval_list).contains(timestamps)
-
-
-def interval_list_excludes_ind(interval_list, timestamps):
-    """Find indices of timestamps that are not contained in an interval list.
-
-    Parameters
-    ----------
-    interval_list : array_like
-        Each element is (start time, stop time), i.e. an interval in seconds.
-    timestamps : array_like
-    """
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log(
-        "interval_list_excludes_ind",
-        alt="Interval.excludes(timestamps, as_indices=True)",
-    )
-    return Interval(interval_list).excludes(timestamps, as_indices=True)
-
-
-def interval_list_excludes(interval_list, timestamps):
-    """Find timestamps that are not contained in an interval list.
-
-    Parameters
-    ----------
-    interval_list : array_like
-        Each element is (start time, stop time), i.e. an interval in seconds.
-    timestamps : array_like
-    """
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log(
-        "interval_list_excludes", alt="Interval.excludes"
-    )
-    return Interval(interval_list).excludes(timestamps)
-
-
-def consolidate_intervals(interval_list):
-    """Consolidate overlapping intervals in an interval list."""
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log(
-        "consolidate_intervals", alt="Interval.consolidate"
-    )
-    return Interval(interval_list).consolidate().times
-
-
-def interval_list_intersect(interval_list1, interval_list2, min_length=0):
-    """Finds the intersections between two interval lists
-
-    Each interval is (start time, stop time)
-
-    Parameters
-    ----------
-    interval_list1 : np.array, (N,2) where N = number of intervals
-    interval_list2 : np.array, (N,2) where N = number of intervals
-    min_length : float, optional.
-        Minimum length of intervals to include, default 0
-
-    Returns
-    -------
-    interval_list: np.array, (N,2)
-    """
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log(
-        "interval_list_intersect", alt="Interval.intersect"
-    )
-    return Interval(interval_list1).intersect(interval_list2, min_length).times
-
-
-def union_adjacent_index(interval1, interval2):
-    """Union index-adjacent intervals. If not adjacent, just concatenate.
-
-    e.g. [a,b] and [b+1, c] is converted to [a,c]
-
-    Parameters
-    ----------
-    interval1 : np.array
-    interval2 : np.array
-    """
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log(
-        "union_adjacent_index", alt="Interval.union_adjacent_index"
-    )
-    return Interval(interval1).union_adjacent_index(interval2).times
-
-
-def interval_list_union(
-    interval_list1: np.ndarray,
-    interval_list2: np.ndarray,
-    min_length: float = 0.0,
-    max_length: float = 1e10,
-) -> np.ndarray:
-    """Finds the union (all times in one or both) for two interval lists
-
-    Parameters
-    ----------
-    interval_list1 : np.ndarray
-        The first interval list [start, stop]
-    interval_list2 : np.ndarray
-        The second interval list [start, stop]
-    min_length : float, optional
-        Minimum length of interval for inclusion in output, default 0.0
-    max_length : float, optional
-        Maximum length of interval for inclusion in output, default 1e10
-
-    Returns
-    -------
-    np.ndarray
-        Array of intervals [start, stop]
-    """
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log("interval_list_union", alt="Interval.union")
-
-    return (
-        Interval(interval_list1)
-        .union(interval_list2, min_length, max_length)
-        .times
-    )
-
-
-def interval_list_censor(interval_list, timestamps):
-    """Returns new interval list that starts/ends at first/last timestamp
-
-    Parameters
-    ----------
-    interval_list : numpy array of intervals [start, stop]
-        interval list from IntervalList valid times
-    timestamps : numpy array or list
-
-    Returns
-    -------
-    interval_list (numpy array of intervals [start, stop])
-    """
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log("interval_list_censor", alt="Interval.censor")
-    return Interval(interval_list).censor(timestamps).times
-
-
-def interval_from_inds(list_frames):
-    """Converts a list of indices to a list of intervals.
-
-    e.g. [2,3,4,6,7,8,9,10] -> [[2,4],[6,10]]
-
-    Parameters
-    ----------
-    list_frames : array_like of int
-    """
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log(
-        "interval_from_inds", alt="Interval(list_frames, from_inds=True)"
-    )
-    return Interval(list_frames, from_inds=True).times
-
-
-def interval_set_difference_inds(intervals1, intervals2):
-    """
-    e.g.
-    intervals1 = [(0, 5), (8, 10)]
-    intervals2 = [(1, 2), (3, 4), (6, 9)]
-
-    result = [(0, 1), (4, 5), (9, 10)]
-
-    Parameters
-    ----------
-    intervals1 : IntervalLike
-    intervals2 : IntervalLike
-
-    Returns
-    -------
-    np.ndarray
-    """
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log(
-        "interval_set_difference_inds", alt="Interval.subtract"
-    )
-    return Interval(intervals1).subtract(intervals2).times
-
-
-def interval_list_complement(intervals1, intervals2, min_length=0.0):
-    """
-    Finds intervals in intervals1 that are not in intervals2
-
-    Parameters
-    ----------
-    min_length : float, optional
-        Minimum interval length in seconds. Defaults to 0.0.
-    """
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log(
-        "interval_list_complement",
-        alt="Interval(one).subtract(two, min_length=min_length)",
-    )
-    return (
-        Interval(intervals1).subtract(intervals2, min_length=min_length).times
-    )

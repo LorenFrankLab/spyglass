@@ -1,13 +1,22 @@
+from pathlib import Path
 from typing import List, Union
 
 import datajoint as dj
-from datajoint.utils import to_camel_case
+import yaml
 
 from spyglass.common.common_behav import (
     PositionSource,
-    RawPosition,
+    RawCompassDirection,
     StateScriptFile,
     VideoFile,
+)
+from spyglass.common.common_device import (
+    CameraDevice,
+    DataAcquisitionDevice,
+    DataAcquisitionDeviceAmplifier,
+    DataAcquisitionDeviceSystem,
+    Probe,
+    ProbeType,
 )
 from spyglass.common.common_dio import DIOEvents
 from spyglass.common.common_ephys import (
@@ -16,18 +25,26 @@ from spyglass.common.common_ephys import (
     Raw,
     SampleCount,
 )
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_optogenetics import (
+    OpticalFiberDevice,
     OpticalFiberImplant,
     OptogeneticProtocol,
+    Virus,
     VirusInjection,
 )
 from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
+from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import TaskEpoch
+from spyglass.common.common_task_rec import TaskRecording, TaskRecordingTypes
 from spyglass.common.common_usage import InsertError
+from spyglass.settings import base_dir
 from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import declare_all_merge_tables
+from spyglass.utils.nwb_helper_fn import get_config
 
 
 def log_insert_error(
@@ -56,7 +73,7 @@ def log_insert_error(
             **error_constants,
             table=table.__name__,
             error_type=type(err).__name__,
-            error_message=str(err),
+            error_message=str(err)[:255],  # limit to 255 chars
             error_raw=str(err),
         )
     )
@@ -67,47 +84,43 @@ def single_transaction_make(
     nwb_file_name: str,
     raise_err: bool = False,
     error_constants: dict = None,
+    config: dict = None,
 ):
-    """For each table, run the `make` method directly instead of `populate`.
+    """Ingest each table from the NWB file, inside one transaction.
 
-    Requires `allow_direct_insert` set to True within each method. Uses
-    nwb_file_name search table key_source for relevant key. Currently assumes
-    all tables will have exactly one key_source entry per nwb file.
+    Every table here is a SpyglassIngestion table, so each parses the file
+    once via `insert_from_nwbfile` rather than running `make` per key_source
+    key. Failures are logged per table unless `raise_err` is set.
     """
-    file_restr = {"nwb_file_name": nwb_file_name}
-    with Nwbfile.connection.transaction:
+
+    # Entries may also be declared in a `_spyglass_config.yaml` beside the NWB
+    # file. Both configs share the {TableName: [rows]} shape that
+    # `generate_entries_from_config` indexes by name, so each table is handed
+    # the whole merged mapping -- a per-table lookup would yield a row list.
+    # The file's own config wins: `entries.yaml` holds lab-wide defaults,
+    # while the sidecar describes this session. Before this PR the sidecar was
+    # the only config any table that read one consulted.
+    # `or dict()`: yaml.safe_load returns None for an empty file, and the
+    # config argument is optional.
+    file_config = (
+        get_config(
+            Nwbfile.get_abs_path(nwb_file_name),
+            calling_table="populate_all_common",
+        )
+        or dict()
+    )
+    merged_config = {**(config or dict()), **file_config}
+
+    with Nwbfile._safe_context():
         for table in tables:
-            logger.info(f"Populating {table.__name__}...")
-
-            # If imported/computed table, get key from key_source
-            key_source = getattr(table, "key_source", None)
-            if key_source is None:  # Generate key from parents
-                parents = table.parents(as_objects=True)
-                key_source = parents[0].proj()
-                for parent in parents[1:]:
-                    key_source *= parent.proj()
-
-            table_name = to_camel_case(table.table_name)
-            if table_name == "PositionSource":
-                # PositionSource only uses nwb_file_name - full calls redundant
-                key_source = dj.U("nwb_file_name") & key_source
-            if table_name in [
-                "ImportedPose",
-                "ImportedLFP",
-                "VirusInjection",
-                "OpticalFiberImplant",
-            ]:
-                key_source = Nwbfile()
-
-            for pop_key in (key_source & file_restr).fetch("KEY"):
-                try:
-                    table().make(pop_key)
-                except Exception as err:
-                    if raise_err:
-                        raise err
-                    log_insert_error(
-                        table=table, err=err, error_constants=error_constants
-                    )
+            try:
+                table().insert_from_nwbfile(nwb_file_name, config=merged_config)
+            except Exception as err:
+                if raise_err:
+                    raise err
+                log_insert_error(
+                    table=table, err=err, error_constants=error_constants
+                )
 
 
 def populate_all_common(
@@ -130,12 +143,18 @@ def populate_all_common(
     -------
     List
         A list of keys for InsertError entries if any errors occurred.
+
+    Notes
+    -----
+    InsertError rows logged by an earlier attempt at the same file, under the
+    same user and connection, are cleared before population starts, so the
+    returned list only ever describes the current attempt.
     """
     from spyglass.lfp.lfp_imported import ImportedLFP
     from spyglass.position.v1.imported_pose import ImportedPose
     from spyglass.spikesorting.imported import ImportedSpikeSorting
 
-    declare_all_merge_tables()
+    _ = declare_all_merge_tables()
 
     error_constants = dict(
         dj_user=dj.config["database.user"],
@@ -143,33 +162,70 @@ def populate_all_common(
         nwb_file_name=nwb_file_name,
     )
 
-    table_lists = [
-        [  # Tables that can be inserted in a single transaction
-            Session,
+    # Drop errors logged by an earlier attempt at this same file, user, and
+    # connection. Without this, the check below reports stale failures and can
+    # roll back an otherwise clean ingestion. See issue #1497. InsertError has
+    # no dependent tables, so delete_quick is safe here.
+    (InsertError & error_constants).delete_quick()
+
+    table_lists: List[List[dj.Table]] = [
+        # Tables that can be inserted in a single transaction
+        [
+            Institution,  # Parent node
+            Lab,  # Parent node
+            LabMember,  # Parent node
+            LabTeam,  # Parent node
+            Subject,  # Parent node
+            CameraDevice,  # Parent node
+            ProbeType,  # Parent node
+            DataAcquisitionDeviceAmplifier,  # Parent node
+            DataAcquisitionDeviceSystem,  # Parent node
+            DataAcquisitionDevice,  # Depends on DataAcq*Amp, DataAcq*Sys
+            OpticalFiberDevice,  # Parent node
+            Virus,  # Parent node
+        ],
+        [
+            Probe,  # Depends on ProbeType, DataAcquisitionDevice
+            Probe.Shank,  # Depends on Probe
+            Probe.Electrode,  # Depends on Probe
+            Session,  # Depends on Subject, Institution, Lab
+            Session.Experimenter,  # Depends on Session
+            Session.DataAcquisitionDevice,  # Depends on Sess, DataAcq*Device
             ElectrodeGroup,  # Depends on Session
             Raw,  # Depends on Session
             SampleCount,  # Depends on Session
             DIOEvents,  # Depends on Session
-            TaskEpoch,  # Depends on Session
             ImportedSpikeSorting,  # Depends on Session
             SensorData,  # Depends on Session
+            IntervalList,  # Depends on Session
+            TaskEpoch,  # Depends on Session, Task, CamearaDevice, IntervalList
+            TaskRecordingTypes,  # Depends on Nwbfile
+            TaskRecordingTypes.ActionTypes,  # Depends on TaskRecordingTypes
+            TaskRecordingTypes.EventTypes,  # Depends on TaskRecordingTypes
+            TaskRecordingTypes.StateTypes,  # Depends on TaskRecordingTypes
+            TaskRecordingTypes.Arguments,  # Depends on TaskRecordingTypes
+            TaskRecording,  # Depends on TaskRecordingTypes
             # NwbfileKachery, # Not used by default
         ],
         [  # Tables that depend on above transaction
             Electrode,  # Depends on ElectrodeGroup
-            PositionSource,  # Depends on Session
+            PositionSource,  # Depends on Session. Also fills RawPosition
+            RawCompassDirection,  # Depends on Session
             VideoFile,  # Depends on TaskEpoch
             StateScriptFile,  # Depends on TaskEpoch
             ImportedPose,  # Depends on Session
             ImportedLFP,  # Depends on ElectrodeGroup
             VirusInjection,  # Depends on Session
-            OpticalFiberImplant,  # Depends on Session
+            OpticalFiberImplant,  # Depends on Session and OpticalFiberDevice
             OptogeneticProtocol,  # Depends on Session and TaskEpoch
         ],
-        [
-            RawPosition,  # Depends on PositionSource
-        ],
     ]
+
+    config = dict()
+    entries_path = Path(base_dir) / "entries.yaml"
+    if entries_path.exists():
+        with open(f"{base_dir}/entries.yaml", "r") as stream:
+            config = yaml.safe_load(stream)
 
     for tables in table_lists:
         single_transaction_make(
@@ -177,6 +233,7 @@ def populate_all_common(
             nwb_file_name=nwb_file_name,
             raise_err=raise_err,
             error_constants=error_constants,
+            config=config,
         )
 
     err_query = InsertError & error_constants

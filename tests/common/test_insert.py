@@ -12,6 +12,9 @@ def test_insert_session(mini_insert, mini_content, mini_restr, common):
         session_data["subject_id"] == subj_raw.subject_id
     ), "Subject ID not match"
 
+    subject_data = (common.Subject & (common.Session & mini_restr)).fetch1()
+    assert subject_data["sex"] == "M", "Subject sex not standardized correctly"
+
     attrs = [
         ("institution_name", "institution"),
         ("lab_name", "lab"),
@@ -184,15 +187,22 @@ def test_insert_camera(mini_insert, mini_devices, common):
 
     attrs = [
         ("camera_name", "camera_name"),
-        ("manufacturer", "manufacturer"),
-        ("model", "model"),
         ("lens", "lens"),
         ("meters_per_pixel", "meters_per_pixel"),
+    ]
+    model_attrs = [
+        ("model", "name"),
+        ("manufacturer", "manufacturer"),
     ]
     for camera_attr, meta_attr in attrs:
         assert camera_data[camera_attr] == getattr(
             camera_raw, meta_attr
         ), f"Camera table {camera_attr} not match raw data {meta_attr}"
+
+    for model_attr, meta_attr in model_attrs:
+        assert camera_data[model_attr] == getattr(
+            camera_raw.model, meta_attr
+        ), f"Camera table {model_attr} not match raw data {meta_attr}"
 
 
 def test_insert_probe(mini_insert, mini_devices, common):

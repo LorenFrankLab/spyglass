@@ -7,7 +7,7 @@
 
 [Demo](https://spyglass.hhmi.2i2c.cloud/hub/user-redirect/git-pull?repo=https%3A%2F%2Fgithub.com%2FLorenFrankLab%2Fspyglass-demo&urlpath=lab%2Ftree%2Fspyglass-demo%2Fnotebooks%2F02_Insert_Data.ipynb&branch=main)
 |
-[Installation](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
+[Installation](https://lorenfranklab.github.io/spyglass/latest/GettingStarted/QUICKSTART/)
 | [Docs](https://lorenfranklab.github.io/spyglass/) |
 [Tutorials](https://github.com/LorenFrankLab/spyglass/tree/master/notebooks) |
 [Citation](#citation)
@@ -33,11 +33,11 @@ Features of Spyglass include:
     code. This ensures that all analysis is reproducible and that the results
     are automatically updated when the data or analysis code changes.
 - **Common analysis tools** - Spyglass provides easy usage of the open-source
-    packages [SpikeInterface](https://github.com/SpikeInterface/spikeinterface),
-    [Ghostipy](https://github.com/kemerelab/ghostipy), and
-    [DeepLabCut](https://github.com/DeepLabCut/DeepLabCut) for common analysis
-    tasks. These packages are well-documented and have active developer
-    communities.
+    packages [SpikeInterface](https://github.com/SpikeInterface/spikeinterface)
+    and [DeepLabCut](https://github.com/DeepLabCut/DeepLabCut) for common
+    analysis tasks. These packages are well-documented and have active developer
+    communities. Its LFP filtering is derived from
+    [Ghostipy](https://github.com/kemerelab/ghostipy).
 - **Interactive data visualization** - Spyglass uses
     [figurl](https://github.com/flatironinstitute/figurl) to create interactive
     data visualizations that can be shared with collaborators and the broader
@@ -48,7 +48,8 @@ Features of Spyglass include:
     via [Kachery](https://github.com/flatironinstitute/kachery-cloud), a
     decentralized content addressable data sharing platform. Kachery Cloud
     allows users to access the database and pull data and analysis results
-    directly to their local machine.
+    directly to their local machine. Kachery is an optional dependency; install
+    it with `pip install spyglass-neuro[kachery-cloud]`.
 - **Pipeline versioning** - Processing and analysis of data in neuroscience is
     often dynamic, requiring new features. Spyglass uses *Merge tables* to
     ensure that analysis pipelines can be versioned. This allows users to easily
@@ -65,10 +66,66 @@ Documentation can be found at -
 
 ## Installation
 
-For installation instructions see -
-[https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
+### Quick Start (Recommended)
 
-Typical installation time is: 5-10 minutes
+Get started with Spyglass in 5 minutes using our automated installer:
+
+```bash
+# Clone the repository
+git clone https://github.com/LorenFrankLab/spyglass.git
+cd spyglass
+
+# Run automated installer
+python scripts/install.py
+
+# Activate environment
+conda activate spyglass
+```
+
+The installer will:
+
+- ✅ Create conda environment with all dependencies
+- ✅ Set up local MySQL database (Docker) or connect to remote
+- ✅ Validate installation
+- ✅ Provide clear next steps
+
+**Installation Options:**
+
+```bash
+# Minimal installation (recommended for new users)
+python scripts/install.py --minimal
+
+# Full installation (all features)
+python scripts/install.py --full
+
+# With Docker database
+python scripts/install.py --docker
+
+# Connect to remote database
+python scripts/install.py --remote
+
+# Non-interactive with environment variables
+export SPYGLASS_BASE_DIR=/path/to/data
+python scripts/install.py --minimal --docker
+
+# Non-interactive remote database setup
+export SPYGLASS_DB_PASSWORD=mysecret
+python scripts/install.py --remote --db-host db.lab.edu --db-user myuser
+```
+
+**Troubleshooting:**
+
+- See [TROUBLESHOOTING.md](docs/src/GettingStarted/TROUBLESHOOTING.md) for
+    common issues
+- Run `python scripts/validate.py` to check your installation
+- For database help, see [DATABASE.md](docs/src/GettingStarted/DATABASE.md)
+
+### Manual Installation
+
+For manual installation and advanced configuration:
+
+- [Setup Documentation](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
+- [Database Setup Guide](docs/src/GettingStarted/DATABASE.md)
 
 ## Tutorials
 
@@ -91,16 +148,18 @@ License and Copyright notice can be found at
 
 ## System requirements
 
-Spyglass has been tested on Linux Ubuntu 20.04 and MacOS 10.15. It has not been
-tested on Windows and likely will not work.
+Spyglass has been tested on Linux (Ubuntu) and recent versions of macOS. Windows
+support is experimental.
 
 No specific hardware requirements are needed to run spyglass. However, the
 amount of data that can be stored and analyzed is limited by the available disk
 space and memory. GPUs are required for some of the analysis tools, such as
 DeepLabCut.
 
-See [pyproject.toml](pyproject.toml), [environment.yml](environment.yml), or
-[environment_dlc.yml](environment_dlc.yml) for software dependencies.
+See [pyproject.toml](pyproject.toml),
+[environment.yml](environments/environment.yml), or
+[environment_dlc.yml](environments/environment_dlc.yml) for software
+dependencies.
 
 See
 [spec-file.txt](https://github.com/LorenFrankLab/spyglass-demo/blob/main/spec-file/spec-file.txt)

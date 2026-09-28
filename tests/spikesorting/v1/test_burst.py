@@ -13,6 +13,7 @@ def test_burst_params(spike_v1, burst_params_key):
     assert params1 == params2, "get_params() method not working correctly"
 
 
+@pytest.mark.very_slow
 def test_burst_pairs(spike_v1, pop_burst):
     assert len(pop_burst) > 0
 

@@ -49,6 +49,67 @@ should be fetched from `Nwbfile` or an analysis file should be fetched from
 `AnalysisNwbfile`. If neither is foreign-key-referenced, the function will refer
 to a `_nwb_table` attribute.
 
+**Custom Analysis File Tables**: Spyglass supports individualized
+`AnalysisNwbfile` tables to address transaction lock contention in multi-team
+environments. The `fetch_nwb()` method automatically detects whether your table
+references the common `AnalysisNwbfile` table or a custom team-specific table
+and fetches from the appropriate location. See
+[Custom Analysis Tables](../ForDevelopers/Management.md#custom-analysis-tables)
+for details on using custom analysis file tables.
+
+### Migration from standalone `fetch_nwb` / `get_nwb_table` helpers
+
+Older Spyglass code used two standalone functions from
+`spyglass.utils.dj_helper_fn` that required passing the NWB table and attribute
+explicitly. Both were removed in 0.6.0. `get_nwb_table` is gone entirely —
+importing it raises an `ImportError`. `fetch_nwb` is kept as a stub that raises
+`NotImplementedError` when called, since it is a commonly imported name and a
+runtime message is clearer than an import failure. Use the `fetch_nwb()` method
+below instead.
+
+#### `fetch_nwb` (helper function)
+
+```python
+# Before
+from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.common import Nwbfile
+
+results = fetch_nwb(
+    MyTable & my_key,
+    (Nwbfile, "nwb_file_abs_path"),
+)
+
+# After
+results = (MyTable & my_key).fetch_nwb()
+```
+
+#### `get_nwb_table`
+
+```python
+# Before
+from spyglass.utils.dj_helper_fn import get_nwb_table
+from spyglass.common import Nwbfile
+
+nwb_files, path_fn = get_nwb_table(
+    MyTable & my_key,
+    Nwbfile,
+    "nwb_file_abs_path",
+)
+file_path = path_fn(nwb_files[0])
+
+# After — fetch_nwb handles file resolution internally
+results = (MyTable & my_key).fetch_nwb()
+```
+
+The method inspects the table's foreign-key references to determine whether to
+resolve paths from `Nwbfile` or `AnalysisNwbfile` automatically, so the
+`nwb_master` tuple is no longer needed. The return value is a list of dicts,
+each containing the fetched row fields plus the loaded NWB object.
+
+**NOTE:** Both functions are always called together in practice —
+`get_nwb_table` provides the file list and path resolver that `fetch_nwb` then
+uses. The `fetch_nwb()` method replaces both in a single call.
+
 ## Long-Distance Restrictions
 
 In complicated pipelines like Spyglass, there are often tables that 'bury' their
@@ -106,10 +167,10 @@ restriction of the child, use 'down' direction.
 For a more concrete example, imagine that we want to know which entries in the
 `BurstPair` table have a `1` in the `session_id`. The DataJoint-native way to
 approach this is to manually figure out the path from `Session` -> `Raw` ... ->
-`BurstPair` by looking at the diagram, or using various graph-structure
-methods: `parents`, `children`, `ancestors`, and `descendants`. We then use the
-`*` join operator for each link in the chain. Because there are some clashing
-secondary keys, we would need to drop them with `proj()`.
+`BurstPair` by looking at the diagram, or using various graph-structure methods:
+`parents`, `children`, `ancestors`, and `descendants`. We then use the `*` join
+operator for each link in the chain. Because there are some clashing secondary
+keys, we would need to drop them with `proj()`.
 
 ```python
 from spyglass.common import Raw, Session
@@ -139,7 +200,7 @@ join = (
     * MetricCurationSelection
 ).proj() * (
     MetricCuration * BurstPairSelection * BurstPair
-) * Session & "session_id LIKE '%1%'" # Last join adds back secondary keys
+) * Session & "session_id LIKE '%1%'"  # Last join adds back secondary keys
 ```
 
 - **Pros:**
@@ -148,14 +209,14 @@ join = (
     - All primary keys present, so it's easier to fetch other attributes
 - **Cons:**
     - Effortful - for long pipelines, takes time to find the path and then add
-    relevant parentheses and `proj`
+        relevant parentheses and `proj`
     - Inconvenient for one-off queries
 
 Instead, we can use the long-distance operator, or the equivalent `restrict_by`
 method to restrict the current table. By default, `verbose` and `return_graph`
 are false. When turned on, these display the search process and return the
-`RestrGraph` object, respectively. The graph object can be used to look at
-the path or check the same restriction at midpoints.
+`RestrGraph` object, respectively. The graph object can be used to look at the
+path or check the same restriction at midpoints.
 
 ```python
 from spyglass.spikesorting.v1 import BurstPair
@@ -172,13 +233,13 @@ restr_graph.all_ft  # see each table as restricted by session_restr
 - **Pros:**
     - Easy to write
     - Easier to read - the result is a restriction on the current table, not
-      including any additional primary keys.
+        including any additional primary keys.
 - **Cons:**
     - Slow - ~10x processing time to run restriction compatibility checks
-    - Unreliable - may not traverse multi-directional paths (i.e., parent ->
-      child -> other-parent)
-    - False negatives - may show no results if the discovered path does not
-      follow the data provenance
+    - Unreliable - may not traverse multi-directional paths (i.e., parent -> child
+        -> other-parent)
+    - False negatives - may show no results if the discovered path does not follow
+        the data provenance
 
 ## Delete Permission Checks
 
@@ -236,23 +297,6 @@ See [issue #1000](https://github.com/LorenFrankLab/spyglass/issues/1000) and
 [PR #1001](https://github.com/LorenFrankLab/spyglass/pull/1001) for more
 information.
 
-### Disable Transaction Protection
-
-By default, DataJoint wraps the `populate` function in a transaction to ensure
-data integrity (see
-[Transactions](https://docs.datajoint.io/python/definition/05-Transactions.html)).
-
-This can cause issues when populating large tables if another user attempts to
-declare/modify a table while the transaction is open (see
-[issue #1030](https://github.com/LorenFrankLab/spyglass/issues/1030) and
-[DataJoint issue #1170](https://github.com/datajoint/datajoint-python/issues/1170)).
-
-Tables with `_use_transaction` set to `False` will not be wrapped in a
-transaction when calling `populate`. Transaction protection is replaced by a
-hash of upstream data to ensure no changes are made to the table during the
-unprotected populate. The additional time required to hash the data is a
-trade-off for already time-consuming populates, but avoids blocking other users.
-
 ## Miscellaneous Helper functions
 
 `file_like` allows you to restrict a table using a substring of a file name.
@@ -296,8 +340,8 @@ declare/modify a table while the transaction is open (see
 [issue #1030](https://github.com/LorenFrankLab/spyglass/issues/1030) and
 [DataJoint issue #1170](https://github.com/datajoint/datajoint-python/issues/1170)).
 
-Tables with `_use_transaction` set to `False` will not be wrapped in a
-transaction when calling `populate`. Transaction protection is replaced by a
-hash of upstream data to ensure no changes are made to the table during the
-unprotected populate. The additional time required to hash the data is a
-trade-off for already time-consuming populates, but avoids blocking other users.
+**NOTE:** Setting `_use_transaction = False` on a table class is deprecated. The
+recommended replacement is the tri-part make pattern (`make_fetch`,
+`make_compute`, `make_insert`), which keeps the database insert inside a
+transaction while allowing long computations to run without holding a lock. See
+[Populate and Long-Running Computations](./Populate.md) for a migration guide.

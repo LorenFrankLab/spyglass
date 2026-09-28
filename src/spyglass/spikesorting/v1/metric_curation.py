@@ -51,7 +51,7 @@ _comparison_to_function = {
 class WaveformParameters(SpyglassMixin, dj.Lookup):
     """Parameters for extracting waveforms from the recording based on sorting.
 
-    Parameters
+    Attributes
     ----------
     waveform_param_name : str
         Name of the waveform extraction parameters.
@@ -161,7 +161,7 @@ class MetricParameters(SpyglassMixin, dj.Lookup):
 class MetricCurationParameters(SpyglassMixin, dj.Lookup):
     """Parameters for automatic curation of spike sorting
 
-    Parameters
+    Attributes
     ----------
     metric_curation_params_name : str
         Name of the automatic curation parameters
@@ -236,10 +236,9 @@ class MetricCuration(SpyglassMixin, dj.Computed):
     object_id: varchar(40) # Object ID for the metrics in NWB file
     """
 
-    _use_transaction, _allow_insert = False, True
     _waves_cache = {}  # Cache waveforms for burst merge
 
-    def make(self, key):
+    def make_fetch(self, key):
         """Populate MetricCuration table.
 
         1. Fetches...
@@ -247,16 +246,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
             - Metric parameters from MetricParameters
             - Label and merge parameters from MetricCurationParameters
             - Sorting ID and curation ID from MetricCurationSelection
-        2. Loads the recording and sorting from CurationV1.
-        3. Optionally whitens the recording with spikeinterface
-        4. Extracts waveforms from the recording based on the sorting.
-        5. Optionally computes quality metrics for the units.
-        6. Applies curation based on the metrics, computing labels and merge
-            groups.
-        7. Saves the waveforms, metrics, labels, and merge groups to an
-            analysis NWB file and inserts into MetricCuration table.
         """
-        # FETCH
         upstream = (
             SpikeSortingSelection
             * WaveformParameters
@@ -266,17 +256,45 @@ class MetricCuration(SpyglassMixin, dj.Computed):
             & key
         ).fetch1()
 
+        return [upstream]
+
+    def make_compute(self, key, upstream):
+        """Runs computation to populate MetricCuration table.
+
+        Parameters
+        ----------
+        key : dict
+            primary key to MetricCurationSelection
+        upstream : dict
+            output of make_fetch
+
+        1. Loads the recording and sorting from CurationV1.
+        2. Optionally whitens the recording with spikeinterface
+        3. Extracts waveforms from the recording based on the sorting.
+        4. Optionally computes quality metrics for the units.
+        5. Applies curation based on the metrics, computing labels and merge
+            groups.
+        6. Saves the waveforms, metrics, labels, and merge groups to an
+            analysis NWB file.
+        """
         nwb_file_name = upstream["nwb_file_name"]
         metric_params = upstream["metric_params"]
         label_params = upstream["label_params"]
         merge_params = upstream["merge_params"]
 
         # DO
-        logger.info("Extracting waveforms...")
+        # NOTE: fetching waveform does query upstream tables for keys to find
+        # the right Analysis file. May cause errors if DJ decides to enforce
+        # strict tripartite separation of make_fetch and make_compute.
+        # Cannot pass recording and sorting here because dj's deepdiff hasher
+        # cannot handle these objects.
+        # TODO: refactor upstream to allow for passing of keys to avoid fetch,
+        # only fetching data from disk here.
+        self._info_msg("Extracting waveforms...")
         waveforms = self.get_waveforms(key)
 
         # compute metrics
-        logger.info("Computing metrics...")
+        self._info_msg("Computing metrics...")
         metrics = {}
         for metric_name, metric_param_dict in metric_params.items():
             metrics[metric_name] = self._compute_metric(
@@ -288,24 +306,27 @@ class MetricCuration(SpyglassMixin, dj.Computed):
                 for unit_id, value in metrics["nn_isolation"].items()
             }
 
-        logger.info("Applying curation...")
+        self._info_msg("Applying curation...")
         labels = self._compute_labels(metrics, label_params)
         merge_groups = self._compute_merge_groups(metrics, merge_params)
 
-        logger.info("Saving to NWB...")
-        (
-            key["analysis_file_name"],
-            key["object_id"],
-        ) = _write_metric_curation_to_nwb(
+        self._info_msg("Saving to NWB...")
+        analysis_file_name, object_id = _write_metric_curation_to_nwb(
             nwb_file_name, waveforms, metrics, labels, merge_groups
         )
 
-        # INSERT
-        AnalysisNwbfile().add(
-            nwb_file_name,
-            key["analysis_file_name"],
+        return [nwb_file_name, analysis_file_name, object_id]
+
+    def make_insert(self, key, nwb_file_name, analysis_file_name, object_id):
+        """Inserts a new row into MetricCuration."""
+        AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+        self.insert1(
+            dict(
+                key,
+                analysis_file_name=analysis_file_name,
+                object_id=object_id,
+            )
         )
-        self.insert1(key)
 
     def get_waveforms(
         self, key: dict, overwrite: bool = True, fetch_all: bool = False
@@ -352,14 +373,20 @@ class MetricCuration(SpyglassMixin, dj.Computed):
 
         # Extract non-sparse waveforms by default
         waveform_params.setdefault("sparse", False)
-        waveforms = si.extract_waveforms(
-            recording=recording,
-            sorting=sorting,
-            folder=waveforms_dir,
-            overwrite=overwrite,
-            load_if_exists=not overwrite,
-            **waveform_params,
+        dir_empty = not Path(waveforms_dir).exists() or not any(
+            Path(waveforms_dir).iterdir()
         )
+
+        if overwrite or dir_empty:
+            waveforms = si.extract_waveforms(
+                recording=recording,
+                sorting=sorting,
+                folder=waveforms_dir,
+                overwrite=overwrite,
+                **waveform_params,
+            )
+        else:
+            waveforms = si.load_waveforms(waveforms_dir)
 
         self._waves_cache[key_hash] = waveforms
 
@@ -418,6 +445,10 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         ) as io:
             nwbf = io.read()
             units = nwbf.objects[object_id].to_dataframe()
+        # The column is absent when no unit was labeled (see
+        # _write_metric_curation_to_nwb); report that as no labels.
+        if "curation_label" not in units:
+            return {}
         return dict(zip(units.index, units["curation_label"]))
 
     @classmethod
@@ -632,22 +663,22 @@ def _write_metric_curation_to_nwb(
 
         # add labels, merge groups, metrics
         if labels is not None:
-            label_values = []
-            for unit_id in unit_ids:
-                if unit_id not in labels:
-                    label_values.append([])
-                else:
-                    label_values.append(labels[unit_id])
-            nwbf.add_unit_column(
-                name="curation_label",
-                description="curation label",
-                data=label_values,
-                index=True,
-            )
+            label_values = [labels.get(unit_id, []) for unit_id in unit_ids]
+            # Skip the column when no unit is labeled: an all-empty ragged
+            # column has no data for hdmf to infer a dtype from, which would
+            # crash the write. get_labels tolerates the column being absent.
+            if any(len(value) > 0 for value in label_values):
+                nwbf.add_unit_column(
+                    name="curation_label",
+                    description="curation label",
+                    data=label_values,
+                    index=True,
+                )
         if merge_groups is not None:
             merge_groups_dict = _list_to_merge_dict(merge_groups, unit_ids)
             merge_groups_list = [
-                [""] for i in merge_groups_dict.values() if i == []
+                [""] if value == [] else value
+                for value in merge_groups_dict.values()
             ]
             nwbf.add_unit_column(
                 name="merge_groups",

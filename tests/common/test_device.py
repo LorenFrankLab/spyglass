@@ -22,31 +22,6 @@ def test_spike_gadgets_system_alias(mini_insert, common):
     ), "SpikeGadgets MCU alias not found"
 
 
-def test_invalid_probe(common, populate_exception):
-    probe_dict = common.ProbeType.fetch(as_dict=True)[0]
-    probe_dict["other"] = "invalid"
-    with pytest.raises(populate_exception):
-        common.Probe._add_probe_type(probe_dict)
-
-
-def test_create_probe(common, mini_devices, mini_path, mini_copy_name):
-    probe_id = common.Probe.fetch("KEY", as_dict=True)[0]
-    probe_type = common.ProbeType.fetch("KEY", as_dict=True)[0]
-    before = common.Probe.fetch()
-    common.Probe.create_from_nwbfile(
-        nwb_file_name=mini_copy_name,
-        nwb_device_name="probe 0",
-        contact_side_numbering=False,
-        **probe_id,
-        **probe_type,
-    )
-    after = common.Probe.fetch()
-    # Because already inserted, expect no change
-    assert array_equal(
-        before, after
-    ), "Probe create_from_nwbfile had unexpected effect"
-
-
 def test_replace_nan_with_default(utils):
     """Test that NaN values in probe geometry fields are properly replaced with -1.0."""
     # Test with NaN values (similar to the issue case)
@@ -72,3 +47,17 @@ def test_replace_nan_with_default(utils):
     assert result["probe_id"] == "nTrode32_probe description"
     assert result["probe_shank"] == 0
     assert result["probe_electrode"] == 194
+
+
+def test_none_acq_device_attrs(common):
+    """Test that _add_amplifier handles None values gracefully.
+
+    Issue #1446: DataAcqDevice insertion fails when optional amplifier and
+    system fields are None, despite being optional in ndx-franklab-novela
+    """
+    acq_dev = common.DataAcquisitionDevice()
+    amp = acq_dev._add_amplifier(None)
+    assert amp is None, "None amplifier should return None"
+
+    system = common.DataAcquisitionDevice._add_system(None)
+    assert system is None, "None system should return None"

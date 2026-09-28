@@ -27,7 +27,7 @@ schema = dj.schema("spikesorting_v1_artifact")
 class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     """Parameters for detecting artifacts (non-neural high amplitude events).
 
-    Parameters
+    Attributes
     ----------
     artifact_param_name : str
         Name of the artifact detection parameters.
@@ -250,10 +250,11 @@ def _get_artifact_times(
 
     # if both thresholds are None, we skip artifract detection
     if amplitude_thresh_uV is zscore_thresh is None:
-        logger.info(
-            "Amplitude and zscore thresholds are both None, "
-            + "skipping artifact detection"
-        )
+        if verbose:
+            logger.info(
+                "Amplitude and zscore thresholds are both None, "
+                + "skipping artifact detection"
+            )
         return np.asarray(
             [valid_timestamps[0], valid_timestamps[-1]]
         ), np.asarray([])

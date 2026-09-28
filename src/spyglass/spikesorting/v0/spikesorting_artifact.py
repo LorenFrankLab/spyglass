@@ -24,7 +24,7 @@ schema = dj.schema("spikesorting_artifact")
 class ArtifactDetectionParameters(SpyglassMixin, dj.Manual):
     """Parameters for detecting artifact times within a sort group.
 
-    Parameters
+    Attributes
     ----------
     artifact_params_name : str
         Name of the artifact detection parameters.

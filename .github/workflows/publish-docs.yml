@@ -33,9 +33,9 @@ jobs:
         uses: proudust/gh-describe@v2
 
       - name: Set up Python runtime
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: 3.9
+          python-version: '3.10'
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup - pip & config

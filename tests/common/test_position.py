@@ -8,6 +8,7 @@ def interval_pos_key(upsample_position):
     yield upsample_position
 
 
+@pytest.mark.very_slow
 def test_interval_position_info_insert(common_position, interval_pos_key):
     assert common_position.IntervalPositionInfo & interval_pos_key
 
@@ -46,6 +47,7 @@ def upsample_position_error(
     )
 
 
+@pytest.mark.slow
 def test_interval_position_info_insert_error(
     interval_position_info, upsample_position_error
 ):
@@ -53,6 +55,7 @@ def test_interval_position_info_insert_error(
         interval_position_info.populate(upsample_position_error)
 
 
+@pytest.mark.slow
 def test_fetch1_dataframe(interval_position_info, interval_pos_key):
     df = (interval_position_info & interval_pos_key).fetch1_dataframe()
     err_msg = "Unexpected output of IntervalPositionInfo.fetch1_dataframe"
@@ -95,6 +98,7 @@ def position_video(common_position):
     yield common_position.PositionVideo()
 
 
+@pytest.mark.slow
 def test_position_video(position_video, upsample_position):
     _ = position_video.populate()
     assert len(position_video) == 2, "Failed to populate PositionVideo table."

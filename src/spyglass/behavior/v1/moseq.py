@@ -1,15 +1,41 @@
 import os
 from pathlib import Path
+from typing import Dict, List, Optional
 
 import datajoint as dj
-import keypoint_moseq as kpms
+import numpy as np
+from spyglass.utils import logger
+
+try:
+    import keypoint_moseq as kpms
+except ImportError:
+    kpms = None
+    logger.warning(
+        "keypoint_moseq not found. This package is necessary to "
+        + "populate the MoseqModel table"
+    )
+
+
+def _require_keypoint_moseq():
+    if kpms is None:
+        raise ImportError(
+            "keypoint_moseq is required for MoSeq operations but is not "
+            "installed. Install the `keypoint_moseq` package to use "
+            "MoseqModel-related functionality."
+        )
+
 
 from spyglass.common import AnalysisNwbfile
 from spyglass.position.position_merge import PositionOutput
 from spyglass.settings import moseq_project_dir, moseq_video_dir
 from spyglass.utils import SpyglassMixin
 
-from .core import PoseGroup, format_dataset_for_moseq, results_to_df
+from .core import (
+    PoseGroup,
+    format_dataset_for_moseq,
+    results_to_df,
+    _normalize_1_pose_dataset,
+)
 
 schema = dj.schema("behavior_v1_moseq")
 
@@ -25,6 +51,10 @@ class MoseqModelParams(SpyglassMixin, dj.Lookup):
     - num_epochs: number of epochs to train the model
     - anterior_bodyparts: used to define orientation
     - posterior_bodyparts: used to define orientation
+    - target_variance: if supplied, determines the number of principal components to
+    keep based on the cumulative variance explained. If not supplied, keeps all
+    principal components up to the maximum defined by max_latent_dim(default 10 or
+    number of keypoints - 1, whichever is smaller)
     """
 
     definition = """
@@ -108,16 +138,66 @@ class MoseqModel(SpyglassMixin, dj.Computed):
     model_name = "": varchar(255)
     """
 
-    def make(self, key):
-        """Method to train a model and insert the resulting model into the MoseqModel table
+    # Make method trains a model and inserts it into the table
+
+    def make_fetch(self, key: dict) -> List:  # TODO: test
+        """Fetch data relevant to model training.
 
         Parameters
         ----------
         key : dict
             key to a single MoseqModelSelection table entry
         """
-        model_params = (MoseqModelParams & key).fetch1("model_params")
-        model_name = self._make_model_name(key)
+        model_params = (MoseqModelParams & key).fetch1("model_params")  # FETCH
+        model_name = self._make_model_name(key)  # FETCH
+        video_paths = (PoseGroup & key).fetch_video_paths()  # FETCH
+        bodyparts = (PoseGroup & key).fetch1("bodyparts")  # FETCH
+        coordinates, confidences = PoseGroup().fetch_pose_datasets(
+            key,
+            format_for_moseq=True,
+            normalize=model_params.get("normalize", False),
+            anterior_bodyparts=model_params.get("anterior_bodyparts", None),
+            posterior_bodyparts=model_params.get("posterior_bodyparts", None),
+        )
+
+        model, epochs_trained = None, None
+        initial_model_key = model_params.get("initial_model", None)
+        if initial_model_key is not None:
+            # begin training from an existing model
+            query = MoseqModel & initial_model_key
+            if not query:
+                raise ValueError(
+                    f"Initial model: {initial_model_key} not found"
+                )
+            model = query.fetch_model()
+            epochs_trained = query.fetch1("epochs_trained")
+
+        return [
+            model_params,
+            model_name,
+            video_paths,
+            bodyparts,
+            coordinates,
+            confidences,
+            initial_model_key,
+            model,
+            epochs_trained,
+        ]
+
+    def make_compute(
+        self,
+        key: dict,
+        model_params: dict,
+        model_name: str,
+        video_paths: List[Path],
+        bodyparts: List[str],
+        coordinates: Dict[str, np.ndarray],
+        confidences: Dict[str, np.ndarray],
+        initial_model_key: dict,
+        model: Optional[dict] = None,
+        epochs_trained: Optional[int] = None,
+    ):
+        _require_keypoint_moseq()
 
         # set up the project and config
         project_dir, video_dir = moseq_project_dir, moseq_video_dir
@@ -126,7 +206,6 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         # os.makedirs(project_dir, exist_ok=True)
         os.makedirs(video_dir, exist_ok=True)
         # make symlinks to the videos in a single directory
-        video_paths = (PoseGroup & key).fetch_video_paths()
         for video in video_paths:
             destination = os.path.join(video_dir, os.path.basename(video))
             if os.path.exists(destination):
@@ -135,7 +214,6 @@ class MoseqModel(SpyglassMixin, dj.Computed):
                 os.remove(destination)  # remove if it's a broken symlink
             os.symlink(video, destination)
 
-        bodyparts = (PoseGroup & key).fetch1("bodyparts")
         kpms.setup_project(
             str(project_dir),
             video_dir=str(video_dir),
@@ -149,34 +227,41 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         config = kpms.load_config(project_dir)
 
         # fetch the data and format it for moseq
-        coordinates, confidences = PoseGroup().fetch_pose_datasets(
-            key, format_for_moseq=True
-        )
         data, metadata = kpms.format_data(coordinates, confidences, **config)
 
         # either initialize a new model or load an existing one
         initial_model_key = model_params.get("initial_model", None)
         if initial_model_key is None:
+            # define maximum latent_dimension based on keypoints
+            _, n_keypoints, keypoint_dim = list(coordinates.values())[0].shape
+            if n_keypoints < 2:
+                raise ValueError(
+                    f"Need at least 2 keypoints to train a moseq model, found {n_keypoints}"
+                )
+            max_latent_dim = min(
+                10,  # suggestion from moseq docs
+                (n_keypoints - 1)
+                * keypoint_dim,  # enforced maximum from model structure
+            )
+
             model, model_name = self._initialize_model(
-                data, metadata, project_dir, model_name, config, model_params
+                data=data,
+                metadata=metadata,
+                project_dir=project_dir,
+                model_name=model_name,
+                config=config,
+                model_params=model_params,
+                max_latent_dim=max_latent_dim,
+                target_variance=model_params.get("target_variance", 1.0),
             )
             epochs_trained = model_params["num_ar_iters"]
-
-        else:
-            # begin training from an existing model
-            query = MoseqModel & initial_model_key
-            if not query:
-                raise ValueError(
-                    f"Initial model: {initial_model_key} not found"
-                )
-            model = query.fetch_model()
-            epochs_trained = query.fetch1("epochs_trained")
 
         # update the hyperparameters
         kappa = model_params["kappa"]
         model = kpms.update_hypparams(model, kappa=kappa)
         # run fitting on the complete model
         num_epochs = model_params["num_epochs"]
+        total_epochs_trained = (epochs_trained or 0) + num_epochs
         model = kpms.fit_model(
             model,
             data,
@@ -185,18 +270,21 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             model_name,
             ar_only=False,
             start_iter=epochs_trained,
-            num_iters=epochs_trained + num_epochs,
+            num_iters=total_epochs_trained,
         )[0]
         # reindex syllables by frequency
         kpms.reindex_syllables_in_checkpoint(project_dir, model_name)
-        self.insert1(
-            {
-                **key,
-                "project_dir": project_dir,
-                "epochs_trained": num_epochs + epochs_trained,
-                "model_name": model_name,
-            }
-        )
+
+        secondary_key = {
+            "project_dir": project_dir,
+            "epochs_trained": total_epochs_trained,
+            "model_name": model_name,
+        }
+
+        return [secondary_key]
+
+    def make_insert(self, key: dict, secondary_key: dict = None):
+        self.insert1(dict(key, **secondary_key))
 
     def _make_model_name(self, key: dict):
         # make a unique model name based on the key
@@ -211,6 +299,8 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         model_name: str,
         config: dict,
         model_params: dict,
+        max_latent_dim: int = 10,
+        target_variance: float = 1.0,
     ):
         """Method to initialize a model. Creates model and runs initial ARHMM fit
 
@@ -228,15 +318,35 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             keypoint moseq config
         model_params : dict
             params dictionary fetched from spyglass parameter table entry
+        max_latent_dim : int, optional
+            maximum latent dimension to keep, by default 10 (seggested by moseq docs)
+        target_variance : float, optional
+            if supplied, determines the number of principal components to keep based
+            on the cumulative variance explained. If not supplied, keeps all principal
+            components up to the maximum defined by max_latent_dim
 
         Returns
         -------
         tuple
             model, model_name
         """
+        _require_keypoint_moseq()
+
         # fit pca of data
         pca = kpms.fit_pca(**data, **config)
         kpms.save_pca(pca, project_dir)
+
+        # determine latent dimension to explain target variance
+        var_explained = np.cumsum(pca.explained_variance_ratio_)
+        if target_variance >= var_explained[-1]:
+            latent_dim = len(var_explained)
+        else:
+            latent_dim = np.where(var_explained >= target_variance)[0][0] + 1
+        latent_dim = min(latent_dim, max_latent_dim)
+
+        # update config with latent dimension
+        kpms.update_config(project_dir, latent_dim=latent_dim)
+        config = kpms.load_config(project_dir)
 
         # create the model
         model = kpms.init_model(data, pca=pca, **config)
@@ -262,6 +372,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         explained_variance : float, optional
             minimum explained variance to print, by default 0.9
         """
+        _require_keypoint_moseq()
         project_dir = (self & key).fetch1("project_dir")
         pca = kpms.load_pca(project_dir)
         config = kpms.load_config(project_dir)
@@ -282,6 +393,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         dict
             model dictionary
         """
+        _require_keypoint_moseq()
         if key is None:
             key = {}
         return kpms.load_checkpoint(
@@ -324,6 +436,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         -------
         None
         """
+        _require_keypoint_moseq()
         self.ensure_single_entry(key)
         query = self & key
         project_dir, model_name = (query).fetch1("project_dir", "model_name")
@@ -365,6 +478,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         None
         """
 
+        _require_keypoint_moseq()
         self.ensure_single_entry(key)
         query = self & key
         project_dir, model_name = (query).fetch1("project_dir", "model_name")
@@ -428,6 +542,7 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        _require_keypoint_moseq()
         model = MoseqModel().fetch_model(key)
         project_dir, model_name = (MoseqModel & key).fetch1(
             "project_dir", "model_name"
@@ -442,7 +557,14 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
         merge_query = PositionOutput & merge_key
         video_path = merge_query.fetch_video_path()
         video_name = Path(video_path).name
+        model_params = (MoseqModelParams & key).fetch1("model_params")
         bodyparts_df = merge_query.fetch_pose_dataframe()
+        if model_params.get("normalize", False):
+            bodyparts_df = _normalize_1_pose_dataset(
+                bodyparts_df,
+                model_params.get("anterior_bodyparts", None),
+                model_params.get("posterior_bodyparts", None),
+            )
 
         if bodyparts is None:
             bodyparts = self.get_bodyparts_from_dataframe(bodyparts_df)

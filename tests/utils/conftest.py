@@ -2,13 +2,13 @@ import datajoint as dj
 import pytest
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")  # Elevated from module scope for performance
 def merge_table(pos_merge_tables):
     """Return the merge table as activated."""
     yield pos_merge_tables[0]
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")  # Elevated from module scope for performance
 def Nwbfile(pos_merge_tables):
     """Return the Nwbfile table as activated."""
     from spyglass.common import Nwbfile as NwbfileTable
@@ -23,7 +23,7 @@ def schema_test(teardown, dj_conn):
     Adapted from datajoint/conftest.py.
     """
     schema_test = dj.Schema("test_conftest", {}, connection=dj_conn)
-    # schema_any(TTest) # Declare table using schema_any as func
+    # schema_any(Test) # Declare table using schema_any as func
     yield schema_test
     if teardown:
         schema_test.drop(force=True)
@@ -33,8 +33,8 @@ def schema_test(teardown, dj_conn):
 def chain(Nwbfile):
     """Return example TableChain object from chains."""
     from spyglass.linearization.merge import (
-        LinearizedPositionOutput,
-    )  # noqa: F401
+        LinearizedPositionOutput,  # noqa: F401
+    )
     from spyglass.utils.dj_graph import TableChain
 
     yield TableChain(Nwbfile, LinearizedPositionOutput)
@@ -49,7 +49,7 @@ def no_link_chain(Nwbfile):
     yield TableChain(Nwbfile, InsertError())
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")  # Elevated from module scope for performance
 def _Merge():
     """Return the _Merge class."""
     from spyglass.utils import _Merge
@@ -57,7 +57,7 @@ def _Merge():
     yield _Merge
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")  # Elevated from module scope for performance
 def SpyglassMixin():
     """Return a mixin class."""
     from spyglass.utils import SpyglassMixin
@@ -65,7 +65,7 @@ def SpyglassMixin():
     yield SpyglassMixin
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")  # Elevated from module scope for performance
 def graph_schema(SpyglassMixin, _Merge):
     """
     NOTE: Must declare tables within fixture to avoid loading config defaults.
@@ -119,6 +119,14 @@ def graph_schema(SpyglassMixin, _Merge):
                 intermediate_id, offset(parent_id, 1), intermediate_attr
             )
         ]
+
+    class BranchNode(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> IntermediateNode
+        ---
+        -> ParentNode
+        """
+        contents = [(intermediate_id[0], parent_id[3])]
 
     class PkNode(SpyglassMixin, dj.Lookup):
         definition = """
@@ -221,6 +229,7 @@ def graph_schema(SpyglassMixin, _Merge):
         "ParentNode": ParentNode,
         "OtherParentNode": OtherParentNode,
         "IntermediateNode": IntermediateNode,
+        "BranchNode": BranchNode,
         "PkNode": PkNode,
         "SkNode": SkNode,
         "PkSkNode": PkSkNode,
@@ -285,3 +294,41 @@ def graph_tables_many_to_one(graph_tables):
     PkSkNode.insert(new_inserts, **insert_kwargs)
 
     yield graph_tables
+
+
+@pytest.fixture(scope="module")
+def add_graph_tables(SpyglassMixin):
+    schema = dj.Schema("test_add_graphs")
+
+    @schema
+    class A(SpyglassMixin, dj.Lookup):
+        definition = """
+        a_id: int
+        ---
+        a_attr: int
+        """
+        contents = [(i, i + 10) for i in range(5)]
+
+    @schema
+    class B1(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> A
+        ---
+        b_attr: int
+        """
+        contents = [(i, i + 20) for i in range(5)]
+
+    @schema
+    class B2(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> A
+        ---
+        b_attr: int
+        """
+        contents = [(i, i + 30) for i in range(5)]
+
+    return {
+        "A": A(),
+        "B1": B1(),
+        "B2": B2(),
+    }

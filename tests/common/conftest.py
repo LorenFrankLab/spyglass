@@ -1,6 +1,7 @@
 from pathlib import Path
 
-import ndx_optogenetics as ndxo
+import ndx_ophys_devices
+import ndx_optogenetics
 import numpy as np
 import pynwb
 import pytest
@@ -8,6 +9,7 @@ from hdmf.common.table import DynamicTable, VectorData
 from ndx_franklab_novela import CameraDevice, FrankLabOptogeneticEpochsTable
 from pynwb import NWBHDF5IO, TimeSeries
 from pynwb.behavior import BehavioralEvents
+from pynwb.device import DeviceModel
 from pynwb.testing.mock.behavior import mock_TimeSeries
 from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 
@@ -78,8 +80,13 @@ def pop_common_electrode_group(common_ephys):
 @pytest.fixture(scope="session")
 def dio_only_nwb(raw_dir, common):
     nwbfile = mock_NWBFile(
-        identifier="my_identifier", session_description="my_session_description"
+        identifier="my_identifier",
+        session_description="my_session_description",
+        lab="My Lab",
+        institution="My Institution",
+        experimenter=["Dr. A", "Dr. B"],
     )
+    nwbfile.subject = mock_Subject()
     time_series = mock_TimeSeries(
         name="my_time_series", timestamps=np.arange(20), data=np.ones((20, 1))
     )
@@ -106,7 +113,7 @@ def dio_only_nwb(raw_dir, common):
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def virus_dict():
     return dict(
         name="test_virus_1",
@@ -117,7 +124,7 @@ def virus_dict():
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def virus_injection_dict(virus_dict):
     return dict(
         name="injection_1",
@@ -135,34 +142,33 @@ def virus_injection_dict(virus_dict):
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def excitation_source_model_dict():
     return dict(
         name="test_source_model",
         description="Test description",
         manufacturer="Test manufacturer",
-        illumination_type="Test illumination type",
+        source_type="Test illumination type",
+        excitation_mode="test mode",
         wavelength_range_in_nm=(400, 700),
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def excitation_source_dict():
     return dict(
         name="test_source",
-        wavelength_in_nm=450.0,
         power_in_W=1.0,
         intensity_in_W_per_m2=100.0,
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def fiber_model_dict():
     return dict(
         name="test_fiber_model",
         description="Test fiber model",
-        fiber_name="Test Fiber",
-        fiber_model="Test Model",
+        model_number="Test Model",
         manufacturer="Test Manufacturer",
         numerical_aperture=0.5,
         core_diameter_in_um=200.0,
@@ -172,18 +178,18 @@ def fiber_model_dict():
     )
 
 
-@pytest.fixture(scope="function")
-def fiber_implant_dict():
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
+def fiber_insertion_dict():
     return dict(
-        implanted_fiber_description="Test fiber implant",
-        location="CA1",
         hemisphere="left",
-        ap_in_mm=0.5,
-        ml_in_mm=1.0,
-        dv_in_mm=1.5,
-        roll_in_deg=0.0,
-        pitch_in_deg=0.0,
-        yaw_in_deg=0.0,
+        insertion_position_ap_in_mm=0.5,
+        insertion_position_ml_in_mm=1.0,
+        insertion_position_dv_in_mm=1.5,
+        insertion_angle_roll_in_deg=0.0,
+        insertion_angle_pitch_in_deg=0.0,
+        insertion_angle_yaw_in_deg=0.0,
+        depth_in_mm=2.0,
+        position_reference="Bregma",
     )
 
 
@@ -199,6 +205,7 @@ def opto_epoch_dict():
         number_trains=1,
         intertrain_interval_in_ms=100,
         power_in_mW=77,
+        wavelength_in_nm=450,
         epoch_name="epoch_01",
         epoch_number=1,
         convenience_code="test",
@@ -222,6 +229,108 @@ def opto_epoch_dict():
     )
 
 
+@pytest.fixture(scope="module")
+def custom_prefix():
+    """Custom database prefix for testing custom AnalysisNwbfile tables."""
+    yield "testcustom"
+
+
+@pytest.fixture(scope="module")
+def custom_config(dj_conn, custom_prefix):
+    """Set up custom config with database prefix."""
+    import datajoint as dj
+
+    original_prefix = dj.config.get("custom", {}).get("database.prefix")
+
+    if "custom" not in dj.config:
+        dj.config["custom"] = {}
+    dj.config["custom"]["database.prefix"] = custom_prefix
+
+    yield custom_prefix
+
+    # Restore original config
+    if original_prefix:
+        dj.config["custom"]["database.prefix"] = original_prefix
+    elif "database.prefix" in dj.config.get("custom", {}):
+        del dj.config["custom"]["database.prefix"]
+
+
+@pytest.fixture(scope="module")
+def common_nwbfile(common):
+    """Return common nwbfile module."""
+    return common.common_nwbfile
+
+
+@pytest.fixture(scope="module")
+def analysis_registry(common_nwbfile):
+    """Return AnalysisRegistry table."""
+    return common_nwbfile.AnalysisRegistry()
+
+
+@pytest.fixture(scope="module")
+def master_analysis_table(common_nwbfile):
+    """Return master AnalysisNwbfile table for comparison."""
+    return common_nwbfile.AnalysisNwbfile()
+
+
+@pytest.fixture(scope="module")
+def custom_analysis_table(custom_config, dj_conn, common_nwbfile):
+    """Create and return a custom AnalysisNwbfile table.
+
+    This fixture dynamically creates a table following the factory pattern.
+    """
+    import datajoint as dj
+
+    from spyglass.utils.dj_mixin import SpyglassAnalysis
+
+    prefix = custom_config
+    schema = dj.schema(f"{prefix}_nwbfile")
+
+    # Make Nwbfile available in the schema context for foreign key resolution
+    Nwbfile = common_nwbfile.Nwbfile  # noqa F401
+    _ = common_nwbfile.AnalysisRegistry().unblock_new_inserts()
+
+    @schema
+    class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
+        definition = """This definition is managed by SpyglassAnalysis"""
+
+    yield AnalysisNwbfile()
+
+
+@pytest.fixture
+def mock_create(monkeypatch):
+    """Fixture to mock create() method for faster testing.
+
+    Replaces the full NWB file copy with a simple text file write.
+    This speeds up tests by ~10x without affecting test logic.
+
+    Usage:
+        def test_something(custom_analysis_table, mock_create):
+            mock_create(custom_analysis_table)
+            # Now create() will use the fast mock
+            file = custom_analysis_table.create(nwb_file_name)
+    """
+
+    def _mock_create(table):
+        """Apply mock to a given AnalysisNwbfile table."""
+
+        def mock_create_impl(nwb_file_name, **kwargs):
+            # Get the new file name using private method
+            new_file_name = table._AnalysisMixin__get_new_file_name(
+                nwb_file_name
+            )
+            # Just write a simple file instead of copying full NWB
+            file_path = Path(table.get_abs_path(new_file_name))
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text("test")
+            return new_file_name
+
+        monkeypatch.setattr(table, "create", mock_create_impl)
+        return table.create  # Return original in case test needs to restore
+
+    return _mock_create
+
+
 @pytest.fixture(scope="function")
 def opto_only_nwb(
     raw_dir,
@@ -232,7 +341,7 @@ def opto_only_nwb(
     excitation_source_model_dict,
     excitation_source_dict,
     fiber_model_dict,
-    fiber_implant_dict,
+    fiber_insertion_dict,
     data_import,
 ):
     dummy_name = "mock_optogenetics.nwb"
@@ -270,7 +379,14 @@ def opto_only_nwb(
         lens="Test Lens",
         camera_name="camera 1",
     )
-    camera = CameraDevice(**camera_dict)
+
+    camera_model = DeviceModel(
+        name=camera_dict.pop("model"),
+        manufacturer=camera_dict.pop("manufacturer"),
+    )
+
+    camera = CameraDevice(**camera_dict, model=camera_model)
+    nwb.add_device_model(camera_model)
     nwb.add_device(camera)
 
     # task info
@@ -317,53 +433,71 @@ def opto_only_nwb(
     nwb.processing["tasks"].add(task)
 
     # add the optogenetic objects
-    virus = ndxo.OptogeneticVirus(**virus_dict)
-
-    virus_injection = ndxo.OptogeneticVirusInjection(
-        **virus_injection_dict, virus=virus
+    virus = ndx_ophys_devices.ViralVector(**virus_dict)
+    virus_injection = ndx_ophys_devices.ViralVectorInjection(
+        **virus_injection_dict, viral_vector=virus
+    )
+    optogenetic_viruses = ndx_optogenetics.OptogeneticViruses(
+        viral_vectors=[virus]
+    )
+    optogenetic_virus_injections = ndx_optogenetics.OptogeneticVirusInjections(
+        viral_vector_injections=[virus_injection]
+    )
+    effector = ndx_ophys_devices.Effector(
+        name="effector_1",
+        description="Test effector",
+        label="test label",
+        viral_vector_injection=virus_injection,
+    )
+    optogenetic_effectors = ndx_optogenetics.OptogeneticEffectors(
+        effectors=[effector]
     )
 
-    optogenetic_viruses = ndxo.OptogeneticViruses(optogenetic_virus=[virus])
-    optogenetic_virus_injections = ndxo.OptogeneticVirusInjections(
-        optogenetic_virus_injections=[virus_injection]
-    )
-
-    excitation_source_model = ndxo.ExcitationSourceModel(
+    excitation_source_model = ndx_ophys_devices.ExcitationSourceModel(
         **excitation_source_model_dict
     )
 
-    excitation_source = ndxo.ExcitationSource(
+    excitation_source = ndx_ophys_devices.ExcitationSource(
         **excitation_source_dict, model=excitation_source_model
     )
 
     # make the fiber objects
-    optical_fiber_model = ndxo.OpticalFiberModel(**fiber_model_dict)
-
-    # make the fiber object
-    optical_fiber = ndxo.OpticalFiber(
+    optical_fiber_model = ndx_ophys_devices.OpticalFiberModel(
+        **fiber_model_dict
+    )
+    fiber_insertion = ndx_ophys_devices.FiberInsertion(
+        **fiber_insertion_dict,
+    )
+    optical_fiber = ndx_ophys_devices.OpticalFiber(
         name="test_fiber",
+        description="CA1",
         model=optical_fiber_model,
+        fiber_insertion=fiber_insertion,
     )
 
-    optical_fiber_locations_table = ndxo.OpticalFiberLocationsTable(
-        description="Information about implanted optical fiber locations",
-        reference="bregma",
+    # make the optogenetic sites table
+    optogenetic_sites = ndx_optogenetics.OptogeneticSitesTable(
+        description="Information about optogenetic stimulation sites"
     )
-    optical_fiber_locations_table.add_row(
-        **fiber_implant_dict,
+    optogenetic_sites.add_row(
         excitation_source=excitation_source,
         optical_fiber=optical_fiber,
+        effector=effector,
     )
 
-    nwb.add_device(excitation_source_model)
+    nwb.add_device_model(excitation_source_model)
     nwb.add_device(excitation_source)
-    nwb.add_device(optical_fiber_model)
+    nwb.add_device_model(optical_fiber_model)
     nwb.add_device(optical_fiber)
-    optogenetic_experiment_metadata = ndxo.OptogeneticExperimentMetadata(
-        optical_fiber_locations_table=optical_fiber_locations_table,
-        optogenetic_viruses=optogenetic_viruses,
-        optogenetic_virus_injections=optogenetic_virus_injections,
-        stimulation_software="fsgui",
+
+    optogenetic_experiment_metadata = (
+        ndx_optogenetics.OptogeneticExperimentMetadata(
+            optogenetic_sites_table=optogenetic_sites,
+            optogenetic_viruses=optogenetic_viruses,
+            optogenetic_virus_injections=optogenetic_virus_injections,
+            optogenetic_effectors=optogenetic_effectors,
+            stimulation_software="fsgui",
+        )
     )
     nwb.add_lab_meta_data(optogenetic_experiment_metadata)
 
@@ -371,6 +505,7 @@ def opto_only_nwb(
     opto_epochs_table = FrankLabOptogeneticEpochsTable(
         name="optogenetic_epochs",
         description="Metadata about optogenetic stimulation parameters per epoch",
+        target_tables={"optogenetic_sites": optogenetic_sites},
     )
     opto_epochs_table.add_row(
         **opto_epoch_dict,
@@ -379,6 +514,7 @@ def opto_only_nwb(
             camera_dict["meters_per_pixel"] * 100
         ],
         stimulus_signal=stimulus,
+        optogenetic_sites=[0],
     )
     nwb.add_time_intervals(opto_epochs_table)
 

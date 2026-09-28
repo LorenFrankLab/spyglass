@@ -1,12 +1,14 @@
 import pathlib
 import re
+from collections import defaultdict
 from functools import reduce
 from typing import Dict, List, Union
 
 import datajoint as dj
-import ndx_franklab_novela
+import numpy as np
 import pandas as pd
 import pynwb
+from pynwb.behavior import CompassDirection
 
 from spyglass.common.common_device import CameraDevice
 from spyglass.common.common_ephys import Raw  # noqa: F401
@@ -14,19 +16,22 @@ from spyglass.common.common_interval import Interval, IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_task import TaskEpoch
-from spyglass.settings import test_mode, video_dir
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.settings import video_dir
+from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
-    get_all_spatial_series,
-    get_data_interface,
+    _get_epoch_groups,
+    _get_pos_dict,
+    estimate_sampling_rate,
     get_nwb_file,
+    get_position_obj,
+    get_valid_intervals,
 )
 
 schema = dj.schema("common_behav")
 
 
 @schema
-class PositionSource(SpyglassMixin, dj.Manual):
+class PositionSource(SpyglassIngestion, dj.Manual):
     definition = """
     -> Session
     -> IntervalList
@@ -35,7 +40,13 @@ class PositionSource(SpyglassMixin, dj.Manual):
     import_file_name: varchar(2000)  # path to import file if importing
     """
 
-    class SpatialSeries(SpyglassMixin, dj.Part):
+    # Position intervals may already exist from a previous ingestion, so an
+    # existing entry is validated rather than reinserted. NOTE: the previous
+    # implementation used IntervalList.cautious_insert(update=True), which
+    # silently overwrote a differing entry; validation prompts instead.
+    _expected_duplicates = True
+
+    class SpatialSeries(SpyglassIngestion, dj.Part):
         definition = """
         -> master
         id = 0 : int unsigned            # index of spatial series
@@ -43,56 +54,55 @@ class PositionSource(SpyglassMixin, dj.Manual):
         name=null: varchar(32)       # name of spatial series
         """
 
-    def populate(self, *args, **kwargs):
-        """Method for populate_all_common."""
-        logger.warning(
-            "PositionSource is a manual table with a custom `make`."
-            + " Use `make` instead."
-        )
-        self.make(*args, **kwargs)
+        _expected_duplicates = True  # follows the master
 
-    def make(self, keys: Union[List[Dict], dj.Table]):
-        """Insert position source data from NWB file."""
-        if not isinstance(keys, list):
-            keys = [keys]
-        if isinstance(keys[0], (dj.Table, dj.expression.QueryExpression)):
-            keys = [k for tbl in keys for k in tbl.fetch("KEY", as_dict=True)]
-        nwb_files = set(key.get("nwb_file_name") for key in keys)
-        for nwb_file_name in nwb_files:  # Only unique nwb files
-            if not nwb_file_name:
-                raise ValueError("PositionSource.make requires nwb_file_name")
-            self.insert_from_nwbfile(nwb_file_name, skip_duplicates=True)
+    _source_nwb_object_type = pynwb.behavior.Position
 
-    @classmethod
-    def insert_from_nwbfile(cls, nwb_file_name, skip_duplicates=False) -> None:
-        """Add intervals to ItervalList and PositionSource.
+    # Entries are grouped by epoch in the override, not per column.
+    table_key_to_obj_attr = {"self": dict()}
 
-        Given an NWB file name, get the spatial series and interval lists from
-        the file, add the interval lists to the IntervalList table, and
-        populate the RawPosition table if possible.
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """The file's Position interface holds every spatial series.
 
-        Parameters
-        ----------
-        nwb_file_name : str
-            The name of the NWB file.
+        `get_position_obj` finds series the default type filter would miss,
+        and raises if a file declares more than one Position interface.
         """
-        nwbf = get_nwb_file(nwb_file_name)
-        all_pos = get_all_spatial_series(nwbf, verbose=True)
-        sess_key = {"nwb_file_name": nwb_file_name}
+        pos_interface = get_position_obj(nwb_file)
+        return [pos_interface] if pos_interface is not None else []
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Group the file's spatial series into one source entry per epoch.
+
+        Each epoch yields an IntervalList entry (the parent, first), a source
+        entry, and one SpatialSeries part entry per series in that epoch.
+        RawPosition and its PosObject part are filled from the same series --
+        they hold the object ids this pass already read -- rather than making
+        RawPosition parse the file a second time.
+        """
+        sess_key = dict(base_key or dict())
+        nwb_file_name = sess_key["nwb_file_name"]
         src_key = dict(**sess_key, source="imported", import_file_name="")
 
-        if all_pos is None:
-            logger.info(f"No position data found in {nwb_file_name}. Skipping.")
-            return
+        all_pos = _get_pos_dict(
+            position=nwb_obj.spatial_series,
+            epoch_groups=_get_epoch_groups(nwb_obj),
+            session_id=nwb_file_name,
+            verbose=True,
+        )
+        if len(all_pos) == 0:
+            self._info_msg(
+                f"No position data found in {nwb_file_name}. Skipping."
+            )
+            return {self: []}
 
-        sources = []
-        intervals = []
-        spat_series = []
+        intervals, sources, spat_series = [], [], []
+        raw_pos, pos_objects = [], []
 
         for epoch, epoch_list in all_pos.items():
-            ind_key = dict(interval_list_name=cls.get_pos_interval_name(epoch))
+            ind_key = dict(interval_list_name=self.get_pos_interval_name(epoch))
 
             sources.append(dict(**src_key, **ind_key))
+            raw_pos.append(dict(**sess_key, **ind_key))
             intervals.append(
                 dict(
                     **sess_key,
@@ -111,16 +121,37 @@ class PositionSource(SpyglassMixin, dj.Manual):
                         name=pdict.get("name"),
                     )
                 )
+                pos_objects.append(
+                    dict(
+                        **sess_key,
+                        **ind_key,
+                        id=index,
+                        raw_position_object_id=pdict["raw_position_object_id"],
+                    )
+                )
 
-        with cls._safe_context():
-            IntervalList().cautious_insert(intervals, update=True)
-            cls.insert(sources, skip_duplicates=skip_duplicates)
-            cls.SpatialSeries.insert(
-                spat_series, skip_duplicates=skip_duplicates
-            )
+        return {
+            IntervalList: intervals,
+            self: sources,
+            self.SpatialSeries: spat_series,
+            RawPosition: raw_pos,
+            RawPosition.PosObject: pos_objects,
+        }
 
-        # make map from epoch intervals to position intervals
-        populate_position_interval_map_session(nwb_file_name)
+    def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
+        """Ingest, then map epoch intervals to the position intervals."""
+        entries = super().insert_from_nwbfile(nwb_file_name, config, dry_run)
+
+        if entries and not dry_run:
+            populate_position_interval_map_session(nwb_file_name)
+
+        return entries
+
+    def make(self, keys: Union[List[Dict], dj.Table]):
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "PositionSource.make is deprecated. Use insert_from_nwbfile."
+        )
 
     @staticmethod
     def get_pos_interval_name(epoch_num: int) -> str:
@@ -168,22 +199,25 @@ class PositionSource(SpyglassMixin, dj.Manual):
 
 
 @schema
-class RawPosition(SpyglassMixin, dj.Imported):
-    """
-
-    Notes
-    -----
-    The position timestamps come from: .pos_cameraHWSync.dat.
-    If PTP is not used, the position timestamps are inferred by finding the
-    closest timestamps from the neural recording via the trodes time.
-
-    """
-
+class RawPosition(SpyglassIngestion, dj.Imported):
     definition = """
     -> PositionSource
     """
 
-    class PosObject(SpyglassMixin, dj.Part):
+    # Filled by PositionSource, which reads the same spatial series.
+    _expected_duplicates = True
+
+    def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
+        """Defer to PositionSource, which generates this table's entries.
+
+        The two tables describe the same spatial series, so parsing the file
+        once fills both. Kept so `populate` and direct callers still work.
+        """
+        return PositionSource().insert_from_nwbfile(
+            nwb_file_name, config, dry_run
+        )
+
+    class PosObject(SpyglassIngestion, dj.Part):
         definition = """
         -> master
         -> PositionSource.SpatialSeries.proj('id')
@@ -192,6 +226,7 @@ class RawPosition(SpyglassMixin, dj.Imported):
         """
 
         _nwb_table = Nwbfile
+        _expected_duplicates = True  # follows the master
 
         def fetch1_dataframe(self):
             """Return a dataframe with all RawPosition.PosObject items."""
@@ -230,32 +265,9 @@ class RawPosition(SpyglassMixin, dj.Imported):
             return column_names
 
     def make(self, key):
-        """Make without transaction
-
-        Allows populate_all_common to work within a single transaction."""
-        nwb_file_name = key["nwb_file_name"]
-        interval_list_name = key["interval_list_name"]
-
-        nwbf = get_nwb_file(nwb_file_name)
-        indices = (PositionSource.SpatialSeries & key).fetch("id")
-
-        # incl_times = False -> don't do extra processing for valid_times
-        spat_objs = get_all_spatial_series(nwbf, incl_times=False)[
-            PositionSource.get_epoch_num(interval_list_name)
-        ]
-
-        self.insert1(key, allow_direct_insert=True)
-        self.PosObject.insert(
-            [
-                dict(
-                    nwb_file_name=nwb_file_name,
-                    interval_list_name=interval_list_name,
-                    id=index,
-                    raw_position_object_id=obj["raw_position_object_id"],
-                )
-                for index, obj in enumerate(spat_objs)
-                if index in indices
-            ]
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "RawPosition.make is deprecated. Use insert_from_nwbfile."
         )
 
     def fetch_nwb(self, *attrs, **kwargs) -> list:
@@ -290,7 +302,104 @@ class RawPosition(SpyglassMixin, dj.Imported):
 
 
 @schema
-class StateScriptFile(SpyglassMixin, dj.Imported):
+class RawCompassDirection(SpyglassIngestion, dj.Manual):
+    """
+    Table to store raw CompassDirection data from NWB files.
+    """
+
+    definition = """
+    -> Session
+    -> IntervalList
+    ---
+    compass_object_id: varchar(40)  # the object id of the compass direction object
+    name: varchar(80)              # name of the compass direction object
+    """
+
+    _nwb_table = Nwbfile
+    _compass_import_enumerator = 1
+
+    _source_nwb_object_type = CompassDirection
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "name": "name",
+                "compass_object_id": "object_id",
+                "valid_times": self.generate_valid_intervals_from_timeseries,
+                "interval_list_name": self.enumerated_interval_name,
+            }
+        }
+
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """Get all CompassDirection spatial series from NWB file, ordered by time."""
+        compass_objects = super().get_nwb_objects(nwb_file, nwb_file_name)
+        spatial_series = sum(
+            [list(obj.spatial_series.values()) for obj in compass_objects], []
+        )
+        start_times = [ss.get_timestamps()[0] for ss in spatial_series]
+        order = np.argsort(start_times)
+        spatial_series = [spatial_series[i] for i in order]
+
+        return spatial_series
+
+    def enumerated_interval_name(
+        self, obj: pynwb.behavior.SpatialSeries
+    ) -> str:
+        """Generate a unique interval list name for each compass direction object."""
+        name = f"compass {self._compass_import_enumerator} valid times"
+        self._compass_import_enumerator += 1
+        return name
+
+    @staticmethod
+    def generate_valid_intervals_from_timeseries(
+        nwb_obj: pynwb.behavior.SpatialSeries,
+    ):
+        """Generate valid intervals from spatial series.
+
+        Parameters
+        ----------
+        nwb_obj : pynwb.behavior.SpatialSeries
+            The pynwb.behavior.SpatialSeries NWB object.
+        Returns
+        -------
+        valid_times : list
+            List of valid time intervals.
+        """
+        timestamps = nwb_obj.get_timestamps()
+        sampling_rate = estimate_sampling_rate(
+            timestamps, filename=nwb_obj.name
+        )
+        valid_times = get_valid_intervals(
+            timestamps=timestamps,
+            sampling_rate=sampling_rate,
+            min_valid_len=int(sampling_rate),
+        )
+        return valid_times
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Add IntervalList entry to the generated entries."""
+        super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        self_key = super_ins[self][0]
+        interval_insert = {
+            k: v for k, v in self_key.items() if k in IntervalList.heading.names
+        }
+        self_key.pop(
+            "valid_times", None
+        )  # remove valid_times from the insert to this table
+        return {
+            IntervalList: [interval_insert],
+            **super_ins,
+        }
+
+    def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
+        """Insert entries from NWB file, generating interval list names ordered by time."""
+        self._compass_import_enumerator = 1  # reset enumerator
+        return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
+
+
+@schema
+class StateScriptFile(SpyglassIngestion, dj.Imported):
     definition = """
     -> TaskEpoch
     ---
@@ -298,72 +407,60 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    # Exact class name, as ndx_franklab_novela may not be importable
+    _source_nwb_object_type = "AssociatedFiles"
+
+    # An associated file is a state script if its description says so.
+    # Matching ignores case and spaces, so "STATE SCRIPT" is covered too.
+    _source_nwb_object_description = ("state script", "state_script")
+
+    table_key_to_obj_attr = {"self": {"file_object_id": "object_id"}}
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Expand one associated file into an entry per task epoch.
+
+        The file names its epochs in a comma-separated string. Only epochs
+        already present in TaskEpoch yield an entry, matching the previous
+        implementation, which ran once per existing TaskEpoch key.
+        """
+        super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        self_key = super_ins[self][0]
+
+        # TODO: update associated_file_obj.task_epochs to be an array of
+        # 1-based ints, not a comma-separated string of ints
+        named_epochs = str(nwb_obj.task_epochs).split(",")
+        task_epochs = TaskEpoch & {
+            "nwb_file_name": self_key.get("nwb_file_name")
+        }
+
+        return {
+            self: [
+                dict(self_key, epoch=epoch)
+                for epoch in task_epochs.fetch("epoch")
+                if str(epoch) in named_epochs
+            ]
+        }
 
     def make(self, key):
-        """Make without transaction
-
-        Allows populate_all_common to work within a single transaction."""
-        """Add a new row to the StateScriptFile table."""
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-
-        associated_files = nwbf.processing.get(
-            "associated_files"
-        ) or nwbf.processing.get("associated files")
-        if associated_files is None:
-            logger.info(
-                "Unable to import StateScriptFile: no processing module named "
-                + f'"associated_files" found in {nwb_file_name}.'
-            )
-            return  # See #849
-
-        script_inserts = []
-        for associated_file_obj in associated_files.data_interfaces.values():
-            if not isinstance(
-                associated_file_obj, ndx_franklab_novela.AssociatedFiles
-            ):
-                logger.info(
-                    f"Data interface {associated_file_obj.name} within "
-                    + '"associated_files" processing module is not '
-                    + "of expected type ndx_franklab_novela.AssociatedFiles\n"
-                )
-                return
-
-            # parse the task_epochs string
-            # TODO: update associated_file_obj.task_epochs to be an array of
-            # 1-based ints, not a comma-separated string of ints
-
-            epoch_list = associated_file_obj.task_epochs.split(",")
-            # only insert if this is the statescript file
-            logger.info(associated_file_obj.description)
-            this_desc = associated_file_obj.description.upper()
-
-            if (
-                "statescript".upper() in this_desc
-                or "state_script".upper() in this_desc
-                or "state script".upper() in this_desc
-            ) and str(key["epoch"]) in epoch_list:
-                # find the file associated with this epoch
-                key["file_object_id"] = associated_file_obj.object_id
-                script_inserts.append(key.copy())
-            else:
-                logger.info("not a statescript file")
-
-        if script_inserts:
-            self.insert(script_inserts, allow_direct_insert=True)
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "StateScriptFile.make is deprecated. Use insert_from_nwbfile."
+        )
 
 
 @schema
-class VideoFile(SpyglassMixin, dj.Imported):
-    """
+class VideoFile(SpyglassIngestion, dj.Imported):
+    """Video file metadata from NWB ImageSeries.
 
     Notes
     -----
     The video timestamps come from: videoTimeStamps.cameraHWSync if PTP is
     used. If PTP is not used, the video timestamps come from
-    videoTimeStamps.cameraHWFrameCount .
+    videoTimeStamps.cameraHWFrameCount.
 
+    **Issue #1444 Note:** VideoFile requires TaskEpoch entries to import videos.
+    If your NWB file contains ImageSeries (video data) without task metadata,
+    a warning will be issued.
     """
 
     definition = """
@@ -375,83 +472,379 @@ class VideoFile(SpyglassMixin, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    _timestamp_overlap_threshold = 0.9  # Min fraction of timestamps in epoch
+    _epoch_cache = dict()  # nwb_file_name -> {epoch: valid times}
+    _failed_videos = defaultdict(list)  # reset per ingested file
+    _video_count = 0  # ImageSeries seen in the file being ingested
+    _placed_videos = 0  # ImageSeries that landed in at least one epoch
 
-    def make(self, key, verbose=True, skip_duplicates=False):
-        """Make without optional transaction"""
-        if not self.connection.in_transaction:
-            self.populate(key)
-            return
-        if test_mode:
-            skip_duplicates = True
+    _source_nwb_object_type = pynwb.image.ImageSeries
 
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        # get all ImageSeries objects in the NWB file
-        videos = {
-            obj.name: obj
-            for obj in nwbf.objects.values()
-            if isinstance(obj, pynwb.image.ImageSeries)
-        }
-        if not videos:
-            logger.warning(
+    # Entries are built per epoch in the override, not per column.
+    table_key_to_obj_attr = {"self": dict()}
+
+    def _epoch_intervals(self, nwb_file_name) -> dict:
+        """Return the valid times of each task epoch, fetched once per file.
+
+        A video belongs to whichever epoch its timestamps fall inside, so
+        every epoch's times are needed to place a single video.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The file being ingested.
+
+        Returns
+        -------
+        dict
+            Epoch number to that epoch's Interval.
+        """
+        if nwb_file_name not in self._epoch_cache:
+            self._epoch_cache[nwb_file_name] = {
+                epoch: (
+                    IntervalList
+                    & {
+                        "nwb_file_name": nwb_file_name,
+                        "interval_list_name": interval_list_name,
+                    }
+                ).fetch_interval()
+                for epoch, interval_list_name in zip(
+                    *(TaskEpoch & {"nwb_file_name": nwb_file_name}).fetch(
+                        "epoch", "interval_list_name"
+                    )
+                )
+            }
+        return self._epoch_cache[nwb_file_name]
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Place one video in whichever epochs its timestamps overlap.
+
+        Failures are collected rather than raised, matching the previous
+        implementation, which reported them per file at the end.
+        """
+        base_key = base_key or dict()
+        self._video_count += 1
+        entries = []
+        mismatches = []  # kept only if the video places in no epoch
+
+        for epoch, valid_times in self._epoch_intervals(
+            base_key["nwb_file_name"]
+        ).items():
+            key = dict(base_key, epoch=epoch)
+            try:
+                rows, failure_reason, overlap_percent = (
+                    self._validate_video_timestamps(nwb_obj, valid_times, key)
+                )
+            except KeyError as err:  # camera device not in CameraDevice
+                self._failed_videos["missing_camera"].append(
+                    {
+                        "name": nwb_obj.name,
+                        "camera": getattr(
+                            nwb_obj.device, "camera_name", "unknown"
+                        ),
+                        "error": str(err),
+                    }
+                )
+                break  # the camera is missing for every epoch
+            except Exception as err:
+                self._failed_videos["other"].append(
+                    {
+                        "name": nwb_obj.name,
+                        "error": f"{type(err).__name__}: {str(err)}",
+                    }
+                )
+                break
+
+            if failure_reason:
+                mismatches.append(
+                    {
+                        "name": nwb_obj.name,
+                        "reason": failure_reason,
+                        "overlap_percent": overlap_percent,
+                    }
+                )
+            else:
+                entries.extend(rows)
+
+        # Counted per source series, not per row: one video spanning several
+        # epochs yields several rows, so a row count cannot tell whether
+        # every series was placed.
+        self._placed_videos += bool(entries)
+
+        # Every epoch a video does *not* belong to fails the overlap check, so
+        # a placed video would otherwise report a mismatch for each of its
+        # non-owning epochs. Only a video that landed nowhere has failed.
+        if not entries:
+            self._failed_videos["timestamp_mismatch"].extend(mismatches)
+
+        return {self: entries}
+
+    def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
+        """Ingest, then report on any videos that could not be placed."""
+        self._epoch_cache = dict()
+        self._failed_videos = defaultdict(list)
+        self._video_count = 0
+        self._placed_videos = 0
+
+        entries = super().insert_from_nwbfile(nwb_file_name, config, dry_run)
+
+        if not self._video_count:
+            self._warn_msg(
                 f"No video data interface found in {nwb_file_name}\n"
             )
-            return
+            return entries
 
-        # get the interval for the current TaskEpoch
-        interval_list_name = (TaskEpoch() & key).fetch1("interval_list_name")
-        valid_times = (
-            IntervalList
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": interval_list_name,
-            }
-        ).fetch_interval()
-
-        cam_device_str = r"camera_device (\d+)"
-        is_found = False
-        for ind, video in enumerate(videos.values()):
-            if isinstance(video, pynwb.image.ImageSeries):
-                video = [video]
-            for video_obj in video:
-                # check to see if the times for this video_object are largely
-                # overlapping with the task epoch times
-
-                timestamps = video_obj.timestamps
-                these_times = valid_times.contains(timestamps)
-                if not len(these_times > 0.9 * len(timestamps)):
-                    continue
-
-                nwb_cam_device = video_obj.device.name
-
-                # returns whatever was captured in the first group (within the
-                # parentheses) of the regular expression - in this case, 0
-
-                key["video_file_num"] = int(
-                    re.match(cam_device_str, nwb_cam_device)[1]
-                )
-                camera_name = video_obj.device.camera_name
-                if CameraDevice & {"camera_name": camera_name}:
-                    key["camera_name"] = video_obj.device.camera_name
-                else:
-                    raise KeyError(
-                        f"No camera with camera_name: {camera_name} found "
-                        + "in CameraDevice table."
-                    )
-                key["video_file_object_id"] = video_obj.object_id
-                self.insert1(
-                    key,
-                    skip_duplicates=skip_duplicates,
-                    allow_direct_insert=True,
-                )
-                is_found = True
-
-        if not is_found and verbose:
-            logger.info(
-                f"No video found corresponding to file {nwb_file_name}, "
-                + f"epoch {interval_list_name}"
+        if self._placed_videos < self._video_count:
+            self._report_partial_import(
+                nwb_file_name,
+                self._failed_videos,
+                self._video_count,
+                self._placed_videos,
             )
+
+        return entries
+
+    def _prepare_video_entry(
+        self, key, video_obj, cam_device_regex: str = r"camera_device (\d+)"
+    ):
+        """Prepare a VideoFile entry dict for a given video object.
+
+        Parameters
+        ----------
+        key : dict
+            The primary key for the VideoFile entry
+        video_obj : pynwb.image.ImageSeries
+            The video object from the NWB file
+        cam_device_regex : str, optional
+            Regular expression pattern to extract camera device number.
+            Default: r"camera_device (\\d+)"
+
+        Returns
+        -------
+        dict
+            Prepared entry dict ready for insertion
+
+        Raises
+        ------
+        KeyError
+            If camera_name is not found in CameraDevice table
+        """
+        nwb_cam_device = video_obj.device.name
+        camera_name = video_obj.device.camera_name
+
+        if not (CameraDevice & {"camera_name": camera_name}):
+            raise KeyError(
+                f"No camera with camera_name: {camera_name} found "
+                "in CameraDevice table."
+            )
+
+        match = re.match(cam_device_regex, nwb_cam_device)
+        if not match:
+            raise ValueError(
+                f"Camera device name '{nwb_cam_device}' does not match "
+                f"expected pattern '{cam_device_regex}'"
+            )
+
+        return dict(
+            key,
+            video_file_num=int(match[1]),
+            camera_name=camera_name,
+            video_file_object_id=video_obj.object_id,
+        )
+
+    def _validate_video_timestamps(self, video_obj, valid_times, key):
+        """Validate video timestamps and return entries or failure reason.
+
+        Handles both single-file and multi-file ImageSeries. Validates that
+        timestamps meet the overlap threshold with epoch intervals.
+
+        Parameters
+        ----------
+        video_obj : pynwb.image.ImageSeries
+            The video object from the NWB file
+        valid_times : Interval
+            Valid time intervals for the current epoch
+        key : dict
+            The primary key for the VideoFile entry
+
+        Returns
+        -------
+        tuple
+            (entries_list, failure_reason_or_None, overlap_percent)
+            - If validation passes: ([entry_dicts], None, overlap_percent)
+            - If validation fails: ([], "failure reason string", overlap_percent)
+        """
+        timestamps = video_obj.timestamps
+        starting_frame = getattr(video_obj, "starting_frame", None)
+
+        # Multi-file ImageSeries
+        if starting_frame is not None and len(starting_frame) > 1:
+            entries, overlap_pct = self._validate_multifile_timestamps(
+                video_obj, timestamps, starting_frame, valid_times, key
+            )
+            if not entries:
+                threshold_pct = self._timestamp_overlap_threshold * 100
+                return (
+                    [],
+                    (
+                        f"No file segments have ≥{threshold_pct:.0f}% "
+                        "timestamp overlap with epoch"
+                    ),
+                    overlap_pct,
+                )
+            return entries, None, overlap_pct
+
+        # Single-file ImageSeries: valid if >= threshold% of timestamps
+        # overlap with epoch intervals (epoch covers the video).
+        these_times = valid_times.contains(timestamps)
+        overlap_pct = len(these_times) / len(timestamps)
+
+        # Also valid if a single epoch interval is >= threshold% covered
+        # by the video timestamps (video covers the whole epoch).
+        timestamps_interval = [timestamps[0], timestamps[-1]]
+        max_interval_overlap_pct = 0
+        for interval in valid_times.times:
+            interval_duration = interval[1] - interval[0]
+            if interval_duration <= 0:
+                continue
+            overlap_start = max(interval[0], timestamps_interval[0])
+            overlap_end = min(interval[1], timestamps_interval[1])
+            overlap_duration = max(0, overlap_end - overlap_start)
+            interval_overlap_pct = overlap_duration / interval_duration
+            max_interval_overlap_pct = max(
+                max_interval_overlap_pct, interval_overlap_pct
+            )
+
+        if (
+            overlap_pct < self._timestamp_overlap_threshold
+            and max_interval_overlap_pct < self._timestamp_overlap_threshold
+        ):
+            threshold_pct = self._timestamp_overlap_threshold * 100
+            return (
+                [],
+                (
+                    f"Only {overlap_pct:.1%} of timestamps overlap with epoch, "
+                    f"and the best-covered epoch interval has only "
+                    f"{max_interval_overlap_pct:.1%} of its duration covered "
+                    f"by the timestamps (need ≥{threshold_pct:.0f}%)"
+                ),
+                overlap_pct,
+            )
+
+        return [self._prepare_video_entry(key, video_obj)], None, overlap_pct
+
+    def _validate_multifile_timestamps(
+        self,
+        video_obj,
+        timestamps,
+        starting_frame,
+        valid_times,
+        key,
+    ):
+        """Validate each segment of multi-file ImageSeries timestamps.
+
+        Parameters
+        ----------
+        video_obj : pynwb.image.ImageSeries
+            The video object from the NWB file
+        timestamps : array
+            All timestamps for the ImageSeries
+        starting_frame : array
+            Frame indices indicating where each external file begins
+        valid_times : Interval
+            Valid time intervals for the current epoch
+        key : dict
+            The primary key for the VideoFile entry
+
+        Returns
+        -------
+        tuple(list, float)
+            List of entry dicts for segments with valid timestamps. May be empty
+            Maximum overlap percentage across all file segments
+        """
+        entries = []
+
+        max_overlap_pct = 0
+        for file_idx in range(len(starting_frame)):
+            # Determine timestamp range for this file segment
+            start_idx = starting_frame[file_idx]
+            end_idx = (
+                starting_frame[file_idx + 1]
+                if file_idx + 1 < len(starting_frame)
+                else len(timestamps)
+            )
+
+            # Extract timestamps for this specific file
+            file_timestamps = timestamps[start_idx:end_idx]
+
+            # Check if threshold % of this file's timestamps overlap with epoch
+            these_times = valid_times.contains(file_timestamps)
+            overlap_pct = len(these_times) / len(file_timestamps)
+            max_overlap_pct = max(max_overlap_pct, overlap_pct)
+
+            if len(these_times) < (
+                self._timestamp_overlap_threshold * len(file_timestamps)
+            ):
+                continue
+
+            # This file segment matches the epoch - prepare VideoFile entry
+            entry = self._prepare_video_entry(key.copy(), video_obj)
+            entries.append(entry)
+
+        return entries, max_overlap_pct
+
+    def make(self, key, verbose=True, skip_duplicates=False):
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "VideoFile.make is deprecated. Use insert_from_nwbfile."
+        )
+
+    @staticmethod
+    def _report_partial_import(
+        nwb_file_name, failed_videos, total_videos, imported_count
+    ):
+        """Report specific reasons for partial video import.
+
+        Issue #1444: Provide detailed diagnostics for each video that wasn't
+        imported, categorized by failure reason with specific details.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            Name of the NWB file
+        failed_videos : dict
+            Dictionary with keys 'timestamp_mismatch', 'missing_camera',
+            'other', each containing list of failure details
+        total_videos : int
+            Total number of ImageSeries found
+        imported_count : int
+            Number of ImageSeries successfully imported
+        """
+
+        msg_parts = [
+            f"{nwb_file_name}: VideoFile Partial Import",
+            f"Imported {imported_count}/{total_videos} ImageSeries",
+        ]
+
+        if failed_videos["timestamp_mismatch"]:
+            msg_parts.append("\nTimestamp mismatches:")
+            for item in failed_videos["timestamp_mismatch"]:
+                msg_parts.append(f"  - {item['name']}: {item['reason']}")
+
+        if failed_videos["missing_camera"]:
+            msg_parts.append("\nMissing camera devices:")
+            for item in failed_videos["missing_camera"]:
+                msg_parts.append(
+                    f"  - {item['name']}: camera '{item['camera']}' "
+                    "not in CameraDevice table"
+                )
+
+        if failed_videos["other"]:
+            msg_parts.append("\nOther errors:")
+            for item in failed_videos["other"]:
+                msg_parts.append(f"  - {item['name']}: {item['error']}")
+
+        logger.warning("\n".join(msg_parts))
 
     @classmethod
     def update_entries(cls, restrict=True):
@@ -542,7 +935,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Skip populating if no pos interval list names
         if len(pos_intervals) == 0:
-            logger.error(f"NO POS INTERVALS FOR {key};\n{no_pop_msg}")
+            self._err_msg(f"NO POS INTERVALS FOR {key};\n{no_pop_msg}")
             self.insert1(null_key, **insert_opts)
             return
 
@@ -579,7 +972,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Check that each pos interval was matched to only one epoch
         if len(matching_pos_intervals) != 1:
-            logger.warning(
+            self._warn_msg(
                 f"{no_pop_msg}. Found {len(matching_pos_intervals)} pos "
                 + f"intervals for\n\t{key}\n\t"
                 + f"Matching intervals: {matching_pos_intervals}"
@@ -592,7 +985,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
             dict(key, position_interval_name=matching_pos_intervals[0]),
             **insert_opts,
         )
-        logger.info(
+        self._info_msg(
             "Populated PosIntervalMap for "
             + f'{nwb_file_name}, {key["interval_list_name"]}'
         )
@@ -641,7 +1034,9 @@ def convert_epoch_interval_name_to_position_interval_name(
 
     if populate_missing and (no_entries or null_entry):
         if null_entry:
-            pos_query.delete(safemode=False)  # no prompt
+            pos_query.delete(
+                force_permission=True, safemode=False
+            )  # no prompt; bypass delete permission check for null placeholder entry
         PositionIntervalMap()._no_transaction_make(key)
         pos_query = PositionIntervalMap & key
 

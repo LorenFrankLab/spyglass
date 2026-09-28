@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 
+@pytest.mark.very_slow
 def test_spikes_decoding(spikes_decoding, result_coordinates):
     results = spikes_decoding.fetch_results()
     assert result_coordinates.issubset(

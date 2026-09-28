@@ -131,7 +131,7 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
 class DLCModelParams(SpyglassMixin, dj.Manual):
     """Parameters for model training.
 
-    Parameters
+    Attributes
     ----------
     dlc_model_params_name : str
         Name of the parameter set
@@ -305,7 +305,7 @@ class DLCModel(SpyglassMixin, dj.Computed):
         self.BodyPart.insert(
             {**part_key, "bodypart": bp} for bp in dlc_config["bodyparts"]
         )
-        logger.info(
+        self._info_msg(
             f"Finished inserting {model_name}, training iteration"
             f" {dlc_config['iteration']} into DLCModel"
         )

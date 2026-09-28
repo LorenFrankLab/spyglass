@@ -2,7 +2,6 @@ import os
 import shutil
 import tempfile
 import time
-import uuid
 from pathlib import Path
 
 import datajoint as dj
@@ -31,7 +30,7 @@ schema = dj.schema("spikesorting_sorting")
 class SpikeSorterParameters(SpyglassMixin, dj.Manual):
     """Parameters for spike sorting algorithms.
 
-    Parameters
+    Attributes
     ----------
     sorter: str
         Name of the spike sorting algorithm.
@@ -184,7 +183,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
     _parallel_make = True
 
-    def make(self, key: dict):
+    def make_fetch(self, key: dict):
         """Runs spike sorting on the data and parameters specified by the
         SpikeSortingSelection table and inserts a new entry to SpikeSorting table.
 
@@ -193,10 +192,29 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         2. Saves the sorting with spikeinterface
         3. Creates an analysis NWB file and saves the sorting there
            (this is redundant with 2; will change in the future)
-
         """
-        recording = SpikeSortingRecording().load_recording(key)
+        recording_path = SpikeSortingRecording()._fetch_recording_path(key)
 
+        artifact_times = (
+            ArtifactRemovedIntervalList
+            & {
+                "artifact_removed_interval_list_name": key[
+                    "artifact_removed_interval_list_name"
+                ]
+            }
+        ).fetch1("artifact_times")
+
+        sorter, sorter_params = (SpikeSorterParameters & key).fetch1(
+            "sorter", "sorter_params"
+        )
+
+        return [recording_path, artifact_times, sorter, sorter_params]
+
+    def make_compute(
+        self, key: dict, recording_path, artifact_times, sorter, sorter_params
+    ):
+        """Compute method to run spike sorting and save the results."""
+        recording = si.load_extractor(recording_path)
         # first, get the timestamps
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
         _ = recording.get_sampling_frequency()
@@ -213,14 +231,6 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 recording = si.concatenate_recordings([recording])
 
         # load artifact intervals
-        artifact_times = (
-            ArtifactRemovedIntervalList
-            & {
-                "artifact_removed_interval_list_name": key[
-                    "artifact_removed_interval_list_name"
-                ]
-            }
-        ).fetch1("artifact_times")
         if len(artifact_times):
             if artifact_times.ndim == 1:
                 artifact_times = np.expand_dims(artifact_times, 0)
@@ -243,10 +253,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 mode="zeros",
             )
 
-        logger.info(f"Running spike sorting on {key}...")
-        sorter, sorter_params = (SpikeSorterParameters & key).fetch1(
-            "sorter", "sorter_params"
-        )
+        self._info_msg(f"Running spike sorting on {key}...")
 
         sorter_temp_dir = tempfile.TemporaryDirectory(dir=temp_dir)
         # add tempdir option for mountainsort
@@ -276,6 +283,8 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             # whiten recording separately; make sure dtype is float32
             # to avoid downstream error with svd
             recording = sip.whiten(recording, dtype="float32")
+            # NOTE: mountainsort4's ms4alg.py calls warnings.resetwarnings()
+            # at import time, which clears all user-defined warning filters.
             sorting = sis.run_sorter(
                 sorter,
                 recording,
@@ -284,18 +293,23 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 delete_output_folder=True,
                 **sorter_params,
             )
-        key["time_of_sort"] = int(time.time())
+        time_of_sort = int(time.time())
 
         logger.info("Saving sorting results...")
 
         sorting_folder = Path(sorting_dir)
-
         sorting_name = self._get_sorting_name(key)
-        key["sorting_path"] = str(sorting_folder / Path(sorting_name))
-        if os.path.exists(key["sorting_path"]):
-            shutil.rmtree(key["sorting_path"])
-        sorting = sorting.save(folder=key["sorting_path"])
-        self.insert1(key)
+        sorting_path = str(sorting_folder / Path(sorting_name))
+        if os.path.exists(sorting_path):
+            shutil.rmtree(sorting_path)
+        _ = sorting.save(folder=sorting_path)
+        return [sorting_path, time_of_sort]
+
+    def make_insert(self, key, sorting_path, time_of_sort):
+        """Insert the sorting result into the SpikeSorting table."""
+        self.insert1(
+            dict(key, sorting_path=sorting_path, time_of_sort=time_of_sort)
+        )
 
     def fetch_nwb(self, *attrs, **kwargs):
         """Placeholder to override mixin method"""
@@ -303,6 +317,9 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
     def cleanup(self, dry_run=False, verbose=True):
         """Clean up spike sorting directories that are not in the table."""
+        if self._test_mode:
+            verbose = False
+
         sort_dir = Path(sorting_dir)
         tracked = set(self.fetch("sorting_path"))
         all_dirs = {str(f) for f in sort_dir.iterdir() if f.is_dir()}
@@ -322,10 +339,11 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
     @staticmethod
     def _get_sorting_name(key):
         recording_name = SpikeSortingRecording._get_recording_name(key)
-        sorting_name = (
-            recording_name + "_" + str(uuid.uuid4())[0:8] + "_spikesorting"
-        )
-        return sorting_name
+
+        # Need deterministic string for tripart make
+        rand_str = dj.hash.key_hash(key)[:8]
+
+        return f"{recording_name}_{rand_str}_spikesorting"
 
     def _import_sorting(self, key):
         raise NotImplementedError("Not supported in V0. Use V1 instead.")
