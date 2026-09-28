@@ -57,9 +57,7 @@ try:  # ndx_structured_behavior has no PyPI release, so it cannot be pinned
     )
     from ndx_structured_behavior import TaskRecording as NwbTaskRecording
 except ImportError:
-    # Fall back to matching on class name. pynwb builds container classes from
-    # the namespace cached in the file itself, so the objects still read back
-    # under these names; `is_nwb_obj_type` accepts either a class or a name.
+    # Fall back to matching on class name. .
     ActionTypesTable = "ActionTypesTable"
     EventTypesTable = "EventTypesTable"
     StateTypesTable = "StateTypesTable"
