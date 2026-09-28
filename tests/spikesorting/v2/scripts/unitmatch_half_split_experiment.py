@@ -598,12 +598,16 @@ def score_pairs(passing_pairs, unit_ids, drift_out_units) -> dict[str, list]:
     dict
         ``[n_pass, n]`` for ``drift_out_true`` (i, i) with i in S,
         ``healthy_true`` (i, i) with i not in S, ``healthy_false`` (i, j),
-        i != j both not in S, and ``drift_out_false`` (i, j), i != j both in S.
+        i != j both not in S, ``drift_out_false`` (i, j), i != j both in S,
+        and ``mixed_false`` (i, j), i != j with exactly one of i, j in S
+        (both orders) -- a false cross-session pair between a drift-out unit
+        and a healthy unit. ``mixed_false`` is printed as a diagnostic only;
+        no gate is defined on it.
 
     Examples
     --------
     >>> score_pairs([(0, 0, 0.9), (1, 1, 0.8), (2, 3, 0.7)], range(4), [0, 1])
-    {'drift_out_true': [2, 2], 'healthy_true': [0, 2], 'healthy_false': [1, 2], 'drift_out_false': [0, 2]}
+    {'drift_out_true': [2, 2], 'healthy_true': [0, 2], 'healthy_false': [1, 2], 'drift_out_false': [0, 2], 'mixed_false': [0, 8]}
     """
     passed = {(int(p[0]), int(p[1])) for p in passing_pairs}
     units = [int(u) for u in unit_ids]
@@ -613,6 +617,7 @@ def score_pairs(passing_pairs, unit_ids, drift_out_units) -> dict[str, list]:
         "healthy_true": [0, 0],
         "healthy_false": [0, 0],
         "drift_out_false": [0, 0],
+        "mixed_false": [0, 0],
     }
     for i in units:
         for j in units:
@@ -623,7 +628,7 @@ def score_pairs(passing_pairs, unit_ids, drift_out_units) -> dict[str, list]:
             elif i not in in_s and j not in in_s:
                 key = "healthy_false"
             else:
-                continue
+                key = "mixed_false"
             counts[key][1] += 1
             counts[key][0] += int((i, j) in passed)
     return counts
@@ -696,8 +701,9 @@ def paired_counts(record, control_record) -> dict[str, list]:
     """Healthy counts of a drift-out run and its control on the same units.
 
     Both runs are scored with the drift-out run's S, so the control's healthy
-    true pairs and healthy false pairs cover exactly the same non-S units and
-    non-S x non-S pairs as the drift-out run.
+    true pairs, healthy false pairs and mixed (S x non-S) false pairs cover
+    exactly the same non-S units and non-S x non-S / S x non-S pairs as the
+    drift-out run.
     """
     s = record["seed_drift_out_units"]
     ctrl = score_pairs(
@@ -707,6 +713,8 @@ def paired_counts(record, control_record) -> dict[str, list]:
     return {
         "healthy_true_control": ctrl["healthy_true"],
         "healthy_true_scenario": scen["healthy_true"],
+        "mixed_false_control": ctrl["mixed_false"],
+        "mixed_false_scenario": scen["mixed_false"],
         "healthy_false_control": ctrl["healthy_false"],
         "healthy_false_scenario": scen["healthy_false"],
     }
@@ -779,6 +787,9 @@ def pooled_paired_counts(records, scenario, condition) -> dict | None:
     )
     out["healthy_fp_increase"] = _rate(out["healthy_false_scenario"]) - _rate(
         out["healthy_false_control"]
+    )
+    out["mixed_fp_increase"] = _rate(out["mixed_false_scenario"]) - _rate(
+        out["mixed_false_control"]
     )
     out["seeds"] = sorted(r["seed"] for r in runs)
     return out
@@ -946,9 +957,10 @@ def _as_diagnostic(gate: Gate) -> Gate:
 
     Used by G2 (S x S false-pair rate, unstable under UnitMatch's per-run
     calibration), G3a-count and G3b-count (the former G3a/G3b acceptance
-    gates). Each keeps its computed value/detail for display, but
-    :attr:`Gate.passed` is forced to ``None`` -- they are no longer part of
-    acceptance, superseded by G3a-exact, G3a-prob and G3b-prob.
+    gates, superseded by G3a-exact, G3a-prob and G3b-prob) and the S x non-S
+    false-pair rate increase (no preregistered limit). Each keeps its
+    computed value/detail for display, but :attr:`Gate.passed` is forced to
+    ``None`` -- none of them are part of acceptance.
     """
     return Gate(
         f"{gate.name} (diagnostic, not gated)",
@@ -991,10 +1003,18 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
     single redrawn template and admit a burst of false pairs, independent of
     how the cross-validation halves are constructed.
 
-    G1, G2, G3a-count, G3b-count and G4 are evaluated exactly from the
-    underlying integer counts with :mod:`fractions`; only the printed/stored
-    ``value`` is a float. G3a-prob and G3b-prob average continuous
-    probabilities, so they are plain float comparisons.
+    "S x non-S false-pair rate increase" is also computed and returned as a
+    diagnostic, never gated: the paired healthy false-positive rate increase
+    (G4) only counts non-S x non-S pairs, so it is blind to a false pair
+    between a drift-out unit and a healthy one. This diagnostic covers that
+    gap the same way G4 does -- paired against the same seed's control, over
+    both (S, non-S) orders.
+
+    G1, G2, G3a-count, G3b-count, G4 and the S x non-S diagnostic are
+    evaluated exactly from the underlying integer counts with
+    :mod:`fractions`; only the printed/stored ``value`` is a float. G3a-prob
+    and G3b-prob average continuous probabilities, so they are plain float
+    comparisons.
     """
     gates = []
     bit_identical = non_s_bit_identical_halves(records, condition)
@@ -1098,8 +1118,10 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
 
         paired = pooled_paired_counts(records, scenario, condition)
         if paired is None:
-            exact_drop = exact_fp_inc = None
-            drop_detail = fp_detail = "no control run for some seed"
+            exact_drop = exact_fp_inc = exact_mixed_fp_inc = None
+            drop_detail = fp_detail = mixed_fp_detail = (
+                "no control run for some seed"
+            )
         else:
             c, s = (
                 paired["healthy_true_control"],
@@ -1113,6 +1135,12 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
             )
             exact_fp_inc = _exact_diff(_rate_exact(s), _rate_exact(c))
             fp_detail = f"control {c[0]}/{c[1]} -> scenario {s[0]}/{s[1]}"
+            c, s = (
+                paired["mixed_false_control"],
+                paired["mixed_false_scenario"],
+            )
+            exact_mixed_fp_inc = _exact_diff(_rate_exact(s), _rate_exact(c))
+            mixed_fp_detail = f"control {c[0]}/{c[1]} -> scenario {s[0]}/{s[1]}"
         gates.append(
             _as_diagnostic(
                 _gate(
@@ -1167,6 +1195,18 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
                 G4_MAX_HEALTHY_FP_INCREASE,
                 "<=",
                 fp_detail,
+            )
+        )
+        gates.append(
+            _as_diagnostic(
+                _gate(
+                    "S x non-S false-pair rate increase",
+                    scenario,
+                    exact_mixed_fp_inc,
+                    G4_MAX_HEALTHY_FP_INCREASE,
+                    "<=",
+                    mixed_fp_detail,
+                )
             )
         )
     return gates
@@ -1343,8 +1383,9 @@ def format_summary(records, gates, fidelity) -> str:
         "## Pooled over seeds",
         "",
         "| scenario | condition | drift-out recall | healthy recall | "
-        "healthy FP | SxS FP | mean fitted match-class prior |",
-        "|---|---|---|---|---|---|---|",
+        "healthy FP | SxS FP | S x non-S FP (diagnostic, not gated) | "
+        "mean fitted match-class prior |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for scenario in scenarios:
         for condition in conditions:
@@ -1354,7 +1395,7 @@ def format_summary(records, gates, fidelity) -> str:
             lines.append(
                 f"| {scenario} | {condition} | {_frac(p['drift_out_true'])} | "
                 f"{_frac(p['healthy_true'])} | {_frac(p['healthy_false'])} | "
-                f"{_frac(p['drift_out_false'])} | "
+                f"{_frac(p['drift_out_false'])} | {_frac(p['mixed_false'])} | "
                 f"{p['mean_match_class_prior']:.4f} |"
             )
 
@@ -1363,8 +1404,10 @@ def format_summary(records, gates, fidelity) -> str:
         "## Paired against the same condition's control (same non-S units)",
         "",
         "| scenario | condition | healthy recall control -> scenario | "
-        "drop | healthy FP control -> scenario | FP increase |",
-        "|---|---|---|---|---|---|",
+        "drop | healthy FP control -> scenario | FP increase | S x non-S FP "
+        "control -> scenario (diagnostic, not gated) | FP increase "
+        "(diagnostic, not gated) |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for scenario in (s for s in DRIFT_OUT_SCENARIOS if s in scenarios):
         for condition in conditions:
@@ -1378,7 +1421,10 @@ def format_summary(records, gates, fidelity) -> str:
                 f"{p['healthy_recall_drop']:+.4f} | "
                 f"{_frac(p['healthy_false_control'])} -> "
                 f"{_frac(p['healthy_false_scenario'])} | "
-                f"{p['healthy_fp_increase']:+.4f} |"
+                f"{p['healthy_fp_increase']:+.4f} | "
+                f"{_frac(p['mixed_false_control'])} -> "
+                f"{_frac(p['mixed_false_scenario'])} | "
+                f"{p['mixed_fp_increase']:+.4f} |"
             )
 
     lines += [
@@ -1407,9 +1453,10 @@ def format_summary(records, gates, fidelity) -> str:
         "## Per seed",
         "",
         "| seed | S | scenario | condition | drift-out | healthy | healthy FP "
-        "| SxS FP | fitted prior | excluded A / B | paired healthy ctrl->scen "
-        "| paired FP ctrl->scen |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| SxS FP | S x non-S FP (diagnostic, not gated) | fitted prior | "
+        "excluded A / B | paired healthy ctrl->scen | paired FP ctrl->scen | "
+        "paired S x non-S FP ctrl->scen (diagnostic, not gated) |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for seed in seeds:
         for scenario in scenarios:
@@ -1418,7 +1465,7 @@ def format_summary(records, gates, fidelity) -> str:
                 if r is None:
                     continue
                 c = r["counts"]
-                paired_true = paired_fp = ""
+                paired_true = paired_fp = paired_mixed_fp = ""
                 ctrl = index.get((seed, "control", condition))
                 if scenario != "control" and ctrl is not None:
                     pc = paired_counts(r, ctrl)
@@ -1432,6 +1479,11 @@ def format_summary(records, gates, fidelity) -> str:
                         f"{pc['healthy_false_scenario'][0]} "
                         f"/{pc['healthy_false_control'][1]}"
                     )
+                    paired_mixed_fp = (
+                        f"{pc['mixed_false_control'][0]} -> "
+                        f"{pc['mixed_false_scenario'][0]} "
+                        f"/{pc['mixed_false_control'][1]}"
+                    )
                 ex = r["excluded_unit_ids"]
                 lines.append(
                     f"| {seed} | {r['seed_drift_out_units']} | {scenario} | "
@@ -1439,8 +1491,10 @@ def format_summary(records, gates, fidelity) -> str:
                     f"{c['drift_out_true'][1]} | {c['healthy_true'][0]}/"
                     f"{c['healthy_true'][1]} | {c['healthy_false'][0]}/"
                     f"{c['healthy_false'][1]} | {c['drift_out_false'][0]}/"
-                    f"{c['drift_out_false'][1]} | {_fmt_prior(r['fitted'])} | "
-                    f"{ex['A']} / {ex['B']} | {paired_true} | {paired_fp} |"
+                    f"{c['drift_out_false'][1]} | {c['mixed_false'][0]}/"
+                    f"{c['mixed_false'][1]} | {_fmt_prior(r['fitted'])} | "
+                    f"{ex['A']} / {ex['B']} | {paired_true} | {paired_fp} | "
+                    f"{paired_mixed_fp} |"
                 )
 
     lines += [
