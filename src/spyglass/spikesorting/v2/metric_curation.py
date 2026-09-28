@@ -37,6 +37,7 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v2._metric_curation import (
     apply_label_rules,
     apply_snr_peak_sign,
+    escalate_si_metric_errors,
     isi_violation_fraction,
     rules_payloads_match,
 )
@@ -2152,6 +2153,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         job_kwargs=None,
         template_metric_columns=None,
         statistics_spans=None,
+        rule_columns=frozenset(),
     ):
         """Compute quality metrics, routing PC/NN metrics to the whitened one.
 
@@ -2181,6 +2183,13 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         own template variance counts only the spikes and samples inside
         them. ``None`` (or one span covering the recording) keeps
         SpikeInterface's whole-recording estimates.
+
+        ``rule_columns`` are the metric columns auto-curation rules
+        threshold. SpikeInterface turns a metric that raises into a warning
+        and an all-NaN column; around every compute that can run quality or
+        template metrics, such a failure raises ``ValueError`` if it hits a
+        rule column and is logged otherwise (``escalate_si_metric_errors``).
+        The default, empty, escalates nothing.
         """
         import numpy as np
         import pandas as pd
@@ -2223,11 +2232,13 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 )
                 if ext != "principal_components"
             ]
-            ensure_extensions(
-                display_analyzer,
-                list(_CURATION_EXTENSIONS) + extra_extensions,
-                job_kwargs=job_kwargs,
-            )
+            # _CURATION_EXTENSIONS includes template_metrics.
+            with escalate_si_metric_errors(rule_columns):
+                ensure_extensions(
+                    display_analyzer,
+                    list(_CURATION_EXTENSIONS) + extra_extensions,
+                    job_kwargs=job_kwargs,
+                )
             if "sd_ratio" in voltage_names:
                 # SI's sd_ratio divides by get_noise_levels(method="std") on
                 # this analyzer's recording, which returns a cached
@@ -2259,6 +2270,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             with (
                 noise_cluster_spans(statistics_spans),
                 isolated_si_metric_defaults(),
+                escalate_si_metric_errors(rule_columns),
             ):
                 voltage_df = compute_quality_metrics(
                     display_analyzer,
@@ -2339,6 +2351,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             with (
                 noise_cluster_spans(statistics_spans),
                 isolated_si_metric_defaults(),
+                escalate_si_metric_errors(rule_columns),
             ):
                 pc_df = compute_quality_metrics(
                     metric_analyzer,
@@ -2413,9 +2426,12 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         if template_metric_columns and not display_analyzer.has_extension(
             "template_metrics"
         ):
-            ensure_extensions(
-                display_analyzer, ["template_metrics"], job_kwargs=job_kwargs
-            )
+            with escalate_si_metric_errors(rule_columns):
+                ensure_extensions(
+                    display_analyzer,
+                    ["template_metrics"],
+                    job_kwargs=job_kwargs,
+                )
 
         metrics_df = CurationEvaluation._surface_template_columns(
             metrics_df, display_analyzer, template_metric_columns

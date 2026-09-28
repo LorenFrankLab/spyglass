@@ -579,7 +579,10 @@ def test_nn_noise_overlap_is_finite_not_silently_all_nan(
 
 
 def _small_in_memory_analyzer():
-    """A sparse in-memory analyzer (10 s, 4 channels, 2 units) with waveforms."""
+    """A sparse in-memory analyzer (10 s, 4 channels, 2 units) with waveforms.
+
+    Unit ids are integers, as in every v2 sort (SI generates string ids).
+    """
     import spikeinterface as si
 
     recording, sorting = si.generate_ground_truth_recording(
@@ -589,6 +592,7 @@ def _small_in_memory_analyzer():
         num_units=2,
         seed=0,
     )
+    sorting = sorting.rename_units([0, 1])
     analyzer = si.create_sorting_analyzer(
         sorting, recording, format="memory", sparse=True
     )
@@ -680,6 +684,106 @@ def test_compute_metrics_leaves_si_metric_defaults_unchanged(dj_conn):
     assert metrics["presence_ratio"].notna().all()
     assert metrics["nn_noise_overlap"].isna().all()
     assert get_default_quality_metrics_params(names) == before
+
+
+@pytest.mark.db_unit
+@pytest.mark.parametrize(
+    "si_metric, metric_names, template_columns, rule_column",
+    [
+        # Voltage compute on the display analyzer.
+        (
+            "isi_violation",
+            ["num_spikes", "isi_violation"],
+            None,
+            "isi_violation",
+        ),
+        # PC/NN compute on the metric analyzer.
+        (
+            "nn_advanced",
+            ["num_spikes", "nn_advanced"],
+            None,
+            "nn_noise_overlap",
+        ),
+        # Template metrics computed with the display extensions.
+        (
+            "half_width",
+            ["num_spikes"],
+            ["trough_half_width"],
+            "trough_half_width",
+        ),
+        # Template metrics computed for a PC-only row.
+        (
+            "half_width",
+            ["nn_advanced"],
+            ["trough_half_width"],
+            "trough_half_width",
+        ),
+    ],
+)
+def test_compute_metrics_escalates_si_metric_errors_on_rule_columns(
+    dj_conn,
+    monkeypatch,
+    caplog,
+    si_metric,
+    metric_names,
+    template_columns,
+    rule_column,
+):
+    """A metric SI swallows raises only when a rule thresholds its column.
+
+    SI turns a raising metric into a warning and all-NaN columns. With the
+    column among ``rule_columns`` ``_compute_metrics`` raises naming the
+    metric, the column and SI's error; without, it returns the NaN column
+    and logs the failure.
+    """
+    from spikeinterface.metrics.quality import ComputeQualityMetrics
+    from spikeinterface.metrics.template import ComputeTemplateMetrics
+
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+    extension = (
+        ComputeTemplateMetrics
+        if si_metric == "half_width"
+        else ComputeQualityMetrics
+    )
+    metric_class = extension.get_metric_by_name(si_metric)
+    calls = []
+
+    def planted(*args, **kwargs):
+        calls.append(si_metric)
+        raise RuntimeError("planted metric failure")
+
+    monkeypatch.setattr(metric_class, "metric_function", planted)
+
+    def compute(rule_columns):
+        return CurationEvaluation._compute_metrics(
+            _small_in_memory_analyzer(),
+            _small_in_memory_analyzer(),
+            metric_names,
+            {"nn_advanced": {"seed": 0}},
+            False,
+            {},
+            template_metric_columns=template_columns,
+            rule_columns=rule_columns,
+        )
+
+    with pytest.raises(ValueError) as excinfo:
+        compute(frozenset({rule_column}))
+    assert calls == [si_metric]
+    message = str(excinfo.value)
+    assert repr(si_metric) in message
+    assert repr(rule_column) in message
+    assert "planted metric failure" in message
+
+    with caplog.at_level("WARNING"):
+        metrics = compute(frozenset())
+    assert calls == [si_metric, si_metric]
+    assert metrics[rule_column].isna().all()
+    assert any(
+        repr(si_metric) in record.getMessage()
+        and "planted metric failure" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def _sd_ratio_analyzer(fill):

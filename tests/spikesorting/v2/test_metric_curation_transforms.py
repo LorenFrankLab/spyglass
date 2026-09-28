@@ -11,6 +11,8 @@ opens a database connection.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -20,10 +22,13 @@ from spyglass.spikesorting.v2._metric_curation import (
     apply_label_rules,
     apply_snr_peak_sign,
     assert_rule_metrics_computed,
+    escalate_si_metric_errors,
     expected_missing_units,
     isi_violation_fraction,
+    report_si_metric_errors,
     rules_payloads_match,
     sanitize_for_json,
+    si_metric_output_columns,
 )
 
 
@@ -782,3 +787,93 @@ def test_isi_violation_one_spike_unit_follows_missing_policy():
     rule["missing_policy"] = "error"
     with pytest.raises(ValueError, match=r"unit_id\(s\) \[3\]"):
         apply_label_rules(metrics, [rule], expected_missing=expected_missing)
+
+
+# ---------- SpikeInterface "Error computing metric" warnings ------------------
+
+# What SI 0.104.3 emits for a metric whose computation raised
+# (``core/analyzer_extension_core.py:1281-1282``), plus an unrelated warning.
+_SI_WARNINGS = (
+    "Error computing metric isi_violation: boom",
+    "Error computing metric sd_ratio: boom",
+    "Amplitude cutoff set to NaN for units [0]: too few spikes (< 500).",
+)
+
+
+def _recorded(messages):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for message in messages:
+            warnings.warn(message, UserWarning)
+    return caught
+
+
+@pytest.mark.parametrize(
+    "si_metric, columns",
+    [
+        ("nn_advanced", {"nn_isolation", "nn_noise_overlap"}),
+        ("half_width", {"trough_half_width", "peak_half_width"}),
+        (
+            "isi_violation",
+            {"isi_violations_ratio", "isi_violations_count", "isi_violation"},
+        ),
+        ("sd_ratio", {"sd_ratio"}),
+    ],
+)
+def test_si_metric_output_columns_follow_si_metadata(si_metric, columns):
+    """SI's own column metadata, plus Spyglass's ``isi_violation`` fraction."""
+    assert si_metric_output_columns(si_metric) == columns
+
+
+def test_si_metric_error_on_rule_column_raises():
+    """A failed metric whose column a rule thresholds stops the evaluation."""
+    with pytest.raises(ValueError) as excinfo:
+        report_si_metric_errors(_recorded(_SI_WARNINGS), {"isi_violation"})
+    message = str(excinfo.value)
+    assert "'isi_violation'" in message
+    assert "boom" in message
+    assert "sd_ratio" not in message
+
+
+def test_si_metric_errors_off_rule_columns_are_logged_not_raised(caplog):
+    """Unreferenced failures are logged; other warnings are re-emitted."""
+    with (
+        caplog.at_level("WARNING"),
+        warnings.catch_warnings(record=True) as reemitted,
+    ):
+        warnings.simplefilter("always")
+        report_si_metric_errors(
+            _recorded(_SI_WARNINGS), frozenset({"nn_noise_overlap"})
+        )
+    logged = [record.getMessage() for record in caplog.records]
+    assert any("'isi_violation'" in m and "boom" in m for m in logged)
+    assert any("'sd_ratio'" in m and "boom" in m for m in logged)
+    assert [str(w.message) for w in reemitted] == [_SI_WARNINGS[2]]
+    assert reemitted[0].category is UserWarning
+    assert reemitted[0].filename == __file__
+
+
+def test_escalate_si_metric_errors_raises_even_when_warnings_are_ignored():
+    """A caller's ``ignore`` filter cannot hide a failed rule metric."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with pytest.raises(ValueError, match="'isi_violation'"):
+            with escalate_si_metric_errors({"isi_violation"}):
+                warnings.warn(_SI_WARNINGS[0], UserWarning)
+
+
+def test_escalate_si_metric_errors_keeps_the_original_error(caplog):
+    """If the block raises, its error propagates; warnings are not lost."""
+    with (
+        caplog.at_level("WARNING"),
+        warnings.catch_warnings(record=True) as reemitted,
+    ):
+        warnings.simplefilter("always")
+        with pytest.raises(RuntimeError, match="analyzer broke"):
+            with escalate_si_metric_errors({"isi_violation"}):
+                for message in _SI_WARNINGS:
+                    warnings.warn(message, UserWarning)
+                raise RuntimeError("analyzer broke")
+    logged = [record.getMessage() for record in caplog.records]
+    assert any("'isi_violation'" in m for m in logged)
+    assert [str(w.message) for w in reemitted] == [_SI_WARNINGS[2]]

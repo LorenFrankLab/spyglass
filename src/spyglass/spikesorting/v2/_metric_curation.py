@@ -12,7 +12,10 @@ lets them be unit-tested without a database.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Iterable, Mapping
+import re
+import warnings
+from collections.abc import Callable, Collection, Iterable, Mapping
+from contextlib import contextmanager
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -619,6 +622,140 @@ def assert_rule_metrics_computed(
         failed = [unit_id for unit_id in non_finite if unit_id not in expected]
         if failed:
             raise ValueError(_computation_failure_message(column, failed))
+
+
+# ---------- SpikeInterface metric-computation errors -------------------------
+#
+# SI runs each metric in its own ``try``; on any exception it warns
+# ``f"Error computing metric {metric_name}: {e}"`` and fills every column of
+# that metric with NaN (``core/analyzer_extension_core.py:1270-1286``). The
+# same calculator computes the template metrics. ``metric_name`` is SI's
+# metric name (``nn_advanced``, ``half_width``), not an output column.
+_SI_METRIC_ERROR = re.compile(
+    r"Error computing metric (?P<metric>\S+?): (?P<error>.*)", re.DOTALL
+)
+
+
+def si_metric_output_columns(si_metric: str) -> frozenset[str]:
+    """Output columns SpikeInterface fills for one SI metric name.
+
+    Read from SI's own metric metadata: each quality or template metric
+    class's ``metric_columns`` (``core/analyzer_extension_core.py:838``),
+    found by name through ``BaseMetricExtension.get_metric_by_name``
+    (1052-1070). Spyglass's ``isi_violation`` fraction is derived from SI's
+    ``isi_violation`` metric, so it is included for that metric. An unknown
+    name maps to no columns.
+    """
+    from spikeinterface.metrics.quality import ComputeQualityMetrics
+    from spikeinterface.metrics.template import ComputeTemplateMetrics
+
+    columns = set()
+    for extension in (ComputeQualityMetrics, ComputeTemplateMetrics):
+        if si_metric in extension.get_available_metric_names():
+            metric = extension.get_metric_by_name(si_metric)
+            columns.update(metric.metric_columns)
+    if si_metric == "isi_violation":
+        columns.add("isi_violation")
+    return frozenset(columns)
+
+
+def _si_metric_error_message(
+    si_metric: str, error: str, rule_columns: list[str]
+) -> str:
+    """Message: SI failed a metric whose column a rule thresholds."""
+    return (
+        f"SpikeInterface failed to compute metric {si_metric!r} ({error}), "
+        f"so rule-referenced column(s) {rule_columns} are NaN for every "
+        "unit and every auto-curation rule on them would silently apply "
+        "no labels. SpikeInterface replaces a failing metric with NaN and "
+        "only warns; fix the metric computation or remove the rule."
+    )
+
+
+def report_si_metric_errors(
+    caught: Iterable[warnings.WarningMessage],
+    rule_columns: Collection[str],
+) -> None:
+    """Act on warnings recorded around a SpikeInterface metric compute.
+
+    Parameters
+    ----------
+    caught : iterable of warnings.WarningMessage
+        Warnings recorded with ``warnings.catch_warnings(record=True)``.
+    rule_columns : collection of str
+        Metric columns referenced by auto-curation rules.
+
+    Raises
+    ------
+    ValueError
+        If any "Error computing metric" warning names an SI metric one of
+        whose output columns (``si_metric_output_columns``) is in
+        ``rule_columns``; the message names the metric, those columns and
+        SI's error text.
+
+    Notes
+    -----
+    Every other warning is re-emitted unchanged, so it passes through the
+    caller's warning filters as if it had never been recorded. A metric
+    error on columns no rule references is logged at WARNING and its
+    columns stay NaN. All warnings are handled before anything is raised.
+    """
+    rule_columns = frozenset(rule_columns)
+    failures = []
+    for record in caught:
+        match = _SI_METRIC_ERROR.fullmatch(str(record.message))
+        if match is None:
+            warnings.warn_explicit(
+                record.message,
+                record.category,
+                record.filename,
+                record.lineno,
+                source=record.source,
+            )
+            continue
+        si_metric, error = match.group("metric"), match.group("error")
+        referenced = sorted(si_metric_output_columns(si_metric) & rule_columns)
+        if referenced:
+            failures.append(
+                _si_metric_error_message(si_metric, error, referenced)
+            )
+        else:
+            logger.warning(
+                "SpikeInterface failed to compute metric %r (%s); its "
+                "columns are NaN for every unit.",
+                si_metric,
+                error,
+            )
+    if failures:
+        raise ValueError("\n".join(failures))
+
+
+@contextmanager
+def escalate_si_metric_errors(rule_columns: Collection[str]):
+    """Raise on SpikeInterface metric errors that affect rule columns.
+
+    Records every warning raised in the block (``simplefilter("always")``,
+    so neither a caller's ``ignore`` filter nor the once-per-location
+    registry can hide one) and passes them to ``report_si_metric_errors``
+    when the block exits. If the block itself raises, that error
+    propagates unchanged: metric errors are then only logged and other
+    warnings are still re-emitted.
+
+    Parameters
+    ----------
+    rule_columns : collection of str
+        Metric columns referenced by auto-curation rules; empty escalates
+        nothing.
+    """
+    caught: list[warnings.WarningMessage] = []
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            yield
+    except BaseException:
+        report_si_metric_errors(caught, frozenset())
+        raise
+    report_si_metric_errors(caught, rule_columns)
 
 
 def rules_payloads_match(
