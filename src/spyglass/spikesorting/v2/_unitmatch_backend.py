@@ -266,6 +266,14 @@ def extract_unitmatch_bundle(
         **compute_job_kwargs,
     )
     waveforms_ext = analyzer.get_extension("waveforms")
+    # Guard against SpikeInterface's ComputeWaveforms.nbefore/.nafter formula
+    # (analyzer_extension_core.py:172-177) drifting from the margin above.
+    if max(waveforms_ext.nbefore, waveforms_ext.nafter) > max(nbefore, nafter):
+        raise RuntimeError(
+            "extract_unitmatch_bundle: waveforms window "
+            f"({waveforms_ext.nbefore}, {waveforms_ext.nafter}) exceeds the "
+            f"random-spikes margin ({max(nbefore, nafter)})"
+        )
     sampled = analyzer.get_extension("random_spikes").get_random_spikes()
 
     unit_ids = sorting.get_unit_ids()
