@@ -646,6 +646,64 @@ def test_bundle_writes_kept_units_raw_waveforms(tmp_path):
             assert np.linalg.norm(residual) < 0.15 * np.linalg.norm(template)
 
 
+def test_bundle_control_matches_previous_construction(tmp_path, saved_bundles):
+    """On a stationary session, per-unit temporal halves reproduce the
+    recording-half templates (Pearson r > 0.99 for every unit and half).
+
+    The previous construction is the local copy kept by the half-split
+    experiment script; both constructions run on that script's control
+    session A (60 s, 16 channels, 20 units that fire throughout). The spike
+    cap is at least every unit's spike count, so neither construction
+    subsamples: the new one averages all of a unit's interior spikes, the old
+    one all of its spikes in each recording half. For a stationary unit the
+    first/second half of its spikes and the recording halves then hold nearly
+    the same spikes, so the correlation measures the construction rather than
+    random-subset noise.
+    """
+    from tests.spikesorting.v2.scripts import (
+        unitmatch_half_split_experiment as experiment,
+    )
+
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    recording, sorting = experiment.make_dataset(0)
+    (rec_a, sort_a), _ = experiment.split_sessions(recording, sorting)
+    new_dir, old_dir = tmp_path / "per_unit", tmp_path / "time_half"
+    all_spikes = max(
+        sort_a.get_unit_spike_train(uid).size for uid in sort_a.get_unit_ids()
+    )
+    kwargs = dict(
+        ms_before=experiment.MS_BEFORE,
+        ms_after=experiment.MS_AFTER,
+        max_spikes_per_unit=all_spikes,
+        seed=experiment.BUNDLE_SEED,
+        job_kwargs=experiment.JOB_KWARGS,
+    )
+    excluded = backend.extract_unitmatch_bundle(
+        new_dir, rec_a, sort_a, **kwargs
+    )
+    experiment.extract_time_half_bundle(old_dir, rec_a, sort_a, **kwargs)
+
+    assert excluded == []
+    new, old = saved_bundles[new_dir], saved_bundles[old_dir]
+    assert new["unit_ids"] == old["unit_ids"]
+    assert new["waveforms"].shape == old["waveforms"].shape
+    n_units = len(new["unit_ids"])
+    corr = np.array(
+        [
+            [
+                np.corrcoef(
+                    new["waveforms"][i, ..., k].ravel(),
+                    old["waveforms"][i, ..., k].ravel(),
+                )[0, 1]
+                for k in (0, 1)
+            ]
+            for i in range(n_units)
+        ]
+    )
+    assert np.all(corr > 0.99), dict(zip(new["unit_ids"], corr.round(4)))
+
+
 def test_get_matcher_bootstraps_default_after_clear():
     """get_matcher re-registers the built-in backend even if the registry was cleared."""
     from spyglass.spikesorting.v2 import matcher_protocol as mp
