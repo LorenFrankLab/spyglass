@@ -977,51 +977,186 @@ def test_evaluate_gates_g3a_count_is_a_diagnostic_not_a_gate():
     assert g3a_count.value == pytest.approx(2 / 25)
 
 
-def test_evaluate_gates_g3a_prob_is_exact_at_its_boundary():
-    """G3a-prob passes with a drop exactly at 0.04, fails just above it.
-
-    One paired non-S unit whose true-pair ``q = min(p_ab, p_ba)`` is 0.05 in
-    the control run and 0.01 in the scenario run: the pooled drop is
-    ``0.05 - 0.01``, a float subtraction that lands on exactly the same
-    double as the literal ``0.04`` (verified: ``0.05 - 0.01 <= 0.04`` is
-    ``True`` in IEEE 754 double precision, while ``0.07 - 0.03`` rounds to
-    just above 0.04 and fails).
-    """
+def _g3a_prob_gate(records):
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
         evaluate_gates,
     )
 
+    gates = evaluate_gates(records, "per_unit")
+    return _gate(
+        gates,
+        "G3a-prob healthy true-pair mean probability drop",
+        "driftout_A",
+    )
+
+
+def test_evaluate_gates_g3a_prob_is_exact_at_its_boundary():
+    """G3a-prob passes on dyadic drops at/below 0.04, fails clearly above it.
+
+    Every ``q`` here is a dyadic fraction (a binary fraction like ``1/32``),
+    so every value AND every subtraction is bit-exact in IEEE 754 double
+    precision -- no case here depends on 1-ulp rounding luck the way
+    ``0.05 - 0.01`` or ``0.07 - 0.03`` would (those are not exactly
+    representable in binary and only pass/fail by which way they happen to
+    round). One paired non-S unit per case, control ``q = 0.5 = 1/2``:
+
+    - scenario ``q = 0.46875 = 15/32`` -> drop ``0.03125 = 1/32``: PASS,
+      comfortably under the threshold.
+    - scenario ``q = 0.4609375 = 59/128`` -> drop ``0.0390625 = 5/128``:
+      PASS, close to the threshold but still a clean dyadic value below it.
+    - scenario ``q = 0.453125 = 29/64`` -> drop ``0.046875 = 3/64``: FAIL,
+      clearly (not by a hair) above the threshold.
+    """
     s_units = [99]
     unit_ids = s_units + [1]
 
-    control = _gate_test_record(
-        1, "control", unit_ids, s_units, set(), {1: (0.05, 0.05)}
-    )
-    passing = _gate_test_record(
-        1, "driftout_A", unit_ids, s_units, set(), {1: (0.01, 0.01)}
-    )
-    gates = evaluate_gates([control, passing], "per_unit")
-    g3a_prob = _gate(
-        gates,
-        "G3a-prob healthy true-pair mean probability drop",
-        "driftout_A",
-    )
-    assert g3a_prob.passed is True, g3a_prob
-    assert g3a_prob.value == pytest.approx(0.04)
+    def gate_for(scenario_q):
+        control = _gate_test_record(
+            1, "control", unit_ids, s_units, set(), {1: (0.5, 0.5)}
+        )
+        scenario = _gate_test_record(
+            1,
+            "driftout_A",
+            unit_ids,
+            s_units,
+            set(),
+            {1: (scenario_q, scenario_q)},
+        )
+        return _g3a_prob_gate([control, scenario])
 
-    failing = _gate_test_record(
-        1, "driftout_A", unit_ids, s_units, set(), {1: (0.03, 0.03)}
+    comfortably_passing = gate_for(0.46875)
+    assert comfortably_passing.passed is True, comfortably_passing
+    assert comfortably_passing.value == pytest.approx(0.03125, abs=0)
+
+    near_boundary_passing = gate_for(0.4609375)
+    assert near_boundary_passing.passed is True, near_boundary_passing
+    assert near_boundary_passing.value == pytest.approx(0.0390625, abs=0)
+
+    clearly_failing = gate_for(0.453125)
+    assert clearly_failing.passed is False, clearly_failing
+    assert clearly_failing.value == pytest.approx(0.046875, abs=0)
+
+
+def test_evaluate_gates_g3a_prob_pools_units_not_per_seed_means():
+    """The pooled mean is ONE mean over every paired unit, not a mean of
+    per-seed means -- the two differ whenever seeds contribute unequal
+    paired counts.
+
+    Seed 1 has a single paired non-S unit with ``q_control = 1.0``; seed 2
+    has three paired non-S units all with ``q_control = 0.0``. A naive
+    mean-of-per-seed-means would average 1.0 and 0.0 to 0.5; the correct
+    pooled mean over all four units is ``1.0 / 4 = 0.25``.
+    """
+    seed1_units = [901, 1]  # 901 is S (irrelevant to G3a-prob)
+    seed2_units = [902, 11, 12, 13]  # 902 is S
+
+    seed1_control = _gate_test_record(
+        1, "control", seed1_units, [901], set(), {1: (1.0, 1.0)}
     )
-    control_wide = _gate_test_record(
-        1, "control", unit_ids, s_units, set(), {1: (0.07, 0.07)}
+    seed1_scenario = _gate_test_record(
+        1, "driftout_A", seed1_units, [901], set(), {1: (1.0, 1.0)}
     )
-    gates = evaluate_gates([control_wide, failing], "per_unit")
-    g3a_prob = _gate(
-        gates,
-        "G3a-prob healthy true-pair mean probability drop",
+    seed2_control = _gate_test_record(
+        2,
+        "control",
+        seed2_units,
+        [902],
+        set(),
+        {u: (0.0, 0.0) for u in (11, 12, 13)},
+    )
+    seed2_scenario = _gate_test_record(
+        2,
         "driftout_A",
+        seed2_units,
+        [902],
+        set(),
+        {u: (0.0, 0.0) for u in (11, 12, 13)},
     )
-    assert g3a_prob.passed is False, g3a_prob
+
+    gate = _g3a_prob_gate(
+        [seed1_control, seed1_scenario, seed2_control, seed2_scenario]
+    )
+    assert "n_paired=4" in gate.detail, gate
+    # The naive (wrong) mean-of-per-seed-means would report a control mean of
+    # (1.0 + 0.0) / 2 == 0.5; the correct pooled mean over all 4 units is
+    # 1.0 / 4 == 0.25. ``scenario`` mirrors ``control`` here (drop == 0), so
+    # this checks the mean itself, not the drop.
+    assert "control mean 0.2500" in gate.detail, gate
+    assert "scenario mean 0.2500" in gate.detail, gate
+    assert gate.value == pytest.approx(0.0), gate
+
+
+def test_paired_true_pair_probs_drops_unit_missing_on_either_side():
+    """A unit missing a probability on EITHER side is dropped the same way
+    and counted in ``n_unpaired``, not silently ignored.
+
+    Unit 1 has a probability on both sides (paired); unit 2 is missing from
+    the control side; unit 3 is missing from the scenario side. Both 2 and 3
+    must be dropped identically (symmetric treatment) and both counted in
+    ``n_unpaired`` -- regardless of which side is missing.
+    """
+    from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
+        paired_true_pair_probs,
+    )
+
+    s_units = [999]
+    unit_ids = s_units + [1, 2, 3]
+
+    control = _gate_test_record(
+        1, "control", unit_ids, s_units, set(), {1: (0.9, 0.9), 3: (0.8, 0.8)}
+    )
+    scenario = _gate_test_record(
+        1,
+        "driftout_A",
+        unit_ids,
+        s_units,
+        set(),
+        {1: (0.7, 0.7), 2: (0.6, 0.6)},
+    )
+
+    pairs, n_unpaired = paired_true_pair_probs(scenario, control)
+    assert [p[0] for p in pairs] == [1]
+    assert (
+        n_unpaired == 2
+    )  # unit 2 (missing control), unit 3 (missing scenario)
+
+
+def test_evaluate_gates_g3a_prob_reports_unpaired_and_capture_missing():
+    """G3a-prob's detail reports n_paired, n_unpaired and
+    n_capture_missing_runs, not just the paired count.
+
+    Seed 1's non-S units are 1 (paired) and 2 (missing from the scenario
+    side -> unpaired). Seed 2's scenario run has NO recorded probabilities
+    at all despite having non-S units -- a stand-in for UnitMatch returning
+    early or the capture wrap never firing -- so it must be flagged as a
+    capture-missing run (on top of its unit also landing in n_unpaired).
+    """
+    seed1_units = [900, 1, 2]
+    seed1_control = _gate_test_record(
+        1,
+        "control",
+        seed1_units,
+        [900],
+        set(),
+        {1: (0.9, 0.9), 2: (0.8, 0.8)},
+    )
+    seed1_scenario = _gate_test_record(
+        1, "driftout_A", seed1_units, [900], set(), {1: (0.7, 0.7)}
+    )
+    seed2_units = [950, 21]
+    seed2_control = _gate_test_record(
+        2, "control", seed2_units, [950], set(), {21: (0.9, 0.9)}
+    )
+    seed2_scenario = _gate_test_record(
+        2, "driftout_A", seed2_units, [950], set(), {}
+    )
+
+    gate = _g3a_prob_gate(
+        [seed1_control, seed1_scenario, seed2_control, seed2_scenario]
+    )
+    assert "n_paired=1" in gate.detail, gate
+    assert "n_unpaired=2" in gate.detail, gate
+    assert "n_capture_missing_runs=1" in gate.detail, gate
 
 
 def _write_raw_waveform(session_dir, unit_id, half0, half1):
@@ -1086,6 +1221,71 @@ def test_evaluate_gates_g3a_exact_fails_on_one_differing_half(tmp_path):
     )
     assert g3a_exact.passed is True, g3a_exact
     assert g3a_exact.detail == "8/8", g3a_exact
+
+
+def test_evaluate_gates_g3a_exact_counts_missing_unit_as_not_identical(
+    tmp_path,
+):
+    """A non-S unit present in control but excluded from the scenario bundle
+    (or the reverse) counts as NOT identical -- it must not be skipped.
+
+    Unit 3 is present (and bit-identical) in both control and scenario, both
+    sessions. Unit 5 is present in control but entirely missing from the
+    scenario bundle (both sessions) -- as if it had fewer than two sampled
+    spikes in that run only. Unit 5 contributes 4 non-identical comparisons
+    (2 sessions x 2 halves) and 0 identical ones; unit 3 contributes 4
+    identical comparisons: total 4/8, not 4/4 (which is what skipping unit 5
+    would have reported).
+    """
+    from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
+        evaluate_gates,
+    )
+
+    unit_ids = [3, 5]
+    s_units = []
+
+    for label in ("A", "B"):
+        _write_raw_waveform(
+            tmp_path / "control" / label,
+            3,
+            np.full((4, 2), 3.0),
+            np.full((4, 2), 4.0),
+        )
+        _write_raw_waveform(
+            tmp_path / "control" / label,
+            5,
+            np.full((4, 2), 5.0),
+            np.full((4, 2), 6.0),
+        )
+        # Scenario bundle: unit 3 identical to control; unit 5 excluded
+        # entirely (no RawWaveforms file at all).
+        _write_raw_waveform(
+            tmp_path / "scenario" / label,
+            3,
+            np.full((4, 2), 3.0),
+            np.full((4, 2), 4.0),
+        )
+
+    control_dirs = {
+        label: str(tmp_path / "control" / label) for label in ("A", "B")
+    }
+    scenario_dirs = {
+        label: str(tmp_path / "scenario" / label) for label in ("A", "B")
+    }
+
+    def record(scenario, bundle_dirs):
+        r = _gate_test_record(1, scenario, unit_ids, s_units, set())
+        r["bundle_dirs"] = bundle_dirs
+        return r
+
+    control = record("control", control_dirs)
+    scenario = record("driftout_A", scenario_dirs)
+    gates = evaluate_gates([control, scenario], "per_unit")
+    g3a_exact = _gate(
+        gates, "G3a-exact non-S template bit-identity", "driftout_A"
+    )
+    assert g3a_exact.passed is False, g3a_exact
+    assert g3a_exact.detail == "4/8", g3a_exact
 
 
 def test_true_pair_probability_lookup_sparse_reordered_ids():
