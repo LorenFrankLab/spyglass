@@ -130,12 +130,15 @@ excluded raises.
     - Drift-out recall: 42/50 (0.84) cut from one session, 43/50 (0.86) cut
       from both -- the previous construction scored 0/50 in both.
     - Healthy (non-drift-out) units: cross-validation-half templates stayed
-      bit-identical to the no-drift control in 600/600 pairs in both
-      scenarios; mean true-pair match probability moved by 0.0032 and
-      -0.0118 respectively (limit 0.04), and the healthy false-positive rate
-      increased by 0.0010 and 0.0038 (limit 0.005).
-    - False pairs among drift-out units: 4/200 in both scenarios (limit
-      0.015), all four from one dataset (seed 12).
+      bit-identical to the no-drift control in 600/600 template halves in
+      both scenarios; mean true-pair match probability fell by 0.0032
+      (cut from one session) and rose by 0.0118 (cut from both) relative to
+      control (limit: a drop of at most 0.04), and the healthy
+      false-positive rate increased by 0.0010 and 0.0038 (limit 0.005).
+    - False pairs among drift-out units: 4/200 = 0.020 in both scenarios,
+      above the benchmark's 0.015 limit; all four from one dataset (seed 12)
+      whose UnitMatch threshold jumped, so this rate is reported, not
+      gated.
 - UnitMatch fits its match threshold, prior and score distributions from the
   units in each run; with about 20 units per session that per-run
   calibration is unstable and can occasionally accept a burst of false
