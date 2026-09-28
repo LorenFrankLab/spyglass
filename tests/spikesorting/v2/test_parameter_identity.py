@@ -754,6 +754,42 @@ def test_sorter_duplicate_rejected_scoped_by_sorter(dj_conn):
 
 
 @pytest.mark.database
+def test_params_lookup_rejects_replace(dj_conn):
+    """``insert(..., replace=True)`` and ``insert1(..., replace=True)`` raise
+    on every ``ImmutableParamsLookup`` subclass, not just QMP -- the mixin
+    covers every params Lookup that forwards kwargs through ``super().insert``.
+    The stored row is unchanged afterwards.
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.metric_curation import (
+        QualityMetricParameters,
+    )
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    QualityMetricParameters.insert_default()
+    qmp_key = {"metric_params_name": "franklab_default"}
+    qmp_before = (QualityMetricParameters & qmp_key).fetch1()
+    with pytest.raises(dj.errors.DataJointError):
+        QualityMetricParameters().insert(dict(qmp_before), replace=True)
+    with pytest.raises(dj.errors.DataJointError):
+        QualityMetricParameters().insert1(dict(qmp_before), replace=True)
+    assert (QualityMetricParameters & qmp_key).fetch1() == qmp_before
+
+    SorterParameters.insert_default()
+    sorter_key = {
+        "sorter": "clusterless_thresholder",
+        "sorter_params_name": "default",
+    }
+    sorter_before = (SorterParameters & sorter_key).fetch1()
+    with pytest.raises(dj.errors.DataJointError):
+        SorterParameters().insert([dict(sorter_before)], replace=True)
+    with pytest.raises(dj.errors.DataJointError):
+        SorterParameters().insert1(dict(sorter_before), replace=True)
+    assert (SorterParameters & sorter_key).fetch1() == sorter_before
+
+
+@pytest.mark.database
 def test_describe_parameter_rows_columns_and_usage(dj_conn):
     """Documented columns + correct ``used_by_pipeline_presets`` per row."""
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters

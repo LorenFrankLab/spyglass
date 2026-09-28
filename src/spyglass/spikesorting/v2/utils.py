@@ -392,15 +392,17 @@ class ImmutableParamsLookup:
     name for identical content (``reject_duplicate_parameter_content``)
     because that forks provenance; the symmetric hazard is editing a row's
     blob IN PLACE under the SAME name, which silently re-defines what every
-    already-minted id means. ``update1`` is the only standard in-place
-    mutation path, so guard it: a backend/parameter change requires a NEW
-    named row, not an in-place edit.
+    already-minted id means. DataJoint offers two standard in-place mutation
+    paths -- ``update1`` and ``insert(..., replace=True)`` -- so both are
+    guarded here: a backend/parameter change requires a NEW named row, not an
+    in-place edit or overwrite.
 
     ``allow_param_mutation=True`` is the escape hatch for a deliberate
-    maintenance or test edit (mirroring ``allow_direct_insert`` on
-    :class:`SelectionMasterInsertGuard`) of a row known to have no live
-    downstream references. The mixin must precede ``SpyglassMixin`` /
-    ``dj.Lookup`` in the MRO so its ``update1`` takes precedence.
+    maintenance or test edit of ``update1`` (mirroring ``allow_direct_insert``
+    on :class:`SelectionMasterInsertGuard`) of a row known to have no live
+    downstream references; ``insert(..., replace=True)`` has no such escape
+    hatch. The mixin must precede ``SpyglassMixin`` / ``dj.Lookup`` in the
+    MRO so its ``update1`` / ``insert`` take precedence.
     """
 
     def update1(self, row, *, allow_param_mutation=False):
@@ -431,6 +433,47 @@ class ImmutableParamsLookup:
                 "maintenance or test edit of a row with no live references."
             )
         super().update1(row)
+
+    def insert(self, rows, *args, replace=False, **kwargs):
+        """Reject ``replace=True``; otherwise forward to the next ``insert``.
+
+        DataJoint's ``insert(..., replace=True)`` overwrites a row's content
+        in place under its EXISTING primary key (SQL ``REPLACE``) -- the same
+        identity-forking hazard ``update1`` above guards against, reachable
+        through a different DataJoint entry point. Unlike ``update1``, there
+        is no escape hatch here: a deliberate content change still needs a
+        NEW named row, not an in-place overwrite of one every downstream
+        selection may already reference.
+
+        Every subclass whose own ``insert`` override forwards ``**kwargs`` to
+        ``super().insert(...)`` reaches this check; a subclass that never
+        calls ``super().insert`` at all (``AutoCurationRules`` /
+        ``AutoCurationRules.Rule`` reject direct inserts unconditionally) or
+        that guards ``replace`` itself before calling ``super()``
+        (``UnitAnnotationDefinition``, ``CurationReviewProfile``) is already
+        covered without reaching here.
+
+        Parameters
+        ----------
+        rows
+            Forwarded to ``super().insert`` unchanged.
+        replace : bool, optional
+            Must be ``False`` (the default); ``True`` raises.
+
+        Raises
+        ------
+        datajoint.errors.DataJointError
+            If ``replace=True``.
+        """
+        if replace:
+            raise dj.errors.DataJointError(
+                f"insert(replace=True) on {self.__class__.__name__} is not "
+                "supported: this row's content is folded into the "
+                "deterministic id of downstream selections, so overwriting "
+                "it in place under the same key silently re-defines what "
+                "existing ids mean. Insert a NEW named row instead."
+            )
+        super().insert(rows, *args, **kwargs)
 
 
 # ``CurationSource`` and ``CurationLabel`` are defined in the stdlib-only
