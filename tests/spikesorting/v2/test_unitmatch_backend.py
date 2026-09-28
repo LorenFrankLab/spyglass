@@ -606,7 +606,7 @@ def test_bundle_all_units_excluded_raises(tmp_path, saved_bundles):
     assert isinstance(excinfo.value, ValueError)
     assert str(session_dir) in str(excinfo.value)
     assert "fewer than two" in str(excinfo.value)
-    assert not session_dir.exists() or not any(session_dir.iterdir())
+    assert not session_dir.exists()
     assert saved_bundles == {}
 
 
