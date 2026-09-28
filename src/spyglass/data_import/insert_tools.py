@@ -60,6 +60,8 @@ def insert_sessions(
     raise_err: bool = False,
     reinsert: bool = False,
     dry_run: bool = False,
+    use_plan: bool = False,
+    on_divergence: str = "interactive",
 ):
     """Populate the database with new sessions.
 
@@ -90,12 +92,24 @@ def insert_sessions(
         runs tables in the order an insert would, so a table resolving a
         reference to one this ingestion also fills sees the planned rows.
 
+    use_plan : bool, optional
+        If True, check each file in full and then insert what was checked,
+        rather than inserting table by table and recording whatever failed.
+        Nothing is written unless the plan is clean, so a file no longer
+        half-ingests before failing, and a re-attempt skips what is already
+        stored. Default False.
+    on_divergence : str, optional
+        With `use_plan`, what to do when the file disagrees with a stored row:
+        `interactive` asks once, `accept` keeps the stored value and inserts
+        the rest, `raise` declines. Default `interactive`.
+
     Returns
     -------
     list
         One `populate_all_common` result per file processed -- an
-        `IngestionPlan` on a dry run. Files skipped because they are already
-        in the Nwbfile table contribute no entry, except on a dry run.
+        `IngestionPlan` on a dry run or with `use_plan`. Files skipped because
+        they are already in the Nwbfile table contribute no entry, except on a
+        dry run.
     """
 
     if not isinstance(nwb_file_names, list):
@@ -172,6 +186,8 @@ def insert_sessions(
                 out_nwb_file_name,
                 rollback_on_fail=rollback_on_fail,
                 raise_err=raise_err,
+                use_plan=use_plan,
+                on_divergence=on_divergence,
             )
         )
 

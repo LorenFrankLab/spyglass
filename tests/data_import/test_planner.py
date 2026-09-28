@@ -22,8 +22,34 @@ from spyglass.utils.ingestion_plan import IngestionPlan
 
 @pytest.fixture
 def clean_plan(common, mini_copy_name, mini_insert):
-    """A plan for the already-ingested test file."""
-    return plan_nwbfile(mini_copy_name)
+    """A plan for a file this fixture has *made sure* is fully ingested.
+
+    `mini_insert` ingests once per session, so a fixture that merely depended
+    on it was asserting the suite's history: any test in between may leave a
+    table short of rows -- deliberately, as several do -- and the verdict then
+    reads `partial_new` for reasons that have nothing to do with the test.
+
+    So establish the premise rather than assume it: plan, insert whatever is
+    still outstanding, and re-plan. Only rows the file itself describes are
+    inserted, which is the state the suite expects anyway, so this converges
+    toward the shared baseline rather than away from it. Extra rows left by
+    another test do not matter here -- novelty counts what is planned and
+    missing, not what is stored and unplanned.
+    """
+    from spyglass.data_import.planner import insert_plan
+
+    plan = plan_nwbfile(mini_copy_name)
+
+    if plan.verdict != "no_op":  # repair, then look again
+        insert_plan(plan, on_divergence="accept", allow_partial=True)
+        plan = plan_nwbfile(mini_copy_name)
+
+    assert plan.verdict == "no_op", (
+        "Fixture could not reach a fully-ingested file; still outstanding: "
+        + f"{plan.new_entries_by_table()}"
+    )
+
+    return plan
 
 
 # ---------------------------------------------------------------------------

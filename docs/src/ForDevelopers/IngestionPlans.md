@@ -45,6 +45,34 @@ fills — `SensorData` and `DIOEvents` want `Raw`'s interval, `VideoFile` wants
 the task epochs — reads it from the plan rather than from a database that has
 not been written yet.
 
+## Ingesting from the plan
+
+`use_plan=True` checks the whole file first, then inserts what it checked:
+
+```python
+from spyglass.data_import import insert_sessions
+
+plan = insert_sessions("minirec20230622.nwb", use_plan=True)[0]
+```
+
+The difference from the default path is what happens when something is wrong.
+Inserting table by table, a file with one bad table still wrote every table
+before it, and you were left to work out how far it got. With a plan, a blocking
+problem means **nothing is written** — the file is as it was, the report names
+every problem at once, and a re-attempt skips whatever is already stored.
+
+`on_divergence` decides what to do when the file disagrees with a stored row:
+`interactive` (default) asks once for the run, `accept` keeps the stored values
+and inserts the rest, `raise` declines. `allow_partial=True` inserts the tables
+that planned cleanly even though others did not — off by default, so a
+half-ingested file is a choice rather than an accident.
+
+!!! note "Opt-in for now"
+
+    The default remains the per-table path, which records failures in `InsertError`.
+    A future release makes planning the default and adds `ignore_errors=True` to
+    restore today's permissive behaviour.
+
 ## Planning a file directly
 
 ```python

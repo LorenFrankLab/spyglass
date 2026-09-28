@@ -182,16 +182,12 @@ def test_multi_object_merge_accepts_a_new_table(
     re-inserting raises by design -- see the 0.5.6 breaking change. The merge
     is what this test is about, and planning exercises it without the raise.
 
-    **Not asserted: TaskEpoch's own rows.** Planning this table *alone* gets no
-    key space, so epoch-to-interval resolution falls back to the database, where
-    F16's substring matcher finds `1` in `01_s1`, `01_s1_first9`,
-    `lfp_test_01_s1_first9_valid times` and any UUID containing a "1" -- no
-    unique match, so the epoch yields nothing. That is pre-existing F16
-    behaviour against a live database, and this test used to avoid it only
-    because a stale `_interval_cache` carried a cleaner interval list over from
-    an earlier test; F21 stopped that leak. The merge is still fully exercised:
-    two task tables each emit a Task entry, and one merged key holding both is
-    the KeyError this test exists to pin.
+    **Not asserted: TaskEpoch's own rows.** Planning this table alone gets no
+    key space, so epoch-to-interval resolution reads the database, and how many
+    epochs resolve there depends on which derived intervals other pipelines
+    have added. The merge is still fully exercised either way: two task tables
+    each emit a Task entry, and one merged key holding both is the KeyError
+    this test exists to pin.
     """
     plan = common.TaskEpoch().plan_from_nwbfile(mini_copy_name)
     entries = plan.entries

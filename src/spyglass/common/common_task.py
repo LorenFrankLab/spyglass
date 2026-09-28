@@ -1,3 +1,5 @@
+import re
+
 import datajoint as dj
 import pynwb
 
@@ -457,13 +459,17 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
     def get_epoch_interval_name(cls, epoch, session_intervals):
         """Get the interval name for a given epoch based on matching number.
 
-        This method implements flexible matching to handle various epoch tag
-        formats. It tries multiple formats to find a match:
-        1. Exact match (e.g., "1")
-        2. Two-digit zero-padded (e.g., "01")
-        3. Three-digit zero-padded (e.g., "001")
-        If multiple matches are found, the two-digit only match is prioritized if
-        present. If no unique match is found, a warning is logged.
+        Handles the epoch tag formats `1`, `01`, `001`, `01_s1`, `epoch_01` and
+        a descriptive tag such as `baseline`. The epoch must match a whole token
+        -- a run of letters and digits -- rather than appear anywhere in the
+        name, so epoch 1 matches `01_s1` but not `1ae82410-f27d-...`.
+
+        Candidates are ranked in tiers and the first non-empty tier decides:
+        the whole name (`01`), then the leading token (`01_s1`), then any token
+        (`epoch_01`). Within a tier, a name that is a prefix of the others wins,
+        since derived intervals extend the session interval's name
+        (`01_s1_first9`). Anything still ambiguous logs a warning and returns
+        None rather than guessing.
 
         Parameters
         ----------
@@ -486,44 +492,72 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
         '02'
         >>> TaskEpoch.get_epoch_interval_name(3, session_intervals)
         '003'
+        >>> TaskEpoch.get_epoch_interval_name(1, ["01_s1", "01_s1_first9"])
+        '01_s1'
+        >>> TaskEpoch.get_epoch_interval_name(1, ["epoch_01"])
+        'epoch_01'
         """
         if epoch in session_intervals:
             return epoch
 
-        two_digit_matches = [
-            interval
-            for interval in session_intervals
-            if str(epoch).zfill(2) in interval
-        ]
-        if len(set(two_digit_matches)) == 1:
-            return two_digit_matches[0]
+        # `1`, `01`, `001`; deduplicated, since a wide epoch number collapses
+        # them. A non-numeric tag is unchanged by zfill, so it appears once.
+        forms = list(
+            dict.fromkeys(
+                [str(epoch), str(epoch).zfill(2), str(epoch).zfill(3)]
+            )
+        )
 
-        # Try multiple formats:
-        possible_formats = [
-            str(epoch),  # Try exact match first (e.g., "1")
-            str(epoch).zfill(2),  # Try 2-digit zero-pad (e.g., "01")
-            str(epoch).zfill(3),  # Try 3-digit zero-pad (e.g., "001")
-        ]
-        unique_formats = list(dict.fromkeys(possible_formats))
+        for form in forms:  # a name that *is* the epoch beats any holding it
+            if form in session_intervals:
+                return form
 
-        # Find matches for any format, remove duplicates preserving order
-        possible_targets = [
-            interval
-            for interval in session_intervals
-            for target in unique_formats
-            if target in interval
-        ]
+        form_set = set(forms)
+        leading, anywhere = [], []  # tier 2 and tier 3
+        for interval in session_intervals:
+            tokens = cls._tokens(interval)
+            if tokens and tokens[0] in form_set:
+                leading.append(interval)
+            elif form_set & set(tokens):
+                anywhere.append(interval)
 
-        if len(set(possible_targets)) == 1:
-            return possible_targets[0]
+        candidates = []
+        for tier in (leading, anywhere):
+            candidates = list(dict.fromkeys(tier))
+            if not candidates:
+                continue  # weaker evidence only speaks when there is no better
 
-        warn = "Multiple" if len(possible_targets) > 1 else "No"
+            if len(candidates) == 1:
+                return candidates[0]
+
+            # The session interval is the stem the others were built from.
+            shortest = min(candidates, key=len)
+            if all(other.startswith(shortest) for other in candidates):
+                return shortest
+
+            break  # ambiguous at this strength; a weaker tier cannot settle it
 
         cls()._warn_msg(
-            f"{warn} interval(s) found for epoch {epoch}. "
-            f"Available intervals: {session_intervals}"
+            f"{'Multiple' if candidates else 'No'} interval(s) found for epoch "
+            f"{epoch}. Available intervals: {session_intervals}"
         )
         return None
+
+    @staticmethod
+    def _tokens(interval_name: str) -> list:
+        """Split an interval name into runs of letters and digits.
+
+        `01_s1` -> `["01", "s1"]`; `1ae82410-f27d` -> `["1ae82410", "f27d"]`.
+
+        Parameters
+        ----------
+        interval_name : str
+
+        Returns
+        -------
+        list of str
+        """
+        return re.findall(r"[A-Za-z0-9]+", str(interval_name))
 
     @staticmethod
     def _check_videos_without_task(nwbf, nwb_file_name):

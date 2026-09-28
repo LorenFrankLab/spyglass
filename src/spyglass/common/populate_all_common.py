@@ -94,10 +94,14 @@ def log_insert_error(
 def _plan_only(nwb_file_name: str):
     """Plan a file, stage the plan, report, and write no data table.
 
-    What a dry run does. The plan pass reads the database but never writes to
-    it, so every problem in the file is reported at once rather than one per
-    table that happened to fail, and nothing is half-ingested afterwards.
-    The plan is staged so a later attempt can see what this one worked out.
+    The plan pass reads the database but never writes to it, so every problem
+    in the file is reported at once rather than one per table that happened to
+    fail, and nothing is half-ingested afterwards. The plan is staged so a
+    later attempt can see what this one worked out.
+
+    Shared by `dry_run`, which stops here, and `use_plan`, which hands the
+    result to `insert_plan`. One plan pass serves both, so what a dry run
+    reports is what a real run will do.
 
     Parameters
     ----------
@@ -127,6 +131,65 @@ def _plan_only(nwb_file_name: str):
     plan.report()
 
     return plan
+
+
+def _insert_from_plan(
+    nwb_file_name: str,
+    raise_err: bool = False,
+    on_divergence: str = "interactive",
+    allow_partial: bool = False,
+    rollback_on_miss: bool = False,
+):
+    """Plan the whole file, then insert what the plan worked out.
+
+    The point of the two passes: the first writes nothing, so every problem in
+    the file is reported before any table is touched, and a file that cannot be
+    ingested cleanly is not half-ingested first. The second re-derives nothing
+    -- it writes the rows the first pass already checked, skipping those already
+    stored, and closes the staging area on success.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        The copy file registered in Nwbfile.
+    raise_err : bool, optional
+        Raise at the end if anything blocked. Default False, returning the plan
+        for the caller to test. Nothing raises mid-pass either way.
+    on_divergence : str, optional
+        `interactive`, `accept` or `raise`. Default `interactive`.
+    allow_partial : bool, optional
+        Insert the tables that planned cleanly even though others did not.
+    rollback_on_miss : bool, optional
+        Delete the session if a validated plan fails halfway.
+
+    Returns
+    -------
+    IngestionPlan
+        Falsy when everything asked for was inserted.
+
+    Raises
+    ------
+    ValueError
+        When `raise_err` and the plan blocked, with the report attached.
+    """
+    from spyglass.data_import.planner import insert_plan
+
+    plan = _plan_only(nwb_file_name)
+
+    result = insert_plan(
+        plan,
+        allow_partial=allow_partial,
+        on_divergence=on_divergence,
+        rollback_on_miss=rollback_on_miss,
+    )
+
+    if raise_err and result:
+        raise ValueError(
+            f"Ingestion of {nwb_file_name} did not complete:\n"
+            + result.report(log=False)
+        )
+
+    return result
 
 
 def ingestion_table_list() -> List[dj.Table]:
@@ -269,7 +332,13 @@ def single_transaction_make(
 
 
 def populate_all_common(
-    nwb_file_name, rollback_on_fail=False, raise_err=False, dry_run=False
+    nwb_file_name,
+    rollback_on_fail=False,
+    raise_err=False,
+    dry_run=False,
+    use_plan=False,
+    on_divergence="interactive",
+    allow_partial=False,
 ) -> Union[List, None]:
     """Insert all common tables for a given NWB file.
 
@@ -282,29 +351,47 @@ def populate_all_common(
         Defaults to False. Deprecated: planning a file reports every problem
         before anything is written, so there is nothing to undo. A rollback
         now belongs only to a `planner_miss`, where a validated plan failed
-        halfway — see `insert_plan(rollback_on_miss=True)`.
+        halfway — see `insert_plan(rollback_on_miss=True)`, which is what this
+        maps to when `use_plan` is set.
     raise_err : bool, optional
         If True, will raise any errors that occur during population.
         Defaults to False. This will prevent any rollback from occurring.
+        With `use_plan`, nothing raises during the pass — every failure becomes
+        a problem on the plan — so this raises at the end if anything blocked.
     dry_run : bool, optional
         If True, plan the file and return the report without inserting
         anything. Every problem is reported at once rather than one per
         failed table, and no data table is written — see `IngestionPlan`.
         Default False.
+    use_plan : bool, optional
+        If True, insert from the plan a dry run would have reported: check the
+        whole file first, then write what was checked, skipping what is already
+        stored. Nothing is written unless the plan is clean, so a file no longer
+        half-ingests before failing. Default False, taking the per-table path
+        that stops at each failure and records it in `InsertError`.
+    on_divergence : str, optional
+        With `use_plan`, what to do when the file disagrees with a stored row:
+        `interactive` asks once, `accept` keeps the stored value and inserts the
+        rest, `raise` declines. Default `interactive`. Ignored otherwise, where
+        divergence is still resolved mid-transaction per table.
+    allow_partial : bool, optional
+        With `use_plan`, insert the tables that planned cleanly even though
+        others did not. Default False: a blocking problem inserts nothing, so a
+        half-ingested file is a choice rather than an accident.
 
     Returns
     -------
     IngestionPlan or List or None
-        On a dry run, the plan: falsy when nothing blocks it, iterable over
-        its blocking problems, and printable as the report. Otherwise a list
-        of keys for InsertError entries if any errors occurred.
+        With `dry_run` or `use_plan`, the plan: falsy when nothing blocks it,
+        iterable over its blocking problems, and printable as the report.
+        Otherwise a list of keys for InsertError entries if any errors occurred.
 
     Notes
     -----
     InsertError rows logged by an earlier attempt at the same file, under the
     same user and connection, are cleared before population starts, so the
-    returned list only ever describes the current attempt. A dry run neither
-    reads nor writes them.
+    returned list only ever describes the current attempt. Neither a dry run
+    nor a planned run reads or writes them.
     """
     from spyglass.lfp.lfp_imported import ImportedLFP
     from spyglass.position.v1.imported_pose import ImportedPose
@@ -314,6 +401,15 @@ def populate_all_common(
 
     if dry_run:
         return _plan_only(nwb_file_name)
+
+    if use_plan:
+        return _insert_from_plan(
+            nwb_file_name,
+            raise_err=raise_err,
+            on_divergence=on_divergence,
+            allow_partial=allow_partial,
+            rollback_on_miss=rollback_on_fail,
+        )
 
     error_constants = dict(
         dj_user=dj.config["database.user"],

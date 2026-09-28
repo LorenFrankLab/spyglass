@@ -183,3 +183,101 @@ def test_franklab_task_epoch_tags(common):
     assert (
         interval_name == "01_s1"
     ), "Failed to prioritize 2-digit zero-padded format"
+
+
+# --- epoch matching against a live database ---------------------------------
+# Interval names observed in a test database once LFP and spikesorting have
+# run, rather than invented ones.
+
+LIVE_DB_INTERVALS = [
+    "01_s1",
+    "01_s1_first9",
+    "02_s2",
+    "77c053e5-0b1d-4013-881c-ad4cb76309d1",
+    "1ae82410-f27d-4a30-8c08-e1aa8845c24e",
+    "lfp_test_01_s1_first9_valid times",
+    "pos 0 valid times",
+    "pos 1 valid times",
+    "raw data valid times",
+]
+
+
+def test_epoch_does_not_claim_an_unrelated_uuid_interval(common):
+    """An epoch must not match a UUID that happens to contain it.
+
+    `"5" in "77c053e5-0b1d-..."` is true, so matching on a bare substring gave
+    an epoch with no session interval a spikesorting interval instead, and
+    `TaskEpoch` gained a phantom row -- which `VideoFile`, keyed on TaskEpoch,
+    then turned into phantom video rows.
+    """
+    get_epoch = common.TaskEpoch.get_epoch_interval_name
+
+    for epoch in (3, 5):
+        assert (
+            get_epoch(epoch, LIVE_DB_INTERVALS) is None
+        ), f"Epoch {epoch} has no session interval and must match nothing"
+
+
+def test_epoch_resolves_despite_derived_intervals(common):
+    """Derived intervals must not make a real epoch ambiguous.
+
+    Once a database holds `01_s1_first9` and
+    `lfp_test_01_s1_first9_valid times`, a bare substring match found several
+    names for epoch 1, the uniqueness check gave up, and the epoch silently
+    produced no row -- invisible on a first ingestion, waiting for any later
+    re-plan.
+    """
+    get_epoch = common.TaskEpoch.get_epoch_interval_name
+
+    assert get_epoch(1, LIVE_DB_INTERVALS) == "01_s1"
+    assert get_epoch(2, LIVE_DB_INTERVALS) == "02_s2"
+
+
+def test_epoch_prefers_the_session_interval_over_its_descendants(common):
+    """The session interval is the stem the derived ones extend."""
+    get_epoch = common.TaskEpoch.get_epoch_interval_name
+
+    assert (
+        get_epoch(1, ["01_s1_first9", "01_s1", "01_s1 lfp band 100Hz"])
+        == "01_s1"
+    )
+
+
+def test_epoch_declines_to_guess_between_distinct_intervals(common):
+    """Two unrelated intervals sharing the epoch token is still ambiguous.
+
+    Guessing is what produced the phantom rows, so a real ambiguity returns
+    None rather than picking the shorter or the first.
+    """
+    get_epoch = common.TaskEpoch.get_epoch_interval_name
+
+    assert get_epoch(1, ["01_s1", "01_r1"]) is None
+
+
+def test_epoch_as_a_trailing_token_still_matches(common):
+    """`epoch_01` and `task_05` name their epoch; they are just not leading.
+
+    Requiring the epoch to *lead* the name would reject `epoch_01`, an
+    ordinary convention. Trailing tokens are tier 3: consulted only when
+    nothing leads with the epoch, so they never outrank an `01_s1`.
+    """
+    get_epoch = common.TaskEpoch.get_epoch_interval_name
+
+    assert get_epoch(1, ["epoch_01"]) == "epoch_01"
+    assert get_epoch(5, ["task_05"]) == "task_05"
+
+    # Two of them is a real ambiguity, and is not guessed at.
+    assert get_epoch(5, ["task_05", "trial_05"]) is None
+
+
+def test_a_leading_epoch_outranks_a_trailing_one(common):
+    """Tiering is what keeps tier 3 from re-creating the ambiguity.
+
+    `pos 1 valid times` holds `1` as a token, so without tiers it would tie
+    with `01_s1` for epoch 1, and the tie would yield no row at all.
+    """
+    get_epoch = common.TaskEpoch.get_epoch_interval_name
+
+    assert (
+        get_epoch(1, ["pos 1 valid times", "01_s1", "epoch_01"]) == "01_s1"
+    ), "A name leading with the epoch wins outright"

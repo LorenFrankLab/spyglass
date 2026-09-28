@@ -99,14 +99,13 @@ def test_insert_sessions_resolves_the_nwbfile_foreign_key(
 def test_planning_a_raw_file_resolves_every_cross_reference(
     common, unregistered_raw
 ):
-    """The F20 invariant: a reference resolves against the plan, not the DB.
+    """A cross-reference resolves against the plan, not the database.
 
-    Five tables used to work out a cross-reference by querying the database
-    for rows this same ingestion creates -- SensorData and DIOEvents want
-    `Raw`'s interval, TaskEpoch and VideoFile want `IntervalList`/`TaskEpoch`,
-    ImportedLFP needs an `LFPElectrodeGroup`. On a file with none of those rows
-    yet they reported a failure, planned nothing, or planned *different* rows.
-    Each must now plan what the file describes.
+    Five tables need a value from a table this same ingestion fills --
+    SensorData and DIOEvents want `Raw`'s interval, TaskEpoch and VideoFile
+    want `IntervalList`/`TaskEpoch`, ImportedLFP needs an
+    `LFPElectrodeGroup`. Querying for those rows finds nothing on a file that
+    is not ingested yet, so each must read them from the plan instead.
 
     Asserted against the file's own content rather than against a plan of its
     registered copy. Comparing the two found this bug and is a bad way to pin
