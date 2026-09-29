@@ -462,6 +462,29 @@ def plant_artifact_bursts(
 SINGLE_SHANK_PROBE_TYPE = "polymer-1shank-32ch-26um-sim"
 
 
+def rigid_zigzag_kwargs(period_s: float) -> dict:
+    """``generate_drifting_recording`` kwargs of the planted rigid zigzag.
+
+    +/-``RIGID_AMPLITUDE_UM`` along the probe axis with period ``period_s``,
+    sampled at ``DISPLACEMENT_SAMPLING_FREQUENCY``.
+    """
+    return dict(
+        displacement_sampling_frequency=DISPLACEMENT_SAMPLING_FREQUENCY,
+        drift_start_um=[0, RIGID_AMPLITUDE_UM],
+        drift_stop_um=[0, -RIGID_AMPLITUDE_UM],
+        drift_step_um=1,
+        motion_list=[
+            dict(
+                drift_mode="zigzag",
+                non_rigid_gradient=None,
+                t_start_drift=0.0,
+                t_end_drift=None,
+                period_s=period_s,
+            )
+        ],
+    )
+
+
 def write_drifting_polymer_nwb(
     out_path,
     *,
@@ -474,8 +497,9 @@ def write_drifting_polymer_nwb(
     """Write an ingestible one-shank polymer session with planted rigid drift.
 
     The raw (unfiltered) traces of :func:`rigid_drift_recordings`'s drifting
-    recording go into the Frank-lab NWB layout the MEArec fixtures use, so
-    ``insert_sessions`` and the v2 recording stage accept it.
+    recording go into the Frank-lab NWB layout the MEArec fixtures use
+    (:func:`write_polymer_nwb`), so ``insert_sessions`` and the v2 recording
+    stage accept it.
 
     Parameters
     ----------
@@ -489,10 +513,55 @@ def write_drifting_polymer_nwb(
     pathlib.Path
         ``out_path``.
     """
+    from spikeinterface.generation import generate_drifting_recording
+
+    _static, drifting, _sorting, _extra = generate_drifting_recording(
+        num_units=NUM_UNITS,
+        duration=duration_s,
+        sampling_frequency=SAMPLING_FREQUENCY,
+        probe=polymer_shank_probe(),
+        extra_outputs=True,
+        seed=seed,
+        generate_displacement_vector_kwargs=rigid_zigzag_kwargs(duration_s),
+    )
+    return write_polymer_nwb(
+        out_path,
+        drifting.get_traces(return_in_uV=True),
+        session_start=session_start,
+        fixture_name=fixture_name,
+        int16_offset_counts=int16_offset_counts,
+    )
+
+
+def write_polymer_nwb(
+    out_path,
+    traces,
+    *,
+    session_start,
+    fixture_name: str,
+    int16_offset_counts: int | None = None,
+):
+    """Write raw polymer-shank traces as an ingestible one-shank session.
+
+    The Frank-lab NWB layout the MEArec fixtures use: one
+    ``SINGLE_SHANK_PROBE_TYPE`` shank targeted at CA1 and an ``"e-series"``
+    starting at 0 s at ``SAMPLING_FREQUENCY``.
+
+    Parameters
+    ----------
+    traces : numpy.ndarray
+        ``(n_samples, N_CONTACTS)`` raw traces in microvolts.
+    int16_offset_counts : int, optional
+        See :func:`write_drifting_polymer_nwb`.
+
+    Returns
+    -------
+    pathlib.Path
+        ``out_path``.
+    """
     from pathlib import Path
 
     import pynwb
-    from spikeinterface.generation import generate_drifting_recording
 
     from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
         ProbeContact,
@@ -518,34 +587,10 @@ def write_drifting_polymer_nwb(
             for i in range(N_CONTACTS)
         ),
     )
-    _static, drifting, _sorting, _extra = generate_drifting_recording(
-        num_units=NUM_UNITS,
-        duration=duration_s,
-        sampling_frequency=SAMPLING_FREQUENCY,
-        probe=polymer_shank_probe(),
-        extra_outputs=True,
-        seed=seed,
-        generate_displacement_vector_kwargs=dict(
-            displacement_sampling_frequency=DISPLACEMENT_SAMPLING_FREQUENCY,
-            drift_start_um=[0, RIGID_AMPLITUDE_UM],
-            drift_stop_um=[0, -RIGID_AMPLITUDE_UM],
-            drift_step_um=1,
-            motion_list=[
-                dict(
-                    drift_mode="zigzag",
-                    non_rigid_gradient=None,
-                    t_start_drift=0.0,
-                    t_end_drift=None,
-                    period_s=duration_s,
-                )
-            ],
-        ),
-    )
     nwbfile = _build_nwbfile(
         fixture_name=fixture_name, session_start=session_start
     )
     _add_probe_and_electrodes(nwbfile, layout=layout, targeted_location="CA1")
-    traces = drifting.get_traces(return_in_uV=True)
     if int16_offset_counts is None:
         _add_raw_ephys(
             nwbfile, traces=traces, sampling_frequency=SAMPLING_FREQUENCY
@@ -570,6 +615,82 @@ def write_drifting_polymer_nwb(
     with pynwb.NWBHDF5IO(str(out_path), mode="w") as io:
         io.write(nwbfile)
     return out_path
+
+
+def planted_polymer_recordings(
+    *,
+    unit_trains,
+    unit_locations,
+    unit_params,
+    duration_s: float,
+    drift_period_s: float,
+    seed: int,
+):
+    """Raw polymer-shank recordings of planted neurons at known spike frames.
+
+    The generator of :func:`write_drifting_polymer_nwb` with every neuron
+    given: its location, its template parameters and its spike frames, so
+    two recordings built with the same locations and parameters hold the
+    same neurons (identical templates) firing on their own trains. ``seed``
+    draws only the background noise. The drifting twin carries the rigid
+    zigzag of :func:`rigid_zigzag_kwargs` with period ``drift_period_s``;
+    the static twin has the same
+    spikes and noise with zero displacement.
+
+    Parameters
+    ----------
+    unit_trains : sequence of numpy.ndarray
+        One sorted int64 array of spike frames per neuron (may be empty).
+    unit_locations : numpy.ndarray
+        ``(n_neurons, 3)`` x, y (along the shank) and z in um.
+    unit_params : dict
+        ``generate_templates`` unit parameters, each an ``(n_neurons,)``
+        array (every key of SpikeInterface's ``default_unit_params_range``).
+    duration_s : float
+        Recording length.
+    drift_period_s : float
+        Period of the drifting twin's zigzag (s).
+    seed : int
+        Noise seed.
+
+    Returns
+    -------
+    drifting, static : si.BaseRecording
+        Unfiltered recordings in microvolts.
+    """
+    import spikeinterface as si
+    from spikeinterface.generation import generate_drifting_recording
+
+    frames = [np.asarray(train, dtype=np.int64) for train in unit_trains]
+    sorting = si.NumpySorting.from_samples_and_labels(
+        samples_list=[np.concatenate(frames)],
+        labels_list=[
+            np.concatenate(
+                [
+                    np.full(f.size, i, dtype=np.int64)
+                    for i, f in enumerate(frames)
+                ]
+            )
+        ],
+        sampling_frequency=SAMPLING_FREQUENCY,
+        unit_ids=np.arange(len(frames)),
+    )
+    static, drifting, _sorting = generate_drifting_recording(
+        duration=duration_s,
+        sampling_frequency=SAMPLING_FREQUENCY,
+        probe=polymer_shank_probe(),
+        unit_locations=np.asarray(unit_locations, dtype=float),
+        generate_displacement_vector_kwargs=rigid_zigzag_kwargs(drift_period_s),
+        generate_templates_kwargs=dict(
+            ms_before=1.5,
+            ms_after=3.0,
+            mode="ellipsoid",
+            unit_params={k: np.asarray(v) for k, v in unit_params.items()},
+        ),
+        sorting=sorting,
+        seed=seed,
+    )
+    return drifting, static
 
 
 @contextmanager
