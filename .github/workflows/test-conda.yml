@@ -103,8 +103,14 @@ jobs:
         VID_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/
       run: |
         mkdir -p $RAW_DIR $VID_DIR
-        curl_opts() { # Declare func with download options
-          curl -L --output "$1""$2" "$BASEURL""$3"
+        curl_opts() { # Download $3 to $1$2; fail the step on any HTTP error
+          # --fail makes a 4xx/5xx (e.g. a rotated Box link) exit non-zero
+          # instead of saving the error page. Download to a .part name and
+          # rename only on success, so a failed or partial transfer never
+          # leaves a file at the fixture path for a cache step to save.
+          curl --fail -L --output "$1$2.part" "$BASEURL$3" \
+            || { rm -f "$1$2.part"; return 1; }
+          mv "$1$2.part" "$1$2"
         }
         curl_opts $RAW_DIR $NWBFILE $NWB_URL
         curl_opts $VID_DIR $VID_ONE $VID1URL
@@ -398,8 +404,14 @@ jobs:
         VID_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/
       run: |
         mkdir -p $RAW_DIR $VID_DIR
-        curl_opts() { # Declare func with download options
-          curl -L --output "$1""$2" "$BASEURL""$3"
+        curl_opts() { # Download $3 to $1$2; fail the step on any HTTP error
+          # --fail makes a 4xx/5xx (e.g. a rotated Box link) exit non-zero
+          # instead of saving the error page. Download to a .part name and
+          # rename only on success, so a failed or partial transfer never
+          # leaves a file at the fixture path for a cache step to save.
+          curl --fail -L --output "$1$2.part" "$BASEURL$3" \
+            || { rm -f "$1$2.part"; return 1; }
+          mv "$1$2.part" "$1$2"
         }
         curl_opts $RAW_DIR $NWBFILE $NWB_URL
         curl_opts $VID_DIR $VID_ONE $VID1URL
@@ -696,8 +708,14 @@ jobs:
         VID_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/
       run: |
         mkdir -p $RAW_DIR $VID_DIR
-        curl_opts() { # Declare func with download options
-          curl -L --output "$1""$2" "$BASEURL""$3"
+        curl_opts() { # Download $3 to $1$2; fail the step on any HTTP error
+          # --fail makes a 4xx/5xx (e.g. a rotated Box link) exit non-zero
+          # instead of saving the error page. Download to a .part name and
+          # rename only on success, so a failed or partial transfer never
+          # leaves a file at the fixture path for a cache step to save.
+          curl --fail -L --output "$1$2.part" "$BASEURL$3" \
+            || { rm -f "$1$2.part"; return 1; }
+          mv "$1$2.part" "$1$2"
         }
         curl_opts $RAW_DIR $NWBFILE $NWB_URL
         curl_opts $VID_DIR $VID_ONE $VID1URL
