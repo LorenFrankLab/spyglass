@@ -2613,9 +2613,16 @@ def test_tracked_units_map_to_original_member_times_and_regions(
 #: member, MS5 (stood in for by the planted sorter), no sorter motion step.
 _WORKFLOW_PRESET = "franklab_concat_hippocampus_30khz_ms5_2026_09"
 _WORKFLOW_MOTION_RECIPE = "dredge_fast_v1"
-#: The benchmark's held-out-gated two-day recall (0.78, see
-#: ``scripts/unitmatch_daily_concat_benchmark.py``) applied to the neurons
-#: planted on both days, rounded down: at least 17 of the 22.
+#: The recovery floor: the benchmark's held-out-gated two-day recall (0.78,
+#: ``scripts/unitmatch_daily_concat_benchmark.py``) applied to the 22 neurons
+#: planted on both days, rounded down -- at least 17. The benchmark's probe
+#: layout differs (16 contacts in two columns at 20 um pitch; here one column
+#: of 32 contacts at 26 um), so this is a carried-over number, not a property
+#: measured on this geometry. The rule was fixed before the DB-free trials
+#: that chose the scenario (see the test docstring); in those trials the
+#: drift-free ceiling of this design (day 1 replaced by its static twin) was
+#: 19 of 22. A pass does not show that motion-corrected daily matching
+#: recovers 78 % of neurons in general.
 _WORKFLOW_RECALL_FLOOR = 0.78
 
 
@@ -3001,7 +3008,29 @@ def _check_run(fixture, summaries, match, mode) -> dict:
         f"{record['matched']}; mixed: {mixed}; pairs (neuron, neuron) -> "
         f"probability: {sorted(record['pairs'].items())}"
     )
+    for neuron, row in per_neuron.items():
+        print(
+            f"[{mode}] neuron {neuron} ({row['role']}): matched="
+            f"{row['matched']} probability={row['probability']} "
+            f"tracked={row['tracked']}"
+        )
     return record
+
+
+def _assert_design_identities(record) -> None:
+    """No tracked unit mixes two neurons; each one-day distractor is a
+    lone singleton (the planted design implies both, drift or not)."""
+    from tests.spikesorting.v2 import _daily_match_fixtures as daily
+
+    assert record["mixed"] == [], record["mode"]
+    for neuron, role in enumerate(daily.ROLES):
+        if role.endswith("_only"):
+            tracked = record["per_neuron"][neuron]["tracked"]
+            assert len(tracked) == 1 and len(tracked[0]) == 1, (
+                record["mode"],
+                neuron,
+                tracked,
+            )
 
 
 @pytest.fixture(scope="module")
@@ -3039,11 +3068,29 @@ def test_daily_concat_workflow_matches_planted_neurons_end_to_end(
     - both inputs were read from their corrected sorting-input traces;
     - re-reading through fresh tables and the run's NWB gives the same.
 
+    What a pass shows, and what it does not: the scenario is co-registered
+    by construction. Day 1's 16 s drift period was chosen so that its
+    corrected position averages to day 2's, because per-day motion
+    correction registers each day to its own mean position, not across
+    days. In DB-free trials of this design (production bundle, UnitMatchPy
+    backend and tracked-unit graph, on these seeds), a rigid offset between
+    the days of 3 / 6 / 12 um recovered 22 / 12 / 1 of 24 neurons, and one
+    drift period per session (corrected days about 12 um apart) recovered 6
+    of 24. The scenario -- unit count, spacing, distractor clearance, drift
+    period -- was fixed after those trials; the floor rule was fixed before
+    them, and it carries over the benchmark's recall from a different probe
+    layout (``_WORKFLOW_RECALL_FLOOR``). So a pass shows the workflow's
+    plumbing and identities on days whose corrected positions agree; it
+    does not show that motion-corrected daily matching recovers at least
+    78 % of neurons across days that moved relative to each other.
+
     The same chain with ``motion_mode="off"`` is a control: its structure,
-    times, counts, regions and provenance are asserted the same way; its
-    recovery is printed, not asserted, because the floor assumes inputs
-    free of within-day drift and, uncorrected, day 1's planted drift moves
-    every unit by up to 25 um within the day.
+    times, counts, regions and provenance are asserted the same way, and so
+    are the identity properties the planted design implies with or without
+    drift: no tracked unit mixes two neurons and each one-day distractor
+    stays a singleton. Its recovery is printed, not asserted: uncorrected, day 1's
+    planted drift moves every unit by up to 25 um within the day. Both runs
+    print their per-neuron records before any recovery assertion.
     """
     from spyglass.spikesorting.v2.pipeline import estimate_motion
     from spyglass.spikesorting.v2.unit_matching import UnitMatch
@@ -3094,20 +3141,6 @@ def test_daily_concat_workflow_matches_planted_neurons_end_to_end(
         plan, match = _match_days(corrected)
         record = _check_run(fx, corrected, match, "apply")
 
-        both = daily.BOTH_DAYS
-        floor = int(np.floor(_WORKFLOW_RECALL_FLOOR * len(both)))
-        assert floor == 17
-        missed = sorted(set(both) - set(record["matched"]))
-        assert len(record["matched"]) >= floor, (
-            f"recovered {len(record['matched'])} of {len(both)} neurons "
-            f"planted on both days (floor {floor}); missed {missed}"
-        )
-        assert record["mixed"] == []
-        for neuron, role in enumerate(daily.ROLES):
-            if role.endswith("_only"):
-                assert len(record["per_neuron"][neuron]["tracked"]) == 1
-                assert len(record["per_neuron"][neuron]["tracked"][0]) == 1
-
         # Reload: fresh tables, the run's NWB and an idempotent re-run agree.
         label_of = {
             str(s["sorting_id"]): label for label, s in corrected.items()
@@ -3144,7 +3177,8 @@ def test_daily_concat_workflow_matches_planted_neurons_end_to_end(
             "reused",
         )
 
-        # Control: the same data and chain without motion correction.
+        # Control: the same data and chain without motion correction, run
+        # before any recovery assertion so its record is always printed.
         uncorrected = _sort_both_days(fx, trains_by_n_samples, monkeypatch)
         sorting_ids += [s["sorting_id"] for s in uncorrected.values()]
         for label, summary in uncorrected.items():
@@ -3154,10 +3188,22 @@ def test_daily_concat_workflow_matches_planted_neurons_end_to_end(
             assert summary["sorting_id"] != corrected[label]["sorting_id"]
         _plan, control_match = _match_days(uncorrected)
         control = _check_run(fx, uncorrected, control_match, "off")
+        both = daily.BOTH_DAYS
         print(
             f"[summary] corrected matched {len(record['matched'])}, "
             f"control matched {len(control['matched'])} of {len(both)}; "
             f"control mixed {control['mixed']}"
+        )
+
+        # Identities: design properties for both runs, the floor for apply.
+        _assert_design_identities(control)
+        _assert_design_identities(record)
+        floor = int(np.floor(_WORKFLOW_RECALL_FLOOR * len(both)))
+        assert floor == 17
+        missed = sorted(set(both) - set(record["matched"]))
+        assert len(record["matched"]) >= floor, (
+            f"recovered {len(record['matched'])} of {len(both)} neurons "
+            f"planted on both days (floor {floor}); missed {missed}"
         )
     finally:
         drop_pipeline_sorts(sorting_ids)
