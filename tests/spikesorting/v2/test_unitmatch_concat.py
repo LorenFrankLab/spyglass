@@ -1009,6 +1009,105 @@ def test_frozen_frames_and_order_are_verified_at_make(
         _drop(pk)
 
 
+def test_insert_inputs_rejects_concat_and_single_with_different_geometry(
+    daily_concat_match_inputs, monkeypatch
+):
+    """insert_inputs compares a concatenation input's channel geometry with a
+    single-recording input's as they are: a sort of session c's tetrode with
+    one channel left out does not share the day-1 concatenation's geometry,
+    so the selection is refused before any row is written."""
+    import functools
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+    from tests.spikesorting.v2._motion_db_helpers import drop_pipeline_sorts
+    from tests.spikesorting.v2.conftest import _plant_spread_unit
+
+    fx = daily_concat_match_inputs
+    cur = fx["curations"]
+    c_first = (RecordingSelection & fx["recording_keys"]["c_first"]).fetch1()
+    full_group = {
+        "nwb_file_name": c_first["nwb_file_name"],
+        "sort_group_id": int(c_first["sort_group_id"]),
+    }
+    master = (SortGroupV2 & full_group).fetch1()
+    electrodes = (SortGroupV2.SortGroupElectrode & full_group).fetch(
+        as_dict=True, order_by="electrode_id"
+    )
+    assert len(electrodes) == 4
+    subset_group = {
+        "nwb_file_name": full_group["nwb_file_name"],
+        "sort_group_id": int(
+            max(
+                (
+                    SortGroupV2 & {"nwb_file_name": full_group["nwb_file_name"]}
+                ).fetch("sort_group_id")
+            )
+        )
+        + 1,
+    }
+    SortGroupV2.insert1({**master, **subset_group})
+    SortGroupV2.SortGroupElectrode.insert(
+        [{**row, **subset_group} for row in electrodes[:-1]]
+    )
+    sort_key = None
+    try:
+        recording_key = RecordingSelection.insert_selection(
+            {
+                **subset_group,
+                "interval_list_name": c_first["interval_list_name"],
+                "team_name": c_first["team_name"],
+                "preprocessing_params_name": c_first[
+                    "preprocessing_params_name"
+                ],
+            }
+        )
+        Recording.populate(recording_key, reserve_jobs=False)
+        sort_key = SortingSelection.insert_selection(
+            {
+                **recording_key,
+                "sorter": "mountainsort5",
+                "sorter_params_name": "franklab_30khz_ms5_2026_06",
+            }
+        )
+        monkeypatch.setattr(
+            Sorting,
+            "_run_sorter",
+            staticmethod(functools.partial(_plant_spread_unit, unit_id=0)),
+        )
+        Sorting.populate(sort_key, reserve_jobs=False)
+        subset = CurationV2.insert_curation(sorting_key=sort_key)
+        subset = {
+            "sorting_id": subset["sorting_id"],
+            "curation_id": subset["curation_id"],
+        }
+        concat_positions = UnitMatchSelection._member_channel_positions(
+            cur["concat_day1"]
+        )
+        subset_positions = UnitMatchSelection._member_channel_positions(subset)
+        # The subset sort keeps three of the tetrode's four channels.
+        assert len(concat_positions) == 4
+        assert len(subset_positions) == 3
+
+        n_selections = len(UnitMatchSelection())
+        with pytest.raises(ValueError, match="probe geometry"):
+            UnitMatchSelection.insert_inputs(
+                [subset, cur["concat_day1"]], "unitmatch_default"
+            )
+        assert len(UnitMatchSelection()) == n_selections
+    finally:
+        if sort_key is not None:
+            drop_pipeline_sorts([sort_key["sorting_id"]])
+        (RecordingSelection & subset_group).super_delete(warn=False)
+        (SortGroupV2 & subset_group).super_delete(warn=False)
+
+
 def test_named_sort_plan_runs_without_a_group(
     daily_concat_match_inputs, monkeypatch
 ):
