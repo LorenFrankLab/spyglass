@@ -16,7 +16,10 @@ also requires recreating every
 analyzer needs rebuilding, and recreating any evaluation selection stamped
 with the prior observation version, because noise, whitening, and the
 nn-noise cluster are now estimated only from each sort's persisted
-statistics spans.
+statistics spans. It also requires
+[recreating every `UnitMatchSelection` / `UnitMatch` / `TrackedUnit` row](Features/SpikeSortingV2_Migration.md#recreating-unitmatch--trackedunit-rows),
+because cross-session matching now pins an explicit, ordered list of matching
+inputs instead of one curation per `SessionGroup` member.
 
 Spike sorting v2 now keeps analyzer builds private until a successful Sorting
 insert establishes publication ownership. Duplicate workers cannot overwrite
@@ -207,29 +210,63 @@ excluded raises.
   [preproduction database upgrade sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database)
   for the recreation order.
 
-#### Spike Sorting v2: UnitMatch bundles come from the sorting input, inside statistics spans
+#### Spike Sorting v2: UnitMatch matches independently sorted daily concatenations
 
+Cross-session matching now pins an explicit, ordered list of **matching
+inputs** instead of one curation per `SessionGroup` member. A matching input
+is one independently curated sort, of a single recording or of a same-day
+concatenation, so a daily same-day concatenation can now be matched directly
+-- previously only a single-recording sort could serve as a match input.
+
+- **Schema change:** `UnitMatchSelection`'s `MemberCuration` part
+  (`-> SessionGroup.Member`, `-> CurationV2`) is replaced by `Input`
+  (`input_index`, `-> CurationV2`, `curation_uuid`, `source_kind`,
+  `source_id`, `motion_corrected_recording_id`, `input_start_time`) and
+  `InputRecording` (one row per constituent recording, with its identity and
+  frozen frame span). The master's `-> SessionGroup` foreign key and
+  `curation_set_hash` are replaced by `input_set_hash` and the nullable,
+  non-FK `session_group_owner` / `session_group_name` provenance columns, so
+  deleting or renaming a `SessionGroup` no longer deletes or changes a match
+  run. Inputs are ordered chronologically by the earliest frozen
+  `session_start_time` among their recordings, independent of naming order.
+- **Overlap restrictions**, enforced at `insert_inputs` and re-checked at
+  `UnitMatch.make`: no two inputs may share a recording session
+  (`SameSessionMatchError`) -- this rejects two single-recording sorts of one
+  session, a concatenation matched together with a sort of one of its own
+  members, and two concatenations sharing a constituent session; a
+  concatenation input that spans more than one calendar day is rejected;
+  matching within one session is out of scope.
+- **A run of a single matching input is valid**: it writes the frozen
+  matchable-unit universe and an empty `Pair` table, and never calls the
+  matcher backend.
+- New `plan_v2_unit_match_from_sorts(sorting_ids, *, curation_strategy, ...)`
+  plans a match run directly from a list of already-curated `sorting_id`s,
+  with no `SessionGroup` required; `run_v2_unit_match` accepts its
+  `UnitMatchInputPlan` alongside the existing group-based
+  `plan_v2_unit_match` output. The run receipt gains `inputs` (one
+  `UnitMatchInputSummary` per matching input: identity, source,
+  constituent recordings, and whether the traces were motion-corrected),
+  read from the frozen selection without opening the run's NWB. New
+  `UnitMatch.get_input_provenance(key, from_nwb=False)` returns the same
+  per-input and per-recording provenance as two DataFrames, from the
+  database or the run's own NWB.
 - Bundle extraction reads the traces each input's sorter read. A
-    single-recording sort with a pinned artifact detection is now matched on its
-    artifact-masked traces; it previously read the unmasked `Recording` cache.
-    Concatenated and motion-corrected sorts read their masked persisted traces
-    as before.
-- A spike is sampled for a bundle only if its full waveform window lies inside
-    one of the sort's statistics spans (`Sorting.get_statistics_spans`), so no
-    sampled window crosses a concatenation member join, an acquisition gap or an
-    artifact exclusion. A unit with fewer than two such spikes is excluded from
-    the bundle and stays unmatched in the matchable universe, as before.
-- Bundles of a single continuous recording without artifact exclusions are
-    byte-identical to before. Bundles of sorts with artifact exclusions,
-    disjoint intervals or concatenations change, so delete and repopulate
-    existing `UnitMatch` rows that match such inputs.
-
-#### Spike Sorting v2: tracked units resolve to each original recording
-
-- **Schema change:** new `UnitMatch.RecordingSpikeCount` part with one row per
-  (matching input, constituent recording, matchable unit): the unit's spikes
-  inside that recording's frozen frame span. A concatenation input's parent
-  unit gets one row per member, zero where it did not fire.
+  single-recording sort with a pinned artifact detection is now matched on
+  its artifact-masked traces; it previously read the unmasked `Recording`
+  cache. Concatenated and motion-corrected sorts read their masked persisted
+  traces as before.
+- A spike is sampled for a bundle only if its full waveform window lies
+  inside one of the sort's statistics spans (`Sorting.get_statistics_spans`),
+  so no sampled window crosses a concatenation member join, an acquisition
+  gap or an artifact exclusion. A unit with fewer than two such spikes is
+  excluded from the bundle and stays unmatched in the matchable universe, as
+  before. Bundles of a single continuous recording without artifact
+  exclusions are byte-identical to before; bundles of sorts with artifact
+  exclusions, disjoint intervals or concatenations change.
+- **Schema change:** new `UnitMatch.RecordingSpikeCount` part with one row
+  per (matching input, constituent recording, matchable unit): the unit's
+  spikes inside that recording's frozen frame span. A concatenation input's
+  parent unit gets one row per member, zero where it did not fire.
 - **Schema change:** `TrackedUnit.n_sessions_observed` is renamed
   `n_sessions_detected` and now counts the distinct original sessions
   (`nwb_file_name`) in which at least one member unit has spikes; two
@@ -240,16 +277,23 @@ excluded raises.
 - `TrackedUnit.get_unit_brain_regions` returns one row per (tracked unit,
   member unit, original recording of the member's input), with
   `recording_index`, `interval_list_name`, `n_spikes`, `detected` and the
-  electrode and region columns. Each recording's region is resolved from that
-  recording's own session and sort group, so concatenation inputs are
+  electrode and region columns. Each recording's region is resolved from
+  that recording's own session and sort group, so concatenation inputs are
   supported; it was previously copied from the concatenation's first member.
 - New `TrackedUnit.get_member_spike_times` returns each member unit's spike
   times per original recording, on that recording's own clock: a
-  concatenation parent unit's spikes are split by the frozen member spans and
-  mapped onto each member `Recording`'s timestamps, the rule
+  concatenation parent unit's spikes are split by the frozen member spans
+  and mapped onto each member `Recording`'s timestamps, the rule
   `ConcatMemberCuration` uses, without needing its rows.
-- **Existing `UnitMatch` and `TrackedUnit` rows must be deleted and
-  repopulated.**
+- **Existing `UnitMatchSelection`, `UnitMatch` and `TrackedUnit` rows must be
+  deleted and recreated** -- a replaced part table and a part's changed
+  primary key cannot go through `alter()`. See the
+  [preproduction database upgrade sequence](Features/SpikeSortingV2_Migration.md#recreating-unitmatch--trackedunit-rows).
+- A preregistered, held-out-gated synthetic benchmark and an end-to-end
+  workflow test measure recovery on simulated same-day concatenations; see
+  "Cross-session unit tracking" in `Features/SpikeSortingV2.md` for the gated
+  metrics, the held-out results, and the motion-correction limitation (each
+  day is registered to its own mean position, not across days).
 
 #### Spike Sorting v2: trace accessors with one meaning each
 
