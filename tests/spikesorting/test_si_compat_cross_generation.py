@@ -62,6 +62,10 @@ def test_load_extractor_reads_si099_recording(si099, reference):
     np.testing.assert_array_equal(
         recording.get_channel_ids(), reference["channel_ids"]
     )
+    # Absolute NWB timestamps, not frame / fs: v0 converts frames to seconds
+    # with get_times().
+    assert recording.has_time_vector()
+    np.testing.assert_array_equal(recording.get_times(), reference["times"])
 
 
 def test_load_extractor_reads_si099_sorting(si099, reference):

@@ -129,7 +129,14 @@ def _write_recording(se, folder: Path):
     # serializer relative to the repository root so no machine path is
     # committed; loaders read binary.json, not provenance.json.
     source.dump_to_json(folder / "provenance.json", relative_to=REPO_ROOT)
-    return saved
+    # Reference times come from the NWB-read recording, not from the saved
+    # times file that the loaders under test read.
+    times = source.get_times()
+    if not (
+        saved.has_time_vector() and np.array_equal(saved.get_times(), times)
+    ):
+        raise SystemExit("saved recording lost the NWB time vector")
+    return saved, times
 
 
 def _write_sorting(folder: Path, sampling_frequency: float):
@@ -210,6 +217,8 @@ def _write_readme(si, recording, we, sizes: dict[str, int], n_files: int):
         f"`max_spikes_per_unit={MAX_SPIKES_PER_UNIT}`, dense, "
         "`use_relative_path=True` (SI 0.99 defaults to absolute paths).",
         "- `reference.npz`: SI 0.99 read-back: `traces` (raw `get_traces()`), "
+        "`times` (`get_times()` of the NWB-read recording: absolute NWB "
+        "timestamps, which v0 uses to convert frames to seconds), "
         "`channel_ids`, `unit_ids` (SI order), `spike_train_<unit>`, "
         "`waveforms_<unit>` (`we.get_waveforms(unit)`), `nbefore`, `nafter`.",
         "",
@@ -228,7 +237,7 @@ def main():
         shutil.rmtree(OUTPUT_DIR)
     OUTPUT_DIR.mkdir(parents=True)
 
-    recording = _write_recording(se, OUTPUT_DIR / "recording")
+    recording, times = _write_recording(se, OUTPUT_DIR / "recording")
     sorting = _write_sorting(
         OUTPUT_DIR / "sorting", recording.get_sampling_frequency()
     )
@@ -247,6 +256,7 @@ def main():
 
     reference = {
         "traces": recording.get_traces(return_scaled=False),
+        "times": times,
         "channel_ids": np.asarray(recording.get_channel_ids()),
         "unit_ids": np.asarray(sorting.get_unit_ids()),
         "nbefore": np.asarray(we.nbefore),

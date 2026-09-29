@@ -229,8 +229,9 @@ def test_v0_read_paths_under_modern_si(v0_rows_over_si099_folders):
 
     ``SpikeSortingRecording.load_recording`` and
     ``Curation.get_curated_sorting`` run unpatched on planted v0 rows whose
-    paths point at folders SpikeInterface 0.99 wrote; the loaded traces, channel
-    ids, unit ids and spike trains must equal what 0.99 read back.
+    paths point at folders SpikeInterface 0.99 wrote; the loaded traces, time
+    vector, channel ids, unit ids and spike trains must equal what 0.99 read
+    back.
 
     v1 reads analysis NWB files, not extractor folders; its only folder read is
     ``_si_compat.load_waveforms`` (via ``MetricCuration.get_waveforms``), which
@@ -251,6 +252,8 @@ def test_v0_read_paths_under_modern_si(v0_rows_over_si099_folders):
     traces = recording.get_traces(return_in_uV=False)
     assert traces.dtype == reference["traces"].dtype
     np.testing.assert_array_equal(traces, reference["traces"])
+    assert recording.has_time_vector()
+    np.testing.assert_array_equal(recording.get_times(), reference["times"])
 
     sorting = Curation().get_curated_sorting(planted["curation_key"])
     unit_ids = list(sorting.get_unit_ids())
