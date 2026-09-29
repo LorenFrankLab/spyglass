@@ -164,6 +164,10 @@ jobs:
           --ignore=tests/spikesorting/v1 \
           --ignore=tests/spikesorting/v2 \
           tests/
+    # This is the workflow's only coverage upload. The v0/v1/v2 spike-sorting
+    # tests are ignored above and run in pytest-v2 / pytest-legacy, which
+    # measure coverage but do not upload it, so the uploaded report
+    # undercounts spyglass.spikesorting.
     - name: Upload coverage reports to Codecov
       if: ${{ !cancelled() && hashFiles('coverage.xml') != '' }}
       uses: codecov/codecov-action@v5
