@@ -787,13 +787,9 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
     is ``sorter_runtime_available`` (the ml_ms4alg backend gate) -- any other
     preflight failure fails the test, so the narrow skip can't mask a real
     regression. Where MS4 is runnable (preflight passes) it runs with
-    ``preflight=False`` and asserts the MS4 sorter wiring; if the sort then
-    crashes it skips only on the SpikeInterface sorter-runtime error chained
-    from the sorting stage.
+    ``preflight=False`` and asserts the MS4 sorter wiring; a sort crash is a
+    test failure, not a skip.
     """
-    from spikeinterface.sorters.utils import SpikeSortingError
-
-    from spyglass.spikesorting.v2.exceptions import PipelineStageError
     from spyglass.spikesorting.v2.pipeline import (
         preflight_v2_pipeline,
         run_v2_pipeline,
@@ -824,17 +820,7 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
             pytest.fail(f"unexpected preflight failure(s): {failed}")
 
         # MS4 is runnable here; preflight already passed, so skip re-running it.
-        try:
-            run_summary = run_v2_pipeline(**inputs, preflight=False)
-        except PipelineStageError as exc:
-            # Backend present but the sort crashed at runtime. Skip ONLY when the
-            # sorting stage wrapped the SpikeInterface sorter-runtime error; any
-            # other stage, or a non-runtime cause, is a real regression.
-            if exc.stage == "sorting" and isinstance(
-                exc.__cause__, SpikeSortingError
-            ):
-                pytest.skip(f"mountainsort4 runtime failure: {exc!r}")
-            raise
+        run_summary = run_v2_pipeline(**inputs, preflight=False)
         sel = (
             SortingSelection & {"sorting_id": run_summary["sorting_id"]}
         ).fetch1()
