@@ -640,9 +640,9 @@ def test_concat_inputs_match_and_track_in_chronological_order(
     daily_concat_match_inputs, monkeypatch
 ):
     """Two daily concatenations run through UnitMatch and TrackedUnit: the
-    matcher is fed day 1 then day 2, a pair emitted day 2 -> day 1 is stored
-    with side a on day 1, and the tracked unit resolves to all four original
-    recordings."""
+    matcher is fed day 1 then day 2 whatever order the inputs were listed, a
+    pair the matcher emits with day 2 as its side a is stored with side a on
+    day 1, and the tracked unit resolves to all four original recordings."""
     from spyglass.common import Session
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2 import _unitmatch_backend
@@ -653,29 +653,37 @@ def test_concat_inputs_match_and_track_in_chronological_order(
         UnitMatch,
         UnitMatchSelection,
     )
+    from tests.spikesorting.v2.conftest import DAILY_CONCAT_UNIT_IDS
 
     fx = daily_concat_match_inputs
     cur = fx["curations"]
     day1, day2 = cur["concat_day1"], cur["concat_day2"]
     (unit_day1,) = CurationV2().get_matchable_unit_ids(day1)
     (unit_day2,) = CurationV2().get_matchable_unit_ids(day2)
-    fed = []
+    # Distinct planted ids, so a pair stored with its sides swapped fails.
+    assert (unit_day1, unit_day2) == (0, DAILY_CONCAT_UNIT_IDS["concat_day2"])
+    extracted = []
+    matcher_fed = []
 
-    def _record_feed(session_dir, recording, sorting, **kwargs):
+    def _record_extraction(session_dir, recording, sorting, **kwargs):
         Path(session_dir).mkdir(parents=True, exist_ok=True)
-        fed.append((Path(session_dir).name, recording.get_num_samples()))
+        extracted.append(
+            (Path(session_dir).name, [int(u) for u in sorting.get_unit_ids()])
+        )
         return []
 
-    # The fixture pairer emits (first fed, second fed); list the pair
-    # reversed so orientation, not feed order, must put day 1 on side a.
+    # later_first: the matcher emits (day 2 unit, day 1 unit) with day 2 --
+    # the second input fed -- as side a; orientation must flip it.
     saved = install_fixture_pairer(
         monkeypatch,
         matcher_name="daily_concat_pairer",
         matcher_params_name="daily_concat_pairer_params",
-        pairs=[[unit_day1, unit_day2]],
+        pairs=[[unit_day2, unit_day1]],
+        later_first=True,
+        fed=matcher_fed,
     )
     monkeypatch.setattr(
-        _unitmatch_backend, "extract_unitmatch_bundle", _record_feed
+        _unitmatch_backend, "extract_unitmatch_bundle", _record_extraction
     )
     pk = None
     try:
@@ -683,23 +691,10 @@ def test_concat_inputs_match_and_track_in_chronological_order(
             [day2, day1], "daily_concat_pairer_params"
         )
         UnitMatch.populate(pk, reserve_jobs=False)
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecording,
-        )
-
-        assert fed == [
-            (
-                "input_0",
-                (
-                    ConcatenatedRecording & fx["concat_keys"]["concat_day1"]
-                ).fetch1("n_samples"),
-            ),
-            (
-                "input_1",
-                (
-                    ConcatenatedRecording & fx["concat_keys"]["concat_day2"]
-                ).fetch1("n_samples"),
-            ),
+        assert extracted == [("input_0", [unit_day1]), ("input_1", [unit_day2])]
+        assert matcher_fed == [
+            ("input_0", str(day1["sorting_id"])),
+            ("input_1", str(day2["sorting_id"])),
         ]
         row = (UnitMatch & pk).fetch1()
         assert (AnalysisNwbfile & row).fetch1("nwb_file_name") == (

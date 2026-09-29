@@ -796,6 +796,11 @@ DAILY_CONCAT_INTERVALS = {
 }
 
 
+#: Planted unit ids that differ from the default 0, so the two daily
+#: concatenations' units are distinguishable.
+DAILY_CONCAT_UNIT_IDS = {"concat_day2": 3}
+
+
 def _plant_spread_unit(
     sorter,
     sorter_params,
@@ -805,8 +810,9 @@ def _plant_spread_unit(
     job_kwargs=None,
     execution_params=None,
     statistics_spans=None,
+    unit_id=0,
 ):
-    """One planted unit firing every 5000 frames across the whole recording."""
+    """One planted unit, ``unit_id``, firing every 5000 frames throughout."""
     import numpy as np
     import spikeinterface as si
 
@@ -814,7 +820,7 @@ def _plant_spread_unit(
     samples = np.arange(1000, recording.get_num_samples() - 1000, 5000)
     return si.NumpySorting.from_samples_and_labels(
         samples_list=[samples.astype(np.int64)],
-        labels_list=[np.zeros(len(samples), dtype=np.int32)],
+        labels_list=[np.full(len(samples), unit_id, dtype=np.int32)],
         sampling_frequency=recording.get_sampling_frequency(),
     )
 
@@ -828,7 +834,8 @@ def daily_concat_match_inputs(chronic_2_session_minirec):
     (``DAILY_CONCAT_INTERVALS``) and concatenated into one daily
     concatenation per day; a third, multi-day concatenation joins ``b``'s
     and ``c``'s first intervals. Every sort is planted (one unit every
-    5000 frames, ``Sorting._run_sorter`` monkeypatched) and root-curated:
+    5000 frames, ``Sorting._run_sorter`` monkeypatched; its unit id is
+    ``DAILY_CONCAT_UNIT_IDS`` or 0) and root-curated:
     single-recording sorts of ``a``, ``b`` and ``a``'s first interval, and
     one sort of each concatenation.
 
@@ -843,6 +850,7 @@ def daily_concat_match_inputs(chronic_2_session_minirec):
         ``b_first``, ``c_first``, ``c_second``) and ``nwb_file_names``
         (``a``, ``b``, ``c``).
     """
+    import functools
     import math
 
     import numpy as np
@@ -964,8 +972,17 @@ def daily_concat_match_inputs(chronic_2_session_minirec):
     curations = {}
     patch = pytest.MonkeyPatch()
     try:
-        patch.setattr(Sorting, "_run_sorter", staticmethod(_plant_spread_unit))
         for name, source in sources.items():
+            patch.setattr(
+                Sorting,
+                "_run_sorter",
+                staticmethod(
+                    functools.partial(
+                        _plant_spread_unit,
+                        unit_id=DAILY_CONCAT_UNIT_IDS.get(name, 0),
+                    )
+                ),
+            )
             sort_key = SortingSelection.insert_selection({**source, **sorter})
             if not (Sorting & sort_key):
                 Sorting.populate(sort_key, reserve_jobs=False)

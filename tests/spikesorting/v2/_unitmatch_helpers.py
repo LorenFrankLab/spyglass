@@ -87,6 +87,8 @@ def install_fixture_pairer(
     probability: float = 0.99,
     seen_unit_ids: list[list[int]] | None = None,
     read_bundles: bool = False,
+    later_first: bool = False,
+    fed: list | None = None,
 ):
     """Register a lightweight matcher for DB tests.
 
@@ -96,6 +98,11 @@ def install_fixture_pairer(
     ``cluster_group.tsv`` (appending its unit ids to ``seen_unit_ids``), and it
     emits only the listed pairs whose units are both in the bundles -- so the
     pairs follow what the bundles contain, as UnitMatchPy's loader does.
+    With ``later_first=True`` each listed pair is emitted with the SECOND fed
+    session as side a (``(unit in second, unit in first)``), so side a does
+    not follow feed order. ``fed``, when given, collects ``(bundle directory
+    name, sorting_id)`` for each session in the order the matcher received
+    them.
     """
     from pydantic import BaseModel, ConfigDict, Field
 
@@ -129,13 +136,24 @@ def install_fixture_pairer(
         name = matcher_name
 
         def match(self, session_inputs, params):
-            left = session_inputs[0].curation_key
-            right = session_inputs[1].curation_key
+            if fed is not None:
+                fed.extend(
+                    (
+                        Path(session_input.waveform_dir).name,
+                        str(session_input.curation_key["sorting_id"]),
+                    )
+                    for session_input in session_inputs
+                )
+            first, second = session_inputs[0], session_inputs[1]
+            if later_first:
+                first, second = second, first
+            left = first.curation_key
+            right = second.curation_key
             listed = params.get("pairs", [])
             if read_bundles:
                 left_ids, right_ids = (
                     _bundle_unit_ids(session_input)
-                    for session_input in session_inputs[:2]
+                    for session_input in (first, second)
                 )
                 if seen_unit_ids is not None:
                     seen_unit_ids.extend([sorted(left_ids), sorted(right_ids)])
