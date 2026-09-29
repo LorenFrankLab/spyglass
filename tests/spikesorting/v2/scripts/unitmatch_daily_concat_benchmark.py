@@ -22,10 +22,10 @@ target comes from the planted truth, never from the code under test.
 
 Neurons (per seed; templates from SpikeInterface ``generate_templates`` with
 per-neuron waveform parameters drawn once from SpikeInterface's default
-ranges, locations from ``generate_unit_locations`` at a 20 um minimum
-distance, spikes from ``generate_sorting`` at 10 Hz, noise 5 uV, 16 channels
-in two columns at 20 um pitch, 30 kHz -- the half-split experiment's probe,
-noise and rates):
+ranges, drawn locations from ``generate_unit_locations`` at a 20 um minimum
+distance (see "Spacing" below), spikes from ``generate_sorting`` at 10 Hz,
+noise 5 uV, 16 channels in two columns at 20 um pitch, 30 kHz -- the
+half-split experiment's probe, noise and rates):
 
 ``two_day``
     Two days. 16 ``shared`` neurons fire in both members of both days; 4
@@ -42,6 +42,15 @@ noise and rates):
     16 um apart along the probe axis, one of which moves 0 / 4 / 8 um toward
     the other on days 1 / 2 / 3; 3 ``distractor`` neurons per day. 25 / 21 / 25
     units on days 1 / 2 / 3.
+
+Spacing: in ``two_day`` no neuron moves, so every two neurons of a day are
+at least 20 um apart. In ``three_day`` only the drawn neurons (every neuron
+but the conflict partners) are held to 20 um, and only at their first-day
+location. A conflict partner is placed 16 um from its mover with no check
+against the other neurons, and the gradual and mover shifts are not checked
+either, so other same-day pairs closer than 20 um exist by construction (on
+the development seeds: 379 such pairs outside the designed mover / partner
+pairs, in all 40 seeds, the closest 4.3 um).
 
 Day layout (member durations in s; the exclusion is 1 s, silenced, inside the
 named member): ``two_day`` day 1 (35, 25), exclusion in member 0 at 14 s;
@@ -76,8 +85,11 @@ denominator]``:
 - Structural checks, each ``[violations, checked]``: ``same_input_group``
   (a tracked unit with two units of one day), ``recording_count_mismatch``
   (production per-recording counts differ from the planted per-member counts),
-  ``sessions_detected_mismatch`` / ``matching_inputs_mismatch`` (a tracked
-  unit's counts differ from the value derived from the planted counts).
+  ``sessions_detected_mismatch`` (a tracked unit's detected-session count
+  differs from the value derived from the planted per-member counts) and
+  ``matching_inputs_mismatch`` (a tracked unit's input count differs from
+  the number of days among its own members -- a consistency check of the
+  production count, not a comparison with the planted truth).
 
 Manifest (fixed before any held-out seed was run):
 
@@ -103,7 +115,9 @@ Manifest (fixed before any held-out seed was run):
   seed-bootstrap standard error of the development pooled rate. A ``>=``
   gate is ``floor_0.01(pooled - margin)``, a ``<=`` gate is
   ``ceil_0.01(pooled + margin)``; a candidate whose ``>=`` bound falls below
-  0.50 (or ``<=`` bound above 0.50) is reported, not gated.
+  0.50 (or ``<=`` bound above 0.50) is reported, not gated. The 0.50 cut-off
+  is a policy threshold for how weak a gate is still worth asserting, not a
+  chance level (random pairing would recover about 1 / n_units of the pairs).
 - Gates (:data:`GATES`, pooled over the held-out seeds, exact rational
   comparison; development pooled value, seed min / median / max, margin in
   brackets):
@@ -277,9 +291,10 @@ UNGATED_DIAGNOSTICS = {
             "derived bound 0.22 (below 0.50)"
         ),
         "pair_tracked:conflict": (
-            "the day-3 mover is as close to its partner as to its own day-1 "
-            "template, so the pair evidence conflicts by construction: "
-            "development pooled recall 0.575, derived bound 0.44 (below 0.50)"
+            "the class falls below the 0.50 cut-off (development pooled "
+            "recall 0.575, derived bound 0.44); its day 1 -- day 3 mover pair "
+            "is tied by construction, the day-3 mover being as close to its "
+            "partner as to its own day-1 location"
         ),
     },
 }
@@ -1216,8 +1231,10 @@ def derive_gate(
     gate is the pooled rate plus the margin, rounded UP to 0.01 (after
     rounding to nine decimals, so float noise never moves a bound). A ``>=``
     bound below ``MIN_GATED_RECALL`` (or a ``<=`` bound above
-    ``1 - MIN_GATED_RECALL``) would not show recovery better than a coin
-    flip, so the metric is not gated (``gated`` False).
+    ``1 - MIN_GATED_RECALL``) leaves the metric ungated (``gated`` False):
+    the cut-off is a policy threshold for how weak a gate is still worth
+    asserting, not a chance level (random pairing recovers about
+    ``1 / n_units`` of the pairs).
 
     Returns
     -------

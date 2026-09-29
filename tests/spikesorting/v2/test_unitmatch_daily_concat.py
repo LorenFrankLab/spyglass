@@ -1,4 +1,4 @@
-"""Known-answer benchmark for matching independently sorted daily concatenations.
+"""Known-answer benchmark: matching independently sorted daily concatenations.
 
 The dataset, scoring and gate functions live in
 ``tests/spikesorting/v2/scripts/unitmatch_daily_concat_benchmark.py``. The
@@ -111,8 +111,16 @@ def test_spike_trains_follow_the_planted_members(dataset):
         }
 
 
-def test_neurons_are_distinct_and_changes_are_as_stated(dataset):
-    """Distinct neurons keep the minimum distance; changes match the constants."""
+def test_spacing_holds_where_stated_and_changes_match_the_constants(dataset):
+    """The stated spacing holds; the per-day changes match the constants.
+
+    Every drawn neuron (all but the conflict partners) is at least the
+    minimum distance from every other drawn neuron at its first-day
+    location; in ``two_day``, where nothing moves, that holds for every two
+    neurons of every day. A conflict partner sits at the designed offset from
+    its mover. Other close pairs in ``three_day`` exist by construction and
+    are not asserted either way.
+    """
     min_distance = bench.UNIT_LOCATION_KWARGS["minimum_distance"]
     drawn = [
         n
@@ -122,6 +130,13 @@ def test_neurons_are_distinct_and_changes_are_as_stated(dataset):
     first = [n["location_um"][n["days"][0]] for n in drawn]
     for a, b in combinations(range(len(first)), 2):
         assert np.linalg.norm(first[a] - first[b]) >= min_distance
+    if dataset.scenario == "two_day":
+        for d in range(len(dataset.days)):
+            day = [
+                n["location_um"][d] for n in dataset.neurons if d in n["days"]
+            ]
+            for a, b in combinations(day, 2):
+                assert np.linalg.norm(a - b) >= min_distance
     neurons = {n["neuron_id"]: n for n in dataset.neurons}
     for neuron in dataset.neurons:
         days = neuron["days"]
@@ -348,7 +363,7 @@ def _records(scenario, per_seed_counts):
 
 
 def test_derive_gate_applies_the_margin_rule():
-    """The floor, the rounding direction and the coin-flip cut-off hold."""
+    """The floor, the rounding direction and the recall cut-off hold."""
     flat = _records("two_day", [{"m": [9, 10]}] * 40)
     up = bench.derive_gate(flat, "two_day", "m", ">=", 40)
     # No seed-to-seed spread: the margin is the floor, 0.90 - 0.05.
@@ -368,7 +383,7 @@ def test_derive_gate_applies_the_margin_rule():
     )
     assert wide["bound"] == np.floor((0.75 - wide["margin"]) * 100) / 100
     assert (wide["min"], wide["median"], wide["max"]) == (0.5, 0.75, 1.0)
-    # A bound below a coin flip is reported, not gated.
+    # A bound below the recall cut-off is reported, not gated.
     weak = _records("two_day", [{"m": [5, 10]}] * 40)
     assert not bench.derive_gate(weak, "two_day", "m", ">=", 40)["gated"]
 
@@ -406,8 +421,27 @@ def test_evaluate_gates_compares_pooled_rates_exactly():
     assert by_id["two-day-precision"].passed is None
 
 
-def _held_out_gates(scenario, out_dir):
-    """Run the held-out seeds of ``scenario`` and evaluate its gates."""
+#: When set, the held-out tests keep their bundles, per-run JSON,
+#: ``<scenario>_results.json`` and ``<scenario>_summary.md`` in this
+#: directory instead of pytest's temporary one.
+HELD_OUT_OUT_DIR_ENV = "SPYGLASS_UNITMATCH_BENCHMARK_OUT"
+
+
+def _held_out_gates(scenario, tmp_path):
+    """Run the held-out seeds of ``scenario`` and evaluate its gates.
+
+    Prints the full summary (every pooled metric, the gate lines and the
+    ungated diagnostics), so a ``-s`` run records the held-out numbers, and
+    writes it with the records to ``$SPYGLASS_UNITMATCH_BENCHMARK_OUT`` when
+    that is set.
+    """
+    import json
+    import os
+    from pathlib import Path
+
+    kept = os.environ.get(HELD_OUT_OUT_DIR_ENV)
+    out_dir = Path(kept).resolve() if kept else Path(tmp_path)
+    out_dir.mkdir(parents=True, exist_ok=True)
     seeds = range(
         bench.HELD_OUT_FIRST_SEED,
         bench.HELD_OUT_FIRST_SEED + bench.HELD_OUT_SEEDS,
@@ -418,6 +452,12 @@ def _held_out_gates(scenario, out_dir):
     )
     assert not set(seeds) & set(development)
     records = [bench.run_one(scenario, seed, out_dir) for seed in seeds]
+    summary = bench.format_summary(records)
+    print(summary)
+    if kept:
+        with open(out_dir / f"{scenario}_results.json", "w") as f:
+            json.dump({"records": records}, f, indent=1)
+        (out_dir / f"{scenario}_summary.md").write_text(summary)
     gates = bench.evaluate_gates(records, scenario)
     table = "\n".join(bench.format_gate_line(g) for g in gates)
     expected = {spec.gate_id for spec in bench.GATES[scenario]} | {
@@ -443,7 +483,9 @@ def test_daily_concat_matches_planted_units(tmp_path):
     unit holds two units of one day; production per-recording counts and
     tracked-unit session / input counts equal the planted truth).
 
-    The gates were derived from development seeds 0..39 only, with the
+    The full summary is printed (run with ``-s``, or set
+    ``SPYGLASS_UNITMATCH_BENCHMARK_OUT`` to keep it with the records). The
+    gates were derived from development seeds 0..39 only, with the
     margin rule in the benchmark module's docstring. Do not change the
     thresholds, seeds, dataset or scoring to make this pass, and do not
     xfail or skip it: a failure is a reported result. DB-free.
@@ -465,11 +507,14 @@ def test_three_day_concat_matches_planted_units(tmp_path):
     absent on day 2, pair precision, the incorrect-identity rate, the
     distractor false-match rate and zero structural violations.
 
-    Gradual-change and conflicting-pair recall are printed, not asserted:
-    on the development seeds their derived bounds fell below 0.50
-    (``UNGATED_DIAGNOSTICS``). The gates were derived from development seeds
-    0..39 only. Do not change the thresholds, seeds, dataset or scoring to
-    make this pass, and do not xfail or skip it. DB-free.
+    Gradual-change and conflicting-pair recall are printed (with every
+    other pooled metric; run with ``-s``, or set
+    ``SPYGLASS_UNITMATCH_BENCHMARK_OUT`` to keep the summary and records),
+    not asserted: on the development seeds their derived bounds fell below
+    the 0.50 cut-off (``UNGATED_DIAGNOSTICS``). The gates were derived
+    from development seeds 0..39 only. Do not change the thresholds, seeds,
+    dataset or scoring to make this pass, and do not xfail or skip it.
+    DB-free.
     """
     pytest.importorskip("UnitMatchPy")
     gates, table = _held_out_gates("three_day", tmp_path)
