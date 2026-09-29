@@ -31,6 +31,7 @@ from tests.spikesorting.v2._motion_db_helpers import (
     MEMBER_B_INTERVAL,
     MOTION_TEAM,
     drop_motion_selections,
+    session_start_s,
 )
 
 # These files are scripts and helper modules, not pytest test modules; the
@@ -1140,6 +1141,109 @@ def discontinuous_sources(drift_recording):
     for key in recording_keys.values():
         drop_motion_selections(key)
     clean_session_groups_for_owner(MOTION_TEAM)
+
+
+# ---- daily-concat matching: two days of the same planted neurons --------------
+
+
+@pytest.fixture(scope="module")
+def planted_matching_days(dj_conn, tmp_path_factory):
+    """Two ingested days of the same planted neurons, one session group each.
+
+    Each day of ``_daily_match_fixtures.DAYS`` is written as one polymer
+    session (day 1 with the planted drift), ingested, cut into its two member
+    intervals and grouped as ``daily_match_day1`` / ``daily_match_day2``
+    under ``DAILY_MATCH_TEAM``. Nothing is populated.
+
+    Yields
+    ------
+    dict
+        ``team`` and ``days``: ``{label: {"spec", "nwb_file_name", "t0",
+        "session_group_name", "manual_excluded_times"}}``, where ``t0`` is the
+        session's first raw timestamp and ``manual_excluded_times`` is the
+        day's exclusion in ``run_v2_pipeline``'s per-member form.
+    """
+    import numpy as np
+
+    from spyglass.common import IntervalList
+    from spyglass.settings import raw_dir
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+    from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
+    from tests.spikesorting.v2 import _daily_match_fixtures as design
+    from tests.spikesorting.v2._ingest_helpers import (
+        _clean_session_v2,
+        clean_session_groups_for_owner,
+        configure_v2_run_inputs,
+        copy_and_insert_nwb,
+    )
+    from tests.spikesorting.v2._motion_fixtures import write_polymer_nwb
+
+    team = design.DAILY_MATCH_TEAM
+
+    def _drop_team_rows():
+        concat_keys = (
+            ConcatenatedRecordingSelection & {"session_group_owner": team}
+        ).fetch("KEY", as_dict=True)
+        for key in concat_keys:
+            drop_motion_selections(
+                {"concat_recording_id": key["concat_recording_id"]}
+            )
+        clean_session_groups_for_owner(team)
+
+    _drop_team_rows()
+    out_dir = tmp_path_factory.mktemp("daily_match")
+    days, nwb_file_names = {}, []
+    for day in design.DAYS:
+        name = f"daily_match_{day.label}.nwb"
+        # A raw file left by an earlier run would be reused as is; the
+        # planted truth lives in this code, so always write a fresh one.
+        for stale in (name, get_nwb_copy_filename(name)):
+            (Path(raw_dir) / stale).unlink(missing_ok=True)
+        src = write_polymer_nwb(
+            out_dir / name,
+            design.day_recording(day).get_traces(return_in_uV=True),
+            session_start=day.session_start,
+            fixture_name=f"daily_match_{day.label}",
+        )
+        nwb_file_name = copy_and_insert_nwb(src, dest_name=name)
+        nwb_file_names.append(nwb_file_name)
+        t0 = session_start_s(nwb_file_name)
+        members = []
+        for index, (start, stop) in enumerate(day.members_s):
+            interval = f"daily match {day.label} member {index}"
+            IntervalList.insert1(
+                {
+                    "nwb_file_name": nwb_file_name,
+                    "interval_list_name": interval,
+                    "valid_times": np.asarray([[t0 + start, t0 + stop]]),
+                    "pipeline": "daily_match_test",
+                },
+                skip_duplicates=True,
+            )
+            members.append(
+                configure_v2_run_inputs(
+                    nwb_file_name, team, interval_list_name=interval
+                )
+            )
+        group = f"daily_match_{day.label}"
+        SessionGroup.create_group(team, group, members)
+        member, (ex_start, ex_stop) = day.exclusion
+        days[day.label] = {
+            "spec": day,
+            "nwb_file_name": nwb_file_name,
+            "t0": t0,
+            "session_group_name": group,
+            "manual_excluded_times": {member: [[t0 + ex_start, t0 + ex_stop]]},
+        }
+
+    yield {"team": team, "days": days}
+
+    _drop_team_rows()
+    for nwb_file_name in nwb_file_names:
+        _clean_session_v2({"nwb_file_name": nwb_file_name})
 
 
 #: Team owning the offset-source session group (its own owner, so no other
