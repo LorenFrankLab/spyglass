@@ -28,9 +28,12 @@ if TYPE_CHECKING:
     import pandas as pd
 
 # DB-free leaf module (imports no schema / no _pipeline_run), so a top-level
-# import is cycle-free and keeps the UnitMatchPlan annotations resolvable at
+# import is cycle-free and keeps the plan annotations resolvable at
 # runtime (e.g. typing.get_type_hints for API docs).
-from spyglass.spikesorting.v2._unit_match_planning import UnitMatchPlan
+from spyglass.spikesorting.v2._unit_match_planning import (
+    UnitMatchInputPlan,
+    UnitMatchPlan,
+)
 from spyglass.spikesorting.v2.curation_api import RunResult
 
 from spyglass.spikesorting.v2._pipeline_preflight import (
@@ -2223,28 +2226,35 @@ def run_v2_pipeline_session(
 
 
 def run_v2_unit_match(
-    plan: "UnitMatchPlan | None" = None,
+    plan: "UnitMatchPlan | UnitMatchInputPlan | None" = None,
     *,
     session_group_owner: "str | None" = None,
     session_group_name: "str | None" = None,
     matcher_params_name: str = "unitmatch_default",
     curation_choices: "dict | None" = None,
 ) -> RunV2UnitMatchSummary:
-    """Match units across a SessionGroup's members in one call, then track them.
+    """Match units across matching inputs in one call, then track them.
 
-    Two call forms:
+    A matching input is one curated sort, of a single recording or of a
+    same-day concatenation. Three call forms:
 
-    - ``run_v2_unit_match(plan)`` -- a :class:`UnitMatchPlan` from
-      :func:`plan_v2_unit_match` (the recommended plan-then-run path; the plan
-      already pinned one curation per member via a curation strategy). A plan
-      that could not resolve every member (``plan.ok is False``) raises here.
+    - ``run_v2_unit_match(plan)`` with a :class:`UnitMatchPlan` from
+      :func:`plan_v2_unit_match` (the recommended plan-then-run path for a
+      ``SessionGroup``; the plan already pinned one curation per member via a
+      curation strategy).
+    - ``run_v2_unit_match(plan)`` with a :class:`UnitMatchInputPlan` from
+      :func:`plan_v2_unit_match_from_sorts` (named sorts, no group; the plan
+      pinned one curation per sort). The pinned curations go to
+      ``UnitMatchSelection.insert_inputs``.
     - ``run_v2_unit_match(session_group_owner=..., session_group_name=...,
-      matcher_params_name=..., curation_choices={...})`` -- the explicit form,
-      for power users.
+      matcher_params_name=..., curation_choices={...})`` -- the explicit
+      group form, for power users.
 
-    Chains the cross-session unit-matching stages into one call:
-    ``UnitMatchSelection.insert_selection`` -> ``UnitMatch`` (pairwise matches)
-    -> ``TrackedUnit`` (biological-unit identity across sessions). Idempotent:
+    A plan that could not pin every curation (``plan.ok is False``) raises
+    here. Chains the cross-session unit-matching stages into one call: the
+    selection (``UnitMatchSelection.insert_selection`` for a group,
+    ``insert_inputs`` for named sorts) -> ``UnitMatch`` (pairwise matches) ->
+    ``TrackedUnit`` (biological-unit identity across sessions). Idempotent:
     re-running with the same inputs reuses the existing rows.
 
     In the explicit form ``curation_choices`` is REQUIRED -- this helper never
@@ -2256,8 +2266,9 @@ def run_v2_unit_match(
 
     Parameters
     ----------
-    plan : UnitMatchPlan, optional
-        Reviewable plan returned by :func:`plan_v2_unit_match`. Recommended.
+    plan : UnitMatchPlan or UnitMatchInputPlan, optional
+        Reviewable plan returned by :func:`plan_v2_unit_match` or
+        :func:`plan_v2_unit_match_from_sorts`. Recommended.
     session_group_owner, session_group_name : str, optional
         Identify the ``SessionGroup`` whose members are matched in the explicit
         form.
@@ -2272,8 +2283,12 @@ def run_v2_unit_match(
     Returns
     -------
     RunV2UnitMatchSummary
-        ``session_group_owner`` / ``session_group_name`` / ``matcher_params_name``,
-        the ``unit_match_id`` selection PK, ``n_pairs`` (pairwise matches) and
+        ``session_group_owner`` / ``session_group_name`` (the group matched;
+        ``None`` for a plan of named sorts) / ``matcher_params_name``,
+        the ``unit_match_id`` selection PK, ``inputs`` (one
+        :class:`UnitMatchInputSummary` per matching input, in chronological
+        ``input_index`` order, read from the frozen selection and the run's
+        NWB), ``n_pairs`` (pairwise matches) and
         ``n_tracked_units`` (cross-session biological units), the per-stage
         ``unit_match_status`` / ``tracked_unit_status`` (``"computed"`` /
         ``"reused"`` -- stems match the ``stage_seconds`` keys so ``describe_run``
@@ -2294,18 +2309,19 @@ def run_v2_unit_match(
         carries the partial summary). A missing optional matcher backend (e.g.
         ``UnitMatchPy``) surfaces here with the backend's install hint.
     """
-    from spyglass.spikesorting.v2._unit_match_planning import UnitMatchPlan
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
-    # Accept a UnitMatchPlan (from plan_v2_unit_match) OR the explicit keyword
-    # form. Unwrap a plan into the explicit inputs; a plan that could not pin a
-    # curation for every member (not ok) raises here rather than running a
-    # partial match.
+    # Accept a plan (from plan_v2_unit_match or plan_v2_unit_match_from_sorts)
+    # OR the explicit keyword form. Unwrap a plan into the explicit inputs; a
+    # plan that could not pin every curation (not ok) raises here rather than
+    # running a partial match.
+    input_curations = None
     if plan is not None:
-        if not isinstance(plan, UnitMatchPlan):
+        if not isinstance(plan, (UnitMatchPlan, UnitMatchInputPlan)):
             raise PipelineInputError(
                 "run_v2_unit_match: plan must be a UnitMatchPlan from "
-                "plan_v2_unit_match, or omit plan and pass "
+                "plan_v2_unit_match or a UnitMatchInputPlan from "
+                "plan_v2_unit_match_from_sorts, or omit plan and pass "
                 "session_group_owner= and session_group_name=."
             )
         # A plan already carries the group + matcher + choices, so the explicit
@@ -2323,17 +2339,21 @@ def run_v2_unit_match(
                 "curation_choices) form -- not both. The plan already carries "
                 "the group, matcher, and pinned curations."
             )
+        is_input_plan = isinstance(plan, UnitMatchInputPlan)
         if not plan.ok:
             raise PipelineInputError(
                 "run_v2_unit_match: the plan could not pin a curation for "
-                "every member (curation_strategy="
-                f"{plan.curation_strategy!r}):\n  - "
+                f"every {'sort' if is_input_plan else 'member'} "
+                f"(curation_strategy={plan.curation_strategy!r}):\n  - "
                 + "\n  - ".join(plan.errors)
             )
-        session_group_owner = plan.session_group_owner
-        session_group_name = plan.session_group_name
         matcher_params_name = plan.matcher_params_name
-        curation_choices = plan.curation_choices
+        if is_input_plan:
+            input_curations = plan.curations
+        else:
+            session_group_owner = plan.session_group_owner
+            session_group_name = plan.session_group_name
+            curation_choices = plan.curation_choices
     elif session_group_owner is None or session_group_name is None:
         raise PipelineInputError(
             "run_v2_unit_match: session_group_owner and session_group_name "
@@ -2344,7 +2364,7 @@ def run_v2_unit_match(
     # curation_choices is REQUIRED and explicit: an implicit "latest curation"
     # lookup would make the match irreproducible the moment a source session
     # gains a new curation. Validate DB-free, before any table import.
-    if curation_choices is None:
+    if input_curations is None and curation_choices is None:
         raise PipelineInputError(
             "run_v2_unit_match requires either a UnitMatchPlan (from "
             "plan_v2_unit_match) or explicit curation_choices "
@@ -2379,15 +2399,21 @@ def run_v2_unit_match(
     }
     stage_seconds: dict[str, float] = {}
 
-    # insert_selection pins one curation per member and validates coverage /
-    # per-member ownership / geometry BEFORE any populate (a wrong-member or
-    # missing choice raises here, not deep in the matcher).
-    selection = UnitMatchSelection.insert_selection(
-        session_group_owner,
-        session_group_name,
-        matcher_params_name,
-        curation_choices,
-    )
+    # The selection pins one curation per input and validates the inputs /
+    # geometry BEFORE any populate (for a group, insert_selection also checks
+    # coverage and per-member ownership), so a bad pin raises here, not deep
+    # in the matcher.
+    if input_curations is not None:
+        selection = UnitMatchSelection.insert_inputs(
+            input_curations, matcher_params_name
+        )
+    else:
+        selection = UnitMatchSelection.insert_selection(
+            session_group_owner,
+            session_group_name,
+            matcher_params_name,
+            curation_choices,
+        )
     # Public orchestration receipts use the clearer ``unit_match_id`` spelling;
     # the DataJoint table PK remains ``unitmatch_id`` for schema stability.
     run_summary["unit_match_id"] = selection["unitmatch_id"]
@@ -2520,6 +2546,154 @@ def plan_v2_unit_match(
         members=members,
         manual_curation_choices=manual_curation_choices,
     )
+
+
+def plan_v2_unit_match_from_sorts(
+    sorting_ids,
+    *,
+    curation_strategy: str,
+    matcher_params_name: str = "unitmatch_default",
+    manual_curation_choices: "dict | None" = None,
+) -> "UnitMatchInputPlan":
+    """Build a reviewable plan pinning one curation per named sort.
+
+    The group-less counterpart of :func:`plan_v2_unit_match`: each named
+    sort -- of a single recording or of a same-day concatenation -- is one
+    matching input, so daily concatenation sorts can be matched directly::
+
+        plan = plan_v2_unit_match_from_sorts(
+            [day1_sorting_id, day2_sorting_id],
+            curation_strategy="final_curated",
+        )
+        display(plan.as_dataframe())   # one row per matching input
+        summary = run_v2_unit_match(plan)
+
+    The plan lists each sort's committed curations and applies
+    ``curation_strategy`` within them. It does not check that the sorts can
+    be matched together; ``UnitMatchSelection.insert_inputs`` (run by
+    ``run_v2_unit_match``) validates that (no shared session, a
+    concatenation within one day, shared channel geometry) and orders the
+    inputs chronologically.
+
+    Parameters
+    ----------
+    sorting_ids : sequence of str or uuid.UUID
+        The ``sorting_id`` of each sort to match, each named once.
+    curation_strategy : str
+        REQUIRED; the same strategies as :func:`plan_v2_unit_match`, applied
+        to each sort's own curations: ``"final_curated"``,
+        ``"auto_curated"``, ``"root"`` (UNCURATED; warns loudly) or
+        ``"manual"``.
+    matcher_params_name : str, optional
+        ``MatcherParameters`` row carried onto the plan (default
+        ``"unitmatch_default"``).
+    manual_curation_choices : dict, optional
+        Only for ``curation_strategy="manual"``: ``{sorting_id:
+        curation_id}`` for every named sort.
+
+    Returns
+    -------
+    UnitMatchInputPlan
+        Carries ``curations`` (the pins), ``warnings`` / ``errors``, and
+        ``as_dataframe()``. ``plan.ok`` is ``False`` if any sort is
+        unresolved; ``run_v2_unit_match(plan)`` then raises with the errors.
+
+    Raises
+    ------
+    PipelineInputError
+        If a ``sorting_id`` is not a UUID or names no ``SortingSelection``.
+    ValueError
+        From the planner on no sorts, a sort named twice, or an invalid
+        strategy / manual pin.
+    """
+    from spyglass.spikesorting.v2._unit_match_planning import (
+        build_unit_match_input_plan,
+    )
+
+    return build_unit_match_input_plan(
+        matcher_params_name=matcher_params_name,
+        curation_strategy=curation_strategy,
+        sorts=_unit_match_sort_choices(sorting_ids),
+        manual_curation_choices=manual_curation_choices,
+    )
+
+
+def _unit_match_sort_choices(sorting_ids) -> list[dict]:
+    """Each named sort's source, constituent recordings and curations.
+
+    The DB-fetching core of :func:`plan_v2_unit_match_from_sorts`. For each
+    sort, in the order named: its ``SortingSelection`` source kind and id,
+    the ``nwb_file_name`` / ``interval_list_name`` of its constituent
+    recordings in recording order (the recording itself, or the
+    concatenation's frozen members), and every committed ``CurationV2`` row
+    of the sort. The curations are not pre-filtered for match-validity;
+    ``UnitMatchSelection.insert_inputs`` is the validation boundary.
+
+    Raises
+    ------
+    PipelineInputError
+        If a ``sorting_id`` is not a UUID or names no ``SortingSelection``.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    sorts = []
+    for sorting_id in sorting_ids:
+        try:
+            key = {"sorting_id": uuid.UUID(str(sorting_id))}
+        except ValueError as exc:
+            raise PipelineInputError(
+                f"unit-match sorts: sorting_id {sorting_id!r} is not a UUID."
+            ) from exc
+        if not (SortingSelection & key):
+            raise PipelineInputError(
+                f"unit-match sorts: no SortingSelection for sorting_id "
+                f"{key['sorting_id']}; sort it first (run_v2_pipeline)."
+            )
+        source = SortingSelection.resolve_source(key)
+        if source.kind == "recording":
+            source_id = source.key["recording_id"]
+            recordings = (RecordingSelection & source.key).fetch(
+                "nwb_file_name", "interval_list_name", as_dict=True
+            )
+        else:
+            source_id = source.key["concat_recording_id"]
+            recordings = (
+                ConcatenatedRecordingSelection.MemberSnapshot & source.key
+            ).fetch(
+                "nwb_file_name",
+                "interval_list_name",
+                as_dict=True,
+                order_by="member_index",
+            )
+        sorts.append(
+            {
+                "sorting_id": str(key["sorting_id"]),
+                "source_kind": source.kind,
+                "source_id": str(source_id),
+                "nwb_file_names": tuple(
+                    row["nwb_file_name"] for row in recordings
+                ),
+                "interval_list_names": tuple(
+                    row["interval_list_name"] for row in recordings
+                ),
+                "choices": (CurationV2 & key).fetch(
+                    "sorting_id",
+                    "curation_id",
+                    "parent_curation_id",
+                    "curation_source",
+                    "description",
+                    as_dict=True,
+                    order_by="curation_id",
+                ),
+            }
+        )
+    return sorts
 
 
 def _unit_match_member_choices(

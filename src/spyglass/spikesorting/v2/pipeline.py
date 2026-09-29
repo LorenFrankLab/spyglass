@@ -66,11 +66,15 @@ from spyglass.spikesorting.v2._pipeline_run import (
     describe_unit_match_choices,
     estimate_motion,
     plan_v2_unit_match,
+    plan_v2_unit_match_from_sorts,
     run_v2_pipeline,
     run_v2_pipeline_session,
     run_v2_unit_match,
 )
-from spyglass.spikesorting.v2._unit_match_planning import UnitMatchPlan
+from spyglass.spikesorting.v2._unit_match_planning import (
+    UnitMatchInputPlan,
+    UnitMatchPlan,
+)
 from spyglass.spikesorting.v2._curation_analyzer import (
     open_curation_analyzer,
 )

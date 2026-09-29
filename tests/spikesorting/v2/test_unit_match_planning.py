@@ -394,3 +394,180 @@ def test_plan_dataframe_and_truthiness():
     # bool(plan) mirrors plan.ok.
     assert bool(plan) is plan.ok
     assert isinstance(plan, UnitMatchPlan)
+
+
+# ---- named-sort plans (one matching input per sort) -------------------------
+
+
+def _sort(sorting_id, choices, kind="recording", nwbs=("day1.nwb",)):
+    return {
+        "sorting_id": sorting_id,
+        "source_kind": kind,
+        "source_id": f"src-{sorting_id}",
+        "nwb_file_names": nwbs,
+        "interval_list_names": tuple(f"interval {i}" for i in range(len(nwbs))),
+        "choices": choices,
+    }
+
+
+def _input_plan(sorts, curation_strategy, **kw):
+    from spyglass.spikesorting.v2._unit_match_planning import (
+        build_unit_match_input_plan,
+    )
+
+    return build_unit_match_input_plan(
+        matcher_params_name="unitmatch_default",
+        curation_strategy=curation_strategy,
+        sorts=sorts,
+        **kw,
+    )
+
+
+def test_input_plan_pins_one_curation_per_sort_in_named_order():
+    """Each automatic strategy resolves within each sort's own curations,
+    and the plan has one row (and one pin) per named sort, in named order."""
+    day2 = _sort(
+        _S1,
+        [
+            _cur(_S1, 0, -1),
+            _cur(_S1, 1, 0),
+            _cur(_S1, 2, 0, source="curation_evaluation"),
+        ],
+        kind="concatenated_recording",
+        nwbs=("day2.nwb", "day2.nwb"),
+    )
+    day1 = _sort(
+        _S0, [_cur(_S0, 0, -1), _cur(_S0, 1, 0, "curation_evaluation")]
+    )
+    expected = {
+        "root": [(_S1, 0), (_S0, 0)],
+        "auto_curated": [(_S1, 2), (_S0, 1)],
+    }
+    for strategy, pins in expected.items():
+        plan = _input_plan([day2, day1], strategy)
+        assert plan.ok, plan.errors
+        assert [
+            (c["sorting_id"], c["curation_id"]) for c in plan.curations
+        ] == (pins)
+        frame = plan.as_dataframe()
+        assert frame.to_dict(orient="records") == [
+            {
+                "sorting_id": _S1,
+                "source_kind": "concatenated_recording",
+                "source_id": f"src-{_S1}",
+                "nwb_file_names": ("day2.nwb", "day2.nwb"),
+                "interval_list_names": ("interval 0", "interval 1"),
+                "curation_id": pins[0][1],
+                "status": "pinned",
+            },
+            {
+                "sorting_id": _S0,
+                "source_kind": "recording",
+                "source_id": f"src-{_S0}",
+                "nwb_file_names": ("day1.nwb",),
+                "interval_list_names": ("interval 0",),
+                "curation_id": pins[1][1],
+                "status": "pinned",
+            },
+        ]
+    # root pins uncurated units: advisory, one per sort, naming the sort.
+    root_plan = _input_plan([day2, day1], "root")
+    assert len(root_plan.warnings) == 2
+    assert f"sort {_S1} (concatenated_recording: day2.nwb, day2.nwb)" in (
+        root_plan.warnings[0]
+    )
+
+
+def test_input_plan_final_curated_blocks_an_ambiguous_sort_only():
+    """final_curated with two curated leaves in one sort blocks that sort
+    (pointing at manual) while the other sort still resolves."""
+    ambiguous = _sort(_S0, [_cur(_S0, 0, -1), _cur(_S0, 1, 0), _cur(_S0, 2, 0)])
+    clean = _sort(_S1, [_cur(_S1, 0, -1), _cur(_S1, 1, 0)])
+    plan = _input_plan([ambiguous, clean], "final_curated")
+    assert not plan.ok
+    assert len(plan.errors) == 1
+    assert f"sort {_S0}" in plan.errors[0] and "manual" in plan.errors[0]
+    assert plan.curations == [{"sorting_id": _S1, "curation_id": 1}]
+    assert plan.as_dataframe()["status"].tolist() == ["UNRESOLVED", "pinned"]
+    no_curation = _input_plan([_sort(_S0, [])], "root")
+    assert no_curation.errors == [
+        f"sort {_S0} (recording: day1.nwb): curation_strategy='root' has no "
+        "curation yet; curate the sort first."
+    ]
+
+
+def test_input_plan_manual_pins_by_sorting_id():
+    """manual takes one curation_id per named sort, checked against that
+    sort's curations; a missing, foreign, fractional or extra pin is caught."""
+    sorts = [
+        _sort(_S0, [_cur(_S0, 0, -1), _cur(_S0, 1, 0)]),
+        _sort(_S1, [_cur(_S1, 0, -1)]),
+    ]
+    plan = _input_plan(
+        sorts, "manual", manual_curation_choices={_S0: 1, _S1: 0}
+    )
+    assert plan.ok
+    assert plan.curations == [
+        {"sorting_id": _S0, "curation_id": 1},
+        {"sorting_id": _S1, "curation_id": 0},
+    ]
+
+    missing = _input_plan(sorts, "manual", manual_curation_choices={_S0: 1})
+    assert [e for e in missing.errors if f"sort {_S1}" in e]
+    assert "manual_curation_choices entry for this sort" in missing.errors[0]
+
+    foreign = _input_plan(
+        sorts, "manual", manual_curation_choices={_S0: 9, _S1: 0}
+    )
+    assert "not among this sort's committed curations" in foreign.errors[0]
+
+    extra = _input_plan(
+        sorts,
+        "manual",
+        manual_curation_choices={_S0: 1, _S1: 0, "sort-9": 0},
+    )
+    assert not extra.ok
+    assert extra.errors == [
+        "manual_curation_choices has entries for sorting_id(s) ['sort-9'] "
+        "that are not among the named sorts."
+    ]
+    with pytest.raises(ValueError, match="sorting sort-0 curation_id"):
+        _input_plan(sorts, "manual", manual_curation_choices={_S0: 1.5})
+
+
+def test_input_plan_rejects_bad_arguments():
+    """No sorts, a sort named twice, an unknown strategy, and manual pins
+    with an automatic strategy are argument errors, not plan errors."""
+    one = _sort(_S0, [_cur(_S0, 0, -1)])
+    with pytest.raises(ValueError, match="at least one sort"):
+        _input_plan([], "root")
+    with pytest.raises(ValueError, match=r"more than once: \['sort-0'\]"):
+        _input_plan([one, one], "root")
+    with pytest.raises(ValueError, match="unknown curation_strategy"):
+        _input_plan([one], "latest")
+    with pytest.raises(ValueError, match="only used by"):
+        _input_plan([one], "root", manual_curation_choices={_S0: 0})
+
+
+def test_run_v2_unit_match_checks_an_input_plan_before_the_database():
+    """An input plan with explicit args, or a not-ok input plan, raises
+    before any table access."""
+    from spyglass.spikesorting.v2._unit_match_planning import (
+        UnitMatchInputPlan,
+    )
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
+
+    def _plan_with(errors):
+        return UnitMatchInputPlan(
+            matcher_params_name="unitmatch_default",
+            curation_strategy="root",
+            curations=[{"sorting_id": _S0, "curation_id": 0}],
+            rows=[],
+            errors=errors,
+        )
+
+    with pytest.raises(PipelineInputError, match="not both"):
+        run_v2_unit_match(_plan_with([]), curation_choices={})
+    with pytest.raises(PipelineInputError, match="for every sort"):
+        run_v2_unit_match(_plan_with(["sort sort-0 ..."]))

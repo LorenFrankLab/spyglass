@@ -12,6 +12,7 @@ PACKAGE_ROOT_REEXPORTS = (
     "estimate_motion",
     "run_v2_unit_match",
     "plan_v2_unit_match",
+    "plan_v2_unit_match_from_sorts",
     "preflight_v2_pipeline",
     "preflight_v2_pipeline_session",
     "describe_run",
@@ -57,6 +58,7 @@ _FACADE_ONLY_EXPORTS = (
     "PreflightSessionReport",
     # typed run summaries / plans
     "UnitMatchPlan",
+    "UnitMatchInputPlan",
     "PipelineOutcome",
     "PipelineStageSeconds",
     "RunV2ConcatSummary",

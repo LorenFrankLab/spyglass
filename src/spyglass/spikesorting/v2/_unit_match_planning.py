@@ -1,18 +1,23 @@
 """DB-free curation-choice planning for cross-session unit matching.
 
-``run_v2_unit_match`` requires an explicit ``curation_choices`` dict -- pinning
-exactly one committed curation per SessionGroup member -- so a match never
-silently depends on an implicit "latest" curation. Hand-building that dict is
-error-prone, so :func:`build_unit_match_plan` turns the per-member curation
-lists (the structured form ``describe_unit_match_choices`` tabulates) into that
-dict via a named, intent-declaring curation strategy and returns a
-:class:`UnitMatchPlan` (with per-member warnings / errors) to inspect BEFORE the
-expensive match.
+``run_v2_unit_match`` requires every matching input to pin exactly one
+committed curation, so a match never silently depends on an implicit "latest"
+curation. Hand-building those pins is error-prone, so this module turns the
+per-candidate curation lists into pins via a named, intent-declaring curation
+strategy and returns a plan (with warnings / errors) to inspect BEFORE the
+expensive match:
 
-This module is deliberately DB-free: it operates on already-fetched per-member
-curation lists, so the curation-strategy logic is unit-tested without a
-database. The DataJoint plumbing (fetching the members, running the plan) lives
-in ``_pipeline_run``. The low-level ``UnitMatchSelection`` stays explicit and
+- :func:`build_unit_match_plan` -- one pin per ``SessionGroup`` member (the
+  structured form ``describe_unit_match_choices`` tabulates), returning a
+  :class:`UnitMatchPlan`;
+- :func:`build_unit_match_input_plan` -- one pin per named sort (a sort of a
+  single recording or of a same-day concatenation), returning a
+  :class:`UnitMatchInputPlan` with one row per matching input.
+
+This module is deliberately DB-free: it operates on already-fetched curation
+lists, so the curation-strategy logic is unit-tested without a database. The
+DataJoint plumbing (fetching the candidates, running the plan) lives in
+``_pipeline_run``. The low-level ``UnitMatchSelection`` stays explicit and
 pinned -- this only redesigns the UX layer that assembles the pins.
 """
 
@@ -54,6 +59,17 @@ _CHOICE_COLUMNS = (
     "parent_curation_id",
     "curation_source",
     "description",
+)
+# Column order for ``UnitMatchInputPlan.as_dataframe``: the sort and its
+# constituent recordings (in recording order), then the pin.
+_INPUT_PLAN_COLUMNS = (
+    "sorting_id",
+    "source_kind",
+    "source_id",
+    "nwb_file_names",
+    "interval_list_names",
+    "curation_id",
+    "status",
 )
 
 
@@ -139,6 +155,42 @@ class UnitMatchPlan:
         )
 
 
+@dataclass
+class UnitMatchInputPlan:
+    """A reviewable plan pinning one curation per named sort for matching.
+
+    Each named sort -- of a single recording or of a same-day concatenation
+    -- is one matching input. ``curations`` is the list of pinned
+    ``{"sorting_id", "curation_id"}`` in the order the sorts were named;
+    ``run_v2_unit_match`` passes it to ``UnitMatchSelection.insert_inputs``,
+    which numbers the inputs chronologically. ``errors`` (blocking) is
+    non-empty when the curation strategy could not pin exactly one curation
+    for some sort; ``ok`` is then ``False`` and running the plan raises.
+    ``warnings`` are advisory. ``as_dataframe()`` renders one row per input.
+    """
+
+    matcher_params_name: str
+    curation_strategy: str
+    curations: list[dict[str, Any]]
+    rows: list[dict[str, Any]]
+    warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        """True when the strategy pinned exactly one curation per sort."""
+        return not self.errors
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+    def as_dataframe(self):
+        """One row per matching input (in the order named) for review."""
+        import pandas as pd
+
+        return pd.DataFrame(self.rows, columns=list(_INPUT_PLAN_COLUMNS))
+
+
 def _leaf_keys(choices: list[dict]) -> set[tuple]:
     """``(sorting_id, curation_id)`` of curations that are no other's parent.
 
@@ -173,67 +225,102 @@ def _candidates(choices: list[dict], curation_strategy: str) -> list[dict]:
     )  # pragma: no cover
 
 
-def _describe_none(curation_strategy: str) -> str:
-    """The per-member 'no candidate' fix hint for an automatic curation strategy."""
+#: Per-subject fix hints for a candidate list an automatic strategy cannot
+#: resolve: ``{subject: {curation_strategy: hint}}``.
+_NONE_HINTS = {
+    "member": {
+        "auto_curated": "sort the member with auto_curate=True",
+        "final_curated": "curate the member first (see the Curation how-to)",
+        "root": "sort the member first",
+    },
+    "sort": {
+        "auto_curated": "auto-curate the sort first",
+        "final_curated": "curate the sort first (see the Curation how-to)",
+        "root": "curate the sort first",
+    },
+}
+
+
+def _describe_none(curation_strategy: str, subject: str = "member") -> str:
+    """The 'no candidate' fix hint for an automatic curation strategy.
+
+    ``subject`` is what is being pinned: a SessionGroup ``"member"`` or a
+    named ``"sort"``.
+    """
+    hint = _NONE_HINTS[subject][curation_strategy]
     if curation_strategy == "auto_curated":
         return (
             "has no auto-curated curation (curation_source="
-            "'curation_evaluation'); sort the member with auto_curate=True, or "
-            "pin one explicitly with curation_strategy='manual'"
+            f"'curation_evaluation'); {hint}, or pin one explicitly with "
+            "curation_strategy='manual'"
         )
     if curation_strategy == "final_curated":
         return (
-            "has no curated (non-root) leaf curation; curate the member first "
-            "(see the Curation how-to), or pin one explicitly with "
-            "curation_strategy='manual'"
+            f"has no curated (non-root) leaf curation; {hint}, or pin one "
+            "explicitly with curation_strategy='manual'"
         )
-    return "has no curation yet; sort the member first"  # root
+    return f"has no curation yet; {hint}"  # root
 
 
-def _resolve_member(
-    member: dict, curation_strategy: str, manual_curation_choices: dict | None
+def _pin_one(
+    label: str,
+    subject: str,
+    choices: list[dict],
+    curation_strategy: str,
+    chosen: dict | None,
+    listing_hint: str,
 ) -> tuple[dict | None, list[str], list[str]]:
-    """Pin one curation for a member per the curation strategy.
+    """Pin one curation from a candidate list per the curation strategy.
 
-    Returns ``(pinned_or_None, warnings, errors)`` where ``pinned`` is
-    ``{"sorting_id", "curation_id"}``.
+    Parameters
+    ----------
+    label : str
+        Names the candidate in messages, e.g. ``"member 0 (a.nwb)"``.
+    subject : str
+        ``"member"`` or ``"sort"``, the noun used in messages.
+    choices : list of dict
+        The candidate's committed curations.
+    curation_strategy : str
+        One of :data:`STRATEGIES`.
+    chosen : dict or None
+        For ``curation_strategy="manual"``: the caller's normalized
+        ``{"sorting_id", "curation_id"}`` pin, or ``None`` if none was given.
+    listing_hint : str
+        Where to list the candidate's curations, quoted when a manual pin is
+        not among them.
+
+    Returns
+    -------
+    tuple
+        ``(pinned_or_None, warnings, errors)`` where ``pinned`` is
+        ``{"sorting_id", "curation_id"}``.
     """
-    idx = member["member_index"]
-    nwb = member["nwb_file_name"]
-    choices = member["choices"]
     warnings: list[str] = []
 
     if curation_strategy == "manual":
-        chosen = (manual_curation_choices or {}).get(idx)
         if chosen is None:
             return (
                 None,
                 warnings,
                 [
-                    f"member {idx} ({nwb}): curation_strategy='manual' "
-                    "requires an explicit manual_curation_choices entry for "
-                    "this member; none was provided."
+                    f"{label}: curation_strategy='manual' requires an "
+                    "explicit manual_curation_choices entry for this "
+                    f"{subject}; none was provided."
                 ],
             )
-        pinned = {
-            "sorting_id": chosen["sorting_id"],
-            "curation_id": lossless_int(
-                chosen["curation_id"], f"member {idx} curation_id"
-            ),
-        }
         available = {(c["sorting_id"], c["curation_id"]) for c in choices}
-        if (pinned["sorting_id"], pinned["curation_id"]) not in available:
+        if (chosen["sorting_id"], chosen["curation_id"]) not in available:
             return (
                 None,
                 warnings,
                 [
-                    f"member {idx} ({nwb}): pinned curation "
-                    f"(sorting_id={pinned['sorting_id']}, "
-                    f"curation_id={pinned['curation_id']}) is not among this "
-                    "member's committed curations (see describe_unit_match_choices)."
+                    f"{label}: pinned curation "
+                    f"(sorting_id={chosen['sorting_id']}, "
+                    f"curation_id={chosen['curation_id']}) is not among this "
+                    f"{subject}'s committed curations ({listing_hint})."
                 ],
             )
-        return pinned, warnings, []
+        return dict(chosen), warnings, []
 
     candidates = _candidates(choices, curation_strategy)
     if len(candidates) == 0:
@@ -241,9 +328,8 @@ def _resolve_member(
             None,
             warnings,
             [
-                f"member {idx} ({nwb}): "
-                f"curation_strategy={curation_strategy!r} "
-                f"{_describe_none(curation_strategy)}."
+                f"{label}: curation_strategy={curation_strategy!r} "
+                f"{_describe_none(curation_strategy, subject)}."
             ],
         )
     if len(candidates) > 1:
@@ -252,28 +338,77 @@ def _resolve_member(
             None,
             warnings,
             [
-                f"member {idx} ({nwb}): "
-                f"curation_strategy={curation_strategy!r} is ambiguous -- "
-                f"{len(candidates)} candidate curations {ids}. Pin one "
-                "explicitly with curation_strategy='manual'."
+                f"{label}: curation_strategy={curation_strategy!r} is "
+                f"ambiguous -- {len(candidates)} candidate curations {ids}. "
+                "Pin one explicitly with curation_strategy='manual'."
             ],
         )
-    chosen = candidates[0]
+    pick = candidates[0]
     if curation_strategy == "root":
         warnings.append(
-            f"member {idx} ({nwb}): curation_strategy='root' pins the "
+            f"{label}: curation_strategy='root' pins the "
             "UNCURATED root curation; matching uncurated units is rarely what "
             "you want -- prefer curation_strategy='final_curated' or "
             "'auto_curated'."
         )
     return (
         {
-            "sorting_id": chosen["sorting_id"],
-            "curation_id": int(chosen["curation_id"]),
+            "sorting_id": pick["sorting_id"],
+            "curation_id": int(pick["curation_id"]),
         },
         warnings,
         [],
     )
+
+
+def _resolve_member(
+    member: dict, curation_strategy: str, manual_curation_choices: dict | None
+) -> tuple[dict | None, list[str], list[str]]:
+    """Pin one curation for a SessionGroup member per the curation strategy.
+
+    Returns ``(pinned_or_None, warnings, errors)`` where ``pinned`` is
+    ``{"sorting_id", "curation_id"}``.
+    """
+    idx = member["member_index"]
+    chosen = None
+    if curation_strategy == "manual":
+        raw = (manual_curation_choices or {}).get(idx)
+        if raw is not None:
+            chosen = {
+                "sorting_id": raw["sorting_id"],
+                "curation_id": lossless_int(
+                    raw["curation_id"], f"member {idx} curation_id"
+                ),
+            }
+    return _pin_one(
+        f"member {idx} ({member['nwb_file_name']})",
+        "member",
+        member["choices"],
+        curation_strategy,
+        chosen,
+        "see describe_unit_match_choices",
+    )
+
+
+def _check_strategy_arguments(
+    caller: str, curation_strategy: str, manual_curation_choices
+) -> None:
+    """Reject an unknown strategy, or manual pins with an automatic one."""
+    if curation_strategy not in STRATEGIES:
+        raise ValueError(
+            f"{caller}: unknown curation_strategy "
+            f"{curation_strategy!r}; choose one of {STRATEGIES}."
+        )
+    # manual_curation_choices is only consulted by curation_strategy='manual';
+    # passing it with an automatic curation strategy would silently do nothing
+    # (the planner picks), so reject it up front rather than let it look
+    # intentional.
+    if manual_curation_choices is not None and curation_strategy != "manual":
+        raise ValueError(
+            f"{caller}: manual_curation_choices is only used by "
+            f"curation_strategy='manual', not {curation_strategy!r}; the "
+            "planner picks the curations for the other strategies."
+        )
 
 
 def build_unit_match_plan(
@@ -305,21 +440,9 @@ def build_unit_match_plan(
     blocking ``error`` (``plan.ok is False``); other members still resolve, so
     ``plan.as_dataframe()`` shows the whole picture at once.
     """
-    if curation_strategy not in STRATEGIES:
-        raise ValueError(
-            "build_unit_match_plan: unknown curation_strategy "
-            f"{curation_strategy!r}; choose one of {STRATEGIES}."
-        )
-    # manual_curation_choices is only consulted by curation_strategy='manual';
-    # passing it with an automatic curation strategy would silently do nothing
-    # (the planner picks), so reject it up front rather than let it look
-    # intentional.
-    if manual_curation_choices is not None and curation_strategy != "manual":
-        raise ValueError(
-            "build_unit_match_plan: manual_curation_choices is only used by "
-            f"curation_strategy='manual', not {curation_strategy!r}; the "
-            "planner picks the curations for the other strategies."
-        )
+    _check_strategy_arguments(
+        "build_unit_match_plan", curation_strategy, manual_curation_choices
+    )
 
     if manual_curation_choices is not None:
         # Keys go through the same lossless rule as the ids: True / 1.0 hash
@@ -370,6 +493,137 @@ def build_unit_match_plan(
         matcher_params_name=matcher_params_name,
         curation_strategy=curation_strategy,
         curation_choices=curation_choices,
+        rows=rows,
+        warnings=warnings,
+        errors=errors,
+    )
+
+
+def build_unit_match_input_plan(
+    *,
+    matcher_params_name: str,
+    curation_strategy: str,
+    sorts: list[dict],
+    manual_curation_choices: dict | None = None,
+) -> UnitMatchInputPlan:
+    """Assemble a pinned :class:`UnitMatchInputPlan` from per-sort curations.
+
+    Each entry of ``sorts`` is one matching input: a sort of a single
+    recording or of a same-day concatenation, as ``{sorting_id,
+    source_kind, source_id, nwb_file_names, interval_list_names, choices}``
+    where ``nwb_file_names`` / ``interval_list_names`` list the sort's
+    constituent recordings in recording order and ``choices`` is the sort's
+    committed curations (``{sorting_id, curation_id, parent_curation_id,
+    curation_source, description}``). DB-free. ``curation_strategy`` is
+    REQUIRED and resolves exactly as in :func:`build_unit_match_plan`, within
+    each sort's own curations:
+
+    - ``final_curated`` -- the sort's single terminal curated (non-root)
+      curation; errors on zero or several.
+    - ``auto_curated`` -- the sort's auto-curated child
+      (``curation_source='curation_evaluation'``); errors on zero / several.
+    - ``root`` -- the sort's root curation, with a loud advisory (uncurated).
+    - ``manual`` -- pins ``manual_curation_choices[sorting_id]`` (a
+      ``curation_id``) per sort, validated against the sort's committed
+      curations; an entry for a sort that is not named is a blocking error.
+
+    A sort the strategy cannot resolve to exactly one curation becomes a
+    blocking ``error`` (``plan.ok is False``); the other sorts still resolve,
+    so ``plan.as_dataframe()`` shows every input at once.
+
+    Raises
+    ------
+    ValueError
+        On an unknown ``curation_strategy``, ``manual_curation_choices`` with
+        an automatic strategy, no sorts, a sort named twice, or a manual
+        ``curation_id`` that is not an integer.
+    """
+    _check_strategy_arguments(
+        "build_unit_match_input_plan",
+        curation_strategy,
+        manual_curation_choices,
+    )
+    if not sorts:
+        raise ValueError(
+            "build_unit_match_input_plan: name at least one sort to match."
+        )
+    sorting_ids = [str(sort["sorting_id"]) for sort in sorts]
+    repeated = sorted(
+        {
+            sorting_id
+            for sorting_id in sorting_ids
+            if sorting_ids.count(sorting_id) > 1
+        }
+    )
+    if repeated:
+        raise ValueError(
+            "build_unit_match_input_plan: each sort is one matching input and "
+            f"may be named once; named more than once: {repeated}."
+        )
+    manual = None
+    if manual_curation_choices is not None:
+        manual = {
+            str(sorting_id): lossless_int(
+                curation_id, f"sorting {sorting_id} curation_id"
+            )
+            for sorting_id, curation_id in manual_curation_choices.items()
+        }
+
+    curations: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    errors: list[str] = []
+    for sort in sorts:
+        sorting_id = str(sort["sorting_id"])
+        chosen = None
+        if manual is not None and sorting_id in manual:
+            chosen = {
+                "sorting_id": sorting_id,
+                "curation_id": manual[sorting_id],
+            }
+        choices = [
+            {**choice, "sorting_id": str(choice["sorting_id"])}
+            for choice in sort["choices"]
+        ]
+        pinned, sort_warnings, sort_errors = _pin_one(
+            f"sort {sorting_id} ({sort['source_kind']}: "
+            f"{', '.join(sort['nwb_file_names'])})",
+            "sort",
+            choices,
+            curation_strategy,
+            chosen,
+            "see its CurationV2 rows",
+        )
+        warnings.extend(sort_warnings)
+        errors.extend(sort_errors)
+        if pinned is not None:
+            curations.append(pinned)
+        rows.append(
+            {
+                "sorting_id": sorting_id,
+                "source_kind": sort["source_kind"],
+                "source_id": str(sort["source_id"]),
+                "nwb_file_names": tuple(sort["nwb_file_names"]),
+                "interval_list_names": tuple(sort["interval_list_names"]),
+                "curation_id": pinned["curation_id"] if pinned else None,
+                "status": "pinned" if pinned else "UNRESOLVED",
+            }
+        )
+
+    # Manual coverage is EXACT: an entry for a sort that was not named
+    # (stale / mistyped) would be silently unused, so it blocks the plan.
+    if manual:
+        extra = sorted(set(manual) - set(sorting_ids))
+        if extra:
+            errors.append(
+                "manual_curation_choices has entries for sorting_id(s) "
+                f"{extra} that are not among the named sorts."
+            )
+
+    return UnitMatchInputPlan(
+        matcher_params_name=matcher_params_name,
+        curation_strategy=curation_strategy,
+        curations=curations,
         rows=rows,
         warnings=warnings,
         errors=errors,

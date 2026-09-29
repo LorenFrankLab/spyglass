@@ -937,3 +937,144 @@ def test_frozen_frames_and_order_are_verified_at_make(
             _refused("end_sample")
     finally:
         _drop(pk)
+
+
+def test_named_sort_plan_runs_without_a_group(
+    daily_concat_match_inputs, monkeypatch
+):
+    """A plan of named sorts (a single-recording sort and a daily
+    concatenation sort) pins one curation per sort, and run_v2_unit_match
+    runs it through insert_inputs with no SessionGroup: the same selection
+    insert_inputs mints for those curations, no group recorded, the listed
+    pair stored between the two inputs, and a rerun reuses both stages."""
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_sorts,
+        run_v2_unit_match,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+    from tests.spikesorting.v2.conftest import DAILY_CONCAT_UNIT_IDS
+
+    fx = daily_concat_match_inputs
+    cur = fx["curations"]
+    single, concat = cur["single_b"], cur["concat_day2"]
+    nwb = fx["nwb_file_names"]
+    concat_unit = DAILY_CONCAT_UNIT_IDS["concat_day2"]
+    saved = install_fixture_pairer(
+        monkeypatch,
+        matcher_name="named_sort_pairer",
+        matcher_params_name="named_sort_pairer_params",
+        pairs=[[0, concat_unit]],
+    )
+    pk = None
+    try:
+        with pytest.raises(PipelineInputError, match="no SortingSelection"):
+            plan_v2_unit_match_from_sorts(
+                [uuid.uuid4()], curation_strategy="root"
+            )
+        # Named day 2 first: the plan keeps the named order; the selection
+        # orders the inputs chronologically.
+        plan = plan_v2_unit_match_from_sorts(
+            [concat["sorting_id"], single["sorting_id"]],
+            curation_strategy="root",
+            matcher_params_name="named_sort_pairer_params",
+        )
+        assert plan.ok, plan.errors
+        assert plan.curations == [
+            {
+                "sorting_id": str(concat["sorting_id"]),
+                "curation_id": concat["curation_id"],
+            },
+            {
+                "sorting_id": str(single["sorting_id"]),
+                "curation_id": single["curation_id"],
+            },
+        ]
+        rows = plan.as_dataframe().to_dict(orient="records")
+        assert [
+            (
+                row["sorting_id"],
+                row["source_kind"],
+                row["source_id"],
+                row["nwb_file_names"],
+                row["curation_id"],
+                row["status"],
+            )
+            for row in rows
+        ] == [
+            (
+                str(concat["sorting_id"]),
+                "concatenated_recording",
+                str(fx["concat_keys"]["concat_day2"]["concat_recording_id"]),
+                (nwb["c"], nwb["c"]),
+                concat["curation_id"],
+                "pinned",
+            ),
+            (
+                str(single["sorting_id"]),
+                "recording",
+                str(fx["recording_keys"]["b"]["recording_id"]),
+                (nwb["b"],),
+                single["curation_id"],
+                "pinned",
+            ),
+        ]
+        assert rows[0]["interval_list_names"] == (
+            "unitmatch_daily_first",
+            "unitmatch_daily_second",
+        )
+        manual = plan_v2_unit_match_from_sorts(
+            [concat["sorting_id"], single["sorting_id"]],
+            curation_strategy="manual",
+            matcher_params_name="named_sort_pairer_params",
+            manual_curation_choices={
+                concat["sorting_id"]: concat["curation_id"],
+                str(single["sorting_id"]): single["curation_id"],
+            },
+        )
+        assert manual.ok and manual.curations == plan.curations
+
+        summary = run_v2_unit_match(plan)
+        pk = {"unitmatch_id": summary["unit_match_id"]}
+        assert pk == UnitMatchSelection.insert_inputs(
+            [single, concat], "named_sort_pairer_params"
+        )
+        assert summary["session_group_owner"] is None
+        assert summary["session_group_name"] is None
+        assert (UnitMatchSelection & pk).fetch1(
+            "session_group_owner", "session_group_name"
+        ) == (None, None)
+        assert summary["matcher_params_name"] == "named_sort_pairer_params"
+        assert summary["unit_match_status"] == "computed"
+        assert summary["n_pairs"] == 1
+        (pair,) = (UnitMatch.Pair & pk).fetch(as_dict=True)
+        assert (
+            str(pair["session_a_sorting_id"]),
+            pair["unit_a_id"],
+            str(pair["session_b_sorting_id"]),
+            pair["unit_b_id"],
+        ) == (
+            str(single["sorting_id"]),
+            0,
+            str(concat["sorting_id"]),
+            concat_unit,
+        )
+        assert summary["n_tracked_units"] == len(TrackedUnit & pk) == 1
+
+        rerun = run_v2_unit_match(plan)
+        assert rerun["unit_match_id"] == summary["unit_match_id"]
+        assert rerun["unit_match_status"] == "reused"
+        assert rerun["tracked_unit_status"] == "reused"
+    finally:
+        if pk is not None:
+            _drop(pk)
+        (
+            MatcherParameters
+            & {"matcher_params_name": "named_sort_pairer_params"}
+        ).super_delete(warn=False)
+        restore_matcher_registry(saved)

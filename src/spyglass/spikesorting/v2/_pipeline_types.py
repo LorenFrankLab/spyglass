@@ -399,10 +399,13 @@ class RunV2UnitMatchSummary(TypedDict):
 
     The cross-session match manifest: the ``UnitMatch`` selection PK plus the
     pairwise-match and tracked-unit results, with per-stage status / timing.
+    ``session_group_owner`` / ``session_group_name`` name the ``SessionGroup``
+    matched, and are ``None`` for a run of named sorts
+    (``plan_v2_unit_match_from_sorts``).
     """
 
-    session_group_owner: str
-    session_group_name: str
+    session_group_owner: "str | None"
+    session_group_name: "str | None"
     matcher_params_name: str
     unit_match_id: UUID
     unit_match_status: StageStatus
