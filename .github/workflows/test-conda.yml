@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
      run:
-       shell: bash -l {0}
+       shell: bash -el {0}
     env:
       OS: ubuntu-latest
       PYTHON: '3.10'
@@ -238,7 +238,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        shell: bash -l {0}
+        shell: bash -el {0}
     services:
       mysql:
         image: datajoint/mysql:8.0
@@ -470,9 +470,16 @@ jobs:
         # run rather than silently skipping.
         if [ "${{ github.event_name }}" = "schedule" ] || \
            [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          python tests/spikesorting/v2/fixtures/_fetch.py \
-            mearec_polymer_128ch_2sessions_s1 \
-            mearec_polymer_128ch_2sessions_s2 || true
+          # _fetch.py exits non-zero when either stem has no URL in
+          # FIXTURE_URLS or its download fails. The AUC gate then skips (see
+          # above); the warning makes that visible in the run summary without
+          # failing the rest of the matcher suite.
+          if ! python tests/spikesorting/v2/fixtures/_fetch.py \
+              mearec_polymer_128ch_2sessions_s1 \
+              mearec_polymer_128ch_2sessions_s2; then
+            echo "::warning::Two-session polymer fixtures are unavailable;" \
+              "the cross-session matcher AUC gate skips on this run."
+          fi
         fi
         # This env is the only one with UnitMatchPy installed, so it also owns
         # the cross-session NOTEBOOK end-to-end test: notebook 14's Part B match
@@ -570,7 +577,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        shell: bash -l {0}
+        shell: bash -el {0}
     services:
       mysql:
         image: datajoint/mysql:8.0
