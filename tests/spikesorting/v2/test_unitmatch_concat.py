@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime as dt
 import itertools
+import re
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -2843,19 +2844,21 @@ def test_tracked_units_map_to_original_member_times_and_regions(
         restore_matcher_registry(saved)
 
 
-def test_tracked_unit_readers_refuse_a_replaced_source(
+def test_member_and_source_drift_is_refused_by_selection_make_and_readers(
     daily_concat_match_inputs, member_time_sorts, monkeypatch
 ):
-    """A tracked-unit reader that reads live sources refuses a run whose
-    source changed after it was made: a concatenation member's Recording
-    replaced by another persisted recording (new timestamps and content
-    hash under the frozen recording id), a changed content hash alone, or a
-    recreated curation. Before the change, and again once it is restored,
-    the member spike times are the planted frames on the member's own
-    clock."""
+    """One check refuses a concatenation member Recording whose content no
+    longer matches the hash its concatenation froze -- at selection, at
+    make and in the tracked-unit readers -- and the readers refuse a
+    single recording's changed content or a recreated curation. A member
+    Recording replaced by another persisted recording gets new timestamps
+    under the frozen recording id; before any change, and again once it is
+    restored, the member spike times are the planted frames on the member's
+    own clock."""
     from spyglass.spikesorting.v2._units_nwb import recording_timestamps
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import (
+        ConcatMemberDriftError,
         UnitMatchSelectionIntegrityError,
     )
     from spyglass.spikesorting.v2.recording import Recording
@@ -2868,13 +2871,18 @@ def test_tracked_unit_readers_refuse_a_replaced_source(
 
     fx, mx = daily_concat_match_inputs, member_time_sorts
     cur = mx["curations"]
+    inputs = [cur["c"], cur["cross_nwb"]]
     spans = _member_spans(mx["concat_keys"]["cross_nwb"])
     planted = _planted_member_frames(spans)
     b_key = fx["recording_keys"]["b_first"]
+    c_key = fx["recording_keys"]["c_first"]
     b_times = Recording().get_recording(b_key).get_times()
     # Unit 0 fires in both members; member 1 of cross_nwb is b's interval.
     expected = b_times[planted[0][1] - spans[1][0]]
     assert len(expected) >= 3
+    b_drift = re.escape(
+        f"'member_index': 1, 'recording_id': '{b_key['recording_id']}'"
+    )
     readers = {
         "get_member_spike_times": TrackedUnit().get_member_spike_times,
         "get_unit_brain_regions": TrackedUnit().get_unit_brain_regions,
@@ -2888,9 +2896,21 @@ def test_tracked_unit_readers_refuse_a_replaced_source(
     )
     pk = None
     try:
-        pk = UnitMatchSelection.insert_inputs(
-            [cur["c"], cur["cross_nwb"]], params_name
+        # A member edited before selection: the selection is refused.
+        with _raw_update(Recording, b_key, "content_hash", "f" * 64):
+            with pytest.raises(ConcatMemberDriftError, match=b_drift):
+                UnitMatchSelection.insert_inputs(inputs, params_name)
+        assert (
+            len(UnitMatchSelection & {"matcher_params_name": params_name}) == 0
         )
+
+        # A member edited between selection and make: make is refused.
+        pk = UnitMatchSelection.insert_inputs(inputs, params_name)
+        with _raw_update(Recording, b_key, "content_hash", "f" * 64):
+            with pytest.raises(ConcatMemberDriftError, match=b_drift):
+                UnitMatch.populate(pk, reserve_jobs=False)
+            assert len(UnitMatch & pk) == 0
+
         UnitMatch.populate(pk, reserve_jobs=False)
         TrackedUnit.populate(pk, reserve_jobs=False)
 
@@ -2906,8 +2926,8 @@ def test_tracked_unit_readers_refuse_a_replaced_source(
         np.testing.assert_array_equal(_member_b_times(), expected)
         assert len(TrackedUnit().get_unit_brain_regions(pk)) == 9
 
-        # b's Recording now reads a's second interval: other timestamps and
-        # content under the frozen recording id.
+        # After the run, b's Recording reads a's second interval: other
+        # timestamps and content under the frozen recording id.
         replacement = (Recording & fx["recording_keys"]["a_second"]).fetch1()
         b_hash, b_series = (Recording & b_key).fetch1(
             "content_hash", "electrical_series_path"
@@ -2928,23 +2948,29 @@ def test_tracked_unit_readers_refuse_a_replaced_source(
         ):
             live_times = recording_timestamps((Recording & b_key).fetch1())
             assert live_times[0] != b_times[0]
+            for reader in readers.values():
+                with pytest.raises(
+                    ConcatMemberDriftError, match=b_drift
+                ) as err:
+                    reader(pk)
+                assert f"'snapshot_content_hash': '{b_hash}'" in str(err.value)
+                assert (
+                    f"'current_content_hash': '{replacement['content_hash']}'"
+                    in str(err.value)
+                )
+
+        # The single recording's changed content is refused by the readers.
+        c_hash = (Recording & c_key).fetch1("content_hash")
+        with _raw_update(Recording, c_key, "content_hash", "f" * 64):
             for name, reader in readers.items():
                 with pytest.raises(
                     UnitMatchSelectionIntegrityError,
                     match=(
-                        rf"TrackedUnit\.{name}: input_index 0 .*"
-                        f"recording 1 recording_content_hash frozen {b_hash}, "
-                        f"now {replacement['content_hash']}"
+                        rf"TrackedUnit\.{name}: input_index 1 .*differs from "
+                        "the snapshot the run was made from: recording 0 "
+                        f"recording_content_hash frozen {c_hash}, now "
+                        f"{'f' * 64}"
                     ),
-                ):
-                    reader(pk)
-
-        # A changed content hash alone is refused the same way.
-        with _raw_update(Recording, b_key, "content_hash", "f" * 64):
-            for reader in readers.values():
-                with pytest.raises(
-                    UnitMatchSelectionIntegrityError,
-                    match=r"input_index 0 .*recording 1 recording_content_hash",
                 ):
                     reader(pk)
 

@@ -2301,14 +2301,14 @@ Key behaviors and caveats:
     its `SessionGroup` member, and `UnitMatch.make()` re-checks every input's
     provenance (raising `UnitMatchSelectionIntegrityError`) so a direct-insert
     bypass, a recreated curation, or changed source content cannot silently
-    match the wrong units. After the run, `TrackedUnit.get_member_spike_times`
-    and `TrackedUnit.get_unit_brain_regions` read live sources (each
-    recording's timestamps, the curated units and their electrodes), so they
-    raise the same error when an input's pinned curation was recreated or its
-    source no longer matches the frozen rows, including a constituent
-    `Recording` whose live `content_hash` differs from the frozen one (a
-    concatenation member recording replaced after the run). Brain regions are
-    still read live, so a corrected `Electrode` region shows up.
+    match the wrong units. A concatenation input whose member `Recording` no
+    longer carries the content hash its concatenation froze is refused with
+    `ConcatMemberDriftError` at selection and at make. After the run,
+    `TrackedUnit.get_member_spike_times` and
+    `TrackedUnit.get_unit_brain_regions` read live sources (each recording's
+    timestamps, the curated units and their electrodes), so they re-run the
+    same check first and raise the same errors. Brain regions are still read
+    live, so a corrected `Electrode` region shows up.
 - **The matcher never sees Spyglass internals.** `UnitMatch.make()` extracts a
     waveform bundle per matching input from the traces its sorter read (the
     sort's effective traces, silenced by its artifact mask and motion-corrected

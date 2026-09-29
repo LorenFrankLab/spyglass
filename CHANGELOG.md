@@ -293,13 +293,14 @@ concatenation, so a daily same-day concatenation can now be matched directly
   and mapped onto each member `Recording`'s timestamps, the rule
   `ConcatMemberCuration` uses, without needing its rows.
 - `TrackedUnit.get_member_spike_times` and
-  `TrackedUnit.get_unit_brain_regions` raise
-  `UnitMatchSelectionIntegrityError` when an input's pinned curation was
-  recreated or its source no longer matches the frozen rows, including a
-  constituent `Recording` whose live `content_hash` differs from the frozen
-  one, instead of reading the changed source (a concatenation member
-  recording replaced after the run previously shifted the returned spike
-  times silently).
+  `TrackedUnit.get_unit_brain_regions` re-run `UnitMatch.make`'s input
+  check before reading an input's live sources, and raise
+  `UnitMatchSelectionIntegrityError` when its pinned curation was recreated
+  or its source no longer matches the frozen rows. A concatenation input
+  whose member `Recording` no longer carries the content hash its
+  concatenation froze raises `ConcatMemberDriftError` at
+  `UnitMatchSelection.insert_inputs`, at `UnitMatch.make` and in these
+  readers.
 - **Existing `UnitMatchSelection`, `UnitMatch` and `TrackedUnit` rows must be
   deleted and recreated** -- a replaced part table and a part's changed
   primary key cannot go through `alter()`. See the

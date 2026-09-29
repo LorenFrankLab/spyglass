@@ -410,9 +410,9 @@ class UnitMatchSelectionIntegrityError(RuntimeError):
     insert that bypassed ``insert_inputs``, a recreated curation, or changed
     source content) raises this rather than silently matching other units.
     ``TrackedUnit.get_member_spike_times`` and
-    ``TrackedUnit.get_unit_brain_regions`` raise it too when an input of a
-    finished run has a recreated curation or a source recording whose live
-    content no longer matches the frozen rows. The message names the
+    ``TrackedUnit.get_unit_brain_regions`` re-run the same check and raise
+    it too when an input of a finished run has a recreated curation or a
+    source that no longer matches the frozen rows. The message names the
     offending inputs.
     """
 
