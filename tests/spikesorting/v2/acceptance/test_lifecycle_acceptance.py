@@ -217,10 +217,108 @@ def test_two_browser_drafts_preserve_both_edits(
         stop_review_servers()
 
 
-def test_masked_sort_review(workflow):
-    from spyglass.spikesorting.v2.review_profile import FRANKLAB_REVIEW_PROFILE
+def _bundle_units_table_unit_ids(bundle: Path) -> list[list[int]]:
+    """Unit ids of every FigPack ``UnitsTable`` in an offline review bundle.
 
-    workflow["root"].start_review(FRANKLAB_REVIEW_PROFILE)
+    ``figpack_spike_sorting`` stores each table's rows as JSON bytes in a
+    ``rows_data`` uint8 array. A saved FigPack bundle is not a plain zarr
+    directory: its metadata lives only in the consolidated ``.zmetadata`` and
+    its chunks are packed into ``_consolidated_<n>.dat`` files, located by
+    ``.zmetadata["refs"][key] = [file, offset, size]``. Rebuild an in-memory
+    zarr v2 store from those pieces and let zarr decode the arrays.
+    """
+    import zarr
+
+    store_dir = bundle / "data.zarr"
+    consolidated = json.loads((store_dir / ".zmetadata").read_text())
+    metadata = consolidated["metadata"]
+    store = {key: json.dumps(value).encode() for key, value in metadata.items()}
+    for key, (name, offset, size) in consolidated.get("refs", {}).items():
+        with open(store_dir / name, "rb") as packed:
+            packed.seek(offset)
+            store[key] = packed.read(size)
+    root = zarr.open_group(store, mode="r")
+    tables = []
+    for key, attrs in metadata.items():
+        if not key.endswith(".zattrs"):
+            continue
+        if attrs.get("view_type") != "spike_sorting.UnitsTable":
+            continue
+        group = key[: -len(".zattrs")].rstrip("/")
+        rows_path = f"{group}/rows_data" if group else "rows_data"
+        rows = json.loads(bytes(root[rows_path][:]).decode("utf-8"))
+        tables.append([int(row["unitId"]) for row in rows])
+    return tables
+
+
+def test_masked_sort_review(workflow):
+    """The standard review of a sort with an excluded span shows every unit
+    and round-trips a saved draft."""
+    import urllib.parse
+    import urllib.request
+
+    from spyglass.spikesorting.v2._figpack_curation import (
+        labels_and_merges_to_annotations,
+    )
+    from spyglass.spikesorting.v2._review_delivery import stop_review_servers
+    from spyglass.spikesorting.v2.review_api import FigPackReview
+    from spyglass.spikesorting.v2.review_profile import FRANKLAB_REVIEW_PROFILE
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    root = workflow["root"]
+    # Derived from the sort's units NWB, independently of the review bundle.
+    sorted_unit_ids = sorted(
+        map(
+            int,
+            Sorting().get_sorting({"sorting_id": root.sorting_id}).unit_ids,
+        )
+    )
+    assert sorted_unit_ids == workflow["unit_ids"]
+
+    review = root.start_review(FRANKLAB_REVIEW_PROFILE)
+    tables = _bundle_units_table_unit_ids(Path(review.uri))
+    assert tables, "The review bundle has no units table"
+    for table_unit_ids in tables:
+        assert len(table_unit_ids) == len(sorted_unit_ids), (
+            f"The review lists {len(table_unit_ids)} units; the masked sort "
+            f"has {len(sorted_unit_ids)}"
+        )
+        assert sorted(table_unit_ids) == sorted_unit_ids
+
+    # Alternate two palette labels so a draft that lost or shifted a unit
+    # cannot compare equal.
+    options = review.profile.label_options[:2]
+    draft_labels = {
+        unit: (options[i % 2],) for i, unit in enumerate(sorted_unit_ids)
+    }
+    draft = labels_and_merges_to_annotations(
+        {unit: list(labels) for unit, labels in draft_labels.items()},
+        [],
+        label_options=list(review.profile.label_options),
+    )
+    url = urllib.parse.urljoin(
+        review.open(open_browser=False), "annotations.json"
+    )
+    try:
+        # Save the draft the way the browser does: PUT with the revision
+        # returned by the last read.
+        with urllib.request.urlopen(url, timeout=30) as response:
+            revision = response.headers["ETag"]
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(draft).encode("utf-8"),
+            method="PUT",
+            headers={"Content-Type": "application/json", "If-Match": revision},
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            assert response.status == 200
+    finally:
+        stop_review_servers()
+
+    reloaded = FigPackReview.resume(review.review_id).preview_import()
+    assert reloaded.unit_count_before == len(sorted_unit_ids)
+    assert dict(reloaded.labels_after) == draft_labels
+    assert reloaded.merge_groups == ()
 
 
 def test_fresh_process_rebuild_preserves_population(workflow, monkeypatch):
