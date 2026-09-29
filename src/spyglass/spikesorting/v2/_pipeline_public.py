@@ -78,6 +78,7 @@ _FACADE_ONLY_EXPORTS = (
     "SourceMode",
     "StageStatus",
     "UnitMatchCurationChoice",
+    "UnitMatchInputSummary",
     "UnitMatchMemberChoices",
     "UnitMatchStageSeconds",
 )

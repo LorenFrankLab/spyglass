@@ -969,6 +969,29 @@ def _run_metadata(entry: dict, partial: dict | None, key: str):
     return value
 
 
+def _describe_match_input(match_input) -> str:
+    """One line for a unit-match receipt input: kind, sessions, curation, traces.
+
+    ``match_input`` is a ``UnitMatchInputSummary``.
+    """
+    if match_input.motion_corrected_recording_id is None:
+        traces = f"{match_input.waveform_traces} traces (not motion corrected)"
+    else:
+        traces = (
+            f"{match_input.waveform_traces} traces "
+            "(motion corrected, motion_corrected_recording_id="
+            f"{match_input.motion_corrected_recording_id})"
+        )
+    return (
+        f"{match_input.source_kind} {match_input.source_id}; "
+        f"{match_input.n_recordings} recording(s) from "
+        f"{', '.join(match_input.nwb_file_names)}; "
+        f"curation sorting_id={match_input.sorting_id}, "
+        f"curation_id={match_input.curation_id} "
+        f"(curation_uuid={match_input.curation_uuid}); {traces}"
+    )
+
+
 def _describe_run_single_rows(
     run_summary: dict, *, sort_group_id=None
 ) -> list[dict[str, Any]]:
@@ -1066,6 +1089,17 @@ def _describe_run_single_rows(
             member_merge_id=member_merge_id,
         )
         rows.append(row)
+    # A run_v2_unit_match receipt: one row per matching input, in input_index
+    # (chronological) order.
+    for match_input in run_summary.get("inputs") or ():
+        row = _run_blank_row()
+        row.update(
+            row_type="input",
+            nwb_file_name=", ".join(match_input.nwb_file_names),
+            setting=f"input_{match_input.input_index}",
+            value=_describe_match_input(match_input),
+        )
+        rows.append(row)
     for warning in run_summary.get("warnings") or []:
         row = _run_blank_row()
         row.update(
@@ -1124,7 +1158,8 @@ def describe_run(result) -> "pd.DataFrame":
     -------
     pandas.DataFrame
         Columns ``row_type`` (``"summary"`` / ``"stage"`` / ``"member"`` /
-        ``"group"`` / ``"warning"``), ``sort_group_id``, ``stage``, ``status``,
+        ``"input"`` / ``"group"`` / ``"warning"``), ``sort_group_id``,
+        ``stage``, ``status``,
         ``seconds``, ``n_units``, ``root_merge_id``, ``auto_labeled_merge_id``,
         ``member_index``, ``nwb_file_name``, ``member_merge_id``, ``warning``,
         ``error``, ``setting``, ``value``. ``config`` rows carry the
@@ -1142,7 +1177,12 @@ def describe_run(result) -> "pd.DataFrame":
         session-safe outputs through the ``member`` rows instead. For any other
         dict summary (e.g. ``run_v2_unit_match``, which has no
         ``root_merge_id``) the ``summary`` status is blank and its stages render
-        from its own ``*_status`` keys.
+        from its own ``*_status`` keys. A ``run_v2_unit_match`` receipt adds one
+        ``input`` row per matching input, in ``input_index`` order:
+        ``setting`` is ``input_<index>``, ``nwb_file_name`` lists the input's
+        sessions, and ``value`` gives its source kind and id, recordings,
+        pinned curation and whether its waveforms came from motion-corrected
+        traces (with the ``motion_corrected_recording_id``).
     """
     import pandas as pd
 

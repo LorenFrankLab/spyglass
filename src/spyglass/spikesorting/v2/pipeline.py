@@ -124,6 +124,7 @@ from spyglass.spikesorting.v2._pipeline_types import (
     SourceMode,
     StageStatus,
     UnitMatchCurationChoice,
+    UnitMatchInputSummary,
     UnitMatchMemberChoices,
     UnitMatchStageSeconds,
 )

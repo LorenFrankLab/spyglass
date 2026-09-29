@@ -18,7 +18,7 @@ annotations``): with stringized annotations a ``TypedDict`` cannot see the
 and codegen inspect -- would be wrong.
 """
 
-from typing import Any, Literal, TypeAlias, TypedDict
+from typing import Any, Literal, NamedTuple, TypeAlias, TypedDict
 from uuid import UUID
 
 from typing_extensions import NotRequired
@@ -394,6 +394,35 @@ class UnitMatchStageSeconds(TypedDict):
     tracked_unit: float
 
 
+class UnitMatchInputSummary(NamedTuple):
+    """One matching input of a ``run_v2_unit_match`` receipt.
+
+    Read from the run's frozen ``UnitMatchSelection.Input`` /
+    ``InputRecording`` rows and, for ``waveform_traces``, from the inputs
+    table in the run's NWB -- never from a live ``SessionGroup``.
+    ``nwb_file_names`` / ``interval_list_names`` list the input's
+    constituent original recordings in recording order (one for a
+    single-recording sort, one per member for a concatenation sort).
+    ``motion_corrected_recording_id`` is the ``MotionCorrectedRecording``
+    the input's bundle was read from, ``None`` when it read the sort's own
+    source; ``waveform_traces`` names that traces kind
+    (``"motion_corrected_recording"``, ``"recording"`` or
+    ``"concatenated_recording"``).
+    """
+
+    input_index: int
+    sorting_id: UUID
+    curation_id: int
+    curation_uuid: UUID
+    source_kind: str
+    source_id: UUID
+    nwb_file_names: tuple[str, ...]
+    interval_list_names: tuple[str, ...]
+    n_recordings: int
+    motion_corrected_recording_id: "UUID | None"
+    waveform_traces: str
+
+
 class RunV2UnitMatchSummary(TypedDict):
     """Return value of ``run_v2_unit_match``.
 
@@ -401,13 +430,16 @@ class RunV2UnitMatchSummary(TypedDict):
     pairwise-match and tracked-unit results, with per-stage status / timing.
     ``session_group_owner`` / ``session_group_name`` name the ``SessionGroup``
     matched, and are ``None`` for a run of named sorts
-    (``plan_v2_unit_match_from_sorts``).
+    (``plan_v2_unit_match_from_sorts``). ``inputs`` holds one
+    :class:`UnitMatchInputSummary` per matching input, in ``input_index``
+    (chronological) order.
     """
 
     session_group_owner: "str | None"
     session_group_name: "str | None"
     matcher_params_name: str
     unit_match_id: UUID
+    inputs: tuple[UnitMatchInputSummary, ...]
     unit_match_status: StageStatus
     n_pairs: int
     tracked_unit_status: StageStatus
@@ -435,6 +467,7 @@ __all__ = [
     "SourceMode",
     "StageStatus",
     "UnitMatchCurationChoice",
+    "UnitMatchInputSummary",
     "UnitMatchMemberChoices",
     "UnitMatchStageSeconds",
 ]

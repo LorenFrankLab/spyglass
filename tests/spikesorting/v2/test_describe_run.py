@@ -135,6 +135,59 @@ def test_describe_run_unit_match_summary_not_labeled_root_only():
     assert {"unit_match", "tracked_unit"} <= stages
 
 
+def test_describe_run_lists_each_unit_match_input():
+    """A unit-match receipt renders one input row per matching input, in
+    input_index order: its kind and source, sessions, pinned curation, and
+    whether its waveforms came from motion-corrected traces (with the
+    corrected recording's id)."""
+    import uuid
+
+    from spyglass.spikesorting.v2._pipeline_types import UnitMatchInputSummary
+
+    ids = {name: uuid.UUID(int=i + 1) for i, name in enumerate("abcdefg")}
+    inputs = (
+        UnitMatchInputSummary(
+            input_index=0,
+            sorting_id=ids["a"],
+            curation_id=2,
+            curation_uuid=ids["b"],
+            source_kind="concatenated_recording",
+            source_id=ids["c"],
+            nwb_file_names=("day1.nwb", "day1.nwb"),
+            interval_list_names=("epoch 1", "epoch 2"),
+            n_recordings=2,
+            motion_corrected_recording_id=ids["d"],
+            waveform_traces="motion_corrected_recording",
+        ),
+        UnitMatchInputSummary(
+            input_index=1,
+            sorting_id=ids["e"],
+            curation_id=0,
+            curation_uuid=ids["f"],
+            source_kind="recording",
+            source_id=ids["g"],
+            nwb_file_names=("day2.nwb",),
+            interval_list_names=("epoch 1",),
+            n_recordings=1,
+            motion_corrected_recording_id=None,
+            waveform_traces="recording",
+        ),
+    )
+    frame = describe_run({**_unit_match_summary(), "inputs": inputs})
+    rows = frame[frame["row_type"] == "input"]
+    assert rows["setting"].tolist() == ["input_0", "input_1"]
+    assert rows["nwb_file_name"].tolist() == ["day1.nwb, day1.nwb", "day2.nwb"]
+    assert rows["value"].tolist() == [
+        f"concatenated_recording {ids['c']}; 2 recording(s) from day1.nwb, "
+        f"day1.nwb; curation sorting_id={ids['a']}, curation_id=2 "
+        f"(curation_uuid={ids['b']}); motion_corrected_recording traces "
+        f"(motion corrected, motion_corrected_recording_id={ids['d']})",
+        f"recording {ids['g']}; 1 recording(s) from day2.nwb; curation "
+        f"sorting_id={ids['e']}, curation_id=0 (curation_uuid={ids['f']}); "
+        "recording traces (not motion corrected)",
+    ]
+
+
 def test_describe_run_single_warning_is_its_own_row():
     frame = describe_run(
         _run_summary(n_units=0, warnings=["zero units found on this shank"])

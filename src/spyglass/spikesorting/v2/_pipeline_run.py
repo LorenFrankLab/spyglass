@@ -60,6 +60,7 @@ from spyglass.spikesorting.v2._pipeline_types import (
     RunV2PipelineSessionResult,
     RunV2UnitMatchSummary,
     StageStatus,
+    UnitMatchInputSummary,
     UnitMatchMemberChoices,
     UnitMatchStageSeconds,
 )
@@ -2446,6 +2447,7 @@ def run_v2_unit_match(
         run_summary,
     )
     run_summary["n_pairs"] = int((UnitMatch & selection).fetch1("n_pairs"))
+    run_summary["inputs"] = _unit_match_input_summaries(selection)
 
     # Biological-unit identity across sessions, derived from the pair graph with
     # the same matcher params. Its own stage so a tracked-unit failure (e.g. the
@@ -2467,6 +2469,7 @@ def run_v2_unit_match(
         session_group_name=session_group_name,
         matcher_params_name=matcher_params_name,
         unit_match_id=run_summary["unit_match_id"],
+        inputs=run_summary["inputs"],
         unit_match_status=run_summary["unit_match_status"],
         n_pairs=run_summary["n_pairs"],
         tracked_unit_status=run_summary["tracked_unit_status"],
@@ -2477,6 +2480,50 @@ def run_v2_unit_match(
         ),
         warnings=warnings,
     )
+
+
+def _unit_match_input_summaries(
+    selection: dict,
+) -> tuple[UnitMatchInputSummary, ...]:
+    """The receipt's per-input records for one populated match run.
+
+    Identity, source and constituent recordings come from the frozen
+    selection parts; ``waveform_traces`` comes from the inputs table the run
+    wrote to its NWB (the traces its bundles were actually read from). Both
+    are read through ``UnitMatch.get_input_provenance``.
+    """
+    from spyglass.spikesorting.v2.unit_matching import UnitMatch
+
+    inputs, recordings = UnitMatch().get_input_provenance(selection)
+    nwb_inputs, _ = UnitMatch().get_input_provenance(selection, from_nwb=True)
+    traces_by_input = dict(
+        zip(
+            nwb_inputs["input_index"].astype(int),
+            nwb_inputs["waveform_traces"],
+        )
+    )
+    summaries = []
+    for row in inputs.to_dict(orient="records"):
+        input_index = int(row["input_index"])
+        members = recordings[recordings["input_index"] == input_index]
+        summaries.append(
+            UnitMatchInputSummary(
+                input_index=input_index,
+                sorting_id=row["sorting_id"],
+                curation_id=int(row["curation_id"]),
+                curation_uuid=row["curation_uuid"],
+                source_kind=row["source_kind"],
+                source_id=row["source_id"],
+                nwb_file_names=tuple(members["nwb_file_name"]),
+                interval_list_names=tuple(members["interval_list_name"]),
+                n_recordings=len(members),
+                motion_corrected_recording_id=row[
+                    "motion_corrected_recording_id"
+                ],
+                waveform_traces=str(traces_by_input[input_index]),
+            )
+        )
+    return tuple(summaries)
 
 
 def plan_v2_unit_match(

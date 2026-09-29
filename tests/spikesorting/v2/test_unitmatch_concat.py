@@ -1134,7 +1134,7 @@ def test_concat_pairs_and_input_provenance_round_trip(
 ):
     """Inputs named in a shuffled order (two daily concatenations and a
     single recording) run through the public workflow; the frozen parts,
-    the NWB inputs / input-recordings tables and
+    the NWB inputs / input-recordings tables, the receipt's inputs and
     UnitMatch.get_input_provenance (database and NWB forms) all give the
     chronological order, pinned curations, sources, every constituent
     recording with its frames, and the (absent) motion reference that the
@@ -1146,6 +1146,7 @@ def test_concat_pairs_and_input_provenance_round_trip(
         UNITMATCH_INPUTS,
         read_long_provenance,
     )
+    from spyglass.spikesorting.v2._pipeline_reporting import describe_run
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.pipeline import (
         plan_v2_unit_match_from_sorts,
@@ -1300,7 +1301,47 @@ def test_concat_pairs_and_input_provenance_round_trip(
             )
         ] == [row[4] for row in expected_inputs]
 
-        # 3. get_input_provenance, both forms.
+        # 3. The receipt.
+        receipt_inputs = [
+            (
+                item.input_index,
+                str(item.sorting_id),
+                item.curation_id,
+                str(item.curation_uuid),
+                item.source_kind,
+                str(item.source_id),
+                item.motion_corrected_recording_id,
+                item.waveform_traces,
+                item.n_recordings,
+                item.nwb_file_names,
+                item.interval_list_names,
+            )
+            for item in summary["inputs"]
+        ]
+        assert receipt_inputs == [
+            (
+                *expected[:6],
+                None,
+                expected[4],
+                len(members),
+                tuple(member[2] for member in members),
+                tuple(member[3] for member in members),
+            )
+            for expected in expected_inputs
+            for members in [
+                [r for r in expected_recordings if r[0] == expected[0]]
+            ]
+        ]
+        receipt = describe_run(summary)
+        assert receipt.loc[
+            receipt["row_type"] == "input", "setting"
+        ].tolist() == [
+            "input_0",
+            "input_1",
+            "input_2",
+        ]
+
+        # 4. get_input_provenance, both forms.
         for from_nwb in (False, True):
             inputs, recordings = UnitMatch().get_input_provenance(
                 pk, from_nwb=from_nwb
@@ -1375,5 +1416,129 @@ def test_concat_pairs_and_input_provenance_round_trip(
         (
             MatcherParameters
             & {"matcher_params_name": "round_trip_pairer_params"}
+        ).super_delete(warn=False)
+        restore_matcher_registry(saved)
+
+
+def test_group_run_receipt_adds_only_its_inputs(
+    daily_concat_match_inputs, monkeypatch
+):
+    """A SessionGroup run's receipt keeps every earlier field with its
+    earlier value (group, matcher, selection, statuses, counts, stage
+    timings, warnings) and adds only ``inputs``: one record per member's
+    single-recording sort in chronological order."""
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match,
+        run_v2_unit_match,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    fx = daily_concat_match_inputs
+    cur = fx["curations"]
+    rec = fx["recording_keys"]
+    members = [
+        {
+            field: value
+            for field, value in (RecordingSelection & rec[tag]).fetch1().items()
+            if field in _MEMBER_FIELDS
+        }
+        for tag in ("b", "a")
+    ]
+    owner, name = members[0]["team_name"], "unitmatch_receipt_group"
+    SessionGroup.create_group(owner, name, members)
+    saved = install_fixture_pairer(
+        monkeypatch,
+        matcher_name="group_receipt_pairer",
+        matcher_params_name="group_receipt_pairer_params",
+        pairs=[[0, 0]],
+    )
+    pk = None
+    try:
+        plan = plan_v2_unit_match(
+            owner,
+            name,
+            curation_strategy="root",
+            matcher_params_name="group_receipt_pairer_params",
+        )
+        summary = run_v2_unit_match(plan)
+        pk = UnitMatchSelection.insert_selection(
+            owner,
+            name,
+            "group_receipt_pairer_params",
+            {0: cur["single_b"], 1: cur["single_a"]},
+        )
+        assert set(summary) == {
+            "session_group_owner",
+            "session_group_name",
+            "matcher_params_name",
+            "unit_match_id",
+            "unit_match_status",
+            "n_pairs",
+            "tracked_unit_status",
+            "n_tracked_units",
+            "stage_seconds",
+            "warnings",
+            "inputs",
+        }
+        assert summary["session_group_owner"] == owner
+        assert summary["session_group_name"] == name
+        assert summary["matcher_params_name"] == "group_receipt_pairer_params"
+        assert summary["unit_match_id"] == pk["unitmatch_id"]
+        assert summary["unit_match_status"] == "computed"
+        assert summary["tracked_unit_status"] == "computed"
+        assert summary["n_pairs"] == 1 == len(UnitMatch.Pair & pk)
+        assert summary["n_tracked_units"] == len(TrackedUnit & pk) == 1
+        assert set(summary["stage_seconds"]) == {"unit_match", "tracked_unit"}
+        assert all(
+            isinstance(seconds, float)
+            for seconds in summary["stage_seconds"].values()
+        )
+        assert summary["warnings"] == []
+        # Members are listed b, a; inputs follow the recording times: a, b.
+        assert [
+            (
+                item.input_index,
+                str(item.sorting_id),
+                item.source_kind,
+                str(item.source_id),
+                item.nwb_file_names,
+                item.motion_corrected_recording_id,
+            )
+            for item in summary["inputs"]
+        ] == [
+            (
+                0,
+                str(cur["single_a"]["sorting_id"]),
+                "recording",
+                str(rec["a"]["recording_id"]),
+                (fx["nwb_file_names"]["a"],),
+                None,
+            ),
+            (
+                1,
+                str(cur["single_b"]["sorting_id"]),
+                "recording",
+                str(rec["b"]["recording_id"]),
+                (fx["nwb_file_names"]["b"],),
+                None,
+            ),
+        ]
+    finally:
+        (
+            SessionGroup
+            & {"session_group_owner": owner, "session_group_name": name}
+        ).super_delete(warn=False)
+        if pk is not None:
+            _drop(pk)
+        (
+            MatcherParameters
+            & {"matcher_params_name": "group_receipt_pairer_params"}
         ).super_delete(warn=False)
         restore_matcher_registry(saved)
