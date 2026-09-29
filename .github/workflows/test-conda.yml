@@ -531,9 +531,9 @@ jobs:
     # yet (their FIXTURE_URLS entries in tests/spikesorting/v2/fixtures/_fetch.py
     # are None). SPYGLASS_V2_REQUIRE_FIXTURES is set on this command only
     # (overriding the job-wide list), so conftest's pytest_sessionstart
-    # downloads them and fails the session naming both stems while they are
-    # unavailable. This step is therefore EXPECTED to be red on nightly and
-    # manual runs until the fixtures are uploaded and their URLs set in
+    # downloads them once they are hosted; until then it fails the session
+    # naming both stems. This step is therefore EXPECTED to be red on nightly
+    # and manual runs until the fixtures are uploaded and their URLs set in
     # _fetch.py (tests/spikesorting/v2/fixtures/README.md); nothing else here
     # needs to change then. Do not mask the failure.
     - name: Two-session matcher ground-truth gate (nightly / manual dispatch)

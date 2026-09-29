@@ -73,12 +73,12 @@ FIXTURE_URLS: dict[str, str | None] = {
         "&shared_name=97co1vzih0u4ybkd7efy8yu2s6a2nv6l"
         "&file_id=f_2275441530141"
     ),
-    "mearec_neuropixels_60s": (  # nightly / manual
+    "mearec_neuropixels_60s": (  # manual dispatch only
         "https://ucsf.box.com/index.php?rm=box_download_shared_file"
         "&shared_name=zb391me083j7nbd9rsso9osrtmigmcj0"
         "&file_id=f_2275442214033"
     ),
-    "mearec_polymer_128ch_drift_120s": (  # nightly / manual
+    "mearec_polymer_128ch_drift_120s": (  # manual dispatch only
         "https://ucsf.box.com/index.php?rm=box_download_shared_file"
         "&shared_name=4968ma26dq71cgceqsrfgavejacmyhca"
         "&file_id=f_2275470926183"
