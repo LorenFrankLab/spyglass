@@ -206,7 +206,8 @@ def test_derive_tracked_units_full_triangle_is_one_component():
     assert len(tracked) == 1
     tu = tracked[0]
     assert set(tu["members"]) == {a, b, c}
-    assert tu["n_sessions_observed"] == 3
+    assert tu["n_sessions_detected"] == 3
+    assert tu["n_matching_inputs"] == 3
     assert tu["policy_used"] == "strict"
     assert tu["median_match_probability"] == pytest.approx(0.9)
 
@@ -283,7 +284,8 @@ def test_derive_tracked_units_unmatched_singleton():
     )
     assert len(tracked) == 2
     for tu in tracked:
-        assert tu["n_sessions_observed"] == 1
+        assert tu["n_sessions_detected"] == 1
+        assert tu["n_matching_inputs"] == 1
         assert tu["median_match_probability"] is None
         assert tu["policy_used"] == "strict"
 
@@ -350,7 +352,7 @@ def test_derive_tracked_units_equal_strength_tie_break_is_member_sorted():
 
 def test_derive_tracked_units_counts_sessions_by_nwb_not_curation():
     """A tracked unit spanning two sortings from the SAME nwb counts as ONE
-    session. ``n_sessions_observed`` is a cross-session-identity claim, so it
+    session. ``n_sessions_detected`` is a cross-session-identity claim, so it
     must key on the recording session (nwb), not on (sorting_id, curation_id) --
     otherwise a within-day match across two sort groups inflates to multi-session.
     """
@@ -364,11 +366,17 @@ def test_derive_tracked_units_counts_sessions_by_nwb_not_curation():
         edges,
         threshold=0.5,
         max_strict_nodes=100,
-        session_by_sorting={"A": "day1.nwb", "B": "day1.nwb", "C": "day2.nwb"},
+        input_by_node={a: 0, b: 1, c: 2},
+        detected_sessions_by_node={
+            a: {"day1.nwb"},
+            b: {"day1.nwb"},
+            c: {"day2.nwb"},
+        },
     )
     assert len(tracked) == 1
     # Three sortings, but only two distinct recording sessions (day1, day2).
-    assert tracked[0]["n_sessions_observed"] == 2
+    assert tracked[0]["n_sessions_detected"] == 2
+    assert tracked[0]["n_matching_inputs"] == 3
 
 
 def test_divergent_electrode_space_members_flags_distinct_probe():
@@ -1883,7 +1891,8 @@ def test_tracked_unit_make_seeds_singletons(two_session_curated_group):
     assert len(tracked) == n_matchable
     for row in tracked:
         # No pairs -> every unit is its own singleton tracked unit.
-        assert row["n_sessions_observed"] == 1
+        assert row["n_sessions_detected"] == 1
+        assert row["n_matching_inputs"] == 1
         assert row["median_match_probability"] is None
         assert row["policy_used"] == "strict"
     # Member rows reference the pinned curated units (FK-validated).
@@ -1997,7 +2006,7 @@ def test_make_runs_full_matcher_table_path(
         matched = [
             row
             for row in (TrackedUnit & selection_pk).fetch(as_dict=True)
-            if row["n_sessions_observed"] == 2
+            if row["n_sessions_detected"] == 2
         ]
         assert len(matched) == 1
         assert matched[0]["median_match_probability"] == pytest.approx(0.99)
@@ -2278,7 +2287,7 @@ def test_full_unitmatch_workflow_with_accepted_evaluation_children(
         matched = [
             row
             for row in (TrackedUnit & selection_pk).fetch(as_dict=True)
-            if row["n_sessions_observed"] == 2
+            if row["n_sessions_detected"] == 2
         ]
         assert len(matched) == 1
         assert matched[0]["median_match_probability"] == pytest.approx(0.97)
@@ -2401,7 +2410,7 @@ def test_unitmatch_populate_with_committed_merged_child_member(
         matched = [
             row
             for row in (TrackedUnit & selection_pk).fetch(as_dict=True)
-            if row["n_sessions_observed"] == 2
+            if row["n_sessions_detected"] == 2
         ]
         assert len(matched) == 1
     finally:
@@ -2645,7 +2654,16 @@ def test_excluded_bundle_units_stay_in_frozen_universe(
         excluded_row = (
             TrackedUnit & pk & {"tracked_unit_id": excluded_tracked}
         ).fetch1()
-        assert excluded_row["n_sessions_observed"] == 1
+        # The excluded unit's one planted spike is still counted, so its
+        # session is detected.
+        assert {
+            int(r["unit_id"]): int(r["n_spikes"])
+            for r in (
+                UnitMatch.RecordingSpikeCount & pk & {"input_index": 0}
+            ).fetch(as_dict=True)
+        } == {excluded: 1, kept: 35}
+        assert excluded_row["n_sessions_detected"] == 1
+        assert excluded_row["n_matching_inputs"] == 1
         assert excluded_row["median_match_probability"] is None
 
 
@@ -3420,7 +3438,7 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         matched = [
             row
             for row in (TrackedUnit & selection_pk).fetch(as_dict=True)
-            if row["n_sessions_observed"] == 2
+            if row["n_sessions_detected"] == 2
         ]
         assert len(matched) == 1
 

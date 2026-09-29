@@ -715,7 +715,11 @@ def test_concat_inputs_match_and_track_in_chronological_order(
 
         TrackedUnit.populate(pk, reserve_jobs=False)
         (tracked,) = (TrackedUnit & pk).fetch("KEY")
-        assert (TrackedUnit & tracked).fetch1("n_sessions_observed") == 2
+        # Each day's planted unit fires in both of its intervals of one
+        # session: two inputs, two sessions (not four recordings).
+        assert (TrackedUnit & tracked).fetch1(
+            "n_sessions_detected", "n_matching_inputs"
+        ) == (2, 2)
         regions = TrackedUnit().get_unit_brain_regions(tracked)
         expected = []
         for input_index, curation in enumerate((day1, day2)):
@@ -2312,6 +2316,11 @@ def test_tracked_units_map_to_original_member_times_and_regions(
         ] == expected_spans
     assert [len(s) for s in spans.values()] == [2, 2, 1]
     planted = {name: _planted_member_frames(s) for name, s in spans.items()}
+    nwbs = fx["nwb_file_names"]
+    member_nwbs = {
+        "day1": [nwbs["a"], nwbs["a"]],
+        "cross_nwb": [nwbs["a"], nwbs["b"]],
+    }
     params_name = "member_times_pairer_params"
     saved = install_fixture_pairer(
         monkeypatch,
@@ -2355,6 +2364,48 @@ def test_tracked_units_map_to_original_member_times_and_regions(
             assert expected_counts[(0, 1, 1)] == 0
             assert expected_counts[(0, 0, 2)] == 0
             assert min(n for n in expected_counts.values() if n) >= 3
+
+            # Unit k of the concatenation pairs unit k of c. A session is
+            # detected where a member unit has planted spikes; two intervals
+            # of one session count once.
+            TrackedUnit.populate(pk, reserve_jobs=False)
+            got_counts = {}
+            for tracked in (TrackedUnit & pk).fetch(as_dict=True):
+                units = {
+                    (str(m["sorting_id"]), int(m["unit_id"]))
+                    for m in (TrackedUnit.Member & tracked).fetch(as_dict=True)
+                }
+                got_counts[frozenset(units)] = (
+                    tracked["n_sessions_detected"],
+                    tracked["n_matching_inputs"],
+                )
+            expected_tracked = {}
+            for unit, per_span in planted[name].items():
+                sessions = {
+                    nwb
+                    for nwb, frames in zip(member_nwbs[name], per_span)
+                    if len(frames)
+                } | {nwbs["c"]}
+                expected_tracked[
+                    frozenset(
+                        {
+                            (str(cur[name]["sorting_id"]), unit),
+                            (str(cur["c"]["sorting_id"]), unit),
+                        }
+                    )
+                ] = (len(sessions), 2)
+            assert got_counts == expected_tracked
+            by_unit = {
+                min(unit for _sid, unit in units): counts
+                for units, counts in got_counts.items()
+            }
+            if name == "day1":
+                # Every planted unit: sessions a and c, two inputs.
+                assert by_unit == {0: (2, 2), 1: (2, 2), 2: (2, 2)}
+            else:
+                # Unit 0 fires in a and b: three sessions over two inputs;
+                # units 1 and 2 fire in one member only.
+                assert by_unit == {0: (3, 2), 1: (2, 2), 2: (2, 2)}
     finally:
         for pk in runs.values():
             _drop(pk)

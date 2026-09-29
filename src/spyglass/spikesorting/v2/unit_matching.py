@@ -1844,13 +1844,23 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     groups via a greedy maximal-clique cover (each unit belongs to exactly one
     tracked unit; the strongest overlapping clique wins). Exceeding
     ``max_strict_nodes`` raises ``TrackedUnitBudgetExceededError``.
+
+    A member unit of a concatenation input covers several original
+    recordings. ``n_sessions_detected`` counts the distinct original
+    sessions (``nwb_file_name``) in which at least one member unit has
+    spikes, from the frozen ``UnitMatch.RecordingSpikeCount`` rows: two
+    intervals of one nwb count once, and a recording where a member has no
+    spikes does not count. ``n_matching_inputs`` counts the distinct inputs
+    among the members. For single-recording inputs whose units all have
+    spikes the two are equal.
     """
 
     definition = """
     -> UnitMatch
     tracked_unit_id: int
     ---
-    n_sessions_observed: int
+    n_sessions_detected: int   # distinct original sessions (nwb files) in which a member unit has at least one spike
+    n_matching_inputs: int     # distinct matching inputs among the member units
     median_match_probability=NULL: float  # NULL for singleton tracked units
     policy_used: varchar(32)              # 'strict' ships today; future policies
                                           # are pure inserts (no migration)
@@ -1875,7 +1885,9 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         tracked-unit graph. ``derive_tracked_units`` still fails loudly if a
         ``Pair`` edge endpoint is absent from the (frozen) universe -- a genuine
         UnitMatch/MatchableUnit inconsistency that should never occur, since both
-        are written together in ``make_insert``.
+        are written together in ``make_insert``. Detected sessions come from
+        the frozen ``UnitMatch.RecordingSpikeCount`` rows
+        (:func:`_node_detections`).
         """
         from spyglass.spikesorting.v2._matcher_graph import (
             derive_tracked_units,
@@ -1930,32 +1942,14 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
             for pair in (UnitMatch.Pair & key).fetch(as_dict=True)
         ]
 
-        # Map each input sorting to its recording session(s) from the frozen
-        # InputRecording rows so n_sessions_observed counts distinct SESSIONS,
-        # not (sorting_id, curation_id): a single-recording input maps to its
-        # nwb; a concatenation input to the sorted tuple of its nwb files.
-        nwb_files_by_input: dict = {}
-        for row in (UnitMatchSelection.InputRecording & key).fetch(
-            "input_index", "nwb_file_name", as_dict=True
-        ):
-            nwb_files_by_input.setdefault(int(row["input_index"]), set()).add(
-                row["nwb_file_name"]
-            )
-        session_by_sorting = {}
-        for row in (UnitMatchSelection.Input & key).fetch(
-            "input_index", "sorting_id", as_dict=True
-        ):
-            nwb_files = sorted(nwb_files_by_input[int(row["input_index"])])
-            session_by_sorting[str(row["sorting_id"])] = (
-                nwb_files[0] if len(nwb_files) == 1 else tuple(nwb_files)
-            )
-
+        input_by_node, detected_sessions_by_node = _node_detections(key)
         tracked = derive_tracked_units(
             node_universe,
             edges,
             threshold=threshold,
             max_strict_nodes=max_strict_nodes,
-            session_by_sorting=session_by_sorting,
+            input_by_node=input_by_node,
+            detected_sessions_by_node=detected_sessions_by_node,
         )
 
         master_rows = []
@@ -1965,7 +1959,8 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
                 {
                     **key,
                     "tracked_unit_id": tracked_unit_id,
-                    "n_sessions_observed": unit["n_sessions_observed"],
+                    "n_sessions_detected": unit["n_sessions_detected"],
+                    "n_matching_inputs": unit["n_matching_inputs"],
                     "median_match_probability": unit[
                         "median_match_probability"
                     ],
@@ -2114,6 +2109,82 @@ _INPUT_RECORDING_PROVENANCE_COLUMNS = (
     "start_sample",
     "end_sample",
 )
+
+
+def _node_detections(key) -> tuple[dict, dict]:
+    """Each matchable unit's input and the sessions it was detected in.
+
+    Reads one run's frozen ``UnitMatch.MatchableUnit``,
+    ``UnitMatch.RecordingSpikeCount`` and
+    ``UnitMatchSelection.InputRecording`` rows. A unit is detected in a
+    recording's session (``nwb_file_name``) when it has at least one spike
+    in that recording's frame span.
+
+    Parameters
+    ----------
+    key : dict
+        Restriction selecting one ``UnitMatch`` row.
+
+    Returns
+    -------
+    input_by_node : dict
+        ``{(sorting_id str, curation_id, unit_id): input_index}``.
+    detected_sessions_by_node : dict
+        ``{node: set of nwb_file_name}``; a unit with no spikes maps to an
+        empty set.
+
+    Raises
+    ------
+    ValueError
+        A matchable unit has no spike counts for its input's recordings (the
+        ``UnitMatch`` row predates the counts); re-populate ``UnitMatch``.
+    """
+    nwb_by_recording = {
+        (int(row["input_index"]), int(row["recording_index"])): row[
+            "nwb_file_name"
+        ]
+        for row in (UnitMatchSelection.InputRecording & key).fetch(
+            "input_index", "recording_index", "nwb_file_name", as_dict=True
+        )
+    }
+    counts: dict = {}
+    for row in (UnitMatch.RecordingSpikeCount & key).fetch(as_dict=True):
+        counts.setdefault((int(row["input_index"]), int(row["unit_id"])), {})[
+            int(row["recording_index"])
+        ] = int(row["n_spikes"])
+    input_by_node, detected_sessions_by_node = {}, {}
+    missing = []
+    for row in (UnitMatch.MatchableUnit & key).fetch(as_dict=True):
+        input_index = int(row["input_index"])
+        node = (
+            str(row["sorting_id"]),
+            int(row["curation_id"]),
+            int(row["unit_id"]),
+        )
+        per_recording = counts.get((input_index, node[2]), {})
+        recordings = {
+            recording_index
+            for index, recording_index in nwb_by_recording
+            if index == input_index
+        }
+        if set(per_recording) != recordings:
+            missing.append(node)
+            continue
+        input_by_node[node] = input_index
+        detected_sessions_by_node[node] = {
+            nwb_by_recording[(input_index, recording_index)]
+            for recording_index, n_spikes in per_recording.items()
+            if n_spikes > 0
+        }
+    if missing:
+        raise ValueError(
+            f"TrackedUnit.make: UnitMatch row {key} has no "
+            "UnitMatch.RecordingSpikeCount rows for every recording of "
+            f"matchable units {sorted(missing)} (the row predates the "
+            "per-recording counts). Re-populate UnitMatch (delete + populate) "
+            "before deriving tracked units."
+        )
+    return input_by_node, detected_sessions_by_node
 
 
 def _input_label(sorting_id, curation_id) -> str:

@@ -224,6 +224,22 @@ excluded raises.
     disjoint intervals or concatenations change, so delete and repopulate
     existing `UnitMatch` rows that match such inputs.
 
+#### Spike Sorting v2: tracked units resolve to each original recording
+
+- **Schema change:** new `UnitMatch.RecordingSpikeCount` part with one row per
+  (matching input, constituent recording, matchable unit): the unit's spikes
+  inside that recording's frozen frame span. A concatenation input's parent
+  unit gets one row per member, zero where it did not fire.
+- **Schema change:** `TrackedUnit.n_sessions_observed` is renamed
+  `n_sessions_detected` and now counts the distinct original sessions
+  (`nwb_file_name`) in which at least one member unit has spikes; two
+  intervals of one session count once and a member with no spikes in a
+  recording does not count it. New `TrackedUnit.n_matching_inputs` counts the
+  distinct matching inputs among the members. For single-recording inputs
+  whose units have spikes both equal the old value.
+- **Existing `UnitMatch` and `TrackedUnit` rows must be deleted and
+  repopulated.**
+
 #### Spike Sorting v2: every computed table keeps heavy work out of its insert transaction
 
 - `FigPackCuration` now uses DataJoint's tri-part make with

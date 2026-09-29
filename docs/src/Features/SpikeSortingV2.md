@@ -2197,7 +2197,7 @@ Key behaviors and caveats:
     edge probability) so each curated unit belongs to exactly one tracked unit —
     overlapping cliques never duplicate a unit across identities. If A↔B and B↔C
     match but A↔C does not, A and C land in different tracked units. A unit with
-    no matches surfaces as a singleton (`n_sessions_observed == 1`,
+    no matches surfaces as a singleton (`n_matching_inputs == 1`,
     `median_match_probability` NULL). The graph size is bounded by
     `max_strict_nodes` (default 2000); a larger universe raises
     `TrackedUnitBudgetExceededError`.

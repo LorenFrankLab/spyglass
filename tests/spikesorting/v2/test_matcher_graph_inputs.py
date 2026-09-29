@@ -349,3 +349,72 @@ def test_count_recording_spikes_refuses_unconserved_spans(trains, spans, match):
             {unit: np.asarray(frames) for unit, frames in trains.items()},
             spans,
         )
+
+
+def _tracked_counts(members_edges, input_by_node, detected):
+    """``{sorted members: (n_sessions_detected, n_matching_inputs)}``."""
+    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+
+    nodes, edges = members_edges
+    return {
+        tuple(unit["members"]): (
+            unit["n_sessions_detected"],
+            unit["n_matching_inputs"],
+        )
+        for unit in derive_tracked_units(
+            nodes,
+            edges,
+            threshold=0.5,
+            max_strict_nodes=100,
+            input_by_node=input_by_node,
+            detected_sessions_by_node=detected,
+        )
+    }
+
+
+def test_tracked_units_count_detected_sessions_and_matching_inputs():
+    """Hand-computed counts for tracked units over concatenation inputs.
+
+    Input 0 is a concatenation of ``a.nwb`` and ``b.nwb`` (units c0, c1, c2),
+    input 1 a single recording of ``c.nwb`` (units s0, s1, s2); ck pairs sk.
+    c0 fires in both members (3 sessions over 2 inputs), c1 only in its
+    ``a.nwb`` member (``b.nwb`` does not count), and c2 fires nowhere (an
+    empty train never counts), leaving its tracked unit one session. The
+    single-recording singleton s3 counts its own session and input.
+    """
+    c0, c1, c2 = ("C", 0, 0), ("C", 0, 1), ("C", 0, 2)
+    s0, s1, s2, s3 = ("S", 0, 0), ("S", 0, 1), ("S", 0, 2), ("S", 0, 3)
+    nodes = [c0, c1, c2, s0, s1, s2, s3]
+    edges = [(c0, s0, 0.9), (c1, s1, 0.9), (c2, s2, 0.9)]
+    input_by_node = {node: 0 if node[0] == "C" else 1 for node in nodes}
+    detected = {
+        c0: {"a.nwb", "b.nwb"},
+        c1: {"a.nwb"},
+        c2: set(),
+        s0: {"c.nwb"},
+        s1: {"c.nwb"},
+        s2: {"c.nwb"},
+        s3: {"c.nwb"},
+    }
+    assert _tracked_counts((nodes, edges), input_by_node, detected) == {
+        (c0, s0): (3, 2),
+        (c1, s1): (2, 2),
+        (c2, s2): (1, 2),
+        (s3,): (1, 1),
+    }
+
+
+def test_tracked_units_count_two_intervals_of_one_session_once():
+    """A concatenation of two intervals of ``a.nwb`` whose parent unit fires
+    in both intervals is one session: listed once per interval, the session
+    still counts once, so the tracked unit with a unit of ``b.nwb`` has two
+    sessions over two inputs; a parent unit with no spikes is a singleton
+    detected in no session."""
+    d0, d1, b0 = ("D", 0, 0), ("D", 0, 1), ("B", 0, 0)
+    nodes = [d0, d1, b0]
+    counts = _tracked_counts(
+        (nodes, [(d0, b0, 0.9)]),
+        {d0: 0, d1: 0, b0: 1},
+        {d0: ["a.nwb", "a.nwb"], d1: [], b0: ["b.nwb"]},
+    )
+    assert counts == {(b0, d0): (2, 2), (d1,): (0, 1)}

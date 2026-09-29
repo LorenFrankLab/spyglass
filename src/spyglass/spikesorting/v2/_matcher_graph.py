@@ -514,7 +514,8 @@ def derive_tracked_units(
     threshold: float,
     max_strict_nodes: int,
     policy: str = STRICT_POLICY,
-    session_by_sorting: "dict | None" = None,
+    input_by_node: "dict | None" = None,
+    detected_sessions_by_node: "dict | None" = None,
 ) -> list[dict]:
     """Group curated units into tracked (biological) units via strict cliques.
 
@@ -550,21 +551,30 @@ def derive_tracked_units(
         search runs.
     policy : str, optional
         Persisted on every row. Only ``"strict"`` ships today.
-    session_by_sorting : dict, optional
-        ``{sorting_id: session_key}`` (the session key is the matching
-        input's ``nwb_file_name``, or the sorted tuple of its constituent
-        ``nwb_file_name`` values for a concatenation). When given, ``n_sessions_observed`` counts distinct
-        RECORDING SESSIONS, so two sortings from one nwb (different sort groups
-        of the same day) count once -- a within-session match cannot inflate to
-        multi-session. When ``None`` (or a sorting is absent), it falls back to
-        counting distinct ``(sorting_id, curation_id)``.
+    input_by_node : dict, optional
+        ``{node: matching-input key}`` (e.g. the node's ``input_index``);
+        ``n_matching_inputs`` counts distinct values among a tracked unit's
+        members. When ``None``, a node's input is its ``(sorting_id,
+        curation_id)``, since an input pins one curation per sorting.
+    detected_sessions_by_node : dict, optional
+        ``{node: iterable of session}``: the original recording sessions
+        (``nwb_file_name``) in which the node's unit has at least one spike.
+        A concatenation input's parent unit covers several recordings and
+        lists only those it fired in; two intervals of one nwb are one
+        session, and a unit with no spikes lists none (a node absent from
+        the map is detected nowhere). ``n_sessions_detected`` counts the
+        distinct sessions over a tracked unit's members, so two sortings
+        from one nwb (different sort groups of the same day) count once --
+        a within-session match cannot inflate to multi-session. When
+        ``None``, each node counts as detected in its own input.
 
     Returns
     -------
     list[dict]
         One dict per tracked unit (deterministically ordered) with ``members``
-        (sorted node tuples), ``n_sessions_observed``, ``median_match_probability``
-        (``None`` for singletons), and ``policy_used``.
+        (sorted node tuples), ``n_sessions_detected``, ``n_matching_inputs``,
+        ``median_match_probability`` (``None`` for singletons), and
+        ``policy_used``.
 
     Raises
     ------
@@ -636,6 +646,12 @@ def derive_tracked_units(
             members,
         ),
     )
+
+    def _node_input(node):
+        if input_by_node is None:
+            return (node[0], node[1])
+        return input_by_node[node]
+
     claimed: set = set()
     tracked: list[dict] = []
     for clique_members in cliques:
@@ -643,24 +659,26 @@ def derive_tracked_units(
         if not members:
             continue
         claimed.update(members)
-        # Count distinct RECORDING SESSIONS, not (sorting_id, curation_id):
-        # two sortings from one nwb (different sort groups of the same day) are
-        # one session, so a within-session match can never inflate the
-        # cross-session count. Fall back to (sorting_id, curation_id) when no
-        # session map is supplied (or a sorting is missing from it).
-        if session_by_sorting is None:
-            sessions = {(node[0], node[1]) for node in members}
+        inputs = {_node_input(node) for node in members}
+        # Count distinct RECORDING SESSIONS in which a member unit fired, not
+        # inputs or recordings: two sortings (or two concatenated intervals)
+        # of one nwb are one session, and a member with an empty train in a
+        # recording is not detected there.
+        if detected_sessions_by_node is None:
+            sessions = inputs
         else:
             sessions = {
-                session_by_sorting.get(node[0], (node[0], node[1]))
+                session
                 for node in members
+                for session in detected_sessions_by_node.get(node, ())
             }
         edge_probs = _clique_edge_probs(members)
         median_prob = float(median(edge_probs)) if edge_probs else None
         tracked.append(
             {
                 "members": members,
-                "n_sessions_observed": len(sessions),
+                "n_sessions_detected": len(sessions),
+                "n_matching_inputs": len(inputs),
                 "median_match_probability": median_prob,
                 "policy_used": policy,
             }
