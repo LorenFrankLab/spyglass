@@ -653,6 +653,17 @@ def clean_ground_truth():
     return _clean_ground_truth()
 
 
+@pytest.fixture(scope="module")
+def clean_recording(clean_ground_truth):
+    """The clean 60 s, 16-channel recording built from ``clean_ground_truth``."""
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        numpy_recording,
+    )
+
+    traces, probe, _ = clean_ground_truth
+    return numpy_recording(traces, probe)
+
+
 def _applied_whitening(whitened):
     """(W, M) the WhitenRecording actually applies to its traces."""
     segment = whitened._recording_segments[0]
@@ -661,7 +672,7 @@ def _applied_whitening(whitened):
 
 @pytest.mark.medium
 def test_pinned_whiten_unmasked_is_bit_identical_to_previous(
-    clean_ground_truth,
+    clean_recording,
 ):
     """No spans, or one span covering the recording, is SI's own whitening.
 
@@ -672,12 +683,8 @@ def test_pinned_whiten_unmasked_is_bit_identical_to_previous(
     import spikeinterface.preprocessing as sip
 
     from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
-    from tests.spikesorting.v2._masked_statistics_helpers import (
-        numpy_recording,
-    )
 
-    traces, probe, _ = clean_ground_truth
-    recording = numpy_recording(traces, probe)
+    recording = clean_recording
     n_samples = recording.get_num_samples()
     seed = 7
     reference = sip.whiten(recording, dtype=np.float64, seed=seed)
@@ -695,6 +702,52 @@ def test_pinned_whiten_unmasked_is_bit_identical_to_previous(
             whitened.get_traces(start_frame=1_000, end_frame=31_000),
             ref_slice,
         ), f"whitened traces differ for spans={spans}"
+
+
+@pytest.mark.medium
+def test_pinned_whiten_is_deterministic_across_calls(clean_recording):
+    """Two ``pinned_whiten`` calls with the same seed give bit-identical
+    results, and match a live seeded SpikeInterface reference.
+
+    Uses a seed distinct from the default (0) and from the other bit-identity
+    test's seed (7), so this exercises ``random_seed`` forwarding rather than
+    a coincidental default. ``pinned_whiten`` forwards ``seed=random_seed`` to
+    SI's ``sip.whiten`` at
+    ``src/spyglass/spikesorting/v2/_sorting_dispatch.py:458`` (and to
+    ``_span_whitening_matrix(..., random_seed=)`` at ``:459-461``); dropping
+    that forwarding would let SI draw its random data-fitting chunks
+    unseeded, so two calls -- and the comparison against the live seeded SI
+    reference -- would no longer match.
+    """
+    import numpy as np
+    import spikeinterface.preprocessing as sip
+
+    from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+
+    recording = clean_recording
+    seed = 13
+
+    first = pinned_whiten(recording, random_seed=seed, spans=None)
+    second = pinned_whiten(recording, random_seed=seed, spans=None)
+    w_first, m_first = _applied_whitening(first)
+    w_second, m_second = _applied_whitening(second)
+    assert m_first is None
+    assert m_second is None
+    assert np.array_equal(w_first, w_second)
+    assert np.array_equal(
+        first.get_traces(start_frame=1_000, end_frame=31_000),
+        second.get_traces(start_frame=1_000, end_frame=31_000),
+    )
+
+    reference = sip.whiten(recording, dtype=np.float64, seed=seed)
+    w_ref, m_ref = _applied_whitening(reference)
+    assert m_ref is None
+    assert w_first.dtype == w_ref.dtype
+    assert np.array_equal(w_first, w_ref)
+    assert np.array_equal(
+        first.get_traces(start_frame=1_000, end_frame=31_000),
+        reference.get_traces(start_frame=1_000, end_frame=31_000),
+    )
 
 
 @pytest.mark.medium
