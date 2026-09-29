@@ -362,6 +362,19 @@ def pytest_addoption(parser):
             "SPIKESORTING_V2_CHRONIC_TEST_PATH env var; skipped by default."
         ),
     )
+    parser.addoption(  # opt-in for the v2 end-to-end acceptance probes
+        "--run-acceptance",
+        action="store_true",
+        dest="run_acceptance",
+        default=False,
+        help=(
+            "Run the spike-sorting v2 end-to-end acceptance probes "
+            "(tests marked `acceptance`, in tests/spikesorting/v2/acceptance). "
+            "Requires the MEArec tetrode and smoke fixtures, the "
+            "spikesorting-v2-curation extras and a Chromium for Playwright; "
+            "skipped by default."
+        ),
+    )
     parser.addoption(  # Keeps MySQL data off a potentially small root disk
         "--container-vol-dir",
         action="store",

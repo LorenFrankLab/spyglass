@@ -1,4 +1,5 @@
-"""Opt-in backup, account-handoff, and population-quality rehearsals."""
+"""End-to-end backup, account-handoff, and population-quality acceptance
+probes (run with ``--run-acceptance``)."""
 
 import json
 import shutil
@@ -8,17 +9,12 @@ from pathlib import Path
 
 import datajoint as dj
 import numpy as np
+import pytest
 
-# Imported to register the `workflow` fixture in this module; the test
-# parameters below shadow the name on purpose.
-from tests.spikesorting.v2.scripts.audit_lifecycle import (
-    workflow as workflow,  # noqa: PLC0414
-)
+pytestmark = pytest.mark.acceptance
 
 
-def test_database_and_file_restore(
-    workflow, server, base_dir, monkeypatch  # noqa: F811
-):
+def test_database_and_file_restore(workflow, server, base_dir, monkeypatch):
     from spyglass.common import AnalysisNwbfile
     from spyglass.spikesorting.analysis.v1 import group as gm
     from spyglass.spikesorting.v2.analysis_selection import (
@@ -27,6 +23,11 @@ def test_database_and_file_restore(
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.utils.nwb_helper_fn import close_nwb_files
 
+    if server.client is None:
+        pytest.skip(
+            "Needs a Docker-managed MySQL container to mysqldump and restore; "
+            "this session uses an external server (--no-docker)."
+        )
     monkeypatch.setattr(gm, "test_mode", False)
     ref = workflow["child"]
     curation_key = ref.as_key()
@@ -224,9 +225,7 @@ json.dump({'curation_id': child.curation_id, 'curation_uuid': str(child.curation
             dj.conn().query(f"DROP USER IF EXISTS '{user}'@'%%'")
 
 
-def test_ground_truth_population_after_auto_labels(
-    workflow, monkeypatch  # noqa: F811
-):
+def test_ground_truth_population_after_auto_labels(workflow, monkeypatch):
     import pynwb
     import spikeinterface as si
     from spikeinterface.comparison import compare_sorter_to_ground_truth

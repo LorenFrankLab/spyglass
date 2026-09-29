@@ -1,4 +1,4 @@
-"""Opt-in lifecycle acceptance probes; run explicitly with pytest.
+"""End-to-end lifecycle acceptance probes (run with ``--run-acceptance``).
 
 Uses the v2 test database and MEArec tetrode fixture. Position is a controlled
 input; the sorter, curation, population selection, detector, and serialization
@@ -11,79 +11,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-import datajoint as dj
 import numpy as np
 import pandas as pd
 import pytest
 
-
-@pytest.fixture(scope="module")
-def workflow(dj_conn, tmp_path_factory):
-    from spyglass.common import LabTeam
-    from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.curation_api import CurationRef
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
-    from spyglass.spikesorting.v2.recording import SortGroupV2
-    from spyglass.spikesorting.v2.sorting import Sorting
-    from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
-
-    path = (
-        Path(__file__).resolve().parents[1] / "fixtures/mearec_tetrode_60s.nwb"
-    )
-    assert path.exists(), "This acceptance probe requires the tetrode fixture"
-    name = copy_and_insert_nwb(path, dest_name="lifecycle_tetrode.nwb")
-    initialize_v2_defaults()
-    LabTeam.insert1({"team_name": "lifecycle_audit"}, skip_duplicates=True)
-    SortGroupV2.set_group_by_shank(nwb_file_name=name)
-    group = min((SortGroupV2 & {"nwb_file_name": name}).fetch("sort_group_id"))
-    run = run_v2_pipeline(
-        nwb_file_name=name,
-        sort_group_id=int(group),
-        interval_list_name="raw data valid times",
-        team_name="lifecycle_audit",
-        pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
-        manual_excluded_times=[[20.0, 21.0]],
-        require_units=True,
-    )
-    root = run.root_curation
-    ids = sorted(map(int, (Sorting.Unit & root.as_key()).fetch("unit_id")))
-    assert len(ids) >= 2, "A real merge needs at least two sorted units"
-    child = CurationRef.from_key(
-        CurationV2.insert_curation(
-            {"sorting_id": root.sorting_id},
-            parent_curation_id=root.curation_id,
-            labels={u: ["accept"] for u in ids},
-            merge_groups=[ids[:2]],
-            apply_merge=True,
-            description="Lifecycle audit: controlled merge, not a biological judgment",
-        )
-    )
-    # Verify and label the resulting unit namespace after the merge, including
-    # the newly allocated merged unit; contributor IDs are no longer units.
-    merged_ids = (CurationV2.Unit & child.as_key()).fetch("unit_id")
-    child = CurationRef.from_key(
-        CurationV2.insert_curation(
-            {"sorting_id": root.sorting_id},
-            parent_curation_id=child.curation_id,
-            labels={int(u): ["accept"] for u in merged_ids},
-            description="Lifecycle audit: verified merged population",
-        )
-    )
-    out = tmp_path_factory.mktemp("lifecycle")
-    config_file = out / "db.json"
-    dj.config.save(str(config_file))
-    config_file.chmod(0o600)
-    yield {
-        "run": run,
-        "root": root,
-        "child": child,
-        "name": name,
-        "unit_ids": ids,
-        "out": out,
-        "config": config_file,
-    }
-    config_file.unlink(missing_ok=True)
+pytestmark = pytest.mark.acceptance
 
 
 @pytest.mark.parametrize("estimate", [False, True])

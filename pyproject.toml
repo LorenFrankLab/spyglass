@@ -295,6 +295,7 @@ markers = [
   # Special markers
   "serial: Tests that must run serially (not parallel-safe)",
   "regenerate: Tests that regenerate large on-disk fixtures (manual run only)",
+  "acceptance: End-to-end acceptance probes; run only with --run-acceptance",
 
   # Test-tier markers for the spike-sorting v2 suite. Convention:
   #   T1 unit          - <1s, no Docker
