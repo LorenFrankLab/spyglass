@@ -9,7 +9,7 @@ Two roles live here:
   SpikeInterface sorting + recording into a UnitMatch directory bundle (dense
   per-unit cross-validation-half templates + channel positions + good-unit
   labels). ``UnitMatch._extract_and_match`` (run from
-  ``UnitMatch.make_compute``) calls this once per group member; it reads the
+  ``UnitMatch.make_compute``) calls this once per matching input; it reads the
   recording (what ``CurationV2.get_recording`` returns) but writes only the
   self-contained bundle.
 - :class:`UnitMatchBackend.match` -- the *matcher*: it reads the prepared bundle

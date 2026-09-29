@@ -1,11 +1,12 @@
 """Plugin interface + registry for cross-session unit matchers.
 
-A *matcher* takes per-session, wrapper-prepared waveform bundles and returns
-pairwise cross-session unit matches. The interface is deliberately narrow so
+A *matcher* takes wrapper-prepared waveform bundles, one per matching input,
+and returns pairwise cross-session unit matches. The interface is deliberately narrow so
 external backends (UnitMatch first, others later) can be added without touching
 the DataJoint tables:
 
-- :class:`SessionMatcherInput` -- one wrapper-prepared bundle per session. The
+- :class:`SessionMatcherInput` -- one wrapper-prepared bundle per matching
+  input (a sort of a single recording or of a same-day concatenation). The
   matcher reads only these directories; it never sees a ``SortingAnalyzer``
   object, a recording, or a Spyglass table key.
 - :class:`MatchPair` -- one cross-session match, keyed by
@@ -30,7 +31,11 @@ from spyglass.spikesorting.v2.exceptions import UnknownMatcherError
 
 @dataclass(frozen=True)
 class SessionMatcherInput:
-    """One per-session bundle the wrapper prepares for the matcher.
+    """One bundle the wrapper prepares for the matcher per matching input.
+
+    A matching input is one curated sort, of a single recording or of a
+    same-day concatenation; its bundle holds that sort's units once each.
+    Bundles are passed in ``input_index`` (chronological) order.
 
     Attributes
     ----------
@@ -45,10 +50,11 @@ class SessionMatcherInput:
     channel_positions_path : pathlib.Path
         ``.npy`` file of shape ``(n_channels, 2)`` with the probe geometry.
     recording_date : Any
-        A canonical UTC ISO 8601 string derived from
-        ``Session.session_start_time`` (used for chronological drift ordering;
-        UTC-normalized so plain string comparison is chronological); may be
-        ``None`` when a backend does not need it.
+        The input's frozen start time
+        (``UnitMatchSelection.Input.input_start_time``: the earliest
+        ``Session.session_start_time`` among its constituent recordings) as a
+        canonical UTC ISO 8601 string, so plain string comparison is
+        chronological; may be ``None`` when a backend does not need it.
     """
 
     curation_key: dict

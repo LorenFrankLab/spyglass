@@ -1,10 +1,13 @@
 """DB-free NWB (de)serialization for cross-session match output.
 
-``UnitMatch.make`` writes one scratch table into an ``AnalysisNwbfile``:
+``UnitMatch.make`` writes the pairs table into an ``AnalysisNwbfile``, next to
+the run's provenance tables (``_nwb_provenance``: the run header, one row per
+matching input, one row per constituent recording):
 
 ``unit_match_pairs``
-    a long table, one row per cross-session match pair, carrying both sides'
-    ``(sorting_id, curation_id, unit_id)`` plus the match probability and the
+    a long table, one row per match pair between two matching inputs, carrying
+    both sides' ``(sorting_id, curation_id, unit_id)`` (``session_a_*`` is the
+    input with the lower ``input_index``) plus the match probability and the
     (default) drift / FDR columns. ``fdr_estimate`` has no per-pair backend
     source, so a missing value is stored as a native HDF5 NaN (HDF5 cannot store
     ``None`` in a numeric column) and surfaced back as ``None`` on read.
@@ -12,7 +15,7 @@
 The structured, FK-validated copy of the same pairs lives in the
 ``UnitMatch.Pair`` DataJoint part table; this NWB table is the exportable
 analysis artifact (it travels with DANDI / kachery / recompute like every other
-v2 analysis NWB). A degenerate single-session run writes an empty table.
+v2 analysis NWB). A single-input run writes an empty table.
 
 This module touches no DataJoint connection: the builder is pure and the write /
 read functions take an absolute file path the ``@schema`` table layer resolves.
@@ -88,7 +91,7 @@ def build_pairs_table(pairs: list[dict]) -> DynamicTable:
         name=UNIT_MATCH_PAIRS_TABLE,
         description=(
             "Cross-session unit match pairs; one row per matched (unit_a, "
-            "unit_b) across two SessionGroup members."
+            "unit_b) across two matching inputs."
         ),
         columns=vector_columns,
     )
