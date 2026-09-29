@@ -19,6 +19,8 @@ touch them.
 from __future__ import annotations
 
 import importlib
+import shutil
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -96,41 +98,168 @@ def test_compat_numpy_sorting_constructor_preserves_unit_ids():
     np.testing.assert_array_equal(sorting.get_unit_spike_train(unit_id=99), [])
 
 
-def test_v0_v1_read_paths_under_modern_si(dj_conn, monkeypatch):
-    """Legacy recording and curation reads reach the compatibility shim."""
+_SI099_DIR = Path(__file__).parent / "fixtures" / "si099"
+_PLANT_NAME = "si099_read_path"
+_PLANT_SORT_GROUP_ID = 9099
+
+
+@pytest.fixture(scope="module")
+def v0_rows_over_si099_folders(
+    dj_conn, mini_copy_name, team_name, tmp_path_factory
+):
+    """Plant v0 recording/sorting/curation rows over SI 0.99-written folders.
+
+    The rows point at a temporary copy of ``fixtures/si099`` (see its README),
+    so the loaders read real SpikeInterface 0.99 folders and cannot write into
+    the repository. Every planted row is removed afterwards.
+    """
     import spikeinterface as si
 
     if Version(si.__version__) < Version("0.101"):
         pytest.skip("Modern-SI read-path regression test")
 
-    from spyglass.spikesorting import _si_compat
+    from spyglass.spikesorting.v0 import spikesorting_artifact as art
+    from spyglass.spikesorting.v0 import spikesorting_curation as cur
+    from spyglass.spikesorting.v0 import spikesorting_recording as rec
+    from spyglass.spikesorting.v0 import spikesorting_sorting as srt
+
+    folders = tmp_path_factory.mktemp("v0_si099") / "si099"
+    shutil.copytree(_SI099_DIR, folders)
+    with np.load(folders / "reference.npz") as data:
+        reference = {key: data[key] for key in data.files}
+
+    session = {"nwb_file_name": mini_copy_name}
+    rec_key = {
+        **session,
+        "sort_group_id": _PLANT_SORT_GROUP_ID,
+        "sort_interval_name": _PLANT_NAME,
+        "preproc_params_name": _PLANT_NAME,
+        "team_name": team_name,
+    }
+    artifact_key = {**rec_key, "artifact_params_name": _PLANT_NAME}
+    sorter_key = {"sorter": _PLANT_NAME, "sorter_params_name": _PLANT_NAME}
+    sorting_key = {
+        **rec_key,
+        **sorter_key,
+        "artifact_removed_interval_list_name": _PLANT_NAME,
+    }
+    curation_key = {**sorting_key, "curation_id": 0}
+    times = np.load(folders / "recording" / "times_cached_seg0.npy")
+    sort_interval = np.asarray([times[0], times[-1]])
+
+    # Insertion order follows the foreign keys; rows are removed in reverse.
+    planted = [
+        (rec.SortGroup(), {**session, "sort_group_id": _PLANT_SORT_GROUP_ID}),
+        (
+            rec.SortInterval(),
+            {
+                **session,
+                "sort_interval_name": _PLANT_NAME,
+                "sort_interval": sort_interval,
+            },
+        ),
+        (
+            rec.SpikeSortingPreprocessingParameters(),
+            {"preproc_params_name": _PLANT_NAME, "preproc_params": {}},
+        ),
+        (
+            rec.SpikeSortingRecordingSelection(),
+            {**rec_key, "interval_list_name": "01_s1"},
+        ),
+        (
+            rec.SpikeSortingRecording(),
+            {
+                **rec_key,
+                "recording_path": str(folders / "recording"),
+                "sort_interval_list_name": "01_s1",
+            },
+        ),
+        (
+            art.ArtifactDetectionParameters(),
+            {"artifact_params_name": _PLANT_NAME, "artifact_params": {}},
+        ),
+        (art.ArtifactDetectionSelection(), artifact_key),
+        (
+            art.ArtifactRemovedIntervalList(),
+            {
+                **artifact_key,
+                "artifact_removed_interval_list_name": _PLANT_NAME,
+                "artifact_removed_valid_times": sort_interval[None, :],
+                "artifact_times": np.empty((0, 2)),
+            },
+        ),
+        (srt.SpikeSorterParameters(), {**sorter_key, "sorter_params": {}}),
+        (srt.SpikeSortingSelection(), sorting_key),
+        (
+            srt.SpikeSorting(),
+            {
+                **sorting_key,
+                "sorting_path": str(folders / "sorting"),
+                "time_of_sort": 0,
+            },
+        ),
+        (
+            cur.Curation(),
+            {
+                **curation_key,
+                "curation_labels": {},
+                "merge_groups": [],
+                "quality_metrics": {},
+                "time_of_creation": 0,
+            },
+        ),
+    ]
+    inserted = []
+    try:
+        for table, row in planted:
+            table.insert1(row, allow_direct_insert=True)
+            inserted.append((table, {k: row[k] for k in table.primary_key}))
+        yield {
+            "recording_key": rec_key,
+            "curation_key": curation_key,
+            "reference": reference,
+        }
+    finally:
+        for table, restriction in reversed(inserted):
+            (table & restriction).delete_quick()
+
+
+def test_v0_read_paths_under_modern_si(v0_rows_over_si099_folders):
+    """v0 recording and curated-sorting reads load SI 0.99-written folders.
+
+    ``SpikeSortingRecording.load_recording`` and
+    ``Curation.get_curated_sorting`` run unpatched on planted v0 rows whose
+    paths point at folders SpikeInterface 0.99 wrote; the loaded traces, channel
+    ids, unit ids and spike trains must equal what 0.99 read back.
+
+    v1 reads analysis NWB files, not extractor folders; its only folder read is
+    ``_si_compat.load_waveforms`` (via ``MetricCuration.get_waveforms``), which
+    ``test_si_compat_cross_generation.py`` covers.
+    """
     from spyglass.spikesorting.v0.spikesorting_curation import Curation
     from spyglass.spikesorting.v0.spikesorting_recording import (
         SpikeSortingRecording,
     )
 
-    loaded = object()
-    sources = []
+    planted = v0_rows_over_si099_folders
+    reference = planted["reference"]
 
-    def _load(source):
-        sources.append(source)
-        return loaded
-
-    monkeypatch.setattr(_si_compat, "load_extractor", _load)
-    monkeypatch.setattr(
-        SpikeSortingRecording,
-        "_fetch_recording_path",
-        lambda self, key: "recording-folder",
+    recording = SpikeSortingRecording().load_recording(planted["recording_key"])
+    np.testing.assert_array_equal(
+        recording.get_channel_ids(), reference["channel_ids"]
     )
-    monkeypatch.setattr(
-        Curation,
-        "_load_sorting_info",
-        lambda self, key: ("sorting-folder", []),
-    )
+    traces = recording.get_traces(return_in_uV=False)
+    assert traces.dtype == reference["traces"].dtype
+    np.testing.assert_array_equal(traces, reference["traces"])
 
-    assert SpikeSortingRecording().load_recording({}) is loaded
-    assert Curation().get_curated_sorting({}) is loaded
-    assert sources == ["recording-folder", "sorting-folder"]
+    sorting = Curation().get_curated_sorting(planted["curation_key"])
+    unit_ids = list(sorting.get_unit_ids())
+    assert unit_ids == list(reference["unit_ids"])
+    for unit_id in unit_ids:
+        np.testing.assert_array_equal(
+            sorting.get_unit_spike_train(unit_id=unit_id),
+            reference[f"spike_train_{unit_id}"],
+        )
 
 
 @pytest.mark.parametrize("module_name", _LEGACY_TABLE_MODULES)
