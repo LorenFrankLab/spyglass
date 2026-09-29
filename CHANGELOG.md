@@ -2400,6 +2400,69 @@ cross-referenced here, not duplicated.
     may legitimately restrict on one source's key; the existing no-match
     warning is unchanged, so the two never both fire. `fetch_nwb`'s
     docstring states the behavior.
+- **Add committed SpikeInterface 0.99 extractor fixtures.** Recording, sorting,
+    and WaveformExtractor folders written by SpikeInterface 0.99, checked in
+    with a README naming the SI version and the generator script that produced
+    them. Tests under SpikeInterface 0.104 read them back through `_si_compat`
+    loaders and check the time vector, traces, spike trains, and waveforms; a
+    companion test reads the v0 `load_recording` / `get_curated_sorting` paths
+    without patching the loaders.
+- **Exercise the real v1 clusterless feature populate under legacy
+    SpikeInterface.** `tests/spikesorting/v1/test_waveform_features_legacy.py`
+    runs the v1 clusterless chain on the minirec session and populates
+    `UnitWaveformFeatures` with the amplitude feature, checking each stored per-
+    spike amplitude against the scaled recording trace. The v2 test file the
+    legacy job also collects (`test_clusterless_waveform_features.py`) now runs
+    cleanly there: its SI-0.104-only metric-defaults fixture stays inert under
+    SI 0.99, and a v2-only disk-backed-buffer test in that file is now version-
+    gated to skip there.
+- **Make the v2 end-to-end acceptance probes opt-in tests.** The lifecycle and
+    handoff probes move to `tests/spikesorting/v2/acceptance/` as
+    `acceptance`-marked test modules, collected everywhere but skipped unless
+    pytest is given `--run-acceptance`. CI runs them on the nightly schedule and
+    on manual dispatch, single-session shard, curation environment; the
+    database/file restore probe skips there because the service-container MySQL
+    has no Docker client. The masked-sort review probe now checks that every
+    FigPack units table lists exactly the sort's units and that a saved draft
+    round-trips through the local review server.
+- **Tier the matching-lane tests by duration and fixture availability.** The
+    end-to-end daily-concatenation matching test
+    (`test_daily_concat_workflow_matches_planted_neurons_end_to_end`, ~230 s) is
+    now `very_slow` and deselected on push/pull-request, running only on the
+    nightly schedule and manual dispatch. Its held-out seeds 100..139 and the
+    per-unit bundle's seeds 10..19 were each already evaluated once against
+    their committed gates; docstrings, the benchmark manifest, and the user
+    guide now describe re-runs of those seed sets as regression checks, not new
+    evaluations. The two-session ground-truth matcher gate runs on a separate
+    nightly/manual step that fails by name until the
+    `mearec_polymer_128ch_2sessions_s1`/`s2` fixtures are hosted and their URLs
+    set, instead of silently skipping.
+- **Publish the motion-correction development benchmark on manual dispatch.**
+    The opt-in benchmark in `test_motion_acceptance.py` runs its 117-case
+    MountainSort5 development manifest plus the MEArec drift-fixture case in the
+    unit shard of manual runs, requires the drift fixture by name, and uploads
+    its per-case results as a workflow artifact. This is development evidence
+    only: the manifest carries no gates, and no recipe is promoted by it.
+- **CI.** Workflow steps now run under `bash -el {0}` so a failed command
+    earlier in a step (conda create, pip install, playwright install, fixture
+    download) fails the step instead of being masked by a later passing command;
+    the two-session fixture fetch's `|| true` is replaced with an explicit
+    warning branch. The three minirec NWB/video downloads now use `curl --fail`
+    to a `.part` name and only rename to the fixture path on success, so an HTTP
+    error can no longer leave an HTML error page on disk under the fixture name.
+    Stale workflow comments describing job composition, SpikeInterface versions,
+    and fixture tiers are corrected. A note above the coverage-upload step says
+    only `run-tests` uploads to Codecov and that it ignores the v0/v1/v2 spike-
+    sorting tests.
+- **Test fixes.** A MountainSort4 preset test no longer turns a sorter runtime
+    crash into a skip; only the narrow ml_ms4alg backend-gate preflight skip
+    remains. Whitening determinism is pinned: two seeded `pinned_whiten` calls
+    must produce bit-identical matrices and traces. The artifact-detection
+    oracle now applies both gain and offset the way production's
+    `return_in_uV=True` scan does, with cases whose flagged frames actually
+    depend on offset, on gain, and on a z-score threshold reachable by a single
+    outlier channel among 8. A committed script checks that four regression
+    tests actually fail when their fixes are reverted.
 
 ### Pipelines
 
