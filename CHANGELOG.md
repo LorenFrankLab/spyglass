@@ -298,9 +298,11 @@ concatenation, so a daily same-day concatenation can now be matched directly
   `UnitMatchSelectionIntegrityError` when its pinned curation was recreated
   or its source no longer matches the frozen rows. A concatenation input
   whose member `Recording` no longer carries the content hash its
-  concatenation froze raises `ConcatMemberDriftError` at
-  `UnitMatchSelection.insert_inputs`, at `UnitMatch.make` and in these
-  readers.
+  concatenation froze, or is gone, is refused by that same check at
+  `UnitMatchSelection.insert_inputs` (`ValueError`), at `UnitMatch.make`
+  and in these readers (`UnitMatchSelectionIntegrityError`), with the
+  concatenation's `ConcatMemberDriftError` /
+  `MissingRecordingForConcatError` as the cause.
 - **Existing `UnitMatchSelection`, `UnitMatch` and `TrackedUnit` rows must be
   deleted and recreated** -- a replaced part table and a part's changed
   primary key cannot go through `alter()`. See the

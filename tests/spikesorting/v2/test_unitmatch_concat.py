@@ -2880,9 +2880,25 @@ def test_member_and_source_drift_is_refused_by_selection_make_and_readers(
     # Unit 0 fires in both members; member 1 of cross_nwb is b's interval.
     expected = b_times[planted[0][1] - spans[1][0]]
     assert len(expected) >= 3
+    concat_input = re.escape(
+        f"(sorting_id={cur['cross_nwb']['sorting_id']}, "
+        f"curation_id={cur['cross_nwb']['curation_id']}) is a sort of "
+        "concatenation "
+        f"{mx['concat_keys']['cross_nwb']['concat_recording_id']}"
+    )
     b_drift = re.escape(
         f"'member_index': 1, 'recording_id': '{b_key['recording_id']}'"
     )
+
+    @contextmanager
+    def _member_drift_refused(exc_class, prefix):
+        """Refused with ``exc_class`` naming the input, caused by the drift."""
+        with pytest.raises(
+            exc_class, match=rf"^{prefix}{concat_input}.*{b_drift}"
+        ) as err:
+            yield err
+        assert type(err.value.__cause__) is ConcatMemberDriftError
+
     readers = {
         "get_member_spike_times": TrackedUnit().get_member_spike_times,
         "get_unit_brain_regions": TrackedUnit().get_unit_brain_regions,
@@ -2898,7 +2914,7 @@ def test_member_and_source_drift_is_refused_by_selection_make_and_readers(
     try:
         # A member edited before selection: the selection is refused.
         with _raw_update(Recording, b_key, "content_hash", "f" * 64):
-            with pytest.raises(ConcatMemberDriftError, match=b_drift):
+            with _member_drift_refused(ValueError, "UnitMatchSelection: "):
                 UnitMatchSelection.insert_inputs(inputs, params_name)
         assert (
             len(UnitMatchSelection & {"matcher_params_name": params_name}) == 0
@@ -2907,7 +2923,10 @@ def test_member_and_source_drift_is_refused_by_selection_make_and_readers(
         # A member edited between selection and make: make is refused.
         pk = UnitMatchSelection.insert_inputs(inputs, params_name)
         with _raw_update(Recording, b_key, "content_hash", "f" * 64):
-            with pytest.raises(ConcatMemberDriftError, match=b_drift):
+            with _member_drift_refused(
+                UnitMatchSelectionIntegrityError,
+                r"UnitMatch\.make: input_index 0 ",
+            ):
                 UnitMatch.populate(pk, reserve_jobs=False)
             assert len(UnitMatch & pk) == 0
 
@@ -2948,9 +2967,10 @@ def test_member_and_source_drift_is_refused_by_selection_make_and_readers(
         ):
             live_times = recording_timestamps((Recording & b_key).fetch1())
             assert live_times[0] != b_times[0]
-            for reader in readers.values():
-                with pytest.raises(
-                    ConcatMemberDriftError, match=b_drift
+            for name, reader in readers.items():
+                with _member_drift_refused(
+                    UnitMatchSelectionIntegrityError,
+                    rf"TrackedUnit\.{name}: input_index 0 ",
                 ) as err:
                     reader(pk)
                 assert f"'snapshot_content_hash': '{b_hash}'" in str(err.value)

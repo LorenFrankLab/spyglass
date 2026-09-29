@@ -398,10 +398,13 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         Raises
         ------
         ValueError
-            On no inputs, a sorting given twice, a missing
-            curation, a curation with unapplied proposed merges, a
-            multi-day concatenation input, a ``SessionGroup`` that does not
-            exist, or a channel-geometry mismatch across inputs.
+            On no inputs, a sorting given twice, a missing curation, a
+            curation with unapplied proposed merges, a concatenation input
+            whose member ``Recording`` no longer has the content hash the
+            concatenation froze or is gone (chained from the
+            ``ConcatMemberDriftError`` / ``MissingRecordingForConcatError``),
+            a multi-day concatenation input, a ``SessionGroup`` that does
+            not exist, or a channel-geometry mismatch across inputs.
         SameSessionMatchError
             If two inputs share a recording session.
         DuplicateSelectionError
@@ -410,9 +413,6 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         SchemaBypassError
             If the deterministic selection exists but its parts do not
             realize its ``input_set_hash``.
-        ConcatMemberDriftError, MissingRecordingForConcatError
-            If a concatenation input's member ``Recording`` no longer has the
-            content hash its concatenation froze, or is gone.
         """
         from spyglass.spikesorting.v2._matcher_graph import (
             chronological_input_order,
@@ -1074,7 +1074,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         must still match the frozen recordings (source, ``recording_id``,
         content hash, concatenation membership, frames and kept intervals; a
         concatenation member's ``Recording`` must still carry the content
-        hash its concatenation froze, else ``ConcatMemberDriftError``;
+        hash its concatenation froze;
         a single recording's frames and kept intervals are re-read from its
         traces when bundles will be extracted, i.e. for two or more inputs),
         and each frozen ``session_start_time`` must still equal its live
@@ -1165,7 +1165,13 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         for row in input_rows:
             sorting_id, curation_id = row["sorting_id"], int(row["curation_id"])
             _check_input_curation(sorting_id, curation_id, exc_class)
-            live = _resolve_match_input(sorting_id, curation_id, exc_class)
+            live = _resolve_match_input(
+                sorting_id,
+                curation_id,
+                exc_class,
+                context="UnitMatch.make",
+                input_index=int(row["input_index"]),
+            )
             if extracts_bundles:
                 _add_single_recording_frames(live)
             frozen_recordings = recordings_by_input[int(row["input_index"])]
@@ -2048,11 +2054,11 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         ------
         UnitMatchSelectionIntegrityError
             An input's pinned curation was recreated or its source no longer
-            matches the frozen rows (for a single recording, including its
-            ``Recording``'s live ``content_hash``).
-        ConcatMemberDriftError, MissingRecordingForConcatError
-            A concatenation input's member ``Recording`` no longer has the
-            content hash its concatenation froze, or is gone.
+            matches the frozen rows: a single recording's live
+            ``Recording.content_hash`` differs from the frozen one, or a
+            concatenation member's ``Recording`` no longer has the content
+            hash its concatenation froze or is gone (then chained from the
+            ``ConcatMemberDriftError`` / ``MissingRecordingForConcatError``).
         ValueError
             The member unit's electrode is not in a recording's sort group.
         """
@@ -2212,11 +2218,11 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         ------
         UnitMatchSelectionIntegrityError
             An input's pinned curation was recreated or its source no longer
-            matches the frozen rows (for a single recording, including its
-            ``Recording``'s live ``content_hash``).
-        ConcatMemberDriftError, MissingRecordingForConcatError
-            A concatenation input's member ``Recording`` no longer has the
-            content hash its concatenation froze, or is gone.
+            matches the frozen rows: a single recording's live
+            ``Recording.content_hash`` differs from the frozen one, or a
+            concatenation member's ``Recording`` no longer has the content
+            hash its concatenation froze or is gone (then chained from the
+            ``ConcatMemberDriftError`` / ``MissingRecordingForConcatError``).
         ValueError
             A concatenation curation's units NWB has no
             ``spike_sample_index`` column, or a member-local frame falls
@@ -2542,17 +2548,25 @@ def _check_input_curation(sorting_id, curation_id, exc_class) -> None:
         )
 
 
-def _resolve_match_input(sorting_id, curation_id, exc_class) -> dict:
+def _resolve_match_input(
+    sorting_id,
+    curation_id,
+    exc_class,
+    *,
+    context: str = "UnitMatchSelection",
+    input_index: int | None = None,
+) -> dict:
     """Resolve one matching input's pinned generation, source and recordings.
 
     Database reads only (no trace file is opened and ``Session`` is not
-    read). A single-recording sort resolves to its one ``Recording``; a
+    read). A single-recording sort resolves to its one ``Recording``. A
     concatenation sort resolves to its frozen members
-    (``ConcatenatedRecordingSelection.MemberSnapshot``), each of which must
-    still resolve to a ``Recording`` with the frozen content hash
-    (``ConcatenatedRecording._resolve_snapshot_recordings``); in member
-    order, each with its frames in the concatenation
-    (``ConcatenatedRecording.MemberBoundary``: the cumulative exclusive ``end_sample``, a member starting where the
+    (``ConcatenatedRecordingSelection.MemberSnapshot``) in member order;
+    each member must still resolve to a ``Recording`` with the content hash
+    the concatenation froze
+    (``ConcatenatedRecording._resolve_snapshot_recordings``), and carries
+    its frames in the concatenation (``ConcatenatedRecording.MemberBoundary``:
+    the cumulative exclusive ``end_sample``, a member starting where the
     previous one ended) and its kept intervals on its own clock
     (``member_valid_times``). A single recording's frames and kept intervals
     need its persisted traces and are added by :func:`_recording_n_samples` /
@@ -2564,7 +2578,15 @@ def _resolve_match_input(sorting_id, curation_id, exc_class) -> dict:
     curation_id : int
     exc_class : type
         Exception raised when the concatenation's boundaries do not match its
-        frozen members.
+        frozen members, or (chained from the ``ConcatMemberDriftError`` /
+        ``MissingRecordingForConcatError`` it catches) when a member
+        ``Recording`` changed or is gone.
+    context : str, optional
+        Caller named at the start of the member-drift message. Default
+        ``"UnitMatchSelection"``.
+    input_index : int, optional
+        The input's frozen ``input_index``, named in the member-drift message
+        when known. Default ``None``.
 
     Returns
     -------
@@ -2584,6 +2606,10 @@ def _resolve_match_input(sorting_id, curation_id, exc_class) -> dict:
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        ConcatMemberDriftError,
+        MissingRecordingForConcatError,
     )
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
@@ -2641,7 +2667,18 @@ def _resolve_match_input(sorting_id, curation_id, exc_class) -> dict:
         # UnitMatch.make and the TrackedUnit readers (which read each member
         # Recording's timestamps) alike; a member repopulated with other
         # content after the concatenation was built is refused here.
-        ConcatenatedRecording._resolve_snapshot_recordings(snapshot)
+        try:
+            ConcatenatedRecording._resolve_snapshot_recordings(snapshot)
+        except (ConcatMemberDriftError, MissingRecordingForConcatError) as exc:
+            position = (
+                "" if input_index is None else f"input_index {input_index} "
+            )
+            raise exc_class(
+                f"{context}: {position}"
+                f"{_input_label(sorting_id, curation_id)} is a sort of "
+                f"concatenation {source_id}, whose member recordings no "
+                f"longer match its frozen members: {exc}"
+            ) from exc
         recordings = []
         start_sample = 0
         for member, boundary in zip(snapshot, boundaries, strict=True):
@@ -2993,9 +3030,8 @@ def _assert_run_input_unchanged(reader: str, input_key: dict) -> None:
     ------
     UnitMatchSelectionIntegrityError
         The pinned curation or the input's source differs from its frozen
-        rows.
-    ConcatMemberDriftError, MissingRecordingForConcatError
-        A concatenation member's ``Recording`` changed or is gone.
+        rows, including a concatenation member ``Recording`` that changed or
+        is gone (chained from the concatenation's drift error).
     """
     input_row = (UnitMatchSelection.Input & input_key).fetch1()
     recording_rows = (UnitMatchSelection.InputRecording & input_key).fetch(
@@ -3005,6 +3041,8 @@ def _assert_run_input_unchanged(reader: str, input_key: dict) -> None:
         input_row["sorting_id"],
         int(input_row["curation_id"]),
         UnitMatchSelectionIntegrityError,
+        context=f"TrackedUnit.{reader}",
+        input_index=int(input_key["input_index"]),
     )
     mismatches = _snapshot_mismatches(input_row, recording_rows, live)
     if mismatches:

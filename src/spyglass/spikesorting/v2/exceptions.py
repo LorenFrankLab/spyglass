@@ -402,18 +402,24 @@ class UnitMatchSelectionIntegrityError(RuntimeError):
     """Raise when a match selection's frozen inputs no longer hold.
 
     ``UnitMatch.make()`` re-validates the ``UnitMatchSelection.Input`` /
-    ``InputRecording`` rows before any bundle is extracted: the parts are
-    well formed and realize the stored ``input_set_hash``, the inputs are
-    distinct sorts from disjoint sessions, each pinned ``CurationV2`` still
-    exists with the pinned ``curation_uuid``, and each input's live source
-    still matches its frozen recordings. A selection that fails (a direct
-    insert that bypassed ``insert_inputs``, a recreated curation, or changed
-    source content) raises this rather than silently matching other units.
-    ``TrackedUnit.get_member_spike_times`` and
-    ``TrackedUnit.get_unit_brain_regions`` re-run the same check and raise
-    it too when an input of a finished run has a recreated curation or a
-    source that no longer matches the frozen rows. The message names the
-    offending inputs.
+    ``InputRecording`` rows before any bundle is extracted and raises this
+    when any check fails: the parts are well formed and realize the stored
+    ``input_set_hash``; there is at least one input, no sorting is pinned
+    twice and no concatenation
+    input spans two days; the frozen start times and input numbering agree;
+    each pinned ``CurationV2`` still exists with the pinned
+    ``curation_uuid`` and no unapplied proposed merges; each input's live
+    source still matches its frozen recordings (source, ``recording_id``,
+    content hash, concatenation membership, frames and kept intervals),
+    with every concatenation member ``Recording`` still carrying the content
+    hash its concatenation froze; and each frozen session start time equals
+    its live ``Session`` row. (Two inputs sharing a session raise
+    ``SameSessionMatchError`` instead.) ``TrackedUnit.get_member_spike_times``
+    and ``TrackedUnit.get_unit_brain_regions`` run the curation and source
+    part of that check before reading an input of a finished run and raise
+    this too. When a concatenation member ``Recording`` changed or is gone,
+    the ``ConcatMemberDriftError`` / ``MissingRecordingForConcatError`` is
+    chained as ``__cause__``. The message names the offending input.
     """
 
 
