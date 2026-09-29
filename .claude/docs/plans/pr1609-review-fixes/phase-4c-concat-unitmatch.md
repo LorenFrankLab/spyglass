@@ -2,7 +2,7 @@
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [design](designs-motion-and-matching.md#matching-independently-sorted-recording-groups)
 
-**Status:** Planned owner-requested feature addition (2026-09-19), not implemented. Depends on phase 4a and phase 3c's effective-source/lineage contract; also inherits phases 3a/3b's geometry and observed-time invariants. The original single-session matcher remains a supported input shape. Original merge-gate scheduling is recorded separately in PLAN.md.
+**Status:** Owner-requested feature addition (2026-09-19), implemented 660386f8..eb8ef53f (2026-09-28/29, unpushed); see PLAN.md status for evidence and open items. Depends on phase 4a and phase 3c's effective-source/lineage contract; also inherits phases 3a/3b's geometry and observed-time invariants. The original single-session matcher remains a supported input shape. Original merge-gate scheduling is recorded separately in PLAN.md.
 
 **Inputs to read first:**
 
