@@ -783,6 +783,230 @@ def chronic_2_session_minirec(dj_conn, tmp_path_factory):
         _clean_session_v2({"nwb_file_name": nwb_file_name})
 
 
+#: Two intervals cut from one session per day for the daily concatenations
+#: the UnitMatch input tests match (seconds after the session's first sample;
+#: each longer than ``Recording``'s 1 s minimum segment). Both START in one
+#: float64 binade ([2, 4) s): SpikeInterface estimates a persisted recording's
+#: sampling rate from its first 1000 timestamps, and a concatenation requires
+#: its members' rates to agree to 1e-9 Hz, which timestamps rounded in
+#: different binades miss.
+DAILY_CONCAT_INTERVALS = {
+    "first": (2.02, 3.22),
+    "second": (3.3, 4.9),
+}
+
+
+def _plant_spread_unit(
+    sorter,
+    sorter_params,
+    recording,
+    sorting_id,
+    *,
+    job_kwargs=None,
+    execution_params=None,
+    statistics_spans=None,
+):
+    """One planted unit firing every 5000 frames across the whole recording."""
+    import numpy as np
+    import spikeinterface as si
+
+    del sorter, sorter_params, sorting_id, job_kwargs, execution_params
+    samples = np.arange(1000, recording.get_num_samples() - 1000, 5000)
+    return si.NumpySorting.from_samples_and_labels(
+        samples_list=[samples.astype(np.int64)],
+        labels_list=[np.zeros(len(samples), dtype=np.int32)],
+        sampling_frequency=recording.get_sampling_frequency(),
+    )
+
+
+@pytest.fixture(scope="module")
+def daily_concat_match_inputs(chronic_2_session_minirec):
+    """Curated sorts of single recordings and of same-day concatenations.
+
+    On the chronic minirec sessions (``a`` and ``b`` on day 1, ``c`` on day
+    2): session ``a`` and session ``c`` are each cut into two intervals
+    (``DAILY_CONCAT_INTERVALS``) and concatenated into one daily
+    concatenation per day; a third, multi-day concatenation joins ``b``'s
+    and ``c``'s first intervals. Every sort is planted (one unit every
+    5000 frames, ``Sorting._run_sorter`` monkeypatched) and root-curated:
+    single-recording sorts of ``a``, ``b`` and ``a``'s first interval, and
+    one sort of each concatenation.
+
+    Yields
+    ------
+    dict
+        ``curations`` (name -> ``{"sorting_id", "curation_id"}``; names
+        ``single_a``, ``single_b``, ``single_a_first``, ``concat_day1``,
+        ``concat_day2``, ``concat_multi_day``), ``concat_keys`` (name ->
+        ``{"concat_recording_id"}``), ``recording_keys`` (name ->
+        ``{"recording_id"}`` for ``a``, ``b``, ``a_first``, ``a_second``,
+        ``b_first``, ``c_first``, ``c_second``) and ``nwb_file_names``
+        (``a``, ``b``, ``c``).
+    """
+    import math
+
+    import numpy as np
+
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        SessionGroup,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        UnitMatchSelection,
+    )
+    from tests.spikesorting.v2._concat_helpers import select_unmasked_concat
+    from tests.spikesorting.v2._ingest_helpers import (
+        clean_session_groups_for_owner,
+        clear_curations_for,
+        configure_v2_run_inputs,
+    )
+
+    sub = chronic_2_session_minirec
+    owner = sub["owner"]
+    preprocessing = sub["preprocessing_params_name"]
+    nwb_a = sub["same_day_members"][0]["nwb_file_name"]
+    nwb_b = sub["same_day_members"][1]["nwb_file_name"]
+    nwb_c = sub["next_day_member"]["nwb_file_name"]
+    SorterParameters.insert_default()
+    MatcherParameters.insert_default()
+    clean_session_groups_for_owner(owner)
+
+    recording_keys = {
+        "a": sub["recording_pks"][0],
+        "b": sub["recording_pks"][1],
+    }
+    members = {}
+    intervals = [
+        (tag, nwb_file_name, part)
+        for tag, nwb_file_name in (("a", nwb_a), ("c", nwb_c))
+        for part in DAILY_CONCAT_INTERVALS
+    ] + [("b", nwb_b, "first")]
+    for tag, nwb_file_name, part in intervals:
+        t0 = float(
+            (
+                IntervalList
+                & {
+                    "nwb_file_name": nwb_file_name,
+                    "interval_list_name": "raw data valid times",
+                }
+            ).fetch1("valid_times")[0][0]
+        )
+        start, stop = DAILY_CONCAT_INTERVALS[part]
+        # Every interval of every session starts in one binade (see the
+        # constant).
+        assert math.frexp(t0 + DAILY_CONCAT_INTERVALS["first"][0])[1] == (
+            math.frexp(t0 + DAILY_CONCAT_INTERVALS["second"][0])[1]
+        )
+        name = f"unitmatch_daily_{part}"
+        IntervalList.insert1(
+            {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": name,
+                "valid_times": np.asarray([[t0 + start, t0 + stop]]),
+                "pipeline": "unitmatch_daily_concat_test",
+            },
+            skip_duplicates=True,
+        )
+        member = configure_v2_run_inputs(
+            nwb_file_name, owner, interval_list_name=name
+        )
+        members[f"{tag}_{part}"] = member
+        key = RecordingSelection.insert_selection(
+            {**member, "preprocessing_params_name": preprocessing}
+        )
+        if not (Recording & key):
+            Recording.populate(key, reserve_jobs=False)
+        recording_keys[f"{tag}_{part}"] = key
+
+    groups = {
+        "concat_day1": ([members["a_first"], members["a_second"]], False),
+        "concat_day2": ([members["c_first"], members["c_second"]], False),
+        "concat_multi_day": ([members["b_first"], members["c_first"]], True),
+    }
+    concat_keys = {}
+    for name, (group_members, multi_day) in groups.items():
+        SessionGroup.create_group(
+            owner,
+            f"unitmatch_{name}",
+            group_members,
+            allow_multi_day=multi_day,
+        )
+        concat_keys[name] = select_unmasked_concat(
+            {
+                "session_group_owner": owner,
+                "session_group_name": f"unitmatch_{name}",
+                "preprocessing_params_name": preprocessing,
+            }
+        )
+        ConcatenatedRecording.populate(concat_keys[name], reserve_jobs=False)
+
+    sorter = {
+        "sorter": "mountainsort5",
+        "sorter_params_name": "franklab_30khz_ms5_2026_06",
+    }
+    sources = {
+        "single_a": recording_keys["a"],
+        "single_b": recording_keys["b"],
+        "single_a_first": recording_keys["a_first"],
+        **concat_keys,
+    }
+    sort_keys = {}
+    curations = {}
+    patch = pytest.MonkeyPatch()
+    try:
+        patch.setattr(Sorting, "_run_sorter", staticmethod(_plant_spread_unit))
+        for name, source in sources.items():
+            sort_key = SortingSelection.insert_selection({**source, **sorter})
+            if not (Sorting & sort_key):
+                Sorting.populate(sort_key, reserve_jobs=False)
+            clear_curations_for(sort_key)
+            curation = CurationV2.insert_curation(sorting_key=sort_key)
+            sort_keys[name] = sort_key
+            curations[name] = {
+                "sorting_id": curation["sorting_id"],
+                "curation_id": curation["curation_id"],
+            }
+    finally:
+        patch.undo()
+
+    yield {
+        "curations": curations,
+        "concat_keys": concat_keys,
+        "recording_keys": recording_keys,
+        "nwb_file_names": {"a": nwb_a, "b": nwb_b, "c": nwb_c},
+    }
+
+    # Explicit-input selections reference no group, so drop every selection
+    # pinning these sorts before their curations go.
+    sort_restriction = [
+        {"sorting_id": key["sorting_id"]} for key in sort_keys.values()
+    ]
+    (
+        UnitMatchSelection
+        & (UnitMatchSelection.Input & sort_restriction).proj()
+    ).super_delete(warn=False)
+    clean_session_groups_for_owner(owner)
+    for name in ("single_a", "single_b", "single_a_first"):
+        if name in sort_keys:
+            clear_curations_for(sort_keys[name])
+            (Sorting & sort_keys[name]).super_delete(warn=False)
+            (SortingSelection & sort_keys[name]).super_delete(warn=False)
+    for name in ("a_first", "a_second", "b_first", "c_first", "c_second"):
+        (RecordingSelection & recording_keys[name]).super_delete(warn=False)
+
+
 # ---- motion correction: the planted-drift polymer session -------------------
 
 
