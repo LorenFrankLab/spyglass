@@ -532,6 +532,25 @@ jobs:
           "tests/spikesorting/v2/single_session/test_pipeline_run.py::test_run_v2_pipeline_figpack_zero_units_skips_view" \
           tests/spikesorting/v2/test_notebook_execution.py::test_curation_notebook_runs \
           --no-docker --no-dlc -q
+    # --- End-to-end acceptance probes (tests/spikesorting/v2/acceptance).
+    # Tier: nightly schedule and manual dispatch ONLY, in the single-session
+    # shard, inside the spyglass_v2_curation env the FigPack step above builds
+    # (the probes import figpack and drive Chromium through Playwright). They
+    # sort the 60 s tetrode fixture end to end (8 tests, ~11 min on a laptop
+    # with a local MySQL), too slow for every push. Without --run-acceptance
+    # the unit shard collects them as skipped.
+    # SPYGLASS_V2_REQUIRE_FIXTURES is set on this command only (overriding the
+    # job-wide list): conftest's pytest_sessionstart downloads the tetrode and
+    # smoke fixtures and fails the session naming any that are absent, instead
+    # of the probes skipping. test_database_and_file_restore always SKIPS here:
+    # the job's MySQL is a service container reached with --no-docker, so
+    # there is no Docker client for its mysqldump / docker exec restore.
+    - name: End-to-end acceptance probes (nightly / manual dispatch)
+      if: matrix.shard.name == 'single-session' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      run: |
+        SPYGLASS_V2_REQUIRE_FIXTURES="mearec_tetrode_60s mearec_polymer_smoke" \
+          conda run -n spyglass_v2_curation pytest \
+          tests/spikesorting/v2/acceptance --run-acceptance --no-docker --no-dlc -q
 
   pytest-legacy:
     # Legacy (v0/v1) spike-sorting tests run under SpikeInterface 0.99,
