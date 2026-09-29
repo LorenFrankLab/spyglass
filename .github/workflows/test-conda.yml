@@ -173,11 +173,13 @@ jobs:
         name: ${{ steps.test_mode.outputs.description }}
 
   pytest-v2:
-    # Modern spike-sorting tests run under SpikeInterface 0.104, isolated
-    # from the SpikeInterface 0.99 suite in run-tests above. Static-tier
-    # tests run DB-free; DB-tier tests (fixture ingestion, legacy-runtime
-    # boundary) connect to the MySQL service via the conftest's
-    # null_server path.
+    # Modern spike-sorting tests (tests/spikesorting/v2) run here under
+    # SpikeInterface 0.104 in their own conda env. run-tests above also uses
+    # SpikeInterface 0.104 but ignores tests/spikesorting/v0, v1 and v2; the
+    # SpikeInterface 0.99 suite is pytest-legacy below. Static-tier tests run
+    # DB-free; DB-tier tests (fixture ingestion, legacy-runtime boundary)
+    # connect to this job's own MySQL service (services.mysql below) via the
+    # conftest's null_server path (--no-docker).
     name: pytest-v2 ${{ matrix.shard.name }} (SpikeInterface 0.104)
     # Skip if PR is closed but not merged
     if: |-
@@ -304,9 +306,10 @@ jobs:
       # Avoid re-downloading the canonical fixtures from Box every run. Keyed
       # on the manifest (fixture bytes) + _fetch.py (Box URLs) so a fixture
       # refresh or URL change busts the cache, and on github.event_name so the
-      # per-PR cache (smoke only) and the nightly cache (smoke + 60s) keep
-      # separate entries rather than clobbering one key. On a hit, _fetch.py
-      # finds the files already present and is a no-op.
+      # per-PR entry (smoke only) and the scheduled and manual entries (which
+      # also hold whatever larger fixtures those runs download) stay separate
+      # rather than clobbering one key. On a hit, _fetch.py finds the files
+      # already present and is a no-op.
       uses: actions/cache@v4
       with:
         path: tests/spikesorting/v2/fixtures/*.nwb
@@ -322,10 +325,10 @@ jobs:
       # (generate_mearec.py; see fixtures/README.md), not a CI fallback.
       #
       # mearec_polymer_smoke.nwb (~4s) drives the per-PR integration /
-      # clusterless / zero-unit cases. The 60s / Neuropixels / drift fixtures
-      # are downloaded only on the nightly/manual runs (next step); their tests
-      # skip cleanly via ``*_PATH.exists()`` guards otherwise. No-op on a cache
-      # hit.
+      # clusterless / zero-unit cases. Larger fixtures are downloaded only on
+      # scheduled or manual runs (the steps below); tests that need an absent
+      # fixture skip cleanly via ``*_PATH.exists()`` guards unless
+      # SPYGLASS_V2_REQUIRE_FIXTURES names it. No-op on a cache hit.
       run: |
         python tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
     - name: Download 60s polymer fixture (scheduled / manual full runs)
@@ -341,11 +344,15 @@ jobs:
       run: |
         python tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_128ch_60s
     - name: Download scenario fixtures (manual dispatch only)
-      # Dense-probe (neuropixels) and tetrode-path coverage. These change
-      # rarely, so they are pulled only on a manual workflow_dispatch (or run
-      # locally) rather than per-PR or nightly. The drift fixture is hosted on
-      # Box but intentionally NOT fetched -- no test references it yet (motion
-      # correction is unwritten). Same download + verify + no-fallback contract.
+      # Dense-probe (neuropixels) and tetrode-path coverage for the main test
+      # run. These change rarely, so this step runs only on a manual
+      # workflow_dispatch, not per-PR or on the nightly schedule. On scheduled
+      # and manual runs the acceptance-probe step below also fetches the
+      # tetrode fixture for its own session. This step does not fetch the
+      # drift fixture (mearec_polymer_128ch_drift_120s, hosted on Box); the
+      # opt-in motion benchmark in test_motion_acceptance.py reads it and
+      # skips when the file is absent. Same download + verify + no-fallback
+      # contract.
       if: github.event_name == 'workflow_dispatch'
       run: |
         python tests/spikesorting/v2/fixtures/_fetch.py mearec_neuropixels_60s
@@ -410,16 +417,22 @@ jobs:
         fi
         echo "SPYGLASS_V2_REQUIRE_FIXTURES=$REQ" >> "$GITHUB_ENV"
     - name: Run modern spike-sorting tests
-      # Collects the whole v2 dir. The smoke fixture drives the per-PR
-      # integration + clusterless + zero-unit cases; when the 60s polymer
-      # fixture is present (scheduled / manual runs) the merge, MS5
-      # ground-truth, and clusterless sparse-id cases run too -- otherwise
-      # they skip cleanly via their ``*_PATH.exists()`` / fixture guards.
+      # Runs this shard's slice of tests/spikesorting/v2 (matrix above):
+      # single-session = single_session/, integration = the listed full-sort
+      # files, unit = everything else in the directory. The smoke fixture
+      # drives the per-PR integration + clusterless + zero-unit cases; when
+      # the 60s polymer fixture is present (scheduled / manual runs) the
+      # merge, MS5 ground-truth, and clusterless sparse-id cases run too --
+      # otherwise they skip cleanly via their ``*_PATH.exists()`` / fixture
+      # guards.
       # NOTE: this job does NOT honor the workflow_dispatch fast/full
       # ``test_mode`` input (that governs the general ``run-tests`` job only).
-      # The v2 coverage tier is keyed on the EVENT (push=smoke, schedule=+60s,
-      # manual dispatch=+scenario fixtures + REQUIRE), so a manual dispatch is
-      # always the most thorough v2 run; there is no fast v2 lane by design.
+      # The v2 coverage tier is keyed on the EVENT (push / pull request =
+      # smoke; schedule = + 60s polymer and minirec; manual dispatch = those
+      # plus the neuropixels and tetrode scenario fixtures), and every tier
+      # requires its fixtures through SPYGLASS_V2_REQUIRE_FIXTURES. A manual
+      # dispatch is always the most thorough v2 run; there is no fast v2 lane
+      # by design.
       run: |
         pytest ${{ matrix.shard.paths }} --no-docker --no-dlc -q
     # --- Matching-extra resolver-evidence job.
@@ -462,7 +475,8 @@ jobs:
         # This env is the only one with UnitMatchPy installed, so it owns the
         # cross-session matcher gates: the resolver-evidence assertion plus the
         # polymer ground-truth AUC gate (and the rest of the matcher suite).
-        # The AUC gate reaches the run-tests job's MySQL service via --no-docker.
+        # The AUC gate uses this job's own MySQL service (services.mysql above;
+        # --no-docker skips starting a database container).
         # It SKIPS until the two-session polymer fixtures are present; to ENFORCE
         # it in CI, upload mearec_polymer_128ch_2sessions_{s1,s2}.nwb, set their
         # URLs in tests/spikesorting/v2/fixtures/_fetch.py, fetch them here, and
@@ -505,8 +519,9 @@ jobs:
     # run in NO CI environment. A separate env mirrors the matching lane above:
     # the figpack pins are light, but isolating them keeps the default env's
     # SpikeInterface pin uncoupled from the figpack-verified SI combo. These
-    # tests build a real v2 analyzer, so they reach the run-tests MySQL service
-    # via --no-docker and need the smoke fixture, like the matcher lane.
+    # tests build a real v2 analyzer, so they use this job's own MySQL service
+    # (services.mysql above; --no-docker skips starting a database container)
+    # and need the smoke fixture, like the matcher lane.
     - name: FigPack curation tests (separate env)
       # Heavy separate-env lane: runs in ONE shard only (single-session) so the
       # matrix does not build its conda env + run the figpack suite three times.
