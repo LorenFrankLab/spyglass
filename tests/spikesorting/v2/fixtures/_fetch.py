@@ -90,6 +90,8 @@ FIXTURE_URLS: dict[str, str | None] = {
     ),
     # Cross-session matcher gate pair (generate-or-skip until uploaded). The
     # AUC gate references both stems by path and skips when either is absent.
+    # Not hosted yet: the nightly / manual CI step for that gate requires both,
+    # so it fails naming them until these URLs are set (see README.md).
     "mearec_polymer_128ch_2sessions_s1": None,  # nightly / manual
     "mearec_polymer_128ch_2sessions_s2": None,  # nightly / manual
 }

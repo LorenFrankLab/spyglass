@@ -114,6 +114,30 @@ keep generate-or-skip behaviour for that fixture.
   operation below, not a CI step — so the per-PR job carries no biophysical
   toolchain.
 
+### Two-session polymer pair (not hosted)
+
+`mearec_polymer_128ch_2sessions_s1.nwb` and
+`mearec_polymer_128ch_2sessions_s2.nwb` are generated locally by
+`generate_mearec.py` (`--only mearec_polymer_128ch_2sessions_s1 --only
+mearec_polymer_128ch_2sessions_s2`) and are **not hosted**: their
+`FIXTURE_URLS` entries in [`_fetch.py`](_fetch.py) are `None`. Only
+`test_v2_unitmatch_polymer_mearec_ground_truth` (`test_unitmatch.py`, the
+cross-session matcher AUC gate) uses them; without them it skips.
+
+The `pytest-v2` job's "Two-session matcher ground-truth gate" step (nightly
+schedule and manual dispatch) already names both stems in
+`SPYGLASS_V2_REQUIRE_FIXTURES`, so until they are hosted that step fails with
+"No download URL is configured -- the fixture is not hosted". To enable the
+gate:
+
+1. Upload both NWBs to Box. Their bytes must match `nwb_sha256` in
+   `fixtures_manifest.json`; if you regenerate them instead, commit the new
+   manifest too.
+2. Set both `FIXTURE_URLS` entries to their direct-download URLs (the form
+   shown above).
+
+Nothing else changes in CI: the step then downloads, verifies and runs them.
+
 ### Regenerate → upload → re-commit runbook
 
 When the probe layout or a fixture spec changes (or you intentionally refresh):

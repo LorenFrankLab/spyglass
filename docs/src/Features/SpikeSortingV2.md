@@ -2158,11 +2158,13 @@ implant). Two levels of matcher validation exist, with different CI status:
     runs that don't fetch it.
 - **Ground-truth AUC gate** (`test_v2_unitmatch_polymer_mearec_ground_truth`)
     requires AUC > 0.85 on a *two-session* polymer recording with planted
-    correspondences. It is verified **locally**; in CI it is NOT yet enforced
-    because the two-session polymer fixtures are not uploaded (their URLs in
-    `tests/spikesorting/v2/fixtures/_fetch.py` are still `None`, so the gate
-    skips cleanly). Uploading them + adding them to
-    `SPYGLASS_V2_REQUIRE_FIXTURES` enforces it.
+    correspondences. It is verified **locally** only: the two-session polymer
+    fixtures are not uploaded (their URLs in
+    `tests/spikesorting/v2/fixtures/_fetch.py` are still `None`), so the test
+    skips wherever they are absent. The nightly / manual CI step that runs it
+    requires both fixtures and fails, naming them as not hosted, until they
+    are uploaded and their URLs set (see
+    `tests/spikesorting/v2/fixtures/README.md`).
 
 The recommended path is the **plan-then-run** orchestrator — pin curations by a
 named curation strategy, review the plan, then run. Two planning entry points

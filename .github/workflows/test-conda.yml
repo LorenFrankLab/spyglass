@@ -490,27 +490,11 @@ jobs:
           -e ".[test,spikesorting-v2,spikesorting-v2-matching]" || true
         # This env is the only one with UnitMatchPy installed, so it owns the
         # cross-session matcher gates: the resolver-evidence assertion plus the
-        # polymer ground-truth AUC gate (and the rest of the matcher suite).
-        # The AUC gate uses this job's own MySQL service (services.mysql above;
-        # --no-docker skips starting a database container).
-        # It SKIPS until the two-session polymer fixtures are present; to ENFORCE
-        # it in CI, upload mearec_polymer_128ch_2sessions_{s1,s2}.nwb, set their
-        # URLs in tests/spikesorting/v2/fixtures/_fetch.py, fetch them here, and
-        # add them to SPYGLASS_V2_REQUIRE_FIXTURES so an absent fixture fails the
-        # run rather than silently skipping.
-        if [ "${{ github.event_name }}" = "schedule" ] || \
-           [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          # _fetch.py exits non-zero when either stem has no URL in
-          # FIXTURE_URLS or its download fails. The AUC gate then skips (see
-          # above); the warning makes that visible in the run summary without
-          # failing the rest of the matcher suite.
-          if ! python tests/spikesorting/v2/fixtures/_fetch.py \
-              mearec_polymer_128ch_2sessions_s1 \
-              mearec_polymer_128ch_2sessions_s2; then
-            echo "::warning::Two-session polymer fixtures are unavailable;" \
-              "the cross-session matcher AUC gate skips on this run."
-          fi
-        fi
+        # rest of the matcher suite. Its DB tests use this job's own MySQL
+        # service (services.mysql above; --no-docker skips starting a database
+        # container). The two-session polymer ground-truth AUC gate is collected
+        # here too but skips without its fixtures; the next step is the one that
+        # requires them.
         # This env is the only one with UnitMatchPy installed, so it also owns
         # the cross-session NOTEBOOK end-to-end test: notebook 14's Part B match
         # needs UnitMatchPy (bundle extraction), so the default v2 job (no
@@ -540,6 +524,25 @@ jobs:
           tests/spikesorting/v2/test_motion_consumers.py::test_unitmatch_bundle_of_a_corrected_sort \
           tests/spikesorting/v2/test_motion_consumers.py::test_corrected_concat_bundle_keeps_windows_in_spans \
           tests/spikesorting/v2/test_notebook_execution.py::test_cross_session_notebook_runs \
+          --no-docker --no-dlc -q
+    # --- Two-session matcher ground-truth gate. Tier: nightly schedule and
+    # manual dispatch, in the unit shard, inside the spyglass_v2_matching env
+    # the step above builds. test_v2_unitmatch_polymer_mearec_ground_truth
+    # needs mearec_polymer_128ch_2sessions_{s1,s2}.nwb, which are NOT hosted
+    # yet (their FIXTURE_URLS entries in tests/spikesorting/v2/fixtures/_fetch.py
+    # are None). SPYGLASS_V2_REQUIRE_FIXTURES is set on this command only
+    # (overriding the job-wide list), so conftest's pytest_sessionstart
+    # downloads them and fails the session naming both stems while they are
+    # unavailable. This step is therefore EXPECTED to be red on nightly and
+    # manual runs until the fixtures are uploaded and their URLs set in
+    # _fetch.py (tests/spikesorting/v2/fixtures/README.md); nothing else here
+    # needs to change then. Do not mask the failure.
+    - name: Two-session matcher ground-truth gate (nightly / manual dispatch)
+      if: matrix.shard.name == 'unit' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      run: |
+        SPYGLASS_V2_REQUIRE_FIXTURES="mearec_polymer_128ch_2sessions_s1 mearec_polymer_128ch_2sessions_s2" \
+          conda run -n spyglass_v2_matching pytest \
+          tests/spikesorting/v2/test_unitmatch.py::test_v2_unitmatch_polymer_mearec_ground_truth \
           --no-docker --no-dlc -q
     # --- FigPack curation extra lane (separate env). The curation extra
     # (figpack + figpack-spike-sorting) is kept out of the default v2 env, so

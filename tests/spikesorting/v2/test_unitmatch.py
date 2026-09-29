@@ -2717,10 +2717,10 @@ def test_all_excluded_member_raises_with_member_identity(
 # --------------------------------------------------------------------------- #
 # Ground-truth AUC gate (slow / heavy). Target: UnitMatch discriminates planted #
 # cross-session correspondences on the polymer probe with AUC > 0.85. Verified  #
-# LOCALLY only -- NOT yet CI-enforced: the two-session polymer fixtures are      #
-# unhosted (their _fetch.py URLs are None), so this skips when they or           #
-# UnitMatchPy are absent. Uploading them + adding to SPYGLASS_V2_REQUIRE_FIXTURES #
-# turns this into a hard CI gate.                                                #
+# LOCALLY only: the two-session polymer fixtures are unhosted (their _fetch.py  #
+# URLs are None), so this skips wherever they or UnitMatchPy are absent. The    #
+# nightly / manual CI step that runs it requires both fixtures, so that step    #
+# fails, naming them, until they are uploaded and their URLs set.               #
 # --------------------------------------------------------------------------- #
 
 _FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
@@ -2779,9 +2779,10 @@ def _bandpassed_polymer_recording(fixture_path):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_v2_unitmatch_polymer_mearec_ground_truth(dj_conn, tmp_path):
-    """Ship-readiness target (verified locally, not yet CI-enforced -- see the
-    gate banner above): AUC of UnitMatch probability vs ground-truth
-    correspondence on the two-session polymer probe is > 0.85.
+    """Ship-readiness target (verified locally; its CI step fails until the
+    fixtures are hosted -- see the gate banner above): AUC of UnitMatch
+    probability vs ground-truth correspondence on the two-session polymer
+    probe is > 0.85.
 
     The two sessions are built from one MEArec template set sharing a
     ``template_seed`` (so ground-truth unit ``i`` is the same neuron in both
