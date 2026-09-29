@@ -2288,8 +2288,7 @@ def run_v2_unit_match(
         ``None`` for a plan of named sorts) / ``matcher_params_name``,
         the ``unit_match_id`` selection PK, ``inputs`` (one
         :class:`UnitMatchInputSummary` per matching input, in chronological
-        ``input_index`` order, read from the frozen selection and the run's
-        NWB), ``n_pairs`` (pairwise matches) and
+        ``input_index`` order, read from the frozen selection), ``n_pairs`` (pairwise matches) and
         ``n_tracked_units`` (cross-session biological units), the per-stage
         ``unit_match_status`` / ``tracked_unit_status`` (``"computed"`` /
         ``"reused"`` -- stems match the ``stage_seconds`` keys so ``describe_run``
@@ -2487,21 +2486,14 @@ def _unit_match_input_summaries(
 ) -> tuple[UnitMatchInputSummary, ...]:
     """The receipt's per-input records for one populated match run.
 
-    Identity, source and constituent recordings come from the frozen
-    selection parts; ``waveform_traces`` comes from the inputs table the run
-    wrote to its NWB (the traces its bundles were actually read from). Both
-    are read through ``UnitMatch.get_input_provenance``.
+    Everything comes from the frozen selection parts through the database
+    form of ``UnitMatch.get_input_provenance`` (which derives
+    ``waveform_traces`` from the frozen ``motion_corrected_recording_id``),
+    so building the receipt never opens the run's analysis NWB.
     """
     from spyglass.spikesorting.v2.unit_matching import UnitMatch
 
     inputs, recordings = UnitMatch().get_input_provenance(selection)
-    nwb_inputs, _ = UnitMatch().get_input_provenance(selection, from_nwb=True)
-    traces_by_input = dict(
-        zip(
-            nwb_inputs["input_index"].astype(int),
-            nwb_inputs["waveform_traces"],
-        )
-    )
     summaries = []
     for row in inputs.to_dict(orient="records"):
         input_index = int(row["input_index"])
@@ -2520,7 +2512,7 @@ def _unit_match_input_summaries(
                 motion_corrected_recording_id=row[
                     "motion_corrected_recording_id"
                 ],
-                waveform_traces=str(traces_by_input[input_index]),
+                waveform_traces=str(row["waveform_traces"]),
             )
         )
     return tuple(summaries)

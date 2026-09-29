@@ -398,8 +398,8 @@ class UnitMatchInputSummary(NamedTuple):
     """One matching input of a ``run_v2_unit_match`` receipt.
 
     Read from the run's frozen ``UnitMatchSelection.Input`` /
-    ``InputRecording`` rows and, for ``waveform_traces``, from the inputs
-    table in the run's NWB -- never from a live ``SessionGroup``.
+    ``InputRecording`` rows -- never from a live ``SessionGroup`` and
+    without opening the run's NWB.
     ``nwb_file_names`` / ``interval_list_names`` list the input's
     constituent original recordings in recording order (one for a
     single-recording sort, one per member for a concatenation sort).

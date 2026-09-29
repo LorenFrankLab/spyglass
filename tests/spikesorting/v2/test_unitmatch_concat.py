@@ -1066,10 +1066,54 @@ def test_named_sort_plan_runs_without_a_group(
         )
         assert summary["n_tracked_units"] == len(TrackedUnit & pk) == 1
 
-        rerun = run_v2_unit_match(plan)
+        # The receipt's inputs come from the frozen parts alone: chronological
+        # (session b on day 1, then day 2's concatenation), uncorrected.
+        assert [
+            (
+                str(item.sorting_id),
+                item.source_kind,
+                item.waveform_traces,
+                item.motion_corrected_recording_id,
+            )
+            for item in summary["inputs"]
+        ] == [
+            (str(single["sorting_id"]), "recording", "recording", None),
+            (
+                str(concat["sorting_id"]),
+                "concatenated_recording",
+                "concatenated_recording",
+                None,
+            ),
+        ]
+
+        # A rerun builds the same receipt without the run's analysis NWB:
+        # resolving that file, or reading any provenance table, raises. (The
+        # selection still opens its single recording's own traces file.)
+        from spyglass.common.common_nwbfile import AnalysisNwbfile
+        from spyglass.spikesorting.v2 import _nwb_provenance, _unitmatch_nwb
+
+        run_file = (UnitMatch & pk).fetch1("analysis_file_name")
+        get_abs_path = AnalysisNwbfile.get_abs_path
+
+        def _no_nwb(*args, **kwargs):
+            raise AssertionError("the receipt opened the analysis NWB")
+
+        def _no_run_file(analysis_file_name, *args, **kwargs):
+            if analysis_file_name == run_file:
+                _no_nwb()
+            return get_abs_path(analysis_file_name, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                AnalysisNwbfile, "get_abs_path", staticmethod(_no_run_file)
+            )
+            patch.setattr(_unitmatch_nwb, "read_input_provenance", _no_nwb)
+            patch.setattr(_nwb_provenance, "read_long_provenance", _no_nwb)
+            rerun = run_v2_unit_match(plan)
         assert rerun["unit_match_id"] == summary["unit_match_id"]
         assert rerun["unit_match_status"] == "reused"
         assert rerun["tracked_unit_status"] == "reused"
+        assert rerun["inputs"] == summary["inputs"]
     finally:
         if pk is not None:
             _drop(pk)
