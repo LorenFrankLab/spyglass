@@ -2370,7 +2370,9 @@ are offset from each other by more than a few micrometers, matching degrades
 sharply. In synthetic pilots on a 32-contact single-column polymer layout (26
 um pitch), a rigid position offset of 3 / 6 / 12 um between two otherwise
 identical, motion-corrected days recovered 22 / 12 / 1 of 24 planted neurons
-(vs. 22-23/24 with no offset). Before matching corrected daily sorts, confirm
+(in the same pilot series, a static twin with no drift at all recovered
+23/24, and a separate dredge_fast-corrected run with no offset between days
+recovered 22/24). Before matching corrected daily sorts, confirm
 by other means (e.g. a stable stereotaxic reference, or comparing the two
 days' displacement estimates) that the days are already registered to within a
 few micrometers -- correcting each day's motion independently does not do
