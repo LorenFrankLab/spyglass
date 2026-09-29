@@ -278,6 +278,7 @@ def _hand_input_plan(curations):
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import SortingSelection
     from spyglass.spikesorting.v2.unit_matching import (
+        _add_single_recording_frames,
         _member_match_files,
         _member_waveform_traces,
         _resolve_match_input,
@@ -288,6 +289,7 @@ def _hand_input_plan(curations):
         resolved = _resolve_match_input(
             curation["sorting_id"], curation["curation_id"], ValueError
         )
+        _add_single_recording_frames(resolved)
         source = SortingSelection.resolve_effective_source(
             {"sorting_id": curation["sorting_id"]}
         )
@@ -306,8 +308,6 @@ def _hand_input_plan(curations):
                         **recording,
                         "recording_id": str(recording["recording_id"]),
                         "session_start_time": start,
-                        "start_sample": 0,
-                        "end_sample": 0,
                     }
                     for recording in resolved["recordings"]
                 ],

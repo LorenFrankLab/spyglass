@@ -104,10 +104,13 @@ class UnitMatchFetched(NamedTuple):
     ``recording_content_hash``, ``session_start_time`` (UTC ISO str),
     ``start_sample``, ``end_sample``, ``valid_times`` (nested list)),
     "matchable_unit_ids" (sorted list[int]), "waveform_traces" (str),
-    "motion_corrected_recording_id" (str or None), "sorting_input"
-    (CanonicalRecording), "units" (StoredUnits), "statistics_spans" (list of
-    ``[start, end]`` sort frames)}``; the last three are present only for two
-    or more inputs (a single input extracts no bundle).
+    "motion_corrected_recording_id" (str or None), "units" (StoredUnits),
+    "sorting_input" (CanonicalRecording), "statistics_spans" (list of
+    ``[start, end]`` sort frames)}``; the last two are present only for two
+    or more inputs (a single input extracts no bundle). ``units`` is present
+    for every input: compute counts each matchable unit's spikes per
+    constituent recording from it (for a single input it is resolved
+    without reading or rebuilding the traces file).
     Threading ``matchable_unit_ids`` here -- rather than re-querying in
     compute -- keeps a curation relabel between stages from changing which
     units match; the times are the frozen ones, never re-read from
@@ -152,6 +155,10 @@ class UnitMatchComputed(NamedTuple):
     # so ``make_insert`` writes ``UnitMatch.MatchableUnit`` and ``TrackedUnit``
     # reads the exact node universe the matcher saw, not current labels.
     matchable_units: list[dict]
+    # Per-(input, recording, matchable unit) spike counts (``{"input_index",
+    # "recording_index", "unit_id", "n_spikes"}`` dicts) for
+    # ``UnitMatch.RecordingSpikeCount``.
+    recording_spike_counts: list[dict]
     # Producer provenance (secondary, never identity): SI version at match time,
     # the resolved backend's module path, and the backend package version.
     spikeinterface_version: str
@@ -1012,6 +1019,30 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         unit_id: int
         """
 
+    class RecordingSpikeCount(SpyglassMixinPart):
+        """FROZEN per-recording spike counts of every matchable unit.
+
+        One row per (matching input, constituent recording, matchable unit):
+        the number of the unit's spikes whose sort frame lies in the
+        recording's frozen ``[start_sample, end_sample)`` span
+        (``UnitMatchSelection.InputRecording``). A single-recording input
+        has one row per unit (its total); a concatenation input's parent
+        unit has one row per member, zero where it did not fire, and the
+        counts over an input's recordings sum to the unit's total. Covers
+        units left out of the matcher's bundle too. ``TrackedUnit`` counts
+        a session as detected only where a member unit has spikes. A plain
+        snapshot (not FK'd), like ``MatchableUnit``.
+        """
+
+        definition = """
+        -> master
+        input_index: int
+        recording_index: int
+        unit_id: int
+        ---
+        n_spikes: int     # spikes of the unit whose sort frame lies in this recording's frame span
+        """
+
     # Tri-part make so the heavy curation reads, dense bundle extraction,
     # matcher execution, and NWB write run OUTSIDE the DB transaction (mirroring
     # Recording / Sorting / CurationEvaluation). Only the row inserts run inside
@@ -1041,8 +1072,9 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         read, and the ``SessionGroup`` the inputs were discovered from is not
         consulted. Each input's traces file is rebuilt here if missing, and
         its path, the artifact valid times of the sort's mask (when applied at
-        load), the sort's statistics spans and its curated units NWB are
-        carried to compute.
+        load) and the sort's statistics spans are carried to compute, together
+        with its curated units NWB (resolved for every input, including a
+        single one, whose traces file is not read).
         """
         from spyglass.spikesorting.v2._matcher_graph import (
             frozen_order_errors,
@@ -1213,12 +1245,15 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         # Resolve the files last, once every input passed its checks, so a
         # fetch that raises never rebuilds a traces file. A single input
         # writes zero pairs without extracting a bundle, so it reads (and
-        # heals) no traces file.
-        if len(input_plan) >= 2:
-            for plan, curation_key in zip(
-                input_plan, input_curation_keys, strict=True
-            ):
+        # heals) no traces file; only its curated units file is resolved,
+        # for the per-recording spike counts.
+        for plan, curation_key in zip(
+            input_plan, input_curation_keys, strict=True
+        ):
+            if len(input_plan) >= 2:
                 plan.update(_member_match_files(curation_key))
+            else:
+                plan["units"] = _input_stored_units(curation_key)
         return UnitMatchFetched(
             matcher_name=matcher_name,
             params=dict(params),
@@ -1244,7 +1279,9 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         All heavy SI / UnitMatch / NWB work happens here, outside the DB
         transaction. A single-input selection writes an empty pairs table
-        without calling the matcher backend. The anchor AnalysisNwbfile parent is the first input's
+        without calling the matcher backend. Every input's matchable units
+        are counted per constituent recording from its curated units file
+        (:func:`_input_recording_spike_counts`). The anchor AnalysisNwbfile parent is the first input's
         first recording's NWB (``input_plan`` is ``input_index``-ordered).
         Reads only the input files ``make_fetch`` resolved; the one DB access
         left is staging the pairs NWB (see :mod:`._recording_nwb`).
@@ -1290,6 +1327,11 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             }
             for plan in input_plan
             for unit_id in plan["matchable_unit_ids"]
+        ]
+        recording_spike_counts = [
+            count
+            for plan in input_plan
+            for count in _input_recording_spike_counts(plan)
         ]
         # Self-describing provenance: the run/group/matcher header (re-emitting
         # the producer provenance the row stores), the per-input map and the
@@ -1392,6 +1434,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             matcher_runtime_s=float(runtime_s),
             anchor_nwb_file_name=anchor_nwb_file_name,
             matchable_units=matchable_units,
+            recording_spike_counts=recording_spike_counts,
             spikeinterface_version=spikeinterface_version,
             matcher_backend=matcher_backend,
             matcher_backend_version=matcher_backend_version,
@@ -1406,12 +1449,13 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         matcher_runtime_s,
         anchor_nwb_file_name,
         matchable_units,
+        recording_spike_counts,
         spikeinterface_version,
         matcher_backend,
         matcher_backend_version,
     ) -> None:
         """Register the analysis file + insert the master, Pair, and frozen
-        ``MatchableUnit`` rows.
+        ``MatchableUnit`` / ``RecordingSpikeCount`` rows.
 
         Runs inside the framework's tri-part insert transaction. The Pair rows
         are read back from the staged NWB (the canonical written pairs) rather
@@ -1461,6 +1505,9 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             # exact node set the matcher saw, not current curation labels.
             self.MatchableUnit.insert(
                 [{**key, **unit} for unit in matchable_units]
+            )
+            self.RecordingSpikeCount.insert(
+                [{**key, **count} for count in recording_spike_counts]
             )
 
     @staticmethod
@@ -2653,6 +2700,109 @@ def _member_match_files(curation_key: dict) -> dict:
             for start, end in Sorting().get_statistics_spans(sorting_key)
         ],
     }
+
+
+def _input_stored_units(curation_key: dict):
+    """Resolve an input's curated units NWB without touching its traces.
+
+    For an input that extracts no bundle (a single-input selection): the
+    curated units file stores each spike's sort frame
+    (``spike_sample_index``), so the traces file is neither rebuilt nor
+    checksummed. Only a units file without stored frames (an older file)
+    needs the source recording's timestamps, which are then resolved as
+    ``CurationV2.get_sorting`` resolves them.
+
+    Parameters
+    ----------
+    curation_key : dict
+        ``{"sorting_id", "curation_id"}`` of the input's pinned curation.
+
+    Returns
+    -------
+    StoredUnits
+        For :func:`._units_nwb.read_stored_units`.
+    """
+    from spyglass.spikesorting.v2._units_nwb import (
+        units_nwb_stores_sample_indices,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    source = SortingSelection.resolve_effective_source(
+        {"sorting_id": curation_key["sorting_id"]}
+    )
+    units_file = (CurationV2 & curation_key).fetch1("analysis_file_name")
+    traces_abs_path = (
+        None
+        if units_nwb_stores_sample_indices(
+            AnalysisNwbfile.get_abs_path(units_file)
+        )
+        else SortingSelection.ensure_effective_traces(source.traces)
+    )
+    return SortingSelection.resolve_stored_units(
+        units_file, source, traces_abs_path
+    )
+
+
+def _input_recording_spike_counts(plan: dict) -> list[dict]:
+    """Count each matchable unit's spikes per constituent recording; no DB.
+
+    Reads the input's curated units (sort frames) from ``plan["units"]``
+    and splits every matchable unit's spikes by the recordings' frozen
+    ``[start_sample, end_sample)`` spans (:func:`._matcher_graph.
+    count_recording_spikes`), which conserves every spike.
+
+    Parameters
+    ----------
+    plan : dict
+        One ``UnitMatchFetched.input_plan`` entry.
+
+    Returns
+    -------
+    list[dict]
+        ``{"input_index", "recording_index", "unit_id", "n_spikes"}`` per
+        (constituent recording, matchable unit).
+
+    Raises
+    ------
+    ConcatSplitError
+        A spike of a matchable unit lies outside every frozen span of its
+        input's recordings.
+    """
+    from spyglass.spikesorting.v2._matcher_graph import count_recording_spikes
+    from spyglass.spikesorting.v2._units_nwb import read_stored_units
+    from spyglass.spikesorting.v2.exceptions import ConcatSplitError
+
+    sorting = read_stored_units(plan["units"])
+    trains = {
+        int(unit_id): sorting.get_unit_spike_train(unit_id=unit_id)
+        for unit_id in plan["matchable_unit_ids"]
+    }
+    recordings = plan["recordings"]
+    try:
+        counts = count_recording_spikes(
+            trains,
+            [
+                (int(recording["start_sample"]), int(recording["end_sample"]))
+                for recording in recordings
+            ],
+        )
+    except ConcatSplitError as exc:
+        raise ConcatSplitError(
+            f"UnitMatch.make: input_index {plan['input_index']} "
+            f"{_input_label(plan['sorting_id'], plan['curation_id'])}: its "
+            "curated spikes do not fit the frozen frame spans of its "
+            f"recordings ({exc})"
+        ) from exc
+    return [
+        {
+            "input_index": int(plan["input_index"]),
+            "recording_index": int(recording["recording_index"]),
+            "unit_id": unit_id,
+            "n_spikes": int(n_spikes),
+        }
+        for unit_id, per_recording in counts.items()
+        for recording, n_spikes in zip(recordings, per_recording, strict=True)
+    ]
 
 
 def normalize_curation_choices(curation_choices) -> dict[int, tuple]:

@@ -1665,8 +1665,9 @@ def test_selection_without_inputs_is_rejected(two_session_curated_group):
 def test_unitmatch_computed_matches_make_insert_signature():
     """The tri-part dispatch splats ``UnitMatchComputed`` POSITIONALLY into
     ``make_insert(key, *computed)``, so the NamedTuple field order is a wire
-    contract. The three provenance fields were appended to both -- a misalignment
-    would silently mis-bind the str-adjacent slots without a TypeError."""
+    contract. The per-recording spike counts follow the matchable universe and
+    the three provenance fields close both -- a misalignment would silently
+    mis-bind the list- and str-adjacent slots without a TypeError."""
     import inspect
 
     from spyglass.spikesorting.v2.unit_matching import (

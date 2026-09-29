@@ -11,6 +11,8 @@ without a database:
   so ``(A, B)`` and ``(B, A)`` can never both be inserted into ``UnitMatch.Pair``.
 - :func:`input_set_hash` / :func:`chronological_input_order` content-address
   and order the frozen matching inputs of a selection.
+- :func:`count_recording_spikes` counts each parent unit's spikes inside each
+  constituent recording of its matching input.
 - :func:`derive_tracked_units` seeds a graph from the full curated-unit universe,
   enforces the strict node budget, and partitions the units into tracked units
   via a greedy maximal-clique cover (each unit in exactly one tracked unit; the
@@ -264,6 +266,48 @@ def frozen_order_errors(input_rows, recording_rows) -> list[str]:
             f"start times (chronological order {chronological})"
         )
     return errors
+
+
+def count_recording_spikes(unit_spike_trains: dict, spans: list) -> dict:
+    """Count each unit's spikes inside each constituent recording's span.
+
+    A matching input's parent unit (a unit of a concatenation sort) covers
+    every constituent recording and may fire in only some of them. Its
+    spikes are split by the recordings' frozen ``[start_sample,
+    end_sample)`` frame spans with
+    :func:`._concat_recording.split_spike_frames_by_spans`, which conserves
+    every spike: a spike outside all spans raises rather than going
+    uncounted, so the per-recording counts always sum to the unit's total.
+
+    Parameters
+    ----------
+    unit_spike_trains : dict[int, numpy.ndarray]
+        ``{unit_id: spike frames in the input sort's frame space}``.
+    spans : list of (int, int)
+        ``(start_sample, end_sample)`` of each constituent recording, in
+        ``recording_index`` order, contiguous from frame 0.
+
+    Returns
+    -------
+    dict[int, list[int]]
+        ``{unit_id: [n_spikes in recording 0, n_spikes in recording 1,
+        ...]}``.
+
+    Raises
+    ------
+    ConcatSplitError
+        If the spans are not contiguous from frame 0 or a spike falls
+        outside them.
+    """
+    from spyglass.spikesorting.v2._concat_recording import (
+        split_spike_frames_by_spans,
+    )
+
+    per_recording = split_spike_frames_by_spans(unit_spike_trains, spans)
+    return {
+        int(unit_id): [len(frames[unit_id]) for frames in per_recording]
+        for unit_id in unit_spike_trains
+    }
 
 
 def canonicalize_match_pairs(

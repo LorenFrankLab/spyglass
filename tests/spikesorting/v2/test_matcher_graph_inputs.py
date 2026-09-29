@@ -297,3 +297,55 @@ def test_frozen_order_errors_flags_start_time_and_numbering():
     (error,) = frozen_order_errors(input_rows, recording_rows)
     assert "input_index order [0, 1] is not chronological" in error
     assert "chronological order [1, 0]" in error
+
+
+def test_count_recording_spikes_splits_each_unit_by_recording_span():
+    """Hand-computed counts over a two-member concatenation's frame spans
+    (member 0 = frames [0, 10), member 1 = [10, 15)): a unit firing in both
+    members, one firing only in member 1, and one with no spikes. A frame
+    on a span's end belongs to the next span."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._matcher_graph import count_recording_spikes
+
+    trains = {
+        0: np.array([0, 5, 9, 10, 14]),
+        7: np.array([12, 13]),
+        3: np.array([], dtype=np.int64),
+    }
+    assert count_recording_spikes(trains, [(0, 10), (10, 15)]) == {
+        0: [3, 2],
+        7: [0, 2],
+        3: [0, 0],
+    }
+    # A single recording is one span; its count is the unit's total.
+    assert count_recording_spikes(trains, [(0, 15)]) == {
+        0: [5],
+        7: [2],
+        3: [0],
+    }
+
+
+@pytest.mark.parametrize(
+    "trains, spans, match",
+    [
+        ({0: [3, 15]}, [(0, 10), (10, 15)], "outside the concatenated"),
+        ({0: [-1, 3]}, [(0, 15)], "outside the concatenated"),
+        ({0: [3]}, [(0, 10), (11, 15)], "contiguous from frame 0"),
+        ({0: [3]}, [(1, 15)], "contiguous from frame 0"),
+        ({0: [3]}, [], "no recording spans"),
+    ],
+)
+def test_count_recording_spikes_refuses_unconserved_spans(trains, spans, match):
+    """A spike outside every span, or spans that do not tile the sort's
+    frames from 0, raise instead of leaving spikes uncounted."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._matcher_graph import count_recording_spikes
+    from spyglass.spikesorting.v2.exceptions import ConcatSplitError
+
+    with pytest.raises(ConcatSplitError, match=match):
+        count_recording_spikes(
+            {unit: np.asarray(frames) for unit, frames in trains.items()},
+            spans,
+        )

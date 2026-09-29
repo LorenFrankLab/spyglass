@@ -2070,3 +2070,295 @@ def test_concat_units_are_not_duplicated_in_match_graph(
             & {"matcher_params_name": "parent_graph_pairer_params"}
         ).super_delete(warn=False)
         restore_matcher_registry(saved)
+
+
+# ---- tracking matched parent units back to their original recordings -------
+
+#: Sessions of the day-1 cross-session concatenation (``a`` then ``b``).
+_CROSS_NWB_GROUP = "unitmatch_cross_nwb_day1"
+
+
+def _planted_member_frames(spans) -> dict:
+    """Planted frames per unit and span, in the sort's frame space.
+
+    Unit 0 fires in every span, unit 1 only in the first span and unit 2
+    only in the last span; with one span (a single recording) all three fire
+    in it. Each spike stays at least 700 frames inside its span.
+
+    Returns
+    -------
+    dict
+        ``{unit_id: [frames in span 0, frames in span 1, ...]}``.
+    """
+    empty = np.array([], dtype=np.int64)
+    last = len(spans) - 1
+    planted = {0: [], 1: [], 2: []}
+    for position, (start, end) in enumerate(spans):
+        start, end = int(start), int(end)
+        planted[0].append(np.arange(start + 700, end - 700, 3000))
+        planted[1].append(
+            np.arange(start + 1100, end - 700, 2500) if position == 0 else empty
+        )
+        planted[2].append(
+            np.arange(start + 1500, end - 700, 3500)
+            if position == last
+            else empty
+        )
+    return {
+        unit: [frames.astype(np.int64) for frames in per_span]
+        for unit, per_span in planted.items()
+    }
+
+
+def _plant_by_member(
+    sorter,
+    sorter_params,
+    recording,
+    sorting_id,
+    *,
+    job_kwargs=None,
+    execution_params=None,
+    statistics_spans=None,
+):
+    """Plant ``_planted_member_frames`` over the sort's statistics spans."""
+    import spikeinterface as si
+
+    del sorter, sorter_params, sorting_id, job_kwargs, execution_params
+    planted = _planted_member_frames(statistics_spans)
+    samples = np.concatenate(
+        [np.concatenate(per_span) for per_span in planted.values()]
+    )
+    labels = np.concatenate(
+        [
+            np.full(sum(len(f) for f in per_span), unit, dtype=np.int32)
+            for unit, per_span in planted.items()
+        ]
+    )
+    order = np.argsort(samples, kind="stable")
+    return si.NumpySorting.from_samples_and_labels(
+        samples_list=[samples[order]],
+        labels_list=[labels[order]],
+        sampling_frequency=recording.get_sampling_frequency(),
+    )
+
+
+@pytest.fixture(scope="module")
+def member_time_sorts(daily_concat_match_inputs):
+    """Planted three-unit sorts whose units fire in chosen members.
+
+    ``day1``: a sort of the day-1 concatenation (two intervals of session
+    ``a``, a gap between them, unequal lengths). ``cross_nwb``: a sort of a
+    new same-day concatenation of ``a``'s and ``b``'s first intervals (two
+    sessions). ``c``: a sort of ``c``'s first interval (day 2, one
+    recording). Units are ``_planted_member_frames``; each sort is
+    root-curated.
+
+    Yields
+    ------
+    dict
+        ``curations`` and ``sort_keys`` (name -> key) and ``concat_keys``
+        (``day1``, ``cross_nwb`` -> ``{"concat_recording_id"}``).
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from tests.spikesorting.v2._concat_helpers import select_unmasked_concat
+    from tests.spikesorting.v2._motion_db_helpers import drop_pipeline_sorts
+
+    fx = daily_concat_match_inputs
+    owner = (
+        ConcatenatedRecordingSelection & fx["concat_keys"]["concat_day1"]
+    ).fetch1("session_group_owner")
+    params_name = "unitmatch_member_times_ms5"
+    default_ms5 = (
+        SorterParameters
+        & {
+            "sorter": "mountainsort5",
+            "sorter_params_name": "franklab_30khz_ms5_2026_06",
+        }
+    ).fetch1("params")
+    SorterParameters.insert1(
+        {
+            "sorter": "mountainsort5",
+            "sorter_params_name": params_name,
+            "params": dict(default_ms5),
+        },
+        skip_duplicates=True,
+        allow_duplicate_params=True,
+    )
+    members = [
+        {
+            field: (RecordingSelection & fx["recording_keys"][name]).fetch1(
+                field
+            )
+            for field in _MEMBER_FIELDS
+        }
+        for name in ("a_first", "b_first")
+    ]
+    SessionGroup.create_group(owner, _CROSS_NWB_GROUP, members)
+    cross_key = select_unmasked_concat(
+        {
+            "session_group_owner": owner,
+            "session_group_name": _CROSS_NWB_GROUP,
+            "preprocessing_params_name": "default",
+        }
+    )
+    ConcatenatedRecording.populate(cross_key, reserve_jobs=False)
+    concat_keys = {
+        "day1": fx["concat_keys"]["concat_day1"],
+        "cross_nwb": cross_key,
+    }
+    sources = {
+        "day1": concat_keys["day1"],
+        "cross_nwb": concat_keys["cross_nwb"],
+        "c": fx["recording_keys"]["c_first"],
+    }
+    sort_keys = {
+        name: SortingSelection.insert_selection(
+            {
+                **source,
+                "sorter": "mountainsort5",
+                "sorter_params_name": params_name,
+            }
+        )
+        for name, source in sources.items()
+    }
+    curations = {}
+    patch = pytest.MonkeyPatch()
+    try:
+        patch.setattr(Sorting, "_run_sorter", staticmethod(_plant_by_member))
+        for name, sort_key in sort_keys.items():
+            if not (Sorting & sort_key):
+                Sorting.populate(sort_key, reserve_jobs=False)
+            curation = CurationV2.insert_curation(sorting_key=sort_key)
+            curations[name] = {
+                "sorting_id": curation["sorting_id"],
+                "curation_id": curation["curation_id"],
+            }
+    finally:
+        patch.undo()
+
+    yield {
+        "curations": curations,
+        "sort_keys": sort_keys,
+        "concat_keys": concat_keys,
+    }
+
+    drop_pipeline_sorts([key["sorting_id"] for key in sort_keys.values()])
+    (SorterParameters & {"sorter_params_name": params_name}).super_delete(
+        warn=False
+    )
+
+
+def _member_spans(concat_key) -> list[tuple[int, int]]:
+    """Each member's frame span in a concatenation, from ``MemberBoundary``."""
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    ends = (ConcatenatedRecording.MemberBoundary & concat_key).fetch(
+        "end_sample", order_by="member_index"
+    )
+    starts = [0, *[int(end) for end in ends[:-1]]]
+    return [(start, int(end)) for start, end in zip(starts, ends)]
+
+
+def test_tracked_units_map_to_original_member_times_and_regions(
+    daily_concat_match_inputs, member_time_sorts, monkeypatch
+):
+    """Tracked units over concatenation inputs resolve to each original
+    recording: per-recording spike counts, detection-based session counts,
+    regions from each recording's own session and spike times on each
+    recording's own clock, all against the planted spikes.
+
+    Two runs pair the day-2 single recording ``c`` (input 1) with a day-1
+    concatenation (input 0), unit k with unit k: ``day1`` (two intervals of
+    one session) and ``cross_nwb`` (sessions ``a`` and ``b``). Planted unit 0
+    fires in every member, unit 1 only in member 0 and unit 2 only in
+    member 1.
+    """
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    fx, mx = daily_concat_match_inputs, member_time_sorts
+    cur = mx["curations"]
+    c_recording = Recording().get_recording(fx["recording_keys"]["c_first"])
+    spans = {
+        "day1": _member_spans(mx["concat_keys"]["day1"]),
+        "cross_nwb": _member_spans(mx["concat_keys"]["cross_nwb"]),
+        "c": [(0, int(c_recording.get_num_samples()))],
+    }
+    # The planter placed units by the sort's statistics spans; with no
+    # artifact or gap inside a member they are exactly the member spans.
+    for name, expected_spans in spans.items():
+        assert [
+            (int(start), int(end))
+            for start, end in Sorting().get_statistics_spans(
+                mx["sort_keys"][name]
+            )
+        ] == expected_spans
+    assert [len(s) for s in spans.values()] == [2, 2, 1]
+    planted = {name: _planted_member_frames(s) for name, s in spans.items()}
+    params_name = "member_times_pairer_params"
+    saved = install_fixture_pairer(
+        monkeypatch,
+        matcher_name="member_times_pairer",
+        matcher_params_name=params_name,
+        pairs=[[0, 0], [1, 1], [2, 2]],
+    )
+    runs = {}
+    try:
+        for name in ("day1", "cross_nwb"):
+            pk = UnitMatchSelection.insert_inputs(
+                [cur["c"], cur[name]], params_name
+            )
+            runs[name] = pk
+            assert [str(row["sorting_id"]) for row in _input_rows(pk)] == [
+                str(cur[name]["sorting_id"]),
+                str(cur["c"]["sorting_id"]),
+            ]
+            UnitMatch.populate(pk, reserve_jobs=False)
+
+            # Frozen per-recording counts equal the planted counts: zero
+            # where a unit was not planted, and they sum to the unit total.
+            expected_counts = {
+                (0, recording_index, unit): len(frames)
+                for unit, per_span in planted[name].items()
+                for recording_index, frames in enumerate(per_span)
+            } | {
+                (1, 0, unit): len(per_span[0])
+                for unit, per_span in planted["c"].items()
+            }
+            assert {
+                (
+                    int(row["input_index"]),
+                    int(row["recording_index"]),
+                    int(row["unit_id"]),
+                ): int(row["n_spikes"])
+                for row in (UnitMatch.RecordingSpikeCount & pk).fetch(
+                    as_dict=True
+                )
+            } == expected_counts
+            assert expected_counts[(0, 1, 1)] == 0
+            assert expected_counts[(0, 0, 2)] == 0
+            assert min(n for n in expected_counts.values() if n) >= 3
+    finally:
+        for pk in runs.values():
+            _drop(pk)
+        (MatcherParameters & {"matcher_params_name": params_name}).super_delete(
+            warn=False
+        )
+        restore_matcher_registry(saved)

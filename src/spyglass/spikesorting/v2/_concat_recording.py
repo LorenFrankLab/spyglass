@@ -344,6 +344,58 @@ def split_unit_spike_trains(
     return per_member
 
 
+def split_spike_frames_by_spans(
+    unit_spike_trains: dict, spans: list
+) -> list[dict]:
+    """Slice a sort's spike frames by its constituent recordings' frame spans.
+
+    A sort of one recording has one span, ``[0, n_samples)``; a sort of a
+    concatenation has one span per member, each starting where the previous
+    one ended. The spans must be contiguous from frame 0, so they are exactly
+    the member boundaries :func:`split_unit_spike_trains` splits by, and its
+    per-spike conservation applies: every spike lands in exactly one span, or
+    this raises.
+
+    Parameters
+    ----------
+    unit_spike_trains : dict[int, numpy.ndarray]
+        ``{unit_id: spike frames in the sort's frame space}``.
+    spans : list of (int, int)
+        Half-open ``[start_sample, end_sample)`` frame span of each
+        constituent recording, in recording order.
+
+    Returns
+    -------
+    list[dict[int, numpy.ndarray]]
+        One ``{unit_id: local-frame spike indices}`` dict per span (frames
+        relative to the span's start), every unit id in every span.
+
+    Raises
+    ------
+    ConcatSplitError
+        If the spans are empty or not contiguous from frame 0, or a spike
+        falls outside them (see :func:`split_unit_spike_trains`).
+    """
+    from spyglass.spikesorting.v2.exceptions import ConcatSplitError
+
+    if not spans:
+        raise ConcatSplitError(
+            "split_spike_frames_by_spans: no recording spans to split by."
+        )
+    expected_start = 0
+    for index, (start, end) in enumerate(spans):
+        if int(start) != expected_start:
+            raise ConcatSplitError(
+                "split_spike_frames_by_spans: recording spans must be "
+                f"contiguous from frame 0, but span {index} starts at "
+                f"{int(start)} instead of {expected_start}."
+            )
+        expected_start = int(end)
+    return split_unit_spike_trains(
+        unit_spike_trains, [int(end) for _start, end in spans]
+    )
+
+
 def electrode_signature_from_rows(
     electrode_rows: list[dict], region_by_key: dict
 ) -> tuple:
