@@ -582,7 +582,16 @@ _ARTIFACT_ZSCORE_THRESHOLD = 2.2
         # a single outlier can never flag anything (see _ARTIFACT_ZSCORE
         # _THRESHOLD), which is why this branch used to flag nothing.
         (None, _ARTIFACT_ZSCORE_THRESHOLD, None, 0.125),
-        (50.0, 6.0, None, 0.5),  # OR-combined branch
+        # OR-combined branch: proportion 0.125 -> n_required=1, and a
+        # z-score threshold below sqrt(n_channels - 1) so the z branch can
+        # fire at all. The 75_000:75_050 single-channel burst (45 µV, below
+        # the 50 µV amplitude threshold) trips z but not amplitude, so every
+        # one of its frames is flagged here and none is flagged by the
+        # amplitude-only branch at the same proportion; an implementation
+        # that ignored z whenever amplitude is set would drop them. (At
+        # n_required=1 the z branch also flags baseline-noise frames whose
+        # single most deviant channel crosses the threshold.)
+        (50.0, _ARTIFACT_ZSCORE_THRESHOLD, None, 0.125),
         (50.0, None, _ARTIFACT_CHANNEL_OFFSETS_UV, 0.5),  # amplitude+offsets
         # amplitude + gain: proportion 0.125 -> n_required=1, so channel 3's
         # own correctness at the 75_000:75_050 burst (45 µV, below the 50
@@ -609,7 +618,9 @@ def test_chunked_artifact_matches_in_memory_reference(
     z-score depends solely on that frame's columns, so chunk boundaries
     (which split the time axis) cannot change which frames are flagged --
     this test pins that property across the amplitude-only, z-score-only and
-    OR-combined branches, plus a case with heterogeneous non-zero channel
+    OR-combined branches (the OR case flags frames that each threshold
+    alone misses, so it fails if either threshold is ignored when both are
+    set), plus a case with heterogeneous non-zero channel
     offsets and a case that discriminates gain (production reads
     ``return_in_uV=True``, i.e. gain AND offset; see
     ``_artifact_compute.py:121-130`` and
