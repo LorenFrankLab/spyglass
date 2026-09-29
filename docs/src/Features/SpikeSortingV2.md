@@ -211,14 +211,18 @@ coexist under one merge surface.
 - **`MatcherParameters`** -- registry-validated cross-session matcher
     configuration. `insert1` rejects an unregistered `matcher` name and
     Pydantic-validates `params` against that matcher's schema.
-- **`UnitMatchSelection` / `UnitMatch`** -- pin one curation per `SessionGroup`
-    member, then match units across sessions via the chosen matcher backend. The
-    `Pair` part records each cross-session match (FK-validated against the
-    pinned `CurationV2.Unit`).
-- **`TrackedUnit`** -- biological-unit identities across sessions: a strict
-    partition of the curated units into groups via a greedy maximal-clique cover
-    of the match graph (one identity per unit). `get_unit_brain_regions`
-    resolves each tracked unit's per-session brain regions.
+- **`UnitMatchSelection` / `UnitMatch`** -- pin an explicit, ordered set of
+    **matching inputs** -- each one an independently curated sort, of a single
+    recording or of a same-day concatenation -- then match units across them
+    via the chosen matcher backend. The `Pair` part records each cross-session
+    match (FK-validated against the pinned `CurationV2.Unit`). See
+    [Cross-session unit tracking](#cross-session-unit-tracking).
+- **`TrackedUnit`** -- biological-unit identities across matching inputs: a
+    strict partition of the curated units into groups via a greedy
+    maximal-clique cover of the match graph (one identity per unit).
+    `get_unit_brain_regions` and `get_member_spike_times` resolve each tracked
+    unit's member units back to their original, per-recording regions and
+    spike times.
 
 ### Pipeline orchestrator
 
@@ -2064,13 +2068,56 @@ Key behaviors and caveats:
 
 For sessions recorded **days or weeks apart**, the recommended workflow is
 *sort-then-match*: sort and curate each session independently, then match units
-across sessions to recover the same biological unit over time. This is the
-cross-day complement to same-day concatenation — both reuse `SessionGroup`, but
-matching pins one curation **per member** and never concatenates the raw data.
+across sessions to recover the same biological unit over time. Matching never
+concatenates the raw data -- it pins one already-committed curation per
+**matching input** and reads only the traces that sort's sorter read.
 
-**Chronic electrode-space contract.** Matched members should share one physical
+A matching input is one independently curated sort, of either shape:
+
+- a **single-recording sort** -- one session's `CurationV2` row, or
+- a **same-day concatenation sort** -- the synthetic parent curation of a
+    `SessionGroup`-concatenated, same-day sort (see
+    [Chronic same-day recordings](#chronic-same-day-recordings)).
+
+Sort and curate each day independently first (a same-day concatenation when a
+day has several blocks, a single-recording sort otherwise); only then match
+across days. There is exactly **one matching input per curated sort**, whatever
+its internal shape -- a two-block daily concatenation contributes one input,
+not two.
+
+**Overlap restrictions**, enforced by `UnitMatchSelection.insert_inputs` (and
+re-checked by `UnitMatch.make`, so a direct-insert bypass cannot slip past
+them):
+
+- **No two inputs may share a recording session** (`nwb_file_name`):
+    `SameSessionMatchError` rejects two single-recording sorts of one session,
+    a same-day concatenation matched together with a sort of one of its own
+    members, and two concatenations sharing a constituent session.
+- **A concatenation input must lie within one day.** A same-day concatenation
+    that (through a data error) spans more than one calendar day is rejected
+    as a matching input.
+- **Matching within one session is out of scope.** Because every input's
+    sessions must be disjoint, there is no way to pass all-of-one-session as
+    two matching inputs; that case is exactly the shared-session rejection
+    above.
+
+**Chronological order and identity.** Inputs are numbered `input_index`
+`0..n-1` by the earliest frozen `session_start_time` among their constituent
+recordings, regardless of the order they were named or pinned in -- the same
+inputs, listed in any order, resolve to the same selection. Each input pins an
+exact `(sorting_id, curation_id)` and its `curation_uuid` generation (no
+implicit "latest curation"), together with its constituent recordings' identity
+and frame spans, frozen at selection time in `UnitMatchSelection.Input` /
+`UnitMatchSelection.InputRecording`. A `SessionGroup` recorded via
+`insert_selection` is provenance only, not identity: it is not a foreign key,
+so deleting or renaming the group never deletes or changes the match run, and
+matching a set of inputs directly (below) needs no group at all. **A run of
+just one input is valid**: it writes the frozen matchable-unit universe and an
+empty `Pair` table, and never calls the matcher backend.
+
+**Chronic electrode-space contract.** Matched inputs should share one physical
 electrode space. UnitMatch **hard-rejects** a channel-**geometry** mismatch
-across members (the lab-agnostic check), and **warns** when members differ in
+across inputs (the lab-agnostic check), and **warns** when inputs differ in
 electrode *identity* — each sort group's
 `(electrode_group_name, electrode_id, brain_region)` signature — since two
 distinct probes can share a layout. The identity divergence is a *warning, not a
@@ -2109,8 +2156,13 @@ implant). Two levels of matcher validation exist, with different CI status:
     `SPYGLASS_V2_REQUIRE_FIXTURES` enforces it.
 
 The recommended path is the **plan-then-run** orchestrator — pin curations by a
-named curation strategy, review the plan, then run (each session already sorted
-\+ curated, grouped as a `SessionGroup` as in step 1 below):
+named curation strategy, review the plan, then run. Two planning entry points
+share one `run_v2_unit_match`: a `SessionGroup` of members (below), or a plain
+list of already-curated `sorting_id`s with no group at all (next
+subsection) — pick whichever already describes how you organized the sorts.
+
+Group-based planning (each session already sorted \+ curated, grouped as a
+`SessionGroup` as in step 1 below):
 
 ```python
 from spyglass.spikesorting.v2.pipeline import (
@@ -2126,7 +2178,60 @@ plan.as_dataframe()
 summary = run_v2_unit_match(plan)  # runs UnitMatch + TrackedUnit
 ```
 
-The orchestrator wraps exactly the low-level table calls below:
+#### Matching named sorts directly (e.g. daily same-day concatenations)
+
+`plan_v2_unit_match_from_sorts` is the group-less counterpart: name the
+already-curated sorts to match, in any order, with no `SessionGroup` step at
+all. Each named sort — a single-recording sort or a same-day concatenation
+sort — becomes one matching input. This is the direct path for matching two
+(or more) days that were each concatenated and sorted independently:
+
+```python
+from spyglass.spikesorting.v2.pipeline import (
+    plan_v2_unit_match_from_sorts,
+    run_v2_unit_match,
+)
+
+# day1_sorting_id / day2_sorting_id are each a same-day concatenation's
+# sorting_id (SortingSelection.ConcatenatedRecordingSource) or a
+# single-recording sorting_id -- whichever each day actually is. Named once
+# each, in any order.
+plan = plan_v2_unit_match_from_sorts(
+    [day1_sorting_id, day2_sorting_id],
+    curation_strategy="final_curated",
+)
+plan.as_dataframe()          # one row per matching input; review before running
+summary = run_v2_unit_match(plan)  # runs UnitMatch + TrackedUnit; inputs are
+                                    # reordered chronologically internally
+```
+
+`curation_strategy` takes the same values as the group-based planner
+(`final_curated` / `auto_curated` / `root` / `manual`, with
+`manual_curation_choices={sorting_id: curation_id}` for `manual`). The plan
+does not itself check that the named sorts can be matched together (no shared
+session, one day per concatenation, shared electrode geometry) — that
+validation runs, as it does for the group form, inside
+`UnitMatchSelection.insert_inputs` when `run_v2_unit_match(plan)` executes it.
+A plan that could not pin exactly one curation for every named sort has
+`plan.ok is False` and `run_v2_unit_match` raises listing `plan.errors` rather
+than running a partial match.
+
+The receipt from either planning path carries `summary["inputs"]`: one
+`UnitMatchInputSummary` per matching input, in chronological order, with its
+identity (`sorting_id`, `curation_id`, `curation_uuid`), `source_kind` /
+`source_id`, constituent `nwb_file_names` / `interval_list_names`, and whether
+its traces were motion-corrected (`motion_corrected_recording_id`,
+`waveform_traces`) — read from the frozen selection, without opening the run's
+NWB. `describe_run(summary)` renders one `input_<i>` row per input.
+`UnitMatch.get_input_provenance(key, from_nwb=False)` returns the same
+provenance (database or, with `from_nwb=True`, the run's own NWB) as two
+DataFrames — one row per matching input and one row per constituent
+recording — for scripted inspection outside the receipt.
+
+The orchestrator wraps exactly the low-level table calls below (the
+`SessionGroup` form; the direct form calls
+`UnitMatchSelection.insert_inputs(curations, matcher_params_name)` instead of
+`insert_selection`, with no group argument):
 
 ```python
 from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -2179,12 +2284,15 @@ regions = TrackedUnit().get_unit_brain_regions(
 Key behaviors and caveats:
 
 - **Explicit, reproducible curations.** `UnitMatchSelection` pins one
-    `(sorting_id, curation_id)` per member via its `MemberCuration` part; there
-    is no implicit "latest curation" lookup, so a match run is reproducible even
-    if a source session gains new curations later. `insert_selection` verifies
-    each pinned curation actually belongs to its member, and `UnitMatch.make()`
-    re-checks that provenance (raising `UnitMatchSelectionIntegrityError`) so a
-    direct-insert bypass cannot silently match the wrong units.
+    `(sorting_id, curation_id)` and its `curation_uuid` generation per matching
+    input via its `Input` part (`InputRecording` freezes each input's
+    constituent recordings); there is no implicit "latest curation" lookup, so
+    a match run is reproducible even if a source sort gains new curations
+    later. `insert_selection` verifies each pinned curation actually belongs to
+    its `SessionGroup` member, and `UnitMatch.make()` re-checks every input's
+    provenance (raising `UnitMatchSelectionIntegrityError`) so a direct-insert
+    bypass, a recreated curation, or changed source content cannot silently
+    match the wrong units.
 - **The matcher never sees Spyglass internals.** `UnitMatch.make()` extracts a
     waveform bundle per matching input from the traces its sorter read (the
     sort's effective traces, silenced by its artifact mask and motion-corrected
@@ -2203,13 +2311,18 @@ Key behaviors and caveats:
     match threshold, prior and score distributions from the units present in
     each run, so with few units per session (about 20 or fewer) results can
     change noticeably from run to run and occasionally include bursts of
-    false matches, including a unit matched to two partners. Match only
+    false matches, including a unit matched to two partners. In development
+    pilots for the daily-concatenation benchmark below, UnitMatchPy 3.2.7
+    raised an `IndexError` (`get_threshold`, via `overlord.py`) at about 12
+    units in one session -- keep well above that floor. Match only
     well-isolated curated units ([UnitMatch issue
     #146](https://github.com/EnnyvanBeest/UnitMatch/issues/146)) and treat
     results from small groups with caution ([UnitMatch issue
-    #87](https://github.com/EnnyvanBeest/UnitMatch/issues/87)).
+    #87](https://github.com/EnnyvanBeest/UnitMatch/issues/87)); see also
+    [upstream issue #170](https://github.com/EnnyvanBeest/UnitMatch/issues/170)
+    on the per-call threshold refit itself.
 - **Tracked units are a strict partition.** `TrackedUnit` groups units that
-    match *every* other member of the group, derived as a greedy maximal-clique
+    match *every* other input in the group, derived as a greedy maximal-clique
     cover of the pair graph (largest clique first, ties broken by highest median
     edge probability) so each curated unit belongs to exactly one tracked unit —
     overlapping cliques never duplicate a unit across identities. If A↔B and B↔C
@@ -2218,11 +2331,109 @@ Key behaviors and caveats:
     `median_match_probability` NULL). The graph size is bounded by
     `max_strict_nodes` (default 2000); a larger universe raises
     `TrackedUnitBudgetExceededError`.
-- **Per-session brain regions.** `TrackedUnit.get_unit_brain_regions` resolves
-    each member unit's `Electrode -> BrainRegion` and labels it by session — the
-    per-session resolver the concat-sort guard points to.
-- **Degenerate single-session.** A one-member group produces zero pairs and no
-    matcher call.
+- **Counting semantics: `n_matching_inputs` vs. `n_sessions_detected`.**
+    `TrackedUnit.n_matching_inputs` is the number of distinct matching inputs
+    (curated sorts) among the tracked unit's member units -- 2 for a two-day
+    match, whether or not each day was itself a concatenation.
+    `TrackedUnit.n_sessions_detected` is the number of distinct **original
+    recording sessions** (`nwb_file_name`) in which a member unit actually has
+    spikes, from the frozen `UnitMatch.RecordingSpikeCount` rows: a member unit
+    with an empty spike train in one of its input's recordings does not count
+    that recording as detected, and two disjoint intervals of one session
+    (e.g. a concatenation's two blocks of the same nwb) count as one session,
+    not two. For a single-recording input whose unit has spikes, the two
+    counts agree; a same-day concatenation input can make them differ.
+- **Per-recording spike times and brain regions.**
+    `TrackedUnit.get_unit_brain_regions` resolves each member unit's region
+    **per constituent recording** of its input — the member unit's electrode
+    within that recording's own sort group, `Electrode -> BrainRegion` — never
+    copied from a concatenation's anchor member, and returns `n_spikes` /
+    `detected` alongside the region so a silent (undetected) recording is
+    visible. `TrackedUnit.get_member_spike_times` returns each member unit's
+    spike times **on each original recording's own clock**: for a
+    single-recording input these are the curated spike times as stored; for a
+    concatenation input the parent unit's spikes on the synthetic
+    concatenation timeline are split by the frozen `InputRecording` frame
+    spans and mapped back onto each member `Recording`'s own timestamps (the
+    rule `ConcatMemberCuration` applies, without needing its rows) — so
+    cross-session analysis reads real acquisition-clock times and per-session
+    regions, never the synthetic concatenation frame or a copied anchor
+    region.
+- **A run of one matching input** writes the frozen matchable-unit universe
+    and an empty `UnitMatch.Pair` table; the matcher backend is never called.
+
+#### Matching corrected daily sorts assumes the days already line up
+
+**Motion correction registers each day to that day's own mean position, not
+across days.** There is no cross-day registration step: if the corrected days
+are offset from each other by more than a few micrometers, matching degrades
+sharply. In synthetic pilots on a 32-contact single-column polymer layout (26
+um pitch), a rigid position offset of 3 / 6 / 12 um between two otherwise
+identical, motion-corrected days recovered 22 / 12 / 1 of 24 planted neurons
+(vs. 22-23/24 with no offset). Before matching corrected daily sorts, confirm
+by other means (e.g. a stable stereotaxic reference, or comparing the two
+days' displacement estimates) that the days are already registered to within a
+few micrometers -- correcting each day's motion independently does not do
+this for you.
+
+#### Scientific evidence: matching independently sorted daily concatenations
+
+Two complementary checks, both **synthetic only** -- no real lab multi-day
+recording was evaluated:
+
+- **A preregistered, held-out-gated benchmark**
+    (`tests/spikesorting/v2/scripts/unitmatch_daily_concat_benchmark.py`, run
+    through `tests/spikesorting/v2/test_unitmatch_daily_concat.py`) drives the
+    same production code path (`extract_unitmatch_bundle`,
+    `UnitMatchBackend.match`, `count_recording_spikes`,
+    `derive_tracked_units`) over two scenarios of simulated same-day
+    concatenations with planted ground truth: `two_day` (24 units/day, 28
+    neurons: shared, partial-member, and per-day distractor roles) and
+    `three_day` (21-25 units/day, 31 neurons: stable, gradually drifting,
+    day-1/day-3 reappearing, and conflicting-identity roles), each on a
+    16-channel, 2-column, 20 um-pitch synthetic probe. Every gate's threshold
+    was derived from 40 development seeds (0-39) *before* the held-out
+    evaluation, then checked exactly once against 40 held-out seeds (100-139).
+    All gates **passed**:
+
+    | scenario | gated metric | held-out result |
+    | --- | --- | --- |
+    | two_day | `pair_tracked:all` >= 0.78 | 0.8350 (668/800) |
+    | two_day | `pair_tracked:partial` >= 0.74 | 0.8063 (129/160) |
+    | two_day | `pair_precision` >= 0.74 | 0.8561 (672/785) |
+    | two_day | `incorrect_identity` <= 0.06 | 0.0015 (1/669) |
+    | two_day | `distractor_emitted` <= 0.23 | 0.0938 (30/320) |
+    | two_day | `partial_bundled` >= 1.0 | 1.0000 (320/320) |
+    | three_day | `pair_tracked:stable` >= 0.73 | 0.8350 (1002/1200) |
+    | three_day | `pair_tracked:reappear` (day 1 -- day 3) >= 0.50 | 0.7500 (120/160) |
+    | three_day | `pair_precision` >= 0.65 | 0.7552 (1641/2173) |
+    | three_day | `incorrect_identity` <= 0.09 | 0.0301 (21/698) |
+    | three_day | `distractor_emitted` <= 0.23 | 0.1500 (54/360) |
+    | both | structural invariants (`same_input_group`, `recording_count_mismatch`, `sessions_detected_mismatch`, `matching_inputs_mismatch`) | 0 violations, both scenarios |
+
+    Two `three_day` classes fall below the gating rule's 0.50 cut-off and are
+    reported as **ungated diagnostics**, not pass/fail: `pair_tracked:gradual`
+    (a per-neuron amplitude loss of 15% and a 4 um shift per day; held-out
+    147/480 = 0.306) and `pair_tracked:conflict` (a mover neuron placed as
+    close to a fixed partner as to its own day-1 template by construction;
+    held-out 234/480 = 0.487). Both are out of reach at these magnitudes by
+    design, not a regression to chase.
+- **An end-to-end workflow test**
+    (`test_daily_concat_workflow_matches_planted_neurons_end_to_end` in
+    `tests/spikesorting/v2/test_unitmatch_concat.py`) runs 24 planted neurons
+    through the complete pipeline -- per-day motion estimation and
+    application, independent per-day concatenation and sorting, curation,
+    `plan_v2_unit_match_from_sorts`, `run_v2_unit_match`, and original-member
+    readback (`get_member_spike_times`, `get_unit_brain_regions`) -- on a
+    32-contact single-column polymer layout (26 um pitch) with a planted rigid
+    drift on day 1 and a static day 2, chosen so the two days' *corrected*
+    positions line up (see the limitation above). With per-day motion
+    correction applied, it recovered **19 of 22** cross-day neurons (floor 17,
+    from the benchmark's held-out two-day recall gate applied to this
+    scenario's neuron count); the same scenario **without** motion correction
+    recovered **13 of 22**. This probe layout differs from the benchmark's
+    (single column vs. two columns, 26 vs. 20 um pitch), so the 0.78 floor is
+    carried over across layouts, not re-derived for this one.
 
 ### Downstream consumers
 
@@ -2339,7 +2550,7 @@ DB-derivable; only the producing params are written.
 | Sorting                     | `spyglass_v2_sorting_provenance` + per-unit Units columns                | `peak_amplitude_uv` / `peak_electrode_id` / `n_spikes` / `brain_region` columns (matching `Sorting.Unit`), and a header with the recording/concat id, sorter + params, `artifact_detection_id`, display recipe, effective seed, SI + sorter versions              |
 | Curated units               | `spyglass_v2_curation_provenance` + `spyglass_v2_curation_merge_lineage` | curation header (sorting/curation id, immutable `curation_uuid`, parent, source, `merges_applied`, description) and the kept→contributor merge lineage mirroring `CurationV2.MergeGroup` (raw contributors; proposed-vs-applied is the header's `merges_applied`) |
 | Concat member curated units | `spyglass_v2_curation_provenance` + `spyglass_v2_curation_merge_lineage` | the chosen concat curation provenance plus `member_index` / member `nwb_file_name`; wall-clock times and local sample frames, with curated unit IDs preserved across members                                                                                      |
-| UnitMatch                   | `spyglass_v2_unitmatch_provenance` + `spyglass_v2_unitmatch_members`     | run/group/matcher header (matcher backend + versions) and the per-member `(sorting_id, curation_id, session_start_time)` map                                                                                                                                      |
+| UnitMatch                   | `spyglass_v2_unitmatch_provenance` + `spyglass_v2_unitmatch_inputs` + `spyglass_v2_unitmatch_input_recordings` | run/matcher header (matcher backend + versions) and the per-matching-input `(sorting_id, curation_id, curation_uuid, source_kind, source_id, input_start_time, waveform_traces, motion_corrected_recording_id)` table plus the per-constituent-recording `(nwb_file_name, interval_list_name, recording_id, session_start_time, start_sample, end_sample)` table |
 | CurationEvaluation          | `spyglass_v2_curation_evaluation_provenance`                             | metric set + recipe names, auto-merge preset/rules, evaluated curation, the `source_analyzer_hashes` manifest, SI version, upstream recording/concat `content_hash`                                                                                               |
 | ConcatenatedRecording       | `spyglass_v2_concat_provenance` + `spyglass_v2_concat_members`           | member artifact detection IDs, excluded frame ranges, valid observation intervals, and the ordered member frame boundaries used for session mapping (no motion: concatenation itself never corrects motion)                                                        |
 | MotionCorrectedRecording    | `spyglass_v2_motion_correction_provenance` + `spyglass_v2_motion_continuity_spans` (+ `spyglass_v2_concat_members` for a concat source) | estimation + interpolation recipe names, the resolved interpolation config, SpikeInterface version, the estimate and corrected-recording ids, the application algorithm version, the source (kind, key, `content_hash`), any `remove_channels`-dropped channel ids, the statistics spans, each continuity span's frames with its first/last source timestamp and its start on the estimation clock, and for a concat source the concatenation's member back-map |
