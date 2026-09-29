@@ -93,6 +93,26 @@ def _member_electrode_signature(member: dict) -> tuple:
     return electrode_signature_from_rows(electrode_rows, region_by_key)
 
 
+def distinct_recording_dates(session_start_times) -> list:
+    """Distinct calendar dates of session start times, ascending.
+
+    The multi-day criterion: a set of recordings spans more than one day when
+    this returns two or more dates. ``SessionGroup.create_group`` (without
+    ``allow_multi_day``), ``SessionGroup.is_multi_day`` and the UnitMatch
+    same-day check on a concatenation input all apply it.
+
+    Parameters
+    ----------
+    session_start_times : iterable of datetime.datetime
+        ``Session.session_start_time`` values.
+
+    Returns
+    -------
+    list of datetime.date
+    """
+    return sorted({start_time.date() for start_time in session_start_times})
+
+
 def assert_members_share_electrode_space(members: list[dict]) -> None:
     """Reject a SessionGroup whose members map to different electrode spaces.
 
@@ -249,7 +269,7 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
         required_keys = ("nwb_file_name", "sort_group_id", "interval_list_name")
         rows: list[dict] = []
-        dates: list = []
+        start_times: list = []
         for i, member in enumerate(members):
             missing = [k for k in required_keys if k not in member]
             if missing:
@@ -271,8 +291,7 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                     f"nwb_file_name {member['nwb_file_name']!r}, which is not an "
                     "ingested Session. Ingest it first (e.g. insert_sessions)."
                 )
-            derived_date = session_match.fetch1("session_start_time").date()
-            dates.append(derived_date)
+            start_times.append(session_match.fetch1("session_start_time"))
             rows.append(
                 {
                     **member,
@@ -308,7 +327,7 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 "concatenating the same recording twice is not supported."
             )
 
-        unique_dates = sorted(set(dates))
+        unique_dates = distinct_recording_dates(start_times)
         if len(unique_dates) > 1 and not allow_multi_day:
             raise SessionGroupDateError(
                 "SessionGroup.create_group: members span "
@@ -372,8 +391,7 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         # One batched Session query for all member sessions, not one fetch1
         # per member.
         start_times = (Session & nwb_file_names).fetch("session_start_time")
-        dates = {start_time.date() for start_time in start_times}
-        return len(dates) > 1
+        return len(distinct_recording_dates(start_times)) > 1
 
 
 @schema
