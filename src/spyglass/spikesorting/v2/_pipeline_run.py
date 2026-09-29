@@ -2359,7 +2359,6 @@ def run_v2_unit_match(
         TrackedUnit,
         UnitMatch,
         UnitMatchSelection,
-        normalize_curation_choices,
     )
 
     if not (MatcherParameters & {"matcher_params_name": matcher_params_name}):
@@ -2395,11 +2394,11 @@ def run_v2_unit_match(
 
     # Surface the advisory electrode-space divergence in the receipt (it is also
     # logged inside insert_selection / make_fetch). Recomputed here from the
-    # explicit choices so the summary carries it even on a reused selection.
+    # selection's pinned inputs so the summary carries it even on a reused
+    # selection.
     warnings: list[str] = []
-    choices_by_member = normalize_curation_choices(curation_choices)
     divergent = UnitMatchSelection._divergent_electrode_space_members(
-        choices_by_member
+        UnitMatchSelection.pinned_curations(selection)
     )
     if divergent:
         warnings.append(

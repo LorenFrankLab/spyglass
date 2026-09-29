@@ -9,18 +9,22 @@ same biological unit recorded on different days. Four tables:
     ``params`` against that matcher's schema -- a typo is caught at insert, not
     hours later in ``UnitMatch.populate``.
 
-``UnitMatchSelection`` (+ ``MemberCuration`` part)
-    One row per (session group, matcher params, explicit per-member curation
-    choices). The user pins exactly one ``(sorting_id, curation_id)`` per
-    ``SessionGroup.Member`` -- there is no implicit "latest curation" lookup, so
-    a match run is reproducible. The master stores a deterministic hash of the
-    choices so ``insert_selection`` is idempotent.
+``UnitMatchSelection`` (+ ``Input`` / ``InputRecording`` parts)
+    One row per (matcher params, explicit set of matching inputs). A matching
+    input is one curated sort of a single recording or of a same-day
+    concatenation; the user pins its exact ``(sorting_id, curation_id)`` --
+    there is no implicit "latest curation" lookup, so a match run is
+    reproducible. ``insert_inputs`` freezes each input's curation generation,
+    source and constituent original recordings, numbers the inputs
+    chronologically, and stores a deterministic hash of the frozen inputs so a
+    repeat call is idempotent. ``insert_selection`` resolves one curation per
+    ``SessionGroup`` member into inputs.
 
-``UnitMatch`` (+ ``Pair`` part)
-    ``make()`` re-validates the pinned curations against the group, extracts a
-    wrapper-owned waveform bundle per session, dispatches the chosen matcher, and
-    writes the canonicalized cross-session pairs (one ``Pair`` row per match) plus
-    an exportable NWB pairs table.
+``UnitMatch`` (+ ``Pair`` / ``MatchableUnit`` parts)
+    ``make()`` re-validates the frozen inputs, extracts a wrapper-owned
+    waveform bundle per input, dispatches the chosen matcher in chronological
+    input order, and writes the canonicalized pairs (one ``Pair`` row per
+    match) plus an exportable NWB pairs table.
 
 ``TrackedUnit`` (+ ``Member`` part)
     ``make()`` derives biological-unit identities from the ``Pair`` graph: a
@@ -34,7 +38,7 @@ from __future__ import annotations
 
 import functools
 import time
-from datetime import timezone
+import uuid
 from typing import TYPE_CHECKING, NamedTuple
 
 import datajoint as dj
@@ -80,7 +84,7 @@ def _warn_clusterless_match_once(sorting_id: str) -> None:
         "thresholder -- its units are threshold-crossing events, NOT sorted "
         "neurons (CurationV2.get_unit_semantics == "
         "'clusterless_threshold_crossings'). Cross-session matching tracks "
-        "sorted neurons, so matching this member is degenerate.",
+        "sorted neurons, so matching this input is degenerate.",
         sorting_id,
     )
 
@@ -89,35 +93,40 @@ class UnitMatchFetched(NamedTuple):
     """DB inputs for ``UnitMatch.make_compute`` (no SI/NWB I/O except the
     self-heal rebuild of a missing traces file).
 
-    ``member_plan`` is the member_index-ordered per-member list of DeepHash-stable
-    dicts with the pinned, provenance-validated curation choice plus the
-    correctness-sensitive DB state resolved at fetch time:
-    ``{"member_index", "nwb_file_name", "sorting_id" (str), "curation_id",
-    "recording_date" (canonical UTC ISO 8601 str), "matchable_unit_ids"
-    (sorted list[int]), "waveform_traces" (str), "motion_corrected_recording_id"
-    (str or None), "traces" (EffectiveTraces), "traces_abs_path" (str),
-    "units" (StoredUnits)}``. Threading ``recording_date`` and
-    ``matchable_unit_ids`` here -- rather than re-querying in compute -- keeps a
-    curation relabel or session-time edit between stages from changing which
-    units match or the chronological drift order. ``waveform_traces`` names the
-    trace artifact the member's bundle is extracted from
-    (:func:`_member_waveform_traces`); ``traces`` / ``traces_abs_path`` /
-    ``units`` locate that artifact and the curated units NWB, so compute reads
-    them without the DB (:func:`_member_match_files`); they are present only
-    for a group of two or more members (a single-member group extracts no
-    bundle). ``sorting_id`` is a str, but ``traces`` keeps the fetched keys'
-    ``uuid.UUID`` values, which DataJoint's DeepHash hashes by value, so both
-    fetches still agree.
+    ``input_plan`` is the ``input_index``-ordered (chronological) list of
+    per-input DeepHash-stable dicts built from the selection's FROZEN
+    ``Input`` / ``InputRecording`` rows, plus the correctness-sensitive DB
+    state resolved at fetch time: ``{"input_index", "sorting_id" (str),
+    "curation_id", "curation_uuid" (str), "source_kind", "source_id" (str),
+    "input_start_time" (canonical UTC ISO 8601 str), "recordings" (one dict
+    per constituent recording: ``recording_index``, ``nwb_file_name``,
+    ``sort_group_id``, ``interval_list_name``, ``recording_id`` (str),
+    ``recording_content_hash``, ``session_start_time`` (UTC ISO str),
+    ``start_sample``, ``end_sample``, ``valid_times`` (nested list)),
+    "matchable_unit_ids" (sorted list[int]), "waveform_traces" (str),
+    "motion_corrected_recording_id" (str or None), "traces"
+    (EffectiveTraces), "traces_abs_path" (str), "units" (StoredUnits)}``.
+    Threading ``matchable_unit_ids`` here -- rather than re-querying in
+    compute -- keeps a curation relabel between stages from changing which
+    units match; the times are the frozen ones, never re-read from
+    ``Session``. ``waveform_traces`` names the trace artifact the input's
+    bundle is extracted from (:func:`_member_waveform_traces`); ``traces`` /
+    ``traces_abs_path`` / ``units`` locate that artifact and the curated
+    units NWB, so compute reads them without the DB
+    (:func:`_member_match_files`). ``sorting_id`` is a str, but ``traces``
+    keeps the fetched keys' ``uuid.UUID`` values, which DataJoint's DeepHash
+    hashes by value, so both fetches still agree.
     """
 
     matcher_name: str
     params: dict
     job_kwargs: dict
-    member_plan: list[dict]
-    # Selection identity re-emitted into the artifact NWB (provenance, not
-    # used in compute): the owning team, the group name, and the matcher recipe.
-    session_group_owner: str
-    session_group_name: str
+    input_plan: list[dict]
+    # Selection provenance re-emitted into the artifact NWB (not used in
+    # compute): the SessionGroup the inputs were discovered from (None for an
+    # explicit-input selection) and the matcher recipe.
+    session_group_owner: str | None
+    session_group_name: str | None
     matcher_params_name: str
 
 
@@ -133,8 +142,8 @@ class UnitMatchComputed(NamedTuple):
     n_pairs: int
     matcher_runtime_s: float
     anchor_nwb_file_name: str
-    # The FROZEN matchable universe (per-member ``{"member_index", "sorting_id"
-    # (str), "curation_id", "unit_id"}`` dicts), snapshotted from ``member_plan``
+    # The FROZEN matchable universe (per-input ``{"input_index", "sorting_id"
+    # (str), "curation_id", "unit_id"}`` dicts), snapshotted from ``input_plan``
     # so ``make_insert`` writes ``UnitMatch.MatchableUnit`` and ``TrackedUnit``
     # reads the exact node universe the matcher saw, not current labels.
     matchable_units: list[dict]
@@ -262,33 +271,258 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
 
 @schema
 class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
-    """One row per (session group, matcher params, per-member curation choices).
+    """One row per (matcher params, explicit ordered set of matching inputs).
 
-    The user must pin a specific ``(sorting_id, curation_id)`` per group member
-    via the ``MemberCuration`` part. This design deliberately rejects an implicit
-    "latest curation" lookup -- that would make UnitMatch outputs irreproducible
-    when a user adds a curation to one source session. The master stores a
-    deterministic hash of the part-row choices so ``insert_selection`` stays
-    idempotent.
+    A matching input is one complete, independently curated sort: a sort of a
+    single recording or of a same-day concatenation. Each ``Input`` part pins
+    the exact ``(sorting_id, curation_id)`` and its ``curation_uuid``
+    generation -- there is no implicit "latest curation" lookup, so a match
+    run is reproducible -- together with the sort's source and the
+    constituent original recordings (``InputRecording``), frozen when the
+    selection is made. Inputs are numbered in chronological order
+    (``input_index``), and every later step (matcher feed order, pair
+    orientation) reads only these frozen rows. The master stores a
+    deterministic hash of the frozen inputs so ``insert_inputs`` is
+    idempotent. ``SessionGroup`` records where the inputs were discovered
+    (``insert_selection``); it is provenance, not identity.
     """
 
     definition = """
     unitmatch_id: uuid
     ---
-    -> SessionGroup
     -> MatcherParameters
-    curation_set_hash: char(64)  # sha256 over ordered member->curation choices
+    input_set_hash: char(64)     # sha256 over the chronologically ordered inputs and their frozen recordings
+    -> [nullable] SessionGroup   # group the inputs were discovered from; not part of identity
     """
 
-    class MemberCuration(SpyglassMixinPart):
-        """For each member of the SessionGroup, the exact curation pinned."""
+    class Input(SpyglassMixinPart):
+        """One matching input: a curated sort, in chronological order."""
 
         definition = """
         -> master
-        -> SessionGroup.Member
+        input_index: int                  # position in chronological order, 0-based
         ---
         -> CurationV2
+        curation_uuid: uuid               # generation of the pinned curation
+        source_kind: varchar(32)          # sort source kind: recording or concatenated_recording
+        source_id: uuid                   # recording_id or concat_recording_id
+        motion_corrected_recording_id=null: uuid
+        input_start_time: datetime        # earliest session start among the input's recordings
         """
+
+    class InputRecording(SpyglassMixinPart):
+        """One constituent original recording of a matching input.
+
+        One row for a single-recording input; one row per concatenation
+        member, in member order, for a concatenation input.
+        """
+
+        definition = """
+        -> master
+        input_index: int
+        recording_index: int              # 0 for a single recording; the concatenation member_index otherwise
+        ---
+        nwb_file_name: varchar(64)
+        sort_group_id: int
+        interval_list_name: varchar(170)
+        recording_id: uuid
+        recording_content_hash: char(64)
+        session_start_time: datetime
+        start_sample: bigint              # first frame of this recording in the sort's frame space
+        end_sample: bigint                # exclusive end frame in the sort's frame space
+        valid_times: longblob             # (n_intervals, 2) kept intervals on the recording's own clock, in seconds
+        """
+
+    @classmethod
+    def insert_inputs(
+        cls,
+        curations,
+        matcher_params_name: str,
+        session_group: tuple[str, str] | None = None,
+    ) -> dict:
+        """Find-existing-or-insert a match over explicit inputs; return its key.
+
+        Each input is one curated sort, either of a single recording or of a
+        same-day concatenation, given in any order. Before any row is written
+        the inputs are validated: at least two inputs, one curation per
+        sorting, every curation exists and has no unapplied proposed merges,
+        no two inputs share a recording session (``nwb_file_name``), and a
+        concatenation input lies within one day. The inputs are then ordered
+        chronologically (earliest session start of each input, ties broken by
+        ``sorting_id`` then ``curation_id``) and numbered ``input_index``
+        ``0..n-1``; each input's source and constituent recordings are
+        frozen. The selection id is deterministic over the matcher params and
+        the hash of the frozen inputs, so listing the same inputs in another
+        order returns the same selection. A new selection also runs the
+        electrode-space warning and the channel-geometry preflight.
+
+        Parameters
+        ----------
+        curations : sequence of dict
+            ``{"sorting_id": ..., "curation_id": ...}`` per matching input.
+        matcher_params_name : str
+            The ``MatcherParameters`` row to use.
+        session_group : tuple of (str, str), optional
+            ``(session_group_owner, session_group_name)`` the inputs were
+            discovered from, recorded as provenance only. Default ``None``.
+
+        Returns
+        -------
+        dict
+            ``{"unitmatch_id": ...}`` for the existing-or-inserted selection.
+
+        Raises
+        ------
+        ValueError
+            On fewer than two inputs, a sorting given twice, a missing
+            curation, a curation with unapplied proposed merges, a
+            multi-day concatenation input, a ``SessionGroup`` that does not
+            exist, or a channel-geometry mismatch across inputs.
+        SameSessionMatchError
+            If two inputs share a recording session.
+        DuplicateSelectionError
+            If a selection row for the identity carries a non-deterministic
+            id (a raw insert bypassed this helper).
+        SchemaBypassError
+            If the deterministic selection exists but its parts do not
+            realize its ``input_set_hash``.
+        """
+        from spyglass.spikesorting.v2._matcher_graph import (
+            chronological_input_order,
+            input_set_hash,
+        )
+        from spyglass.spikesorting.v2._selection_identity import (
+            deterministic_id,
+        )
+
+        requested = _normalize_input_curations(curations)
+        _check_input_count_and_sortings(requested, ValueError)
+        group_key = None
+        if session_group is not None:
+            owner, name = session_group
+            group_key = {
+                "session_group_owner": owner,
+                "session_group_name": name,
+            }
+            if not (SessionGroup & group_key):
+                raise ValueError(
+                    "UnitMatchSelection.insert_inputs: SessionGroup "
+                    f"{group_key} does not exist."
+                )
+        for sorting_id, curation_id in requested:
+            _check_input_curation(sorting_id, curation_id, ValueError)
+
+        resolved = [
+            _resolve_match_input(sorting_id, curation_id, ValueError)
+            for sorting_id, curation_id in requested
+        ]
+        start_times = _session_start_times(
+            {
+                recording["nwb_file_name"]
+                for item in resolved
+                for recording in item["recordings"]
+            }
+        )
+        for item in resolved:
+            for recording in item["recordings"]:
+                recording["session_start_time"] = start_times[
+                    recording["nwb_file_name"]
+                ]
+            item["input_start_time"] = min(
+                recording["session_start_time"]
+                for recording in item["recordings"]
+            )
+        _check_input_sessions(resolved, ValueError)
+
+        ordered = chronological_input_order(resolved)
+        for input_index, item in enumerate(ordered):
+            item["input_index"] = input_index
+            if item["source_kind"] == "recording":
+                recording = item["recordings"][0]
+                recording["start_sample"] = 0
+                recording["end_sample"] = _recording_n_samples(
+                    recording["recording_id"]
+                )
+        input_rows, recording_rows = _input_part_rows(ordered)
+        set_hash = input_set_hash(input_rows, recording_rows)
+        identity = {
+            "matcher_params_name": matcher_params_name,
+            "input_set_hash": set_hash,
+        }
+        unitmatch_id = deterministic_id("unitmatch", identity)
+
+        existing = cls._find_existing_pk(identity, unitmatch_id)
+        if existing is not None:
+            return existing
+
+        # Honor unit semantics: warn (don't block -- the cheap clusterless
+        # thresholder is a valid sort) when an input's units are threshold
+        # crossings rather than sorted neurons, since matching them across
+        # sessions is biologically degenerate.
+        for item in ordered:
+            if (
+                CurationV2.get_unit_semantics(
+                    {"sorting_id": item["sorting_id"]}
+                )
+                == "clusterless_threshold_crossings"
+            ):
+                _warn_clusterless_match_once(str(item["sorting_id"]))
+
+        # Preflight NOW, at selection time, before UnitMatch.make's expensive
+        # dense bundle extraction: warn if inputs map to different electrode
+        # identities (advisory -- group names / ids are not lab-stable), and
+        # HARD-reject a cross-day / cross-probe geometry mismatch. Only on the
+        # new-insert path (an idempotent re-call of an already-validated
+        # selection skips the I/O).
+        choices_by_input = {
+            item["input_index"]: (item["sorting_id"], item["curation_id"])
+            for item in ordered
+        }
+        cls._warn_on_divergent_electrode_space(choices_by_input)
+        cls._assert_members_share_geometry(choices_by_input)
+
+        # The kept intervals of a single recording come from its persisted
+        # timestamps (a scan), so they are read only for a new selection;
+        # they are recorded, not hashed.
+        for item in ordered:
+            if item["source_kind"] == "recording":
+                recording = item["recordings"][0]
+                recording["valid_times"] = _recording_valid_times(
+                    recording["recording_id"],
+                    recording["nwb_file_name"],
+                    item["artifact_detection_id"],
+                )
+        input_rows, recording_rows = _input_part_rows(ordered)
+
+        master_row = {**identity, "unitmatch_id": unitmatch_id}
+        if group_key is not None:
+            master_row.update(group_key)
+        try:
+            with transaction_or_noop(cls.connection):
+                # allow_direct_insert: this helper IS the validation boundary
+                # (it has validated the inputs and minted the deterministic
+                # id), so it bypasses the master insert guard.
+                cls().insert1(master_row, allow_direct_insert=True)
+                cls.Input.insert(
+                    [
+                        {**row, "unitmatch_id": unitmatch_id}
+                        for row in input_rows
+                    ]
+                )
+                cls.InputRecording.insert(
+                    [
+                        {**row, "unitmatch_id": unitmatch_id}
+                        for row in recording_rows
+                    ]
+                )
+        except dj.errors.DuplicateError:
+            # Lost a concurrent race on the same deterministic unitmatch_id;
+            # refetch and return the winner's row.
+            existing = cls._find_existing_pk(identity, unitmatch_id)
+            if existing is not None:
+                return existing
+            raise
+        return {"unitmatch_id": unitmatch_id}
 
     @classmethod
     def insert_selection(
@@ -298,20 +532,17 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         matcher_params_name: str,
         curation_choices: dict,
     ) -> dict:
-        """Find-existing-or-insert a match selection; return a PK-only dict.
+        """Match one curation per ``SessionGroup`` member; return the key.
 
-        Pins one curation per group member. ``curation_choices`` maps each
-        member's ``member_index`` to an explicit
-        ``{"sorting_id": ..., "curation_id": ...}`` key. The helper:
-
-        - validates that every member has exactly one choice (missing/extra
-          raise);
-        - verifies each chosen ``CurationV2`` belongs to that member's
-          session/recording path -- a curation from member B must never be
-          accepted for member A just because it satisfies the independent FK;
-        - computes ``curation_set_hash`` over the canonical ordered choices and
-          mints a deterministic ``unitmatch_id`` from the full identity, so a
-          repeat request returns the existing row rather than a duplicate.
+        Discovery adapter over :meth:`insert_inputs` for a group whose members
+        are single recordings. ``curation_choices`` maps each member's
+        ``member_index`` to an explicit ``{"sorting_id": ..., "curation_id":
+        ...}`` key. Every member must have exactly one choice (missing / extra
+        raise), and each chosen curation must be a sort of that member's
+        recording -- a curation from member B is never accepted for member A
+        just because it satisfies the independent FK. The resolved curations
+        are then matched as explicit inputs with the group recorded as
+        provenance; later edits to the group do not change the selection.
 
         Parameters
         ----------
@@ -330,16 +561,10 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         Raises
         ------
         ValueError
-            On a missing/extra member choice, a non-existent curation, or a
-            curation that does not belong to its member.
-        DuplicateSelectionError
-            If more than one selection row already matches the identity (a raw
-            insert bypassed this helper).
+            On an empty group, a missing/extra member choice, a non-existent
+            curation, a curation that does not belong to its member, or any
+            :meth:`insert_inputs` validation failure.
         """
-        from spyglass.spikesorting.v2._selection_identity import (
-            deterministic_id,
-        )
-
         group_key = {
             "session_group_owner": session_group_owner,
             "session_group_name": session_group_name,
@@ -354,158 +579,112 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 "SessionGroup.create_group()."
             )
         choices_by_member = normalize_curation_choices(curation_choices)
-        # Validate coverage + per-member ownership BEFORE minting any row (a
-        # wrong-member choice raises here, before the master or part inserts).
-        _validate_member_curations(members, choices_by_member, ValueError)
-
-        # Cross-session matching requires one member per recording session;
-        # reject a group pairing two members from the same nwb (valid for
-        # concatenation, degenerate for matching) before minting any row.
-        from spyglass.spikesorting.v2._matcher_graph import (
-            assert_distinct_member_sessions,
+        # Coverage + per-member ownership BEFORE any input is resolved (a
+        # wrong-member choice raises here, before any row is minted).
+        _validate_member_curations(members, choices_by_member)
+        return cls.insert_inputs(
+            [
+                {"sorting_id": sorting_id, "curation_id": curation_id}
+                for _index, (sorting_id, curation_id) in sorted(
+                    choices_by_member.items()
+                )
+            ],
+            matcher_params_name,
+            session_group=(session_group_owner, session_group_name),
         )
 
-        assert_distinct_member_sessions(members)
+    @classmethod
+    def pinned_curations(cls, key: dict) -> dict:
+        """The selection's pinned curations keyed by ``input_index``.
 
-        # Honor unit semantics: warn (don't block -- the cheap clusterless
-        # thresholder is a valid sort) when a member's units are threshold
-        # crossings rather than sorted neurons, since matching them across
-        # sessions is biologically degenerate.
-        for member_sorting_id, _curation_id in choices_by_member.values():
-            if (
-                CurationV2.get_unit_semantics({"sorting_id": member_sorting_id})
-                == "clusterless_threshold_crossings"
-            ):
-                _warn_clusterless_match_once(str(member_sorting_id))
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting one ``UnitMatchSelection`` row.
 
-        from spyglass.spikesorting.v2._matcher_graph import curation_set_hash
-
-        # ``members`` is ordered by member_index; pair each with its choice once.
-        ordered_members = [
-            (int(member["member_index"]), member) for member in members
-        ]
-        # ``curation_set_hash`` content-addresses the per-member choices. The
-        # shared helper is the single source of truth, so insert_selection
-        # (mint) and ``UnitMatch.make_fetch`` (verify) compute byte-identical
-        # digests for the same choices.
-        set_hash = curation_set_hash(
-            (index, choices_by_member[index][0], choices_by_member[index][1])
-            for index, _member in ordered_members
-        )
-        identity = {
-            **group_key,
-            "matcher_params_name": matcher_params_name,
-            "curation_set_hash": set_hash,
+        Returns
+        -------
+        dict
+            ``{input_index: (sorting_id, curation_id)}``.
+        """
+        return {
+            int(row["input_index"]): (
+                row["sorting_id"],
+                int(row["curation_id"]),
+            )
+            for row in (cls.Input & key).fetch(
+                "input_index", "sorting_id", "curation_id", as_dict=True
+            )
         }
-        unitmatch_id = deterministic_id("unitmatch", identity)
-
-        existing = cls._find_existing_pk(identity, unitmatch_id)
-        if existing is not None:
-            return existing
-
-        # Preflight NOW, at selection time, before UnitMatch.make's expensive
-        # dense bundle extraction: warn if members map to different electrode
-        # identities (advisory -- group names / ids are not lab-stable), and
-        # HARD-reject a cross-day / cross-probe geometry mismatch. Only on the
-        # new-insert path (an idempotent re-call of an already-validated
-        # selection skips the I/O).
-        cls._warn_on_divergent_electrode_space(choices_by_member)
-        cls._assert_members_share_geometry(choices_by_member)
-
-        master_row = {**identity, "unitmatch_id": unitmatch_id}
-        part_rows = [
-            {
-                "unitmatch_id": unitmatch_id,
-                **group_key,
-                "member_index": index,
-                "sorting_id": choices_by_member[index][0],
-                "curation_id": choices_by_member[index][1],
-            }
-            for index, _member in ordered_members
-        ]
-        try:
-            with transaction_or_noop(cls.connection):
-                # allow_direct_insert: this helper IS the validation boundary
-                # (it has already validated coverage/ownership and minted the
-                # deterministic id), so it bypasses the master insert guard.
-                cls().insert1(master_row, allow_direct_insert=True)
-                cls.MemberCuration.insert(part_rows)
-        except dj.errors.DuplicateError:
-            # Lost a concurrent race on the same deterministic unitmatch_id;
-            # refetch and return the winner's row.
-            existing = cls._find_existing_pk(identity, unitmatch_id)
-            if existing is not None:
-                return existing
-            raise
-        return {"unitmatch_id": unitmatch_id}
 
     @classmethod
     def _member_channel_positions(cls, curation_key):
-        """Channel positions for one pinned member's curated recording.
+        """Channel positions for one pinned input's curated recording.
 
         Loads the curated recording (the same object ``UnitMatch.make`` extracts
         bundles from) and returns its ``get_channel_locations()`` array. For a
         sort of a motion-corrected recording that is the corrected recording's
         effective geometry, without any channels ``remove_channels`` dropped;
-        members are compared as they are, never padded, reordered or trimmed
-        to agree. A thin seam so the geometry preflight is unit-testable by
-        patching this rather than building a full SpikeInterface recording.
+        for a concatenation it is the concatenation's own geometry. Inputs are
+        compared as they are, never padded, reordered or trimmed to agree. A
+        thin seam so the geometry preflight is unit-testable by patching this
+        rather than building a full SpikeInterface recording.
         """
         return CurationV2.get_recording(curation_key).get_channel_locations()
 
     @classmethod
-    def _assert_members_share_geometry(cls, choices_by_member) -> None:
-        """Reject a cross-probe / cross-day geometry mismatch across members.
+    def _assert_members_share_geometry(cls, choices_by_input) -> None:
+        """Reject a cross-probe / cross-day geometry mismatch across inputs.
 
-        Loads each pinned member's curated-recording channel positions (cheap
+        Loads each pinned input's curated-recording channel positions (cheap
         metadata) and runs the same shared-probe check the matcher backend runs
         post-extraction -- here as a preflight, so a mismatch fails at selection
         time rather than deep in ``UnitMatch.make``'s dense bundle extraction.
-        Single-member selections skip (nothing to compare against).
+        ``choices_by_input`` maps a label (the ``input_index``) to
+        ``(sorting_id, curation_id)``.
         """
-        if len(choices_by_member) < 2:
-            return
         from spyglass.spikesorting.v2._unitmatch_backend import (
             assert_consistent_channel_geometry,
         )
 
         named_positions = [
             (
-                f"member_{member_index}",
+                f"input_{label}",
                 cls._member_channel_positions(
                     {
-                        "sorting_id": choices_by_member[member_index][0],
-                        "curation_id": choices_by_member[member_index][1],
+                        "sorting_id": choices_by_input[label][0],
+                        "curation_id": choices_by_input[label][1],
                     }
                 ),
             )
-            for member_index in sorted(choices_by_member)
+            for label in sorted(choices_by_input)
         ]
         assert_consistent_channel_geometry(named_positions)
 
     @classmethod
     def _member_electrode_signature(cls, sorting_id):
-        """Electrode/region signature for one member's curated sort group.
+        """Electrode/region signature for one input's sort group.
 
-        Resolves the member's ``(nwb_file_name, sort_group_id)`` and returns the
-        same ``(electrode_group_name, electrode_id, region)`` signature the
-        concat path uses, so two physically distinct probes never collapse to
-        one electrode space even when their channel geometry coincides.
+        Resolves the input's first constituent recording's ``(nwb_file_name,
+        sort_group_id)`` -- the recording itself, or a concatenation's first
+        member (members share electrode ids and regions, which the
+        concatenation enforces) -- and returns the same
+        ``(electrode_group_name, electrode_id, region)`` signature the concat
+        path uses, so two physically distinct probes never collapse to one
+        electrode space even when their channel geometry coincides.
         """
         from spyglass.spikesorting.v2.session_group import (
             _member_electrode_signature,
         )
 
-        nwb_file_name, sort_group_id, _interval, _team = (
-            _curation_member_identity(sorting_id)
-        )
+        nwb_file_name, sort_group_id = _input_anchor_sort_group(sorting_id)
         return _member_electrode_signature(
             {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
         )
 
     @classmethod
-    def _divergent_electrode_space_members(cls, choices_by_member) -> list:
-        """Member indexes whose electrode signature diverges from the anchor.
+    def _divergent_electrode_space_members(cls, choices_by_input) -> list:
+        """Input labels whose electrode signature diverges from the first.
 
         Compares electrode IDENTITY (group + ids + regions) -- the lab-dependent
         signal channel geometry can't catch -- via
@@ -513,17 +692,18 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         WARNS rather than blocks (see :meth:`_warn_on_divergent_electrode_space`)
         because electrode-group names / ids come from each NWB's
         ``ElectrodeGroup`` and are not guaranteed stable across labs' ingestion.
-        Single-member selections return ``[]``.
+        ``choices_by_input`` maps a label (the ``input_index``) to
+        ``(sorting_id, curation_id)``; fewer than two inputs return ``[]``.
         """
-        if len(choices_by_member) < 2:
+        if len(choices_by_input) < 2:
             return []
         from spyglass.spikesorting.v2._matcher_graph import (
             divergent_electrode_space_members,
         )
 
         signatures = {
-            member_index: cls._member_electrode_signature(choice[0])
-            for member_index, choice in choices_by_member.items()
+            label: cls._member_electrode_signature(choice[0])
+            for label, choice in choices_by_input.items()
         }
         return divergent_electrode_space_members(signatures)
 
@@ -535,26 +715,25 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         carry identical text.
         """
         return (
-            f"member(s) {divergent} map to a different electrode space "
-            "(electrode group / ids / regions) than the anchor, though channel "
-            "geometry still matched. If these are NOT the same chronic implant "
-            "the match is meaningless. Electrode-group names / ids come from "
-            "each NWB file's ElectrodeGroup and are not guaranteed stable across "
-            "sessions, so this is a warning, not a rejection -- a genuine "
-            "distinct-probe mix-up will also show as poor matcher AUC / few "
-            "pairs."
+            f"matching input(s) {divergent} map to a different electrode space "
+            "(electrode group / ids / regions) than the first input, though "
+            "channel geometry still matched. If these are NOT the same chronic "
+            "implant the match is meaningless. Electrode-group names / ids come "
+            "from each NWB file's ElectrodeGroup and are not guaranteed stable "
+            "across sessions, so this is a warning, not a rejection -- a "
+            "genuine distinct-probe mix-up will also show as poor matcher AUC "
+            "/ few pairs."
         )
 
     @classmethod
-    def _warn_on_divergent_electrode_space(cls, choices_by_member) -> None:
-        """Log a WARNING (don't block) when members differ in electrode space.
+    def _warn_on_divergent_electrode_space(cls, choices_by_input) -> None:
+        """Log a WARNING (don't block) when inputs differ in electrode space.
 
         The hard checks (geometry, same-session) live elsewhere; this signal is
         advisory because electrode-group names / ids are not lab-stable.
         ``run_v2_unit_match`` also surfaces it in the receipt's ``warnings``.
-        Single-member selections skip.
         """
-        divergent = cls._divergent_electrode_space_members(choices_by_member)
+        divergent = cls._divergent_electrode_space_members(choices_by_input)
         if divergent:
             logger.warning(
                 "UnitMatchSelection: %s",
@@ -567,21 +746,23 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     ) -> dict | None:
         """Return the canonical PK for this selection identity, or None.
 
-        The full logical identity (group + matcher + ``curation_set_hash``)
-        lives in the master's own columns. A master matching the identity whose
-        ``unitmatch_id`` is NOT the deterministic id is a raw-insert /
-        pre-determinism bypass and is rejected. When the deterministic master
-        DOES exist, its ``MemberCuration`` parts are verified to realize the
-        identity's ``curation_set_hash`` (mirroring the part-join the other
-        part-bearing selection masters do): a forged master can carry the right
-        id with missing / stale / foreign parts, and that must be rejected HERE
-        rather than returning a "valid" PK that only ``make_fetch`` later
+        The full logical identity (matcher + ``input_set_hash``) lives in the
+        master's own columns. A master matching the identity whose
+        ``unitmatch_id`` is NOT the deterministic id is a raw-insert bypass and
+        is rejected. When the deterministic master DOES exist, its ``Input`` /
+        ``InputRecording`` parts are verified to be well formed and to realize
+        the identity's ``input_set_hash``: a forged master can carry the right
+        id with missing / stale / orphaned parts, and that must be rejected
+        HERE rather than returning a "valid" PK that only ``make_fetch`` later
         rejects.
 
-        Used by ``insert_selection`` for both the pre-insert lookup and the
+        Used by ``insert_inputs`` for both the pre-insert lookup and the
         post-duplicate-key refetch.
         """
-        from spyglass.spikesorting.v2._matcher_graph import curation_set_hash
+        from spyglass.spikesorting.v2._matcher_graph import (
+            input_part_structure_errors,
+            input_set_hash,
+        )
         from spyglass.spikesorting.v2.exceptions import (
             DuplicateSelectionError,
             SchemaBypassError,
@@ -599,69 +780,56 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 f"UnitMatchSelection has {len(master_ids)} master row(s) for "
                 f"identity {identity} whose unitmatch_id is not the "
                 f"deterministic id {deterministic_unitmatch_id}: {bypassed}. "
-                "This is a non-deterministic selection row (a raw insert or "
-                "pre-determinism legacy row); drop it and re-insert via "
-                "insert_selection."
+                "This is a non-deterministic selection row (a raw insert); "
+                "drop it and re-insert via insert_inputs."
             )
         if not master_ids:
             return None
-        parts = (
-            cls.MemberCuration & {"unitmatch_id": deterministic_unitmatch_id}
-        ).fetch(as_dict=True)
-        # curation_set_hash folds only (member_index, sorting_id, curation_id),
-        # so copied parts from ANOTHER SessionGroup could hash to the same value.
-        # Reject foreign-group parts explicitly (the master's group lives in the
-        # identity; MemberCuration carries its own group via SessionGroup.Member).
-        group = (
-            identity["session_group_owner"],
-            identity["session_group_name"],
+        restriction = {"unitmatch_id": deterministic_unitmatch_id}
+        input_rows = (cls.Input & restriction).fetch(as_dict=True)
+        recording_rows = (cls.InputRecording & restriction).fetch(as_dict=True)
+        structure_errors = input_part_structure_errors(
+            input_rows, recording_rows
         )
-        if any(
-            (row["session_group_owner"], row["session_group_name"]) != group
-            for row in parts
+        if structure_errors:
+            raise SchemaBypassError(
+                f"UnitMatchSelection master {deterministic_unitmatch_id} has "
+                f"malformed Input / InputRecording parts "
+                f"({'; '.join(structure_errors)}; a raw-insert orphan or "
+                "forgery). Drop the master and re-insert via insert_inputs()."
+            )
+        if (
+            input_set_hash(input_rows, recording_rows)
+            != identity["input_set_hash"]
         ):
             raise SchemaBypassError(
-                f"UnitMatchSelection master {deterministic_unitmatch_id} has a "
-                "MemberCuration row from a different SessionGroup (a raw-insert "
-                "forgery whose copied parts hash to the same choices). Drop the "
-                "master and re-insert via insert_selection()."
-            )
-        part_hash = (
-            curation_set_hash(
-                (row["member_index"], row["sorting_id"], row["curation_id"])
-                for row in parts
-            )
-            if parts
-            else None
-        )
-        if part_hash != identity["curation_set_hash"]:
-            raise SchemaBypassError(
                 f"UnitMatchSelection master {deterministic_unitmatch_id} exists "
-                "but its MemberCuration parts do not realize its "
-                "curation_set_hash (missing / stale parts -- a raw-insert "
-                "orphan or forgery). Drop the master and re-insert via "
-                "insert_selection()."
+                "but its Input / InputRecording parts do not realize its "
+                "input_set_hash (missing / stale parts -- a raw-insert orphan "
+                "or forgery). Drop the master and re-insert via "
+                "insert_inputs()."
             )
         return {"unitmatch_id": deterministic_unitmatch_id}
 
 
 @schema
 class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
-    """Pairwise unit matches across SessionGroup members.
+    """Pairwise unit matches across a selection's matching inputs.
 
-    ``make()`` re-validates the pinned member curations (so a direct-insert
-    bypass of ``UnitMatchSelection.insert_selection`` cannot match the wrong
-    units), extracts a wrapper-owned waveform bundle per session, dispatches the
-    chosen matcher, and writes the canonicalized cross-session pairs. The
-    AnalysisNwbfile parent is the FIRST ``SessionGroup.Member.nwb_file_name``
-    (ordered by ``member_index``); complete multi-session provenance stays
-    queryable through ``UnitMatchSelection -> SessionGroup -> SessionGroup.Member``.
+    ``make()`` re-validates the frozen inputs (so a direct-insert bypass of
+    ``UnitMatchSelection.insert_inputs``, a recreated curation, or changed
+    source content cannot match the wrong units), extracts a wrapper-owned
+    waveform bundle per input, feeds the matcher in ``input_index``
+    (chronological) order, and writes the canonicalized pairs. The
+    AnalysisNwbfile parent is the first input's first recording's NWB;
+    complete provenance stays queryable through ``UnitMatchSelection.Input``
+    and ``UnitMatchSelection.InputRecording``.
     """
 
     definition = """
     -> UnitMatchSelection
     ---
-    -> AnalysisNwbfile           # parent = first SessionGroup.Member's NWB
+    -> AnalysisNwbfile           # parent = the first input's first recording's NWB
     pairs_object_id: varchar(72)
     n_pairs: int
     matcher_runtime_s: float
@@ -675,9 +843,10 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         Each side is a *projected* FK into ``CurationV2.Unit`` so DataJoint
         guarantees referential integrity: a pair cannot reference a unit absent
-        from the pinned curation. UnitMatch operates on the curated, matchable
-        unit set selected by ``UnitMatchSelection.MemberCuration``, not the raw
-        Sorting units. ``drift_estimate_um`` / ``fdr_estimate`` have no per-pair
+        from the pinned curation. The ``session_a_*`` / ``session_b_*`` sides
+        are two matching inputs (side a has the lower ``input_index``).
+        UnitMatch operates on the curated, matchable unit set of the curations
+        pinned by ``UnitMatchSelection.Input``, not the raw Sorting units. ``drift_estimate_um`` / ``fdr_estimate`` have no per-pair
         backend source (drift is applied internally per session-pair; FDR is a
         session-level diagnostic) and keep their defaults.
         """
@@ -698,18 +867,18 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             self.insert([row], **kwargs)
 
         def insert(self, rows, **kwargs):
-            """Validate every pair against the selection's ``MemberCuration``.
+            """Validate every pair against the selection's pinned inputs.
 
             The ``Pair`` FKs guarantee each endpoint exists in SOME ``CurationV2``,
-            not in THIS selection's pinned ``MemberCuration``. The canonical
+            not in THIS selection's pinned ``UnitMatchSelection.Input`` curations. The canonical
             ``UnitMatch.make_insert`` path is safe because
             ``canonicalize_match_pairs`` orients + dedupes within the pinned,
             matchable set; a raw / maintenance ``insert`` bypasses that, so
             re-validate here. Positional rows are normalized to dicts (and
             validated) too, so a raw positional insert cannot slip past the guard.
-            For each row: both endpoints must be a pinned member curation, the two
-            endpoints must be different members (a unit cannot match itself across
-            sessions), the undirected edge must be new (no reversed / duplicate),
+            For each row: both endpoints must be a pinned input curation, the
+            two endpoints must be different curations (a unit cannot match itself
+            across sessions), the undirected edge must be new (no reversed / duplicate),
             and ``match_probability`` must be in ``[0, 1]``.
             """
             from collections.abc import Mapping
@@ -720,7 +889,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 rows = [rows]
             attr_names = self.heading.names
             normalized = [_insert_row_to_dict(row, attr_names) for row in rows]
-            # Per-unitmatch_id caches: the pinned member-curation set and the
+            # Per-unitmatch_id caches: the pinned input-curation set and the
             # undirected edges already present (DB) plus those validated earlier
             # in this batch, so a multi-pair insert does not re-query per row.
             pinned_cache: dict = {}
@@ -756,9 +925,9 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             pinned = pinned_cache.get(unitmatch_id)
             if pinned is None:
                 pinned = {
-                    (str(member["sorting_id"]), int(member["curation_id"]))
-                    for member in (
-                        UnitMatchSelection.MemberCuration
+                    (str(row["sorting_id"]), int(row["curation_id"]))
+                    for row in (
+                        UnitMatchSelection.Input
                         & {"unitmatch_id": unitmatch_id}
                     ).fetch("sorting_id", "curation_id", as_dict=True)
                 }
@@ -768,16 +937,16 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     raise UnitMatchPairIntegrityError(
                         f"UnitMatch.Pair.insert: endpoint {label} curation "
                         f"(sorting_id={endpoint[0]}, curation_id={endpoint[1]}) "
-                        "is not a pinned UnitMatchSelection.MemberCuration for "
+                        "is not a pinned UnitMatchSelection.Input curation for "
                         f"unitmatch_id={unitmatch_id}. A pair may only reference "
                         "units from the selection's pinned curations. Use "
-                        "UnitMatchSelection.insert_selection() + populate()."
+                        "UnitMatchSelection.insert_inputs() + populate()."
                     )
             if endpoint_a == endpoint_b:
                 raise UnitMatchPairIntegrityError(
-                    "UnitMatch.Pair.insert: both endpoints pin the same member "
+                    "UnitMatch.Pair.insert: both endpoints pin the same input "
                     f"curation ({endpoint_a}); a unit cannot match itself across "
-                    "sessions. Cross-session pairs join two distinct members."
+                    "sessions. Cross-session pairs join two distinct inputs."
                 )
             node_a = (*endpoint_a, int(row["unit_a_id"]))
             node_b = (*endpoint_b, int(row["unit_b_id"]))
@@ -822,7 +991,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     class MatchableUnit(SpyglassMixinPart):
         """The FROZEN matchable-unit universe this match ran over.
 
-        Snapshots, per member, the ``(sorting_id, curation_id, unit_id)`` triples
+        Snapshots, per matching input, the ``(sorting_id, curation_id, unit_id)`` triples
         that survived the exclude-label filter in ``make_fetch`` -- the exact
         node universe the matcher saw. ``TrackedUnit.make`` reads this instead of
         re-deriving it from CURRENT curation labels, so a relabel between
@@ -834,7 +1003,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         definition = """
         -> master
-        member_index: int
+        input_index: int
         sorting_id: uuid
         curation_id: int
         unit_id: int
@@ -847,113 +1016,103 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     _parallel_make = True
 
     def make_fetch(self, key) -> UnitMatchFetched:
-        """Fetch + validate the selection (DB reads + provenance checks only).
+        """Fetch + re-validate the frozen inputs (DB reads + checks only).
 
-        Re-validates the direct-insert bypass invariant on the RAW
-        ``MemberCuration`` rows BEFORE collapsing them by ``member_index``:
-        ``MemberCuration`` carries its own (session_group_owner,
-        session_group_name) via its ``SessionGroup.Member`` FK, which DataJoint
-        does NOT unify with the master's group (the master's group fields are
-        non-PK). A direct insert could attach rows from a DIFFERENT SessionGroup
-        under this unitmatch_id, or two rows with the same member_index from
-        different groups (the latter would silently lose one in the dict collapse
-        below). Require every part row to belong to the master's group and to
-        have a unique member_index, then check coverage + per-member ownership --
-        all before any matcher input is extracted.
+        Re-runs the selection checks on the RAW ``Input`` / ``InputRecording``
+        rows before any matcher input is extracted, since a direct insert can
+        bypass ``insert_inputs``: the parts are well formed, there are at
+        least two inputs, no sorting is pinned twice, no concatenation input
+        spans two days and no two inputs share a session (on the frozen
+        session times), and the stored ``input_set_hash`` is the hash of the
+        parts. Then, per input, the pinned curation must still exist with the
+        pinned ``curation_uuid`` (a recreated curation raises rather than
+        silently re-pointing), carry no unapplied proposed merges, and its
+        live source must still match the frozen recordings (source,
+        ``recording_id``, content hash, concatenation membership and
+        boundaries).
 
-        Each member's traces file is rebuilt here if missing, and its path and
-        curated units NWB are carried to compute.
+        Only frozen values order and describe the inputs: ``Session`` is not
+        read, and the ``SessionGroup`` the inputs were discovered from is not
+        consulted. Each input's traces file is rebuilt here if missing, and
+        its path and curated units NWB are carried to compute.
         """
+        from spyglass.spikesorting.v2._matcher_graph import (
+            input_part_structure_errors,
+            input_set_hash,
+            utc_datetime,
+        )
         from spyglass.spikesorting.v2.sorting import SortingSelection
 
+        exc_class = UnitMatchSelectionIntegrityError
         sel = (UnitMatchSelection & key).fetch1()
-        group_key = {
-            "session_group_owner": sel["session_group_owner"],
-            "session_group_name": sel["session_group_name"],
-        }
-        members = (SessionGroup.Member & group_key).fetch(
-            as_dict=True, order_by="member_index"
+        input_rows = (UnitMatchSelection.Input & key).fetch(
+            as_dict=True, order_by="input_index"
         )
-        member_curations = (UnitMatchSelection.MemberCuration & key).fetch(
-            as_dict=True
+        recording_rows = (UnitMatchSelection.InputRecording & key).fetch(
+            as_dict=True, order_by=("input_index", "recording_index")
         )
-        seen_member_indexes = set()
-        for row in member_curations:
-            if (
-                row["session_group_owner"],
-                row["session_group_name"],
-            ) != (
-                group_key["session_group_owner"],
-                group_key["session_group_name"],
-            ):
-                raise UnitMatchSelectionIntegrityError(
-                    "UnitMatch.make: MemberCuration row for member_index "
-                    f"{row['member_index']} belongs to SessionGroup "
-                    f"({row['session_group_owner']}, {row['session_group_name']}), "
-                    f"not the selection's group {group_key}. A direct insert "
-                    "attached a foreign-group member. Use "
-                    "UnitMatchSelection.insert_selection()."
-                )
-            member_index = int(row["member_index"])
-            if member_index in seen_member_indexes:
-                raise UnitMatchSelectionIntegrityError(
-                    "UnitMatch.make: duplicate MemberCuration rows for "
-                    f"member_index {member_index}. Use "
-                    "UnitMatchSelection.insert_selection()."
-                )
-            seen_member_indexes.add(member_index)
-
-        choices_by_member = {
-            int(row["member_index"]): (
-                row["sorting_id"],
-                int(row["curation_id"]),
+        structure_errors = input_part_structure_errors(
+            input_rows, recording_rows
+        )
+        if structure_errors:
+            raise exc_class(
+                f"UnitMatch.make: selection {key} has malformed Input / "
+                f"InputRecording parts ({'; '.join(structure_errors)}). A "
+                "direct insert bypassed UnitMatchSelection.insert_inputs()."
             )
-            for row in member_curations
-        }
-        _validate_member_curations(
-            members, choices_by_member, UnitMatchSelectionIntegrityError
-        )
-
-        # Re-check the cross-session + electrode-space invariants at the compute
-        # boundary. insert_selection enforces them, but a direct-insert bypass
-        # (allow_direct_insert / maintenance) could attach same-NWB members or
-        # members on different electrode spaces. Re-running here stops the
-        # matcher from writing pairs across a within-session set (hard reject)
-        # even when insert_selection was skipped, and re-warns on a divergent
-        # electrode space.
-        from spyglass.spikesorting.v2._matcher_graph import (
-            assert_distinct_member_sessions,
-        )
-
-        assert_distinct_member_sessions(members)
-        UnitMatchSelection._warn_on_divergent_electrode_space(choices_by_member)
-
-        # Re-derive the content address from the pinned parts and reject a row
-        # whose stored ``curation_set_hash`` disagrees with its MemberCuration
-        # rows -- i.e. a raw insert that set a hash not matching its parts.
-        # ``insert_selection`` mints the hash from the same helper, so a
-        # legitimately-created selection always agrees here. This closes the
-        # gap the ownership/coverage checks above do NOT cover: a master can
-        # claim one curation set in its hash while its parts pin another.
-        from spyglass.spikesorting.v2._matcher_graph import curation_set_hash
-
-        recomputed_hash = curation_set_hash(
-            (member_index, sorting_id, curation_id)
-            for member_index, (
-                sorting_id,
-                curation_id,
-            ) in choices_by_member.items()
-        )
-        if recomputed_hash != sel["curation_set_hash"]:
-            raise UnitMatchSelectionIntegrityError(
-                "UnitMatch.make: the selection's stored curation_set_hash "
-                f"{sel['curation_set_hash']} does not match the hash recomputed "
-                f"from its MemberCuration rows ({recomputed_hash}). The master "
-                "and its pinned curations were not created together by "
-                "insert_selection (a raw-insert bypass that lets a master claim "
-                "one curation set while matching on another). Use "
-                "UnitMatchSelection.insert_selection()."
+        recordings_by_input: dict[int, list[dict]] = {}
+        for row in recording_rows:
+            recordings_by_input.setdefault(int(row["input_index"]), []).append(
+                row
             )
+        _check_input_count_and_sortings(
+            [(row["sorting_id"], row["curation_id"]) for row in input_rows],
+            exc_class,
+        )
+        _check_input_sessions(
+            [
+                {
+                    **row,
+                    "recordings": recordings_by_input[int(row["input_index"])],
+                }
+                for row in input_rows
+            ],
+            exc_class,
+        )
+        recomputed_hash = input_set_hash(input_rows, recording_rows)
+        if recomputed_hash != sel["input_set_hash"]:
+            raise exc_class(
+                "UnitMatch.make: the selection's stored input_set_hash "
+                f"{sel['input_set_hash']} does not match the hash recomputed "
+                f"from its Input / InputRecording rows ({recomputed_hash}). "
+                "The master and its inputs were not created together by "
+                "insert_inputs (a raw-insert bypass that lets a master claim "
+                "one input set while matching on another). Use "
+                "UnitMatchSelection.insert_inputs()."
+            )
+        for row in input_rows:
+            sorting_id, curation_id = row["sorting_id"], int(row["curation_id"])
+            _check_input_curation(sorting_id, curation_id, exc_class)
+            mismatches = _snapshot_mismatches(
+                row,
+                recordings_by_input[int(row["input_index"])],
+                _resolve_match_input(sorting_id, curation_id, exc_class),
+            )
+            if mismatches:
+                raise exc_class(
+                    f"UnitMatch.make: input_index {row['input_index']} "
+                    f"{_input_label(sorting_id, curation_id)} no longer "
+                    f"matches its frozen snapshot: {'; '.join(mismatches)}. "
+                    "The curation was recreated or its source changed after "
+                    "the selection was made; select the inputs again with "
+                    "UnitMatchSelection.insert_inputs()."
+                )
+        UnitMatchSelection._warn_on_divergent_electrode_space(
+            {
+                int(row["input_index"]): (row["sorting_id"], row["curation_id"])
+                for row in input_rows
+            }
+        )
 
         matcher_name, params, job_kwargs = (
             MatcherParameters
@@ -961,74 +1120,85 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ).fetch1("matcher", "params", "job_kwargs")
 
         # Resolve the correctness-sensitive DB state HERE (in fetch) and thread
-        # it into compute, so a curation relabel or session-time edit between the
-        # fetch and compute stages can't change which units are matchable or the
-        # chronological drift order. ``recording_date`` is stored as an ISO
-        # string (DeepHash-stable; sorts chronologically) and ``matchable_unit_ids``
-        # as a sorted int list. compute builds the SI objects from the files
-        # resolved here and does not re-derive this state.
-        member_plan = []
-        member_sources = []
-        for member in members:
-            member_index = int(member["member_index"])
-            sorting_id, curation_id = choices_by_member[member_index]
+        # it into compute, so a curation relabel between the fetch and compute
+        # stages can't change which units are matchable. Times are the frozen
+        # ones, stored as UTC ISO strings (DeepHash-stable), and
+        # ``matchable_unit_ids`` as a sorted int list. compute builds the SI
+        # objects from the files resolved here and does not re-derive state.
+        input_plan = []
+        input_sources = []
+        for row in input_rows:
+            input_index = int(row["input_index"])
+            sorting_id, curation_id = row["sorting_id"], int(row["curation_id"])
             curation_key = {
                 "sorting_id": sorting_id,
                 "curation_id": curation_id,
             }
+            recordings = [
+                {
+                    "recording_index": int(recording["recording_index"]),
+                    "nwb_file_name": recording["nwb_file_name"],
+                    "sort_group_id": int(recording["sort_group_id"]),
+                    "interval_list_name": recording["interval_list_name"],
+                    "recording_id": str(recording["recording_id"]),
+                    "recording_content_hash": recording[
+                        "recording_content_hash"
+                    ],
+                    "session_start_time": utc_datetime(
+                        recording["session_start_time"]
+                    ).isoformat(),
+                    "start_sample": int(recording["start_sample"]),
+                    "end_sample": int(recording["end_sample"]),
+                    "valid_times": [
+                        [float(start), float(stop)]
+                        for start, stop in recording["valid_times"]
+                    ],
+                }
+                for recording in recordings_by_input[input_index]
+            ]
             matchable = [
                 int(u)
                 for u in CurationV2().get_matchable_unit_ids(curation_key)
             ]
             if not matchable:
                 raise ValueError(
-                    "UnitMatch.make: member_index "
-                    f"{member_index} (sorting_id={sorting_id}, "
-                    f"curation_id={curation_id}) has no matchable units (all "
-                    "curated units are excluded labels); a matcher cannot run "
-                    "on an empty session. Re-curate so at least one unit "
-                    "survives the exclude filter, or drop the member from the "
-                    "SessionGroup."
+                    f"UnitMatch.make: input_index {input_index} "
+                    f"{_input_label(sorting_id, curation_id)} has no matchable "
+                    "units (all curated units are excluded labels); a matcher "
+                    "cannot run on an empty input. Re-curate so at least one "
+                    "unit survives the exclude filter, or drop the input."
                 )
-            recording_date = (
-                Session & {"nwb_file_name": member["nwb_file_name"]}
-            ).fetch1("session_start_time")
-            # Normalize to UTC before stringifying so the ISO strings sort
-            # chronologically by plain lexicographic order (mixed-offset ISO
-            # strings would not). A naive datetime is treated as UTC.
-            if recording_date.tzinfo is None:
-                recording_date = recording_date.replace(tzinfo=timezone.utc)
             source = SortingSelection.resolve_effective_source(
                 {"sorting_id": sorting_id}
             )
-            member_plan.append(
+            input_plan.append(
                 {
-                    "member_index": member_index,
-                    "nwb_file_name": member["nwb_file_name"],
+                    "input_index": input_index,
                     "sorting_id": str(sorting_id),
-                    "curation_id": int(curation_id),
-                    "recording_date": recording_date.astimezone(
-                        timezone.utc
+                    "curation_id": curation_id,
+                    "curation_uuid": str(row["curation_uuid"]),
+                    "source_kind": row["source_kind"],
+                    "source_id": str(row["source_id"]),
+                    "input_start_time": utc_datetime(
+                        row["input_start_time"]
                     ).isoformat(),
+                    "recordings": recordings,
                     "matchable_unit_ids": matchable,
                     **_member_waveform_traces(source.traces),
                 }
             )
-            member_sources.append((curation_key, source))
-        # Resolve the files last, once every member passed its checks, so a
-        # fetch that raises never rebuilds a traces file. A single-member
-        # group writes zero pairs without extracting a bundle, so it reads
-        # (and heals) no member file.
-        if len(member_plan) >= 2:
-            for plan, (curation_key, source) in zip(
-                member_plan, member_sources, strict=True
-            ):
-                plan.update(_member_match_files(curation_key, source))
+            input_sources.append((curation_key, source))
+        # Resolve the files last, once every input passed its checks, so a
+        # fetch that raises never rebuilds a traces file.
+        for plan, (curation_key, source) in zip(
+            input_plan, input_sources, strict=True
+        ):
+            plan.update(_member_match_files(curation_key, source))
         return UnitMatchFetched(
             matcher_name=matcher_name,
             params=dict(params),
             job_kwargs=dict(job_kwargs or {}),
-            member_plan=member_plan,
+            input_plan=input_plan,
             session_group_owner=sel["session_group_owner"],
             session_group_name=sel["session_group_name"],
             matcher_params_name=sel["matcher_params_name"],
@@ -1040,7 +1210,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         matcher_name,
         params,
         job_kwargs,
-        member_plan,
+        input_plan,
         session_group_owner,
         session_group_name,
         matcher_params_name,
@@ -1048,16 +1218,18 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """Extract bundles, run the matcher, and stage the pairs NWB.
 
         All heavy SI / UnitMatch / NWB work happens here, outside the DB
-        transaction. The degenerate single-session case writes an empty pairs
-        table without calling the matcher backend. The anchor AnalysisNwbfile
-        parent is the FIRST member's NWB (``member_plan`` is member_index-ordered).
-        Reads only the member files ``make_fetch`` resolved; the one DB access
+        transaction. The anchor AnalysisNwbfile parent is the first input's
+        first recording's NWB (``input_plan`` is ``input_index``-ordered).
+        Reads only the input files ``make_fetch`` resolved; the one DB access
         left is staging the pairs NWB (see :mod:`._recording_nwb`).
         """
         import spikeinterface as si
 
         from spyglass.spikesorting.v2._nwb_provenance import (
-            UNITMATCH_MEMBERS,
+            UNITMATCH_INPUT_COLUMNS,
+            UNITMATCH_INPUT_RECORDING_COLUMNS,
+            UNITMATCH_INPUT_RECORDINGS,
+            UNITMATCH_INPUTS,
             UNITMATCH_PROVENANCE,
             build_long_provenance_table,
             build_provenance_table,
@@ -1068,9 +1240,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             _unlink_staged_analysis_file,
         )
 
-        # Producer provenance, resolved from the registry entry that WOULD run
-        # (even on the degenerate single-session path that skips the match), so
-        # the row always records which backend code produced it. Secondary, not
+        # Producer provenance, resolved from the registry entry that runs, so
+        # the row records which backend code produced it. Secondary, not
         # identity.
         backend = get_matcher(matcher_name)
         spikeinterface_version = si.__version__
@@ -1079,26 +1250,25 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             backend, "backend_version", lambda: None
         )()
 
-        anchor_nwb_file_name = member_plan[0]["nwb_file_name"]
-        # Snapshot the frozen matchable universe from member_plan (resolved +
+        anchor_nwb_file_name = input_plan[0]["recordings"][0]["nwb_file_name"]
+        # Snapshot the frozen matchable universe from input_plan (resolved +
         # validated in make_fetch) so make_insert persists exactly the node set
-        # handed to the matcher path -- independent of the path taken below,
-        # and including units a bundle leaves out (they get no pairs and
-        # become unmatched tracked units).
+        # handed to the matcher path, including units a bundle leaves out
+        # (they get no pairs and become unmatched tracked units).
         matchable_units = [
             {
-                "member_index": int(plan["member_index"]),
+                "input_index": int(plan["input_index"]),
                 "sorting_id": plan["sorting_id"],
                 "curation_id": int(plan["curation_id"]),
                 "unit_id": int(unit_id),
             }
-            for plan in member_plan
+            for plan in input_plan
             for unit_id in plan["matchable_unit_ids"]
         ]
         # Self-describing provenance: the run/group/matcher header (re-emitting
-        # the producer provenance the row stores) and the per-member
-        # map, so the pairs table -- side ids only -- is interpretable without
-        # the DB.
+        # the producer provenance the row stores), the per-input map and the
+        # per-recording map, so the pairs table -- side ids only -- is
+        # interpretable without the DB.
         provenance_tables = [
             build_provenance_table(
                 UNITMATCH_PROVENANCE,
@@ -1113,30 +1283,48 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 },
             ),
             build_long_provenance_table(
-                UNITMATCH_MEMBERS,
+                UNITMATCH_INPUTS,
                 [
                     {
-                        "member_index": int(plan["member_index"]),
+                        "input_index": int(plan["input_index"]),
                         "sorting_id": str(plan["sorting_id"]),
                         "curation_id": int(plan["curation_id"]),
-                        "session_start_time": str(plan["recording_date"]),
+                        "curation_uuid": str(plan["curation_uuid"]),
+                        "source_kind": str(plan["source_kind"]),
+                        "source_id": str(plan["source_id"]),
+                        "input_start_time": str(plan["input_start_time"]),
                         "waveform_traces": str(plan["waveform_traces"]),
-                        # Empty for a member whose waveforms come from its
+                        # Empty for an input whose waveforms come from its
                         # source's own traces (typed column: no None).
                         "motion_corrected_recording_id": str(
                             plan["motion_corrected_recording_id"] or ""
                         ),
                     }
-                    for plan in member_plan
+                    for plan in input_plan
                 ],
+                UNITMATCH_INPUT_COLUMNS,
+            ),
+            build_long_provenance_table(
+                UNITMATCH_INPUT_RECORDINGS,
                 [
-                    ("member_index", int),
-                    ("sorting_id", str),
-                    ("curation_id", int),
-                    ("session_start_time", str),
-                    ("waveform_traces", str),
-                    ("motion_corrected_recording_id", str),
+                    {
+                        "input_index": int(plan["input_index"]),
+                        "recording_index": int(recording["recording_index"]),
+                        "nwb_file_name": str(recording["nwb_file_name"]),
+                        "interval_list_name": str(
+                            recording["interval_list_name"]
+                        ),
+                        "recording_id": str(recording["recording_id"]),
+                        "session_start_time": str(
+                            recording["session_start_time"]
+                        ),
+                        "start_sample": int(recording["start_sample"]),
+                        "end_sample": int(recording["end_sample"]),
+                    }
+                    for plan in input_plan
+                    for recording in plan["recordings"]
                 ],
+                UNITMATCH_INPUT_RECORDING_COLUMNS,
             ),
         ]
 
@@ -1146,20 +1334,9 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         try:
-            if len(member_plan) < 2:
-                # Degenerate single-session case: no cross-session pairs, no
-                # matcher / bundle extraction (needs no matcher backend).
-                logger.warning(
-                    "UnitMatch.make: session group "
-                    f"({anchor_nwb_file_name}) has a single member; writing "
-                    "zero pairs."
-                )
-                oriented_pairs: list[dict] = []
-                runtime_s = 0.0
-            else:
-                oriented_pairs, runtime_s = self._extract_and_match(
-                    member_plan, matcher_name, params, job_kwargs
-                )
+            oriented_pairs, runtime_s = self._extract_and_match(
+                input_plan, matcher_name, params, job_kwargs
+            )
             pairs_object_id = write_pairs_table(
                 abs_path, oriented_pairs, provenance_tables=provenance_tables
             )
@@ -1250,26 +1427,27 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             )
 
     @staticmethod
-    def _extract_and_match(member_plan, matcher_name, params, job_kwargs):
-        """Extract per-session bundles, run the matcher, canonicalize the pairs.
+    def _extract_and_match(input_plan, matcher_name, params, job_kwargs):
+        """Extract per-input bundles, run the matcher, canonicalize the pairs.
 
         Returns ``(oriented_pairs, runtime_s)``. The wrapper extracts dense
-        split-half waveform bundles from each member's curated, matchable
+        split-half waveform bundles from each input's curated, matchable
         sorting + recording (resolving ``MatcherParameters.job_kwargs`` into the
-        analyzer compute calls) and feeds the matcher self-contained directories;
-        the matcher never sees a recording, analyzer, or Spyglass key.
+        analyzer compute calls) and feeds the matcher self-contained directories
+        in ``input_index`` order, which is chronological; the matcher never sees
+        a recording, analyzer, or Spyglass key.
 
         A matchable unit with fewer than two sampled spikes with full waveform
-        support is left out of its member's bundle, so it gets no match pair;
-        one warning per member names those units. They stay in the frozen
+        support is left out of its input's bundle, so it gets no match pair;
+        one warning per input names those units. They stay in the frozen
         matchable universe (``make_insert`` writes ``MatchableUnit`` from the
         plan, not the bundles) and become unmatched tracked units.
 
         Raises
         ------
         NoMatchableUnitsError
-            Every matchable unit of a member was left out of its bundle; the
-            message names the member.
+            Every matchable unit of an input was left out of its bundle; the
+            message names the input.
         """
         import tempfile
         from pathlib import Path
@@ -1277,7 +1455,6 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         from spyglass.settings import temp_dir as spyglass_temp_dir
         from spyglass.spikesorting.v2._matcher_graph import (
             canonicalize_match_pairs,
-            chronological_member_order,
         )
         from spyglass.spikesorting.v2._source_resolution import (
             read_persisted_traces,
@@ -1293,24 +1470,28 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
-        def _member_label(plan):
+        def _input_description(plan):
+            nwb_file_names = sorted(
+                {recording["nwb_file_name"] for recording in plan["recordings"]}
+            )
             return (
-                f"member_index {plan['member_index']} "
-                f"({plan['nwb_file_name']}, "
-                f"sorting_id={plan['sorting_id']}, "
-                f"curation_id={plan['curation_id']})"
+                f"input_index {plan['input_index']} "
+                f"(sorting_id={plan['sorting_id']}, "
+                f"curation_id={plan['curation_id']}, "
+                f"nwb_file_name {nwb_file_names})"
             )
 
         resolved_job_kwargs = _resolved_job_kwargs(job_kwargs)
-        member_index_by_curation = {
-            (plan["sorting_id"], plan["curation_id"]): plan["member_index"]
-            for plan in member_plan
+        input_index_by_curation = {
+            (plan["sorting_id"], plan["curation_id"]): plan["input_index"]
+            for plan in input_plan
         }
-        # Feed the matcher in CHRONOLOGICAL order: UnitMatch's drift correction
-        # aligns each session to the previous one, so an out-of-chronology order
-        # would mis-align drift. Pair orientation is independent of feed order --
-        # canonicalize_match_pairs re-orients by member_index below.
-        ordered_plan = chronological_member_order(member_plan)
+        # Feed the matcher in input_index order, the chronological order frozen
+        # at selection: UnitMatch's drift correction aligns each session to the
+        # previous one, so an out-of-chronology order would mis-align drift.
+        # Pair orientation (side a = lower input_index) is applied by
+        # canonicalize_match_pairs below.
+        ordered_plan = sorted(input_plan, key=lambda plan: plan["input_index"])
         with tempfile.TemporaryDirectory(
             prefix="unitmatch_", dir=spyglass_temp_dir
         ) as tmp_root:
@@ -1329,7 +1510,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 )
                 full_sorting = read_stored_units(plan["units"])
                 sorting = full_sorting.select_units(plan["matchable_unit_ids"])
-                session_dir = Path(tmp_root) / f"member_{plan['member_index']}"
+                session_dir = Path(tmp_root) / f"input_{plan['input_index']}"
                 # The bundle window / subsample / seed come from the named,
                 # identity-bearing MatcherParameters params blob -- NOT silent
                 # extract function defaults -- so the settings that produced each
@@ -1357,16 +1538,16 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     )
                 except NoMatchableUnitsError as exc:
                     raise NoMatchableUnitsError(
-                        f"UnitMatch.make: {_member_label(plan)} has no unit "
-                        "that can enter a UnitMatch bundle -- every matchable "
-                        "unit had fewer than two sampled spikes with full "
-                        "waveform support, so none has two cross-validation "
-                        "halves. Re-curate so a unit with more spikes "
-                        "survives, or drop the member from the SessionGroup."
+                        f"UnitMatch.make: {_input_description(plan)} has no "
+                        "unit that can enter a UnitMatch bundle -- every "
+                        "matchable unit had fewer than two sampled spikes with "
+                        "full waveform support, so none has two "
+                        "cross-validation halves. Re-curate so a unit with more "
+                        "spikes survives, or drop the input from the selection."
                     ) from exc
                 if excluded:
                     logger.warning(
-                        f"UnitMatch.make: {_member_label(plan)}: units "
+                        f"UnitMatch.make: {_input_description(plan)}: units "
                         f"{excluded} have fewer than two sampled spikes with "
                         "full waveform support and will have no match pairs; "
                         "they remain in the matchable universe as unmatched "
@@ -1382,14 +1563,14 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                         channel_positions_path=(
                             session_dir / "channel_positions.npy"
                         ),
-                        recording_date=plan["recording_date"],
+                        recording_date=plan["input_start_time"],
                     )
                 )
             start = time.perf_counter()
             raw_pairs = get_matcher(matcher_name).match(session_inputs, params)
             runtime_s = time.perf_counter() - start
         oriented_pairs = canonicalize_match_pairs(
-            raw_pairs, member_index_by_curation
+            raw_pairs, input_index_by_curation
         )
         return oriented_pairs, runtime_s
 
@@ -1409,7 +1590,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     """Biological-unit-level identity across sessions.
 
     One row per inferred biological unit; the ``Member`` part lists the
-    per-session ``(sorting_id, curation_id, unit_id)`` tuples that compose it.
+    per-input ``(sorting_id, curation_id, unit_id)`` tuples that compose it.
     ``make()`` seeds a graph from the complete curated-unit universe (so a unit
     the matcher emitted no pair for still surfaces as a singleton), keeps edges
     above ``tracked_unit_threshold``, and partitions the units into strict
@@ -1473,7 +1654,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
             for row in (UnitMatch.MatchableUnit & key).fetch(as_dict=True)
         ]
         # A populated UnitMatch always wrote a non-empty MatchableUnit snapshot
-        # (make_fetch rejects a member with zero matchable units), so an empty
+        # (make_fetch rejects an input with zero matchable units), so an empty
         # snapshot under an existing UnitMatch means the row predates the
         # MatchableUnit part. Fail loud rather than silently deriving zero tracked
         # units (or raising obscurely on a Pair edge outside an empty universe).
@@ -1502,17 +1683,25 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
             for pair in (UnitMatch.Pair & key).fetch(as_dict=True)
         ]
 
-        # Map each member sorting to its recording session (nwb) so
-        # n_sessions_observed counts distinct SESSIONS, not (sorting_id,
-        # curation_id) -- two sort groups of one day must not read as two
-        # sessions even if a same-session selection slipped past the
-        # insert_selection guard via a raw insert.
-        session_by_sorting = {
-            str(row["sorting_id"]): row["nwb_file_name"]
-            for row in (
-                (UnitMatchSelection.MemberCuration & key) * SessionGroup.Member
-            ).fetch("sorting_id", "nwb_file_name", as_dict=True)
-        }
+        # Map each input sorting to its recording session(s) from the frozen
+        # InputRecording rows so n_sessions_observed counts distinct SESSIONS,
+        # not (sorting_id, curation_id): a single-recording input maps to its
+        # nwb; a concatenation input to the sorted tuple of its nwb files.
+        nwb_files_by_input: dict = {}
+        for row in (UnitMatchSelection.InputRecording & key).fetch(
+            "input_index", "nwb_file_name", as_dict=True
+        ):
+            nwb_files_by_input.setdefault(int(row["input_index"]), set()).add(
+                row["nwb_file_name"]
+            )
+        session_by_sorting = {}
+        for row in (UnitMatchSelection.Input & key).fetch(
+            "input_index", "sorting_id", as_dict=True
+        ):
+            nwb_files = sorted(nwb_files_by_input[int(row["input_index"])])
+            session_by_sorting[str(row["sorting_id"])] = (
+                nwb_files[0] if len(nwb_files) == 1 else tuple(nwb_files)
+            )
 
         tracked = derive_tracked_units(
             node_universe,
@@ -1555,9 +1744,11 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         """Per-session brain regions for one tracked unit's member units.
 
         Walks each pinned ``CurationV2.Unit -> Electrode -> BrainRegion`` and
-        labels rows by their source sorting. This is the canonical per-session
-        resolver for cross-session workflows and is not subject to the concat
-        anchor-member guard (each member is a single-session sort).
+        labels rows by their matching input and constituent recording, read
+        from the frozen ``UnitMatchSelection.InputRecording`` rows. A
+        single-recording input yields one set of rows; a concatenation input
+        repeats its unit's rows once per constituent recording (the members
+        share electrode ids and regions).
 
         Parameters
         ----------
@@ -1567,23 +1758,19 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         Returns
         -------
         pandas.DataFrame
-            One row per (member unit, electrode/region), carrying the full
-            chronic-identity disambiguators resolved at this point:
-            ``unitmatch_id``, ``tracked_unit_id``, ``member_index``,
-            ``nwb_file_name``, ``recording_date``, ``sorting_id``,
-            ``curation_id``, ``unit_id``, ``region_name``. (Returning only
-            ``sorting_id``/``unit_id``/``region_name`` dropped the very
-            identifiers a cross-session caller needs to attribute each row.)
+            One row per (member unit, constituent recording, electrode/region),
+            carrying ``unitmatch_id``, ``tracked_unit_id``, ``input_index``,
+            ``nwb_file_name``, ``recording_date`` (the frozen session start),
+            ``sorting_id``, ``curation_id``, ``unit_id``, ``region_name``.
         """
         import pandas as pd
 
-        from spyglass.common.common_session import Session
         from spyglass.spikesorting.v2.utils import unit_brain_region_df
 
         columns = [
             "unitmatch_id",
             "tracked_unit_id",
-            "member_index",
+            "input_index",
             "nwb_file_name",
             "recording_date",
             "sorting_id",
@@ -1612,9 +1799,9 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
             }
             region_df = unit_brain_region_df(unit_rel, "single_session")
 
-            # member_index from the frozen matchable universe this match ran
-            # over (the canonical per-member ordering).
-            member_index = int(
+            # input_index from the frozen matchable universe this match ran
+            # over (the canonical chronological input ordering).
+            input_index = int(
                 (
                     UnitMatch.MatchableUnit
                     & {
@@ -1623,76 +1810,508 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
                         "curation_id": curation_id,
                         "unit_id": unit_id,
                     }
-                ).fetch1("member_index")
+                ).fetch1("input_index")
             )
-            # Session identity (single-session members only).
-            nwb_file_name = _curation_member_identity(sorting_id)[0]
-            recording_date = (
-                Session & {"nwb_file_name": nwb_file_name}
-            ).fetch1("session_start_time")
-
-            region_df = region_df.assign(
-                unitmatch_id=str(member["unitmatch_id"]),
-                tracked_unit_id=int(member["tracked_unit_id"]),
-                member_index=member_index,
-                nwb_file_name=nwb_file_name,
-                recording_date=recording_date,
-                sorting_id=str(sorting_id),
-                curation_id=curation_id,
+            recordings = (
+                UnitMatchSelection.InputRecording
+                & {
+                    "unitmatch_id": member["unitmatch_id"],
+                    "input_index": input_index,
+                }
+            ).fetch(
+                "nwb_file_name",
+                "session_start_time",
+                as_dict=True,
+                order_by="recording_index",
             )
-            frames.append(region_df[columns])
+            for recording in recordings:
+                frames.append(
+                    region_df.assign(
+                        unitmatch_id=str(member["unitmatch_id"]),
+                        tracked_unit_id=int(member["tracked_unit_id"]),
+                        input_index=input_index,
+                        nwb_file_name=recording["nwb_file_name"],
+                        recording_date=recording["session_start_time"],
+                        sorting_id=str(sorting_id),
+                        curation_id=curation_id,
+                    )[columns]
+                )
         if not frames:
             return pd.DataFrame(columns=columns)
         return pd.concat(frames, ignore_index=True)
 
 
-def _normalize_member_identity(
-    nwb_file_name, sort_group_id, interval_list_name, team_name
-):
-    """Comparable ``(nwb, sort_group, interval, team)`` member identity tuple."""
-    return (
-        str(nwb_file_name),
-        int(sort_group_id),
-        str(interval_list_name),
-        str(team_name),
+def _input_label(sorting_id, curation_id) -> str:
+    """Name one matching input in an error message."""
+    return f"(sorting_id={sorting_id}, curation_id={curation_id})"
+
+
+def _normalize_input_curations(curations) -> list[tuple]:
+    """``[{sorting_id, curation_id}, ...]`` -> ``[(uuid.UUID, int), ...]``.
+
+    Caller-supplied curation ids go through the lossless integer rule (a
+    fractional or boolean id is rejected, not truncated).
+    """
+    return [
+        (
+            uuid.UUID(str(curation["sorting_id"])),
+            lossless_int(curation["curation_id"], "curation_id"),
+        )
+        for curation in curations
+    ]
+
+
+def _check_input_count_and_sortings(pairs, exc_class) -> None:
+    """Reject fewer than two inputs or a sorting pinned more than once.
+
+    Parameters
+    ----------
+    pairs : list of (sorting_id, curation_id)
+        The matching inputs.
+    exc_class : type
+        Exception raised on a violation.
+    """
+    if len(pairs) < 2:
+        raise exc_class(
+            "UnitMatchSelection: cross-session matching needs at least two "
+            f"matching inputs; got {len(pairs)}: "
+            f"{[_input_label(*pair) for pair in pairs]}."
+        )
+    curations_by_sorting: dict = {}
+    for sorting_id, curation_id in pairs:
+        curations_by_sorting.setdefault(str(sorting_id), []).append(
+            int(curation_id)
+        )
+    repeated = {
+        sorting_id: curation_ids
+        for sorting_id, curation_ids in curations_by_sorting.items()
+        if len(curation_ids) > 1
+    }
+    if repeated:
+        detail = "; ".join(
+            f"sorting_id={sorting_id}: curation_id {curation_ids}"
+            for sorting_id, curation_ids in sorted(repeated.items())
+        )
+        raise exc_class(
+            "UnitMatchSelection: each sorting may be matched through one "
+            "curation generation only, but these sortings are pinned more "
+            f"than once -- {detail}. Pick one curation per sorting."
+        )
+
+
+def _check_input_curation(sorting_id, curation_id, exc_class) -> None:
+    """Reject a missing curation or one with unapplied proposed merges."""
+    key = {"sorting_id": sorting_id, "curation_id": curation_id}
+    if not (CurationV2 & key):
+        raise exc_class(
+            f"UnitMatchSelection: input {_input_label(sorting_id, curation_id)} "
+            "pins a curation that does not exist."
+        )
+    # Matching UNMERGED units across sessions is unambiguously wrong -- a
+    # curation created with apply_merge=False (proposed merges recorded but
+    # not applied) would feed oversplit units into the matcher.
+    if CurationV2.has_unapplied_proposed_merges(key):
+        raise exc_class(
+            f"UnitMatchSelection: input {_input_label(sorting_id, curation_id)} "
+            "pins a curation with proposed merges that are NOT applied "
+            "(apply_merge=False); matching unmerged (oversplit) units across "
+            "sessions is wrong. Apply or drop the proposed merges first "
+            "(CurationV2.insert_curation(..., apply_merge=True)) before adding "
+            "the curation to a UnitMatch selection."
+        )
+
+
+def _resolve_match_input(sorting_id, curation_id, exc_class) -> dict:
+    """Resolve one matching input's pinned generation, source and recordings.
+
+    Database reads only (no trace file is opened and ``Session`` is not
+    read). A single-recording sort resolves to its one ``Recording``; a
+    concatenation sort resolves to its frozen members
+    (``ConcatenatedRecordingSelection.MemberSnapshot``) in member order, each
+    with its frames in the concatenation (``ConcatenatedRecording.MemberBoundary``:
+    the cumulative exclusive ``end_sample``, a member starting where the
+    previous one ended) and its kept intervals on its own clock
+    (``member_valid_times``). A single recording's frames and kept intervals
+    need its persisted traces and are added by :func:`_recording_n_samples` /
+    :func:`_recording_valid_times`.
+
+    Parameters
+    ----------
+    sorting_id : uuid.UUID
+    curation_id : int
+    exc_class : type
+        Exception raised when the concatenation's boundaries do not match its
+        frozen members.
+
+    Returns
+    -------
+    dict
+        ``sorting_id``, ``curation_id``, ``curation_uuid``, ``source_kind``
+        (the ``SortingSelection`` source kind), ``source_id``,
+        ``motion_corrected_recording_id`` (or ``None``),
+        ``artifact_detection_id`` (the sort's pinned detection, or ``None``),
+        and ``recordings``: one dict per constituent recording with
+        ``recording_index``, ``nwb_file_name``, ``sort_group_id``,
+        ``interval_list_name``, ``recording_id``, ``recording_content_hash``
+        and, for a concatenation member, ``start_sample``, ``end_sample`` and
+        ``valid_times``.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    curation_uuid = (
+        CurationV2 & {"sorting_id": sorting_id, "curation_id": curation_id}
+    ).fetch1("curation_uuid")
+    source = SortingSelection.resolve_effective_source(
+        {"sorting_id": sorting_id}
+    )
+    lineage = source.lineage
+    if lineage.kind == "recording":
+        source_id = lineage.key["recording_id"]
+        nwb_file_name, sort_group_id, interval_list_name = (
+            RecordingSelection & {"recording_id": source_id}
+        ).fetch1("nwb_file_name", "sort_group_id", "interval_list_name")
+        recordings = [
+            {
+                "recording_index": 0,
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": int(sort_group_id),
+                "interval_list_name": interval_list_name,
+                "recording_id": source_id,
+                "recording_content_hash": str(
+                    (Recording & {"recording_id": source_id}).fetch1(
+                        "content_hash"
+                    )
+                ),
+            }
+        ]
+    else:
+        source_id = lineage.key["concat_recording_id"]
+        concat_key = {"concat_recording_id": source_id}
+        snapshot = (
+            ConcatenatedRecordingSelection.MemberSnapshot & concat_key
+        ).fetch(as_dict=True, order_by="member_index")
+        boundaries = (ConcatenatedRecording.MemberBoundary & concat_key).fetch(
+            as_dict=True, order_by="member_index"
+        )
+        if [int(row["member_index"]) for row in snapshot] != [
+            int(row["member_index"]) for row in boundaries
+        ]:
+            raise exc_class(
+                "UnitMatchSelection: concatenation "
+                f"{source_id} of input {_input_label(sorting_id, curation_id)} "
+                "has MemberBoundary rows that do not match its frozen members."
+            )
+        recordings = []
+        start_sample = 0
+        for member, boundary in zip(snapshot, boundaries, strict=True):
+            end_sample = int(boundary["end_sample"])
+            recordings.append(
+                {
+                    "recording_index": int(member["member_index"]),
+                    "nwb_file_name": member["nwb_file_name"],
+                    "sort_group_id": int(member["sort_group_id"]),
+                    "interval_list_name": member["interval_list_name"],
+                    "recording_id": member["recording_id"],
+                    "recording_content_hash": str(
+                        member["recording_content_hash"]
+                    ),
+                    "start_sample": start_sample,
+                    "end_sample": end_sample,
+                    "valid_times": np.asarray(
+                        boundary["member_valid_times"], dtype=np.float64
+                    ).reshape(-1, 2),
+                }
+            )
+            start_sample = end_sample
+    return {
+        "sorting_id": sorting_id,
+        "curation_id": int(curation_id),
+        "curation_uuid": curation_uuid,
+        "source_kind": lineage.kind,
+        "source_id": source_id,
+        "motion_corrected_recording_id": source.traces.key.get(
+            "motion_corrected_recording_id"
+        ),
+        "artifact_detection_id": lineage.artifact_detection_id,
+        "recordings": recordings,
+    }
+
+
+def _session_start_times(nwb_file_names) -> dict:
+    """``{nwb_file_name: Session.session_start_time}`` in one query."""
+    if not nwb_file_names:
+        return {}
+    rows = (
+        Session & [{"nwb_file_name": name} for name in nwb_file_names]
+    ).fetch("nwb_file_name", "session_start_time", as_dict=True)
+    return {row["nwb_file_name"]: row["session_start_time"] for row in rows}
+
+
+def _recording_n_samples(recording_id) -> int:
+    """Frame count of a single recording's persisted traces.
+
+    A sort of the recording, or of its motion correction (same frames), sees
+    frames ``[0, n_samples)``.
+    """
+    from spyglass.spikesorting.v2.recording import Recording
+
+    return int(
+        Recording()
+        .get_recording({"recording_id": recording_id})
+        .get_num_samples()
     )
 
 
-def _curation_member_identity(sorting_id, *, exc_class=ValueError):
-    """Resolve a single-session curation's owning member identity.
+def _recording_valid_times(recording_id, nwb_file_name, artifact_detection_id):
+    """Kept intervals of a single recording on its own clock, in seconds.
 
-    Walks ``SortingSelection.resolve_source -> RecordingSelection`` to recover
-    the ``(nwb_file_name, sort_group_id, interval_list_name, team_name)`` the
-    curation was sorted from -- the tuple a ``SessionGroup.Member`` row carries.
-    Per-member pinning supports single-session sorts only; concat-backed sorts
-    are out of scope (a concat sort has one curation for the whole
-    concatenation, not one per member). ``exc_class`` is the exception to raise
-    for a concat-backed sort -- the caller passes ``UnitMatchSelectionIntegrityError``
-    so the concat rejection matches the type of the other member-validation
-    failures (it defaults to ``ValueError`` for standalone use).
+    The same intervals the sort records as its observation times
+    (``Sorting.make_fetch`` / ``_units_nwb``): the artifact-removed valid
+    times when the sort pins an artifact detection, else the recorded chunks
+    of the persisted traces (gaps between disjoint intervals kept) -- the
+    rule ``ConcatenatedRecording`` uses for ``member_valid_times``.
+
+    Returns
+    -------
+    numpy.ndarray, shape (n_intervals, 2)
+    """
+    import numpy as np
+
+    if artifact_detection_id is not None:
+        from spyglass.spikesorting.v2._artifact_intervals import (
+            read_recording_artifact_valid_times,
+        )
+
+        valid_times = read_recording_artifact_valid_times(
+            artifact_detection_id,
+            nwb_file_name,
+            caller="UnitMatchSelection.insert_inputs",
+        )
+    else:
+        from spyglass.spikesorting.v2._units_nwb import (
+            _base_intervals_from_recording,
+        )
+        from spyglass.spikesorting.v2.recording import Recording
+
+        recording = Recording().get_recording({"recording_id": recording_id})
+        valid_times = _base_intervals_from_recording(
+            recording, recording.get_sampling_frequency()
+        )
+    return np.asarray(valid_times, dtype=np.float64).reshape(-1, 2)
+
+
+def _check_input_sessions(inputs, exc_class) -> None:
+    """Reject a multi-day concatenation input or inputs sharing a session.
+
+    Parameters
+    ----------
+    inputs : list of dict
+        Each with ``sorting_id``, ``curation_id``, ``source_kind`` and
+        ``recordings`` (``nwb_file_name``, ``session_start_time``).
+    exc_class : type
+        Exception raised for a multi-day concatenation input. Shared
+        sessions raise ``SameSessionMatchError``.
+    """
+    from spyglass.spikesorting.v2._matcher_graph import (
+        assert_disjoint_input_sessions,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        distinct_recording_dates,
+    )
+
+    for item in inputs:
+        if item["source_kind"] == "recording":
+            continue
+        dates = distinct_recording_dates(
+            recording["session_start_time"] for recording in item["recordings"]
+        )
+        if len(dates) > 1:
+            raise exc_class(
+                "UnitMatchSelection: concatenation input "
+                f"{_input_label(item['sorting_id'], item['curation_id'])} "
+                f"spans {len(dates)} recording dates ({dates}); a matching "
+                "input must lie within one day. Match the days as separate "
+                "inputs instead."
+            )
+    assert_disjoint_input_sessions(
+        {
+            _input_label(item["sorting_id"], item["curation_id"]): [
+                recording["nwb_file_name"] for recording in item["recordings"]
+            ]
+            for item in inputs
+        }
+    )
+
+
+def _input_part_rows(ordered) -> tuple[list[dict], list[dict]]:
+    """Build the ``Input`` / ``InputRecording`` part rows (without the PK).
+
+    Parameters
+    ----------
+    ordered : list of dict
+        Resolved inputs carrying ``input_index`` and ``input_start_time``;
+        each recording carries ``session_start_time``, ``start_sample``,
+        ``end_sample`` and ``valid_times`` (``None`` until read).
+
+    Returns
+    -------
+    tuple of (list of dict, list of dict)
+    """
+    input_rows = []
+    recording_rows = []
+    for item in ordered:
+        input_rows.append(
+            {
+                "input_index": item["input_index"],
+                "sorting_id": item["sorting_id"],
+                "curation_id": item["curation_id"],
+                "curation_uuid": item["curation_uuid"],
+                "source_kind": item["source_kind"],
+                "source_id": item["source_id"],
+                "motion_corrected_recording_id": item[
+                    "motion_corrected_recording_id"
+                ],
+                "input_start_time": item["input_start_time"],
+            }
+        )
+        for recording in item["recordings"]:
+            recording_rows.append(
+                {
+                    "input_index": item["input_index"],
+                    "recording_index": recording["recording_index"],
+                    "nwb_file_name": recording["nwb_file_name"],
+                    "sort_group_id": recording["sort_group_id"],
+                    "interval_list_name": recording["interval_list_name"],
+                    "recording_id": recording["recording_id"],
+                    "recording_content_hash": recording[
+                        "recording_content_hash"
+                    ],
+                    "session_start_time": recording["session_start_time"],
+                    "start_sample": recording["start_sample"],
+                    "end_sample": recording["end_sample"],
+                    "valid_times": recording.get("valid_times"),
+                }
+            )
+    return input_rows, recording_rows
+
+
+def _snapshot_mismatches(input_row, recording_rows, live) -> list[str]:
+    """Compare an input's frozen rows with its live resolution.
+
+    Parameters
+    ----------
+    input_row : dict
+        The frozen ``UnitMatchSelection.Input`` row.
+    recording_rows : list of dict
+        Its frozen ``InputRecording`` rows in ``recording_index`` order.
+    live : dict
+        :func:`_resolve_match_input` for the same curation now.
+
+    Returns
+    -------
+    list of str
+        One message per differing field; empty when the live state matches.
+    """
+    import numpy as np
+
+    def _text(value):
+        return None if value is None else str(value)
+
+    mismatches = []
+    for field in (
+        "curation_uuid",
+        "source_kind",
+        "source_id",
+        "motion_corrected_recording_id",
+    ):
+        if _text(input_row[field]) != _text(live[field]):
+            mismatches.append(
+                f"{field} frozen {_text(input_row[field])}, now "
+                f"{_text(live[field])}"
+            )
+    frozen_indexes = [int(row["recording_index"]) for row in recording_rows]
+    live_indexes = [
+        int(recording["recording_index"]) for recording in live["recordings"]
+    ]
+    if frozen_indexes != live_indexes:
+        mismatches.append(
+            f"recordings frozen {frozen_indexes}, now {live_indexes}"
+        )
+        return mismatches
+    fields = [
+        "nwb_file_name",
+        "sort_group_id",
+        "interval_list_name",
+        "recording_id",
+        "recording_content_hash",
+    ]
+    if live["source_kind"] != "recording":
+        fields += ["start_sample", "end_sample"]
+    for frozen, current in zip(recording_rows, live["recordings"], strict=True):
+        for field in fields:
+            if _text(frozen[field]) != _text(current[field]):
+                mismatches.append(
+                    f"recording {frozen['recording_index']} {field} frozen "
+                    f"{_text(frozen[field])}, now {_text(current[field])}"
+                )
+        if live["source_kind"] != "recording" and not np.array_equal(
+            np.asarray(frozen["valid_times"], dtype=np.float64).reshape(-1, 2),
+            current["valid_times"],
+        ):
+            mismatches.append(
+                f"recording {frozen['recording_index']} valid_times changed"
+            )
+    return mismatches
+
+
+def _input_anchor_sort_group(sorting_id) -> tuple[str, int]:
+    """``(nwb_file_name, sort_group_id)`` of an input's first recording.
+
+    The recording of a single-recording sort, or the first member of a
+    concatenation sort.
     """
     from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     source = SortingSelection.resolve_source({"sorting_id": sorting_id})
-    if source.kind != "recording":
-        raise exc_class(
-            f"UnitMatchSelection: sorting_id {sorting_id} is concat-backed; "
-            "per-member curation pinning supports single-session sorts only. "
-            "Concat identity matching is out of scope for this build."
+    if source.kind == "recording":
+        nwb_file_name, sort_group_id = (RecordingSelection & source.key).fetch1(
+            "nwb_file_name", "sort_group_id"
         )
-    nwb_file_name, sort_group_id, interval_list_name, team_name = (
-        RecordingSelection & source.key
-    ).fetch1(
-        "nwb_file_name", "sort_group_id", "interval_list_name", "team_name"
-    )
-    return _normalize_member_identity(
-        nwb_file_name, sort_group_id, interval_list_name, team_name
-    )
+    else:
+        first = (
+            ConcatenatedRecordingSelection.MemberSnapshot & source.key
+        ).fetch(
+            "nwb_file_name",
+            "sort_group_id",
+            as_dict=True,
+            order_by="member_index",
+            limit=1,
+        )[
+            0
+        ]
+        nwb_file_name, sort_group_id = (
+            first["nwb_file_name"],
+            first["sort_group_id"],
+        )
+    return str(nwb_file_name), int(sort_group_id)
 
 
 def _member_waveform_traces(traces) -> dict:
-    """Name the traces a member's matcher waveforms are extracted from.
+    """Name the traces an input's matcher waveforms are extracted from.
 
     The bundle is extracted from the sort's effective traces
     (``SortingSelection.resolve_effective_source``), the traces
@@ -1704,7 +2323,7 @@ def _member_waveform_traces(traces) -> dict:
     Parameters
     ----------
     traces : EffectiveTraces
-        The member sort's effective traces.
+        The input sort's effective traces.
 
     Returns
     -------
@@ -1722,7 +2341,7 @@ def _member_waveform_traces(traces) -> dict:
 
 
 def _member_match_files(curation_key: dict, source) -> dict:
-    """Resolve the files a member's bundle is read from, for a DB-free read.
+    """Resolve the files an input's bundle is read from, for a DB-free read.
 
     The traces file is rebuilt if missing (the self-heal
     ``CurationV2.get_recording`` performs), and the curated units NWB is
@@ -1732,9 +2351,9 @@ def _member_match_files(curation_key: dict, source) -> dict:
     Parameters
     ----------
     curation_key : dict
-        ``{"sorting_id", "curation_id"}`` of the member's pinned curation.
+        ``{"sorting_id", "curation_id"}`` of the input's pinned curation.
     source : EffectiveSource
-        The member sort's ``SortingSelection.resolve_effective_source``.
+        The input sort's ``SortingSelection.resolve_effective_source``.
 
     Returns
     -------
@@ -1771,24 +2390,26 @@ def normalize_curation_choices(curation_choices) -> dict[int, tuple]:
     }
 
 
-def _validate_member_curations(members, choices_by_member, exc_class):
-    """Validate per-member curation coverage + ownership.
+def _validate_member_curations(members, choices_by_member) -> None:
+    """Validate per-member curation coverage + ownership for a group.
 
-    Raises ``exc_class`` (``ValueError`` from ``insert_selection``;
-    ``UnitMatchSelectionIntegrityError`` from ``UnitMatch.make``) when the
-    choices do not exactly cover the group's members or when a chosen curation
-    does not belong to the member it is pinned to.
+    Raises ``ValueError`` when the choices do not exactly cover the group's
+    members, when a chosen curation does not exist, or when a chosen curation
+    is not a sort of the member's own recording (another member's sort, or a
+    concatenation sort -- pass those to ``insert_inputs``).
     """
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
     member_indices = {int(member["member_index"]) for member in members}
     chosen = set(choices_by_member)
     missing = member_indices - chosen
     extra = chosen - member_indices
     if missing or extra:
-        raise exc_class(
+        raise ValueError(
             "UnitMatchSelection: per-member curation choices must exactly cover "
             f"the group's members. Missing member_index {sorted(missing)}; "
-            f"extra member_index {sorted(extra)}. Use "
-            "UnitMatchSelection.insert_selection()."
+            f"extra member_index {sorted(extra)}."
         )
     for member in members:
         member_index = int(member["member_index"])
@@ -1796,41 +2417,42 @@ def _validate_member_curations(members, choices_by_member, exc_class):
         if not (
             CurationV2 & {"sorting_id": sorting_id, "curation_id": curation_id}
         ):
-            raise exc_class(
+            raise ValueError(
                 f"UnitMatchSelection: member_index {member_index} pins curation "
                 f"(sorting_id={sorting_id}, curation_id={curation_id}) that does "
-                "not exist. Use UnitMatchSelection.insert_selection()."
+                "not exist."
             )
-        member_identity = _normalize_member_identity(
-            member["nwb_file_name"],
-            member["sort_group_id"],
-            member["interval_list_name"],
-            member["team_name"],
+        member_identity = (
+            str(member["nwb_file_name"]),
+            int(member["sort_group_id"]),
+            str(member["interval_list_name"]),
+            str(member["team_name"]),
         )
-        curation_identity = _curation_member_identity(
-            sorting_id, exc_class=exc_class
+        source = SortingSelection.resolve_source({"sorting_id": sorting_id})
+        if source.kind != "recording":
+            raise ValueError(
+                f"UnitMatchSelection: member_index {member_index} "
+                f"({member_identity}) was pinned to curation "
+                f"(sorting_id={sorting_id}, curation_id={curation_id}), a "
+                "concatenation sort, not a sort of the member's recording. "
+                "Match concatenation sorts with "
+                "UnitMatchSelection.insert_inputs()."
+            )
+        nwb_file_name, sort_group_id, interval_list_name, team_name = (
+            RecordingSelection & source.key
+        ).fetch1(
+            "nwb_file_name", "sort_group_id", "interval_list_name", "team_name"
+        )
+        curation_identity = (
+            str(nwb_file_name),
+            int(sort_group_id),
+            str(interval_list_name),
+            str(team_name),
         )
         if curation_identity != member_identity:
-            raise exc_class(
+            raise ValueError(
                 f"UnitMatchSelection: member_index {member_index} "
                 f"({member_identity}) was pinned to a curation that belongs to "
                 f"{curation_identity}. A curation from another member cannot be "
-                "pinned here. Use UnitMatchSelection.insert_selection()."
-            )
-        # Matching UNMERGED units across sessions is unambiguously wrong --
-        # a curation created with apply_merge=False (proposed merges recorded
-        # but not applied) would feed oversplit units into the matcher. Reject
-        # at both guard sites (insert_selection and UnitMatch.make_fetch both
-        # call this validator).
-        if CurationV2.has_unapplied_proposed_merges(
-            {"sorting_id": sorting_id, "curation_id": curation_id}
-        ):
-            raise exc_class(
-                f"UnitMatchSelection: member_index {member_index} pins curation "
-                f"(sorting_id={sorting_id}, curation_id={curation_id}) with "
-                "proposed merges that are NOT applied (apply_merge=False); "
-                "matching unmerged (oversplit) units across sessions is "
-                "wrong. Apply or drop the proposed merges first "
-                "(CurationV2.insert_curation(..., apply_merge=True)) before "
-                "adding the curation to a UnitMatch selection."
+                "pinned here."
             )

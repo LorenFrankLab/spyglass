@@ -303,20 +303,18 @@ def test_sorting_id_unchanged_after_provenance_columns():
 
 def test_unitmatch_id_unchanged_after_provenance_columns():
     """The unitmatch_id derivation excludes the provenance columns -- and the
-    new bundle params enter identity via matcher_params_name, NOT the
-    deterministic payload -- so a fixed selection identity still mints the
-    pre-change id."""
+    bundle params enter identity via matcher_params_name, NOT the
+    deterministic payload -- so a fixed selection identity (matcher params +
+    input_set_hash) always mints the same id."""
     from spyglass.spikesorting.v2._selection_identity import deterministic_id
 
     identity = {
-        "session_group_owner": "team_a",
-        "session_group_name": "day1",
         "matcher_params_name": "unitmatch_default",
-        "curation_set_hash": "0" * 64,
+        "input_set_hash": "0" * 64,
     }
     assert (
         str(deterministic_id("unitmatch", identity))
-        == "9da8859b-d341-5bae-8fbb-90602d7a2a39"
+        == "f58c6220-5a92-5fc2-a5ee-e3a374e1cab7"
     )
 
 

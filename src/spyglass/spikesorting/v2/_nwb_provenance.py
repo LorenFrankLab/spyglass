@@ -40,7 +40,8 @@ PROVENANCE_SCHEMA_VERSION = 1
 RECORDING_PROVENANCE = "spyglass_v2_recording_provenance"
 SORTING_PROVENANCE = "spyglass_v2_sorting_provenance"
 UNITMATCH_PROVENANCE = "spyglass_v2_unitmatch_provenance"
-UNITMATCH_MEMBERS = "spyglass_v2_unitmatch_members"
+UNITMATCH_INPUTS = "spyglass_v2_unitmatch_inputs"
+UNITMATCH_INPUT_RECORDINGS = "spyglass_v2_unitmatch_input_recordings"
 CURATION_PROVENANCE = "spyglass_v2_curation_provenance"
 CURATION_MERGE_LINEAGE = "spyglass_v2_curation_merge_lineage"
 CURATION_EVALUATION_PROVENANCE = "spyglass_v2_curation_evaluation_provenance"
@@ -62,6 +63,37 @@ CONCAT_MEMBER_COLUMNS = [
     ("end_sample", int),
     ("concat_start_sample", int),
     ("concat_end_sample", int),
+]
+
+#: Columns of ``UNITMATCH_INPUTS``: one row per matching input in
+#: ``input_index`` (chronological) order, naming its pinned curation
+#: generation, its sort source, its earliest session start (UTC ISO 8601) and
+#: the traces its matcher waveforms were read from (``motion_corrected_recording_id``
+#: is empty when the input was not motion corrected).
+UNITMATCH_INPUT_COLUMNS = [
+    ("input_index", int),
+    ("sorting_id", str),
+    ("curation_id", int),
+    ("curation_uuid", str),
+    ("source_kind", str),
+    ("source_id", str),
+    ("input_start_time", str),
+    ("waveform_traces", str),
+    ("motion_corrected_recording_id", str),
+]
+
+#: Columns of ``UNITMATCH_INPUT_RECORDINGS``: one row per constituent original
+#: recording of each matching input, with its session start (UTC ISO 8601) and
+#: its frames ``[start_sample, end_sample)`` in the input sort's frame space.
+UNITMATCH_INPUT_RECORDING_COLUMNS = [
+    ("input_index", int),
+    ("recording_index", int),
+    ("nwb_file_name", str),
+    ("interval_list_name", str),
+    ("recording_id", str),
+    ("session_start_time", str),
+    ("start_sample", int),
+    ("end_sample", int),
 ]
 
 #: Columns of ``MOTION_CONTINUITY_SPANS``: each continuity span's frames

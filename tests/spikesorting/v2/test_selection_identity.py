@@ -786,12 +786,7 @@ def test_direct_master_insert_rejected_without_flag(fresh_recording_identity):
         (
             "spyglass.spikesorting.v2.unit_matching",
             "UnitMatchSelection",
-            {
-                "session_group_owner": "o",
-                "session_group_name": "g",
-                "matcher_params_name": "m",
-                "curation_set_hash": "0" * 64,
-            },
+            {"matcher_params_name": "m", "input_set_hash": "0" * 64},
         ),
         (
             "spyglass.spikesorting.v2.session_group",

@@ -1,27 +1,30 @@
 """DB-free graph logic for cross-session unit tracking.
 
-Two pure transforms the ``unit_matching`` tables delegate to so the
+Pure transforms the ``unit_matching`` tables delegate to so the
 matcher-output validation and the tracked-unit derivation are unit-testable
 without a database:
 
 - :func:`canonicalize_match_pairs` validates raw :class:`MatchPair` records
-  against the explicitly pinned per-member curations and orients each by
-  ascending ``member_index``. It rejects pairs whose curation is not pinned,
-  same-member pairs (which include self-pairs), and reversed/duplicate pairs --
+  against the explicitly pinned matching-input curations and orients each by
+  ascending ``input_index``. It rejects pairs whose curation is not pinned,
+  same-input pairs (which include self-pairs), and reversed/duplicate pairs --
   so ``(A, B)`` and ``(B, A)`` can never both be inserted into ``UnitMatch.Pair``.
+- :func:`input_set_hash` / :func:`chronological_input_order` content-address
+  and order the frozen matching inputs of a selection.
 - :func:`derive_tracked_units` seeds a graph from the full curated-unit universe,
   enforces the strict node budget, and partitions the units into tracked units
   via a greedy maximal-clique cover (each unit in exactly one tracked unit; the
   strongest overlapping clique wins), with isolated units surfacing as singletons.
 
-Neither function imports DataJoint or SpikeInterface, so the module loads without
-a database connection.
+None of them imports DataJoint or SpikeInterface, so the module loads without a
+database connection.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from itertools import combinations
 from statistics import median
 from typing import TYPE_CHECKING
@@ -34,43 +37,166 @@ if TYPE_CHECKING:
     from spyglass.spikesorting.v2.matcher_protocol import MatchPair
 
 
-def curation_set_hash(member_choices) -> str:
-    """Content-address a UnitMatch selection's per-member curation choices.
+def input_set_hash(input_rows, recording_rows) -> str:
+    """Content-address a UnitMatch selection's frozen matching inputs.
 
-    The sha256 hex digest over the canonical, ascending-``member_index``
-    ordered ``(member_index, sorting_id, curation_id)`` triples. It is the
-    ``curation_set_hash`` stored on every ``UnitMatchSelection`` master and
-    is the single source of truth for that selection's identity:
-    ``insert_selection`` calls it to MINT the hash, and ``UnitMatch.make_fetch``
-    calls it to RE-DERIVE the hash from the pinned ``MemberCuration`` rows and
-    reject a row whose stored hash disagrees with its parts (a raw-insert
-    bypass).
+    The sha256 hex digest over the inputs in ascending ``input_index`` order
+    (the frozen chronological order), each contributing its pinned curation
+    (``sorting_id``, ``curation_id``, ``curation_uuid``), its source
+    (``source_kind``, ``source_id``, ``motion_corrected_recording_id``) and,
+    per constituent recording in ``recording_index`` order, the
+    ``recording_id``, ``recording_content_hash`` and the recording's
+    ``[start_sample, end_sample)`` frames in the sort. It is the
+    ``input_set_hash`` stored on every ``UnitMatchSelection`` master and the
+    single source of truth for that selection's identity:
+    ``insert_inputs`` calls it to mint the hash from the part rows it is about
+    to insert, and both ``_find_existing_pk`` and ``UnitMatch.make_fetch``
+    call it to re-derive the hash from the stored ``Input`` /
+    ``InputRecording`` rows and reject a selection whose stored hash
+    disagrees with its parts.
 
     Parameters
     ----------
-    member_choices : iterable of (member_index, sorting_id, curation_id)
-        One entry per ``SessionGroup`` member. ``sorting_id`` may be a
-        ``uuid.UUID`` or its ``str`` form -- both hash identically because it
-        is stringified here, so a freshly-passed str and a DB-fetched UUID
-        agree. ``member_index`` / ``curation_id`` are coerced to ``int``.
-        Order does not matter: entries are sorted by ``member_index`` first.
+    input_rows : iterable of dict
+        ``UnitMatchSelection.Input`` rows (``input_index``, ``sorting_id``,
+        ``curation_id``, ``curation_uuid``, ``source_kind``, ``source_id``,
+        ``motion_corrected_recording_id``). UUID values may be ``uuid.UUID``
+        or ``str``; both hash identically.
+    recording_rows : iterable of dict
+        ``UnitMatchSelection.InputRecording`` rows (``input_index``,
+        ``recording_index``, ``recording_id``, ``recording_content_hash``,
+        ``start_sample``, ``end_sample``). Rows whose ``input_index`` has no
+        input row do not enter the digest; the caller rejects them with
+        :func:`input_part_structure_errors`.
 
     Returns
     -------
     str
-        The 64-char sha256 hex digest, byte-compatible with the value stored
-        on existing ``UnitMatchSelection`` rows.
+        The 64-character sha256 hex digest.
     """
-    ordered = sorted(
-        (
-            [int(member_index), str(sorting_id), int(curation_id)]
-            for member_index, sorting_id, curation_id in member_choices
-        ),
-        key=lambda entry: entry[0],
-    )
+    recordings_by_input: dict[int, list] = {}
+    for row in recording_rows:
+        recordings_by_input.setdefault(int(row["input_index"]), []).append(
+            [
+                int(row["recording_index"]),
+                str(row["recording_id"]),
+                str(row["recording_content_hash"]),
+                int(row["start_sample"]),
+                int(row["end_sample"]),
+            ]
+        )
+    canonical = []
+    for row in sorted(input_rows, key=lambda r: int(r["input_index"])):
+        index = int(row["input_index"])
+        corrected_id = row.get("motion_corrected_recording_id")
+        canonical.append(
+            {
+                "input_index": index,
+                "sorting_id": str(row["sorting_id"]),
+                "curation_id": int(row["curation_id"]),
+                "curation_uuid": str(row["curation_uuid"]),
+                "source_kind": str(row["source_kind"]),
+                "source_id": str(row["source_id"]),
+                "motion_corrected_recording_id": (
+                    None if corrected_id is None else str(corrected_id)
+                ),
+                "recordings": sorted(recordings_by_input.get(index, [])),
+            }
+        )
     return hashlib.sha256(
-        json.dumps(ordered, sort_keys=True).encode("utf-8")
+        json.dumps(canonical, sort_keys=True).encode("utf-8")
     ).hexdigest()
+
+
+def input_part_structure_errors(input_rows, recording_rows) -> list[str]:
+    """Describe structural defects of a selection's ``Input`` parts.
+
+    A selection written by ``insert_inputs`` numbers its inputs ``0..n-1``,
+    gives every input at least one constituent recording numbered
+    ``0..k-1``, and has no recording row without an input. A raw insert can
+    break any of these; the hash alone cannot see a recording row whose input
+    is missing, so the selection boundary and ``UnitMatch.make_fetch`` check
+    the structure explicitly.
+
+    Parameters
+    ----------
+    input_rows : iterable of dict
+        ``UnitMatchSelection.Input`` rows (only ``input_index`` is read).
+    recording_rows : iterable of dict
+        ``UnitMatchSelection.InputRecording`` rows (``input_index``,
+        ``recording_index``).
+
+    Returns
+    -------
+    list[str]
+        One message per defect; empty when the parts are well formed.
+    """
+    errors: list[str] = []
+    indexes = sorted(int(row["input_index"]) for row in input_rows)
+    if indexes != list(range(len(indexes))):
+        errors.append(
+            f"input_index values {indexes} are not 0..{len(indexes) - 1}"
+        )
+    recordings_by_input: dict[int, list[int]] = {}
+    for row in recording_rows:
+        recordings_by_input.setdefault(int(row["input_index"]), []).append(
+            int(row["recording_index"])
+        )
+    orphans = sorted(set(recordings_by_input) - set(indexes))
+    if orphans:
+        errors.append(f"recording rows for missing input_index {orphans}")
+    for index in indexes:
+        recording_indexes = sorted(recordings_by_input.get(index, []))
+        if not recording_indexes or recording_indexes != list(
+            range(len(recording_indexes))
+        ):
+            errors.append(
+                f"input_index {index} has recording_index values "
+                f"{recording_indexes}, not 0..k-1 with k >= 1"
+            )
+    return errors
+
+
+def utc_datetime(value: datetime) -> datetime:
+    """Return ``value`` as a timezone-aware UTC datetime.
+
+    DataJoint returns MySQL ``datetime`` columns naive; a naive value is
+    treated as UTC, the convention ``Session.session_start_time`` follows.
+    """
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def chronological_input_order(inputs: list[dict]) -> list[dict]:
+    """Order matching inputs chronologically, the order ``input_index`` freezes.
+
+    Sorts by ``(input_start_time, str(sorting_id), curation_id)``:
+    ``input_start_time`` is the earliest session start among an input's
+    constituent recordings, and the sorting and curation ids break ties
+    deterministically, so any caller order of the same inputs yields the same
+    order. UnitMatchPy aligns each session's drift to the previous session in
+    feed order, so the matcher is fed in this order.
+
+    Parameters
+    ----------
+    inputs : list of dict
+        Each carrying ``input_start_time`` (``datetime``; naive is read as
+        UTC), ``sorting_id`` and ``curation_id``.
+
+    Returns
+    -------
+    list of dict
+        The same dicts, chronologically ordered.
+    """
+    return sorted(
+        inputs,
+        key=lambda item: (
+            utc_datetime(item["input_start_time"]),
+            str(item["sorting_id"]),
+            int(item["curation_id"]),
+        ),
+    )
 
 
 #: The only tracked-unit policy shipped today (greedy maximal-clique cover).
@@ -82,39 +208,24 @@ STRICT_POLICY = "strict"
 CuratedUnit = tuple  # (sorting_id: str, curation_id: int, unit_id: int)
 
 
-def chronological_member_order(member_plan: list[dict]) -> list[dict]:
-    """Order member-plan dicts chronologically for the matcher.
-
-    Sorts by ``(recording_date, member_index)`` so a sequential matcher (e.g.
-    UnitMatch's drift correction, which aligns each session to the previous one)
-    sees sessions in recording order; ``member_index`` breaks ties for same-day
-    members. ``recording_date`` is the UTC ISO 8601 string resolved upstream, so
-    plain lexicographic order is chronological.
-    """
-    return sorted(
-        member_plan,
-        key=lambda plan: (plan["recording_date"], plan["member_index"]),
-    )
-
-
 def canonicalize_match_pairs(
     pairs: "list[MatchPair]",
-    member_index_by_curation: "dict[tuple[str, int], int]",
+    input_index_by_curation: "dict[tuple[str, int], int]",
 ) -> list[dict]:
     """Validate and canonically orient raw matcher output before insertion.
 
     Each :class:`MatchPair` carries ``(sorting_id, curation_id)`` per side; this
-    maps both sides to their pinned ``member_index`` (via
-    ``member_index_by_curation``) and:
+    maps both sides to their pinned matching input's ``input_index`` (via
+    ``input_index_by_curation``) and:
 
-    - rejects a side whose ``(sorting_id, curation_id)`` is not one of the pinned
-      ``UnitMatchSelection.MemberCuration`` rows (the matcher returned a key it
-      was never fed);
-    - rejects a pair whose two sides share a ``member_index`` (a same-member
-      pair, which includes self-pairs) -- cross-session matching pairs must span
-      two distinct members;
-    - orients each pair so side A is the lower ``member_index``, then rejects a
-      second pair that orients to the same ``(member_a, unit_a, member_b,
+    - rejects a side whose ``(sorting_id, curation_id)`` is not one of the
+      pinned ``UnitMatchSelection.Input`` curations (the matcher returned a key
+      it was never fed);
+    - rejects a pair whose two sides share an ``input_index`` (a same-input
+      pair, which includes self-pairs) -- match pairs must span two distinct
+      matching inputs;
+    - orients each pair so side A is the lower ``input_index``, then rejects a
+      second pair that orients to the same ``(input_a, unit_a, input_b,
       unit_b)`` identity (a reversed duplicate), so ``UnitMatch.Pair`` cannot
       hold both orientations.
 
@@ -122,8 +233,8 @@ def canonicalize_match_pairs(
     ----------
     pairs : list[MatchPair]
         Raw matcher output.
-    member_index_by_curation : dict[(str, int), int]
-        ``(sorting_id, curation_id) -> member_index`` for the pinned curations.
+    input_index_by_curation : dict[(str, int), int]
+        ``(sorting_id, curation_id) -> input_index`` for the pinned curations.
 
     Returns
     -------
@@ -131,12 +242,12 @@ def canonicalize_match_pairs(
         Oriented pair dicts (deterministically ordered) with the
         ``session_a_*`` / ``session_b_*`` / ``unit_*`` / ``match_probability`` /
         ``drift_estimate_um`` / ``fdr_estimate`` keys matching the
-        ``UnitMatch.Pair`` projection, plus ``member_a`` / ``member_b`` indices.
+        ``UnitMatch.Pair`` projection, plus ``input_a`` / ``input_b`` indices.
 
     Raises
     ------
     ValueError
-        On an unpinned curation, a same-member pair, or a reversed duplicate.
+        On an unpinned curation, a same-input pair, or a reversed duplicate.
     """
     oriented: dict[tuple, dict] = {}
     for pair in pairs:
@@ -149,32 +260,31 @@ def canonicalize_match_pairs(
             int(pair.session_b_curation_id),
         )
         for side in (side_a, side_b):
-            if side not in member_index_by_curation:
+            if side not in input_index_by_curation:
                 raise ValueError(
                     "UnitMatch.make: matcher returned a pair referencing "
                     f"curation {side} that is not one of the pinned "
-                    "UnitMatchSelection.MemberCuration rows "
-                    f"{sorted(member_index_by_curation)}. The matcher emitted a "
+                    "UnitMatchSelection.Input curations "
+                    f"{sorted(input_index_by_curation)}. The matcher emitted a "
                     "key it was never fed; this is a backend contract violation."
                 )
-        member_a = member_index_by_curation[side_a]
-        member_b = member_index_by_curation[side_b]
-        if member_a == member_b:
+        input_a = input_index_by_curation[side_a]
+        input_b = input_index_by_curation[side_b]
+        if input_a == input_b:
             raise ValueError(
-                "UnitMatch.make: matcher returned a same-member pair (both "
-                f"sides are member_index {member_a}; this includes self-pairs). "
-                "Cross-session match pairs must span two distinct "
-                "SessionGroup.Member rows."
+                "UnitMatch.make: matcher returned a same-input pair (both "
+                f"sides are input_index {input_a}; this includes self-pairs). "
+                "Match pairs must span two distinct matching inputs."
             )
-        # Orient so side A is the lower member_index (canonical orientation).
-        if member_a <= member_b:
+        # Orient so side A is the lower input_index (canonical orientation).
+        if input_a <= input_b:
             low, low_unit, high, high_unit = (
                 side_a,
                 int(pair.unit_a_id),
                 side_b,
                 int(pair.unit_b_id),
             )
-            low_member, high_member = member_a, member_b
+            low_input, high_input = input_a, input_b
         else:
             low, low_unit, high, high_unit = (
                 side_b,
@@ -182,12 +292,12 @@ def canonicalize_match_pairs(
                 side_a,
                 int(pair.unit_a_id),
             )
-            low_member, high_member = member_b, member_a
-        identity = (low_member, low_unit, high_member, high_unit)
+            low_input, high_input = input_b, input_a
+        identity = (low_input, low_unit, high_input, high_unit)
         if identity in oriented:
             raise ValueError(
                 "UnitMatch.make: matcher returned a reversed/duplicate pair for "
-                f"member units {identity}; (A, B) and (B, A) cannot both be "
+                f"input units {identity}; (A, B) and (B, A) cannot both be "
                 "inserted. The backend must emit each unordered pair once."
             )
         fdr = pair.fdr_estimate
@@ -201,58 +311,56 @@ def canonicalize_match_pairs(
             "match_probability": float(pair.match_probability),
             "drift_estimate_um": float(pair.drift_estimate_um),
             "fdr_estimate": None if fdr is None else float(fdr),
-            "member_a": low_member,
-            "member_b": high_member,
+            "input_a": low_input,
+            "input_b": high_input,
         }
     return [oriented[identity] for identity in sorted(oriented)]
 
 
-def assert_distinct_member_sessions(members) -> None:
-    """Reject a UnitMatch selection with two members from one recording session.
+def assert_disjoint_input_sessions(nwb_files_by_input: dict) -> None:
+    """Reject matching inputs that share a recording session.
 
-    Cross-session matching tracks a unit ACROSS recording sessions, so every
-    member must come from a distinct session (``nwb_file_name``). A
-    ``SessionGroup`` may legitimately carry several members from one NWB for
-    *concatenation* (different intervals / sort groups), but matching within a
-    single session is biologically degenerate and would be reported as a
-    multi-session identity. Called by ``UnitMatchSelection.insert_selection``
-    before any row is minted.
+    Cross-session matching tracks a unit ACROSS recording sessions, so no two
+    matching inputs may draw on the same session (``nwb_file_name``). This
+    rejects two single-recording sorts of one nwb, a concatenation together
+    with a sort of one of its own members, two concatenations sharing a
+    constituent session, and any overlap in acquisition, since two spans of
+    one acquisition share its nwb. Matching within one session is out of
+    scope.
 
     Parameters
     ----------
-    members : iterable of dict
-        ``SessionGroup.Member`` rows, each carrying ``member_index`` and
-        ``nwb_file_name``.
+    nwb_files_by_input : dict
+        ``{input_label: iterable of nwb_file_name}``; the label names the
+        input in the error (e.g. its ``(sorting_id, curation_id)``).
 
     Raises
     ------
     SameSessionMatchError
-        If two or more members share an ``nwb_file_name``.
+        If an ``nwb_file_name`` belongs to two or more inputs.
     """
     from spyglass.spikesorting.v2.exceptions import SameSessionMatchError
 
-    by_session: dict = {}
-    for member in members:
-        by_session.setdefault(member["nwb_file_name"], []).append(
-            int(member["member_index"])
-        )
+    inputs_by_session: dict = {}
+    for label, nwb_file_names in nwb_files_by_input.items():
+        for nwb_file_name in set(nwb_file_names):
+            inputs_by_session.setdefault(nwb_file_name, []).append(label)
     collisions = {
-        nwb: sorted(indices)
-        for nwb, indices in by_session.items()
-        if len(indices) > 1
+        nwb: labels
+        for nwb, labels in inputs_by_session.items()
+        if len(labels) > 1
     }
     if collisions:
         detail = "; ".join(
-            f"{nwb!r}: member_index {indices}"
-            for nwb, indices in sorted(collisions.items())
+            f"{nwb!r}: inputs {labels}"
+            for nwb, labels in sorted(collisions.items())
         )
         raise SameSessionMatchError(
-            "UnitMatchSelection.insert_selection: cross-session matching "
-            "requires each member from a distinct recording session, but these "
-            f"members share the same recording session (nwb_file_name) -- "
-            f"{detail}. Same-session members are valid for "
-            "ConcatenatedRecording, not UnitMatch; build the match group from "
-            "one member per session."
+            "UnitMatchSelection: cross-session matching requires every "
+            "matching input to come from its own recording sessions, but "
+            "these inputs share the same recording session (nwb_file_name) "
+            f"-- {detail}. A concatenation already contains its members' "
+            "sessions; match it against sorts of other sessions only."
         )
 
 
@@ -341,8 +449,9 @@ def derive_tracked_units(
     policy : str, optional
         Persisted on every row. Only ``"strict"`` ships today.
     session_by_sorting : dict, optional
-        ``{sorting_id: session_key}`` (the session key is the member's
-        ``nwb_file_name``). When given, ``n_sessions_observed`` counts distinct
+        ``{sorting_id: session_key}`` (the session key is the matching
+        input's ``nwb_file_name``, or the sorted tuple of its constituent
+        ``nwb_file_name`` values for a concatenation). When given, ``n_sessions_observed`` counts distinct
         RECORDING SESSIONS, so two sortings from one nwb (different sort groups
         of the same day) count once -- a within-session match cannot inflate to
         multi-session. When ``None`` (or a sorting is absent), it falls back to

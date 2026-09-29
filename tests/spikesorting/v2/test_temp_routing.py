@@ -45,15 +45,11 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
     monkeypatch.setattr(
         tempfile, "TemporaryDirectory", _capture_dir_then_stop(captured_um)
     )
-    # Reach the temp site after the cheap pure preamble: an empty member plan
+    # Reach the temp site after the cheap pure preamble: an empty input plan
     # is enough (the loop body never runs -- the recorder aborts first).
-    monkeypatch.setattr(
-        "spyglass.spikesorting.v2._matcher_graph.chronological_member_order",
-        lambda plan: list(plan),
-    )
     with pytest.raises(_StopAfterTempDir):
         um.UnitMatch._extract_and_match(
-            member_plan=[],
+            input_plan=[],
             matcher_name="unitmatchpy",
             params={},
             job_kwargs=None,

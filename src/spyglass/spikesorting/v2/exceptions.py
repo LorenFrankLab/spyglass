@@ -385,29 +385,30 @@ class UnknownMatcherError(ValueError):
 
 
 class SameSessionMatchError(ValueError):
-    """Raise when a UnitMatch selection has two members from one recording session.
+    """Raise when two UnitMatch matching inputs share a recording session.
 
-    Cross-session matching tracks a unit ACROSS recording sessions, so every
-    member must come from a distinct session (``nwb_file_name``). A
-    ``SessionGroup`` may legitimately carry several members from one NWB for
-    *concatenation* (different intervals / sort groups), but feeding such a
-    group to ``UnitMatchSelection.insert_selection`` would match within a single
-    session and report it as a multi-session identity. Rejected at selection
-    time; message names the offending ``member_index`` / ``nwb_file_name`` pairs.
+    Cross-session matching tracks a unit ACROSS recording sessions, so no two
+    matching inputs may draw on the same session (``nwb_file_name``): not two
+    sorts of one nwb, not a concatenation together with a sort of one of its
+    members, and not two concatenations sharing a constituent session.
+    Matching within one session would be reported as a multi-session
+    identity. Rejected at selection time and again at ``UnitMatch.make``;
+    the message names the offending inputs and ``nwb_file_name`` values.
     """
 
 
 class UnitMatchSelectionIntegrityError(RuntimeError):
-    """Raise when pinned member curations do not match the session group.
+    """Raise when a match selection's frozen inputs no longer hold.
 
-    ``UnitMatch.make()`` re-validates that the
-    ``UnitMatchSelection.MemberCuration`` part rows exactly cover the parent
-    ``SessionGroup.Member`` set and that each pinned ``CurationV2`` belongs to
-    that member's session/recording path. A schema-valid but
-    provenance-invalid selection (a direct insert that bypassed
-    ``insert_selection``) raises this rather than silently matching the wrong
-    units. Message names the missing/extra/wrong ``member_index`` values and
-    points the caller at ``UnitMatchSelection.insert_selection()``.
+    ``UnitMatch.make()`` re-validates the ``UnitMatchSelection.Input`` /
+    ``InputRecording`` rows before any bundle is extracted: the parts are
+    well formed and realize the stored ``input_set_hash``, the inputs are
+    distinct sorts from disjoint sessions, each pinned ``CurationV2`` still
+    exists with the pinned ``curation_uuid``, and each input's live source
+    still matches its frozen recordings. A selection that fails (a direct
+    insert that bypassed ``insert_inputs``, a recreated curation, or changed
+    source content) raises this rather than silently matching other units.
+    The message names the offending inputs.
     """
 
 
@@ -435,13 +436,13 @@ class UnitMatchPairIntegrityError(RuntimeError):
 
     ``Pair`` FKs each endpoint to ``CurationV2.Unit`` GLOBALLY, so the schema
     only guarantees the unit exists in SOME curation -- not in the pinned
-    ``UnitMatchSelection.MemberCuration`` for this run. The canonical
+    ``UnitMatchSelection.Input`` curations for this run. The canonical
     ``make_insert`` path is safe because ``canonicalize_match_pairs`` orients and
     dedupes within the pinned, matchable set, but a raw / maintenance
     ``Pair.insert`` bypasses that. The validated ``Pair.insert`` override raises
-    this when an endpoint's ``(sorting_id, curation_id)`` is not a pinned member
-    curation, when both endpoints share one member (a unit cannot match itself
-    across sessions), when a reversed/duplicate undirected edge is re-inserted,
+    this when an endpoint's ``(sorting_id, curation_id)`` is not a pinned input
+    curation, when both endpoints pin the same curation (a unit cannot match
+    itself across sessions), when a reversed/duplicate undirected edge is re-inserted,
     or when ``match_probability`` is outside ``[0, 1]``.
     """
 

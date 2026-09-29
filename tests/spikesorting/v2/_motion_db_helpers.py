@@ -209,7 +209,7 @@ def drop_pipeline_sorts(sorting_ids) -> None:
     keys = [{"sorting_id": sid} for sid in set(sorting_ids) if sid]
     if not keys:
         return
-    pinned = (UnitMatchSelection.MemberCuration & keys).fetch("unitmatch_id")
+    pinned = (UnitMatchSelection.Input & keys).fetch("unitmatch_id")
     if len(pinned):
         (
             UnitMatchSelection & [{"unitmatch_id": u} for u in set(pinned)]

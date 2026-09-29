@@ -198,7 +198,7 @@ def test_bundle_params_reach_extract(monkeypatch):
     params = UnitMatchParamsSchema(
         ms_before=2.0, ms_after=2.0, seed=4
     ).model_dump()
-    # The member files make_fetch would resolve; the readers are stubbed.
+    # The input files make_fetch would resolve; the readers are stubbed.
     files = {
         "traces": EffectiveTraces(
             kind="recording", key={}, row={}, apply_artifact_mask=False
@@ -206,26 +206,20 @@ def test_bundle_params_reach_extract(monkeypatch):
         "traces_abs_path": "unused.nwb",
         "units": None,
     }
-    member_plan = [
+    input_plan = [
         {
-            "member_index": 0,
-            "sorting_id": "s0",
+            "input_index": index,
+            "sorting_id": f"s{index}",
             "curation_id": 0,
-            "matchable_unit_ids": [1, 2],
-            "recording_date": "2026-01-01T00:00:00+00:00",
+            "matchable_unit_ids": unit_ids,
+            "input_start_time": f"2026-01-0{index + 1}T00:00:00+00:00",
+            "recordings": [{"nwb_file_name": f"day{index}.nwb"}],
             **files,
-        },
-        {
-            "member_index": 1,
-            "sorting_id": "s1",
-            "curation_id": 0,
-            "matchable_unit_ids": [3, 4],
-            "recording_date": "2026-01-02T00:00:00+00:00",
-            **files,
-        },
+        }
+        for index, unit_ids in enumerate([[1, 2], [3, 4]])
     ]
     unit_matching.UnitMatch._extract_and_match(
-        member_plan, "unitmatch", params, {}
+        input_plan, "unitmatch", params, {}
     )
     assert captured["ms_before"] == 2.0
     assert captured["seed"] == 4

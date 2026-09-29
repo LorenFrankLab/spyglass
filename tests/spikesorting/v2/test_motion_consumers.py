@@ -268,6 +268,60 @@ def _units_readbacks(sort_key, curation, selection):
     return trains, (fetched.raw_units, fetched.curated_units)
 
 
+def _hand_input_plan(curations):
+    """A UnitMatch input plan for ``curations``, built as ``make_fetch`` does.
+
+    For driving ``UnitMatch._extract_and_match`` / ``make_compute`` directly
+    on sorts of one recording, which a selection would reject as sharing a
+    session.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2.unit_matching import (
+        _member_match_files,
+        _member_waveform_traces,
+        _resolve_match_input,
+    )
+
+    plan = []
+    for index, curation in enumerate(curations):
+        resolved = _resolve_match_input(
+            curation["sorting_id"], curation["curation_id"], ValueError
+        )
+        source = SortingSelection.resolve_effective_source(
+            {"sorting_id": curation["sorting_id"]}
+        )
+        start = f"2023-06-2{index + 2}T12:00:00+00:00"
+        plan.append(
+            {
+                "input_index": index,
+                "sorting_id": str(curation["sorting_id"]),
+                "curation_id": int(curation["curation_id"]),
+                "curation_uuid": str(resolved["curation_uuid"]),
+                "source_kind": resolved["source_kind"],
+                "source_id": str(resolved["source_id"]),
+                "input_start_time": start,
+                "recordings": [
+                    {
+                        **recording,
+                        "recording_id": str(recording["recording_id"]),
+                        "session_start_time": start,
+                        "start_sample": 0,
+                        "end_sample": 0,
+                    }
+                    for recording in resolved["recordings"]
+                ],
+                "matchable_unit_ids": [
+                    int(u)
+                    for u in CurationV2().get_matchable_unit_ids(curation)
+                ],
+                **_member_waveform_traces(source.traces),
+                **_member_match_files(curation, source),
+            }
+        )
+    return plan
+
+
 def test_all_consumers_resolve_selected_correction(
     corrected_sorts, fresh_curations, curation_evaluation_defaults, monkeypatch
 ):
@@ -307,7 +361,6 @@ def test_all_consumers_resolve_selected_correction(
     from spyglass.spikesorting.v2.unit_matching import (
         UnitMatch,
         UnitMatchSelection,
-        _member_match_files,
     )
 
     sorts = corrected_sorts
@@ -480,33 +533,16 @@ def test_all_consumers_resolve_selected_correction(
     monkeypatch.setattr(
         matcher_protocol, "get_matcher", lambda name: _NoPairs()
     )
-    member_plan = [
-        {
-            "member_index": index,
-            "sorting_id": str(curation["sorting_id"]),
-            "curation_id": int(curation["curation_id"]),
-            "recording_date": f"2023-06-2{index + 2}T12:00:00+00:00",
-            "matchable_unit_ids": [
-                int(u) for u in CurationV2().get_matchable_unit_ids(curation)
-            ],
-            **_member_match_files(
-                curation,
-                SortingSelection.resolve_effective_source(
-                    {"sorting_id": curation["sorting_id"]}
-                ),
-            ),
-        }
-        for index, curation in enumerate([root, uncorrected_root])
-    ]
+    input_plan = _hand_input_plan([root, uncorrected_root])
     pairs, _runtime = UnitMatch._extract_and_match(
-        member_plan, "unitmatch", {}, {}
+        input_plan, "unitmatch", {}, {}
     )
     assert pairs == []
     _assert_reads_corrected(
-        bundle_inputs["member_0"], sorts, "UnitMatch bundle input"
+        bundle_inputs["input_0"], sorts, "UnitMatch bundle input"
     )
     _assert_reads_source(
-        bundle_inputs["member_1"], sorts, "uncorrected UnitMatch bundle input"
+        bundle_inputs["input_1"], sorts, "uncorrected UnitMatch bundle input"
     )
 
 
@@ -628,26 +664,25 @@ def test_curation_restriction_tells_corrected_from_uncorrected(
 
 
 def test_unitmatch_records_the_waveform_traces(
-    corrected_sorts, fresh_curations
+    corrected_sorts, fresh_curations, monkeypatch
 ):
-    """A match run records, per member, whether its waveforms came from the
+    """A match run records, per input, whether its waveforms came from the
     source or from a corrected recording (and which)."""
     from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import _unitmatch_backend, matcher_protocol
     from spyglass.spikesorting.v2._nwb_provenance import (
-        UNITMATCH_MEMBERS,
+        UNITMATCH_INPUTS,
         read_long_provenance,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.session_group import SessionGroup
+    from spyglass.spikesorting.v2.recording import (
+        _unlink_staged_analysis_file,
+    )
     from spyglass.spikesorting.v2.sorting import SortingSelection
     from spyglass.spikesorting.v2.unit_matching import (
-        MatcherParameters,
         UnitMatch,
-        UnitMatchSelection,
         _member_waveform_traces,
     )
-    from tests.spikesorting.v2._ingest_helpers import configure_v2_run_inputs
 
     def _traces(sort):
         return SortingSelection.resolve_effective_source(
@@ -665,42 +700,58 @@ def test_unitmatch_records_the_waveform_traces(
         "motion_corrected_recording_id": None,
     }
 
-    # One member: UnitMatch writes its provenance without running a matcher.
-    group = {
-        "session_group_owner": MOTION_TEAM,
-        "session_group_name": "motion_consumer_solo",
-    }
-    nwb_file_name = (RecordingSelection & sorts["recording_key"]).fetch1(
-        "nwb_file_name"
+    class _NoPairs:
+        def match(self, session_inputs, params):
+            return []
+
+    def _no_bundle(session_dir, recording, sorting, **kwargs):
+        session_dir.mkdir(parents=True, exist_ok=True)
+        return []
+
+    monkeypatch.setattr(
+        _unitmatch_backend, "extract_unitmatch_bundle", _no_bundle
     )
-    MatcherParameters.insert_default()
-    root = CurationV2.insert_curation(sorting_key=sorts["corrected_sort"])
+    monkeypatch.setattr(
+        matcher_protocol, "get_matcher", lambda name: _NoPairs()
+    )
+    # Both sorts read one recording, which a selection rejects as one
+    # session, so drive make_compute on a hand-built input plan.
+    corrected_root = CurationV2.insert_curation(
+        sorting_key=sorts["corrected_sort"]
+    )
+    uncorrected_root = CurationV2.insert_curation(
+        sorting_key=sorts["uncorrected_sort"]
+    )
+    computed = UnitMatch().make_compute(
+        {"unitmatch_id": uuid.uuid4()},
+        "unitmatch",
+        {},
+        {},
+        _hand_input_plan([corrected_root, uncorrected_root]),
+        None,
+        None,
+        "unitmatch_default",
+    )
     try:
-        SessionGroup.create_group(
-            MOTION_TEAM,
-            group["session_group_name"],
-            [configure_v2_run_inputs(nwb_file_name, MOTION_TEAM)],
+        inputs = read_long_provenance(
+            AnalysisNwbfile.get_abs_path(computed.analysis_file_name),
+            UNITMATCH_INPUTS,
         )
-        selection = UnitMatchSelection.insert_selection(
-            MOTION_TEAM,
-            group["session_group_name"],
-            "unitmatch_default",
-            {0: root},
-        )
-        UnitMatch.populate(selection, reserve_jobs=False)
-        members = read_long_provenance(
-            AnalysisNwbfile.get_abs_path(
-                (UnitMatch & selection).fetch1("analysis_file_name")
-            ),
-            UNITMATCH_MEMBERS,
-        )
-        assert [
-            (m["waveform_traces"], m["motion_corrected_recording_id"])
-            for m in members
-        ] == [("motion_corrected_recording", corrected_id)]
     finally:
-        (UnitMatchSelection & group).super_delete(warn=False, safemode=False)
-        (SessionGroup & group).super_delete(warn=False, safemode=False)
+        _unlink_staged_analysis_file(
+            computed.analysis_file_name, context="waveform traces test"
+        )
+    assert [
+        (
+            m["input_index"],
+            m["waveform_traces"],
+            m["motion_corrected_recording_id"],
+        )
+        for m in inputs
+    ] == [
+        (0, "motion_corrected_recording", corrected_id),
+        (1, "recording", ""),
+    ]
 
 
 def test_make_fetch_rechecks_the_sorters_own_correction(
