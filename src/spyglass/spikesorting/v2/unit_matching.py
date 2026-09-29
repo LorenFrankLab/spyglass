@@ -1062,16 +1062,16 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         spans two days and no two inputs share a session (on the frozen
         session times), each ``input_start_time`` is its earliest frozen
         session start and ``input_index`` follows their chronological order,
-        the stored ``input_set_hash`` is the hash of the parts, and every
-        frozen ``session_start_time`` still equals its live
-        ``Session.session_start_time``. Then, per input, the pinned curation
-        must still exist with the pinned ``curation_uuid`` (a recreated
-        curation raises rather than silently re-pointing), carry no unapplied
-        proposed merges, and its live source must still match the frozen
-        recordings (source, ``recording_id``, content hash, concatenation
-        membership, frames and kept intervals; a single recording's frames
-        and kept intervals are re-read from its traces when bundles will be
-        extracted, i.e. for two or more inputs).
+        and the stored ``input_set_hash`` is the hash of the parts. Then, per
+        input, the pinned curation must still exist with the pinned
+        ``curation_uuid`` (a recreated curation raises rather than silently
+        re-pointing), carry no unapplied proposed merges, and its live source
+        must still match the frozen recordings (source, ``recording_id``,
+        content hash, concatenation membership, frames and kept intervals;
+        a single recording's frames and kept intervals are re-read from its
+        traces when bundles will be extracted, i.e. for two or more inputs),
+        and each frozen ``session_start_time`` must still equal its live
+        ``Session.session_start_time``.
 
         Only frozen values order and describe the inputs: ``Session`` is read
         only to refuse a run whose frozen session times differ from it (it
@@ -1144,30 +1144,27 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 "one input set while matching on another). Use "
                 "UnitMatchSelection.insert_inputs()."
             )
-        session_time_errors = _frozen_session_start_errors(recording_rows)
-        if session_time_errors:
-            raise exc_class(
-                f"UnitMatch.make: selection {key} has frozen session start "
-                "times that differ from the live Session rows "
-                f"({'; '.join(session_time_errors)}). The frozen times order "
-                "the inputs and decide whether a concatenation spans days, so "
-                "the run is refused rather than re-ordered. Select the inputs "
-                "again with UnitMatchSelection.insert_inputs()."
-            )
         # Bundles are extracted only for two or more inputs; only then are a
         # single recording's frames and kept intervals (which bound the
         # bundle windows) re-read from its traces and compared. A single
         # input reads no traces file.
         extracts_bundles = len(input_rows) >= 2
+        # The frozen session times order the inputs and decide whether a
+        # concatenation spans days; a live time that differs refuses the run
+        # but never re-orders it.
+        live_start_times = _session_start_times(
+            {row["nwb_file_name"] for row in recording_rows}
+        )
         for row in input_rows:
             sorting_id, curation_id = row["sorting_id"], int(row["curation_id"])
             _check_input_curation(sorting_id, curation_id, exc_class)
             live = _resolve_match_input(sorting_id, curation_id, exc_class)
             if extracts_bundles:
                 _add_single_recording_frames(live)
+            frozen_recordings = recordings_by_input[int(row["input_index"])]
             mismatches = _snapshot_mismatches(
-                row, recordings_by_input[int(row["input_index"])], live
-            )
+                row, frozen_recordings, live
+            ) + _session_start_mismatches(frozen_recordings, live_start_times)
             if mismatches:
                 raise exc_class(
                     f"UnitMatch.make: input_index {row['input_index']} "
@@ -2654,20 +2651,22 @@ def _session_start_times(nwb_file_names) -> dict:
     return {row["nwb_file_name"]: row["session_start_time"] for row in rows}
 
 
-def _frozen_session_start_errors(recording_rows) -> list[str]:
+def _session_start_mismatches(recording_rows, live_start_times) -> list[str]:
     """Describe frozen session start times that differ from ``Session``.
 
     Compares each ``UnitMatchSelection.InputRecording`` row's frozen
     ``session_start_time`` with the live ``Session.session_start_time`` of
-    its ``nwb_file_name`` (both read as UTC). Each input's
+    its ``nwb_file_name`` (both read as UTC). An input's
     ``input_start_time`` is checked separately to be the earliest of its
     frozen session times, so it is covered too.
 
     Parameters
     ----------
     recording_rows : iterable of dict
-        ``InputRecording`` rows (``input_index``, ``recording_index``,
-        ``nwb_file_name``, ``session_start_time``).
+        ``InputRecording`` rows (``recording_index``, ``nwb_file_name``,
+        ``session_start_time``).
+    live_start_times : dict
+        :func:`_session_start_times` of the rows' sessions.
 
     Returns
     -------
@@ -2677,26 +2676,19 @@ def _frozen_session_start_errors(recording_rows) -> list[str]:
     """
     from spyglass.spikesorting.v2._matcher_graph import utc_datetime
 
-    recording_rows = list(recording_rows)
-    live = _session_start_times(
-        {row["nwb_file_name"] for row in recording_rows}
-    )
-    errors = []
+    mismatches = []
     for row in recording_rows:
         name = row["nwb_file_name"]
-        label = (
-            f"input_index {row['input_index']} recording "
-            f"{row['recording_index']} ({name})"
-        )
+        label = f"recording {row['recording_index']} ({name})"
         frozen = utc_datetime(row["session_start_time"])
-        if name not in live:
-            errors.append(f"{label} has no Session row")
-        elif utc_datetime(live[name]) != frozen:
-            errors.append(
+        if name not in live_start_times:
+            mismatches.append(f"{label} has no Session row")
+        elif utc_datetime(live_start_times[name]) != frozen:
+            mismatches.append(
                 f"{label} session_start_time frozen {frozen.isoformat()}, "
-                f"now {utc_datetime(live[name]).isoformat()}"
+                f"now {utc_datetime(live_start_times[name]).isoformat()}"
             )
-    return errors
+    return mismatches
 
 
 def _add_single_recording_frames(item) -> None:
