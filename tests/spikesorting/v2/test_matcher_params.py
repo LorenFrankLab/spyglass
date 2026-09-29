@@ -159,14 +159,13 @@ def test_bundle_params_reach_extract(monkeypatch):
     """The named bundle params actually reach extract_unitmatch_bundle in the
     matcher compute path -- they are no longer silent function defaults."""
     from spyglass.spikesorting.v2 import (
-        _source_resolution,
+        _sorting_analyzer,
         _unitmatch_backend,
         _units_nwb,
         matcher_protocol,
         unit_matching,
     )
     from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
-    from spyglass.spikesorting.v2._source_resolution import EffectiveTraces
 
     captured = {}
 
@@ -182,9 +181,9 @@ def test_bundle_params_reach_extract(monkeypatch):
         _unitmatch_backend, "extract_unitmatch_bundle", fake_extract
     )
     monkeypatch.setattr(
-        _source_resolution,
-        "read_effective_recording",
-        lambda abs_path, traces: object(),
+        _sorting_analyzer,
+        "read_canonical_recording",
+        lambda sorting_input: object(),
     )
     monkeypatch.setattr(
         _units_nwb, "read_stored_units", lambda units: _DummySorting()
@@ -199,13 +198,7 @@ def test_bundle_params_reach_extract(monkeypatch):
         ms_before=2.0, ms_after=2.0, seed=4
     ).model_dump()
     # The input files make_fetch would resolve; the readers are stubbed.
-    files = {
-        "traces": EffectiveTraces(
-            kind="recording", key={}, row={}, apply_artifact_mask=False
-        ),
-        "traces_abs_path": "unused.nwb",
-        "units": None,
-    }
+    files = {"sorting_input": None, "units": None}
     input_plan = [
         {
             "input_index": index,

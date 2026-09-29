@@ -10,8 +10,7 @@ Two roles live here:
   per-unit cross-validation-half templates + channel positions + good-unit
   labels). ``UnitMatch._extract_and_match`` (run from
   ``UnitMatch.make_compute``) calls this once per matching input; it reads the
-  recording (what ``CurationV2.get_recording`` returns) but writes only the
-  self-contained bundle.
+  traces the input's sorter read but writes only the self-contained bundle.
 - :class:`UnitMatchBackend.match` -- the *matcher*: it reads the prepared bundle
   directories and runs the UnitMatch inference, returning cross-session pairs.
   It never touches a recording, a ``SortingAnalyzer``, or a Spyglass key.

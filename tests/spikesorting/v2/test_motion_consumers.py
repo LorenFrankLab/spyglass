@@ -316,7 +316,7 @@ def _hand_input_plan(curations):
                     for u in CurationV2().get_matchable_unit_ids(curation)
                 ],
                 **_member_waveform_traces(source.traces),
-                **_member_match_files(curation, source),
+                **_member_match_files(curation),
             }
         )
     return plan
