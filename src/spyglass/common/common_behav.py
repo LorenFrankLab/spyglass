@@ -561,7 +561,9 @@ class VideoFile(SpyglassIngestion, dj.Imported):
             key = dict(base_key, epoch=epoch)
             try:
                 rows, failure_reason, overlap_percent = (
-                    self._validate_video_timestamps(nwb_obj, valid_times, key)
+                    self._validate_video_timestamps(
+                        nwb_obj, valid_times, key, ctx=ctx
+                    )
                 )
             except KeyError as err:  # camera device not in CameraDevice
                 self._failed_videos["missing_camera"].append(
@@ -641,7 +643,11 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         return entries
 
     def _prepare_video_entry(
-        self, key, video_obj, cam_device_regex: str = r"camera_device (\d+)"
+        self,
+        key,
+        video_obj,
+        cam_device_regex: str = r"camera_device (\d+)",
+        ctx=None,
     ):
         """Prepare a VideoFile entry dict for a given video object.
 
@@ -654,6 +660,10 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         cam_device_regex : str, optional
             Regular expression pattern to extract camera device number.
             Default: r"camera_device (\\d+)"
+        ctx : FileContext, optional
+            Parse context, used to find the camera among the rows this
+            ingestion will hold rather than only those already stored. Default
+            None, consulting the database alone.
 
         Returns
         -------
@@ -668,7 +678,19 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         nwb_cam_device = video_obj.device.name
         camera_name = video_obj.device.camera_name
 
-        if not (CameraDevice & {"camera_name": camera_name}):
+        # The same ingestion fills CameraDevice, so on a first pass over a file
+        # the camera exists only in the plan. Querying here found nothing and
+        # this method raised, which the caller records as a missing camera and
+        # stops placing videos -- so a from-scratch ingestion planned no videos
+        # at all, while one against a database that already held the cameras
+        # planned them fine.
+        cam_restr = {"camera_name": camera_name}
+        known = (
+            ctx.rows_for(CameraDevice(), cam_restr)
+            if ctx is not None
+            else (CameraDevice & cam_restr)
+        )
+        if not known:
             raise KeyError(
                 f"No camera with camera_name: {camera_name} found "
                 "in CameraDevice table."
@@ -688,7 +710,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
             video_file_object_id=video_obj.object_id,
         )
 
-    def _validate_video_timestamps(self, video_obj, valid_times, key):
+    def _validate_video_timestamps(self, video_obj, valid_times, key, ctx=None):
         """Validate video timestamps and return entries or failure reason.
 
         Handles both single-file and multi-file ImageSeries. Validates that
@@ -716,7 +738,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         # Multi-file ImageSeries
         if starting_frame is not None and len(starting_frame) > 1:
             entries, overlap_pct = self._validate_multifile_timestamps(
-                video_obj, timestamps, starting_frame, valid_times, key
+                video_obj, timestamps, starting_frame, valid_times, key, ctx=ctx
             )
             if not entries:
                 threshold_pct = self._timestamp_overlap_threshold * 100
@@ -767,7 +789,11 @@ class VideoFile(SpyglassIngestion, dj.Imported):
                 overlap_pct,
             )
 
-        return [self._prepare_video_entry(key, video_obj)], None, overlap_pct
+        return (
+            [self._prepare_video_entry(key, video_obj, ctx=ctx)],
+            None,
+            overlap_pct,
+        )
 
     def _validate_multifile_timestamps(
         self,
@@ -776,6 +802,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         starting_frame,
         valid_times,
         key,
+        ctx=None,
     ):
         """Validate each segment of multi-file ImageSeries timestamps.
 
@@ -824,7 +851,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
                 continue
 
             # This file segment matches the epoch - prepare VideoFile entry
-            entry = self._prepare_video_entry(key.copy(), video_obj)
+            entry = self._prepare_video_entry(key.copy(), video_obj, ctx=ctx)
             entries.append(entry)
 
         return entries, max_overlap_pct
