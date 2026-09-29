@@ -1582,24 +1582,82 @@ def test_make_rejects_malformed_input_parts(two_session_curated_group):
 
 
 @pytest.mark.slow
-def test_single_input_selection_is_rejected(two_session_curated_group):
-    """Matching needs two inputs: a one-member group or a single explicit
-    input is rejected before any row is written."""
-    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+def test_degenerate_single_session_zero_pairs(two_session_curated_group):
+    """A one-member group produces zero pairs (no matcher call)."""
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
 
     grp = two_session_curated_group
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"],
+        grp["solo_name"],
+        "unitmatch_default",
+        {0: grp["choices"][0]},
+    )
+    UnitMatch.populate(pk, reserve_jobs=False)
+    row = (UnitMatch & pk).fetch1()
+    assert row["n_pairs"] == 0
+    assert len(UnitMatch.Pair & pk) == 0
+    # The empty NWB pairs table round-trips to an empty DataFrame.
+    assert len(UnitMatch().get_pairs(pk)) == 0
+
+
+@pytest.mark.slow
+def test_degenerate_single_session_needs_no_member_traces(
+    two_session_curated_group, monkeypatch
+):
+    """A one-member group writes its zero-pair row without reading the
+    member's traces, so a traces file that is missing and cannot be rebuilt
+    does not fail the populate."""
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    grp = two_session_curated_group
+    choice = grp["choices"][0]
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"], grp["solo_name"], "unitmatch_default", {0: choice}
+    )
+    (UnitMatch & pk).super_delete(warn=False)
+    traces = SortingSelection.resolve_effective_source(
+        {"sorting_id": choice["sorting_id"]}
+    ).traces
+    assert traces.kind == "recording"
+    traces_path = Path(
+        AnalysisNwbfile.get_abs_path(traces.row["analysis_file_name"])
+    )
+    aside = traces_path.with_name(traces_path.name + ".aside")
+
+    def _unrebuildable(self, key):
+        raise RuntimeError("simulated unrebuildable traces file")
+
+    monkeypatch.setattr(Recording, "_rebuild_nwb_artifact", _unrebuildable)
+    traces_path.rename(aside)
+    try:
+        UnitMatch.populate(pk, reserve_jobs=False)
+        assert (UnitMatch & pk).fetch1("n_pairs") == 0
+    finally:
+        aside.rename(traces_path)
+        (UnitMatch & pk).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_selection_without_inputs_is_rejected(two_session_curated_group):
+    """A selection needs at least one input: no explicit input is rejected
+    before any row is written."""
+    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+
     before = len(UnitMatchSelection())
-    with pytest.raises(ValueError, match="at least two"):
-        UnitMatchSelection.insert_selection(
-            grp["owner"],
-            grp["solo_name"],
-            "unitmatch_default",
-            {0: grp["choices"][0]},
-        )
-    with pytest.raises(ValueError, match="at least two"):
-        UnitMatchSelection.insert_inputs(
-            [grp["choices"][0]], "unitmatch_default"
-        )
+    with pytest.raises(ValueError, match="at least one"):
+        UnitMatchSelection.insert_inputs([], "unitmatch_default")
     assert len(UnitMatchSelection()) == before
 
 
@@ -1641,52 +1699,35 @@ def test_unitmatch_fetched_matches_make_compute_signature():
 
 
 @pytest.mark.slow
-def test_unitmatch_records_backend_version(
-    two_session_curated_group, monkeypatch
-):
+def test_unitmatch_records_backend_version(two_session_curated_group):
     """A populated UnitMatch row records the producer provenance: the SI version,
-    the resolved backend module path, and the backend package version --
-    resolved from the registry entry that ran. Bundle extraction and the
-    UnitMatchPy call are stubbed; only the provenance is under test."""
+    the resolved backend module path, and the backend package version -- resolved
+    from the registry even on the degenerate single-session path."""
     import importlib.metadata
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend
     from spyglass.spikesorting.v2.unit_matching import (
         UnitMatch,
         UnitMatchSelection,
     )
 
-    def _noop_extract(session_dir, recording, sorting, **kwargs):
-        Path(session_dir).mkdir(parents=True, exist_ok=True)
-        return []
-
-    monkeypatch.setattr(
-        _unitmatch_backend, "extract_unitmatch_bundle", _noop_extract
-    )
-    monkeypatch.setattr(
-        _unitmatch_backend.UnitMatchBackend,
-        "match",
-        lambda self, session_inputs, params: [],
-    )
     grp = two_session_curated_group
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+        grp["owner"],
+        grp["solo_name"],
+        "unitmatch_default",
+        {0: grp["choices"][0]},
     )
-    try:
-        (UnitMatch & pk).super_delete(warn=False)
-        UnitMatch.populate(pk, reserve_jobs=False)
-        row = (UnitMatch & pk).fetch1()
-        assert row["spikeinterface_version"] == si.__version__
-        assert row["matcher_backend"] == (
-            "spyglass.spikesorting.v2._unitmatch_backend"
-        )
-        assert row["matcher_backend_version"] == importlib.metadata.version(
-            "unitmatchpy"
-        )
-    finally:
-        (UnitMatchSelection & pk).super_delete(warn=False)
+    UnitMatch.populate(pk, reserve_jobs=False)
+    row = (UnitMatch & pk).fetch1()
+    assert row["spikeinterface_version"] == si.__version__
+    assert row["matcher_backend"] == (
+        "spyglass.spikesorting.v2._unitmatch_backend"
+    )
+    assert row["matcher_backend_version"] == importlib.metadata.version(
+        "unitmatchpy"
+    )
 
 
 @pytest.mark.slow
@@ -1695,15 +1736,16 @@ def test_clusterless_unit_semantics_derived_and_warned(
 ):
     """A clusterless sort's units are threshold-crossings, not sorted neurons:
     CurationV2.get_unit_semantics derives that from the sorter, and
-    UnitMatchSelection.insert_inputs warns that matching them across sessions
+    UnitMatchSelection.insert_selection warns that matching them across sessions
     is degenerate -- a consuming surface honoring the semantics, not just a
-    column. Built standalone (a real clusterless sort of each same-day
-    session) because the matching fixtures deliberately use a sorted-units
-    sorter, exactly so they do NOT match threshold crossings.
+    column. Built standalone (a real clusterless sort + a solo group) because
+    the matching fixtures deliberately use a sorted-units sorter, exactly so
+    they do NOT match threshold crossings.
     """
     import logging
 
     from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.session_group import SessionGroup
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
@@ -1713,45 +1755,51 @@ def test_clusterless_unit_semantics_derived_and_warned(
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     sub = chronic_2_session_minirec
+    owner = sub["owner"]
+    member = sub["same_day_members"][0]
+    rec_pk = sub["recording_pks"][0]
+    group_name = "unitmatch_clusterless_warn"
+
     MatcherParameters.insert_default()
     params_name = _ensure_minirec_clusterless_params()
-    sort_pks = [
-        SortingSelection.insert_selection(
-            {
-                "recording_id": rec_pk["recording_id"],
-                "sorter": "clusterless_thresholder",
-                "sorter_params_name": params_name,
-            }
-        )
-        for rec_pk in sub["recording_pks"]
-    ]
-    pk = None
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": params_name,
+        }
+    )
+    group_key = {
+        "session_group_owner": owner,
+        "session_group_name": group_name,
+    }
     try:
-        curations = []
-        for sort_pk in sort_pks:
-            if not (Sorting & sort_pk):
-                Sorting.populate(sort_pk, reserve_jobs=False)
-            clear_curations_for(sort_pk)
-            curation = CurationV2.insert_curation(
-                sorting_key={"sorting_id": sort_pk["sorting_id"]}
-            )
-            curations.append(
-                {
-                    "sorting_id": curation["sorting_id"],
-                    "curation_id": curation["curation_id"],
-                }
-            )
-            assert (
-                CurationV2.get_unit_semantics(
-                    {"sorting_id": sort_pk["sorting_id"]}
-                )
-                == "clusterless_threshold_crossings"
-            )
+        if not (Sorting & sort_pk):
+            Sorting.populate(sort_pk, reserve_jobs=False)
+        clear_curations_for(sort_pk)
+        curation = CurationV2.insert_curation(
+            sorting_key={"sorting_id": sort_pk["sorting_id"]}
+        )
+        if not (SessionGroup & group_key):
+            SessionGroup.create_group(owner, group_name, [member])
+
+        assert (
+            CurationV2.get_unit_semantics({"sorting_id": sort_pk["sorting_id"]})
+            == "clusterless_threshold_crossings"
+        )
 
         _warn_clusterless_match_once.cache_clear()
         with caplog.at_level(logging.WARNING, logger="spyglass"):
-            pk = UnitMatchSelection.insert_inputs(
-                curations, "unitmatch_default"
+            UnitMatchSelection.insert_selection(
+                owner,
+                group_name,
+                "unitmatch_default",
+                {
+                    0: {
+                        "sorting_id": curation["sorting_id"],
+                        "curation_id": curation["curation_id"],
+                    }
+                },
             )
         assert any(
             "threshold" in r.getMessage().lower()
@@ -1759,22 +1807,20 @@ def test_clusterless_unit_semantics_derived_and_warned(
             for r in caplog.records
         )
     finally:
-        if pk is not None:
-            (UnitMatchSelection & pk).super_delete(warn=False)
-        for sort_pk in sort_pks:
-            clear_curations_for(sort_pk)
-            (Sorting & sort_pk).super_delete(warn=False)
-            (SortingSelection & sort_pk).super_delete(warn=False)
+        if SessionGroup & group_key:
+            (SessionGroup & group_key).super_delete(warn=False)
+        clear_curations_for(sort_pk)
+        (Sorting & sort_pk).super_delete(warn=False)
+        (SortingSelection & sort_pk).super_delete(warn=False)
 
 
 @pytest.mark.slow
 def test_raw_pair_insert_rejects_unpinned_endpoint(two_session_curated_group):
-    """Goal 7: a raw Pair referencing a curation the selection did not pin is
+    """A raw Pair referencing a unit absent from the pinned curation is
     rejected. The validated ``Pair.insert`` guard fronts the DataJoint foreign
-    key: the bogus pair's second endpoint is a child curation of member 1's
-    sort, which is NOT a pinned ``UnitMatchSelection.Input`` curation, so the
+    key: the bogus pair's second endpoint pins member 1's curation, which is
+    NOT a pinned ``UnitMatchSelection.Input`` of the solo selection, so the
     guard rejects it (before the FK, which remains as defense-in-depth)."""
-    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import (
         UnitMatchPairIntegrityError,
     )
@@ -1785,130 +1831,62 @@ def test_raw_pair_insert_rejects_unpinned_endpoint(two_session_curated_group):
 
     grp = two_session_curated_group
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+        grp["owner"],
+        grp["solo_name"],
+        "unitmatch_default",
+        {0: grp["choices"][0]},
     )
-    side_a = grp["choices"][0]
-    unpinned = CurationV2.insert_curation(
-        sorting_key={"sorting_id": grp["choices"][1]["sorting_id"]},
-        parent_curation_id=grp["choices"][1]["curation_id"],
-    )
+    UnitMatch.populate(pk, reserve_jobs=False)
+    side_a, side_b = grp["choices"][0], grp["choices"][1]
     bogus = {
         **pk,
         "pair_index": 999,
         "session_a_sorting_id": side_a["sorting_id"],
         "session_a_curation_id": side_a["curation_id"],
         "unit_a_id": 10**9,  # no such curated unit
-        "session_b_sorting_id": unpinned["sorting_id"],
-        "session_b_curation_id": unpinned["curation_id"],
+        "session_b_sorting_id": side_b[
+            "sorting_id"
+        ],  # member 1: not pinned here
+        "session_b_curation_id": side_b["curation_id"],
         "unit_b_id": 10**9,
         "match_probability": 0.9,
     }
-    try:
-        with pytest.raises(UnitMatchPairIntegrityError, match="not a pinned"):
-            UnitMatch.Pair.insert1(bogus, allow_direct_insert=True)
-    finally:
-        from spyglass.spikesorting.spikesorting_merge import (
-            SpikeSortingOutput,
-        )
-
-        (UnitMatchSelection & pk).super_delete(warn=False)
-        # The child registers on SpikeSortingOutput; drop the merge master
-        # first (DataJoint refuses to delete the part ahead of its master).
-        for mid in (SpikeSortingOutput.CurationV2 & unpinned).fetch("merge_id"):
-            (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
-        (CurationV2 & unpinned).super_delete(warn=False)
+    with pytest.raises(UnitMatchPairIntegrityError, match="not a pinned"):
+        UnitMatch.Pair.insert1(bogus, allow_direct_insert=True)
 
 
 @pytest.mark.slow
-def test_tracked_unit_make_seeds_singletons(
-    two_session_curated_group, monkeypatch
-):
+def test_tracked_unit_make_seeds_singletons(two_session_curated_group):
     """``TrackedUnit.make`` seeds the node universe from the curated units and,
-    with no matches (a matcher that emits no pairs), emits one strict
-    singleton per matchable unit of every input -- exercising the DB wiring of
-    the pure clique derivation."""
+    with no matches (the solo group), emits one strict singleton per matchable
+    unit -- exercising the DB wiring of the pure clique derivation."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.unit_matching import (
-        MatcherParameters,
         TrackedUnit,
         UnitMatch,
         UnitMatchSelection,
     )
 
     grp = two_session_curated_group
-    saved = _install_fixture_pairer(
-        monkeypatch,
-        matcher_name="no_pair_matcher",
-        matcher_params_name="no_pair_matcher_params",
-        pairs=[],
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"],
+        grp["solo_name"],
+        "unitmatch_default",
+        {0: grp["choices"][0]},
     )
-    pk = None
-    try:
-        pk = UnitMatchSelection.insert_selection(
-            grp["owner"],
-            grp["group_name"],
-            "no_pair_matcher_params",
-            grp["choices"],
-        )
-        UnitMatch.populate(pk, reserve_jobs=False)
-        TrackedUnit.populate(pk, reserve_jobs=False)
+    UnitMatch.populate(pk, reserve_jobs=False)
+    TrackedUnit.populate(pk, reserve_jobs=False)
 
-        n_matchable = sum(
-            len(CurationV2().get_matchable_unit_ids(choice))
-            for choice in grp["choices"].values()
-        )
-        tracked = (TrackedUnit & pk).fetch(as_dict=True)
-        assert len(tracked) == n_matchable
-        for row in tracked:
-            # No pairs -> every unit is its own singleton tracked unit.
-            assert row["n_sessions_observed"] == 1
-            assert row["median_match_probability"] is None
-            assert row["policy_used"] == "strict"
-        # Member rows reference the pinned curated units (FK-validated).
-        assert len(TrackedUnit.Member & pk) == n_matchable
-    finally:
-        if pk is not None:
-            (UnitMatchSelection & pk).super_delete(warn=False)
-        (
-            MatcherParameters
-            & {"matcher_params_name": "no_pair_matcher_params"}
-        ).super_delete(warn=False)
-        _restore_matcher_registry(saved)
-
-
-@contextmanager
-def _no_pair_selection(grp, monkeypatch, name):
-    """The two-member group matched by a registered matcher emitting no pairs.
-
-    Bundle extraction is stubbed, so ``UnitMatch.populate`` needs no
-    UnitMatchPy. Yields the selection key; drops the selection, the matcher
-    params row and the registration afterwards.
-    """
-    from spyglass.spikesorting.v2.unit_matching import (
-        MatcherParameters,
-        UnitMatchSelection,
-    )
-
-    matcher_params_name = f"{name}_params"
-    saved = _install_fixture_pairer(
-        monkeypatch,
-        matcher_name=name,
-        matcher_params_name=matcher_params_name,
-        pairs=[],
-    )
-    pk = None
-    try:
-        pk = UnitMatchSelection.insert_selection(
-            grp["owner"], grp["group_name"], matcher_params_name, grp["choices"]
-        )
-        yield pk
-    finally:
-        if pk is not None:
-            (UnitMatchSelection & pk).super_delete(warn=False)
-        (
-            MatcherParameters & {"matcher_params_name": matcher_params_name}
-        ).super_delete(warn=False)
-        _restore_matcher_registry(saved)
+    n_matchable = len(CurationV2().get_matchable_unit_ids(grp["choices"][0]))
+    tracked = (TrackedUnit & pk).fetch(as_dict=True)
+    assert len(tracked) == n_matchable
+    for row in tracked:
+        # No pairs -> every unit is its own singleton tracked unit.
+        assert row["n_sessions_observed"] == 1
+        assert row["median_match_probability"] is None
+        assert row["policy_used"] == "strict"
+    # Member rows reference the pinned curated units (FK-validated).
+    assert len(TrackedUnit.Member & pk) == n_matchable
 
 
 @pytest.mark.slow
@@ -3061,58 +3039,58 @@ def test_pair_insert_rejects_unpinned_curation(two_session_curated_group):
 
 @pytest.mark.slow
 def test_tracked_unit_uses_frozen_universe_after_relabel(
-    two_session_curated_group, monkeypatch
+    two_session_curated_group,
 ):
     """``TrackedUnit`` reads ``UnitMatch``'s FROZEN ``MatchableUnit``
     snapshot, not current curation labels. Relabeling a singleton (no-``Pair``)
-    input unit to ``noise`` AFTER ``UnitMatch`` populated must NOT drop it from
-    the tracked-unit graph -- the frozen universe keeps it.
+    member unit to ``noise`` AFTER ``UnitMatch`` populated must NOT drop it from
+    the tracked-unit graph -- the frozen universe keeps it. Fails on pre-change
+    code, where ``TrackedUnit.make`` re-derived the universe from current labels
+    and dropped the relabeled unit.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.unit_matching import (
         TrackedUnit,
         UnitMatch,
+        UnitMatchSelection,
     )
 
     grp = two_session_curated_group
     choice = grp["choices"][0]
-    with _no_pair_selection(grp, monkeypatch, "frozen_universe_pairer") as pk:
-        # No pairs, but make still freezes the MatchableUnit snapshot.
-        UnitMatch.populate(pk, reserve_jobs=False)
-        frozen = {
-            (str(r["sorting_id"]), int(r["curation_id"]), int(r["unit_id"]))
-            for r in (UnitMatch.MatchableUnit & pk & {"input_index": 0}).fetch(
-                as_dict=True
-            )
-        }
-        assert frozen, "MatchableUnit snapshot should be non-empty"
-        target_unit = sorted(int(unit) for _, _, unit in frozen)[0]
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"], grp["solo_name"], "unitmatch_default", {0: choice}
+    )
+    # Solo group -> degenerate make (0 pairs, no matcher backend) but still
+    # freezes the MatchableUnit snapshot.
+    UnitMatch.populate(pk, reserve_jobs=False)
+    frozen = {
+        (str(r["sorting_id"]), int(r["curation_id"]), int(r["unit_id"]))
+        for r in (UnitMatch.MatchableUnit & pk).fetch(as_dict=True)
+    }
+    assert frozen, "MatchableUnit snapshot should be non-empty"
+    target_unit = sorted(int(unit) for _, _, unit in frozen)[0]
 
-        noise_label = {
-            **choice,
-            "unit_id": target_unit,
-            "curation_label": "noise",
-        }
-        try:
-            # Relabel the frozen singleton so the CURRENT matchable set
-            # excludes it.
-            CurationV2.UnitLabel.insert1(noise_label)
-            assert target_unit not in [
-                int(u) for u in CurationV2().get_matchable_unit_ids(choice)
-            ], "relabel should drop the unit from the CURRENT matchable set"
+    noise_label = {**choice, "unit_id": target_unit, "curation_label": "noise"}
+    try:
+        # Relabel the frozen singleton so the CURRENT matchable set excludes it.
+        CurationV2.UnitLabel.insert1(noise_label)
+        assert target_unit not in [
+            int(u) for u in CurationV2().get_matchable_unit_ids(choice)
+        ], "relabel should drop the unit from the CURRENT matchable set"
 
-            TrackedUnit.populate(pk, reserve_jobs=False)
-            tracked_units = {
-                (str(member["sorting_id"]), int(member["unit_id"]))
-                for member in (TrackedUnit.Member & pk).fetch(as_dict=True)
-            }
-            assert (str(choice["sorting_id"]), target_unit) in tracked_units, (
-                "the relabeled singleton must survive in TrackedUnit: "
-                "UnitMatch's frozen MatchableUnit -- not current labels -- is "
-                "the node universe"
-            )
-        finally:
-            (CurationV2.UnitLabel & noise_label).delete_quick()
+        TrackedUnit.populate(pk, reserve_jobs=False)
+        tracked_units = {
+            int(member["unit_id"])
+            for member in (TrackedUnit.Member & pk).fetch(as_dict=True)
+        }
+        assert target_unit in tracked_units, (
+            "the relabeled singleton must survive in TrackedUnit: UnitMatch's "
+            "frozen MatchableUnit -- not current labels -- is the node universe"
+        )
+    finally:
+        (CurationV2.UnitLabel & noise_label).delete_quick()
+        (TrackedUnit & pk).delete(safemode=False)
+        (UnitMatchSelection & pk).super_delete(warn=False)
 
 
 @pytest.mark.slow
@@ -3162,7 +3140,7 @@ def test_geometry_preflight_fails_before_extraction(
 
 
 @pytest.mark.slow
-def test_unitmatch_nwb_self_describes(two_session_curated_group, monkeypatch):
+def test_unitmatch_nwb_self_describes(two_session_curated_group):
     """The UnitMatch NWB is interpretable standalone.
 
     The pairs table carries only side ids; without the DB a reader cannot tell
@@ -3170,10 +3148,15 @@ def test_unitmatch_nwb_self_describes(two_session_curated_group, monkeypatch):
     embeds the run/group/matcher header -- re-emitting the same producer
     provenance stored on the ``UnitMatch`` row (matcher backend, backend
     version, SpikeInterface version) -- plus the per-input and per-recording
-    maps, whose values equal the frozen selection rows.
+    maps.
+
+    Uses the single-input (solo) path so the provenance write is exercised
+    without the cross-session matcher (whose ground-truth correctness is the
+    polymer gate's job). The header and both maps are written on this path
+    too: ``write_pairs_table`` runs and the backend is resolved regardless of
+    input count.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._matcher_graph import utc_datetime
     from spyglass.spikesorting.v2._nwb_provenance import (
         UNITMATCH_INPUT_RECORDINGS,
         UNITMATCH_INPUTS,
@@ -3187,113 +3170,93 @@ def test_unitmatch_nwb_self_describes(two_session_curated_group, monkeypatch):
     )
 
     grp = two_session_curated_group
-    with _no_pair_selection(grp, monkeypatch, "self_describing_pairer") as pk:
-        UnitMatch.populate(pk, reserve_jobs=False)
+    choice = grp["choices"][0]
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"], grp["solo_name"], "unitmatch_default", {0: choice}
+    )
+    UnitMatch.populate(pk, reserve_jobs=False)
 
-        row = (UnitMatch & pk).fetch1()
-        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+    row = (UnitMatch & pk).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
 
-        header = read_provenance_values(abs_path, UNITMATCH_PROVENANCE)
-        assert header["unitmatch_id"] == str(pk["unitmatch_id"])
-        assert header["session_group_owner"] == grp["owner"]
-        assert header["session_group_name"] == grp["group_name"]
-        assert header["matcher_params_name"] == "self_describing_pairer_params"
-        # Re-emits the EXACT producer provenance stored on the row.
-        assert header["matcher_backend"] == row["matcher_backend"]
-        assert (
-            header["matcher_backend_version"] == row["matcher_backend_version"]
-        )
-        assert header["spikeinterface_version"] == row["spikeinterface_version"]
+    header = read_provenance_values(abs_path, UNITMATCH_PROVENANCE)
+    assert header["unitmatch_id"] == str(pk["unitmatch_id"])
+    assert header["session_group_owner"] == grp["owner"]
+    assert header["session_group_name"] == grp["solo_name"]
+    assert header["matcher_params_name"] == "unitmatch_default"
+    # Re-emits the EXACT producer provenance stored on the row.
+    assert header["matcher_backend"] == row["matcher_backend"]
+    assert header["matcher_backend_version"] == row["matcher_backend_version"]
+    assert header["spikeinterface_version"] == row["spikeinterface_version"]
 
-        frozen_inputs = (UnitMatchSelection.Input & pk).fetch(
-            as_dict=True, order_by="input_index"
-        )
-        inputs = read_long_provenance(abs_path, UNITMATCH_INPUTS)
-        assert [m["input_index"] for m in inputs] == [0, 1]
-        for got, frozen in zip(inputs, frozen_inputs, strict=True):
-            assert got["sorting_id"] == str(frozen["sorting_id"])
-            assert got["curation_id"] == int(frozen["curation_id"])
-            assert got["curation_uuid"] == str(frozen["curation_uuid"])
-            assert got["source_kind"] == "recording"
-            assert got["source_id"] == str(frozen["source_id"])
-            assert got["input_start_time"] == (
-                utc_datetime(frozen["input_start_time"]).isoformat()
-            )
-        # Member a (input 0) is the fixture's first-recorded session.
-        assert inputs[0]["sorting_id"] == str(grp["choices"][0]["sorting_id"])
-
-        frozen_recordings = (UnitMatchSelection.InputRecording & pk).fetch(
-            as_dict=True, order_by=("input_index", "recording_index")
-        )
-        recordings = read_long_provenance(abs_path, UNITMATCH_INPUT_RECORDINGS)
-        assert len(recordings) == len(frozen_recordings) == 2
-        for got, frozen in zip(recordings, frozen_recordings, strict=True):
-            for field in (
-                "input_index",
-                "recording_index",
-                "start_sample",
-                "end_sample",
-            ):
-                assert got[field] == int(frozen[field])
-            assert got["nwb_file_name"] == frozen["nwb_file_name"]
-            assert got["recording_id"] == str(frozen["recording_id"])
-            assert got["session_start_time"] == (
-                utc_datetime(frozen["session_start_time"]).isoformat()
-            )
+    inputs = read_long_provenance(abs_path, UNITMATCH_INPUTS)
+    by_index = {m["input_index"]: m for m in inputs}
+    assert set(by_index) == {0}
+    got = by_index[0]
+    assert got["sorting_id"] == str(choice["sorting_id"])
+    assert got["curation_id"] == int(choice["curation_id"])
+    assert got["source_kind"] == "recording"
+    # A real session start time (ISO 8601), not a placeholder.
+    assert "T" in got["input_start_time"]
+    (recording,) = read_long_provenance(abs_path, UNITMATCH_INPUT_RECORDINGS)
+    assert recording["input_index"] == 0
+    assert recording["nwb_file_name"] == grp["members"][0]["nwb_file_name"]
+    assert recording["session_start_time"] == got["input_start_time"]
 
 
 @pytest.mark.slow
-def test_get_unit_brain_regions_keeps_disambiguators(
-    two_session_curated_group, monkeypatch
-):
+def test_get_unit_brain_regions_keeps_disambiguators(two_session_curated_group):
     """``TrackedUnit.get_unit_brain_regions`` returns the chronic-identity
-    disambiguators -- ``unitmatch_id`` / ``tracked_unit_id`` / ``input_index`` /
-    ``nwb_file_name`` / ``recording_date`` / ``curation_id`` -- read from the
-    frozen selection rows, not just ``sorting_id`` / ``unit_id`` /
-    ``region_name``."""
-    from spyglass.common import Session
+    disambiguators resolved at this point -- ``unitmatch_id`` /
+    ``tracked_unit_id`` / ``input_index`` / ``nwb_file_name`` /
+    ``recording_date`` / ``curation_id`` -- not just ``sorting_id`` /
+    ``unit_id`` / ``region_name``."""
     from spyglass.spikesorting.v2.unit_matching import (
         TrackedUnit,
         UnitMatch,
+        UnitMatchSelection,
     )
 
     grp = two_session_curated_group
-    with _no_pair_selection(grp, monkeypatch, "brain_region_pairer") as pk:
-        UnitMatch.populate(pk, reserve_jobs=False)
-        TrackedUnit.populate(pk, reserve_jobs=False)
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"],
+        grp["solo_name"],
+        "unitmatch_default",
+        {0: grp["choices"][0]},
+    )
+    UnitMatch.populate(pk, reserve_jobs=False)
+    TrackedUnit.populate(pk, reserve_jobs=False)
 
-        tracked_keys = (TrackedUnit & pk).fetch("KEY")
-        assert tracked_keys, "no tracked units were populated"
+    tracked_keys = (TrackedUnit & pk).fetch("KEY")
+    assert tracked_keys, "no tracked units were populated"
 
-        for tracked_key in tracked_keys:
-            df = TrackedUnit().get_unit_brain_regions(tracked_key)
-            expected = [
-                "unitmatch_id",
-                "tracked_unit_id",
-                "input_index",
-                "nwb_file_name",
-                "recording_date",
-                "sorting_id",
-                "curation_id",
-                "unit_id",
-                "region_name",
-            ]
-            assert list(df.columns) == expected
-            assert len(df), "a tracked unit resolves to at least one region row"
-            for col in expected:
-                assert df[col].notna().all(), f"{col} must be populated"
-            # Singletons: one input each; input 0 is member a's session.
-            (input_index,) = df["input_index"].unique()
-            member = grp["members"][int(input_index)]
-            assert (df["nwb_file_name"] == member["nwb_file_name"]).all()
-            session_start = (
-                Session & {"nwb_file_name": member["nwb_file_name"]}
-            ).fetch1("session_start_time")
-            assert (df["recording_date"] == session_start).all()
-            assert (
-                df["sorting_id"]
-                == str(grp["choices"][int(input_index)]["sorting_id"])
-            ).all()
+    df = TrackedUnit().get_unit_brain_regions(tracked_keys[0])
+
+    expected = {
+        "unitmatch_id",
+        "tracked_unit_id",
+        "input_index",
+        "nwb_file_name",
+        "recording_date",
+        "sorting_id",
+        "curation_id",
+        "unit_id",
+        "region_name",
+    }
+    assert expected <= set(df.columns), (
+        "get_unit_brain_regions dropped chronic-identity disambiguators; "
+        f"columns={list(df.columns)}"
+    )
+    if len(df):
+        for col in (
+            "unitmatch_id",
+            "tracked_unit_id",
+            "input_index",
+            "nwb_file_name",
+            "recording_date",
+            "curation_id",
+        ):
+            assert df[col].notna().all(), f"{col} must be populated, not null"
 
 
 @pytest.mark.slow

@@ -105,7 +105,9 @@ class UnitMatchFetched(NamedTuple):
     ``start_sample``, ``end_sample``, ``valid_times`` (nested list)),
     "matchable_unit_ids" (sorted list[int]), "waveform_traces" (str),
     "motion_corrected_recording_id" (str or None), "traces"
-    (EffectiveTraces), "traces_abs_path" (str), "units" (StoredUnits)}``.
+    (EffectiveTraces), "traces_abs_path" (str), "units" (StoredUnits)}``;
+    the last three are present only for two or more inputs (a single input
+    extracts no bundle).
     Threading ``matchable_unit_ids`` here -- rather than re-querying in
     compute -- keeps a curation relabel between stages from changing which
     units match; the times are the frozen ones, never re-read from
@@ -349,7 +351,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
         Each input is one curated sort, either of a single recording or of a
         same-day concatenation, given in any order. Before any row is written
-        the inputs are validated: at least two inputs, one curation per
+        the inputs are validated: at least one input, one curation per
         sorting, every curation exists and has no unapplied proposed merges,
         no two inputs share a recording session (``nwb_file_name``), and a
         concatenation input lies within one day. The inputs are then ordered
@@ -381,7 +383,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         Raises
         ------
         ValueError
-            On fewer than two inputs, a sorting given twice, a missing
+            On no inputs, a sorting given twice, a missing
             curation, a curation with unapplied proposed merges, a
             multi-day concatenation input, a ``SessionGroup`` that does not
             exist, or a channel-geometry mismatch across inputs.
@@ -648,8 +650,11 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         post-extraction -- here as a preflight, so a mismatch fails at selection
         time rather than deep in ``UnitMatch.make``'s dense bundle extraction.
         ``choices_by_input`` maps a label (the ``input_index``) to
-        ``(sorting_id, curation_id)``.
+        ``(sorting_id, curation_id)``. A single input skips (nothing to
+        compare against).
         """
+        if len(choices_by_input) < 2:
+            return
         from spyglass.spikesorting.v2._unitmatch_backend import (
             assert_consistent_channel_geometry,
         )
@@ -1027,8 +1032,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         Re-runs the selection checks on the RAW ``Input`` / ``InputRecording``
         rows before any matcher input is extracted, since a direct insert can
-        bypass ``insert_inputs``: the parts are well formed, there are at
-        least two inputs, no sorting is pinned twice, no concatenation input
+        bypass ``insert_inputs``: the parts are well formed, there is at
+        least one input, no sorting is pinned twice, no concatenation input
         spans two days and no two inputs share a session (on the frozen
         session times), and the stored ``input_set_hash`` is the hash of the
         parts. Then, per input, the pinned curation must still exist with the
@@ -1196,11 +1201,14 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             )
             input_sources.append((curation_key, source))
         # Resolve the files last, once every input passed its checks, so a
-        # fetch that raises never rebuilds a traces file.
-        for plan, (curation_key, source) in zip(
-            input_plan, input_sources, strict=True
-        ):
-            plan.update(_member_match_files(curation_key, source))
+        # fetch that raises never rebuilds a traces file. A single input
+        # writes zero pairs without extracting a bundle, so it reads (and
+        # heals) no traces file.
+        if len(input_plan) >= 2:
+            for plan, (curation_key, source) in zip(
+                input_plan, input_sources, strict=True
+            ):
+                plan.update(_member_match_files(curation_key, source))
         return UnitMatchFetched(
             matcher_name=matcher_name,
             params=dict(params),
@@ -1225,7 +1233,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """Extract bundles, run the matcher, and stage the pairs NWB.
 
         All heavy SI / UnitMatch / NWB work happens here, outside the DB
-        transaction. The anchor AnalysisNwbfile parent is the first input's
+        transaction. A single-input selection writes an empty pairs table
+        without calling the matcher backend. The anchor AnalysisNwbfile parent is the first input's
         first recording's NWB (``input_plan`` is ``input_index``-ordered).
         Reads only the input files ``make_fetch`` resolved; the one DB access
         left is staging the pairs NWB (see :mod:`._recording_nwb`).
@@ -1341,9 +1350,20 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         try:
-            oriented_pairs, runtime_s = self._extract_and_match(
-                input_plan, matcher_name, params, job_kwargs
-            )
+            if len(input_plan) < 2:
+                # A single input: no cross-session pairs, no matcher or
+                # bundle extraction (needs no matcher backend).
+                logger.warning(
+                    "UnitMatch.make: selection "
+                    f"{key['unitmatch_id']} ({anchor_nwb_file_name}) has a "
+                    "single matching input; writing zero pairs."
+                )
+                oriented_pairs: list[dict] = []
+                runtime_s = 0.0
+            else:
+                oriented_pairs, runtime_s = self._extract_and_match(
+                    input_plan, matcher_name, params, job_kwargs
+                )
             pairs_object_id = write_pairs_table(
                 abs_path, oriented_pairs, provenance_tables=provenance_tables
             )
@@ -1869,7 +1889,10 @@ def _normalize_input_curations(curations) -> list[tuple]:
 
 
 def _check_input_count_and_sortings(pairs, exc_class) -> None:
-    """Reject fewer than two inputs or a sorting pinned more than once.
+    """Reject an empty input set or a sorting pinned more than once.
+
+    A single input is valid: its run writes zero pairs, and every matchable
+    unit becomes a singleton tracked unit.
 
     Parameters
     ----------
@@ -1878,11 +1901,10 @@ def _check_input_count_and_sortings(pairs, exc_class) -> None:
     exc_class : type
         Exception raised on a violation.
     """
-    if len(pairs) < 2:
+    if not pairs:
         raise exc_class(
-            "UnitMatchSelection: cross-session matching needs at least two "
-            f"matching inputs; got {len(pairs)}: "
-            f"{[_input_label(*pair) for pair in pairs]}."
+            "UnitMatchSelection: a match selection needs at least one "
+            "matching input; got none."
         )
     curations_by_sorting: dict = {}
     for sorting_id, curation_id in pairs:
