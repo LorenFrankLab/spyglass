@@ -293,8 +293,8 @@ def pytest_sessionstart(session):
     # without exercising the gate. The CI workflow sets a job-wide list per
     # trigger (its "Select required fixtures for this run" step), and steps
     # that need other fixtures (the acceptance probes, the two-session matcher
-    # gate) set their own list on their pytest command only. Unset locally,
-    # so absent fixtures skip as before.
+    # gate, the motion benchmark) set their own list on their pytest command
+    # only. Unset locally, so absent fixtures skip as before.
     required = os.environ.get("SPYGLASS_V2_REQUIRE_FIXTURES", "").split()
     missing = _missing_required_fixtures(required)
     if missing:

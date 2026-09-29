@@ -359,10 +359,9 @@ jobs:
       # workflow_dispatch, not per-PR or on the nightly schedule. On scheduled
       # and manual runs the acceptance-probe step below also fetches the
       # tetrode fixture for its own session. This step does not fetch the
-      # drift fixture (mearec_polymer_128ch_drift_120s, hosted on Box); the
-      # opt-in motion benchmark in test_motion_acceptance.py reads it and
-      # skips when the file is absent. Same download + verify + no-fallback
-      # contract.
+      # drift fixture (mearec_polymer_128ch_drift_120s, ~1.7 GB, hosted on
+      # Box); the motion benchmark step below requires and fetches it for its
+      # own session. Same download + verify + no-fallback contract.
       if: github.event_name == 'workflow_dispatch'
       run: |
         python tests/spikesorting/v2/fixtures/_fetch.py mearec_neuropixels_60s
@@ -544,6 +543,49 @@ jobs:
           conda run -n spyglass_v2_matching pytest \
           tests/spikesorting/v2/test_unitmatch.py::test_v2_unitmatch_polymer_mearec_ground_truth \
           --no-docker --no-dlc -q
+    # --- Motion-correction development benchmark (manual dispatch only), in
+    # the unit shard and the default v2 env. SPYGLASS_V2_MOTION_BENCHMARK=1
+    # runs the opt-in tests in test_motion_acceptance.py on the committed
+    # development manifest (seeds 0-2): 117 cases, each generating, motion
+    # correcting and MountainSort5-sorting a recording in its own process
+    # (23-25 s and ~2.5 GB peak RSS per case on a macOS arm64 laptop, ~50 min
+    # in all; longer on a hosted runner), plus a paired off / dredge /
+    # dredge_fast run on one shank of the MEArec drift fixture. That cost, for
+    # ungated evidence, is why this is not a nightly job.
+    # It publishes DEVELOPMENT EVIDENCE as the motion-benchmark-development
+    # artifact: per case, motion error, corrected-signal fidelity, sorting
+    # precision / recall / accuracy, over-merged and over-split units,
+    # channels lost at the border, runtime and peak memory. It is NOT an
+    # acceptance run and promotes no motion recipe: the development manifest
+    # carries no gates, so test_benchmark_meets_manifest_gates skips, and a
+    # case that fails to run fails test_benchmark_case. The held-out manifest
+    # (motion_acceptance_held_out.json) is deliberately not run here: its seeds
+    # were spent on its one evaluation, which FAILED its gates for both
+    # DREDge recipes. A new held-out evaluation needs a new manifest with
+    # fresh seeds, committed before it is run.
+    # SPYGLASS_V2_REQUIRE_FIXTURES is set on this command only (overriding the
+    # job-wide list): conftest's pytest_sessionstart downloads the drift
+    # fixture and fails the session naming it if it is absent, instead of the
+    # representative run skipping. ``!cancelled()`` keeps this independent of
+    # the steps above: the two-session matcher gate is expected to be red on
+    # manual runs, and a failure there must not suppress this evidence.
+    - name: Motion-correction development benchmark (manual dispatch only)
+      if: ${{ !cancelled() && matrix.shard.name == 'unit' && github.event_name == 'workflow_dispatch' }}
+      run: |
+        SPYGLASS_V2_MOTION_BENCHMARK=1 \
+        SPYGLASS_V2_MOTION_BENCHMARK_OUT="$RUNNER_TEMP/motion-benchmark-development" \
+        SPYGLASS_V2_REQUIRE_FIXTURES="mearec_polymer_128ch_drift_120s" \
+          pytest tests/spikesorting/v2/test_motion_acceptance.py \
+          --no-docker --no-dlc -q
+    - name: Upload the motion benchmark evidence (manual dispatch only)
+      # always(): publish whatever case results were written, including on a
+      # failed or timed-out benchmark run.
+      if: ${{ always() && matrix.shard.name == 'unit' && github.event_name == 'workflow_dispatch' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: motion-benchmark-development
+        path: ${{ runner.temp }}/motion-benchmark-development
+        if-no-files-found: error
     # --- FigPack curation extra lane (separate env). The curation extra
     # (figpack + figpack-spike-sorting) is kept out of the default v2 env, so
     # the FigPack table layer AND the orchestrator figpack=True path otherwise
