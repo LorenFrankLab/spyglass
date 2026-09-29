@@ -300,6 +300,87 @@ drafts and analysis populations, follow [resuming reviews and rebuilding populat
 below. Import/commit an old draft through its original review before reviewing
 that committed child with the new profile; never overwrite its identity sidecar.
 
+### Recreating UnitMatch / TrackedUnit rows
+
+This release restructures cross-session matching to pin an explicit,
+ordered list of **matching inputs** (each one an independently curated sort,
+of a single recording or a same-day concatenation) instead of one curation per
+`SessionGroup` member, so the schema changes in dependency order:
+
+- `UnitMatchSelection`'s `MemberCuration` part (`-> SessionGroup.Member`, `->
+  CurationV2`) is replaced by `Input` (`input_index`, `-> CurationV2`,
+  `curation_uuid`, `source_kind`, `source_id`, `motion_corrected_recording_id`,
+  `input_start_time`) and `InputRecording` (one row per constituent recording:
+  `nwb_file_name`, `interval_list_name`, `recording_id`,
+  `recording_content_hash`, `session_start_time`, `start_sample`, `end_sample`,
+  `valid_times`). The master's `-> SessionGroup` foreign key and
+  `curation_set_hash` are replaced by `input_set_hash` and the nullable,
+  non-FK `session_group_owner` / `session_group_name` provenance columns.
+- `UnitMatch.MatchableUnit` is now keyed by `input_index` (previously
+  `member_index`), and the new `RecordingSpikeCount` part freezes each
+  matchable unit's spike count in every constituent recording of its input.
+- `TrackedUnit.n_sessions_observed` is renamed `n_sessions_detected` (its
+  values also change meaning: two intervals of one session now count once,
+  and a member with no spikes in a recording no longer counts it), and the
+  new `TrackedUnit.n_matching_inputs` counts the distinct matching inputs
+  among a tracked unit's members.
+
+**Every existing `UnitMatchSelection` / `UnitMatch` / `TrackedUnit` row must be
+recreated** — there is no in-place value migration for the replaced part or
+the redefined counts. Because a part table is replaced and another part's
+primary key changes, `alter()` cannot express this; drop and redeclare the
+whole family instead. `MatcherParameters` (a `Lookup` table in the same
+schema module) is untouched and does not need recreating.
+
+```python
+import datajoint as dj
+from spyglass.spikesorting.v2.unit_matching import (
+    UnitMatch,
+    UnitMatchSelection,
+    TrackedUnit,
+)
+
+# Preview the cascade before confirming: this deletes every UnitMatchSelection
+# row and, with it, every UnitMatch and TrackedUnit row built from it.
+UnitMatchSelection().delete()
+
+# Drop the tables this release restructures, leaf-first (a table a live
+# foreign key still references cannot be dropped), then reload the module so
+# DataJoint redeclares each one -- Input / InputRecording / RecordingSpikeCount
+# included -- from the current source. MemberCuration's class no longer
+# exists, so its table is named from the (unchanged) master's own SQL name.
+_database, _selection_sql_name = UnitMatchSelection.full_table_name.strip(
+    "`"
+).split("`.`")
+for full_table_name in (
+    TrackedUnit.Member.full_table_name,
+    TrackedUnit.full_table_name,
+    UnitMatch.RecordingSpikeCount.full_table_name,
+    UnitMatch.MatchableUnit.full_table_name,
+    UnitMatch.Pair.full_table_name,
+    UnitMatch.full_table_name,
+    UnitMatchSelection.InputRecording.full_table_name,
+    UnitMatchSelection.Input.full_table_name,
+    f"`{_database}`.`{_selection_sql_name}__member_curation`",  # removed part
+    UnitMatchSelection.full_table_name,
+):
+    dj.FreeTable(dj.conn(), full_table_name).drop_quick()
+
+from importlib import reload
+
+import spyglass.spikesorting.v2.unit_matching as unit_matching_module
+
+reload(unit_matching_module)
+UnitMatchSelection = unit_matching_module.UnitMatchSelection
+UnitMatch = unit_matching_module.UnitMatch
+TrackedUnit = unit_matching_module.TrackedUnit
+
+# Recreate the runs you use -- e.g. via the plan-then-run orchestrator (see
+# "Cross-session unit tracking" in SpikeSortingV2.md):
+#   plan = plan_v2_unit_match_from_sorts([...], curation_strategy=...)
+#   run_v2_unit_match(plan)
+```
+
 ### Porting a v1 sort to v2
 
 1. Reuse the v1 sort's identity — session (`nwb_file_name`), sort group,
