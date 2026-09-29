@@ -1945,3 +1945,128 @@ def test_daily_bundle_uses_corrected_parent_and_valid_support(
                 assert np.any(waveform[..., half] != 0)
         # Unit 0 fires only in the first span (before the join/exclusion).
         assert np.all(draw["sample_index"][draw["unit_index"] == 0] < first_end)
+
+
+def test_concat_units_are_not_duplicated_in_match_graph(
+    span_edge_sorts, monkeypatch
+):
+    """A concatenation input is one node per parent unit, however many member
+    exports it has, and no edge joins two units of one parent curation.
+
+    The concatenation's curation has one ``ConcatMemberCuration`` export per
+    member; ``MatchableUnit`` and the ``TrackedUnit`` graph still hold each
+    parent unit once, keyed by the parent ``(sorting_id, curation_id,
+    unit_id)``. A raw pair between two units of the parent is refused. (The
+    matcher cannot emit one either: UnitMatchPy masks every pair within one
+    session directory, and each input is one directory.)
+    """
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import (
+        UnitMatchPairIntegrityError,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    sx = span_edge_sorts
+    concat, masked = sx["curations"]["concat"], sx["curations"]["masked"]
+    n_members = len(ConcatMemberCuration & concat)
+    assert n_members == 2
+    parent_units = sorted(CurationV2().get_matchable_unit_ids(concat))
+    masked_units = sorted(CurationV2().get_matchable_unit_ids(masked))
+    assert parent_units == masked_units == [0, 1, 2]
+
+    def _node(curation, unit_id):
+        return (
+            str(curation["sorting_id"]),
+            int(curation["curation_id"]),
+            unit_id,
+        )
+
+    saved = install_fixture_pairer(
+        monkeypatch,
+        matcher_name="parent_graph_pairer",
+        matcher_params_name="parent_graph_pairer_params",
+        pairs=[[0, 0], [2, 2]],
+    )
+    pk = None
+    try:
+        pk = UnitMatchSelection.insert_inputs(
+            [masked, concat], "parent_graph_pairer_params"
+        )
+        UnitMatch.populate(pk, reserve_jobs=False)
+        TrackedUnit.populate(pk, reserve_jobs=False)
+
+        matchable = [
+            (str(r["sorting_id"]), int(r["curation_id"]), int(r["unit_id"]))
+            for r in (UnitMatch.MatchableUnit & pk).fetch(as_dict=True)
+        ]
+        expected_nodes = sorted(
+            [_node(concat, u) for u in parent_units]
+            + [_node(masked, u) for u in masked_units]
+        )
+        assert sorted(matchable) == expected_nodes
+        graph = [
+            (str(r["sorting_id"]), int(r["curation_id"]), int(r["unit_id"]))
+            for r in (TrackedUnit.Member & pk).fetch(as_dict=True)
+        ]
+        assert sorted(graph) == expected_nodes
+        for table in (UnitMatch.MatchableUnit, TrackedUnit.Member):
+            assert "member_index" not in table.heading.names
+
+        tracked = {}
+        for row in (TrackedUnit.Member & pk).fetch(as_dict=True):
+            tracked.setdefault(row["tracked_unit_id"], set()).add(
+                (str(row["sorting_id"]), int(row["unit_id"]))
+            )
+        concat_id, masked_id = (
+            str(concat["sorting_id"]),
+            str(masked["sorting_id"]),
+        )
+        assert sorted(sorted(group) for group in tracked.values()) == sorted(
+            [
+                sorted({(concat_id, 0), (masked_id, 0)}),
+                sorted({(concat_id, 2), (masked_id, 2)}),
+                [(concat_id, 1)],
+                [(masked_id, 1)],
+            ]
+        )
+
+        pairs = (UnitMatch.Pair & pk).fetch(as_dict=True)
+        assert len(pairs) == 2
+        for pair in pairs:
+            assert (
+                str(pair["session_a_sorting_id"]),
+                int(pair["session_a_curation_id"]),
+            ) != (
+                str(pair["session_b_sorting_id"]),
+                int(pair["session_b_curation_id"]),
+            )
+        within_parent = {
+            **pk,
+            "pair_index": 999,
+            "session_a_sorting_id": concat["sorting_id"],
+            "session_a_curation_id": concat["curation_id"],
+            "unit_a_id": 0,
+            "session_b_sorting_id": concat["sorting_id"],
+            "session_b_curation_id": concat["curation_id"],
+            "unit_b_id": 1,
+            "match_probability": 0.9,
+        }
+        with pytest.raises(UnitMatchPairIntegrityError, match="same input"):
+            UnitMatch.Pair.insert1(within_parent, allow_direct_insert=True)
+        assert len(UnitMatch.Pair & pk) == 2
+    finally:
+        if pk is not None:
+            _drop(pk)
+        (
+            MatcherParameters
+            & {"matcher_params_name": "parent_graph_pairer_params"}
+        ).super_delete(warn=False)
+        restore_matcher_registry(saved)
