@@ -13,9 +13,7 @@ def staged(common, mini_copy_name):
     key = log.stage(plan_nwbfile(mini_copy_name))
     yield log, key, plan_nwbfile(mini_copy_name)
     # Parts first: the master cannot go while its rows reference it.
-    (log.Entry & key).delete_quick()
-    (log.Problem & key).delete_quick()
-    (log & key).delete_quick()
+    log._clear(key)  # parts then master, in one place
 
 
 def test_a_plan_stages_every_entry_it_holds(staged):
@@ -123,9 +121,7 @@ def test_inserting_a_plan_closes_its_staging_area(common, mini_copy_name):
     ), "Every entry should be accounted for once the plan is applied"
     assert (log & key).fetch1("status") == "complete"
 
-    (log.Entry & key).delete_quick()
-    (log.Problem & key).delete_quick()
-    (log & key).delete_quick()
+    log._clear(key)  # parts then master, in one place
 
 
 def test_entries_are_keyed_by_where_the_row_is_going(common, mini_copy_name):
@@ -150,6 +146,64 @@ def test_entries_are_keyed_by_where_the_row_is_going(common, mini_copy_name):
         "e.g. Task or RawPosition"
     )
 
-    (log.Entry & key).delete_quick()
-    (log.Problem & key).delete_quick()
-    (log & key).delete_quick()
+    log._clear(key)  # parts then master, in one place
+
+
+def test_staging_records_each_table_and_its_read_set(
+    common, mini_copy_name, mini_insert
+):
+    """A staged plan keeps per-table provenance, not just per-entry.
+
+    The read-set digest is what lets a later attempt skip a table whose inputs
+    did not change. Storing it per table is the half of that which the log has
+    to carry; the comparison itself belongs to the planner.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.data_import.planner import plan_nwbfile
+
+    plan = plan_nwbfile(mini_copy_name)
+    IngestionPlanLog().stage(plan)
+
+    key = {"nwb_file_name": mini_copy_name}
+    staged = IngestionPlanLog.Table & key
+
+    assert len(staged) == len(
+        plan.table_plans
+    ), "One row per table the plan covers"
+
+    rows = staged.fetch(as_dict=True)
+    by_name = {row["table_name"]: row for row in rows}
+
+    for table_plan in plan.table_plans:
+        row = by_name[table_plan.table_name]
+        assert row["status"] == table_plan.status
+        assert row["entry_count"] == table_plan.entry_count
+        assert row["read_set_digest"] == table_plan.read_set_digest
+
+    digests = [r["read_set_digest"] for r in rows if r["read_set_digest"]]
+    assert digests, "The mini file is hashable, so digests should be present"
+    assert len(set(digests)) > 1, (
+        "Different tables read different objects, so their digests must "
+        "differ -- one digest for everything would make reuse meaningless"
+    )
+
+
+def test_restaging_replaces_the_table_rows(common, mini_copy_name, mini_insert):
+    """Re-planning updates the per-table rows rather than appending them.
+
+    One live plan per file: a second attempt describes the same file, so its
+    table rows replace the first attempt's.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.data_import.planner import plan_nwbfile
+
+    key = {"nwb_file_name": mini_copy_name}
+    log = IngestionPlanLog()
+
+    log.stage(plan_nwbfile(mini_copy_name))
+    first = len(IngestionPlanLog.Table & key)
+
+    log.stage(plan_nwbfile(mini_copy_name))
+    second = len(IngestionPlanLog.Table & key)
+
+    assert first == second, f"Table rows accumulated: {first} -> {second}"

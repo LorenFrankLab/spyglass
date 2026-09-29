@@ -435,7 +435,9 @@ def test_video_partial_import_counts_source_series(common, monkeypatch):
     table._video_count = 0
     table._placed_videos = 0
 
-    def fake_validate(video_obj, valid_times, key):
+    def fake_validate(video_obj, valid_times, key, ctx=None):
+        # `ctx` because the real method takes it: the camera is looked up among
+        # the rows this ingestion will hold, not only those already stored.
         if video_obj.name == "spans two epochs":
             return [dict(key, video_file_num=0)], None, 1.0
         return [], "no timestamp overlap with epoch", 0.0

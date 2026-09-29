@@ -141,6 +141,33 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         message = NULL: varchar(255)
         """
 
+    class Table(SpyglassMixinPart):
+        """One table's share of a plan, and whether its parse can be reused.
+
+        `read_set_digest` covers the NWB objects that table actually read. Equal
+        digest, same inputs: nothing it depends on changed, so the entries
+        staged last time still describe the file and the parse need not run
+        again. This is what makes a re-attempt cheap after the user edits one
+        thing -- the tables that read the edited object re-parse, the rest do
+        not.
+
+        NULL digest means *unknown*, never "unchanged": a file that could not be
+        hashed must re-parse rather than silently reuse.
+
+        `table_name` is a plain string for the same reason as on `Entry` -- a
+        plan names tables whose rows do not exist yet.
+        """
+
+        definition = """
+        -> master
+        table_name: varchar(128)
+        ---
+        status: varchar(16)                  # ok|skipped|failed|blocked
+        read_set_digest = NULL: varchar(32)  # NULL means unknown, not unchanged
+        reads = NULL: blob                   # object ids the digest covers
+        entry_count = 0: int
+        """
+
     class Problem(SpyglassMixinPart):
         """A file-level problem, belonging to no single entry."""
 
@@ -162,6 +189,34 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     # and a problem only, and marked so it is re-parsed rather than trusted:
     # silent degradation would read as a cache hit.
     _entry_blob_cap = 1 << 20  # 1 MiB
+
+    def _clear(self, master_key: dict) -> None:
+        """Remove a file's staged plan, parts before master.
+
+        One place that knows the part list, because `delete_quick` does not
+        cascade: every caller clearing a staged plan by hand had to name each
+        part, and adding one silently broke them with a foreign-key error from
+        the master delete. Assumes a surrounding transaction -- see `clear`.
+
+        Parameters
+        ----------
+        master_key : dict
+            `{"nwb_file_name": ...}`.
+        """
+        for part in (self.Entry, self.Table, self.Problem):
+            (part & master_key).delete_quick()
+        (self & master_key).delete_quick()
+
+    def clear(self, nwb_file_name: str) -> None:
+        """Remove a file's staged plan entirely.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The file whose plan to discard.
+        """
+        with self._safe_context():
+            self._clear({"nwb_file_name": nwb_file_name})
 
     def stage(self, plan) -> dict:
         """Record a plan, updating the entries it already holds.
@@ -193,8 +248,22 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             dj_user=dj.config["database.user"],
         )
 
-        rows, problems = [], []
+        rows, problems, table_rows = [], [], []
         for table_plan in plan.table_plans:
+            table_rows.append(
+                dict(
+                    master_key,
+                    table_name=table_plan.table_name,
+                    status=table_plan.status,
+                    read_set_digest=table_plan.read_set_digest,
+                    # The object ids the digest covers. Kept so a later attempt
+                    # can re-hash *the same* set and compare: the digest alone
+                    # cannot be recomputed without knowing what went into it,
+                    # and what a table reads is only known after it parses.
+                    reads=list(table_plan.reads),
+                    entry_count=table_plan.entry_count,
+                )
+            )
             # A table that could not be parsed, or was skipped because a
             # parent failed, stages its entries in that state rather than as
             # ready-to-insert. `exists` and `conflict` are per-entry
@@ -231,10 +300,9 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         with self._safe_context():
             # Replace rather than append: an entry keeps its identity across
             # attempts, so re-planning updates what is already staged.
-            (self.Entry & master_key).delete_quick()
-            (self.Problem & master_key).delete_quick()
-            existing.delete_quick()
+            self._clear(master_key)
             self.insert1(master)
+            self.Table.insert(table_rows)
             self.Entry.insert(rows)
             self.Problem.insert(problem_rows)
 
