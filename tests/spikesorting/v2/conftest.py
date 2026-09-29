@@ -94,7 +94,22 @@ def _isolate_si_metric_defaults():
     The copies are made without ``isolated_si_metric_defaults``'s lock:
     holding that lock on the main thread for a whole test would block every
     worker thread the test starts that computes metrics through Spyglass.
+
+    No-op under SpikeInterface < 0.101. The legacy (v0/v1) CI job installs
+    SI 0.99 and collects one file from this directory,
+    ``test_clusterless_waveform_features.py`` (for its v0/v1 guard test), so
+    this autouse fixture also runs there. ``_si_metric_patches`` imports
+    ``spikeinterface.metrics`` at module scope, which does not exist before
+    SI 0.101, and legacy tests never call SI's quality/template metric
+    computes, so skipping the copy changes nothing they exercise.
     """
+    import spikeinterface as si
+    from packaging.version import Version
+
+    if Version(si.__version__) < Version("0.101"):
+        yield
+        return
+
     from spyglass.spikesorting.v2._si_metric_patches import (
         _si_metric_param_copies,
     )
