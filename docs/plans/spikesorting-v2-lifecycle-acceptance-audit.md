@@ -284,9 +284,12 @@ comparison was deselected because it had already passed. This run includes the
 real sparse nearest-neighbor metric patch checks, dependency declarations,
 sorter-default snapshots, and legacy import/runtime boundaries. It is not a
 fresh legacy sorting run. The earlier fresh-process and ground-truth probes
-also passed. The separately exercised masked-review, competing-draft, and two
-real-decoder cases retain the failures documented above; the passing final
-subset does not supersede those failures.
+also passed. At this point in the audit, the separately exercised
+masked-review, competing-draft, and two real-decoder cases still carried the
+failures documented above; the passing final subset did not supersede those
+failures. The implementation follow-up above (masked analyzer reload,
+competing draft saves, decoder compatibility) later fixed all three, and the
+acceptance probes exercising these paths now pass.
 
 All four new scripts pass Ruff and Python syntax parsing. `git diff --check`
 passes. No production changes were made in this audit pass, and existing
@@ -340,9 +343,12 @@ container reached with `--no-docker`, so there is no Docker client to run
 `mysqldump` and `docker exec` against. Run it locally against a
 Docker-managed test container.
 
-The known failing acceptance paths should fail until fixed; they are not marked
-as passing or hidden with `xfail`. Logs, JSON measurements, screenshots, wheel,
-and the standalone decoder reproducer from this run are under
+At the time of this audit, the known failing acceptance paths were left
+failing rather than marked as passing or hidden with `xfail`. The
+implementation follow-up above fixed those findings, and all 8 acceptance
+probes (`test_lifecycle_acceptance.py`, `test_handoff_acceptance.py`) now
+pass locally with `--run-acceptance`. Logs, JSON measurements, screenshots,
+wheel, and the standalone decoder reproducer from this run are under
 `/private/tmp/spyglass-v2-lifecycle-audit/`. Early iterations also contain harness
 errors (merge-result labels, SQL quoting, and stale-reference assertions); these
 are not counted as product findings.
