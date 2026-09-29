@@ -2445,11 +2445,13 @@ cross-referenced here, not duplicated.
     only: the manifest carries no gates, and no recipe is promoted by it.
 - **CI.** Workflow steps now run under `bash -el {0}` so a failed command
     earlier in a step (conda create, pip install, playwright install, fixture
-    download) fails the step instead of being masked by a later passing command;
-    the two-session fixture fetch's `|| true` is replaced with an explicit
-    warning branch. The three minirec NWB/video downloads now use `curl --fail`
-    to a `.part` name and only rename to the fixture path on success, so an HTTP
-    error can no longer leave an HTML error page on disk under the fixture name.
+    download) fails the step instead of being masked by a later passing command.
+    The matching lane no longer fetches the two-session fixtures (formerly
+    under `|| true`); the nightly/manual two-session gate described above
+    requires them by name instead. The three minirec NWB/video downloads now
+    use `curl --fail` to a `.part` name and only rename to the fixture path on
+    success, so an HTTP error can no longer leave an HTML error page on disk
+    under the fixture name.
     Stale workflow comments describing job composition, SpikeInterface versions,
     and fixture tiers are corrected. A note above the coverage-upload step says
     only `run-tests` uploads to Codecov and that it ignores the v0/v1/v2 spike-
