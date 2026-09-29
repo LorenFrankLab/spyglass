@@ -780,6 +780,7 @@ def test_fetch_waveform_v2_is_disk_backed_and_cleaned(wave_session):
     )
 
 
+@_skip_if_legacy
 @pytest.mark.database
 def test_clusterless_waveform_buffer_is_disk_backed(dj_conn):
     """Every-spike, every-channel extraction must not be resident in RAM.
