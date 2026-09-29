@@ -313,17 +313,33 @@ def _clean_session_v2(session_key):
 
 
 def _synthetic_artifact_recording(offsets=None):
-    """8-channel, 90 000-sample (3 s @ 30 kHz) recording with two planted
-    artifact runs -- one common-mode amplitude burst, one single-channel
-    z-score outlier -- plus heterogeneous gains so the µV scaling matters.
+    """8-channel, 90 000-sample (3 s @ 30 kHz) recording with three planted
+    artifact bursts -- one common-mode amplitude burst (all channels), one
+    single-channel burst sized to trip both amplitude and z-score regardless
+    of gain, and one smaller single-channel burst sized to cross an
+    amplitude threshold in raw counts but NOT after that channel's gain (180
+    raw * 0.25 µV/count = 45 µV, below a 50 µV threshold; the same 180 raw
+    counts read as already-µV would wrongly exceed it) -- plus heterogeneous
+    per-channel gains, so a wrong (or dropped) gain broadcast surfaces as a
+    disagreement between the chunked scan and an in-memory reference.
+
+    Both ``gain_to_uV`` and ``offset_to_uV`` are always set on the returned
+    recording (never gain alone), matching Spyglass's real NWB-backed
+    recordings: SpikeInterface's NWB reader always sets both properties
+    (``spikeinterface/extractors/nwbextractors.py:581-582,834-837,866-869``
+    in the installed SI 0.104.3). SpikeInterface's own
+    ``get_traces(return_in_uV=True)`` only actually scales when BOTH
+    properties are present (``has_scaleable_traces()``,
+    ``spikeinterface/core/baserecordingsnippets.py:47-49``); with gain set
+    but offset unset, it silently returns the raw, unscaled traces instead
+    (``spikeinterface/core/baserecording.py:364-374``) -- always setting
+    both here avoids that gap.
 
     Parameters
     ----------
     offsets : list[float] or None, optional
         Per-channel ``offset_to_uV`` values applied via
-        ``set_channel_offsets``. Default ``None`` leaves the recording
-        without an ``offset_to_uV`` property, unchanged from before this
-        parameter existed.
+        ``set_channel_offsets``. Default ``None`` uses all-zero offsets.
     """
     import spikeinterface as si
 
@@ -337,14 +353,22 @@ def _synthetic_artifact_recording(offsets=None):
     )
     # Common-mode amplitude burst across all channels (trips amplitude).
     traces[20_000:20_300, :] += 300.0
-    # Single-channel transient (trips the across-channel z-score).
+    # Single-channel transient, large enough to trip amplitude AND z-score
+    # regardless of gain (channel 3, gain 0.25 -> 100 µV peak).
     traces[60_000:60_120, 3] += 400.0
+    # Single-channel transient sized to straddle the amplitude threshold
+    # depending on whether gain is applied: 180 raw counts * 0.25 µV/count
+    # (channel 3's gain) = 45 µV, below a 50 µV threshold; 180 raw counts
+    # compared directly against that same threshold would wrongly exceed it.
+    traces[75_000:75_050, 3] += 180.0
     rec = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
     # Heterogeneous gains: the chunk worker and the reference must apply the
-    # SAME per-channel gain, so a wrong gain broadcast surfaces as inequality.
+    # SAME per-channel gain, so a wrong gain broadcast surfaces as
+    # inequality (see the 75_000:75_050 burst above).
     rec.set_channel_gains([1.0, 0.5, 2.0, 0.25, 1.0, 1.5, 0.8, 1.2])
-    if offsets is not None:
-        rec.set_channel_offsets(offsets)
+    if offsets is None:
+        offsets = [0.0] * n_channels
+    rec.set_channel_offsets(offsets)
     return rec
 
 

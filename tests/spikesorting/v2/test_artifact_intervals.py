@@ -507,24 +507,22 @@ def _in_memory_artifact_frames_reference(recording, validated):
     ``frames_above`` array the interval-building code consumes).
     """
     traces = recording.get_traces(return_in_uV=False)
-    if recording.has_scaleable_traces():
-        # Matches production's own return_in_uV=True affine transform
-        # exactly, gain AND offset, both cast to float32 before the
-        # multiply-add (spikeinterface/core/baserecording.py:375-380 in
-        # spyglass_spikesorting_v2's installed SI 0.104.3; see also
-        # ``_artifact_compute.py``'s ``get_traces(..., return_in_uV=True)``
-        # call, which is what this oracle stands in for).
-        gains = recording.get_channel_gains().astype(np.float32)
-        offsets = recording.get_channel_offsets().astype(np.float32)
-        traces_uv = (
-            traces.astype(np.float32) * gains[None, :] + offsets[None, :]
-        )
-    else:
-        # SpikeInterface leaves a float recording's traces unscaled when
-        # gain or offset is unset (baserecording.py:364-374) -- production's
-        # own return_in_uV=True call does the same, so the reference must
-        # too.
-        traces_uv = traces.astype(np.float32)
+    # Matches production's own return_in_uV=True affine transform
+    # unconditionally: gain AND offset, both cast to float32 before the
+    # multiply-add (spikeinterface/core/baserecording.py:375-380 in
+    # spyglass_spikesorting_v2's installed SI 0.104.3; see also
+    # ``_artifact_compute.py``'s ``get_traces(..., return_in_uV=True)`` call,
+    # which is what this oracle stands in for). This does NOT branch on
+    # ``recording.has_scaleable_traces()``: that branch exists in
+    # SpikeInterface only as a fallback for a float recording that never had
+    # gain/offset properties set at all, which is not what production reads
+    # (Spyglass recordings come from ``se.read_nwb_recording``, whose NWB
+    # reader always sets both), and ``_synthetic_artifact_recording`` now
+    # always sets both too, so ``has_scaleable_traces()`` is always True
+    # here.
+    gains = recording.get_channel_gains().astype(np.float32)
+    offsets = recording.get_channel_offsets().astype(np.float32)
+    traces_uv = traces.astype(np.float32) * gains[None, :] + offsets[None, :]
     absolute = np.abs(traces_uv)
 
     n_channels = traces.shape[1]
@@ -562,18 +560,43 @@ def _in_memory_artifact_frames_reference(recording, validated):
 # combining with channel 3's own burst, not on channel 3's offset.
 _ARTIFACT_CHANNEL_OFFSETS_UV = [1000.0, 0.0, 1000.0, 0.0, 1000.0, 0.0, 0.0, 0.0]
 
+# A single true outlier channel among N can reach a population (ddof=0)
+# cross-channel |z| of at most sqrt(N - 1) (here sqrt(7) ~= 2.6458): the
+# other N-1 channels' own |z| settles near 1/sqrt(N-1) ~= 0.378. A threshold
+# below sqrt(N-1) -- but comfortably above what the OTHER planted burst
+# (the all-channel amplitude burst, which is not common-mode once
+# heterogeneous gain is applied) reaches, empirically ~1.91 -- lets the
+# single-channel bursts trip the z-score branch without the all-channel
+# burst doing so too.
+_ARTIFACT_ZSCORE_THRESHOLD = 2.2
+
 
 @pytest.mark.parametrize(
-    "amplitude_threshold_uv,zscore_threshold,channel_offsets_uv",
+    "amplitude_threshold_uv,zscore_threshold,channel_offsets_uv,"
+    "proportion_above_threshold",
     [
-        (50.0, None, None),  # amplitude-only branch
-        (None, 6.0, None),  # z-score-only branch
-        (50.0, 6.0, None),  # OR-combined branch
-        (50.0, None, _ARTIFACT_CHANNEL_OFFSETS_UV),  # amplitude + offsets
+        (50.0, None, None, 0.5),  # amplitude-only branch
+        # z-score-only branch: proportion 0.125 -> n_required=1, so the
+        # single true outlier channel (the 60_000:60_120 and 75_000:75_050
+        # bursts) alone can flag a frame; at proportion 0.5 (n_required=4)
+        # a single outlier can never flag anything (see _ARTIFACT_ZSCORE
+        # _THRESHOLD), which is why this branch used to flag nothing.
+        (None, _ARTIFACT_ZSCORE_THRESHOLD, None, 0.125),
+        (50.0, 6.0, None, 0.5),  # OR-combined branch
+        (50.0, None, _ARTIFACT_CHANNEL_OFFSETS_UV, 0.5),  # amplitude+offsets
+        # amplitude + gain: proportion 0.125 -> n_required=1, so channel 3's
+        # own correctness at the 75_000:75_050 burst (45 µV, below the 50
+        # µV threshold) directly decides that window -- a dropped/wrong gain
+        # there flips it to a false positive (180 raw > 50).
+        (50.0, None, None, 0.125),
     ],
 )
 def test_chunked_artifact_matches_in_memory_reference(
-    dj_conn, amplitude_threshold_uv, zscore_threshold, channel_offsets_uv
+    dj_conn,
+    amplitude_threshold_uv,
+    zscore_threshold,
+    channel_offsets_uv,
+    proportion_above_threshold,
 ):
     """The chunked ``_scan_artifact_frames`` produces frame-identical
     output to the frozen full-in-memory reference, and is invariant to chunk
@@ -585,9 +608,10 @@ def test_chunked_artifact_matches_in_memory_reference(
     only if the flagged frame set is unchanged. The per-frame across-channel
     z-score depends solely on that frame's columns, so chunk boundaries
     (which split the time axis) cannot change which frames are flagged --
-    this test pins that property across all three zero-offset detection
-    branches, plus a fourth case with heterogeneous non-zero channel offsets
-    (production reads ``return_in_uV=True``, i.e. gain AND offset; see
+    this test pins that property across the amplitude-only, z-score-only and
+    OR-combined branches, plus a case with heterogeneous non-zero channel
+    offsets and a case that discriminates gain (production reads
+    ``return_in_uV=True``, i.e. gain AND offset; see
     ``_artifact_compute.py:121-130`` and
     ``_in_memory_artifact_frames_reference`` above).
     """
@@ -601,13 +625,18 @@ def test_chunked_artifact_matches_in_memory_reference(
         detect=True,
         amplitude_threshold_uv=amplitude_threshold_uv,
         zscore_threshold=zscore_threshold,
-        proportion_above_threshold=0.5,
+        proportion_above_threshold=proportion_above_threshold,
         removal_window_ms=1.0,
         join_window_ms=0.0,
         min_length_s=0.001,
     )
 
     reference = _in_memory_artifact_frames_reference(rec, validated)
+    assert reference.size > 0, (
+        "This parametrization's reference flagged no frames at all -- a "
+        "vacuous case that compares an empty set to an empty set and "
+        "cannot catch a regression."
+    )
 
     # Many small chunks (~0.1 s each → ~30 chunks) exercises chunk seams.
     chunked = RecordingArtifactDetection._scan_artifact_frames(
