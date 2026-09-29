@@ -14,26 +14,37 @@
 
 # # Cross-session spike sorting: concatenate and track units across sessions
 #
-# Two cross-session workflows that build on the single-session pipeline from
-# [Spike Sorting v2](./10_Spike_SortingV2.ipynb). They apply to **different**
-# session sets, so this notebook keeps them separate — run either or both:
+# Three cross-session workflows that build on the single-session pipeline from
+# [Spike Sorting v2](./10_Spike_SortingV2.ipynb). They compose — a daily
+# concatenation from Part A is a valid matching input for Part B/C — so this
+# notebook keeps them in separate, independently runnable parts:
 #
 # 1. **Concatenate same-day recordings and sort them as one** (Part A). When an
 #    animal was recorded in several blocks on the *same day* on the same probe,
 #    sorting the concatenation (rather than each block separately) keeps a unit's
 #    identity consistent across the blocks. Concatenation only makes sense within
 #    a day — there is no shared drift to align across days.
-# 2. **Match units across sessions** (Part B). Sort each session independently,
-#    then link the same biological unit across sessions — typically **across
-#    days** — into a *tracked unit*, the basis for following a cell over time.
+# 2. **Match units across sessions via a `SessionGroup`** (Part B). Sort each
+#    session independently, then link the same biological unit across
+#    sessions — typically **across days** — into a *tracked unit*, the basis
+#    for following a cell over time.
+# 3. **Match independently sorted sorts directly, without a group** (Part C).
+#    The group-less counterpart of Part B: name the already-curated
+#    `sorting_id`s to match — each one a single-recording sort *or* a same-day
+#    concatenation sort from Part A — and match them directly. This is the
+#    direct path for two or more **daily concatenations** (sort each day's
+#    blocks as one concatenation via Part A, curate each day, then match the
+#    days' concatenation sorts here), and it also reads back each tracked
+#    unit's spike times and brain regions on each **original recording's own
+#    clock**, not the synthetic concatenation timeline.
 #
-# Both start from a `SessionGroup`: a named bundle of *members*, where each member
-# is a `(session, sort group, interval)` tuple. The same-day concat group and the
-# (possibly cross-day) match group are distinct, so they get separate parameters
-# below. This notebook assumes you have already configured a DataJoint connection
-# (see [Setup](./00_Setup.ipynb)), ingested the sessions with `insert_sessions`
-# (see [Insert Data](./02_Insert_Data.ipynb)), and created per-shank sort groups
-# for each session (`SortGroupV2.set_group_by_shank`; see notebook 10).
+# Parts A and B start from a `SessionGroup`: a named bundle of *members*, where
+# each member is a `(session, sort group, interval)` tuple. Part C names sorts
+# directly and builds no group. This notebook assumes you have already
+# configured a DataJoint connection (see [Setup](./00_Setup.ipynb)), ingested
+# the sessions with `insert_sessions` (see [Insert Data](./02_Insert_Data.ipynb)),
+# and created per-shank sort groups for each session
+# (`SortGroupV2.set_group_by_shank`; see notebook 10).
 
 # +
 import datajoint as dj
@@ -45,11 +56,13 @@ from spyglass.spikesorting.v2.pipeline import (
     describe_run,
     describe_unit_match_choices,
     plan_v2_unit_match,
+    plan_v2_unit_match_from_sorts,
     run_v2_pipeline,
     run_v2_unit_match,
     select_units_for_analysis,
 )
 from spyglass.spikesorting.v2.session_group import SessionGroup
+from spyglass.spikesorting.v2.unit_matching import TrackedUnit
 
 dj.config["display.limit"] = 12
 # -
@@ -322,8 +335,6 @@ if run_unit_match and unitmatch_available:
 
     # A tracked unit's per-session members (the curated units that compose it)
     # are queryable through TrackedUnit for downstream cross-session analysis.
-    from spyglass.spikesorting.v2.unit_matching import TrackedUnit
-
     tracked_key = {"unitmatch_id": match_summary["unit_match_id"]}
     display(TrackedUnit & tracked_key)
     display(TrackedUnit.Member & tracked_key)
@@ -333,11 +344,82 @@ elif run_unit_match:
         "'spikesorting-v2-matching' extra to match units across sessions."
     )
 
+# ## Part C — Match independently sorted daily concatenations directly
+#
+# `plan_v2_unit_match_from_sorts` is the group-less counterpart of
+# `plan_v2_unit_match`: name the already-curated `sorting_id`s to match, in any
+# order, with no `SessionGroup` step at all. Each named sort — a
+# single-recording sort *or* a same-day concatenation sort — becomes one
+# **matching input**; a two-block daily concatenation contributes exactly one
+# input, not two. This is the direct path when each day was independently
+# concatenated (Part A) and sorted: sort and curate every day first, then match
+# the days' `sorting_id`s here. No two matching inputs may share a session
+# (`nwb_file_name`), so a concatenation and one of its own member sessions
+# cannot be matched together, and a concatenation must lie within one day.
+#
+# For a runnable example without a second concatenation to configure, this
+# matches Part A's same-day concatenation directly against one of Part B's
+# independently sorted, independently curated sessions — substitute another
+# day's concatenation `sorting_id` for a concatenation-vs-concatenation match.
+
+if run_concat and run_unit_match and unitmatch_available:
+    daily_sorting_ids = [
+        concat_summary["sorting_id"],  # Part A's same-day concatenation
+        member_summaries[1]["sorting_id"],  # any other day's curated sort
+    ]
+    daily_plan = plan_v2_unit_match_from_sorts(
+        daily_sorting_ids,
+        curation_strategy="auto_curated",
+        matcher_params_name=matcher_params_name,
+    )
+    display(daily_plan.as_dataframe())  # one row per matching input
+    for warning in daily_plan.warnings:
+        print("WARNING:", warning)
+    if not daily_plan.ok:
+        for problem in daily_plan.errors:
+            print("UNRESOLVED:", problem)
+
+    daily_summary = run_v2_unit_match(daily_plan)
+    # One input_<i> row per matching input, in chronological order, with its
+    # source, constituent recordings and motion-correction status.
+    display(describe_run(daily_summary))
+    print(
+        f"{daily_summary['n_pairs']} cross-session pair(s) -> "
+        f"{daily_summary['n_tracked_units']} tracked unit(s)"
+    )
+
+    # Original-member analysis: a concatenation member's spikes and region are
+    # read back on that ORIGINAL recording's own clock and sort group, never
+    # the synthetic concatenation timeline or a copied anchor region.
+    daily_tracked_key = {"unitmatch_id": daily_summary["unit_match_id"]}
+    display(TrackedUnit & daily_tracked_key)
+    example_tracked_unit_id = int(
+        (TrackedUnit & daily_tracked_key).fetch("tracked_unit_id")[0]
+    )
+    example_tracked_key = {
+        **daily_tracked_key,
+        "tracked_unit_id": example_tracked_unit_id,
+    }
+    member_spike_times = TrackedUnit().get_member_spike_times(
+        example_tracked_key
+    )
+    member_regions = TrackedUnit().get_unit_brain_regions(example_tracked_key)
+    display(member_spike_times)  # one row per (member unit, original recording)
+    display(member_regions)  # per-recording n_spikes / detected / region
+elif run_concat and run_unit_match:
+    print(
+        "UnitMatch extra not installed; skipping Part C. Install the "
+        "'spikesorting-v2-matching' extra to match sorts directly."
+    )
+
 # ## Next steps
 #
-# - Curate the concatenated sort (Part A) or any member sort (Part B) with the
-#   inspect-and-curate tools in [Spike Sorting v2](./10_Spike_SortingV2.ipynb).
+# - Curate the concatenated sort (Part A) or any member/named sort (Parts B/C)
+#   with the inspect-and-curate tools in
+#   [Spike Sorting v2](./10_Spike_SortingV2.ipynb).
 # - Organize sorts and filter units with
 #   [Spike Sorting Analysis](./11_Spike_Sorting_Analysis.ipynb).
-# - For the matcher's parameters and internals, see
+# - For the matcher's parameters, internals, overlap restrictions, and the
+#   held-out matching-recovery evidence (including the per-day
+#   motion-correction alignment limitation), see
 #   `docs/src/Features/SpikeSortingV2.md`.
