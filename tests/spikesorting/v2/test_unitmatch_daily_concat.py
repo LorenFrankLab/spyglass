@@ -337,3 +337,140 @@ def test_score_run_flags_a_tracked_unit_holding_one_input_twice():
     assert counts["same_input_group"] == [1, 11]
     assert counts["incorrect_identity"] == [1, 1]
     assert counts["pair_precision"] == [0, 0]
+
+
+def _records(scenario, per_seed_counts):
+    """Hand-built run records: one ``counts`` dict per seed."""
+    return [
+        {"scenario": scenario, "seed": seed, "counts": counts}
+        for seed, counts in enumerate(per_seed_counts)
+    ]
+
+
+def test_derive_gate_applies_the_margin_rule():
+    """The floor, the rounding direction and the coin-flip cut-off hold."""
+    flat = _records("two_day", [{"m": [9, 10]}] * 40)
+    up = bench.derive_gate(flat, "two_day", "m", ">=", 40)
+    # No seed-to-seed spread: the margin is the floor, 0.90 - 0.05.
+    assert up["se_dev"] == pytest.approx(0.0, abs=1e-12)
+    assert up["margin"] == bench.MARGIN_FLOOR
+    assert up["bound"] == 0.85 and up["gated"]
+    low = _records("two_day", [{"m": [1, 10]}] * 40)
+    down = bench.derive_gate(low, "two_day", "m", "<=", 40)
+    assert down["bound"] == 0.15 and down["gated"]
+    # A spread of seeds widens the margin past the floor.
+    spread = _records("two_day", [{"m": [10, 10]}, {"m": [5, 10]}] * 20)
+    wide = bench.derive_gate(spread, "two_day", "m", ">=", 40)
+    assert wide["pooled_rate"] == 0.75
+    assert wide["margin"] > bench.MARGIN_FLOOR
+    assert wide["margin"] == pytest.approx(
+        bench.MARGIN_SE_MULTIPLIER * wide["se_dev"] * np.sqrt(2.0)
+    )
+    assert wide["bound"] == np.floor((0.75 - wide["margin"]) * 100) / 100
+    assert (wide["min"], wide["median"], wide["max"]) == (0.5, 0.75, 1.0)
+    # A bound below a coin flip is reported, not gated.
+    weak = _records("two_day", [{"m": [5, 10]}] * 40)
+    assert not bench.derive_gate(weak, "two_day", "m", ">=", 40)["gated"]
+
+
+def test_evaluate_gates_compares_pooled_rates_exactly():
+    """Pooled rates on the threshold pass; below, violations or gaps fail."""
+    base = {
+        "pair_tracked:all": [39, 50],
+        "pair_tracked:partial": [37, 50],
+        "pair_precision": [37, 50],
+        "incorrect_identity": [3, 50],
+        "distractor_emitted": [23, 100],
+        "partial_bundled": [8, 8],
+        **{metric: [0, 10] for metric in bench.INVARIANT_METRICS},
+    }
+    records = _records("two_day", [base, base])
+    gates = {g.gate_id: g for g in bench.evaluate_gates(records, "two_day")}
+    expected_ids = {spec.gate_id for spec in bench.GATES["two_day"]} | {
+        f"invariant-{metric}" for metric in bench.INVARIANT_METRICS
+    }
+    assert set(gates) == expected_ids
+    # 78/100 == 0.78, 74/100 == 0.74, 6/100 == 0.06, 46/200 == 0.23.
+    assert all(g.passed is True for g in gates.values())
+    below = dict(base, **{"pair_tracked:all": [38, 50]})
+    violated = dict(base, same_input_group=[1, 10])
+    records = _records("two_day", [base, below])
+    by_id = {g.gate_id: g for g in bench.evaluate_gates(records, "two_day")}
+    assert by_id["two-day-recall"].passed is False
+    records = _records("two_day", [base, violated])
+    by_id = {g.gate_id: g for g in bench.evaluate_gates(records, "two_day")}
+    assert by_id["invariant-same_input_group"].passed is False
+    missing = {k: v for k, v in base.items() if k != "pair_precision"}
+    records = _records("two_day", [missing])
+    by_id = {g.gate_id: g for g in bench.evaluate_gates(records, "two_day")}
+    assert by_id["two-day-precision"].passed is None
+
+
+def _held_out_gates(scenario, out_dir):
+    """Run the held-out seeds of ``scenario`` and evaluate its gates."""
+    seeds = range(
+        bench.HELD_OUT_FIRST_SEED,
+        bench.HELD_OUT_FIRST_SEED + bench.HELD_OUT_SEEDS,
+    )
+    development = range(
+        bench.DEVELOPMENT_FIRST_SEED,
+        bench.DEVELOPMENT_FIRST_SEED + bench.DEVELOPMENT_SEEDS,
+    )
+    assert not set(seeds) & set(development)
+    records = [bench.run_one(scenario, seed, out_dir) for seed in seeds]
+    gates = bench.evaluate_gates(records, scenario)
+    table = "\n".join(bench.format_gate_line(g) for g in gates)
+    expected = {spec.gate_id for spec in bench.GATES[scenario]} | {
+        f"invariant-{metric}" for metric in bench.INVARIANT_METRICS
+    }
+    assert {g.gate_id for g in gates} == expected, table
+    return gates, table
+
+
+@pytest.mark.slow
+def test_daily_concat_matches_planted_units(tmp_path):
+    """Held-out evaluation of the two-day gates (seeds 100..139).
+
+    Each day is a same-day concatenation of two independently simulated
+    members, and every neuron's day units are sorted into sparse, unrelated
+    ids. Pooled over the held-out seeds, with real SpikeInterface bundle
+    extraction inside each day's statistics spans, real UnitMatchPy and the
+    production tracked-unit graph, the run must meet every gate in
+    ``GATES["two_day"]``: pair recall through tracked units, recall of
+    neurons firing in only one member of each day, pair precision, the
+    incorrect-identity rate, the distractor false-match rate, every
+    partial-member unit bundled, and zero structural violations (no tracked
+    unit holds two units of one day; production per-recording counts and
+    tracked-unit session / input counts equal the planted truth).
+
+    The gates were derived from development seeds 0..39 only, with the
+    margin rule in the benchmark module's docstring. Do not change the
+    thresholds, seeds, dataset or scoring to make this pass, and do not
+    xfail or skip it: a failure is a reported result. DB-free.
+    """
+    pytest.importorskip("UnitMatchPy")
+    gates, table = _held_out_gates("two_day", tmp_path)
+    assert all(g.passed is True for g in gates), table
+
+
+@pytest.mark.slow
+def test_three_day_concat_matches_planted_units(tmp_path):
+    """Held-out evaluation of the three-day gates (seeds 100..139).
+
+    Three concatenated days with stable neurons, neurons absent on day 2,
+    neurons whose templates change gradually, conflicting pairs of
+    near-identical neurons and per-day distractors. Pooled over the held-out
+    seeds, the run must meet every gate in ``GATES["three_day"]``: stable
+    pair recall through tracked units, the day 1 -- day 3 linkage of neurons
+    absent on day 2, pair precision, the incorrect-identity rate, the
+    distractor false-match rate and zero structural violations.
+
+    Gradual-change and conflicting-pair recall are printed, not asserted:
+    on the development seeds their derived bounds fell below 0.50
+    (``UNGATED_DIAGNOSTICS``). The gates were derived from development seeds
+    0..39 only. Do not change the thresholds, seeds, dataset or scoring to
+    make this pass, and do not xfail or skip it. DB-free.
+    """
+    pytest.importorskip("UnitMatchPy")
+    gates, table = _held_out_gates("three_day", tmp_path)
+    assert all(g.passed is True for g in gates), table

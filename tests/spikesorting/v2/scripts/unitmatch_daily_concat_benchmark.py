@@ -79,14 +79,69 @@ denominator]``:
   ``sessions_detected_mismatch`` / ``matching_inputs_mismatch`` (a tracked
   unit's counts differ from the value derived from the planted counts).
 
-The dataset and scoring functions are importable; UnitMatchPy is imported
-only when a bundle is built or matched.
+Manifest (fixed before any held-out seed was run):
+
+- Development seeds: 0..39 per scenario (``DEVELOPMENT_*``), the only seeds
+  run to derive the gates. A 20-seed pilot (seeds 0..19) came first; its
+  standard errors for the classes with four pairs per seed were too wide to
+  derive gates from, so the development and held-out counts were both set to
+  40 seeds, and the gates below come from seeds 0..39.
+- Held-out seeds: 100..139 per scenario (``HELD_OUT_*``), disjoint from the
+  development seeds, evaluated once against these gates by
+  ``test_daily_concat_matches_planted_units`` and
+  ``test_three_day_concat_matches_planted_units``.
+- Dataset: every module constant above (probe, noise, firing rate, template
+  window, location draw, day layouts, class counts, change magnitudes, unit
+  id pool).
+- Bundle: ``ms_before = ms_after = 1.5``, ``max_spikes_per_unit = 100``,
+  ``seed = 0`` (the ``UnitMatchParamsSchema`` defaults), statistics spans
+  from each day. Matching: ``match_threshold = 0.5``,
+  ``tracked_unit_threshold = 0.5``, ``max_strict_nodes = 2000`` (the schema
+  defaults).
+- Margin rule (:func:`derive_gate`): ``margin = max(3 * se_diff, 0.05)``,
+  ``se_diff = se_dev * sqrt(1 + n_dev / n_held_out)``, ``se_dev`` the
+  seed-bootstrap standard error of the development pooled rate. A ``>=``
+  gate is ``floor_0.01(pooled - margin)``, a ``<=`` gate is
+  ``ceil_0.01(pooled + margin)``; a candidate whose ``>=`` bound falls below
+  0.50 (or ``<=`` bound above 0.50) is reported, not gated.
+- Gates (:data:`GATES`, pooled over the held-out seeds, exact rational
+  comparison; development pooled value, seed min / median / max, margin in
+  brackets):
+
+  ``two_day``: ``pair_tracked:all >= 0.78`` [668/800 = 0.835; 0.70 / 0.85 /
+  0.95; 0.050]; ``pair_tracked:partial >= 0.74`` [137/160 = 0.856; 0.50 /
+  1.00 / 1.00; 0.111]; ``pair_precision >= 0.74`` [669/807 = 0.829; 0.50 /
+  0.86 / 1.00; 0.086]; ``incorrect_identity <= 0.06`` [6/674 = 0.009; 0.00 /
+  0.00 / 0.07; 0.050]; ``distractor_emitted <= 0.23`` [40/320 = 0.125; 0.00 /
+  0.13 / 0.63; 0.102]; ``partial_bundled >= 1.0`` (every partial-member unit
+  gets two halves; an invariant, 320/320).
+
+  ``three_day``: ``pair_tracked:stable >= 0.73`` [949/1200 = 0.791; 0.60 /
+  0.77 / 0.93; 0.061]; ``pair_tracked:reappear >= 0.50`` (day 1 -- day 3
+  linkage) [107/160 = 0.669; 0.25 / 0.75 / 1.00; 0.164]; ``pair_precision >=
+  0.65`` [1668/2293 = 0.727; 0.51 / 0.76 / 0.97; 0.077]; ``incorrect_identity
+  <= 0.09`` [26/699 = 0.037; 0.00 / 0.00 / 0.17; 0.050]; ``distractor_emitted
+  <= 0.23`` [44/360 = 0.122; 0.00 / 0.11 / 0.56; 0.102].
+
+  Both: zero violations of ``same_input_group``, ``recording_count_mismatch``,
+  ``sessions_detected_mismatch`` and ``matching_inputs_mismatch``
+  (invariants; zero in every development run).
+- Not gated (:data:`UNGATED_DIAGNOSTICS`): ``three_day``
+  ``pair_tracked:gradual`` (166/480 = 0.346, bound 0.22) and
+  ``pair_tracked:conflict`` (276/480 = 0.575, bound 0.44), plus every
+  ``pair_emitted``, ``identity_complete``, ``singleton``,
+  ``distractor_grouped`` and ``false_pair`` count.
+
+The dataset, scoring and gate functions are importable; UnitMatchPy is
+imported only when a bundle is built or matched.
 
 Usage (from the repo root, in the spikesorting-v2 environment with the
 matching extra installed)::
 
     python tests/spikesorting/v2/scripts/unitmatch_daily_concat_benchmark.py \\
-        --scenario two_day [--first-seed 0] [--seeds 10] [--out-dir DIR]
+        --scenario two_day [--first-seed 0] [--seeds 40] [--out-dir DIR]
+
+The defaults run the development seeds.
 
 Per-run JSON (``<scenario>/seed<seed>/run.json``), ``results.json`` and
 ``summary.md`` are written to ``--out-dir`` (default: a new temporary
@@ -152,6 +207,102 @@ JOB_KWARGS = {"n_jobs": 1, "progress_bar": False}
 
 SCENARIOS = ("two_day", "three_day")
 _SCENARIO_CODE = {"two_day": 2, "three_day": 3}
+
+#: Development seeds (run to derive the gates) and held-out seeds (a
+#: disjoint range, evaluated once against the committed gates).
+DEVELOPMENT_FIRST_SEED = 0
+DEVELOPMENT_SEEDS = 40
+HELD_OUT_FIRST_SEED = 100
+HELD_OUT_SEEDS = 40
+
+#: Margin rule (:func:`derive_gate`).
+MARGIN_SE_MULTIPLIER = 3.0
+MARGIN_FLOOR = 0.05
+MIN_GATED_RECALL = 0.50
+N_BOOTSTRAP = 10_000
+BOOTSTRAP_SEED = 0
+
+
+@dataclass(frozen=True)
+class GateSpec:
+    """One acceptance gate on a pooled metric rate."""
+
+    gate_id: str
+    metric: str
+    comparison: str
+    threshold: float
+
+
+#: Acceptance gates for the held-out seeds, pooled over them. Every
+#: threshold was derived from the development seeds only
+#: (:func:`derive_gate`); see the module docstring for the derivation.
+GATES = {
+    "two_day": (
+        GateSpec("two-day-recall", "pair_tracked:all", ">=", 0.78),
+        GateSpec("two-day-partial-recall", "pair_tracked:partial", ">=", 0.74),
+        GateSpec("two-day-precision", "pair_precision", ">=", 0.74),
+        GateSpec(
+            "two-day-incorrect-identity", "incorrect_identity", "<=", 0.06
+        ),
+        GateSpec("two-day-distractor", "distractor_emitted", "<=", 0.23),
+        GateSpec("two-day-partial-bundled", "partial_bundled", ">=", 1.0),
+    ),
+    "three_day": (
+        GateSpec("three-day-stable-recall", "pair_tracked:stable", ">=", 0.73),
+        GateSpec(
+            "three-day-reappear-linkage", "pair_tracked:reappear", ">=", 0.50
+        ),
+        GateSpec("three-day-precision", "pair_precision", ">=", 0.65),
+        GateSpec(
+            "three-day-incorrect-identity", "incorrect_identity", "<=", 0.09
+        ),
+        GateSpec("three-day-distractor", "distractor_emitted", "<=", 0.23),
+    ),
+}
+
+#: Correctness invariants gated in every scenario at zero violations.
+INVARIANT_METRICS = (
+    "same_input_group",
+    "recording_count_mismatch",
+    "sessions_detected_mismatch",
+    "matching_inputs_mismatch",
+)
+
+#: Gate candidates the margin rule left ungated, with the reason.
+UNGATED_DIAGNOSTICS = {
+    "three_day": {
+        "pair_tracked:gradual": (
+            "per-neuron amplitude loss of 15 % a day plus 4 um a day of "
+            "movement is out of reach: development pooled recall 0.346, "
+            "derived bound 0.22 (below 0.50)"
+        ),
+        "pair_tracked:conflict": (
+            "the day-3 mover is as close to its partner as to its own day-1 "
+            "template, so the pair evidence conflicts by construction: "
+            "development pooled recall 0.575, derived bound 0.44 (below 0.50)"
+        ),
+    },
+}
+
+#: Metrics the margin rule is applied to, with the passing direction.
+GATE_CANDIDATES = {
+    "two_day": (
+        ("pair_tracked:all", ">="),
+        ("pair_tracked:partial", ">="),
+        ("pair_precision", ">="),
+        ("incorrect_identity", "<="),
+        ("distractor_emitted", "<="),
+    ),
+    "three_day": (
+        ("pair_tracked:stable", ">="),
+        ("pair_tracked:gradual", ">="),
+        ("pair_tracked:reappear", ">="),
+        ("pair_tracked:conflict", ">="),
+        ("pair_precision", ">="),
+        ("incorrect_identity", "<="),
+        ("distractor_emitted", "<="),
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -1030,6 +1181,181 @@ def _frac(count) -> str:
     return f"{count[0]}/{count[1]} ({rate(count):.3f})"
 
 
+# ----------------------------------------------------------------------------
+# Gate derivation (development seeds only)
+# ----------------------------------------------------------------------------
+def pooled_rate_se(records, scenario: str, metric: str) -> float:
+    """Seed-bootstrap standard error of one metric's pooled rate.
+
+    Resamples the scenario's seeds with replacement (``N_BOOTSTRAP`` draws,
+    generator seeded with ``BOOTSTRAP_SEED``) and recomputes the pooled
+    ``sum(numerators) / sum(denominators)`` of each draw, so seeds with more
+    pairs weigh more, exactly as in the pooled value itself.
+    """
+    runs = [r for r in records if r["scenario"] == scenario]
+    num = np.array([r["counts"][metric][0] for r in runs], dtype=float)
+    den = np.array([r["counts"][metric][1] for r in runs], dtype=float)
+    rng = np.random.default_rng(BOOTSTRAP_SEED)
+    draws = rng.integers(0, len(runs), size=(N_BOOTSTRAP, len(runs)))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        boot = num[draws].sum(axis=1) / den[draws].sum(axis=1)
+    return float(np.nanstd(boot, ddof=1))
+
+
+def derive_gate(
+    records, scenario: str, metric: str, comparison: str, n_held_out: int
+) -> dict:
+    """Apply the margin rule to one metric's development distribution.
+
+    ``margin = max(MARGIN_SE_MULTIPLIER * se_diff, MARGIN_FLOOR)``, where
+    ``se_diff = se_dev * sqrt(1 + n_dev / n_held_out)`` is the standard error
+    of the difference between a held-out pooled rate and the development
+    pooled rate (``se_dev`` from :func:`pooled_rate_se`; the held-out pool's
+    error scales with ``1 / sqrt(n_held_out)``). A ``>=`` gate is the
+    development pooled rate minus the margin, rounded DOWN to 0.01; a ``<=``
+    gate is the pooled rate plus the margin, rounded UP to 0.01 (after
+    rounding to nine decimals, so float noise never moves a bound). A ``>=``
+    bound below ``MIN_GATED_RECALL`` (or a ``<=`` bound above
+    ``1 - MIN_GATED_RECALL``) would not show recovery better than a coin
+    flip, so the metric is not gated (``gated`` False).
+
+    Returns
+    -------
+    dict
+        ``pooled`` (count), ``pooled_rate``, per-seed ``min`` / ``median`` /
+        ``max``, ``n_dev``, ``se_dev``, ``se_diff``, ``margin``, ``bound``
+        and ``gated``.
+    """
+    runs = [r for r in records if r["scenario"] == scenario]
+    per_seed = [rate(r["counts"][metric]) for r in runs]
+    per_seed = [v for v in per_seed if not np.isnan(v)]
+    pooled = pooled_counts(runs, scenario)[metric]
+    pooled_rate = rate(pooled)
+    se_dev = pooled_rate_se(runs, scenario, metric)
+    se_diff = se_dev * float(np.sqrt(1.0 + len(runs) / n_held_out))
+    margin = max(MARGIN_SE_MULTIPLIER * se_diff, MARGIN_FLOOR)
+    if comparison == ">=":
+        bound = max(0.0, np.floor(round((pooled_rate - margin) * 100, 9)) / 100)
+        gated = bound >= MIN_GATED_RECALL
+    elif comparison == "<=":
+        bound = min(1.0, np.ceil(round((pooled_rate + margin) * 100, 9)) / 100)
+        gated = bound <= 1.0 - MIN_GATED_RECALL
+    else:
+        raise ValueError(f"unknown comparison {comparison!r}")
+    return {
+        "metric": metric,
+        "comparison": comparison,
+        "pooled": pooled,
+        "pooled_rate": pooled_rate,
+        "min": float(np.min(per_seed)),
+        "median": float(np.median(per_seed)),
+        "max": float(np.max(per_seed)),
+        "n_dev": len(runs),
+        "se_dev": se_dev,
+        "se_diff": se_diff,
+        "margin": margin,
+        "bound": float(bound),
+        "gated": bool(gated),
+    }
+
+
+@dataclass(frozen=True)
+class Gate:
+    """One gate outcome; ``passed`` is ``None`` when it cannot be evaluated."""
+
+    gate_id: str
+    scenario: str
+    metric: str
+    value: float
+    threshold: float
+    comparison: str
+    passed: bool | None
+    detail: str
+
+
+def evaluate_gates(records, scenario: str) -> list[Gate]:
+    """Evaluate one scenario's gates and invariants on the pooled records.
+
+    Each gate compares the pooled rate ``sum(numerators) /
+    sum(denominators)`` over every record of ``scenario`` with its
+    threshold, in exact :class:`fractions.Fraction` arithmetic (a value on
+    the threshold passes). An invariant passes when its pooled violation
+    count is zero. A metric with an empty pool (no record, or a zero
+    denominator) is not evaluable: ``passed`` is ``None``.
+    """
+    import fractions
+
+    pooled = pooled_counts(records, scenario) or {}
+    specs = list(GATES[scenario]) + [
+        GateSpec(f"invariant-{metric}", metric, "<=", 0.0)
+        for metric in INVARIANT_METRICS
+    ]
+    gates = []
+    for spec in specs:
+        count = pooled.get(spec.metric, [0, 0])
+        if not count[1]:
+            gates.append(
+                Gate(
+                    spec.gate_id,
+                    scenario,
+                    spec.metric,
+                    float("nan"),
+                    spec.threshold,
+                    spec.comparison,
+                    None,
+                    "empty pool",
+                )
+            )
+            continue
+        exact = fractions.Fraction(count[0], count[1])
+        threshold = fractions.Fraction(str(spec.threshold))
+        passed = (
+            exact >= threshold
+            if spec.comparison == ">="
+            else exact <= threshold
+        )
+        gates.append(
+            Gate(
+                spec.gate_id,
+                scenario,
+                spec.metric,
+                float(exact),
+                spec.threshold,
+                spec.comparison,
+                bool(passed),
+                f"{count[0]}/{count[1]}",
+            )
+        )
+    return gates
+
+
+def format_gate_line(gate: Gate) -> str:
+    """Render one :class:`Gate` as a single line."""
+    verdict = {True: "PASS", False: "FAIL", None: "N/A"}[gate.passed]
+    return (
+        f"- {verdict} {gate.gate_id} [{gate.scenario}] {gate.metric}: "
+        f"{gate.value:.4f} {gate.comparison} {gate.threshold} ({gate.detail})"
+    )
+
+
+def format_derivation(records, scenario: str) -> list[str]:
+    """Markdown table of :func:`derive_gate` over the gate candidates."""
+    lines = [
+        "| metric | pooled | seed min / median / max | se_dev | se_diff | "
+        "margin | derived bound | gated |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for metric, comparison in GATE_CANDIDATES[scenario]:
+        d = derive_gate(records, scenario, metric, comparison, HELD_OUT_SEEDS)
+        lines.append(
+            f"| {metric} | {_frac(d['pooled'])} | {d['min']:.3f} / "
+            f"{d['median']:.3f} / {d['max']:.3f} | {d['se_dev']:.4f} | "
+            f"{d['se_diff']:.4f} | {d['margin']:.4f} | {comparison} "
+            f"{d['bound']:.2f} | {'yes' if d['gated'] else 'no'} |"
+        )
+    return lines
+
+
 def format_summary(records) -> str:
     """Render pooled and per-seed tables as markdown."""
     lines = ["# UnitMatch daily-concatenation benchmark", ""]
@@ -1082,7 +1408,23 @@ def format_summary(records) -> str:
                 f"{r['timings_s']['bundles']:.1f} | "
                 f"{r['timings_s']['match']:.1f} |"
             )
-        lines.append("")
+        lines += ["", f"### Gates (pooled over seeds {seeds})", ""]
+        lines += [format_gate_line(g) for g in evaluate_gates(runs, scenario)]
+        for metric, reason in UNGATED_DIAGNOSTICS.get(scenario, {}).items():
+            lines.append(
+                f"- not gated: {metric} {_frac(pooled[metric])} -- {reason}"
+            )
+        lines += [
+            "",
+            "### Margin rule applied to these seeds",
+            "",
+            "Meaningful only for development seeds; the committed gates come "
+            f"from seeds {DEVELOPMENT_FIRST_SEED}.."
+            f"{DEVELOPMENT_FIRST_SEED + DEVELOPMENT_SEEDS - 1}.",
+            "",
+            *format_derivation(runs, scenario),
+            "",
+        ]
     return "\n".join(lines) + "\n"
 
 
@@ -1096,10 +1438,12 @@ def main(argv=None) -> None:
     ap.add_argument(
         "--first-seed",
         type=int,
-        default=0,
+        default=DEVELOPMENT_FIRST_SEED,
         help="first seed (runs first-seed .. first-seed + seeds - 1)",
     )
-    ap.add_argument("--seeds", type=int, default=10, help="seed count")
+    ap.add_argument(
+        "--seeds", type=int, default=DEVELOPMENT_SEEDS, help="seed count"
+    )
     ap.add_argument("--out-dir", type=Path, default=None)
     args = ap.parse_args(argv)
     if args.seeds < 1:
