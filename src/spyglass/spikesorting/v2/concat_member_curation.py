@@ -12,6 +12,7 @@ from spyglass.common import Session  # noqa: F401
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v2._concat_recording import (
+    member_spike_times,
     split_unit_spike_trains,
 )
 from spyglass.spikesorting.v2._staged_outputs import (
@@ -505,33 +506,15 @@ class ConcatMemberCuration(
         )
         local_frames = split_trains[member_position]
 
-        timestamps = read_series_timestamps(
-            recording_abs_path, recording_electrical_series_path
+        abs_times_by_uid = member_spike_times(
+            local_frames,
+            read_series_timestamps(
+                recording_abs_path, recording_electrical_series_path
+            ),
+            context=(
+                f"ConcatMemberCuration.make (member {int(key['member_index'])})"
+            ),
         )
-        bad_frames = {
-            int(unit_id): np.asarray(frames, dtype=np.int64)
-            for unit_id, frames in local_frames.items()
-            if len(frames)
-            and (
-                int(np.min(frames)) < 0
-                or int(np.max(frames)) >= len(timestamps)
-            )
-        }
-        if bad_frames:
-            bounds = {
-                unit_id: (int(frames.min()), int(frames.max()))
-                for unit_id, frames in bad_frames.items()
-            }
-            raise ValueError(
-                "ConcatMemberCuration.make: local spike frames fall outside "
-                f"member {int(key['member_index'])}'s timestamp vector of length "
-                f"{len(timestamps)}: {bounds}."
-            )
-
-        abs_times_by_uid = {
-            int(unit_id): timestamps[np.asarray(frames, dtype=np.int64)]
-            for unit_id, frames in local_frames.items()
-        }
         obs_intervals_by_uid = {
             int(unit_id): member_obs for unit_id in local_frames
         }

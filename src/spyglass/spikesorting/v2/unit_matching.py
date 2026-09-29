@@ -31,7 +31,9 @@ same biological unit recorded on different days. Four tables:
     strict partition of the curated-unit universe via a greedy maximal-clique
     cover (one identity per unit), with a bounded node budget.
     ``get_unit_brain_regions`` resolves each member unit's brain region in
-    every original recording of its input, from that recording's own session.
+    every original recording of its input, from that recording's own session,
+    and ``get_member_spike_times`` returns its spike times on each original
+    recording's clock.
 """
 
 from __future__ import annotations
@@ -2118,6 +2120,172 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
             "n_spikes",
             "detected",
             *region_columns,
+        ]
+        return (
+            pd.DataFrame(rows, columns=columns)
+            .sort_values(
+                [
+                    "unitmatch_id",
+                    "tracked_unit_id",
+                    "input_index",
+                    "unit_id",
+                    "recording_index",
+                ]
+            )
+            .reset_index(drop=True)
+        )
+
+    def get_member_spike_times(self, tracked_unit_key) -> "pd.DataFrame":
+        """Tracked units' member spike times on each original recording's clock.
+
+        A member unit of a single-recording input has the spike times its
+        curation's units NWB stores, which are on that recording's clock. A
+        member unit of a concatenation input is a parent unit on the
+        synthetic concatenation timeline: its spike frames (the units NWB
+        ``spike_sample_index`` column) are split by the frozen
+        ``[start_sample, end_sample)`` spans of the input's recordings
+        (``UnitMatchSelection.InputRecording``) and each member-local frame
+        is mapped onto that member ``Recording``'s timestamps -- the rule
+        ``ConcatMemberCuration`` applies, without needing its rows. Gaps
+        between and inside members are kept, and a member the unit did not
+        fire in gets an empty array.
+
+        Parameters
+        ----------
+        tracked_unit_key : dict
+            Restriction selecting one or more ``TrackedUnit`` rows.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per (tracked unit, member unit, constituent recording of
+            the member's input), ordered by those, with columns
+            ``unitmatch_id``, ``tracked_unit_id``, ``input_index``,
+            ``recording_index``, ``nwb_file_name``, ``interval_list_name``,
+            ``sorting_id``, ``curation_id``, ``unit_id`` and ``spike_times``
+            (numpy.ndarray of seconds on the recording's own clock).
+
+        Raises
+        ------
+        ValueError
+            A concatenation curation's units NWB has no
+            ``spike_sample_index`` column, or a member-local frame falls
+            outside its member ``Recording``.
+        ConcatSplitError
+            A concatenation unit's spike lies outside the frozen spans.
+        """
+        import pandas as pd
+
+        from spyglass.spikesorting.v2._concat_recording import (
+            member_spike_times,
+            split_spike_frames_by_spans,
+        )
+        from spyglass.spikesorting.v2._units_nwb import (
+            read_units_abs_times_and_sample_indices,
+            recording_timestamps,
+        )
+        from spyglass.spikesorting.v2.recording import Recording
+
+        timestamps_by_recording: dict = {}
+
+        def _timestamps(recording_id):
+            if recording_id not in timestamps_by_recording:
+                timestamps_by_recording[recording_id] = recording_timestamps(
+                    (Recording & {"recording_id": recording_id}).fetch1()
+                )
+            return timestamps_by_recording[recording_id]
+
+        rows = []
+        for member in (self.Member & tracked_unit_key).fetch(as_dict=True):
+            run = {"unitmatch_id": member["unitmatch_id"]}
+            curation_key = {
+                "sorting_id": member["sorting_id"],
+                "curation_id": int(member["curation_id"]),
+            }
+            unit_id = int(member["unit_id"])
+            input_index = int(
+                (
+                    UnitMatch.MatchableUnit
+                    & run
+                    & curation_key
+                    & {"unit_id": unit_id}
+                ).fetch1("input_index")
+            )
+            input_key = {**run, "input_index": input_index}
+            source_kind = (UnitMatchSelection.Input & input_key).fetch1(
+                "source_kind"
+            )
+            recordings = (UnitMatchSelection.InputRecording & input_key).fetch(
+                as_dict=True, order_by="recording_index"
+            )
+            abs_times, sample_indices, _obs = (
+                read_units_abs_times_and_sample_indices(
+                    AnalysisNwbfile.get_abs_path(
+                        (CurationV2 & curation_key).fetch1("analysis_file_name")
+                    ),
+                    unit_ids=[unit_id],
+                )
+            )
+            if source_kind == "recording":
+                times_per_recording = [abs_times[unit_id]]
+            else:
+                if sample_indices is None:
+                    raise ValueError(
+                        "TrackedUnit.get_member_spike_times: the curated "
+                        f"concatenation units NWB of {curation_key} has no "
+                        "spike_sample_index column, so its synthetic times "
+                        "cannot be mapped back to member frames. Recreate the "
+                        "curation with CurationV2.insert_curation."
+                    )
+                local_frames = split_spike_frames_by_spans(
+                    {unit_id: sample_indices[unit_id]},
+                    [
+                        (int(r["start_sample"]), int(r["end_sample"]))
+                        for r in recordings
+                    ],
+                )
+                times_per_recording = [
+                    member_spike_times(
+                        frames,
+                        _timestamps(recording["recording_id"]),
+                        context=(
+                            "TrackedUnit.get_member_spike_times "
+                            f"(input_index {input_index}, recording_index "
+                            f"{recording['recording_index']})"
+                        ),
+                    )[unit_id]
+                    for recording, frames in zip(
+                        recordings, local_frames, strict=True
+                    )
+                ]
+            for recording, spike_times in zip(
+                recordings, times_per_recording, strict=True
+            ):
+                rows.append(
+                    {
+                        "unitmatch_id": str(member["unitmatch_id"]),
+                        "tracked_unit_id": int(member["tracked_unit_id"]),
+                        "input_index": input_index,
+                        "recording_index": int(recording["recording_index"]),
+                        "nwb_file_name": recording["nwb_file_name"],
+                        "interval_list_name": recording["interval_list_name"],
+                        "sorting_id": str(member["sorting_id"]),
+                        "curation_id": int(member["curation_id"]),
+                        "unit_id": unit_id,
+                        "spike_times": spike_times,
+                    }
+                )
+        columns = [
+            "unitmatch_id",
+            "tracked_unit_id",
+            "input_index",
+            "recording_index",
+            "nwb_file_name",
+            "interval_list_name",
+            "sorting_id",
+            "curation_id",
+            "unit_id",
+            "spike_times",
         ]
         return (
             pd.DataFrame(rows, columns=columns)

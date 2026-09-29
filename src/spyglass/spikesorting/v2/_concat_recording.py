@@ -396,6 +396,56 @@ def split_spike_frames_by_spans(
     )
 
 
+def member_spike_times(
+    local_frames_by_unit: dict, timestamps, *, context: str
+) -> dict:
+    """Map member-local spike frames onto the member recording's own clock.
+
+    A member's local frame ``k`` is sample ``k`` of that member's
+    ``Recording``, so its time is ``timestamps[k]`` on the member's original
+    clock (gaps between members and inside a member are kept, unlike the
+    synthetic concatenation timeline).
+
+    Parameters
+    ----------
+    local_frames_by_unit : dict[int, numpy.ndarray]
+        ``{unit_id: member-local spike frames}`` (one entry of
+        :func:`split_unit_spike_trains`).
+    timestamps : numpy.ndarray, shape (n_member_samples,)
+        The member ``Recording``'s timestamps, in seconds.
+    context : str
+        Names the caller and member in the error message.
+
+    Returns
+    -------
+    dict[int, numpy.ndarray]
+        ``{unit_id: spike times in seconds}``; a unit without spikes in the
+        member keeps an empty array.
+
+    Raises
+    ------
+    ValueError
+        If a local frame falls outside ``[0, len(timestamps))``.
+    """
+    import numpy as np
+
+    bounds = {
+        int(unit_id): (int(np.min(frames)), int(np.max(frames)))
+        for unit_id, frames in local_frames_by_unit.items()
+        if len(frames)
+        and (int(np.min(frames)) < 0 or int(np.max(frames)) >= len(timestamps))
+    }
+    if bounds:
+        raise ValueError(
+            f"{context}: local spike frames fall outside the member's "
+            f"timestamp vector of length {len(timestamps)}: {bounds}."
+        )
+    return {
+        int(unit_id): timestamps[np.asarray(frames, dtype=np.int64)]
+        for unit_id, frames in local_frames_by_unit.items()
+    }
+
+
 def electrode_signature_from_rows(
     electrode_rows: list[dict], region_by_key: dict
 ) -> tuple:

@@ -243,6 +243,11 @@ excluded raises.
   electrode and region columns. Each recording's region is resolved from that
   recording's own session and sort group, so concatenation inputs are
   supported; it was previously copied from the concatenation's first member.
+- New `TrackedUnit.get_member_spike_times` returns each member unit's spike
+  times per original recording, on that recording's own clock: a
+  concatenation parent unit's spikes are split by the frozen member spans and
+  mapped onto each member `Recording`'s timestamps, the rule
+  `ConcatMemberCuration` uses, without needing its rows.
 - **Existing `UnitMatch` and `TrackedUnit` rows must be deleted and
   repopulated.**
 

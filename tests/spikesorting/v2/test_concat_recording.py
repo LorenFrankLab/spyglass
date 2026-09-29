@@ -14,7 +14,9 @@ from spyglass.spikesorting.v2._concat_recording import (
     build_concatenated_recording,
     cumulative_member_boundaries,
     member_set_hash,
+    member_spike_times,
     member_split_key,
+    split_spike_frames_by_spans,
     split_unit_spike_trains,
 )
 from spyglass.spikesorting.v2.exceptions import ConcatSplitError
@@ -54,6 +56,33 @@ def test_split_maps_to_local_member_frames():
     # Member 1 keeps frames in [100, 200) shifted by -100.
     np.testing.assert_array_equal(per_member[1][7], [0, 50, 99])
     np.testing.assert_array_equal(per_member[1][9], [0])
+
+
+def test_member_spike_times_keep_each_members_own_clock():
+    """Two members with gapped clocks of unequal length: frames split by the
+    member spans map onto each member's own timestamps (hand-computed), and
+    a unit absent from a member keeps an empty train."""
+    member0 = 100.0 + np.arange(4) * 0.5  # 100.0 .. 101.5
+    member1 = 250.0 + np.arange(3) * 0.5  # 250.0 .. 251.0 (after a gap)
+    per_member = split_spike_frames_by_spans(
+        {0: np.array([1, 3, 4, 6]), 5: np.array([5])}, [(0, 4), (4, 7)]
+    )
+    assert [
+        {
+            u: t.tolist()
+            for u, t in member_spike_times(f, ts, context="x").items()
+        }
+        for f, ts in zip(per_member, (member0, member1))
+    ] == [{0: [100.5, 101.5], 5: []}, {0: [250.0, 251.0], 5: [250.5]}]
+
+
+def test_member_spike_times_rejects_frames_outside_the_member():
+    """A local frame past the member's last sample raises, naming the
+    caller's context."""
+    with pytest.raises(ValueError, match="member 2 of x: local spike frames"):
+        member_spike_times(
+            {0: np.array([0, 3])}, np.arange(3.0), context="member 2 of x"
+        )
 
 
 def test_member_split_key_disambiguates_same_spatial_member():

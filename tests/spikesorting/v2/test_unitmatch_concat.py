@@ -2406,6 +2406,20 @@ def test_tracked_units_map_to_original_member_times_and_regions(
         nwb: (Session & {"nwb_file_name": nwb}).fetch1("session_start_time")
         for nwb in nwbs.values()
     }
+    member_times = {
+        recording: Recording()
+        .get_recording(fx["recording_keys"][recording])
+        .get_times()
+        for recording in ("a_first", "a_second", "b_first", "c_first")
+    }
+    # The day-1 members have their own gapped clocks and unequal lengths.
+    first, second = member_times["a_first"], member_times["a_second"]
+    assert second[0] - first[-1] > 0.05
+    assert len(first) != len(second)
+    assert [end - start for start, end in spans["day1"]] == [
+        len(first),
+        len(second),
+    ]
     params_name = "member_times_pairer_params"
     saved = install_fixture_pairer(
         monkeypatch,
@@ -2548,6 +2562,38 @@ def test_tracked_units_map_to_original_member_times_and_regions(
                 _assert_regions_follow_each_session(
                     pk, cur[name], nwbs["a"], nwbs["b"]
                 )
+
+            # Original-clock spike times equal the planted frames read on each
+            # member Recording's own timestamps.
+            times = TrackedUnit().get_member_spike_times(pk)
+            got_times = {
+                (r.sorting_id, r.unit_id, r.recording_index): r.spike_times
+                for r in times.itertuples()
+            }
+            expected_times = {}
+            for sort_name, recording_names in (
+                (name, member_recordings[name]),
+                ("c", ["c_first"]),
+            ):
+                for unit, per_span in planted[sort_name].items():
+                    for recording_index, (frames, recording_name) in enumerate(
+                        zip(per_span, recording_names, strict=True)
+                    ):
+                        start = spans[sort_name][recording_index][0]
+                        expected_times[
+                            (
+                                str(cur[sort_name]["sorting_id"]),
+                                unit,
+                                recording_index,
+                            )
+                        ] = member_times[recording_name][frames - start]
+            assert len(times) == 9
+            assert got_times.keys() == expected_times.keys()
+            for position, expected in expected_times.items():
+                np.testing.assert_array_equal(
+                    got_times[position], expected, err_msg=str(position)
+                )
+            assert len(got_times[(str(cur[name]["sorting_id"]), 1, 1)]) == 0
     finally:
         for pk in runs.values():
             _drop(pk)
