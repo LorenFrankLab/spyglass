@@ -230,7 +230,12 @@ concatenation, so a daily same-day concatenation can now be matched directly
   run. Inputs are ordered chronologically by the earliest frozen
   `session_start_time` among their recordings, independent of naming order;
   `UnitMatch.make` refuses a run whose frozen session start times no longer
-  equal the `Session` rows rather than re-ordering it.
+  equal the `Session` rows rather than re-ordering it. The selection identity
+  (`input_set_hash`) includes each recording's frozen session start time
+  (as UTC), so after a `Session.session_start_time` correction, selecting the
+  same curations again gives a new selection with the corrected time instead
+  of returning the refused one. Existing `UnitMatchSelection` rows no longer
+  realize their stored hash and must be recreated (see below).
 - **Overlap restrictions**, enforced at `insert_inputs` and re-checked at
   `UnitMatch.make`: no two inputs may share a recording session
   (`SameSessionMatchError`) -- this rejects two single-recording sorts of one

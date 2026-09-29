@@ -648,6 +648,81 @@ def test_matching_snapshot_survives_live_group_changes(
         _drop(pk)
 
 
+def test_reselecting_after_a_session_start_correction_gives_a_new_selection(
+    daily_concat_match_inputs, monkeypatch
+):
+    """After a one-minute correction of a session's start time the old
+    selection is refused at make, and selecting the same curations again
+    gives a new selection that freezes the corrected time and populates."""
+    from spyglass.common import Session
+    from spyglass.spikesorting.v2.exceptions import (
+        UnitMatchSelectionIntegrityError,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    fx = daily_concat_match_inputs
+    cur = fx["curations"]
+    nwb_a = fx["nwb_file_names"]["a"]
+    params_name = "start_correction_pairer_params"
+    saved = install_fixture_pairer(
+        monkeypatch,
+        matcher_name="start_correction_pairer",
+        matcher_params_name=params_name,
+        pairs=[],
+    )
+    inputs = [cur["single_a"], cur["single_b"]]
+    old_pk = new_pk = None
+    try:
+        old_pk = UnitMatchSelection.insert_inputs(inputs, params_name)
+        recorded = (Session & {"nwb_file_name": nwb_a}).fetch1(
+            "session_start_time"
+        )
+        corrected = recorded + dt.timedelta(minutes=1)
+        with _raw_update(
+            Session,
+            {"nwb_file_name": nwb_a},
+            "session_start_time",
+            corrected,
+        ):
+            with pytest.raises(
+                UnitMatchSelectionIntegrityError, match="session_start_time"
+            ):
+                UnitMatch.populate(old_pk, reserve_jobs=False)
+            assert len(UnitMatch & old_pk) == 0
+
+            new_pk = UnitMatchSelection.insert_inputs(inputs, params_name)
+            assert new_pk != old_pk
+            # The correction keeps a before b, so only a's frozen times move.
+            new_inputs = _input_rows(new_pk)
+            assert [str(row["sorting_id"]) for row in new_inputs] == [
+                str(cur["single_a"]["sorting_id"]),
+                str(cur["single_b"]["sorting_id"]),
+            ]
+            assert new_inputs[0]["input_start_time"] == corrected
+            assert _recording_rows(new_pk, 0)[0]["session_start_time"] == (
+                corrected
+            )
+            assert _input_rows(old_pk)[0]["input_start_time"] == recorded
+            UnitMatch.populate(new_pk, reserve_jobs=False)
+            assert len(UnitMatch & new_pk) == 1
+            # Selecting again under the corrected time is idempotent.
+            assert UnitMatchSelection.insert_inputs(inputs, params_name) == (
+                new_pk
+            )
+    finally:
+        for pk in (old_pk, new_pk):
+            if pk is not None:
+                _drop(pk)
+        (MatcherParameters & {"matcher_params_name": params_name}).super_delete(
+            warn=False
+        )
+        restore_matcher_registry(saved)
+
+
 def test_concat_inputs_match_and_track_in_chronological_order(
     daily_concat_match_inputs, monkeypatch
 ):

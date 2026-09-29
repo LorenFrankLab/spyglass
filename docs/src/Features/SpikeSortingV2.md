@@ -2109,9 +2109,14 @@ inputs from live values):
 recordings, regardless of the order they were named or pinned in -- the same
 inputs, listed in any order, resolve to the same selection. Each input pins an
 exact `(sorting_id, curation_id)` and its `curation_uuid` generation (no
-implicit "latest curation"), together with its constituent recordings' identity
-and frame spans, frozen at selection time in `UnitMatchSelection.Input` /
-`UnitMatchSelection.InputRecording`. A `SessionGroup` recorded via
+implicit "latest curation"), together with its constituent recordings'
+identity, content hash, session start time, frame span and kept intervals,
+frozen at selection time in `UnitMatchSelection.Input` /
+`UnitMatchSelection.InputRecording`; the selection's identity
+(`input_set_hash`) covers all of them. So after a
+`Session.session_start_time` correction, selecting the same curations again
+gives a new selection that freezes the corrected time, while the old selection
+is refused by `UnitMatch.make`. A `SessionGroup` recorded via
 `insert_selection` is provenance only, not identity: it is not a foreign key,
 so deleting or renaming the group never deletes or changes the match run, and
 matching a set of inputs directly (below) needs no group at all. **A run of

@@ -49,9 +49,14 @@ def input_set_hash(input_rows, recording_rows) -> str:
     (``sorting_id``, ``curation_id``, ``curation_uuid``), its source
     (``source_kind``, ``source_id``, ``motion_corrected_recording_id``) and,
     per constituent recording in ``recording_index`` order, the
-    ``recording_id``, ``recording_content_hash``, the recording's
+    ``recording_id``, ``recording_content_hash``, its frozen
+    ``session_start_time`` (as UTC, :func:`utc_datetime`), the recording's
     ``[start_sample, end_sample)`` frames in the sort and its kept
-    ``valid_times``. It is the
+    ``valid_times``. An input's ``input_start_time`` is not hashed on its own:
+    :func:`frozen_order_errors` requires it to equal the earliest of its
+    recordings' session start times. A corrected
+    ``Session.session_start_time`` therefore gives a new hash, and selecting
+    the same curations again gives a new selection. It is the
     ``input_set_hash`` stored on every ``UnitMatchSelection`` master and the
     single source of truth for that selection's identity:
     ``insert_inputs`` calls it to mint the hash from the part rows it is about
@@ -70,6 +75,8 @@ def input_set_hash(input_rows, recording_rows) -> str:
     recording_rows : iterable of dict
         ``UnitMatchSelection.InputRecording`` rows (``input_index``,
         ``recording_index``, ``recording_id``, ``recording_content_hash``,
+        ``session_start_time`` (``datetime``; naive is read as UTC, so a
+        naive and an aware value of one instant hash identically),
         ``start_sample``, ``end_sample``, ``valid_times`` as an
         ``(n_intervals, 2)`` array of seconds; each float enters the digest
         exactly). Rows whose ``input_index`` has no
@@ -88,6 +95,7 @@ def input_set_hash(input_rows, recording_rows) -> str:
                 int(row["recording_index"]),
                 str(row["recording_id"]),
                 str(row["recording_content_hash"]),
+                utc_datetime(row["session_start_time"]).isoformat(),
                 int(row["start_sample"]),
                 int(row["end_sample"]),
                 np.asarray(row["valid_times"], dtype=np.float64)

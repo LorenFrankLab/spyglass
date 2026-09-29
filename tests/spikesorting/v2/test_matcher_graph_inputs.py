@@ -106,6 +106,7 @@ def _parts(curation_uuid="00000000-0000-0000-0000-0000000000c1"):
             "recording_index": 0,
             "recording_id": uuid.UUID(int=1),
             "recording_content_hash": "a" * 64,
+            "session_start_time": _DAY1,
             "start_sample": 0,
             "end_sample": 150_000,
             "valid_times": [[0.0, 4.99996667]],
@@ -115,6 +116,7 @@ def _parts(curation_uuid="00000000-0000-0000-0000-0000000000c1"):
             "recording_index": 0,
             "recording_id": uuid.UUID(int=3),
             "recording_content_hash": "b" * 64,
+            "session_start_time": _DAY2,
             "start_sample": 0,
             "end_sample": 60_000,
             "valid_times": [[2.02, 3.21996667]],
@@ -124,6 +126,7 @@ def _parts(curation_uuid="00000000-0000-0000-0000-0000000000c1"):
             "recording_index": 1,
             "recording_id": uuid.UUID(int=4),
             "recording_content_hash": "c" * 64,
+            "session_start_time": _DAY2 + dt.timedelta(hours=2),
             "start_sample": 60_000,
             "end_sample": 120_000,
             "valid_times": [[3.3, 4.89996667]],
@@ -165,12 +168,20 @@ def test_input_set_hash_is_row_order_and_uuid_form_independent():
         ("recording", 2, "recording_id", uuid.UUID(int=9)),
         ("recording", 0, "valid_times", [[0.0, 4.9999]]),
         ("recording", 1, "valid_times", [[2.02, 2.5], [2.6, 3.21996667]]),
+        ("recording", 0, "session_start_time", _DAY1 + dt.timedelta(minutes=1)),
+        (
+            "recording",
+            2,
+            "session_start_time",
+            _DAY2 + dt.timedelta(hours=2, seconds=1),
+        ),
     ],
 )
 def test_input_set_hash_changes_with_every_frozen_field(
     table, row_index, field, value
 ):
-    """A new curation generation, source or recording snapshot is a new id."""
+    """A new curation generation, source, recording snapshot or corrected
+    session start time is a new id."""
     from spyglass.spikesorting.v2._matcher_graph import input_set_hash
 
     input_rows, recording_rows = _parts()
@@ -178,6 +189,44 @@ def test_input_set_hash_changes_with_every_frozen_field(
     rows = input_rows if table == "input" else recording_rows
     rows[row_index] = {**rows[row_index], field: value}
     assert input_set_hash(input_rows, recording_rows) != base
+
+
+def test_input_set_hash_reads_session_start_times_as_utc():
+    """A naive session start (as MySQL returns it) and the same instant as a
+    timezone-aware value hash identically; a different instant does not."""
+    from spyglass.spikesorting.v2._matcher_graph import input_set_hash
+
+    input_rows, recording_rows = _parts()
+    base = input_set_hash(input_rows, recording_rows)
+    # _DAY1 is 12:00 UTC; the same instant at +02:00 reads 14:00.
+    plus_two = dt.timezone(dt.timedelta(hours=2))
+    same_instant = [
+        {
+            **recording_rows[0],
+            "session_start_time": _DAY1.replace(hour=14, tzinfo=plus_two),
+        },
+        *recording_rows[1:],
+    ]
+    assert input_set_hash(input_rows, same_instant) == base
+    utc_aware = [
+        {
+            **row,
+            "session_start_time": row["session_start_time"].replace(
+                tzinfo=dt.timezone.utc
+            ),
+        }
+        for row in recording_rows
+    ]
+    assert input_set_hash(input_rows, utc_aware) == base
+    # 12:00 at +02:00 is 10:00 UTC, a different instant.
+    shifted = [
+        {
+            **recording_rows[0],
+            "session_start_time": _DAY1.replace(tzinfo=plus_two),
+        },
+        *recording_rows[1:],
+    ]
+    assert input_set_hash(input_rows, shifted) != base
 
 
 def test_input_part_structure_errors_names_each_defect():
