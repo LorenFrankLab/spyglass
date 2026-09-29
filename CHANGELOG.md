@@ -228,7 +228,9 @@ concatenation, so a daily same-day concatenation can now be matched directly
   non-FK `session_group_owner` / `session_group_name` provenance columns, so
   deleting or renaming a `SessionGroup` no longer deletes or changes a match
   run. Inputs are ordered chronologically by the earliest frozen
-  `session_start_time` among their recordings, independent of naming order.
+  `session_start_time` among their recordings, independent of naming order;
+  `UnitMatch.make` refuses a run whose frozen session start times no longer
+  equal the `Session` rows rather than re-ordering it.
 - **Overlap restrictions**, enforced at `insert_inputs` and re-checked at
   `UnitMatch.make`: no two inputs may share a recording session
   (`SameSessionMatchError`) -- this rejects two single-recording sorts of one

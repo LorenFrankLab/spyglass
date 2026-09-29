@@ -1062,22 +1062,25 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         spans two days and no two inputs share a session (on the frozen
         session times), each ``input_start_time`` is its earliest frozen
         session start and ``input_index`` follows their chronological order,
-        and the stored ``input_set_hash`` is the hash of the parts. Then, per
-        input, the pinned curation must still exist with the pinned
-        ``curation_uuid`` (a recreated curation raises rather than silently
-        re-pointing), carry no unapplied proposed merges, and its live source
-        must still match the frozen recordings (source, ``recording_id``,
-        content hash, concatenation membership, frames and kept intervals;
-        a single recording's frames and kept intervals are re-read from its
-        traces when bundles will be extracted, i.e. for two or more inputs).
+        the stored ``input_set_hash`` is the hash of the parts, and every
+        frozen ``session_start_time`` still equals its live
+        ``Session.session_start_time``. Then, per input, the pinned curation
+        must still exist with the pinned ``curation_uuid`` (a recreated
+        curation raises rather than silently re-pointing), carry no unapplied
+        proposed merges, and its live source must still match the frozen
+        recordings (source, ``recording_id``, content hash, concatenation
+        membership, frames and kept intervals; a single recording's frames
+        and kept intervals are re-read from its traces when bundles will be
+        extracted, i.e. for two or more inputs).
 
-        Only frozen values order and describe the inputs: ``Session`` is not
-        read, and the ``SessionGroup`` the inputs were discovered from is not
-        consulted. Each input's traces file is rebuilt here if missing, and
-        its path, the artifact valid times of the sort's mask (when applied at
-        load) and the sort's statistics spans are carried to compute, together
-        with its curated units NWB (resolved for every input, including a
-        single one, whose traces file is not read).
+        Only frozen values order and describe the inputs: ``Session`` is read
+        only to refuse a run whose frozen session times differ from it (it
+        never re-orders the inputs), and the ``SessionGroup`` the inputs were
+        discovered from is not consulted. Each input's traces file is rebuilt
+        here if missing, and its path, the artifact valid times of the sort's
+        mask (when applied at load) and the sort's statistics spans are
+        carried to compute, together with its curated units NWB (resolved for
+        every input, including a single one, whose traces file is not read).
         """
         from spyglass.spikesorting.v2._matcher_graph import (
             frozen_order_errors,
@@ -1140,6 +1143,16 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 "insert_inputs (a raw-insert bypass that lets a master claim "
                 "one input set while matching on another). Use "
                 "UnitMatchSelection.insert_inputs()."
+            )
+        session_time_errors = _frozen_session_start_errors(recording_rows)
+        if session_time_errors:
+            raise exc_class(
+                f"UnitMatch.make: selection {key} has frozen session start "
+                "times that differ from the live Session rows "
+                f"({'; '.join(session_time_errors)}). The frozen times order "
+                "the inputs and decide whether a concatenation spans days, so "
+                "the run is refused rather than re-ordered. Select the inputs "
+                "again with UnitMatchSelection.insert_inputs()."
             )
         # Bundles are extracted only for two or more inputs; only then are a
         # single recording's frames and kept intervals (which bound the
@@ -2639,6 +2652,51 @@ def _session_start_times(nwb_file_names) -> dict:
         Session & [{"nwb_file_name": name} for name in nwb_file_names]
     ).fetch("nwb_file_name", "session_start_time", as_dict=True)
     return {row["nwb_file_name"]: row["session_start_time"] for row in rows}
+
+
+def _frozen_session_start_errors(recording_rows) -> list[str]:
+    """Describe frozen session start times that differ from ``Session``.
+
+    Compares each ``UnitMatchSelection.InputRecording`` row's frozen
+    ``session_start_time`` with the live ``Session.session_start_time`` of
+    its ``nwb_file_name`` (both read as UTC). Each input's
+    ``input_start_time`` is checked separately to be the earliest of its
+    frozen session times, so it is covered too.
+
+    Parameters
+    ----------
+    recording_rows : iterable of dict
+        ``InputRecording`` rows (``input_index``, ``recording_index``,
+        ``nwb_file_name``, ``session_start_time``).
+
+    Returns
+    -------
+    list of str
+        One message per differing or missing session; empty when every
+        frozen time equals the live one.
+    """
+    from spyglass.spikesorting.v2._matcher_graph import utc_datetime
+
+    recording_rows = list(recording_rows)
+    live = _session_start_times(
+        {row["nwb_file_name"] for row in recording_rows}
+    )
+    errors = []
+    for row in recording_rows:
+        name = row["nwb_file_name"]
+        label = (
+            f"input_index {row['input_index']} recording "
+            f"{row['recording_index']} ({name})"
+        )
+        frozen = utc_datetime(row["session_start_time"])
+        if name not in live:
+            errors.append(f"{label} has no Session row")
+        elif utc_datetime(live[name]) != frozen:
+            errors.append(
+                f"{label} session_start_time frozen {frozen.isoformat()}, "
+                f"now {utc_datetime(live[name]).isoformat()}"
+            )
+    return errors
 
 
 def _add_single_recording_frames(item) -> None:

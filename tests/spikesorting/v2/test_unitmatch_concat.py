@@ -486,8 +486,9 @@ def test_matching_snapshot_survives_live_group_changes(
     daily_concat_match_inputs,
 ):
     """After selection the run keeps its inputs, order and times when the
-    group or a session's start time changes, and refuses -- rather than
-    re-points -- when a curation is recreated or a source changes."""
+    group changes, and refuses -- rather than re-points or re-orders -- when
+    a session's start time changes, a curation is recreated or a source
+    changes."""
     from spyglass.common import Session
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import (
@@ -580,8 +581,9 @@ def test_matching_snapshot_survives_live_group_changes(
         assert _input_rows(pk) == frozen_inputs
         assert _plan_identity() == baseline
 
-        # A session start moved two days later: the frozen time still orders
-        # the inputs (a would otherwise follow b), and make() never reads it.
+        # A session start moved two days later (a would then follow b) no
+        # longer equals its frozen time: the run is refused, and the frozen
+        # rows keep their order and times.
         later = (Session & {"nwb_file_name": nwb["a"]}).fetch1(
             "session_start_time"
         ) + dt.timedelta(days=2)
@@ -591,7 +593,13 @@ def test_matching_snapshot_survives_live_group_changes(
             assert (Session & {"nwb_file_name": nwb["a"]}).fetch1(
                 "session_start_time"
             ) == later
-            assert _plan_identity() == baseline
+            with pytest.raises(
+                UnitMatchSelectionIntegrityError, match="session_start_time"
+            ):
+                UnitMatch.populate(pk, reserve_jobs=False)
+            assert len(UnitMatch & pk) == 0
+            assert _input_rows(pk) == frozen_inputs
+        assert _plan_identity() == baseline
 
         # A recreated curation (same key, new generation) is refused.
         with _raw_update(
@@ -855,9 +863,13 @@ def test_frozen_frames_and_order_are_verified_at_make(
     daily_concat_match_inputs, monkeypatch
 ):
     """A single recording's frozen kept intervals and frames are hashed and
-    re-read from its traces at make, and each input's start time and the
-    chronological numbering are re-checked; an edit to any of them fails
-    UnitMatch.populate before a bundle is extracted."""
+    re-read from its traces at make, each input's start time and the
+    chronological numbering are re-checked, and every frozen session start
+    time must equal its live Session row; an edit to any of them fails
+    UnitMatch.populate before a bundle is extracted, including a rehashed
+    swap of two inputs with their start times and a multi-day concatenation
+    frozen with same-day session times."""
+    from spyglass.common import Session
     from spyglass.spikesorting.v2.exceptions import (
         UnitMatchSelectionIntegrityError,
     )
@@ -943,6 +955,56 @@ def test_frozen_frames_and_order_are_verified_at_make(
                 rehash=True,
             )
             _refused("end_sample")
+
+            # Inputs 0 and 1 swapped together with their start times and
+            # rehashed: the frozen order is consistent, but each frozen
+            # session time differs from its Session row.
+            _drop(pk)
+            pk = UnitMatchSelection.insert_inputs(
+                [cur["single_a"], cur["single_b"]], "unitmatch_default"
+            )
+            start = {
+                int(row["input_index"]): row["input_start_time"]
+                for row in _input_rows(pk)
+            }
+            reforge_selection(
+                pk,
+                input_edits={
+                    0: {"input_index": 1, "input_start_time": start[1]},
+                    1: {"input_index": 0, "input_start_time": start[0]},
+                },
+                recording_edits={
+                    (0, 0): {"input_index": 1, "session_start_time": start[1]},
+                    (1, 0): {"input_index": 0, "session_start_time": start[0]},
+                },
+                rehash=True,
+            )
+            assert [str(row["sorting_id"]) for row in _input_rows(pk)] == [
+                str(cur["single_b"]["sorting_id"]),
+                str(cur["single_a"]["sorting_id"]),
+            ]
+            _refused("session_start_time")
+
+            # A multi-day concatenation (b and c) frozen with same-day
+            # session times -- session c sat on b's day while the inputs were
+            # selected -- passes every check on frozen values; the live
+            # session times refuse it.
+            _drop(pk)
+            nwb = daily_concat_match_inputs["nwb_file_names"]
+            b_start = (Session & {"nwb_file_name": nwb["b"]}).fetch1(
+                "session_start_time"
+            )
+            with _raw_update(
+                Session,
+                {"nwb_file_name": nwb["c"]},
+                "session_start_time",
+                b_start + dt.timedelta(hours=1),
+            ):
+                pk = UnitMatchSelection.insert_inputs(
+                    [cur["single_a"], cur["concat_multi_day"]],
+                    "unitmatch_default",
+                )
+            _refused("session_start_time")
     finally:
         _drop(pk)
 

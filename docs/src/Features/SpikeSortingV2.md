@@ -2085,9 +2085,12 @@ across days. There is exactly **one matching input per curated sort**, whatever
 its internal shape -- a two-block daily concatenation contributes one input,
 not two.
 
-**Overlap restrictions**, enforced by `UnitMatchSelection.insert_inputs` (and
-re-checked by `UnitMatch.make`, so a direct-insert bypass cannot slip past
-them):
+**Overlap restrictions**, enforced by `UnitMatchSelection.insert_inputs` and
+re-checked by `UnitMatch.make` on the frozen `InputRecording` rows. Before it
+runs, `UnitMatch.make` also compares each frozen `nwb_file_name` with the
+input's live source and each frozen `session_start_time` with the live
+`Session` row, and refuses the run on any difference (it never re-orders the
+inputs from live values):
 
 - **No two inputs may share a recording session** (`nwb_file_name`):
     `SameSessionMatchError` rejects two single-recording sorts of one session,
