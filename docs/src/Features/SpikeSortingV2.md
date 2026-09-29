@@ -2169,15 +2169,19 @@ Key behaviors and caveats:
     re-checks that provenance (raising `UnitMatchSelectionIntegrityError`) so a
     direct-insert bypass cannot silently match the wrong units.
 - **The matcher never sees Spyglass internals.** `UnitMatch.make()` extracts a
-    waveform bundle per session from the curated recording + sorting: each
-    unit's own sampled spikes (drawn only where the full waveform window fits
-    in the recording) are split in temporal order into two cross-validation
-    halves (UnitMatch's split-half templates), so a unit present in only part
-    of a session is still matchable. A unit with fewer than two such spikes is
-    excluded from the bundle, logged, and left unmatched (it stays in the
-    matchable universe). The bundle hands the matcher self-contained
-    directories — never a recording, a `SortingAnalyzer`, or a table key. A new
-    backend implements `MatcherProtocol` and registers via `register_matcher()`.
+    waveform bundle per matching input from the traces its sorter read (the
+    sort's effective traces, silenced by its artifact mask and motion-corrected
+    when a correction was selected) and its curated sorting: each unit's own
+    sampled spikes (drawn only where the full waveform window lies inside one of
+    the sort's statistics spans, so never across a concatenation join, an
+    acquisition gap or an artifact exclusion) are split in temporal order into
+    two cross-validation halves (UnitMatch's split-half templates), so a unit
+    present in only part of a session, or in only one member of a concatenation,
+    is still matchable. A unit with fewer than two such spikes is excluded from
+    the bundle, logged, and left unmatched (it stays in the matchable universe).
+    The bundle hands the matcher self-contained directories — never a recording,
+    a `SortingAnalyzer`, or a table key. A new backend implements
+    `MatcherProtocol` and registers via `register_matcher()`.
 - **Small unit counts destabilize the match calibration.** UnitMatch fits its
     match threshold, prior and score distributions from the units present in
     each run, so with few units per session (about 20 or fewer) results can

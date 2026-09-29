@@ -207,6 +207,23 @@ excluded raises.
   [preproduction database upgrade sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database)
   for the recreation order.
 
+#### Spike Sorting v2: UnitMatch bundles come from the sorting input, inside statistics spans
+
+- Bundle extraction reads the traces each input's sorter read. A
+    single-recording sort with a pinned artifact detection is now matched on its
+    artifact-masked traces; it previously read the unmasked `Recording` cache.
+    Concatenated and motion-corrected sorts read their masked persisted traces
+    as before.
+- A spike is sampled for a bundle only if its full waveform window lies inside
+    one of the sort's statistics spans (`Sorting.get_statistics_spans`), so no
+    sampled window crosses a concatenation member join, an acquisition gap or an
+    artifact exclusion. A unit with fewer than two such spikes is excluded from
+    the bundle and stays unmatched in the matchable universe, as before.
+- Bundles of a single continuous recording without artifact exclusions are
+    byte-identical to before. Bundles of sorts with artifact exclusions,
+    disjoint intervals or concatenations change, so delete and repopulate
+    existing `UnitMatch` rows that match such inputs.
+
 #### Spike Sorting v2: every computed table keeps heavy work out of its insert transaction
 
 - `FigPackCuration` now uses DataJoint's tri-part make with
