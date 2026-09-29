@@ -426,7 +426,7 @@ class UnitMatchBackend:
         session_inputs: list[SessionMatcherInput],
         params: dict,
     ) -> list[MatchPair]:
-        """Run UnitMatch over the prepared per-session bundles.
+        """Run UnitMatch over the prepared per-input bundles.
 
         Returns ``[]`` for the degenerate single-session case without importing
         or calling UnitMatch.

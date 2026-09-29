@@ -2301,9 +2301,16 @@ def run_v2_unit_match(
     PipelineInputError
         If ``curation_choices`` is ``None`` or ``matcher_params_name`` is not a
         known ``MatcherParameters`` row.
+    PipelineInputError
+        Also if ``plan`` is not a plan, is combined with the explicit
+        arguments, or could not pin a curation for every member / sort.
     ValueError
-        From ``insert_selection`` on a missing/extra member choice, a
-        non-existent curation, or a curation that does not belong to its member.
+        From ``insert_selection`` (group form) on a missing/extra member
+        choice, a non-existent curation, or a curation that does not belong to
+        its member; or from ``insert_inputs`` (both forms) on an invalid input
+        set, e.g. a curation with unapplied merges, two inputs sharing a
+        session (``SameSessionMatchError``), a multi-day concatenation input,
+        or a channel-geometry mismatch across inputs.
     PipelineStageError
         If ``UnitMatch`` / ``TrackedUnit`` populate fails (names the stage,
         carries the partial summary). A missing optional matcher backend (e.g.
