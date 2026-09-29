@@ -63,8 +63,25 @@ The artifact merge is internal -- user workflows never import it. A sort can
 optionally add a third source part, `MotionCorrectionSource`, pointing at a
 `MotionCorrectedRecording` computed from the same base source and mask -- see
 [Optional motion correction](#optional-motion-correction) below. Recording
-access stays `SpikeSortingOutput.get_recording`; use the selected curation's
-analyzer for the masked, sorting-aligned traces used by QC.
+access stays `SpikeSortingOutput.get_recording`, whose meaning depends on the
+sort. Two accessors have one meaning each, on `CurationV2`,
+`ConcatMemberCuration` and `SpikeSortingOutput`: `get_source_recording` is the
+original `Recording` cache (unmasked, uncorrected; a concat-backed
+`CurationV2` raises and points at each member's), and
+`get_sorting_input_recording` is the traces the sorter read (masked, corrected
+when selected; a concatenation member gets the parent's traces over its frames
+on the member's own timestamps).
+
+| Sort                             | `get_recording` returns       | Masked | Corrected | Clock            |
+| -------------------------------- | ----------------------------- | ------ | --------- | ---------------- |
+| single recording                 | `get_source_recording`        | no     | no        | acquisition      |
+| single recording, corrected      | `get_sorting_input_recording` | yes    | yes       | acquisition      |
+| concatenation                    | `get_sorting_input_recording` | yes    | no        | synthetic concat |
+| concatenation, corrected         | `get_sorting_input_recording` | yes    | yes       | synthetic concat |
+| concatenation member (any)       | `get_source_recording`        | no     | no        | member recording |
+
+A single-recording sort that pins an artifact detection is still unmasked
+through `get_recording`.
 
 All v2 tables live in dedicated DataJoint schemas (`spikesorting_v2_recording`,
 `spikesorting_v2_artifact`, `spikesorting_v2_artifact_output`,
@@ -2248,6 +2265,8 @@ receipt.group_key  # SortedSpikesGroup key for decoding
 | Selected spike times (the supported path)       | `select_units_for_analysis(curation).fetch_spike_data()`                                                                                                  |
 | All units of one registered output              | `SpikeSortingOutput().get_spike_times({"merge_id": merge_id})`                                                                                            |
 | Recording                                       | `SpikeSortingOutput().get_recording({"merge_id": merge_id})`                                                                                              |
+| Original source recording (unmasked)            | `SpikeSortingOutput().get_source_recording({"merge_id": merge_id})`                                                                                       |
+| Traces the sorter read (masked, corrected)      | `SpikeSortingOutput().get_sorting_input_recording({"merge_id": merge_id})`                                                                                |
 | Sorting                                         | `SpikeSortingOutput().get_sorting({"merge_id": merge_id})`                                                                                                |
 | Unit brain regions                              | `SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})`                                                                                       |
 | Curation summary (the curated result)           | `CurationV2.summarize_curation(auto_summary.auto_labeled_curation.as_key())` (`auto_summary.root_curation.as_key()` inspects the uncurated root)          |

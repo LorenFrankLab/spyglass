@@ -251,6 +251,26 @@ excluded raises.
 - **Existing `UnitMatch` and `TrackedUnit` rows must be deleted and
   repopulated.**
 
+#### Spike Sorting v2: trace accessors with one meaning each
+
+- New `get_source_recording` on `CurationV2`, `ConcatMemberCuration` and
+  `SpikeSortingOutput` (v2 sources) returns the original source: the
+  unmasked, uncorrected `Recording` cache on its acquisition clock. A
+  concat-backed `CurationV2` raises, because its source is one recording per
+  member; call `ConcatMemberCuration.get_source_recording` for each member.
+- New `get_sorting_input_recording` on the same tables returns the traces the
+  sorter read: artifact-masked when the sort pins a detection (a
+  concatenation carries its member masks), motion-corrected when a correction
+  was selected, never whitened. It is the recording analyzer rebuilds and
+  UnitMatch bundle extraction start from. For a concatenation member it is
+  the parent's sorting input over the member's frozen frames, with the
+  member `Recording`'s timestamps set, so it lines up with the member's
+  spike times; it is corrected when the parent sort was.
+- `get_recording` is unchanged. `CurationV2.get_recording` is the source for
+  an uncorrected single-recording sort (unmasked even when it pins an
+  artifact detection) and the sorting input for corrected and concat sorts;
+  `ConcatMemberCuration.get_recording` is the source.
+
 #### Spike Sorting v2: every computed table keeps heavy work out of its insert transaction
 
 - `FigPackCuration` now uses DataJoint's tri-part make with
