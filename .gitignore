@@ -212,3 +212,8 @@ tmp_params_path.yaml
 
 # Version
 _version.py
+
+# SpikeInterface 0.99-written extractor folders read by the cross-generation
+# tests; must stay last so it overrides the blanket *.json/*.npy/*.npz/temp*
+# ignores above.
+!tests/spikesorting/fixtures/si099/**
