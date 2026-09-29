@@ -105,8 +105,9 @@ class UnitMatchFetched(NamedTuple):
     ``start_sample``, ``end_sample``, ``valid_times`` (nested list)),
     "matchable_unit_ids" (sorted list[int]), "waveform_traces" (str),
     "motion_corrected_recording_id" (str or None), "sorting_input"
-    (CanonicalRecording), "units" (StoredUnits)}``; the last two are present
-    only for two or more inputs (a single input extracts no bundle).
+    (CanonicalRecording), "units" (StoredUnits), "statistics_spans" (list of
+    ``[start, end]`` sort frames)}``; the last three are present only for two
+    or more inputs (a single input extracts no bundle).
     Threading ``matchable_unit_ids`` here -- rather than re-querying in
     compute -- keeps a curation relabel between stages from changing which
     units match; the times are the frozen ones, never re-read from
@@ -115,7 +116,9 @@ class UnitMatchFetched(NamedTuple):
     ``sorting_input`` locates that artifact with the artifact valid times
     the sorter's mask was built from, and ``units`` the curated units NWB,
     so compute opens the traces the sorter read without the DB
-    (:func:`_member_match_files`). ``sorting_id`` is a str, but
+    (:func:`_member_match_files`). ``statistics_spans`` are the sort's
+    persisted statistics spans, which bound every sampled waveform window.
+    ``sorting_id`` is a str, but
     ``sorting_input`` keeps the fetched keys' ``uuid.UUID`` values, which
     DataJoint's DeepHash hashes by value, so both fetches still agree.
     """
@@ -1038,7 +1041,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         read, and the ``SessionGroup`` the inputs were discovered from is not
         consulted. Each input's traces file is rebuilt here if missing, and
         its path, the artifact valid times of the sort's mask (when applied at
-        load) and its curated units NWB are carried to compute.
+        load), the sort's statistics spans and its curated units NWB are
+        carried to compute.
         """
         from spyglass.spikesorting.v2._matcher_graph import (
             frozen_order_errors,
@@ -1470,11 +1474,14 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         in ``input_index`` order, which is chronological; the matcher never sees
         a recording, analyzer, or Spyglass key.
 
-        A matchable unit with fewer than two sampled spikes with full waveform
-        support is left out of its input's bundle, so it gets no match pair;
-        one warning per input names those units. They stay in the frozen
-        matchable universe (``make_insert`` writes ``MatchableUnit`` from the
-        plan, not the bundles) and become unmatched tracked units.
+        Only spikes whose whole waveform window lies inside one of the sort's
+        statistics spans are sampled, so no window runs across a
+        concatenation join, an acquisition gap or an artifact exclusion. A
+        matchable unit with fewer than two sampled spikes is left out of its
+        input's bundle, so it gets no match pair; one warning per input names
+        those units. They stay in the frozen matchable universe
+        (``make_insert`` writes ``MatchableUnit`` from the plan, not the
+        bundles) and become unmatched tracked units.
 
         Raises
         ------
@@ -1567,21 +1574,24 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                         sorting,
                         **bundle_kwargs,
                         job_kwargs=resolved_job_kwargs,
+                        statistics_spans=plan["statistics_spans"],
                     )
                 except NoMatchableUnitsError as exc:
                     raise NoMatchableUnitsError(
                         f"UnitMatch.make: {_input_description(plan)} has no "
                         "unit that can enter a UnitMatch bundle -- every "
-                        "matchable unit had fewer than two sampled spikes with "
-                        "full waveform support, so none has two "
-                        "cross-validation halves. Re-curate so a unit with more "
+                        "matchable unit had fewer than two sampled spikes "
+                        "whose full waveform window lies inside one statistics "
+                        "span of the sort, so none has two cross-validation "
+                        "halves. Re-curate so a unit with more "
                         "spikes survives, or drop the input from the selection."
                     ) from exc
                 if excluded:
                     logger.warning(
                         f"UnitMatch.make: {_input_description(plan)}: units "
-                        f"{excluded} have fewer than two sampled spikes with "
-                        "full waveform support and will have no match pairs; "
+                        f"{excluded} have fewer than two sampled spikes whose "
+                        "full waveform window lies inside one statistics span "
+                        "of the sort and will have no match pairs; "
                         "they remain in the matchable universe as unmatched "
                         "units."
                     )
@@ -2607,7 +2617,11 @@ def _member_match_files(curation_key: dict) -> dict:
     artifact detection must be applied at load (a single recording's cache is
     persisted unmasked; a concatenation or a motion-corrected recording is
     persisted masked). The curated units NWB is resolved with the sampling
-    rate and timestamps ``CurationV2.get_sorting`` reads it against.
+    rate and timestamps ``CurationV2.get_sorting`` reads it against, and the
+    sort's persisted statistics spans (``Sorting.get_statistics_spans``: the
+    artifact-free frame ranges that never cross a selection join, a
+    concatenation member join or an acquisition gap) bound the bundle's
+    waveform windows.
 
     Parameters
     ----------
@@ -2617,16 +2631,16 @@ def _member_match_files(curation_key: dict) -> dict:
     Returns
     -------
     dict
-        ``{"sorting_input": CanonicalRecording, "units": StoredUnits}``.
+        ``{"sorting_input": CanonicalRecording, "units": StoredUnits,
+        "statistics_spans": list of [start, end]}``.
     """
     from spyglass.spikesorting.v2._sorting_analyzer import (
         resolve_canonical_recording,
     )
-    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
-    sorting_input = resolve_canonical_recording(
-        {"sorting_id": curation_key["sorting_id"]}
-    )
+    sorting_key = {"sorting_id": curation_key["sorting_id"]}
+    sorting_input = resolve_canonical_recording(sorting_key)
     return {
         "sorting_input": sorting_input,
         "units": SortingSelection.resolve_stored_units(
@@ -2634,6 +2648,10 @@ def _member_match_files(curation_key: dict) -> dict:
             sorting_input.source,
             sorting_input.abs_path,
         ),
+        "statistics_spans": [
+            [int(start), int(end)]
+            for start, end in Sorting().get_statistics_spans(sorting_key)
+        ],
     }
 
 

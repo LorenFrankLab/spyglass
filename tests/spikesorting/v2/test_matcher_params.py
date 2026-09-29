@@ -156,8 +156,9 @@ def test_named_bundle_params_stored_distinctly():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_bundle_params_reach_extract(monkeypatch):
-    """The named bundle params actually reach extract_unitmatch_bundle in the
-    matcher compute path -- they are no longer silent function defaults."""
+    """The named bundle params and the sort's statistics spans reach
+    extract_unitmatch_bundle in the matcher compute path -- the params are no
+    longer silent function defaults."""
     from spyglass.spikesorting.v2 import (
         _sorting_analyzer,
         _unitmatch_backend,
@@ -198,7 +199,11 @@ def test_bundle_params_reach_extract(monkeypatch):
         ms_before=2.0, ms_after=2.0, seed=4
     ).model_dump()
     # The input files make_fetch would resolve; the readers are stubbed.
-    files = {"sorting_input": None, "units": None}
+    files = {
+        "sorting_input": None,
+        "units": None,
+        "statistics_spans": [[0, 30_000]],
+    }
     input_plan = [
         {
             "input_index": index,
@@ -217,3 +222,4 @@ def test_bundle_params_reach_extract(monkeypatch):
     assert captured["ms_before"] == 2.0
     assert captured["seed"] == 4
     assert captured["max_spikes_per_unit"] == 100
+    assert captured["statistics_spans"] == [[0, 30_000]]

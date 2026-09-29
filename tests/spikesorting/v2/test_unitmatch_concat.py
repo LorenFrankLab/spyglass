@@ -1586,3 +1586,362 @@ def test_group_run_receipt_adds_only_its_inputs(
             & {"matcher_params_name": "group_receipt_pairer_params"}
         ).super_delete(warn=False)
         restore_matcher_registry(saved)
+
+
+# ---- bundles from the sorting input, windows inside statistics spans --------
+
+#: Artifact exclusion on session ``b`` (seconds after its first sample).
+_EXCLUDED_S = (2.0, 2.2)
+#: Waveform window half-width of the default matcher params, in ms.
+_HALF_WINDOW_MS = 1.5
+
+
+def _plant_around_span_edge(
+    sorter,
+    sorter_params,
+    recording,
+    sorting_id,
+    *,
+    job_kwargs=None,
+    execution_params=None,
+    statistics_spans=None,
+):
+    """Three planted units placed by the sort's two statistics spans.
+
+    Unit 0 fires only in the first span; unit 1 fires every 20 frames over
+    the last 600 frames of the first span and the first 600 of the second, so
+    several of its windows would run across the edge between them; unit 2
+    fires every 5000 frames outside the frames between the spans.
+    """
+    import numpy as np
+    import spikeinterface as si
+
+    del sorter, sorter_params, sorting_id, job_kwargs, execution_params
+    (_, first_end), (second_start, _) = [
+        (int(a), int(b)) for a, b in statistics_spans
+    ]
+    n_samples = recording.get_num_samples()
+    spread = np.arange(1000, n_samples - 1000, 5000)
+    units = [
+        np.arange(1000, first_end - 1000, 2000),
+        np.concatenate(
+            [
+                np.arange(first_end - 600, first_end, 20),
+                np.arange(second_start, second_start + 600, 20),
+            ]
+        ),
+        spread[(spread < first_end) | (spread >= second_start)],
+    ]
+    samples = np.concatenate(units).astype(np.int64)
+    labels = np.concatenate(
+        [
+            np.full(len(u), label, dtype=np.int32)
+            for label, u in enumerate(units)
+        ]
+    )
+    order = np.argsort(samples, kind="stable")
+    return si.NumpySorting.from_samples_and_labels(
+        samples_list=[samples[order]],
+        labels_list=[labels[order]],
+        sampling_frequency=recording.get_sampling_frequency(),
+    )
+
+
+@pytest.fixture(scope="module")
+def span_edge_sorts(daily_concat_match_inputs):
+    """Two planted three-unit sorts whose statistics spans have one edge.
+
+    ``concat``: a sort of the day-1 concatenation (a join between its two
+    members). ``masked``: a sort of session ``b`` pinning a manual artifact
+    exclusion over ``_EXCLUDED_S``. Both are root-curated; the concat
+    curation's member exports are populated.
+    """
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from tests.spikesorting.v2._motion_db_helpers import (
+        drop_pipeline_sorts,
+        masked_artifact,
+        session_start_s,
+    )
+
+    fx = daily_concat_match_inputs
+    params_name = "unitmatch_span_edge_ms5"
+    default_ms5 = (
+        SorterParameters
+        & {
+            "sorter": "mountainsort5",
+            "sorter_params_name": "franklab_30khz_ms5_2026_06",
+        }
+    ).fetch1("params")
+    SorterParameters.insert1(
+        {
+            "sorter": "mountainsort5",
+            "sorter_params_name": params_name,
+            "params": dict(default_ms5),
+        },
+        skip_duplicates=True,
+        allow_duplicate_params=True,
+    )
+    t0 = session_start_s(fx["nwb_file_names"]["b"])
+    artifact_key = masked_artifact(
+        fx["recording_keys"]["b"], [t0 + _EXCLUDED_S[0], t0 + _EXCLUDED_S[1]]
+    )
+    sort_keys = {
+        "concat": SortingSelection.insert_selection(
+            {
+                **fx["concat_keys"]["concat_day1"],
+                "sorter": "mountainsort5",
+                "sorter_params_name": params_name,
+            }
+        ),
+        "masked": SortingSelection.insert_selection(
+            {
+                **fx["recording_keys"]["b"],
+                **artifact_key,
+                "sorter": "mountainsort5",
+                "sorter_params_name": params_name,
+            }
+        ),
+    }
+    curations = {}
+    patch = pytest.MonkeyPatch()
+    try:
+        patch.setattr(
+            Sorting, "_run_sorter", staticmethod(_plant_around_span_edge)
+        )
+        for name, sort_key in sort_keys.items():
+            if not (Sorting & sort_key):
+                Sorting.populate(sort_key, reserve_jobs=False)
+            curation = CurationV2.insert_curation(sorting_key=sort_key)
+            curations[name] = {
+                "sorting_id": curation["sorting_id"],
+                "curation_id": curation["curation_id"],
+            }
+    finally:
+        patch.undo()
+    ConcatMemberCuration.populate(curations["concat"], reserve_jobs=False)
+
+    yield {
+        "curations": curations,
+        "sort_keys": sort_keys,
+        "artifact_key": artifact_key,
+        "session_b_start_s": t0,
+    }
+
+    drop_pipeline_sorts([key["sorting_id"] for key in sort_keys.values()])
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+
+    (RecordingArtifactDetection & artifact_key).delete(safemode=False)
+    (RecordingArtifactSelection & artifact_key).super_delete(warn=False)
+    (SorterParameters & {"sorter_params_name": params_name}).super_delete(
+        warn=False
+    )
+
+
+def _supported(frame, spans, half_window) -> bool:
+    """Whether ``frame``'s waveform window lies inside one of ``spans``."""
+    return any(
+        start <= frame - half_window and frame + half_window <= end
+        for start, end in spans
+    )
+
+
+def test_daily_bundle_uses_corrected_parent_and_valid_support(
+    daily_concat_match_inputs, span_edge_sorts, monkeypatch, tmp_path
+):
+    """Each bundle is cut from the traces its sorter read, only at spikes
+    whose window lies inside one statistics span of the sort.
+
+    Real bundle extraction runs for a daily concatenation (one join) and a
+    masked single recording (one artifact exclusion). For each input: the
+    frames SpikeInterface drew are exactly the planted frames whose window
+    fits one span (so none crosses the join or touches the exclusion), each
+    half equals the mean of windows cut at those frames from
+    ``load_effective_recording``'s traces, the unit that fires only before
+    the join or exclusion still has two nonzero halves, and the masked
+    input's traces are the zero-silenced sorter input, not the unmasked
+    cache. The traces are uncorrected here; the corrected parent case is
+    ``test_motion_consumers.py::test_corrected_concat_bundle_keeps_windows_in_spans``.
+    """
+    pytest.importorskip("UnitMatchPy")
+    import shutil
+
+    from spikeinterface.core import analyzer_extension_core
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import _unitmatch_backend
+    from spyglass.spikesorting.v2._artifact_intervals import (
+        read_recording_artifact_valid_times,
+    )
+    from spyglass.spikesorting.v2._source_resolution import (
+        load_effective_recording,
+        read_persisted_traces,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    fx, sx = daily_concat_match_inputs, span_edge_sorts
+    concat, masked = sx["curations"]["concat"], sx["curations"]["masked"]
+    join = int(
+        (
+            ConcatenatedRecording.MemberBoundary
+            & fx["concat_keys"]["concat_day1"]
+            & {"member_index": 0}
+        ).fetch1("end_sample")
+    )
+
+    real_extract = _unitmatch_backend.extract_unitmatch_bundle
+    extracted = {}
+
+    def _keep_bundle(session_dir, recording, sorting, **kwargs):
+        excluded = real_extract(session_dir, recording, sorting, **kwargs)
+        name = Path(session_dir).name
+        extracted[name] = {
+            "recording": recording,
+            "spans": kwargs["statistics_spans"],
+            "excluded": excluded,
+            "dir": shutil.copytree(session_dir, tmp_path / name),
+        }
+        return excluded
+
+    real_draw = analyzer_extension_core.random_spikes_selection
+    drawn = []
+
+    def _record_draw(sorting, *args, **kwargs):
+        indices = real_draw(sorting, *args, **kwargs)
+        drawn.append(sorting.to_spike_vector()[indices])
+        return indices
+
+    saved = install_fixture_pairer(
+        monkeypatch,
+        matcher_name="span_edge_pairer",
+        matcher_params_name="span_edge_pairer_params",
+        pairs=[],
+        read_bundles=True,
+    )
+    monkeypatch.setattr(
+        _unitmatch_backend, "extract_unitmatch_bundle", _keep_bundle
+    )
+    monkeypatch.setattr(
+        analyzer_extension_core, "random_spikes_selection", _record_draw
+    )
+    pk = None
+    try:
+        pk = UnitMatchSelection.insert_inputs(
+            [masked, concat], "span_edge_pairer_params"
+        )
+        UnitMatch.populate(pk, reserve_jobs=False)
+        assert UnitMatch & pk
+    finally:
+        if pk is not None:
+            _drop(pk)
+        (
+            MatcherParameters
+            & {"matcher_params_name": "span_edge_pairer_params"}
+        ).super_delete(warn=False)
+        restore_matcher_registry(saved)
+
+    # Session a (the concatenation) starts before session b.
+    assert sorted(extracted) == ["input_0", "input_1"]
+    assert len(drawn) == 2
+    t0 = sx["session_b_start_s"]
+    for input_name, curation, draw in (
+        ("input_0", concat, drawn[0]),
+        ("input_1", masked, drawn[1]),
+    ):
+        bundle = extracted[input_name]
+        sort_key = {"sorting_id": curation["sorting_id"]}
+        spans = [
+            tuple(span) for span in Sorting().get_statistics_spans(sort_key)
+        ]
+        assert [tuple(span) for span in bundle["spans"]] == spans
+        (first_start, first_end), (second_start, second_end) = spans
+        if input_name == "input_0":
+            # The only edge is the concatenation join.
+            assert first_end == second_start == join
+        else:
+            # The only edge is the exclusion, located by the timestamps.
+            recording = bundle["recording"]
+            times = recording.get_times()
+            assert times[first_end - 1] <= t0 + _EXCLUDED_S[0]
+            assert times[second_start] >= t0 + _EXCLUDED_S[1]
+            slop = 1.0 / recording.get_sampling_frequency()
+            excluded_times = times[first_end:second_start]
+            assert excluded_times.min() >= t0 + _EXCLUDED_S[0] - slop
+            assert excluded_times.max() <= t0 + _EXCLUDED_S[1] + slop
+            assert first_start == 0
+            assert second_end == recording.get_num_samples()
+
+        source = SortingSelection.resolve_effective_source(sort_key)
+        valid_times = None
+        if source.traces.apply_artifact_mask:
+            valid_times = read_recording_artifact_valid_times(
+                source.lineage.artifact_detection_id,
+                fx["nwb_file_names"]["b"],
+                caller="test",
+            )
+        expected_input = load_effective_recording(
+            source.traces, artifact_valid_times=valid_times
+        )
+        traces = expected_input.get_traces(return_in_uV=True)
+        # SpikeInterface's window: int(ms * fs / 1000) samples each side, at
+        # the recording's (timestamp-estimated) rate.
+        half_window = int(
+            _HALF_WINDOW_MS * expected_input.get_sampling_frequency() / 1000.0
+        )
+        np.testing.assert_array_equal(
+            bundle["recording"].get_traces(return_in_uV=True), traces
+        )
+        if input_name == "input_1":
+            assert source.traces.apply_artifact_mask
+            unmasked = read_persisted_traces(
+                AnalysisNwbfile.get_abs_path(
+                    source.traces.row["analysis_file_name"]
+                ),
+                source.traces,
+            ).get_traces(return_in_uV=True)
+            assert np.all(traces[first_end:second_start] == 0)
+            assert np.any(unmasked[first_end:second_start] != 0)
+
+        planted = CurationV2.get_sorting(curation)
+        assert bundle["excluded"] == []
+        for unit_index, unit_id in enumerate(planted.get_unit_ids()):
+            frames = draw["sample_index"][draw["unit_index"] == unit_index]
+            train = planted.get_unit_spike_train(unit_id)
+            assert sorted(frames.tolist()) == [
+                int(s) for s in train if _supported(int(s), spans, half_window)
+            ], (input_name, unit_id)
+            assert len(frames) < len(train) or unit_id != 1
+            frames = np.sort(frames)
+            windows = np.stack(
+                [traces[s - half_window : s + half_window] for s in frames]
+            )
+            n_half = len(frames) // 2
+            waveform = np.load(
+                bundle["dir"] / "RawWaveforms" / f"Unit{unit_id}_RawSpikes.npy"
+            )
+            for half, expected in enumerate(
+                (windows[:n_half].mean(axis=0), windows[n_half:].mean(axis=0))
+            ):
+                np.testing.assert_allclose(
+                    waveform[..., half], expected, rtol=1e-5, atol=1e-6
+                )
+                assert np.any(waveform[..., half] != 0)
+        # Unit 0 fires only in the first span (before the join/exclusion).
+        assert np.all(draw["sample_index"][draw["unit_index"] == 0] < first_end)

@@ -1015,6 +1015,235 @@ def test_unitmatch_bundle_of_a_corrected_sort(
     assert waveform.shape[1:] == (len(row["channel_ids"]), 2)
 
 
+def _plant_at_span_edges(
+    sorter,
+    sorter_params,
+    recording,
+    sorting_id,
+    *,
+    job_kwargs=None,
+    execution_params=None,
+    statistics_spans=None,
+):
+    """Three planted units placed by the sort's statistics spans.
+
+    Unit 0 fires only in the first span; unit 1 fires every 20 frames over
+    the 600 frames on each side of every edge between two spans, so several
+    of its windows would run across a join or gap; unit 2 fires every 5000
+    frames inside the spans.
+    """
+    import spikeinterface as si
+
+    del sorter, sorter_params, sorting_id, job_kwargs, execution_params
+    spans = [(int(a), int(b)) for a, b in statistics_spans]
+    inside = np.zeros(recording.get_num_samples(), dtype=bool)
+    for start, end in spans:
+        inside[start:end] = True
+    edges = [end for (_, end), (start, _) in zip(spans, spans[1:])]
+    dense = np.concatenate([np.arange(e - 600, e + 600, 20) for e in edges])
+    units = [
+        np.arange(spans[0][0] + 1000, spans[0][1] - 1000, 2000),
+        dense[inside[dense]],
+        np.arange(1000, recording.get_num_samples() - 1000, 5000),
+    ]
+    units[2] = units[2][inside[units[2]]]
+    samples = np.concatenate(units).astype(np.int64)
+    labels = np.concatenate(
+        [
+            np.full(len(u), label, dtype=np.int32)
+            for label, u in enumerate(units)
+        ]
+    )
+    order = np.argsort(samples, kind="stable")
+    return si.NumpySorting.from_samples_and_labels(
+        samples_list=[samples[order]],
+        labels_list=[labels[order]],
+        sampling_frequency=recording.get_sampling_frequency(),
+    )
+
+
+def test_corrected_concat_bundle_keeps_windows_in_spans(
+    discontinuous_sources, monkeypatch, tmp_path
+):
+    """A UnitMatch bundle of a corrected concatenation is cut from the
+    corrected traces, only at spikes whose window lies in one statistics span.
+
+    The concatenation has a member join and a gap inside its second member.
+    For the corrected sort and the uncorrected sort of the same
+    concatenation, real bundle extraction draws exactly the planted frames
+    whose window fits one span, each half equals the mean of windows cut at
+    those frames from the sort's own effective traces, and the unit that
+    fires only in the first member has two nonzero halves. The corrected
+    bundle's traces differ from the uncorrected one's, so it is not the
+    concatenation's traces (needs UnitMatchPy; the matching CI lane runs
+    it).
+    """
+    pytest.importorskip("UnitMatchPy")
+    import shutil
+    from pathlib import Path
+
+    from spikeinterface.core import analyzer_extension_core
+
+    from spyglass.spikesorting.v2 import _unitmatch_backend, matcher_protocol
+    from spyglass.spikesorting.v2._source_resolution import (
+        load_effective_recording,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+    from spyglass.spikesorting.v2.sorting import (
+        Sorting,
+        SortingSelection,
+    )
+    from spyglass.spikesorting.v2.unit_matching import UnitMatch
+
+    concat_key = discontinuous_sources["concat_key"]
+    corrected_key = populated_corrected(
+        populated_estimate(
+            concat_recording_id=concat_key["concat_recording_id"]
+        )
+    )
+    concat_spans = [
+        (int(a), int(b))
+        for a, b in (ConcatenatedRecording & concat_key).fetch1(
+            "statistics_spans"
+        )
+    ]
+    assert len(concat_spans) >= 3  # a member join and a gap in member B
+    sort_keys = {
+        "input_0": SortingSelection.insert_selection(
+            {**concat_key, **sorter_key(), **corrected_key}
+        ),
+        "input_1": SortingSelection.insert_selection(
+            {**concat_key, **sorter_key()}
+        ),
+    }
+
+    real_extract = _unitmatch_backend.extract_unitmatch_bundle
+    extracted = {}
+
+    def _keep_bundle(session_dir, recording, sorting, **kwargs):
+        excluded = real_extract(session_dir, recording, sorting, **kwargs)
+        name = Path(session_dir).name
+        extracted[name] = {
+            "recording": recording,
+            "spans": kwargs["statistics_spans"],
+            "excluded": excluded,
+            "dir": shutil.copytree(session_dir, tmp_path / name),
+        }
+        return excluded
+
+    real_draw = analyzer_extension_core.random_spikes_selection
+    drawn = []
+
+    def _record_draw(sorting, *args, **kwargs):
+        indices = real_draw(sorting, *args, **kwargs)
+        drawn.append(sorting.to_spike_vector()[indices])
+        return indices
+
+    class _NoPairs:
+        def match(self, session_inputs, params):
+            return []
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                Sorting, "_run_sorter", staticmethod(_plant_at_span_edges)
+            )
+            Sorting.populate(list(sort_keys.values()), reserve_jobs=False)
+        curations = {
+            name: CurationV2.insert_curation(sorting_key=key)
+            for name, key in sort_keys.items()
+        }
+        monkeypatch.setattr(
+            _unitmatch_backend, "extract_unitmatch_bundle", _keep_bundle
+        )
+        monkeypatch.setattr(
+            analyzer_extension_core, "random_spikes_selection", _record_draw
+        )
+        monkeypatch.setattr(
+            matcher_protocol, "get_matcher", lambda name: _NoPairs()
+        )
+        input_plan = _hand_input_plan(
+            [curations["input_0"], curations["input_1"]]
+        )
+        assert [plan["waveform_traces"] for plan in input_plan] == [
+            "motion_corrected_recording",
+            "concatenated_recording",
+        ]
+        UnitMatch._extract_and_match(input_plan, "unitmatch", {}, {})
+
+        assert sorted(extracted) == ["input_0", "input_1"]
+        traces_by_input = {}
+        for index, name in enumerate(("input_0", "input_1")):
+            bundle, draw = extracted[name], drawn[index]
+            sort_key = sort_keys[name]
+            spans = [
+                tuple(span) for span in Sorting().get_statistics_spans(sort_key)
+            ]
+            assert spans == concat_spans
+            assert [tuple(span) for span in bundle["spans"]] == spans
+            source = SortingSelection.resolve_effective_source(sort_key)
+            assert not source.traces.apply_artifact_mask
+            expected_input = load_effective_recording(source.traces)
+            traces = expected_input.get_traces(return_in_uV=True)
+            np.testing.assert_array_equal(
+                bundle["recording"].get_traces(return_in_uV=True), traces
+            )
+            traces_by_input[name] = traces
+            half_window = int(
+                1.5 * expected_input.get_sampling_frequency() / 1000.0
+            )
+            planted = CurationV2.get_sorting(curations[name])
+            assert bundle["excluded"] == []
+            for unit_index, unit_id in enumerate(planted.get_unit_ids()):
+                frames = np.sort(
+                    draw["sample_index"][draw["unit_index"] == unit_index]
+                )
+                train = planted.get_unit_spike_train(unit_id)
+                assert frames.tolist() == [
+                    int(s)
+                    for s in train
+                    if any(
+                        a <= s - half_window and s + half_window <= b
+                        for a, b in spans
+                    )
+                ], (name, unit_id)
+                windows = np.stack(
+                    [traces[s - half_window : s + half_window] for s in frames]
+                )
+                n_half = len(frames) // 2
+                waveform = np.load(
+                    bundle["dir"]
+                    / "RawWaveforms"
+                    / f"Unit{unit_id}_RawSpikes.npy"
+                )
+                for half, expected in enumerate(
+                    (
+                        windows[:n_half].mean(axis=0),
+                        windows[n_half:].mean(axis=0),
+                    )
+                ):
+                    np.testing.assert_allclose(
+                        waveform[..., half], expected, rtol=1e-5, atol=1e-6
+                    )
+                    assert np.any(waveform[..., half] != 0)
+            # The dense unit lost the spikes whose window crosses an edge.
+            assert np.sum(draw["unit_index"] == 1) < len(
+                planted.get_unit_spike_train(planted.get_unit_ids()[1])
+            )
+            assert np.all(
+                draw["sample_index"][draw["unit_index"] == 0] < spans[0][1]
+            )
+        assert (
+            np.max(
+                np.abs(traces_by_input["input_0"] - traces_by_input["input_1"])
+            )
+            > MIN_CORRECTION_UV
+        )
+    finally:
+        drop_pipeline_sorts([key["sorting_id"] for key in sort_keys.values()])
+
+
 #: An estimation recipe whose zero gap cap removes every real gap from the
 #: estimation clock, so estimation-clock times after a gap differ from the
 #: source's real times by the whole gap.

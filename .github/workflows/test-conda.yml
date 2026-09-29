@@ -488,6 +488,7 @@ jobs:
           tests/spikesorting/v2/test_unitmatch_concat.py \
           tests/spikesorting/v2/test_unitmatch_backend.py \
           tests/spikesorting/v2/test_motion_consumers.py::test_unitmatch_bundle_of_a_corrected_sort \
+          tests/spikesorting/v2/test_motion_consumers.py::test_corrected_concat_bundle_keeps_windows_in_spans \
           tests/spikesorting/v2/test_notebook_execution.py::test_cross_session_notebook_runs \
           --no-docker --no-dlc -q
     # --- FigPack curation extra lane (separate env). The curation extra
