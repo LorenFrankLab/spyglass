@@ -18,13 +18,24 @@ each distractor are left empty, so a distractor is at least 56 um from every
 other neuron.
 
 Day 1 carries the planted rigid zigzag (+/-25 um, 16 s period): 0 um at
-16 s, +25 um at 20 s, 0 um at 24 s, -25 um at 28 s, so the drift over day
-1's members averages to about the static day 2's position and a per-day
-motion correction (which registers a day to its own mean position) leaves
-no offset between the days. Day 2 is static. No spike is planted within
-``GUARD_S`` of a member edge or an exclusion edge, so which member a spike
-belongs to and whether it is excluded are unambiguous; spikes deeper inside
-an exclusion are in the raw data and are masked by the artifact detection.
+16 s, +25 um at 20 s, 0 um at 24 s, -25 um at 28 s. Day 2 is static. The
+16 s period was chosen so that day 1's corrected position averages to day
+2's: per-day motion correction registers each day to its own mean position,
+not across days. In DB-free trials of this design (production bundle,
+UnitMatchPy backend and tracked-unit graph), a rigid offset between the days
+of 3 / 6 / 12 um recovered 22 / 12 / 1 of 24 neurons, and one drift period
+per session (the drift fixture's default, leaving the corrected days about
+12 um apart) recovered 6 of 24. The unit count, spacing, distractor
+clearance and drift period were fixed after those trials, on these seeds and
+templates; the tests' recovery floor was fixed before them. So these days
+are co-registered by construction: they exercise the workflow on days whose
+corrected positions agree, not recovery across days that moved relative to
+each other.
+
+No spike is planted within ``GUARD_S`` of a member edge or an exclusion
+edge, so which member a spike belongs to and whether it is excluded are
+unambiguous; spikes deeper inside an exclusion are in the raw data and are
+masked by the artifact detection.
 
 Everything here is DB-free; the ingesting fixture is
 ``planted_matching_days`` in ``conftest.py``.
@@ -70,7 +81,8 @@ TEMPLATE_SEED = 20260929
 ALPHA_RANGE = (350.0, 500.0)
 #: Distance of every neuron from the shank plane (um).
 DEPTH_UM = 20.0
-#: Period of day 1's planted rigid zigzag (s).
+#: Period of day 1's planted rigid zigzag (s); chosen so day 1's corrected
+#: position averages to day 2's (see the module docstring).
 DRIFT_PERIOD_S = 16.0
 
 

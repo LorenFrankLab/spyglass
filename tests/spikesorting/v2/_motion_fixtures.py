@@ -1,4 +1,4 @@
-"""Synthetic drifting-recording fixtures for the motion-estimation tests.
+"""Synthetic drifting polymer-shank recordings for the v2 tests.
 
 One polymer shank (32 contacts in a single column at the 26 um pitch of the
 Frank-lab polymer probe, ``_fixtures/mearec_to_nwb.py``) with 30 units,
@@ -10,6 +10,12 @@ units and spike trains with zero displacement).
 
 Everything is lazy: traces are generated chunk by chunk, so a 90 s recording
 costs about 1 GB peak with estimation (measured with ``/usr/bin/time -l``).
+
+The same generator also plants chosen neurons (``planted_polymer_recordings``:
+given locations, template parameters and spike frames), which the
+daily-concatenation matching fixtures use to put identical neurons on two
+recording days, and ``write_polymer_nwb`` writes any such traces as an
+ingestible session.
 """
 
 from __future__ import annotations
