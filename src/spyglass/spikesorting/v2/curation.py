@@ -2788,9 +2788,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 raise ConcatBrainRegionAmbiguousError(
                     f"CurationV2.get_unit_brain_regions: sorting_id "
                     f"{key['sorting_id']} is concat-backed; pass "
-                    "allow_anchor_member=True for anchor-only regions, or use "
-                    "TrackedUnit.get_unit_brain_regions for per-session regions "
-                    "across matched sessions."
+                    "allow_anchor_member=True for anchor-only regions, or match "
+                    "this curation with UnitMatch and use "
+                    "TrackedUnit.get_unit_brain_regions, which resolves each "
+                    "unit's region in every member recording from that "
+                    "member's own session."
                 )
             resolution = "anchor_member"
         else:

@@ -111,8 +111,9 @@ def test_sorting_get_unit_brain_regions_concat_raises_without_anchor():
     unless ``allow_anchor_member=True``.
 
     A concat unit's peak channel maps to one Electrode row per member
-    session, so per-session regions are ambiguous without cross-session
-    matching (not in this build). The default refuses; the opt-in returns
+    session, so a sort-level region is ambiguous. The default refuses and
+    points to ``TrackedUnit.get_unit_brain_regions`` over a matched curation,
+    which resolves each member recording's region; the opt-in returns
     anchor-member regions.
     """
     import uuid
@@ -125,7 +126,13 @@ def test_sorting_get_unit_brain_regions_concat_raises_without_anchor():
     sid = uuid.uuid4()
     _plant_concat_sorting_selection(sid)
     try:
-        with pytest.raises(ConcatBrainRegionAmbiguousError):
+        with pytest.raises(
+            ConcatBrainRegionAmbiguousError,
+            match=(
+                "match a curation of this sort with UnitMatch and use "
+                "TrackedUnit.get_unit_brain_regions"
+            ),
+        ):
             Sorting().get_unit_brain_regions(
                 {"sorting_id": sid}, allow_anchor_member=False
             )

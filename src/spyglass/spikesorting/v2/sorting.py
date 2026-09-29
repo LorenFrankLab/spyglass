@@ -3277,9 +3277,11 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     f"{key['sorting_id']} is concat-backed; the unit peak "
                     "channel maps to multiple Electrode rows (one per "
                     "SessionGroup.Member). Pass allow_anchor_member=True "
-                    "to return anchor-member regions, or use "
-                    "TrackedUnit.get_unit_brain_regions for per-session "
-                    "regions across matched sessions."
+                    "to return anchor-member regions, or match a curation of "
+                    "this sort with UnitMatch and use "
+                    "TrackedUnit.get_unit_brain_regions, which resolves each "
+                    "unit's region in every member recording from that "
+                    "member's own session."
                 )
             resolution = "anchor_member"
         else:

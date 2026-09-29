@@ -143,9 +143,10 @@ class ConcatBrainRegionAmbiguousError(RuntimeError):
     ``CurationV2.get_unit_brain_regions()`` is called on concat-backed
     data without ``allow_anchor_member=True``. Message explains the
     anchor-member ambiguity and points the caller at
-    ``allow_anchor_member=True`` for anchor-only regions, or
-    ``TrackedUnit.get_unit_brain_regions`` for per-session regions across
-    matched sessions.
+    ``allow_anchor_member=True`` for anchor-only regions, or at matching the
+    curation with UnitMatch and calling
+    ``TrackedUnit.get_unit_brain_regions``, which resolves each unit's region
+    in every member recording from that member's own session.
     """
 
 
