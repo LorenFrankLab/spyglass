@@ -221,6 +221,47 @@ def _missing_required_fixtures(required):
     return missing
 
 
+def _missing_fixtures_message(missing: list[str]) -> str:
+    """Session-exit message for required fixtures that are absent.
+
+    Separates the two reasons a required fixture can be absent, because they
+    need different fixes: a stem whose ``FIXTURE_URLS`` entry is empty has no
+    hosted copy to download (someone must upload it and set its URL), while
+    any other stem had a download that failed or a link that went stale (a
+    known stem) or a workflow download step that failed (a stem ``_fetch.py``
+    does not know, such as ``minirec20230622``).
+
+    Parameters
+    ----------
+    missing : sequence of str
+        Fixture stems (no ``.nwb``) returned by ``_missing_required_fixtures``.
+
+    Returns
+    -------
+    str
+        One line per reason that applies, each naming its stems.
+    """
+    from tests.spikesorting.v2.fixtures._fetch import FIXTURE_URLS
+
+    unhosted = [n for n in missing if n in FIXTURE_URLS and not FIXTURE_URLS[n]]
+    failed = [n for n in missing if n not in unhosted]
+    lines = []
+    if unhosted:
+        lines.append(
+            "Required v2 fixtures are absent, so their gates would silently "
+            "skip: " + ", ".join(unhosted) + ". No download URL is configured "
+            "-- the fixture is not hosted; see "
+            "tests/spikesorting/v2/fixtures/README.md."
+        )
+    if failed:
+        lines.append(
+            "Required v2 fixtures are absent, so their gates would silently "
+            "skip: " + ", ".join(failed) + ". The download step failed or a "
+            "Box link is stale -- see tests/spikesorting/v2/fixtures/_fetch.py."
+        )
+    return "\n".join(lines)
+
+
 def pytest_sessionstart(session):
     """Pre-fetch only the fixtures this session is configured to require.
 
@@ -249,18 +290,15 @@ def pytest_sessionstart(session):
 
     # Honest-green gate: any fixture named in SPYGLASS_V2_REQUIRE_FIXTURES MUST
     # be present, or its test would silently skip and the run would look green
-    # without exercising the gate. CI sets this per tier to exactly the fixtures
-    # it downloaded (per-PR: smoke; nightly: + 60s polymer; manual dispatch:
-    # + scenario fixtures). Unset locally, so absent fixtures skip as before.
+    # without exercising the gate. The CI workflow sets a job-wide list per
+    # trigger (its "Select required fixtures for this run" step), and steps
+    # that need other fixtures (the acceptance probes, the two-session matcher
+    # gate) set their own list on their pytest command only. Unset locally,
+    # so absent fixtures skip as before.
     required = os.environ.get("SPYGLASS_V2_REQUIRE_FIXTURES", "").split()
     missing = _missing_required_fixtures(required)
     if missing:
-        pytest.exit(
-            "Required v2 fixtures are absent, so their gates would silently "
-            "skip: " + ", ".join(missing) + ". The download step failed or a "
-            "Box link is stale -- see tests/spikesorting/v2/fixtures/_fetch.py.",
-            returncode=1,
-        )
+        pytest.exit(_missing_fixtures_message(missing), returncode=1)
 
 
 def pytest_collection_modifyitems(session, config, items):

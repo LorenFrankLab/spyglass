@@ -263,6 +263,44 @@ def test_require_fixtures_gate_ignores_stale_ingested_copies(
     assert _missing_required_fixtures(required) == ["minirec20230622"]
 
 
+def test_missing_fixture_message_separates_unhosted_from_failed(monkeypatch):
+    """The gate's exit message says WHY each required fixture is absent.
+
+    A fixture with no download URL is not hosted, so no re-run can fix it and
+    the message must point at the hosting instructions. A fixture that has a
+    URL, or that ``_fetch.py`` does not know (the curled real session), is
+    absent because a download failed or a link went stale. Each stem must be
+    named only under its own reason.
+    """
+    from tests.spikesorting.v2.conftest import _missing_fixtures_message
+    from tests.spikesorting.v2.fixtures import _fetch
+
+    no_url, has_url, unknown = "no_url_xyz", "has_url_xyz", "minirec20230622"
+    monkeypatch.setitem(_fetch.FIXTURE_URLS, no_url, None)
+    monkeypatch.setitem(_fetch.FIXTURE_URLS, has_url, "https://example.invalid")
+    assert unknown not in _fetch.FIXTURE_URLS
+
+    lines = _missing_fixtures_message([no_url, has_url, unknown]).splitlines()
+    assert len(lines) == 2, lines
+    unhosted_line, failed_line = lines
+
+    assert no_url in unhosted_line
+    assert has_url not in unhosted_line and unknown not in unhosted_line
+    assert "No download URL is configured" in unhosted_line
+    assert "the fixture is not hosted" in unhosted_line
+    assert "tests/spikesorting/v2/fixtures/README.md" in unhosted_line
+    assert "download step failed" not in unhosted_line
+
+    assert has_url in failed_line and unknown in failed_line
+    assert no_url not in failed_line
+    assert "The download step failed or a Box link is stale" in failed_line
+    assert "No download URL is configured" not in failed_line
+
+    # Only the reasons that apply are reported.
+    assert "No download URL" not in _missing_fixtures_message([has_url])
+    assert "download step failed" not in _missing_fixtures_message([no_url])
+
+
 def test_require_fixtures_gate_still_exits_nonzero():
     """The honest-green gate must fail loudly when a required fixture is absent.
 
