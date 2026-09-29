@@ -9,7 +9,7 @@ SI 0.99.
 
 Tests dispatch on the installed SI version: the v2 tests need SI >= 0.101 and
 skip under the legacy env; the legacy guard test needs SI < 0.101 and skips
-under the modern env (so this phase merges independently of the legacy job).
+under the modern env, so each environment runs only the tests it supports.
 
 All tests are ``slow``: each runs a full MEArec sort plus an analyzer build
 against the Docker MySQL container.
@@ -710,13 +710,14 @@ def test_spike_location_rejects_legacy_waveform_extractor_clearly(dj_conn):
 def test_unit_waveform_features_v0v1_guard_unchanged_under_legacy():
     """Under SI 0.99 the legacy-SI guard is a no-op, so v0/v1 ``make`` runs.
 
-    This phase scoped the guard to the v0/v1 branches only; under the legacy
+    ``make`` applies the guard on the v0/v1 branches only; under the legacy
     env that guard must NOT raise (otherwise the v0/v1 extraction path would
-    be broken for legacy-supported feature rows such as ``amplitude``). The
-    full v0/v1 ``UnitWaveformFeatures.make`` is exercised by the existing
-    clusterless-decoding tests in this same legacy job; here we pin the
-    guard-version contract make() depends on. ``spike_location`` itself is
-    covered separately as an intentional v2-only feature.
+    be broken for legacy-supported feature rows such as ``amplitude``). Here
+    we pin the guard-version contract make() depends on. The real v1
+    ``UnitWaveformFeatures.populate`` runs in the legacy job in
+    ``tests/spikesorting/v1/test_waveform_features_legacy.py``, which checks
+    the stored amplitudes against the recording traces. ``spike_location``
+    itself is covered separately as an intentional v2-only feature.
     """
     from spyglass.spikesorting._legacy_runtime import (
         _require_legacy_si_environment,
