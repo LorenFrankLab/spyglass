@@ -2414,8 +2414,10 @@ recording was evaluated:
     day-1/day-3 reappearing, and conflicting-identity roles), each on a
     16-channel, 2-column, 20 um-pitch synthetic probe. Every gate's threshold
     was derived from 40 development seeds (0-39) *before* the held-out
-    evaluation, then checked exactly once against 40 held-out seeds (100-139).
-    All gates **passed**:
+    evaluation, then checked exactly once against 40 held-out seeds (100-139;
+    2026-09-29, macOS arm64). All gates **passed**. Those seeds are now spent:
+    the tests re-run them as regression checks, not new held-out evaluations,
+    and the gates have not yet been evaluated on another platform.
 
     | scenario | gated metric | held-out result |
     | --- | --- | --- |

@@ -551,8 +551,13 @@ def test_external_matcher_satisfies_protocol_and_runs():
 
 @pytest.mark.slow
 def test_driftout_units_recovered_pooled(tmp_path):
-    """Preregistered 10-seed acceptance run for the production ``per_unit``
-    bundle construction (:func:`extract_unitmatch_bundle`).
+    """Regression check of the production ``per_unit`` bundle construction
+    (:func:`extract_unitmatch_bundle`) on its preregistered acceptance seeds.
+
+    Seeds 10..19 were the preregistered 10-seed acceptance run: they were
+    evaluated once against the gates below and passed. They are now spent,
+    so this test re-runs them as a regression check, not a new acceptance
+    evaluation.
 
     Builds the synthetic control / driftout_A / driftout_AB scenarios (see
     ``tests/spikesorting/v2/scripts/unitmatch_half_split_experiment.py`` for

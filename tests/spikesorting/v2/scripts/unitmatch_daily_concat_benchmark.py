@@ -99,9 +99,11 @@ Manifest (fixed before any held-out seed was run):
   derive gates from, so the development and held-out counts were both set to
   40 seeds, and the gates below come from seeds 0..39.
 - Held-out seeds: 100..139 per scenario (``HELD_OUT_*``), disjoint from the
-  development seeds, evaluated once against these gates by
+  development seeds. They were evaluated once against these gates
+  (2026-09-29, macOS arm64: every gate passed) and are now spent;
   ``test_daily_concat_matches_planted_units`` and
-  ``test_three_day_concat_matches_planted_units``.
+  ``test_three_day_concat_matches_planted_units`` re-run them as regression
+  checks, not as new held-out evaluations.
 - Dataset: every module constant above (probe, noise, firing rate, template
   window, location draw, day layouts, class counts, change magnitudes, unit
   id pool).
