@@ -2274,6 +2274,70 @@ def _member_spans(concat_key) -> list[tuple[int, int]]:
     return [(start, int(end)) for start, end in zip(starts, ends)]
 
 
+def _own_region(curation, unit_id, nwb_file_name) -> tuple:
+    """The unit's electrode and its region in ``nwb_file_name``'s own rows.
+
+    ``(electrode_group_name, electrode_id, region_name)`` of the curated
+    unit's electrode identity looked up in that session's ``Electrode`` and
+    ``BrainRegion`` rows.
+    """
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.common.common_region import BrainRegion
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    group, electrode_id = (
+        CurationV2.Unit & curation & {"unit_id": unit_id}
+    ).fetch1("electrode_group_name", "electrode_id")
+    region = (
+        (
+            Electrode
+            & {
+                "nwb_file_name": nwb_file_name,
+                "electrode_group_name": group,
+                "electrode_id": electrode_id,
+            }
+        )
+        * BrainRegion
+    ).fetch1("region_name")
+    return group, int(electrode_id), region
+
+
+def _assert_regions_follow_each_session(pk, curation, nwb_a, nwb_b) -> None:
+    """Re-point session ``b``'s copy of unit 0's electrode to another region:
+    only the rows of ``b``'s recording follow it (the concatenation's anchor
+    member is session ``a``)."""
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.common.common_region import BrainRegion
+    from spyglass.spikesorting.v2.unit_matching import TrackedUnit
+
+    group, electrode_id, region_a = _own_region(curation, 0, nwb_a)
+    probe_id = BrainRegion.fetch_add(
+        region_name="unitmatch_member_probe_region"
+    )
+    try:
+        with _raw_update(
+            Electrode,
+            {
+                "nwb_file_name": nwb_b,
+                "electrode_group_name": group,
+                "electrode_id": electrode_id,
+            },
+            "region_id",
+            probe_id,
+        ):
+            regions = TrackedUnit().get_unit_brain_regions(pk)
+    finally:
+        (BrainRegion & {"region_id": probe_id}).delete_quick()
+    unit_rows = regions[
+        (regions["sorting_id"] == str(curation["sorting_id"]))
+        & (regions["unit_id"] == 0)
+    ]
+    assert region_a != "unitmatch_member_probe_region"
+    assert sorted(
+        zip(unit_rows["nwb_file_name"], unit_rows["region_name"])
+    ) == (sorted([(nwb_a, region_a), (nwb_b, "unitmatch_member_probe_region")]))
+
+
 def test_tracked_units_map_to_original_member_times_and_regions(
     daily_concat_match_inputs, member_time_sorts, monkeypatch
 ):
@@ -2288,7 +2352,11 @@ def test_tracked_units_map_to_original_member_times_and_regions(
     fires in every member, unit 1 only in member 0 and unit 2 only in
     member 1.
     """
-    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.common import Session
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
     from spyglass.spikesorting.v2.sorting import Sorting
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
@@ -2317,9 +2385,26 @@ def test_tracked_units_map_to_original_member_times_and_regions(
     assert [len(s) for s in spans.values()] == [2, 2, 1]
     planted = {name: _planted_member_frames(s) for name, s in spans.items()}
     nwbs = fx["nwb_file_names"]
+    member_recordings = {
+        "day1": ["a_first", "a_second"],
+        "cross_nwb": ["a_first", "b_first"],
+    }
     member_nwbs = {
+        name: [
+            (RecordingSelection & fx["recording_keys"][recording]).fetch1(
+                "nwb_file_name"
+            )
+            for recording in recordings
+        ]
+        for name, recordings in member_recordings.items()
+    }
+    assert member_nwbs == {
         "day1": [nwbs["a"], nwbs["a"]],
         "cross_nwb": [nwbs["a"], nwbs["b"]],
+    }
+    session_starts = {
+        nwb: (Session & {"nwb_file_name": nwb}).fetch1("session_start_time")
+        for nwb in nwbs.values()
     }
     params_name = "member_times_pairer_params"
     saved = install_fixture_pairer(
@@ -2406,6 +2491,63 @@ def test_tracked_units_map_to_original_member_times_and_regions(
                 # Unit 0 fires in a and b: three sessions over two inputs;
                 # units 1 and 2 fire in one member only.
                 assert by_unit == {0: (3, 2), 1: (2, 2), 2: (2, 2)}
+
+            # One region row per (tracked unit, member unit, recording): each
+            # recording's own session, interval, spike count and region.
+            regions = TrackedUnit().get_unit_brain_regions(pk)
+            expected_rows = set()
+            for unit in (0, 1, 2):
+                for input_index, sort_name, recording_names in (
+                    (0, name, member_recordings[name]),
+                    (1, "c", ["c_first"]),
+                ):
+                    for recording_index, recording_name in enumerate(
+                        recording_names
+                    ):
+                        nwb, interval = (
+                            RecordingSelection
+                            & fx["recording_keys"][recording_name]
+                        ).fetch1("nwb_file_name", "interval_list_name")
+                        n_spikes = len(
+                            planted[sort_name][unit][recording_index]
+                        )
+                        expected_rows.add(
+                            (
+                                str(cur[sort_name]["sorting_id"]),
+                                unit,
+                                input_index,
+                                recording_index,
+                                nwb,
+                                interval,
+                                session_starts[nwb],
+                                n_spikes,
+                                n_spikes > 0,
+                                *_own_region(cur[sort_name], unit, nwb),
+                            )
+                        )
+            assert {
+                (
+                    r.sorting_id,
+                    r.unit_id,
+                    r.input_index,
+                    r.recording_index,
+                    r.nwb_file_name,
+                    r.interval_list_name,
+                    r.recording_date,
+                    r.n_spikes,
+                    r.detected,
+                    r.electrode_group_name,
+                    r.electrode_id,
+                    r.region_name,
+                )
+                for r in regions.itertuples()
+            } == expected_rows
+            assert len(regions) == len(expected_rows) == 9
+            assert regions["region_name"].notna().all()
+            if name == "cross_nwb":
+                _assert_regions_follow_each_session(
+                    pk, cur[name], nwbs["a"], nwbs["b"]
+                )
     finally:
         for pk in runs.values():
             _drop(pk)

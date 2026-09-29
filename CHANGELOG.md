@@ -237,6 +237,12 @@ excluded raises.
   recording does not count it. New `TrackedUnit.n_matching_inputs` counts the
   distinct matching inputs among the members. For single-recording inputs
   whose units have spikes both equal the old value.
+- `TrackedUnit.get_unit_brain_regions` returns one row per (tracked unit,
+  member unit, original recording of the member's input), with
+  `recording_index`, `interval_list_name`, `n_spikes`, `detected` and the
+  electrode and region columns. Each recording's region is resolved from that
+  recording's own session and sort group, so concatenation inputs are
+  supported; it was previously copied from the concatenation's first member.
 - **Existing `UnitMatch` and `TrackedUnit` rows must be deleted and
   repopulated.**
 

@@ -30,8 +30,8 @@ same biological unit recorded on different days. Four tables:
     ``make()`` derives biological-unit identities from the ``Pair`` graph: a
     strict partition of the curated-unit universe via a greedy maximal-clique
     cover (one identity per unit), with a bounded node budget.
-    ``get_unit_brain_regions`` resolves each tracked unit's per-session brain
-    regions.
+    ``get_unit_brain_regions`` resolves each member unit's brain region in
+    every original recording of its input, from that recording's own session.
 """
 
 from __future__ import annotations
@@ -1983,104 +1983,155 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
             self.Member.insert(member_rows)
 
     def get_unit_brain_regions(self, tracked_unit_key) -> "pd.DataFrame":
-        """Per-session brain regions for one tracked unit's member units.
+        """Brain regions of tracked units' member units, per original recording.
 
-        Walks each pinned ``CurationV2.Unit -> Electrode -> BrainRegion`` and
-        labels rows by their matching input and constituent recording, read
-        from the frozen ``UnitMatchSelection.InputRecording`` rows. A
-        single-recording input yields one set of rows; a concatenation input
-        repeats its unit's rows once per constituent recording (the members
-        share electrode ids and regions).
+        A member unit of a concatenation input covers every constituent
+        recording of its input. Each recording's region is resolved from that
+        recording's own session: the member unit's electrode
+        (``electrode_group_name``, ``electrode_id`` of its ``CurationV2.Unit``)
+        within the recording's sort group (``SortGroupV2.SortGroupElectrode``
+        of its ``nwb_file_name`` and ``sort_group_id``) ``-> Electrode ->
+        BrainRegion``, never copied from the concatenation's anchor member.
+        Recordings, dates and spike counts are the frozen
+        ``UnitMatchSelection.InputRecording`` and
+        ``UnitMatch.RecordingSpikeCount`` rows.
 
         Parameters
         ----------
         tracked_unit_key : dict
-            Restriction selecting one ``TrackedUnit`` row.
+            Restriction selecting one or more ``TrackedUnit`` rows.
 
         Returns
         -------
         pandas.DataFrame
-            One row per (member unit, constituent recording, electrode/region),
-            carrying ``unitmatch_id``, ``tracked_unit_id``, ``input_index``,
-            ``nwb_file_name``, ``recording_date`` (the frozen session start),
-            ``sorting_id``, ``curation_id``, ``unit_id``, ``region_name``.
+            One row per (tracked unit, member unit, constituent recording of
+            the member's input), ordered by those, with columns
+            ``unitmatch_id``, ``tracked_unit_id``, ``input_index``,
+            ``recording_index``, ``nwb_file_name``, ``interval_list_name``,
+            ``recording_date`` (the recording's frozen session start),
+            ``sorting_id``, ``curation_id``, ``unit_id``, ``n_spikes`` (the
+            unit's spikes in this recording), ``detected`` (``n_spikes > 0``),
+            ``electrode_group_name``, ``electrode_id``, ``region_name``,
+            ``subregion_name``, ``subsubregion_name``.
+
+        Raises
+        ------
+        ValueError
+            The member unit's electrode is not in a recording's sort group.
         """
         import pandas as pd
 
-        from spyglass.spikesorting.v2.utils import unit_brain_region_df
+        from spyglass.common.common_ephys import Electrode
+        from spyglass.common.common_region import BrainRegion
+        from spyglass.spikesorting.v2.recording import SortGroupV2
 
+        region_columns = [
+            "electrode_group_name",
+            "electrode_id",
+            "region_name",
+            "subregion_name",
+            "subsubregion_name",
+        ]
+        rows = []
+        members = (self.Member & tracked_unit_key) * CurationV2.Unit.proj(
+            "electrode_group_name", "electrode_id"
+        )
+        for member in members.fetch(as_dict=True):
+            run = {"unitmatch_id": member["unitmatch_id"]}
+            unit_key = {
+                "sorting_id": member["sorting_id"],
+                "curation_id": int(member["curation_id"]),
+                "unit_id": int(member["unit_id"]),
+            }
+            input_index = int(
+                (UnitMatch.MatchableUnit & run & unit_key).fetch1("input_index")
+            )
+            input_key = {**run, "input_index": input_index}
+            n_spikes_by_recording = dict(
+                zip(
+                    *(
+                        UnitMatch.RecordingSpikeCount
+                        & input_key
+                        & {"unit_id": unit_key["unit_id"]}
+                    ).fetch("recording_index", "n_spikes")
+                )
+            )
+            for recording in (
+                UnitMatchSelection.InputRecording & input_key
+            ).fetch(as_dict=True, order_by="recording_index"):
+                electrode = {
+                    "electrode_group_name": member["electrode_group_name"],
+                    "electrode_id": int(member["electrode_id"]),
+                }
+                regions = (
+                    (
+                        SortGroupV2.SortGroupElectrode
+                        & {
+                            "nwb_file_name": recording["nwb_file_name"],
+                            "sort_group_id": int(recording["sort_group_id"]),
+                        }
+                        & electrode
+                    )
+                    * Electrode
+                    * BrainRegion
+                ).fetch(*region_columns, as_dict=True)
+                if len(regions) != 1:
+                    raise ValueError(
+                        "TrackedUnit.get_unit_brain_regions: electrode "
+                        f"{electrode} of unit {unit_key} is not in sort group "
+                        f"{recording['sort_group_id']} of "
+                        f"{recording['nwb_file_name']} (input_index "
+                        f"{input_index}, recording_index "
+                        f"{recording['recording_index']})."
+                    )
+                n_spikes = int(
+                    n_spikes_by_recording[int(recording["recording_index"])]
+                )
+                rows.append(
+                    {
+                        "unitmatch_id": str(member["unitmatch_id"]),
+                        "tracked_unit_id": int(member["tracked_unit_id"]),
+                        "input_index": input_index,
+                        "recording_index": int(recording["recording_index"]),
+                        "nwb_file_name": recording["nwb_file_name"],
+                        "interval_list_name": recording["interval_list_name"],
+                        "recording_date": recording["session_start_time"],
+                        "sorting_id": str(unit_key["sorting_id"]),
+                        "curation_id": unit_key["curation_id"],
+                        "unit_id": unit_key["unit_id"],
+                        "n_spikes": n_spikes,
+                        "detected": n_spikes > 0,
+                        **regions[0],
+                    }
+                )
         columns = [
             "unitmatch_id",
             "tracked_unit_id",
             "input_index",
+            "recording_index",
             "nwb_file_name",
+            "interval_list_name",
             "recording_date",
             "sorting_id",
             "curation_id",
             "unit_id",
-            "region_name",
+            "n_spikes",
+            "detected",
+            *region_columns,
         ]
-
-        members = (self.Member & tracked_unit_key).fetch(
-            "unitmatch_id",
-            "tracked_unit_id",
-            "sorting_id",
-            "curation_id",
-            "unit_id",
-            as_dict=True,
+        return (
+            pd.DataFrame(rows, columns=columns)
+            .sort_values(
+                [
+                    "unitmatch_id",
+                    "tracked_unit_id",
+                    "input_index",
+                    "unit_id",
+                    "recording_index",
+                ]
+            )
+            .reset_index(drop=True)
         )
-        frames = []
-        for member in members:
-            sorting_id = member["sorting_id"]
-            curation_id = int(member["curation_id"])
-            unit_id = int(member["unit_id"])
-            unit_rel = CurationV2.Unit & {
-                "sorting_id": sorting_id,
-                "curation_id": curation_id,
-                "unit_id": unit_id,
-            }
-            region_df = unit_brain_region_df(unit_rel, "single_session")
-
-            # input_index from the frozen matchable universe this match ran
-            # over (the canonical chronological input ordering).
-            input_index = int(
-                (
-                    UnitMatch.MatchableUnit
-                    & {
-                        "unitmatch_id": member["unitmatch_id"],
-                        "sorting_id": sorting_id,
-                        "curation_id": curation_id,
-                        "unit_id": unit_id,
-                    }
-                ).fetch1("input_index")
-            )
-            recordings = (
-                UnitMatchSelection.InputRecording
-                & {
-                    "unitmatch_id": member["unitmatch_id"],
-                    "input_index": input_index,
-                }
-            ).fetch(
-                "nwb_file_name",
-                "session_start_time",
-                as_dict=True,
-                order_by="recording_index",
-            )
-            for recording in recordings:
-                frames.append(
-                    region_df.assign(
-                        unitmatch_id=str(member["unitmatch_id"]),
-                        tracked_unit_id=int(member["tracked_unit_id"]),
-                        input_index=input_index,
-                        nwb_file_name=recording["nwb_file_name"],
-                        recording_date=recording["session_start_time"],
-                        sorting_id=str(sorting_id),
-                        curation_id=curation_id,
-                    )[columns]
-                )
-        if not frames:
-            return pd.DataFrame(columns=columns)
-        return pd.concat(frames, ignore_index=True)
 
 
 #: Columns of ``UnitMatch.get_input_provenance``'s per-input frame.
