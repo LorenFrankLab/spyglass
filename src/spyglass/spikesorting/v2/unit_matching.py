@@ -20,11 +20,12 @@ same biological unit recorded on different days. Four tables:
     repeat call is idempotent. ``insert_selection`` resolves one curation per
     ``SessionGroup`` member into inputs.
 
-``UnitMatch`` (+ ``Pair`` / ``MatchableUnit`` parts)
+``UnitMatch`` (+ ``Pair`` / ``MatchableUnit`` / ``RecordingSpikeCount`` parts)
     ``make()`` re-validates the frozen inputs, extracts a wrapper-owned
     waveform bundle per input, dispatches the chosen matcher in chronological
     input order, and writes the canonicalized pairs (one ``Pair`` row per
-    match) plus an exportable NWB pairs table.
+    match), the frozen matchable-unit universe, each matchable unit's spike
+    count in every constituent recording, and an exportable NWB pairs table.
 
 ``TrackedUnit`` (+ ``Member`` part)
     ``make()`` derives biological-unit identities from the ``Pair`` graph: a
