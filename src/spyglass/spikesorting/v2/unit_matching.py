@@ -1245,11 +1245,15 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 }
             )
             input_curation_keys.append(curation_key)
-        # Resolve the files last, once every input passed its checks, so a
-        # fetch that raises never rebuilds a traces file. A single input
-        # writes zero pairs without extracting a bundle, so it reads (and
-        # heals) no traces file; only its curated units file is resolved,
-        # for the per-recording spike counts.
+        # Resolve the files last, once every input passed its checks. The
+        # checks above can still rebuild a file: for two or more inputs, a
+        # single recording's frames are read through
+        # Recording().get_recording, which rebuilds a missing traces file,
+        # so a fetch that raises on a later input may already have rebuilt
+        # an earlier input's file. A single input writes zero pairs without
+        # extracting a bundle, so it reads (and heals) no traces file; only
+        # its curated units file is resolved, for the per-recording spike
+        # counts.
         for plan, curation_key in zip(
             input_plan, input_curation_keys, strict=True
         ):
