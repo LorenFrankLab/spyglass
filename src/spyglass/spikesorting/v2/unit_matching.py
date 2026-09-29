@@ -2045,6 +2045,16 @@ def _resolve_match_input(sorting_id, curation_id, exc_class) -> dict:
                 f"{source_id} of input {_input_label(sorting_id, curation_id)} "
                 "has MemberBoundary rows that do not match its frozen members."
             )
+        # A member's content hash is the frozen MemberSnapshot value, not
+        # the member Recording's live content_hash. That is sufficient: the
+        # concatenation itself refuses member drift -- every materialization
+        # and every rebuild of a missing concat file runs
+        # ConcatenatedRecording.make_fetch, whose _resolve_snapshot_recordings
+        # (session_group.py:866-982) raises ConcatMemberDriftError when a
+        # member Recording's content_hash no longer matches the snapshot, and
+        # _rebuild_nwb_artifact (session_group.py:1396) goes through it. So
+        # the concat traces this sort read always derive from the snapshotted
+        # member content.
         recordings = []
         start_sample = 0
         for member, boundary in zip(snapshot, boundaries, strict=True):
