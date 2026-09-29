@@ -1530,6 +1530,7 @@ def test_trace_accessors_have_one_meaning_each(
     ``get_recording`` keeps returning its documented alias: the source for
     the uncorrected sort and the sorting input for the corrected one. The
     UnitMatch bundle input is the sorting input."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2._sorting_analyzer import (
         read_canonical_recording,
     )
@@ -1566,6 +1567,23 @@ def test_trace_accessors_have_one_meaning_each(
             source,
             windows,
             f"{what} source recording",
+        )
+        merge_key = {
+            "merge_id": (SpikeSortingOutput.CurationV2 & curation).fetch1(
+                "merge_id"
+            )
+        }
+        _assert_same_windows(
+            SpikeSortingOutput.get_source_recording(merge_key),
+            source,
+            windows,
+            f"{what} merge source recording",
+        )
+        _assert_same_windows(
+            SpikeSortingOutput.get_sorting_input_recording(merge_key),
+            CurationV2.get_sorting_input_recording(curation),
+            windows,
+            f"{what} merge sorting input",
         )
 
     # Uncorrected: the sorting input is the source silenced over the
@@ -1619,6 +1637,7 @@ def test_concat_member_trace_accessors_have_one_meaning_each(
     timestamps. The parent curation's ``get_recording`` is its sorting input,
     and its ``get_source_recording`` refuses, naming the per-member
     accessor."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
         ConcatMemberCuration,
     )
@@ -1750,6 +1769,23 @@ def test_concat_member_trace_accessors_have_one_meaning_each(
                     member_input.get_times(),
                     member.get_times(),
                     err_msg=f"{label} sorting input timestamps",
+                )
+                merge_key = {
+                    "merge_id": (
+                        SpikeSortingOutput.ConcatMemberCuration & member_key
+                    ).fetch1("merge_id")
+                }
+                _assert_same_windows(
+                    SpikeSortingOutput.get_source_recording(merge_key),
+                    member,
+                    member_windows,
+                    f"{label} merge source recording",
+                )
+                _assert_same_windows(
+                    SpikeSortingOutput.get_sorting_input_recording(merge_key),
+                    member_input,
+                    member_windows,
+                    f"{label} merge sorting input",
                 )
             member_input = ConcatMemberCuration.get_sorting_input_recording(
                 {**curation, "member_index": 0}

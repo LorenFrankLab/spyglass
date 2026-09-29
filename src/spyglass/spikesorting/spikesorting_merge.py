@@ -408,6 +408,46 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         return query.get_recording(query.fetch("KEY"))
 
     @classmethod
+    def get_source_recording(cls, key):
+        """Return a v2 output's original source recording.
+
+        Dispatches to ``CurationV2.get_source_recording`` or
+        ``ConcatMemberCuration.get_source_recording``: the unmasked,
+        uncorrected ``Recording`` the output's units come from. v0/v1 and
+        imported sources do not define it and raise ``AttributeError``; use
+        :meth:`get_recording` for them.
+        """
+        return cls._get_v2_recording(key, "get_source_recording")
+
+    @classmethod
+    def get_sorting_input_recording(cls, key):
+        """Return the traces a v2 output's sorter read.
+
+        Dispatches to ``CurationV2.get_sorting_input_recording`` or
+        ``ConcatMemberCuration.get_sorting_input_recording``: the traces the
+        sorter read (artifact-masked, motion-corrected when selected), on
+        the output's own clock. v0/v1 and imported sources do not define it
+        and raise ``AttributeError``; use :meth:`get_recording` for them.
+        """
+        return cls._get_v2_recording(key, "get_sorting_input_recording")
+
+    @classmethod
+    def _get_v2_recording(cls, key, accessor: str):
+        """Dispatch a v2-only recording accessor to the output's source."""
+        source_table = source_class_dict[
+            to_camel_case(cls.merge_get_parent(key).table_name)
+        ]
+        if not hasattr(source_table, accessor):
+            raise AttributeError(
+                f"SpikeSortingOutput.{accessor}: source table "
+                f"{source_table.__name__} does not define {accessor}; only "
+                "the v2 CurationV2 and ConcatMemberCuration sources do. Use "
+                "SpikeSortingOutput.get_recording."
+            )
+        query = source_table & cls.merge_get_part(key)
+        return getattr(query, accessor)(query.fetch("KEY"))
+
+    @classmethod
     def assert_decoding_merge_ids_ok(cls, merge_ids) -> None:
         """Validate merge_ids destined for a decoding group/consumer.
 
