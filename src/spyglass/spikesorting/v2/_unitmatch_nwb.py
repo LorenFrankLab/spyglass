@@ -142,3 +142,48 @@ def read_pairs(abs_path: str, object_id: str) -> list[dict]:
             }
         )
     return rows
+
+
+def read_input_provenance(abs_path: str) -> tuple[list[dict], list[dict]]:
+    """Read a match run's per-input and per-recording provenance tables.
+
+    ``UnitMatch.make_compute`` writes the two tables next to the pairs table
+    (:data:`~spyglass.spikesorting.v2._nwb_provenance.UNITMATCH_INPUTS` and
+    :data:`~spyglass.spikesorting.v2._nwb_provenance.UNITMATCH_INPUT_RECORDINGS`).
+
+    Parameters
+    ----------
+    abs_path : str
+        Absolute path of the run's analysis NWB file.
+
+    Returns
+    -------
+    tuple of (list of dict, list of dict)
+        The input rows sorted by ``input_index`` and the recording rows sorted
+        by ``(input_index, recording_index)``, with the columns of
+        ``UNITMATCH_INPUT_COLUMNS`` / ``UNITMATCH_INPUT_RECORDING_COLUMNS`` as
+        written (the layout's ``provenance_schema_version`` column dropped).
+    """
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        UNITMATCH_INPUT_COLUMNS,
+        UNITMATCH_INPUT_RECORDING_COLUMNS,
+        UNITMATCH_INPUT_RECORDINGS,
+        UNITMATCH_INPUTS,
+        read_long_provenance,
+    )
+
+    def _read(name, columns):
+        return [
+            {column: row[column] for column, _ in columns}
+            for row in read_long_provenance(abs_path, name)
+        ]
+
+    inputs = _read(UNITMATCH_INPUTS, UNITMATCH_INPUT_COLUMNS)
+    recordings = _read(
+        UNITMATCH_INPUT_RECORDINGS, UNITMATCH_INPUT_RECORDING_COLUMNS
+    )
+    inputs.sort(key=lambda row: row["input_index"])
+    recordings.sort(
+        key=lambda row: (row["input_index"], row["recording_index"])
+    )
+    return inputs, recordings

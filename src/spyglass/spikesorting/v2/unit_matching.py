@@ -1616,6 +1616,164 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
         return pd.DataFrame(read_pairs(abs_path, row["pairs_object_id"]))
 
+    def get_input_provenance(
+        self, key, *, from_nwb: bool = False
+    ) -> "tuple[pd.DataFrame, pd.DataFrame]":
+        """Per-input and per-recording provenance of one match run.
+
+        Reads the frozen ``UnitMatchSelection.Input`` /
+        ``UnitMatchSelection.InputRecording`` rows, or with
+        ``from_nwb=True`` the same provenance from the run's analysis NWB
+        (the inputs and input-recordings tables ``make_compute`` writes), so
+        a run is described without the ``SessionGroup`` it may have been
+        discovered from. Both forms share their columns and value types,
+        so the two can be compared directly.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting one ``UnitMatch`` row.
+        from_nwb : bool, optional
+            Read the run's NWB instead of the database. Default ``False``.
+
+        Returns
+        -------
+        inputs : pandas.DataFrame
+            One row per matching input in ``input_index`` (chronological)
+            order: ``input_index``, ``sorting_id``, ``curation_id``,
+            ``curation_uuid``, ``source_kind``, ``source_id``,
+            ``input_start_time`` (UTC), ``waveform_traces`` (the traces the
+            input's bundle was read from: ``"motion_corrected_recording"``,
+            or the source kind), ``motion_corrected`` and
+            ``motion_corrected_recording_id`` (``None`` when not corrected).
+        recordings : pandas.DataFrame
+            One row per constituent original recording in ``(input_index,
+            recording_index)`` order: ``input_index``, ``recording_index``,
+            ``nwb_file_name``, ``interval_list_name``, ``recording_id``,
+            ``session_start_time`` (UTC), and ``start_sample`` /
+            ``end_sample`` (the recording's frames in the input sort's frame
+            space). The database form adds ``sort_group_id``,
+            ``recording_content_hash`` and ``valid_times``.
+
+        Notes
+        -----
+        The database has no column for the traces kind: a sort reads the
+        ``MotionCorrectedRecording`` it selected, else its own source
+        (``SortingSelection.resolve_effective_source``), and ``UnitMatch.make``
+        refuses a run whose live correction differs from the frozen
+        ``motion_corrected_recording_id``, so ``waveform_traces`` follows from
+        that id. The NWB form reads the kind the run recorded.
+        """
+        from datetime import datetime
+
+        import pandas as pd
+
+        from spyglass.spikesorting.v2._matcher_graph import utc_datetime
+
+        run = (self & key).fetch1()
+        restriction = {"unitmatch_id": run["unitmatch_id"]}
+
+        def _uuid(value):
+            return None if value in (None, "") else uuid.UUID(str(value))
+
+        if from_nwb:
+            from spyglass.spikesorting.v2._unitmatch_nwb import (
+                read_input_provenance,
+            )
+
+            input_rows, recording_rows = read_input_provenance(
+                AnalysisNwbfile.get_abs_path(run["analysis_file_name"])
+            )
+            inputs = [
+                {
+                    **row,
+                    "sorting_id": _uuid(row["sorting_id"]),
+                    "curation_uuid": _uuid(row["curation_uuid"]),
+                    "source_id": _uuid(row["source_id"]),
+                    "input_start_time": utc_datetime(
+                        datetime.fromisoformat(row["input_start_time"])
+                    ),
+                    "motion_corrected": row["waveform_traces"]
+                    == "motion_corrected_recording",
+                    "motion_corrected_recording_id": _uuid(
+                        row["motion_corrected_recording_id"]
+                    ),
+                }
+                for row in input_rows
+            ]
+            recordings = [
+                {
+                    **row,
+                    "recording_id": _uuid(row["recording_id"]),
+                    "session_start_time": utc_datetime(
+                        datetime.fromisoformat(row["session_start_time"])
+                    ),
+                }
+                for row in recording_rows
+            ]
+            extra_recording_columns = []
+        else:
+            inputs = []
+            for row in (UnitMatchSelection.Input & restriction).fetch(
+                as_dict=True, order_by="input_index"
+            ):
+                corrected_id = _uuid(row["motion_corrected_recording_id"])
+                inputs.append(
+                    {
+                        "input_index": int(row["input_index"]),
+                        "sorting_id": _uuid(row["sorting_id"]),
+                        "curation_id": int(row["curation_id"]),
+                        "curation_uuid": _uuid(row["curation_uuid"]),
+                        "source_kind": row["source_kind"],
+                        "source_id": _uuid(row["source_id"]),
+                        "input_start_time": utc_datetime(
+                            row["input_start_time"]
+                        ),
+                        "waveform_traces": (
+                            row["source_kind"]
+                            if corrected_id is None
+                            else "motion_corrected_recording"
+                        ),
+                        "motion_corrected": corrected_id is not None,
+                        "motion_corrected_recording_id": corrected_id,
+                    }
+                )
+            recordings = [
+                {
+                    "input_index": int(row["input_index"]),
+                    "recording_index": int(row["recording_index"]),
+                    "nwb_file_name": row["nwb_file_name"],
+                    "interval_list_name": row["interval_list_name"],
+                    "recording_id": _uuid(row["recording_id"]),
+                    "session_start_time": utc_datetime(
+                        row["session_start_time"]
+                    ),
+                    "start_sample": int(row["start_sample"]),
+                    "end_sample": int(row["end_sample"]),
+                    "sort_group_id": int(row["sort_group_id"]),
+                    "recording_content_hash": row["recording_content_hash"],
+                    "valid_times": row["valid_times"],
+                }
+                for row in (
+                    UnitMatchSelection.InputRecording & restriction
+                ).fetch(
+                    as_dict=True, order_by=("input_index", "recording_index")
+                )
+            ]
+            extra_recording_columns = [
+                "sort_group_id",
+                "recording_content_hash",
+                "valid_times",
+            ]
+        return (
+            pd.DataFrame(inputs, columns=list(_INPUT_PROVENANCE_COLUMNS)),
+            pd.DataFrame(
+                recordings,
+                columns=list(_INPUT_RECORDING_PROVENANCE_COLUMNS)
+                + extra_recording_columns,
+            ),
+        )
+
 
 @schema
 class TrackedUnit(SpyglassMixin, dj.Computed):
@@ -1871,6 +2029,34 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         if not frames:
             return pd.DataFrame(columns=columns)
         return pd.concat(frames, ignore_index=True)
+
+
+#: Columns of ``UnitMatch.get_input_provenance``'s per-input frame.
+_INPUT_PROVENANCE_COLUMNS = (
+    "input_index",
+    "sorting_id",
+    "curation_id",
+    "curation_uuid",
+    "source_kind",
+    "source_id",
+    "input_start_time",
+    "waveform_traces",
+    "motion_corrected",
+    "motion_corrected_recording_id",
+)
+
+#: Columns shared by both forms of ``UnitMatch.get_input_provenance``'s
+#: per-recording frame.
+_INPUT_RECORDING_PROVENANCE_COLUMNS = (
+    "input_index",
+    "recording_index",
+    "nwb_file_name",
+    "interval_list_name",
+    "recording_id",
+    "session_start_time",
+    "start_sample",
+    "end_sample",
+)
 
 
 def _input_label(sorting_id, curation_id) -> str:

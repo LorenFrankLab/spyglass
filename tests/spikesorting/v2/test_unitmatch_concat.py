@@ -1078,3 +1078,302 @@ def test_named_sort_plan_runs_without_a_group(
             & {"matcher_params_name": "named_sort_pairer_params"}
         ).super_delete(warn=False)
         restore_matcher_registry(saved)
+
+
+def _expected_input_recordings(fx, name):
+    """``(nwb, interval, recording_id, start_sample, end_sample)`` per
+    constituent recording of a fixture sort, from the upstream rows: a
+    concatenation's frozen members and boundaries, or the one Recording and
+    its persisted length."""
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+    )
+
+    if name in fx["concat_keys"]:
+        key = fx["concat_keys"][name]
+        members = (ConcatenatedRecordingSelection.MemberSnapshot & key).fetch(
+            as_dict=True, order_by="member_index"
+        )
+        ends = (ConcatenatedRecording.MemberBoundary & key).fetch(
+            "end_sample", order_by="member_index"
+        )
+        starts = [0, *ends[:-1]]
+        return [
+            (
+                member["nwb_file_name"],
+                member["interval_list_name"],
+                str(member["recording_id"]),
+                int(start),
+                int(end),
+            )
+            for member, start, end in zip(members, starts, ends, strict=True)
+        ]
+    key = fx["recording_keys"][name.removeprefix("single_")]
+    nwb_file_name, interval_list_name = (RecordingSelection & key).fetch1(
+        "nwb_file_name", "interval_list_name"
+    )
+    n_samples = Recording().get_recording(key).get_num_samples()
+    return [
+        (
+            nwb_file_name,
+            interval_list_name,
+            str(key["recording_id"]),
+            0,
+            int(n_samples),
+        )
+    ]
+
+
+def test_concat_pairs_and_input_provenance_round_trip(
+    daily_concat_match_inputs, monkeypatch
+):
+    """Inputs named in a shuffled order (two daily concatenations and a
+    single recording) run through the public workflow; the frozen parts,
+    the NWB inputs / input-recordings tables and
+    UnitMatch.get_input_provenance (database and NWB forms) all give the
+    chronological order, pinned curations, sources, every constituent
+    recording with its frames, and the (absent) motion reference that the
+    upstream rows define; and the NWB pairs are the stored Pair rows."""
+    from spyglass.common import Session
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        UNITMATCH_INPUT_RECORDINGS,
+        UNITMATCH_INPUTS,
+        read_long_provenance,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_sorts,
+        run_v2_unit_match,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    fx = daily_concat_match_inputs
+    cur = fx["curations"]
+    chronological = ["concat_day1", "single_b", "concat_day2"]
+    named = ["concat_day2", "concat_day1", "single_b"]
+
+    expected_inputs = []
+    expected_recordings = []
+    for input_index, name in enumerate(chronological):
+        curation = cur[name]
+        source_kind, source_id = (
+            (
+                "concatenated_recording",
+                fx["concat_keys"][name]["concat_recording_id"],
+            )
+            if name in fx["concat_keys"]
+            else (
+                "recording",
+                fx["recording_keys"][name.split("_")[1]]["recording_id"],
+            )
+        )
+        members = _expected_input_recordings(fx, name)
+        start = min(
+            (Session & {"nwb_file_name": nwb}).fetch1("session_start_time")
+            for nwb, *_ in members
+        ).replace(tzinfo=dt.timezone.utc)
+        expected_inputs.append(
+            (
+                input_index,
+                str(curation["sorting_id"]),
+                int(curation["curation_id"]),
+                str((CurationV2 & curation).fetch1("curation_uuid")),
+                source_kind,
+                str(source_id),
+                start,
+                None,
+            )
+        )
+        expected_recordings += [
+            (input_index, recording_index, *member)
+            for recording_index, member in enumerate(members)
+        ]
+    # The fixture's two concatenations each hold two recordings of one
+    # session; the single recording is session b.
+    assert [row[2] for row in expected_recordings] == [
+        fx["nwb_file_names"][tag] for tag in ("a", "a", "b", "c", "c")
+    ]
+
+    saved = install_fixture_pairer(
+        monkeypatch,
+        matcher_name="round_trip_pairer",
+        matcher_params_name="round_trip_pairer_params",
+        pairs=[[0, 0]],
+    )
+    pk = None
+    try:
+        plan = plan_v2_unit_match_from_sorts(
+            [cur[name]["sorting_id"] for name in named],
+            curation_strategy="root",
+            matcher_params_name="round_trip_pairer_params",
+        )
+        summary = run_v2_unit_match(plan)
+        pk = {"unitmatch_id": summary["unit_match_id"]}
+
+        def _times(value):
+            return value.replace(tzinfo=dt.timezone.utc)
+
+        # 1. The frozen selection parts.
+        db_inputs = [
+            (
+                int(row["input_index"]),
+                str(row["sorting_id"]),
+                int(row["curation_id"]),
+                str(row["curation_uuid"]),
+                row["source_kind"],
+                str(row["source_id"]),
+                _times(row["input_start_time"]),
+                row["motion_corrected_recording_id"],
+            )
+            for row in _input_rows(pk)
+        ]
+        db_recordings = [
+            (
+                int(row["input_index"]),
+                int(row["recording_index"]),
+                row["nwb_file_name"],
+                row["interval_list_name"],
+                str(row["recording_id"]),
+                int(row["start_sample"]),
+                int(row["end_sample"]),
+            )
+            for row in (UnitMatchSelection.InputRecording & pk).fetch(
+                as_dict=True, order_by=("input_index", "recording_index")
+            )
+        ]
+        assert db_inputs == expected_inputs
+        assert db_recordings == expected_recordings
+
+        # 2. The NWB tables, read raw.
+        abs_path = AnalysisNwbfile.get_abs_path(
+            (UnitMatch & pk).fetch1("analysis_file_name")
+        )
+        nwb_inputs = [
+            (
+                row["input_index"],
+                row["sorting_id"],
+                row["curation_id"],
+                row["curation_uuid"],
+                row["source_kind"],
+                row["source_id"],
+                dt.datetime.fromisoformat(row["input_start_time"]),
+                row["motion_corrected_recording_id"] or None,
+            )
+            for row in sorted(
+                read_long_provenance(abs_path, UNITMATCH_INPUTS),
+                key=lambda row: row["input_index"],
+            )
+        ]
+        nwb_recordings = [
+            (
+                row["input_index"],
+                row["recording_index"],
+                row["nwb_file_name"],
+                row["interval_list_name"],
+                row["recording_id"],
+                row["start_sample"],
+                row["end_sample"],
+            )
+            for row in sorted(
+                read_long_provenance(abs_path, UNITMATCH_INPUT_RECORDINGS),
+                key=lambda row: (row["input_index"], row["recording_index"]),
+            )
+        ]
+        assert nwb_inputs == expected_inputs
+        assert nwb_recordings == expected_recordings
+        # Every input read its sort's own (uncorrected) source traces.
+        assert [
+            row["waveform_traces"]
+            for row in sorted(
+                read_long_provenance(abs_path, UNITMATCH_INPUTS),
+                key=lambda row: row["input_index"],
+            )
+        ] == [row[4] for row in expected_inputs]
+
+        # 3. get_input_provenance, both forms.
+        for from_nwb in (False, True):
+            inputs, recordings = UnitMatch().get_input_provenance(
+                pk, from_nwb=from_nwb
+            )
+            assert [
+                (
+                    row.input_index,
+                    str(row.sorting_id),
+                    row.curation_id,
+                    str(row.curation_uuid),
+                    row.source_kind,
+                    str(row.source_id),
+                    row.input_start_time,
+                    row.motion_corrected_recording_id,
+                )
+                for row in inputs.itertuples(index=False)
+            ] == expected_inputs, from_nwb
+            assert inputs["motion_corrected"].tolist() == [False] * 3
+            assert inputs["waveform_traces"].tolist() == [
+                row[4] for row in expected_inputs
+            ]
+            assert [
+                (
+                    row.input_index,
+                    row.recording_index,
+                    row.nwb_file_name,
+                    row.interval_list_name,
+                    str(row.recording_id),
+                    row.start_sample,
+                    row.end_sample,
+                )
+                for row in recordings.itertuples(index=False)
+            ] == expected_recordings, from_nwb
+        db_frames = UnitMatch().get_input_provenance(pk)
+        nwb_frames = UnitMatch().get_input_provenance(pk, from_nwb=True)
+        assert db_frames[0].equals(nwb_frames[0])
+        assert db_frames[1][list(nwb_frames[1].columns)].equals(nwb_frames[1])
+
+        # The NWB pairs are the stored Pair rows: the planted pair between
+        # the day-1 concatenation's unit and session b's unit.
+        def _pair_nodes(rows):
+            return sorted(
+                (
+                    str(row["session_a_sorting_id"]),
+                    int(row["session_a_curation_id"]),
+                    int(row["unit_a_id"]),
+                    str(row["session_b_sorting_id"]),
+                    int(row["session_b_curation_id"]),
+                    int(row["unit_b_id"]),
+                )
+                for row in rows
+            )
+
+        stored = _pair_nodes((UnitMatch.Pair & pk).fetch(as_dict=True))
+        assert stored == [
+            (
+                str(cur["concat_day1"]["sorting_id"]),
+                int(cur["concat_day1"]["curation_id"]),
+                0,
+                str(cur["single_b"]["sorting_id"]),
+                int(cur["single_b"]["curation_id"]),
+                0,
+            )
+        ]
+        assert (
+            _pair_nodes(UnitMatch().get_pairs(pk).to_dict(orient="records"))
+            == stored
+        )
+    finally:
+        if pk is not None:
+            _drop(pk)
+        (
+            MatcherParameters
+            & {"matcher_params_name": "round_trip_pairer_params"}
+        ).super_delete(warn=False)
+        restore_matcher_registry(saved)
