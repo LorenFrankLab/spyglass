@@ -292,6 +292,14 @@ concatenation, so a daily same-day concatenation can now be matched directly
   concatenation parent unit's spikes are split by the frozen member spans
   and mapped onto each member `Recording`'s timestamps, the rule
   `ConcatMemberCuration` uses, without needing its rows.
+- `TrackedUnit.get_member_spike_times` and
+  `TrackedUnit.get_unit_brain_regions` raise
+  `UnitMatchSelectionIntegrityError` when an input's pinned curation was
+  recreated or its source no longer matches the frozen rows, including a
+  constituent `Recording` whose live `content_hash` differs from the frozen
+  one, instead of reading the changed source (a concatenation member
+  recording replaced after the run previously shifted the returned spike
+  times silently).
 - **Existing `UnitMatchSelection`, `UnitMatch` and `TrackedUnit` rows must be
   deleted and recreated** -- a replaced part table and a part's changed
   primary key cannot go through `alter()`. See the

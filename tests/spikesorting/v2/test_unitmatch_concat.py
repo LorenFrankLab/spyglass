@@ -2843,6 +2843,132 @@ def test_tracked_units_map_to_original_member_times_and_regions(
         restore_matcher_registry(saved)
 
 
+def test_tracked_unit_readers_refuse_a_replaced_source(
+    daily_concat_match_inputs, member_time_sorts, monkeypatch
+):
+    """A tracked-unit reader that reads live sources refuses a run whose
+    source changed after it was made: a concatenation member's Recording
+    replaced by another persisted recording (new timestamps and content
+    hash under the frozen recording id), a changed content hash alone, or a
+    recreated curation. Before the change, and again once it is restored,
+    the member spike times are the planted frames on the member's own
+    clock."""
+    from spyglass.spikesorting.v2._units_nwb import recording_timestamps
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import (
+        UnitMatchSelectionIntegrityError,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    fx, mx = daily_concat_match_inputs, member_time_sorts
+    cur = mx["curations"]
+    spans = _member_spans(mx["concat_keys"]["cross_nwb"])
+    planted = _planted_member_frames(spans)
+    b_key = fx["recording_keys"]["b_first"]
+    b_times = Recording().get_recording(b_key).get_times()
+    # Unit 0 fires in both members; member 1 of cross_nwb is b's interval.
+    expected = b_times[planted[0][1] - spans[1][0]]
+    assert len(expected) >= 3
+    readers = {
+        "get_member_spike_times": TrackedUnit().get_member_spike_times,
+        "get_unit_brain_regions": TrackedUnit().get_unit_brain_regions,
+    }
+    params_name = "replaced_source_pairer_params"
+    saved = install_fixture_pairer(
+        monkeypatch,
+        matcher_name="replaced_source_pairer",
+        matcher_params_name=params_name,
+        pairs=[[0, 0], [1, 1], [2, 2]],
+    )
+    pk = None
+    try:
+        pk = UnitMatchSelection.insert_inputs(
+            [cur["c"], cur["cross_nwb"]], params_name
+        )
+        UnitMatch.populate(pk, reserve_jobs=False)
+        TrackedUnit.populate(pk, reserve_jobs=False)
+
+        def _member_b_times():
+            times = TrackedUnit().get_member_spike_times(pk)
+            (row,) = times[
+                (times["sorting_id"] == str(cur["cross_nwb"]["sorting_id"]))
+                & (times["unit_id"] == 0)
+                & (times["recording_index"] == 1)
+            ].itertuples()
+            return row.spike_times
+
+        np.testing.assert_array_equal(_member_b_times(), expected)
+        assert len(TrackedUnit().get_unit_brain_regions(pk)) == 9
+
+        # b's Recording now reads a's second interval: other timestamps and
+        # content under the frozen recording id.
+        replacement = (Recording & fx["recording_keys"]["a_second"]).fetch1()
+        b_hash, b_series = (Recording & b_key).fetch1(
+            "content_hash", "electrical_series_path"
+        )
+        assert replacement["content_hash"] != b_hash
+        # Both files store the series at one path, so the file is the switch.
+        assert replacement["electrical_series_path"] == b_series
+        with (
+            _raw_update(
+                Recording,
+                b_key,
+                "analysis_file_name",
+                replacement["analysis_file_name"],
+            ),
+            _raw_update(
+                Recording, b_key, "content_hash", replacement["content_hash"]
+            ),
+        ):
+            live_times = recording_timestamps((Recording & b_key).fetch1())
+            assert live_times[0] != b_times[0]
+            for name, reader in readers.items():
+                with pytest.raises(
+                    UnitMatchSelectionIntegrityError,
+                    match=(
+                        rf"TrackedUnit\.{name}: input_index 0 .*"
+                        f"recording 1 recording_content_hash frozen {b_hash}, "
+                        f"now {replacement['content_hash']}"
+                    ),
+                ):
+                    reader(pk)
+
+        # A changed content hash alone is refused the same way.
+        with _raw_update(Recording, b_key, "content_hash", "f" * 64):
+            for reader in readers.values():
+                with pytest.raises(
+                    UnitMatchSelectionIntegrityError,
+                    match=r"input_index 0 .*recording 1 recording_content_hash",
+                ):
+                    reader(pk)
+
+        # A recreated curation of the single-recording input is refused.
+        with _raw_update(CurationV2, cur["c"], "curation_uuid", uuid.uuid4()):
+            for name, reader in readers.items():
+                with pytest.raises(
+                    UnitMatchSelectionIntegrityError,
+                    match=rf"TrackedUnit\.{name}: input_index 1 .*curation_uuid",
+                ):
+                    reader(pk)
+
+        # Restored, the readers return the planted times again.
+        np.testing.assert_array_equal(_member_b_times(), expected)
+        assert len(TrackedUnit().get_unit_brain_regions(pk)) == 9
+    finally:
+        if pk is not None:
+            _drop(pk)
+        (MatcherParameters & {"matcher_params_name": params_name}).super_delete(
+            warn=False
+        )
+        restore_matcher_registry(saved)
+
+
 # ---- end to end: two days of the same planted neurons ------------------------
 
 #: The concat MS5 preset: 600-6000 Hz, the 100 uV / 70 % artifact recipe per

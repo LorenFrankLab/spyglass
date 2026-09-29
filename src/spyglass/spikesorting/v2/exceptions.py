@@ -409,7 +409,11 @@ class UnitMatchSelectionIntegrityError(RuntimeError):
     still matches its frozen recordings. A selection that fails (a direct
     insert that bypassed ``insert_inputs``, a recreated curation, or changed
     source content) raises this rather than silently matching other units.
-    The message names the offending inputs.
+    ``TrackedUnit.get_member_spike_times`` and
+    ``TrackedUnit.get_unit_brain_regions`` raise it too when an input of a
+    finished run has a recreated curation or a source recording whose live
+    content no longer matches the frozen rows. The message names the
+    offending inputs.
     """
 
 

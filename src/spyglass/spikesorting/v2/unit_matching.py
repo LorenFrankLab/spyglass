@@ -34,7 +34,8 @@ same biological unit recorded on different days. Four tables:
     ``get_unit_brain_regions`` resolves each member unit's brain region in
     every original recording of its input, from that recording's own session,
     and ``get_member_spike_times`` returns its spike times on each original
-    recording's clock.
+    recording's clock. Both refuse an input whose pinned curation or source
+    recordings changed after the run (``UnitMatchSelectionIntegrityError``).
 """
 
 from __future__ import annotations
@@ -2013,7 +2014,11 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         BrainRegion``, never copied from the concatenation's anchor member.
         Recordings, dates and spike counts are the frozen
         ``UnitMatchSelection.InputRecording`` and
-        ``UnitMatch.RecordingSpikeCount`` rows.
+        ``UnitMatch.RecordingSpikeCount`` rows. The unit's electrode and
+        each sort group are read live, so before reading an input the
+        pinned curation and the input's source recordings are compared with
+        the frozen rows (:func:`_live_source_mismatches`); the region itself
+        is read live by design, so a corrected ``Electrode`` region shows.
 
         Parameters
         ----------
@@ -2035,6 +2040,10 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
 
         Raises
         ------
+        UnitMatchSelectionIntegrityError
+            An input's pinned curation was recreated or its source no longer
+            matches the frozen rows, including a constituent ``Recording``
+            whose live ``content_hash`` differs from the frozen one.
         ValueError
             The member unit's electrode is not in a recording's sort group.
         """
@@ -2052,6 +2061,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
             "subsubregion_name",
         ]
         rows = []
+        checked = set()
         members = (self.Member & tracked_unit_key) * CurationV2.Unit.proj(
             "electrode_group_name", "electrode_id"
         )
@@ -2066,6 +2076,9 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
                 (UnitMatch.MatchableUnit & run & unit_key).fetch1("input_index")
             )
             input_key = {**run, "input_index": input_index}
+            if (str(run["unitmatch_id"]), input_index) not in checked:
+                _assert_run_input_unchanged("get_unit_brain_regions", input_key)
+                checked.add((str(run["unitmatch_id"]), input_index))
             n_spikes_by_recording = dict(
                 zip(
                     *(
@@ -2165,7 +2178,11 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         is mapped onto that member ``Recording``'s timestamps -- the rule
         ``ConcatMemberCuration`` applies, without needing its rows. Gaps
         between and inside members are kept, and a member the unit did not
-        fire in gets an empty array.
+        fire in gets an empty array. The times are read from live data (the
+        curation's units NWB and each member ``Recording``), so before an
+        input is read its pinned curation and source recordings are compared
+        with the frozen rows (:func:`_live_source_mismatches`): a recording
+        replaced after the run would otherwise shift the returned times.
 
         Parameters
         ----------
@@ -2184,6 +2201,10 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
 
         Raises
         ------
+        UnitMatchSelectionIntegrityError
+            An input's pinned curation was recreated or its source no longer
+            matches the frozen rows, including a constituent ``Recording``
+            whose live ``content_hash`` differs from the frozen one.
         ValueError
             A concatenation curation's units NWB has no
             ``spike_sample_index`` column, or a member-local frame falls
@@ -2213,6 +2234,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
             return timestamps_by_recording[recording_id]
 
         rows = []
+        checked = set()
         for member in (self.Member & tracked_unit_key).fetch(as_dict=True):
             run = {"unitmatch_id": member["unitmatch_id"]}
             curation_key = {
@@ -2229,6 +2251,9 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
                 ).fetch1("input_index")
             )
             input_key = {**run, "input_index": input_index}
+            if (str(run["unitmatch_id"]), input_index) not in checked:
+                _assert_run_input_unchanged("get_member_spike_times", input_key)
+                checked.add((str(run["unitmatch_id"]), input_index))
             source_kind = (UnitMatchSelection.Input & input_key).fetch1(
                 "source_kind"
             )
@@ -2934,6 +2959,82 @@ def _snapshot_mismatches(input_row, recording_rows, live) -> list[str]:
                 f"recording {frozen['recording_index']} valid_times changed"
             )
     return mismatches
+
+
+def _live_source_mismatches(input_row, recording_rows) -> list[str]:
+    """Compare a finished run's frozen input with the sources a reader reads.
+
+    :func:`_snapshot_mismatches` against :func:`_resolve_match_input` for the
+    pinned curation now, with each recording's live ``Recording.content_hash``
+    in place of the hash the source resolves to. For a concatenation member
+    that hash is the frozen member snapshot's, which is enough for
+    ``UnitMatch.make`` (the concatenation refuses to rebuild from drifted
+    members), but a reader of a finished run reads each member ``Recording``
+    itself, so a member recording replaced after the run must differ here.
+    A missing ``Recording`` row reads as ``None``. Database reads only; a
+    single recording's frames are not re-read from its traces (its content
+    hash covers its timestamps).
+
+    Parameters
+    ----------
+    input_row : dict
+        The frozen ``UnitMatchSelection.Input`` row.
+    recording_rows : list of dict
+        Its frozen ``InputRecording`` rows in ``recording_index`` order.
+
+    Returns
+    -------
+    list of str
+        One message per differing field; empty when the live sources match.
+    """
+    from spyglass.spikesorting.v2.recording import Recording
+
+    live = _resolve_match_input(
+        input_row["sorting_id"],
+        int(input_row["curation_id"]),
+        UnitMatchSelectionIntegrityError,
+    )
+    for recording in live["recordings"]:
+        hashes = (
+            Recording & {"recording_id": recording["recording_id"]}
+        ).fetch("content_hash")
+        recording["recording_content_hash"] = (
+            str(hashes[0]) if len(hashes) else None
+        )
+    return _snapshot_mismatches(input_row, recording_rows, live)
+
+
+def _assert_run_input_unchanged(reader: str, input_key: dict) -> None:
+    """Refuse to read a run's input whose curation or sources changed.
+
+    Parameters
+    ----------
+    reader : str
+        The ``TrackedUnit`` method name, for the message.
+    input_key : dict
+        ``{"unitmatch_id", "input_index"}`` of one matching input.
+
+    Raises
+    ------
+    UnitMatchSelectionIntegrityError
+        :func:`_live_source_mismatches` reports a difference.
+    """
+    input_row = (UnitMatchSelection.Input & input_key).fetch1()
+    recording_rows = (UnitMatchSelection.InputRecording & input_key).fetch(
+        as_dict=True, order_by="recording_index"
+    )
+    mismatches = _live_source_mismatches(input_row, recording_rows)
+    if mismatches:
+        raise UnitMatchSelectionIntegrityError(
+            f"TrackedUnit.{reader}: input_index {input_key['input_index']} "
+            f"{_input_label(input_row['sorting_id'], input_row['curation_id'])}"
+            f" of match run {input_key['unitmatch_id']} no longer matches its "
+            f"frozen snapshot: {'; '.join(mismatches)}. The curation was "
+            "recreated or its source changed after the run was made, so its "
+            "live data no longer describe the matched units. Restore the "
+            "original source, or sort and curate the changed data and match "
+            "the new curation."
+        )
 
 
 def _input_anchor_sort_group(sorting_id) -> tuple[str, int]:
