@@ -519,7 +519,19 @@ jobs:
         # not silently skip the match path).
         conda run -n spyglass_v2_matching python \
           tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
-        conda run -n spyglass_v2_matching pytest \
+        # Tier of the end-to-end daily-concat workflow test
+        # (test_unitmatch_concat.py::test_daily_concat_workflow_matches_planted_neurons_end_to_end,
+        # marked very_slow): nightly schedule and manual dispatch only. It took
+        # ~230 s (92 s setup + 137 s call, ~1.9 GB peak) on a macOS arm64
+        # laptop, so on push and pull request it is deselected. pytest keeps only the LAST ``-m``,
+        # which replaces pyproject's ``-m "not regenerate"`` addopts, so the
+        # per-PR expression repeats ``not regenerate``.
+        marker_args=()
+        if [ "${{ github.event_name }}" = "push" ] || \
+           [ "${{ github.event_name }}" = "pull_request" ]; then
+          marker_args=(-m "not very_slow and not regenerate")
+        fi
+        conda run -n spyglass_v2_matching pytest "${marker_args[@]}" \
           tests/spikesorting/v2/test_v1_parity.py::test_optional_matching_extra_resolution \
           tests/spikesorting/v2/test_unitmatch.py \
           tests/spikesorting/v2/test_unitmatch_concat.py \

@@ -3448,6 +3448,7 @@ def unitmatchpy():
 
 
 @pytest.mark.slow
+@pytest.mark.very_slow
 def test_daily_concat_workflow_matches_planted_neurons_end_to_end(
     unitmatchpy, planted_matching_days, monkeypatch
 ):
