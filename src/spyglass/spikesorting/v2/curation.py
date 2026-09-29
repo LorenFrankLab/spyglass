@@ -1971,17 +1971,34 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
     @classmethod
     def get_recording(cls, key: dict) -> "si.BaseRecording":
-        """Return the cached preprocessed recording for a CurationV2 row.
+        """Return the sort's effective traces as persisted.
 
-        Resolves the traces via ``SortingSelection.resolve_effective_source``.
-        A standalone source returns its reusable preprocessed ``Recording``;
-        its sorting-stage artifact mask is not applied here. A concat source
-        returns the materialized ``ConcatenatedRecording``, which includes
-        the member masks. A sort of a motion-corrected recording returns
-        that ``MotionCorrectedRecording`` -- the traces the sorter read, with
-        the sort's mask already applied and only the channels the correction
-        kept. Use ``CurationRef.open_analyzer``
-        for the masked traces used by sorting/QC in either mode.
+        What this returns depends on the sort; each case is an alias of one
+        of the two accessors that have a single meaning:
+
+        =================  =============  ======  =========  ================
+        Sort               Alias of       Masked  Corrected  Clock
+        =================  =============  ======  =========  ================
+        single recording   source         no      no         acquisition
+        single, corrected  sorting input  yes     yes        acquisition
+        concatenation      sorting input  yes     no         synthetic concat
+        concat, corrected  sorting input  yes     yes        synthetic concat
+        =================  =============  ======  =========  ================
+
+        "source" is :meth:`get_source_recording` and "sorting input" is
+        :meth:`get_sorting_input_recording`. "Masked" means silenced over the
+        sort's artifact exclusions: a single-recording sort that pins an
+        artifact detection still comes back unmasked here.
+
+        A single-recording sort returns its reusable preprocessed
+        ``Recording``, without the sort's pinned artifact mask. A concat
+        sort returns the materialized ``ConcatenatedRecording``, which
+        includes the member masks. A sort of a motion-corrected recording
+        returns that ``MotionCorrectedRecording``: the traces the sorter
+        read, with the sort's mask already applied and only the channels the
+        correction kept. Call :meth:`get_source_recording` or
+        :meth:`get_sorting_input_recording` to get one meaning for every
+        sort.
 
         ``@classmethod`` so the merge-table dispatcher's
         ``source_table.get_recording(merge_key)`` call (which binds
@@ -2021,6 +2038,86 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         # ``apply_artifact_mask=False`` means "do not mask again", not
         # "unmasked".
         return SortingSelection.load_stored_traces(traces)
+
+    @classmethod
+    def get_source_recording(cls, key: dict) -> "si.BaseRecording":
+        """Return the sort's original source recording.
+
+        The preprocessed ``Recording`` cache the sort's source was built
+        from, on its acquisition clock: never artifact-masked and never
+        motion-corrected, whatever the sort selected. A concatenation has
+        several original recordings, so a concat-backed curation raises;
+        read each member's with ``ConcatMemberCuration.get_source_recording``.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationV2`` row (the merge
+            dispatcher's list-of-dict form is accepted).
+
+        Returns
+        -------
+        si.BaseRecording
+            The source ``Recording``, annotated ``is_filtered=True``.
+
+        Raises
+        ------
+        ValueError
+            If the curation's sort reads a concatenated recording.
+        """
+        from spyglass.spikesorting.v2.recording import Recording
+
+        sorting_id = (cls & key).fetch1("sorting_id")
+        lineage = SortingSelection.resolve_effective_source(
+            {"sorting_id": sorting_id}
+        ).lineage
+        if lineage.kind != "recording":
+            raise ValueError(
+                f"CurationV2.get_source_recording: sorting_id {sorting_id} "
+                f"sorts concatenated recording "
+                f"{lineage.key['concat_recording_id']}, whose original source "
+                "is one recording per member. Call "
+                "ConcatMemberCuration.get_source_recording with each member's "
+                "key (sorting_id, curation_id, member_index)."
+            )
+        return Recording().get_recording(lineage.key)
+
+    @classmethod
+    def get_sorting_input_recording(cls, key: dict) -> "si.BaseRecording":
+        """Return the traces the sorter read.
+
+        The sort's effective traces, unwhitened: silenced over the pinned
+        artifact detection's excluded periods when the sort pins one (a
+        concatenation carries its member masks), and the
+        ``MotionCorrectedRecording`` (only its kept channels) when the sort
+        selected a motion correction. The clock is the sort's: acquisition
+        time for a single recording, the synthetic concatenation clock for a
+        concat sort (see ``ConcatMemberCuration.get_sorting_input_recording``
+        for a member on its own clock). This is the recording every analyzer
+        rebuild and UnitMatch bundle extraction start from
+        (``_sorting_analyzer.resolve_canonical_recording`` opened by
+        ``read_canonical_recording``).
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationV2`` row (the merge
+            dispatcher's list-of-dict form is accepted).
+
+        Returns
+        -------
+        si.BaseRecording
+            The sorting input, annotated ``is_filtered=True``.
+        """
+        from spyglass.spikesorting.v2._sorting_analyzer import (
+            read_canonical_recording,
+            resolve_canonical_recording,
+        )
+
+        sorting_id = (cls & key).fetch1("sorting_id")
+        return read_canonical_recording(
+            resolve_canonical_recording({"sorting_id": sorting_id})
+        )
 
     @classmethod
     def _load_curation_recording_meta(cls, key):

@@ -22,6 +22,7 @@ import numpy as np
 import pytest
 
 from tests.spikesorting.v2._motion_db_helpers import (
+    CONCAT_GROUP,
     MOTION_TEAM,
     drop_motion_selections,
     drop_pipeline_sorts,
@@ -1486,6 +1487,291 @@ def test_corrected_concat_split_into_members_conserves_spikes(
         if sort_key is not None:
             drop_pipeline_sorts([sort_key["sorting_id"]])
         _drop_estimate(estimate_key)
+
+
+def _window_traces(recording, windows):
+    """``recording``'s traces over each ``(start, end)`` frame window."""
+    return [
+        recording.get_traces(start_frame=start, end_frame=end)
+        for start, end in windows
+    ]
+
+
+def _assert_same_windows(recording, expected, windows, what):
+    """``recording`` equals ``expected`` (traces and times) on ``windows``."""
+    assert recording.channel_ids.tolist() == expected.channel_ids.tolist(), what
+    for got, want in zip(
+        _window_traces(recording, windows), _window_traces(expected, windows)
+    ):
+        np.testing.assert_array_equal(got, want, err_msg=what)
+    times, expected_times = recording.get_times(), expected.get_times()
+    for start, end in windows:
+        np.testing.assert_array_equal(
+            times[start:end], expected_times[start:end], err_msg=what
+        )
+
+
+def _inside(times, excluded):
+    """The frame window strictly inside an excluded ``[start, end)`` time
+    range (0.1 s clear of each edge)."""
+    start, end = np.searchsorted(times, [excluded[0] + 0.1, excluded[1] - 0.1])
+    assert end - start > 1000
+    return int(start), int(end)
+
+
+def test_trace_accessors_have_one_meaning_each(
+    corrected_sorts, fresh_curations, drift_recording
+):
+    """For a single-recording sort pinning an artifact detection, uncorrected
+    and corrected: ``get_source_recording`` is the unmasked, uncorrected
+    ``Recording`` cache and ``get_sorting_input_recording`` is the traces the
+    sorter read (zero over the exclusion; the corrected artifact's channels
+    and traces when corrected), both on the acquisition clock.
+    ``get_recording`` keeps returning its documented alias: the source for
+    the uncorrected sort and the sorting input for the corrected one. The
+    UnitMatch bundle input is the sorting input."""
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        read_canonical_recording,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.unit_matching import _member_match_files
+
+    sorts = corrected_sorts
+    source = Recording().get_recording(sorts["recording_key"])
+    corrected = MotionCorrectedRecording().get_recording(sorts["corrected_key"])
+    t0 = session_start_s(drift_recording["nwb_file_name"])
+    excluded = _inside(
+        source.get_times(), (t0 + EXCLUDED_S[0], t0 + EXCLUDED_S[1])
+    )
+    windows = [excluded, sorts["window"]]
+    source_excluded = source.get_traces(
+        start_frame=excluded[0], end_frame=excluded[1]
+    )
+    assert np.count_nonzero(source_excluded) == source_excluded.size
+
+    uncorrected = CurationV2.insert_curation(
+        sorting_key=sorts["uncorrected_sort"]
+    )
+    corrected_curation = CurationV2.insert_curation(
+        sorting_key=sorts["corrected_sort"]
+    )
+    for curation, what in (
+        (uncorrected, "uncorrected"),
+        (corrected_curation, "corrected"),
+    ):
+        _assert_same_windows(
+            CurationV2.get_source_recording(curation),
+            source,
+            windows,
+            f"{what} source recording",
+        )
+
+    # Uncorrected: the sorting input is the source silenced over the
+    # exclusion, and unchanged elsewhere.
+    sorting_input = CurationV2.get_sorting_input_recording(uncorrected)
+    assert sorting_input.channel_ids.tolist() == sorts["source_ids"]
+    got_excluded, got_window = _window_traces(sorting_input, windows)
+    assert not np.any(got_excluded)
+    np.testing.assert_array_equal(got_window, sorts["source_expected"])
+    np.testing.assert_array_equal(sorting_input.get_times(), source.get_times())
+    _assert_same_windows(
+        read_canonical_recording(
+            _member_match_files(uncorrected)["sorting_input"]
+        ),
+        sorting_input,
+        windows,
+        "UnitMatch bundle input",
+    )
+    _assert_same_windows(
+        CurationV2.get_recording(uncorrected),
+        source,
+        windows,
+        "uncorrected get_recording (the source recording)",
+    )
+
+    # Corrected: the sorting input is the corrected artifact, masked.
+    sorting_input = CurationV2.get_sorting_input_recording(corrected_curation)
+    _assert_reads_corrected(sorting_input, sorts, "corrected sorting input")
+    _assert_same_windows(
+        sorting_input, corrected, windows, "corrected sorting input"
+    )
+    assert not np.any(_window_traces(sorting_input, [excluded])[0])
+    np.testing.assert_array_equal(sorting_input.get_times(), source.get_times())
+    _assert_same_windows(
+        CurationV2.get_recording(corrected_curation),
+        corrected,
+        windows,
+        "corrected get_recording (the sorting input)",
+    )
+
+
+def test_concat_member_trace_accessors_have_one_meaning_each(
+    discontinuous_sources, monkeypatch
+):
+    """For a concatenation masking one member, sorted uncorrected and
+    corrected: a member's ``get_source_recording`` (and ``get_recording``) is
+    that member's unmasked, uncorrected ``Recording``; its
+    ``get_sorting_input_recording`` is the parent's sorting input over the
+    member's frames ``[start, end)`` (zero over the member's exclusion; the
+    corrected concatenation's traces when corrected) on the member's own
+    timestamps. The parent curation's ``get_recording`` is its sorting input,
+    and its ``get_source_recording`` refuses, naming the per-member
+    accessor."""
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    fx = discontinuous_sources
+    t0 = fx["t0"]
+    member_excluded_s = (t0 + 17.0, t0 + 18.0)
+    member_keys = [fx["member_a"], fx["member_b"]]
+    members = [Recording().get_recording(key) for key in member_keys]
+    lengths = [int(m.get_num_samples()) for m in members]
+    offsets = np.cumsum([0, *lengths])
+    artifact_key = masked_artifact(member_keys[0], list(member_excluded_s))
+    concat_key, sort_keys = None, []
+    try:
+        concat_key = ConcatenatedRecordingSelection.insert_selection(
+            {
+                "session_group_owner": MOTION_TEAM,
+                "session_group_name": CONCAT_GROUP,
+                "preprocessing_params_name": "default",
+            },
+            artifact_detection_ids={
+                0: artifact_key["artifact_detection_id"],
+                1: None,
+            },
+        )
+        ConcatenatedRecording.populate(concat_key, reserve_jobs=False)
+        snapshot_ids = (
+            ConcatenatedRecordingSelection.MemberSnapshot & concat_key
+        ).fetch("recording_id", order_by="member_index")
+        assert [str(r) for r in snapshot_ids] == [
+            str(key["recording_id"]) for key in member_keys
+        ]
+        corrected_key = populated_corrected(
+            populated_estimate(
+                concat_recording_id=concat_key["concat_recording_id"]
+            )
+        )
+        concat = ConcatenatedRecording().get_recording(concat_key)
+        corrected = MotionCorrectedRecording().get_recording(corrected_key)
+        assert int(concat.get_num_samples()) == offsets[-1]
+        assert (
+            np.max(np.abs(corrected.get_traces() - concat.get_traces()))
+            > MIN_CORRECTION_UV
+        )
+        excluded = _inside(members[0].get_times(), member_excluded_s)
+        source_excluded = members[0].get_traces(
+            start_frame=excluded[0], end_frame=excluded[1]
+        )
+        assert np.count_nonzero(source_excluded) == source_excluded.size
+
+        planted = np.array(
+            [3000, lengths[0] - 3000, offsets[1] + 3000, offsets[2] - 3000]
+        )
+        for parent in (concat_key, corrected_key):
+            sort_keys.append(
+                SortingSelection.insert_selection(
+                    {**concat_key, **sorter_key(), **parent}
+                )
+            )
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                Sorting, "_run_sorter", staticmethod(_planted_frames(planted))
+            )
+            Sorting.populate(sort_keys, reserve_jobs=False)
+
+        for sort_key, parent, what in (
+            (sort_keys[0], concat, "uncorrected concat"),
+            (sort_keys[1], corrected, "corrected concat"),
+        ):
+            curation = CurationV2.insert_curation(sorting_key=sort_key)
+            ConcatMemberCuration.populate(curation, reserve_jobs=False)
+            with pytest.raises(
+                ValueError, match="ConcatMemberCuration.get_source_recording"
+            ):
+                CurationV2.get_source_recording(curation)
+            windows = [(0, int(offsets[-1]))]
+            _assert_same_windows(
+                CurationV2.get_sorting_input_recording(curation),
+                parent,
+                windows,
+                f"{what} sorting input",
+            )
+            _assert_same_windows(
+                CurationV2.get_recording(curation),
+                parent,
+                windows,
+                f"{what} get_recording (the sorting input)",
+            )
+            for index, member in enumerate(members):
+                member_key = {**curation, "member_index": index}
+                member_windows = [(0, lengths[index])]
+                label = f"{what} member {index}"
+                _assert_same_windows(
+                    ConcatMemberCuration.get_source_recording(member_key),
+                    member,
+                    member_windows,
+                    f"{label} source recording",
+                )
+                _assert_same_windows(
+                    ConcatMemberCuration.get_recording(member_key),
+                    member,
+                    member_windows,
+                    f"{label} get_recording (the source recording)",
+                )
+                member_input = ConcatMemberCuration.get_sorting_input_recording(
+                    member_key
+                )
+                assert (
+                    member_input.channel_ids.tolist()
+                    == parent.channel_ids.tolist()
+                ), label
+                np.testing.assert_array_equal(
+                    member_input.get_traces(),
+                    parent.get_traces(
+                        start_frame=int(offsets[index]),
+                        end_frame=int(offsets[index + 1]),
+                    ),
+                    err_msg=f"{label} sorting input traces",
+                )
+                np.testing.assert_array_equal(
+                    member_input.get_times(),
+                    member.get_times(),
+                    err_msg=f"{label} sorting input timestamps",
+                )
+            member_input = ConcatMemberCuration.get_sorting_input_recording(
+                {**curation, "member_index": 0}
+            )
+            assert not np.any(_window_traces(member_input, [excluded])[0])
+    finally:
+        drop_pipeline_sorts([key["sorting_id"] for key in sort_keys])
+        if concat_key is not None:
+            drop_motion_selections(concat_key)
+            (ConcatenatedRecording & concat_key).super_delete(
+                warn=False, safemode=False
+            )
+            (ConcatenatedRecordingSelection & concat_key).super_delete(
+                warn=False, safemode=False
+            )
+        from spyglass.spikesorting.v2.artifact import (
+            RecordingArtifactDetection,
+            RecordingArtifactSelection,
+        )
+
+        (RecordingArtifactDetection & artifact_key).delete(safemode=False)
+        (RecordingArtifactSelection & artifact_key).super_delete(warn=False)
 
 
 def test_motion_cleanup_drops_the_sorts_of_corrected_recordings(

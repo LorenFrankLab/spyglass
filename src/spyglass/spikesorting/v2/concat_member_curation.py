@@ -595,13 +595,41 @@ class ConcatMemberCuration(
     def get_recording(cls, key: dict) -> "si.BaseRecording":
         """Return this member's preprocessed recording in session time.
 
-        This is the member cache before concat masking and before any motion
-        correction: when the parent concat sort read a
-        ``MotionCorrectedRecording``, this still returns the member's own
-        uncorrected ``Recording`` (a corrected recording has no per-member
-        session-time form). Use the parent concat curation's analyzer for the
-        actual sorting/QC traces, which use the synthetic concat timeline and,
-        for a corrected sort, the corrected traces.
+        An alias of :meth:`get_source_recording`: the member's own
+        ``Recording``, never concat-masked and never motion-corrected, even
+        when the parent concat sort read a ``MotionCorrectedRecording``.
+
+        ========================  ========  ======  =========  ===========
+        Parent sort               Alias of  Masked  Corrected  Clock
+        ========================  ========  ======  =========  ===========
+        concat, corrected or not  source    no      no         acquisition
+        ========================  ========  ======  =========  ===========
+
+        "source" is :meth:`get_source_recording`; the clock is the member
+        ``Recording``'s own.
+
+        Use :meth:`get_sorting_input_recording` for the traces the sorter
+        read over this member's frames, on the same member timestamps.
+        """
+        return cls.get_source_recording(key)
+
+    @classmethod
+    def get_source_recording(cls, key: dict) -> "si.BaseRecording":
+        """Return this member's original source recording.
+
+        The member's own preprocessed ``Recording`` on its acquisition
+        clock: before the concatenation's member masks and before any
+        motion correction of the parent concat sort.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``ConcatMemberCuration`` row.
+
+        Returns
+        -------
+        si.BaseRecording
+            The member ``Recording``, annotated ``is_filtered=True``.
         """
         snapshot = cls._member_snapshot_row(key)
         recording = Recording().get_recording(
@@ -609,6 +637,78 @@ class ConcatMemberCuration(
         )
         recording.annotate(is_filtered=True)
         return recording
+
+    @classmethod
+    def get_sorting_input_recording(cls, key: dict) -> "si.BaseRecording":
+        """Return the traces the parent sorter read over this member's frames.
+
+        The parent curation's ``CurationV2.get_sorting_input_recording``
+        (the concatenation with its member masks, or its
+        ``MotionCorrectedRecording`` when the parent sort was corrected)
+        restricted to this member's frozen frames ``[start, end)`` in the
+        concatenation (``ConcatenatedRecording.MemberBoundary``), with the
+        member ``Recording``'s own timestamps set. Its times therefore line
+        up with this member's spike times (:meth:`get_sorting` frames map to
+        the same timestamps). The timestamps are set in memory
+        (SpikeInterface ``set_times``), so a copy made by serializing the
+        recording does not keep them.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``ConcatMemberCuration`` row.
+
+        Returns
+        -------
+        si.BaseRecording
+            The member's frames of the parent sorting input, on the member's
+            acquisition clock.
+
+        Raises
+        ------
+        ValueError
+            If the member's frame span and its ``Recording`` differ in
+            sample count.
+        """
+        row = (cls & key).fetch1("KEY")
+        start, end = cls._member_frame_span(row)
+        timestamps = np.asarray(
+            cls.get_source_recording(row).get_times(), dtype=np.float64
+        )
+        if len(timestamps) != end - start:
+            raise ValueError(
+                "ConcatMemberCuration.get_sorting_input_recording: member "
+                f"{row['member_index']} spans concat frames [{start}, {end}) "
+                f"but its Recording has {len(timestamps)} samples."
+            )
+        recording = CurationV2.get_sorting_input_recording(
+            cls._curation_key(row)
+        ).frame_slice(start_frame=start, end_frame=end)
+        recording.set_times(timestamps, with_warning=False)
+        return recording
+
+    @classmethod
+    def _member_frame_span(cls, key: dict) -> tuple[int, int]:
+        """This member's frozen ``[start, end)`` frames in the concatenation.
+
+        Members occupy consecutive frames in ``member_index`` order, so a
+        member starts where the previous ``MemberBoundary.end_sample`` ends.
+        """
+        sorting_id, member_index = (cls & key).fetch1(
+            "sorting_id", "member_index"
+        )
+        concat_key = {
+            "concat_recording_id": (
+                SortingSelection.ConcatenatedRecordingSource
+                & {"sorting_id": sorting_id}
+            ).fetch1("concat_recording_id")
+        }
+        indices, ends = (
+            ConcatenatedRecording.MemberBoundary & concat_key
+        ).fetch("member_index", "end_sample", order_by="member_index")
+        position = [int(index) for index in indices].index(int(member_index))
+        start = 0 if position == 0 else int(ends[position - 1])
+        return start, int(ends[position])
 
     @classmethod
     def get_sorting(cls, key: dict) -> "si.BaseSorting":

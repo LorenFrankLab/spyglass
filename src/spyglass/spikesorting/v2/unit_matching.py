@@ -1590,11 +1590,13 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 # resolved; the matchable unit set was already resolved +
                 # validated there and threaded in via the plan, so compute does
                 # not re-derive curation-label state. The recording is the
-                # traces the sorter read: the sort's effective traces (a
-                # selected motion-corrected recording included, as the plan's
-                # ``waveform_traces`` records), silenced over the sort's
-                # artifact periods by the same mask the sorter input and every
-                # analyzer rebuild use; the sorting is CurationV2.get_sorting's.
+                # traces the sorter read, opened by the DB-free half of
+                # CurationV2.get_sorting_input_recording: the sort's effective
+                # traces (a selected motion-corrected recording included, as
+                # the plan's ``waveform_traces`` records), silenced over the
+                # sort's artifact periods by the same mask the sorter input and
+                # every analyzer rebuild use; the sorting is
+                # CurationV2.get_sorting's.
                 recording = read_canonical_recording(plan["sorting_input"])
                 full_sorting = read_stored_units(plan["units"])
                 sorting = full_sorting.select_units(plan["matchable_unit_ids"])
@@ -2949,7 +2951,8 @@ def _member_match_files(curation_key: dict) -> dict:
     """Resolve the files an input's bundle is read from, for a DB-free read.
 
     The sort's input traces are resolved as every analyzer rebuild resolves
-    them (``resolve_canonical_recording``): the effective traces file,
+    them, by the DB half of ``CurationV2.get_sorting_input_recording``
+    (``resolve_canonical_recording``): the effective traces file,
     rebuilt if missing, plus the artifact valid times when the sort's pinned
     artifact detection must be applied at load (a single recording's cache is
     persisted unmasked; a concatenation or a motion-corrected recording is
