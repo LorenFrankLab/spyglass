@@ -312,10 +312,18 @@ def _clean_session_v2(session_key):
     (SortGroupV2 & session_key).super_delete(warn=False)
 
 
-def _synthetic_artifact_recording():
+def _synthetic_artifact_recording(offsets=None):
     """8-channel, 90 000-sample (3 s @ 30 kHz) recording with two planted
     artifact runs -- one common-mode amplitude burst, one single-channel
     z-score outlier -- plus heterogeneous gains so the µV scaling matters.
+
+    Parameters
+    ----------
+    offsets : list[float] or None, optional
+        Per-channel ``offset_to_uV`` values applied via
+        ``set_channel_offsets``. Default ``None`` leaves the recording
+        without an ``offset_to_uV`` property, unchanged from before this
+        parameter existed.
     """
     import spikeinterface as si
 
@@ -335,6 +343,8 @@ def _synthetic_artifact_recording():
     # Heterogeneous gains: the chunk worker and the reference must apply the
     # SAME per-channel gain, so a wrong gain broadcast surfaces as inequality.
     rec.set_channel_gains([1.0, 0.5, 2.0, 0.25, 1.0, 1.5, 0.8, 1.2])
+    if offsets is not None:
+        rec.set_channel_offsets(offsets)
     return rec
 
 

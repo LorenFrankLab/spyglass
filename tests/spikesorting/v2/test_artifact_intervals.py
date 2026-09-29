@@ -507,8 +507,24 @@ def _in_memory_artifact_frames_reference(recording, validated):
     ``frames_above`` array the interval-building code consumes).
     """
     traces = recording.get_traces(return_in_uV=False)
-    gains = recording.get_channel_gains()
-    traces_uv = traces.astype(np.float32) * gains[None, :]
+    if recording.has_scaleable_traces():
+        # Matches production's own return_in_uV=True affine transform
+        # exactly, gain AND offset, both cast to float32 before the
+        # multiply-add (spikeinterface/core/baserecording.py:375-380 in
+        # spyglass_spikesorting_v2's installed SI 0.104.3; see also
+        # ``_artifact_compute.py``'s ``get_traces(..., return_in_uV=True)``
+        # call, which is what this oracle stands in for).
+        gains = recording.get_channel_gains().astype(np.float32)
+        offsets = recording.get_channel_offsets().astype(np.float32)
+        traces_uv = (
+            traces.astype(np.float32) * gains[None, :] + offsets[None, :]
+        )
+    else:
+        # SpikeInterface leaves a float recording's traces unscaled when
+        # gain or offset is unset (baserecording.py:364-374) -- production's
+        # own return_in_uV=True call does the same, so the reference must
+        # too.
+        traces_uv = traces.astype(np.float32)
     absolute = np.abs(traces_uv)
 
     n_channels = traces.shape[1]
@@ -539,16 +555,25 @@ def _in_memory_artifact_frames_reference(recording, validated):
     return (channel_hit.sum(axis=1) >= n_required).nonzero()[0]
 
 
+# Heterogeneous per-channel offsets (channels 0, 2 and 4 only) for the
+# gain-AND-offset case below. Channel 3 -- the single-channel z-score
+# burst's own channel -- is deliberately left at offset 0, so that window's
+# outcome depends on the OTHER three channels' constant +1000 uV offset
+# combining with channel 3's own burst, not on channel 3's offset.
+_ARTIFACT_CHANNEL_OFFSETS_UV = [1000.0, 0.0, 1000.0, 0.0, 1000.0, 0.0, 0.0, 0.0]
+
+
 @pytest.mark.parametrize(
-    "amplitude_threshold_uv,zscore_threshold",
+    "amplitude_threshold_uv,zscore_threshold,channel_offsets_uv",
     [
-        (50.0, None),  # amplitude-only branch
-        (None, 6.0),  # z-score-only branch
-        (50.0, 6.0),  # OR-combined branch
+        (50.0, None, None),  # amplitude-only branch
+        (None, 6.0, None),  # z-score-only branch
+        (50.0, 6.0, None),  # OR-combined branch
+        (50.0, None, _ARTIFACT_CHANNEL_OFFSETS_UV),  # amplitude + offsets
     ],
 )
 def test_chunked_artifact_matches_in_memory_reference(
-    dj_conn, amplitude_threshold_uv, zscore_threshold
+    dj_conn, amplitude_threshold_uv, zscore_threshold, channel_offsets_uv
 ):
     """The chunked ``_scan_artifact_frames`` produces frame-identical
     output to the frozen full-in-memory reference, and is invariant to chunk
@@ -560,14 +585,18 @@ def test_chunked_artifact_matches_in_memory_reference(
     only if the flagged frame set is unchanged. The per-frame across-channel
     z-score depends solely on that frame's columns, so chunk boundaries
     (which split the time axis) cannot change which frames are flagged --
-    this test pins that property across all three detection branches.
+    this test pins that property across all three zero-offset detection
+    branches, plus a fourth case with heterogeneous non-zero channel offsets
+    (production reads ``return_in_uV=True``, i.e. gain AND offset; see
+    ``_artifact_compute.py:121-130`` and
+    ``_in_memory_artifact_frames_reference`` above).
     """
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
     from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
 
-    rec = _synthetic_artifact_recording()
+    rec = _synthetic_artifact_recording(offsets=channel_offsets_uv)
     validated = ArtifactDetectionParamsSchema(
         detect=True,
         amplitude_threshold_uv=amplitude_threshold_uv,
