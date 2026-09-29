@@ -453,14 +453,18 @@ def _raw_update(table, restriction: dict, column: str, value):
     """Overwrite one column of one row with SQL, restoring it afterwards.
 
     Stands in for changes DataJoint's API refuses (a recreated curation's
-    new generation, a changed session start or recording content).
+    new generation, a changed session start or recording content, an edited
+    frozen selection row).
     """
     row = (table & restriction).fetch1()
     original = row[column]
 
     def _encode(name, item):
-        if table.heading.attributes[name].uuid:
+        attribute = table.heading.attributes[name]
+        if attribute.uuid:
             return uuid.UUID(str(item)).bytes
+        if attribute.is_blob:
+            return dj.blob.pack(item)
         return item
 
     where = " AND ".join(f"`{name}`=%s" for name in table.primary_key)
@@ -842,3 +846,99 @@ def test_deleting_a_group_keeps_its_match_run(
             & {"matcher_params_name": "group_survival_pairer_params"}
         ).super_delete(warn=False)
         restore_matcher_registry(saved)
+
+
+def test_frozen_frames_and_order_are_verified_at_make(
+    daily_concat_match_inputs, monkeypatch
+):
+    """A single recording's frozen kept intervals and frames are hashed and
+    re-read from its traces at make, and each input's start time and the
+    chronological numbering are re-checked; an edit to any of them fails
+    UnitMatch.populate before a bundle is extracted."""
+    from spyglass.spikesorting.v2.exceptions import (
+        UnitMatchSelectionIntegrityError,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    cur = daily_concat_match_inputs["curations"]
+    pk = UnitMatchSelection.insert_inputs(
+        [cur["single_a"], cur["single_b"]], "unitmatch_default"
+    )
+
+    def _refused(match):
+        with pytest.raises(UnitMatchSelectionIntegrityError, match=match):
+            UnitMatch.populate(pk, reserve_jobs=False)
+        assert len(UnitMatch & pk) == 0
+
+    recording_1 = {**pk, "input_index": 1, "recording_index": 0}
+    frozen_1 = (UnitMatchSelection.InputRecording & recording_1).fetch1()
+    shortened = np.asarray(frozen_1["valid_times"], dtype=np.float64).copy()
+    shortened[0, 1] -= 1.0
+    try:
+        with _no_bundle_extraction(monkeypatch):
+            # An edited frozen interval no longer realizes the stored hash.
+            with _raw_update(
+                UnitMatchSelection.InputRecording,
+                recording_1,
+                "valid_times",
+                shortened,
+            ):
+                _refused("input_set_hash")
+
+            # A start time that is not the input's earliest session start.
+            input_0 = {**pk, "input_index": 0}
+            start_0 = (UnitMatchSelection.Input & input_0).fetch1(
+                "input_start_time"
+            )
+            with _raw_update(
+                UnitMatchSelection.Input,
+                input_0,
+                "input_start_time",
+                start_0 + dt.timedelta(minutes=1),
+            ):
+                _refused("input_start_time")
+
+            # Input 0 moved after input 1 (start time kept consistent): the
+            # numbering no longer follows the frozen chronology.
+            later = frozen_1["session_start_time"] + dt.timedelta(hours=1)
+            with (
+                _raw_update(
+                    UnitMatchSelection.Input,
+                    input_0,
+                    "input_start_time",
+                    later,
+                ),
+                _raw_update(
+                    UnitMatchSelection.InputRecording,
+                    {**pk, "input_index": 0, "recording_index": 0},
+                    "session_start_time",
+                    later,
+                ),
+            ):
+                _refused("not chronological")
+
+            # Rewritten with a consistent hash, the interval and frame edits
+            # are caught against the recording's persisted traces.
+            reforge_selection(
+                pk,
+                recording_edits={(1, 0): {"valid_times": shortened}},
+                rehash=True,
+            )
+            _refused("valid_times changed")
+            _drop(pk)
+            pk = UnitMatchSelection.insert_inputs(
+                [cur["single_a"], cur["single_b"]], "unitmatch_default"
+            )
+            reforge_selection(
+                pk,
+                recording_edits={
+                    (1, 0): {"end_sample": int(frozen_1["end_sample"]) - 1}
+                },
+                rehash=True,
+            )
+            _refused("end_sample")
+    finally:
+        _drop(pk)

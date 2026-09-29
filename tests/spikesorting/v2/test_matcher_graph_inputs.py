@@ -108,6 +108,7 @@ def _parts(curation_uuid="00000000-0000-0000-0000-0000000000c1"):
             "recording_content_hash": "a" * 64,
             "start_sample": 0,
             "end_sample": 150_000,
+            "valid_times": [[0.0, 4.99996667]],
         },
         {
             "input_index": 1,
@@ -116,6 +117,7 @@ def _parts(curation_uuid="00000000-0000-0000-0000-0000000000c1"):
             "recording_content_hash": "b" * 64,
             "start_sample": 0,
             "end_sample": 60_000,
+            "valid_times": [[2.02, 3.21996667]],
         },
         {
             "input_index": 1,
@@ -124,6 +126,7 @@ def _parts(curation_uuid="00000000-0000-0000-0000-0000000000c1"):
             "recording_content_hash": "c" * 64,
             "start_sample": 60_000,
             "end_sample": 120_000,
+            "valid_times": [[3.3, 4.89996667]],
         },
     ]
     return input_rows, recording_rows
@@ -160,6 +163,8 @@ def test_input_set_hash_is_row_order_and_uuid_form_independent():
         ("recording", 2, "start_sample", 60_001),
         ("recording", 1, "end_sample", 60_001),
         ("recording", 2, "recording_id", uuid.UUID(int=9)),
+        ("recording", 0, "valid_times", [[0.0, 4.9999]]),
+        ("recording", 1, "valid_times", [[2.02, 2.5], [2.6, 3.21996667]]),
     ],
 )
 def test_input_set_hash_changes_with_every_frozen_field(
@@ -243,3 +248,52 @@ def test_canonicalize_orients_side_a_by_lower_input_index():
     assert (row["session_b_sorting_id"], row["session_b_curation_id"]) == early
     assert row["unit_b_id"] == 11
     assert (row["input_a"], row["input_b"]) == (0, 1)
+
+
+def _order_rows(starts, input_starts=None):
+    """Input rows ordered 0..n-1 with one recording each starting at ``starts``."""
+    input_rows = [
+        {
+            "input_index": index,
+            "sorting_id": uuid.UUID(int=index + 1),
+            "curation_id": 0,
+            "input_start_time": (input_starts or starts)[index],
+        }
+        for index in range(len(starts))
+    ]
+    recording_rows = [
+        {"input_index": index, "session_start_time": start}
+        for index, start in enumerate(starts)
+    ]
+    return input_rows, recording_rows
+
+
+def test_frozen_order_errors_accepts_the_order_selection_writes():
+    """Numbering by chronological_input_order passes, with a concat input's
+    start time taken as its earliest recording's."""
+    from spyglass.spikesorting.v2._matcher_graph import frozen_order_errors
+
+    input_rows, recording_rows = _order_rows([_DAY1, _DAY2])
+    # Input 1 is a concatenation whose second recording is later still.
+    recording_rows.append(
+        {"input_index": 1, "session_start_time": _DAY2 + dt.timedelta(hours=3)}
+    )
+    assert frozen_order_errors(input_rows, recording_rows) == []
+
+
+def test_frozen_order_errors_flags_start_time_and_numbering():
+    """A start time that is not the earliest recording's, and numbering that
+    disagrees with the frozen times, are both reported."""
+    from spyglass.spikesorting.v2._matcher_graph import frozen_order_errors
+
+    input_rows, recording_rows = _order_rows(
+        [_DAY1, _DAY2], input_starts=[_DAY1 + dt.timedelta(hours=1), _DAY2]
+    )
+    (error,) = frozen_order_errors(input_rows, recording_rows)
+    assert error.startswith("input_index 0 input_start_time")
+
+    # Input 0 recorded after input 1 (consistent start times, wrong numbers).
+    input_rows, recording_rows = _order_rows([_DAY2, _DAY1])
+    (error,) = frozen_order_errors(input_rows, recording_rows)
+    assert "input_index order [0, 1] is not chronological" in error
+    assert "chronological order [1, 0]" in error

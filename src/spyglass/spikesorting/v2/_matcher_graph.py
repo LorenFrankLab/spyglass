@@ -29,6 +29,8 @@ from itertools import combinations
 from statistics import median
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from spyglass.spikesorting.v2.exceptions import (
     TrackedUnitBudgetExceededError,
 )
@@ -45,8 +47,9 @@ def input_set_hash(input_rows, recording_rows) -> str:
     (``sorting_id``, ``curation_id``, ``curation_uuid``), its source
     (``source_kind``, ``source_id``, ``motion_corrected_recording_id``) and,
     per constituent recording in ``recording_index`` order, the
-    ``recording_id``, ``recording_content_hash`` and the recording's
-    ``[start_sample, end_sample)`` frames in the sort. It is the
+    ``recording_id``, ``recording_content_hash``, the recording's
+    ``[start_sample, end_sample)`` frames in the sort and its kept
+    ``valid_times``. It is the
     ``input_set_hash`` stored on every ``UnitMatchSelection`` master and the
     single source of truth for that selection's identity:
     ``insert_inputs`` calls it to mint the hash from the part rows it is about
@@ -65,7 +68,9 @@ def input_set_hash(input_rows, recording_rows) -> str:
     recording_rows : iterable of dict
         ``UnitMatchSelection.InputRecording`` rows (``input_index``,
         ``recording_index``, ``recording_id``, ``recording_content_hash``,
-        ``start_sample``, ``end_sample``). Rows whose ``input_index`` has no
+        ``start_sample``, ``end_sample``, ``valid_times`` as an
+        ``(n_intervals, 2)`` array of seconds; each float enters the digest
+        exactly). Rows whose ``input_index`` has no
         input row do not enter the digest; the caller rejects them with
         :func:`input_part_structure_errors`.
 
@@ -83,6 +88,9 @@ def input_set_hash(input_rows, recording_rows) -> str:
                 str(row["recording_content_hash"]),
                 int(row["start_sample"]),
                 int(row["end_sample"]),
+                np.asarray(row["valid_times"], dtype=np.float64)
+                .reshape(-1, 2)
+                .tolist(),
             ]
         )
     canonical = []
@@ -206,6 +214,56 @@ STRICT_POLICY = "strict"
 
 #: Node identity for the tracked-unit graph: one curated unit.
 CuratedUnit = tuple  # (sorting_id: str, curation_id: int, unit_id: int)
+
+
+def frozen_order_errors(input_rows, recording_rows) -> list[str]:
+    """Describe frozen start times or input numbering that disagree.
+
+    Each input's ``input_start_time`` must be the earliest
+    ``session_start_time`` among its recordings, and ``input_index`` must
+    follow :func:`chronological_input_order` of those frozen times -- the
+    order the matcher is fed and pairs are oriented by.
+
+    Parameters
+    ----------
+    input_rows : iterable of dict
+        ``UnitMatchSelection.Input`` rows (``input_index``, ``sorting_id``,
+        ``curation_id``, ``input_start_time``).
+    recording_rows : iterable of dict
+        ``UnitMatchSelection.InputRecording`` rows (``input_index``,
+        ``session_start_time``); every input has at least one.
+
+    Returns
+    -------
+    list[str]
+        One message per defect; empty when the frozen order holds.
+    """
+    input_rows = list(input_rows)
+    starts_by_input: dict[int, list] = {}
+    for row in recording_rows:
+        starts_by_input.setdefault(int(row["input_index"]), []).append(
+            utc_datetime(row["session_start_time"])
+        )
+    errors = []
+    for row in input_rows:
+        index = int(row["input_index"])
+        earliest = min(starts_by_input[index])
+        if utc_datetime(row["input_start_time"]) != earliest:
+            errors.append(
+                f"input_index {index} input_start_time "
+                f"{utc_datetime(row['input_start_time']).isoformat()} is not "
+                f"its earliest session start {earliest.isoformat()}"
+            )
+    stored = sorted(int(row["input_index"]) for row in input_rows)
+    chronological = [
+        int(row["input_index"]) for row in chronological_input_order(input_rows)
+    ]
+    if chronological != stored:
+        errors.append(
+            f"input_index order {stored} is not chronological by the frozen "
+            f"start times (chronological order {chronological})"
+        )
+    return errors
 
 
 def canonicalize_match_pairs(

@@ -446,12 +446,10 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         ordered = chronological_input_order(resolved)
         for input_index, item in enumerate(ordered):
             item["input_index"] = input_index
-            if item["source_kind"] == "recording":
-                recording = item["recordings"][0]
-                recording["start_sample"] = 0
-                recording["end_sample"] = _recording_n_samples(
-                    recording["recording_id"]
-                )
+            # A single recording's frames and kept intervals come from its
+            # persisted traces; they are frozen and hashed like a
+            # concatenation member's.
+            _add_single_recording_frames(item)
         input_rows, recording_rows = _input_part_rows(ordered)
         set_hash = input_set_hash(input_rows, recording_rows)
         identity = {
@@ -489,19 +487,6 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         }
         cls._warn_on_divergent_electrode_space(choices_by_input)
         cls._assert_members_share_geometry(choices_by_input)
-
-        # The kept intervals of a single recording come from its persisted
-        # timestamps (a scan), so they are read only for a new selection;
-        # they are recorded, not hashed.
-        for item in ordered:
-            if item["source_kind"] == "recording":
-                recording = item["recordings"][0]
-                recording["valid_times"] = _recording_valid_times(
-                    recording["recording_id"],
-                    recording["nwb_file_name"],
-                    item["artifact_detection_id"],
-                )
-        input_rows, recording_rows = _input_part_rows(ordered)
 
         master_row = {**identity, "unitmatch_id": unitmatch_id}
         if group_key is not None:
@@ -772,6 +757,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         post-duplicate-key refetch.
         """
         from spyglass.spikesorting.v2._matcher_graph import (
+            frozen_order_errors,
             input_part_structure_errors,
             input_set_hash,
         )
@@ -803,10 +789,12 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         structure_errors = input_part_structure_errors(
             input_rows, recording_rows
         )
+        if not structure_errors:
+            structure_errors = frozen_order_errors(input_rows, recording_rows)
         if structure_errors:
             raise SchemaBypassError(
                 f"UnitMatchSelection master {deterministic_unitmatch_id} has "
-                f"malformed Input / InputRecording parts "
+                f"malformed or misordered Input / InputRecording parts "
                 f"({'; '.join(structure_errors)}; a raw-insert orphan or "
                 "forgery). Drop the master and re-insert via insert_inputs()."
             )
@@ -1035,13 +1023,16 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         bypass ``insert_inputs``: the parts are well formed, there is at
         least one input, no sorting is pinned twice, no concatenation input
         spans two days and no two inputs share a session (on the frozen
-        session times), and the stored ``input_set_hash`` is the hash of the
-        parts. Then, per input, the pinned curation must still exist with the
-        pinned ``curation_uuid`` (a recreated curation raises rather than
-        silently re-pointing), carry no unapplied proposed merges, and its
-        live source must still match the frozen recordings (source,
-        ``recording_id``, content hash, concatenation membership and
-        boundaries).
+        session times), each ``input_start_time`` is its earliest frozen
+        session start and ``input_index`` follows their chronological order,
+        and the stored ``input_set_hash`` is the hash of the parts. Then, per
+        input, the pinned curation must still exist with the pinned
+        ``curation_uuid`` (a recreated curation raises rather than silently
+        re-pointing), carry no unapplied proposed merges, and its live source
+        must still match the frozen recordings (source, ``recording_id``,
+        content hash, concatenation membership, frames and kept intervals;
+        a single recording's frames and kept intervals are re-read from its
+        traces when bundles will be extracted, i.e. for two or more inputs).
 
         Only frozen values order and describe the inputs: ``Session`` is not
         read, and the ``SessionGroup`` the inputs were discovered from is not
@@ -1049,6 +1040,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         its path and curated units NWB are carried to compute.
         """
         from spyglass.spikesorting.v2._matcher_graph import (
+            frozen_order_errors,
             input_part_structure_errors,
             input_set_hash,
             utc_datetime,
@@ -1091,6 +1083,13 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             ],
             exc_class,
         )
+        order_errors = frozen_order_errors(input_rows, recording_rows)
+        if order_errors:
+            raise exc_class(
+                f"UnitMatch.make: selection {key} has frozen start times or "
+                f"input numbering that disagree ({'; '.join(order_errors)}). "
+                "Use UnitMatchSelection.insert_inputs()."
+            )
         recomputed_hash = input_set_hash(input_rows, recording_rows)
         if recomputed_hash != sel["input_set_hash"]:
             raise exc_class(
@@ -1102,13 +1101,19 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 "one input set while matching on another). Use "
                 "UnitMatchSelection.insert_inputs()."
             )
+        # Bundles are extracted only for two or more inputs; only then are a
+        # single recording's frames and kept intervals (which bound the
+        # bundle windows) re-read from its traces and compared. A single
+        # input reads no traces file.
+        extracts_bundles = len(input_rows) >= 2
         for row in input_rows:
             sorting_id, curation_id = row["sorting_id"], int(row["curation_id"])
             _check_input_curation(sorting_id, curation_id, exc_class)
+            live = _resolve_match_input(sorting_id, curation_id, exc_class)
+            if extracts_bundles:
+                _add_single_recording_frames(live)
             mismatches = _snapshot_mismatches(
-                row,
-                recordings_by_input[int(row["input_index"])],
-                _resolve_match_input(sorting_id, curation_id, exc_class),
+                row, recordings_by_input[int(row["input_index"])], live
             )
             if mismatches:
                 raise exc_class(
@@ -2086,6 +2091,30 @@ def _session_start_times(nwb_file_names) -> dict:
     return {row["nwb_file_name"]: row["session_start_time"] for row in rows}
 
 
+def _add_single_recording_frames(item) -> None:
+    """Add a single-recording input's frames and kept intervals, in place.
+
+    Sets the recording's ``start_sample`` (0), ``end_sample`` (the persisted
+    traces' frame count) and ``valid_times``; a concatenation input already
+    carries its members' values from :func:`_resolve_match_input`.
+
+    Parameters
+    ----------
+    item : dict
+        A :func:`_resolve_match_input` result.
+    """
+    if item["source_kind"] != "recording":
+        return
+    recording = item["recordings"][0]
+    recording["start_sample"] = 0
+    recording["end_sample"] = _recording_n_samples(recording["recording_id"])
+    recording["valid_times"] = _recording_valid_times(
+        recording["recording_id"],
+        recording["nwb_file_name"],
+        item["artifact_detection_id"],
+    )
+
+
 def _recording_n_samples(recording_id) -> int:
     """Frame count of a single recording's persisted traces.
 
@@ -2244,7 +2273,10 @@ def _snapshot_mismatches(input_row, recording_rows, live) -> list[str]:
     recording_rows : list of dict
         Its frozen ``InputRecording`` rows in ``recording_index`` order.
     live : dict
-        :func:`_resolve_match_input` for the same curation now.
+        :func:`_resolve_match_input` for the same curation now. Frames and
+        kept intervals are compared for every recording that carries them
+        (concatenation members always; a single recording once
+        :func:`_add_single_recording_frames` has read its traces).
 
     Returns
     -------
@@ -2284,16 +2316,17 @@ def _snapshot_mismatches(input_row, recording_rows, live) -> list[str]:
         "recording_id",
         "recording_content_hash",
     ]
-    if live["source_kind"] != "recording":
-        fields += ["start_sample", "end_sample"]
     for frozen, current in zip(recording_rows, live["recordings"], strict=True):
-        for field in fields:
+        with_frames = "valid_times" in current
+        for field in fields + (
+            ["start_sample", "end_sample"] if with_frames else []
+        ):
             if _text(frozen[field]) != _text(current[field]):
                 mismatches.append(
                     f"recording {frozen['recording_index']} {field} frozen "
                     f"{_text(frozen[field])}, now {_text(current[field])}"
                 )
-        if live["source_kind"] != "recording" and not np.array_equal(
+        if with_frames and not np.array_equal(
             np.asarray(frozen["valid_times"], dtype=np.float64).reshape(-1, 2),
             current["valid_times"],
         ):
