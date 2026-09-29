@@ -704,6 +704,381 @@ def test_bundle_control_matches_previous_construction(tmp_path, saved_bundles):
     assert np.all(corr > 0.99), dict(zip(new["unit_ids"], corr.round(4)))
 
 
+# ---- waveform windows inside one statistics span ---------------------------
+
+
+@pytest.mark.parametrize(
+    ("spans", "nbefore", "nafter", "samples", "expected"),
+    [
+        # A join at frame 100: windows [s - 10, s + 10) must not cross it.
+        # 10 / 90 / 110 / 190 touch a span edge from inside; 9 / 91 / 109 /
+        # 191 run one sample past it.
+        (
+            [(0, 100), (100, 200)],
+            10,
+            10,
+            [9, 10, 90, 91, 100, 109, 110, 190, 191],
+            [False, True, True, False, False, False, True, True, False],
+        ),
+        # An acquisition gap [100, 150): a window inside the gap or straddling
+        # either of its edges is not kept.
+        (
+            [(0, 100), (150, 250)],
+            10,
+            10,
+            [95, 120, 145, 155, 160, 240, 241],
+            [False, False, False, False, True, True, False],
+        ),
+        # An artifact exclusion [300, 320) between two spans of one recording.
+        (
+            [(200, 300), (320, 400)],
+            10,
+            10,
+            [289, 290, 295, 310, 325, 330, 331],
+            [True, True, False, False, False, True, True],
+        ),
+        # An asymmetric window: 5 samples before, 15 after.
+        (
+            [(0, 100)],
+            5,
+            15,
+            [4, 5, 85, 86],
+            [False, True, True, False],
+        ),
+        # Unsorted spikes, and spikes before the first / after the last span.
+        (
+            [(50, 100)],
+            10,
+            10,
+            [200, 60, -5, 75, 45],
+            [False, True, False, True, False],
+        ),
+    ],
+)
+def test_window_in_one_span_known_answers(
+    spans, nbefore, nafter, samples, expected
+):
+    """Hand-computed answers at span edges, joins, gaps and exclusions."""
+    from spyglass.spikesorting.v2._unitmatch_backend import (
+        spikes_with_window_in_one_span,
+    )
+
+    kept = spikes_with_window_in_one_span(samples, spans, nbefore, nafter)
+    assert kept.dtype == bool
+    assert kept.tolist() == expected
+
+
+def test_window_in_one_span_rejects_malformed_spans():
+    """Unsorted, overlapping or empty spans, or a negative window, raise."""
+    from spyglass.spikesorting.v2._unitmatch_backend import (
+        spikes_with_window_in_one_span,
+    )
+
+    for spans in ([(100, 200), (0, 100)], [(0, 100), (90, 200)], [(5, 5)]):
+        with pytest.raises(ValueError, match="spans must be sorted"):
+            spikes_with_window_in_one_span([50], spans, 1, 1)
+    with pytest.raises(ValueError, match="must not be negative"):
+        spikes_with_window_in_one_span([50], [(0, 100)], -1, 1)
+    # No span holds anything.
+    assert spikes_with_window_in_one_span([50], [], 1, 1).tolist() == [False]
+
+
+@pytest.fixture
+def sampled_frames(monkeypatch):
+    """Record the frames SpikeInterface's ``random_spikes`` draws.
+
+    Wraps ``random_spikes_selection`` where the ``random_spikes`` extension
+    calls it and appends a structured array (``sample_index``,
+    ``unit_index``, ``segment_index``) of the drawn spikes per call. The
+    number of spikes the analyzer's sorting offered each call is appended to
+    the list's ``offered`` attribute.
+    """
+    from spikeinterface.core import analyzer_extension_core
+
+    real = analyzer_extension_core.random_spikes_selection
+
+    class _Drawn(list):
+        offered: list
+
+    drawn = _Drawn()
+    drawn.offered = []
+
+    def _record(sorting, *args, **kwargs):
+        indices = real(sorting, *args, **kwargs)
+        spikes = sorting.to_spike_vector()
+        drawn.append(spikes[indices])
+        drawn.offered.append(spikes.size)
+        return indices
+
+    monkeypatch.setattr(
+        analyzer_extension_core, "random_spikes_selection", _record
+    )
+    return drawn
+
+
+def _halves_cut_from_traces(traces, drawn, unit_index):
+    """Two halves of one unit, cut by hand from ``traces`` at ``drawn``.
+
+    The drawn frames of the unit are put in time order; half 0 is the mean
+    window of the first ``n // 2`` and half 1 of the rest. Returns
+    ``(half_0, half_1)``, each ``(spike_width, n_channels)``.
+    """
+    frames = np.sort(drawn["sample_index"][drawn["unit_index"] == unit_index])
+    windows = np.stack(
+        [traces[s - _HALF_WIDTH : s + _HALF_WIDTH] for s in frames]
+    )
+    n_half = len(frames) // 2
+    return windows[:n_half].mean(axis=0), windows[n_half:].mean(axis=0)
+
+
+def test_full_recording_span_matches_the_unfiltered_bundle(
+    tmp_path, saved_bundles, sampled_frames
+):
+    """One span over the whole recording gives the bundle the segment-border
+    margin alone gives, byte for byte.
+
+    Each unit has spikes inside the waveform half-width of both recording
+    edges (removed by the span filter and by SpikeInterface's own margin)
+    and more spikes than the per-unit draw, so the random draw is exercised
+    and a changed candidate set would change which spikes are drawn.
+    """
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    duration_s = 12.0
+    n_samples = int(duration_s * _FS)
+    # Windows past an edge: removed by the span filter and by the margin.
+    edge_frames = [3, _HALF_WIDTH - 1, n_samples - 2]
+    # Windows touching an edge from inside: kept by the span filter; the
+    # margin keeps the first and drops the last (it keeps frames below
+    # ``n_samples - margin``).
+    touching_frames = [_HALF_WIDTH, n_samples - _HALF_WIDTH]
+    units = {}
+    for uid, (channel, offset) in {
+        4: (0, 0.1),
+        9: (2, 0.13),
+        2: (3, 0.2),
+    }.items():
+        samples = np.sort(
+            np.concatenate(
+                [
+                    edge_frames,
+                    touching_frames,
+                    _train(offset, duration_s - 0.1, period_s=0.1),
+                ]
+            )
+        )
+        units[uid] = (samples, _planted_template(channel), None)
+    recording, sorting = _planted_session(duration_s, units)
+    kwargs = dict(max_spikes_per_unit=20, seed=3)
+
+    unfiltered_dir, spans_dir = tmp_path / "unfiltered", tmp_path / "spans"
+    assert (
+        backend.extract_unitmatch_bundle(
+            unfiltered_dir, recording, sorting, **kwargs
+        )
+        == []
+    )
+    assert (
+        backend.extract_unitmatch_bundle(
+            spans_dir,
+            recording,
+            sorting,
+            statistics_spans=[(0, n_samples)],
+            **kwargs,
+        )
+        == []
+    )
+
+    # The span filter removed the edge spikes before sampling, and nothing
+    # else; the same spikes were then drawn.
+    unfiltered_drawn, spans_drawn = sampled_frames
+    n_units = len(units)
+    assert sampled_frames.offered == [
+        sorting.to_spike_vector().size,
+        sorting.to_spike_vector().size - len(edge_frames) * n_units,
+    ]
+    assert len(spans_drawn) == len(unfiltered_drawn) > 0
+    assert spans_drawn.tolist() == unfiltered_drawn.tolist()
+    assert len(unfiltered_drawn) == 2 * kwargs["max_spikes_per_unit"] * n_units
+
+    unfiltered, spans = saved_bundles[unfiltered_dir], saved_bundles[spans_dir]
+    assert spans["unit_ids"] == unfiltered["unit_ids"] == [4, 9, 2]
+    assert spans["waveforms"].dtype == unfiltered["waveforms"].dtype
+    np.testing.assert_array_equal(spans["waveforms"], unfiltered["waveforms"])
+    for name in ("channel_positions.npy", "cluster_group.tsv"):
+        assert (spans_dir / name).read_bytes() == (
+            unfiltered_dir / name
+        ).read_bytes()
+
+
+def test_spans_keep_windows_off_a_member_join(
+    tmp_path, saved_bundles, sampled_frames
+):
+    """On two members concatenated into one segment, no drawn window runs
+    across the join, and each half is the mean of the windows cut from the
+    traces at the drawn frames.
+
+    Unit 5 fires every 2 ms from 30 ms before to 30 ms after the join, so
+    most of its spikes have a window across the join; without spans such
+    windows are drawn. Unit 8 fires only in the first member, unit 6 in both.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    member_s = 4.0
+    n_member = int(member_s * _FS)
+    join = n_member
+    dense = np.arange(join - 300, join + 300, 20)
+    units_by_member = [
+        {
+            5: (dense[dense < join], _planted_template(0), None),
+            8: (_train(0.05, member_s - 0.05, 0.2), _planted_template(3), None),
+            6: (_train(0.1, member_s - 0.1, 0.3), _planted_template(2), None),
+        },
+        {
+            5: (dense[dense >= join] - join, _planted_template(0), None),
+            8: (np.array([], dtype=int), _planted_template(3), None),
+            6: (_train(0.1, member_s - 0.1, 0.3), _planted_template(2), None),
+        },
+    ]
+    members = [
+        _planted_session(member_s, units, seed=seed)
+        for seed, units in enumerate(units_by_member)
+    ]
+    recording = si.concatenate_recordings([rec for rec, _ in members])
+    recording = recording.set_probe(members[0][0].get_probe())
+    assert recording.get_num_segments() == 1
+    sorting = si.NumpySorting.from_unit_dict(
+        {
+            uid: np.concatenate(
+                [
+                    np.asarray(units_by_member[0][uid][0]),
+                    np.asarray(units_by_member[1][uid][0]) + join,
+                ]
+            ).astype(np.int64)
+            for uid in (5, 8, 6)
+        },
+        sampling_frequency=_FS,
+    )
+    spans = [(0, join), (join, 2 * n_member)]
+    traces = recording.get_traces(return_in_uV=True)
+
+    session_dir = tmp_path / "joined"
+    excluded = backend.extract_unitmatch_bundle(
+        session_dir, recording, sorting, statistics_spans=spans, seed=0
+    )
+    (drawn,) = sampled_frames
+
+    assert excluded == []
+    saved = saved_bundles[session_dir]
+    assert saved["unit_ids"] == [5, 8, 6] == _good_unit_ids(session_dir)
+    for frame in drawn["sample_index"]:
+        lo, hi = frame - _HALF_WIDTH, frame + _HALF_WIDTH
+        assert any(a <= lo and hi <= b for a, b in spans), frame
+    # Unit 5 keeps only the spikes at least a half-width from the join.
+    unit_5_frames = drawn["sample_index"][drawn["unit_index"] == 0]
+    assert set(unit_5_frames) == {
+        s for s in dense if s + _HALF_WIDTH <= join or s - _HALF_WIDTH >= join
+    }
+    # Unit 8 fires only in member 0, and all its drawn frames are there.
+    assert np.all(drawn["sample_index"][drawn["unit_index"] == 1] < join)
+    for row, uid in enumerate(saved["unit_ids"]):
+        half_0, half_1 = _halves_cut_from_traces(traces, drawn, row)
+        assert np.any(half_0 != 0) and np.any(half_1 != 0), uid
+        np.testing.assert_allclose(
+            saved["waveforms"][row, ..., 0], half_0, rtol=1e-6, atol=1e-6
+        )
+        np.testing.assert_allclose(
+            saved["waveforms"][row, ..., 1], half_1, rtol=1e-6, atol=1e-6
+        )
+
+    # Without spans the segment has no join, so windows across it are drawn.
+    backend.extract_unitmatch_bundle(
+        tmp_path / "no_spans", recording, sorting, seed=0
+    )
+    unfiltered = sampled_frames[1]["sample_index"]
+    assert np.any(
+        (unfiltered - _HALF_WIDTH < join) & (unfiltered + _HALF_WIDTH > join)
+    )
+
+
+def test_spans_exclude_units_without_two_supported_spikes(
+    tmp_path, saved_bundles
+):
+    """A unit with fewer than two spikes whose window fits one span is left
+    out and returned; when that leaves no unit, nothing is written."""
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    duration_s = 4.0
+    n_samples = int(duration_s * _FS)
+    exclusion = (20_000, 20_400)
+    spans = [(0, exclusion[0]), (exclusion[1], n_samples)]
+    templates = {3: _planted_template(0), 7: _planted_template(2)}
+    # Unit 7: one spike clear of the exclusion, the others straddle an edge.
+    unit_7 = np.array([10_000, exclusion[0] - 5, exclusion[1] + 5])
+    recording, sorting = _planted_session(
+        duration_s,
+        {
+            3: (_train(0.1, duration_s - 0.1), templates[3], None),
+            7: (unit_7, templates[7], None),
+        },
+    )
+    session_dir = tmp_path / "sess"
+    excluded = backend.extract_unitmatch_bundle(
+        session_dir, recording, sorting, statistics_spans=spans, seed=0
+    )
+    assert excluded == [7]
+    assert saved_bundles[session_dir]["unit_ids"] == [3]
+
+    only_7 = sorting.select_units([7])
+    lone_dir = tmp_path / "lone"
+    with pytest.raises(backend.NoMatchableUnitsError, match="statistics span"):
+        backend.extract_unitmatch_bundle(
+            lone_dir, recording, only_7, statistics_spans=spans, seed=0
+        )
+    assert not lone_dir.exists()
+    # Without spans, unit 7 has three full-support spikes and is kept.
+    assert (
+        backend.extract_unitmatch_bundle(
+            tmp_path / "no_spans", recording, only_7, seed=0
+        )
+        == []
+    )
+
+
+def test_spans_must_describe_the_recording(tmp_path, saved_bundles):
+    """Spans past the recording's end, or a multi-segment recording, raise
+    before any analyzer is built."""
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    recording, sorting = _planted_session(
+        2.0, {3: (_train(0.1, 1.9), _planted_template(0), None)}
+    )
+    n_samples = recording.get_num_samples()
+    with pytest.raises(ValueError, match="past the recording"):
+        backend.extract_unitmatch_bundle(
+            tmp_path / "a",
+            recording,
+            sorting,
+            statistics_spans=[(0, n_samples + 1)],
+        )
+    two_segments = si.append_recordings([recording, recording])
+    two_segment_sorting = si.NumpySorting.from_unit_dict(
+        [{3: _train(0.1, 1.9)}, {3: _train(0.1, 1.9)}], sampling_frequency=_FS
+    )
+    with pytest.raises(ValueError, match="single-segment"):
+        backend.extract_unitmatch_bundle(
+            tmp_path / "b",
+            two_segments,
+            two_segment_sorting,
+            statistics_spans=[(0, n_samples)],
+        )
+    assert saved_bundles == {}
+
+
 def test_get_matcher_bootstraps_default_after_clear():
     """get_matcher re-registers the built-in backend even if the registry was cleared."""
     from spyglass.spikesorting.v2 import matcher_protocol as mp

@@ -134,6 +134,100 @@ class NoMatchableUnitsError(ValueError):
     """
 
 
+def spikes_with_window_in_one_span(
+    sample_indices, spans, nbefore: int, nafter: int
+) -> np.ndarray:
+    """Say which spikes have their whole waveform window inside one span.
+
+    A spike at frame ``s`` is kept when its waveform window
+    ``[s - nbefore, s + nafter)`` lies inside a single half-open span
+    ``[start, end)``: ``start <= s - nbefore`` and ``s + nafter <= end``. A
+    window that runs across the edge between two adjacent spans is not kept,
+    because adjacent spans are separated by a join, an acquisition gap or an
+    artifact exclusion.
+
+    Parameters
+    ----------
+    sample_indices : array-like of int, shape (n_spikes,)
+        Spike frames of a single-segment recording, in any order.
+    spans : sequence of (int, int)
+        Sorted, non-overlapping half-open frame spans ``[start, end)`` with
+        ``start < end``; adjacent spans (one's end equal to the next's start)
+        are allowed.
+    nbefore, nafter : int
+        Waveform window samples before and after the spike frame.
+
+    Returns
+    -------
+    np.ndarray of bool, shape (n_spikes,)
+        ``True`` where the spike's window lies inside one span.
+
+    Raises
+    ------
+    ValueError
+        ``spans`` is not an ``(n, 2)`` list of increasing, non-overlapping
+        spans, or ``nbefore`` / ``nafter`` is negative.
+    """
+    sample_indices = np.asarray(sample_indices, dtype=np.int64)
+    if nbefore < 0 or nafter < 0:
+        raise ValueError(
+            f"waveform window ({nbefore}, {nafter}) must not be negative."
+        )
+    spans = np.asarray(spans, dtype=np.int64).reshape(-1, 2)
+    starts, ends = spans[:, 0], spans[:, 1]
+    if np.any(ends <= starts) or np.any(starts[1:] < ends[:-1]):
+        raise ValueError(
+            "spans must be sorted, non-overlapping [start, end) frame ranges "
+            f"with start < end; got {spans.tolist()}."
+        )
+    window_start = sample_indices - nbefore
+    # The only span that can hold the window is the last one starting at or
+    # before the window's first sample; it holds the window when the window
+    # ends by that span's end.
+    span_index = np.searchsorted(starts, window_start, side="right") - 1
+    has_span = span_index >= 0
+    kept = np.zeros(sample_indices.shape, dtype=bool)
+    kept[has_span] = (
+        sample_indices[has_span] + nafter <= ends[span_index[has_span]]
+    )
+    return kept
+
+
+def _sorting_with_window_in_one_span(
+    sorting, recording, spans, nbefore: int, nafter: int
+):
+    """``sorting`` keeping only the spikes whose window lies in one span.
+
+    Every unit id is kept, including a unit left with no spike. The spike
+    vector keeps SpikeInterface's order (``to_spike_vector``), so each unit's
+    remaining spikes are in the same relative order as before.
+    """
+    from spikeinterface.core import NumpySorting
+
+    if sorting.get_num_segments() != 1 or recording.get_num_segments() != 1:
+        raise ValueError(
+            "extract_unitmatch_bundle: statistics_spans are single-segment "
+            f"frame ranges, but the sorting has {sorting.get_num_segments()} "
+            f"and the recording {recording.get_num_segments()} segments."
+        )
+    n_samples = int(recording.get_num_samples(segment_index=0))
+    ends = np.asarray(spans, dtype=np.int64).reshape(-1, 2)[:, 1]
+    last_end = int(ends.max(initial=0))
+    if last_end > n_samples:
+        raise ValueError(
+            "extract_unitmatch_bundle: statistics_spans end at frame "
+            f"{last_end}, past the recording's {n_samples} frames; the spans "
+            "do not describe this recording."
+        )
+    spikes = sorting.to_spike_vector()
+    kept = spikes_with_window_in_one_span(
+        spikes["sample_index"], spans, nbefore, nafter
+    )
+    return NumpySorting(
+        spikes[kept], sorting.get_sampling_frequency(), sorting.unit_ids
+    )
+
+
 def extract_unitmatch_bundle(
     session_dir,
     recording,
@@ -144,6 +238,7 @@ def extract_unitmatch_bundle(
     max_spikes_per_unit: int = 100,
     seed: int = 0,
     job_kwargs: dict | None = None,
+    statistics_spans=None,
 ) -> list[int]:
     """Write a UnitMatch directory bundle for one curated session.
 
@@ -154,7 +249,11 @@ def extract_unitmatch_bundle(
     ``2 * max_spikes_per_unit`` spikes are drawn per unit, only from spikes at
     least ``max(nbefore, nafter)`` samples from a segment border (SpikeInterface
     zero-fills the waveform of a spike whose window crosses a border, so every
-    sampled spike has full waveform support). Each unit's sampled waveforms are
+    sampled spike has full waveform support). With ``statistics_spans``, a
+    spike is drawn only if its whole window ``[s - nbefore, s + nafter)`` also
+    lies inside one span, so no sampled waveform runs across a concatenation
+    join, an acquisition gap or an artifact exclusion, which a single segment
+    can hold. Each unit's sampled waveforms are
     put in spike-time order and split per unit: half 0 averages the first
     ``n // 2`` and half 1 the rest (an odd spike goes to half 1, as in
     UnitMatchPy's own extraction). A unit that fires in only part of the
@@ -185,13 +284,20 @@ def extract_unitmatch_bundle(
         into the ``waveforms`` compute call. ``UnitMatch`` resolves these from
         ``MatcherParameters.job_kwargs``; ``None`` uses the SpikeInterface
         defaults.
+    statistics_spans : sequence of (int, int) or None
+        Sorted, non-overlapping half-open frame spans ``[start, end)`` of the
+        single-segment recording that each lie between two joins, gaps or
+        artifact exclusions (the sort's ``Sorting.get_statistics_spans``).
+        Spikes whose waveform window is not inside one span are removed
+        before sampling. ``None`` applies only the segment-border margin.
 
     Returns
     -------
     list of int
         Ids of the units left out of the bundle (fewer than two sampled spikes
-        with full waveform support), in the sorting's unit order. Empty when
-        every unit is kept.
+        with full waveform support, inside one span when ``statistics_spans``
+        is given), in the sorting's unit order. Empty when every unit is
+        kept.
 
     Raises
     ------
@@ -202,7 +308,9 @@ def extract_unitmatch_bundle(
         A kept unit's half is exactly all-zero over every sample and channel
         (a waveform-extraction invariant violation).
     ValueError
-        The recording's channel positions are not 2D.
+        The recording's channel positions are not 2D, or ``statistics_spans``
+        are malformed, end past the recording, or are given for a
+        multi-segment recording or sorting.
     """
     # Keep this public service boundary as strict as MatcherParameters.insert:
     # UnitMatch locates the trough at the geometric midpoint, and the baseline
@@ -245,13 +353,26 @@ def extract_unitmatch_bundle(
             "geometry; a non-2D probe cannot be fed to the matcher."
         )
 
-    analyzer = si.create_sorting_analyzer(sorting, recording, sparse=False)
     # The waveforms extension's window in samples (same formula as
     # ComputeWaveforms.nbefore / .nafter). Spikes closer than this to a segment
-    # border are never drawn, so no sampled waveform is zero-filled.
-    fs = analyzer.sampling_frequency
+    # border are never drawn, so no sampled waveform is zero-filled. The
+    # analyzer runs at the recording's rate (SpikeInterface adopts it when the
+    # sorting's rate differs by rounding), so the window is known before the
+    # analyzer exists.
+    fs = recording.get_sampling_frequency()
     nbefore = int(ms_before * fs / 1000.0)
     nafter = int(ms_after * fs / 1000.0)
+    sampling_sorting = sorting
+    if statistics_spans is not None:
+        # Remove, before sampling, every spike whose window leaves its span;
+        # random_spikes then draws uniformly from the rest exactly as it
+        # would from a sorting that only ever had those spikes.
+        sampling_sorting = _sorting_with_window_in_one_span(
+            sorting, recording, statistics_spans, nbefore, nafter
+        )
+    analyzer = si.create_sorting_analyzer(
+        sampling_sorting, recording, sparse=False
+    )
     analyzer.compute(
         "random_spikes",
         method="uniform",
@@ -300,11 +421,15 @@ def extract_unitmatch_bundle(
     all_unit_ids = np.asarray(unit_ids, dtype=int)
     excluded = [int(u) for u in np.delete(all_unit_ids, keep)]
     if keep.size == 0:
+        support = (
+            f"at least {max(nbefore, nafter)} samples from a segment border"
+        )
+        if statistics_spans is not None:
+            support += " and a window inside one statistics span"
         raise NoMatchableUnitsError(
             f"extract_unitmatch_bundle: no unit of the session bundled at "
             f"{session_dir} can be matched -- every unit had fewer than two "
-            "sampled spikes with full waveform support (at least "
-            f"{max(nbefore, nafter)} samples from a segment border), so none "
+            f"sampled spikes with full waveform support ({support}), so none "
             "has two cross-validation halves."
         )
 
