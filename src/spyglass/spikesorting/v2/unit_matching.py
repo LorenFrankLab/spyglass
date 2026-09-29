@@ -283,8 +283,12 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     (``input_index``), and every later step (matcher feed order, pair
     orientation) reads only these frozen rows. The master stores a
     deterministic hash of the frozen inputs so ``insert_inputs`` is
-    idempotent. ``SessionGroup`` records where the inputs were discovered
-    (``insert_selection``); it is provenance, not identity.
+    idempotent. ``session_group_owner`` / ``session_group_name`` record the
+    ``SessionGroup`` the inputs were discovered from (``insert_selection``).
+    They are provenance only: not identity, and not a foreign key, so
+    deleting or editing a group never deletes or changes a match run. Two
+    groups resolving to the same inputs share one selection, which keeps
+    the group recorded first.
     """
 
     definition = """
@@ -292,7 +296,8 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     ---
     -> MatcherParameters
     input_set_hash: char(64)     # sha256 over the chronologically ordered inputs and their frozen recordings
-    -> [nullable] SessionGroup   # group the inputs were discovered from; not part of identity
+    session_group_owner=null: varchar(80)  # owner of the SessionGroup the inputs were discovered from; provenance, not identity
+    session_group_name=null: varchar(64)   # name of that SessionGroup; recorded without a foreign key
     """
 
     class Input(SpyglassMixinPart):
@@ -364,7 +369,9 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             The ``MatcherParameters`` row to use.
         session_group : tuple of (str, str), optional
             ``(session_group_owner, session_group_name)`` the inputs were
-            discovered from, recorded as provenance only. Default ``None``.
+            discovered from, recorded on a new selection as provenance only
+            (a selection found for the same inputs keeps what it recorded).
+            Default ``None``.
 
         Returns
         -------

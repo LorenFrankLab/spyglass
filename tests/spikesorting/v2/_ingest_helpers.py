@@ -71,6 +71,30 @@ def copy_and_insert_nwb(
     return get_nwb_copy_filename(ingest_name)
 
 
+def drop_unitmatch_selections_for(sorting_restriction) -> None:
+    """Delete every ``UnitMatchSelection`` pinning a curation of these sorts.
+
+    A selection's ``Input`` part references ``CurationV2``, and DataJoint
+    refuses to cascade a curation delete into a part ahead of its master, so
+    the selections go first. They reference their ``SessionGroup`` only as
+    provenance, so deleting a group does not remove them.
+
+    Parameters
+    ----------
+    sorting_restriction : dict or list of dict
+        Restriction on ``sorting_id`` (extra curation fields narrow it).
+    """
+    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+
+    pinned = (UnitMatchSelection.Input & sorting_restriction).fetch(
+        "unitmatch_id"
+    )
+    if len(pinned):
+        (
+            UnitMatchSelection & [{"unitmatch_id": u} for u in set(pinned)]
+        ).super_delete(warn=False, safemode=False)
+
+
 def clear_curations_for(sorting_key) -> None:
     """Delete every ``CurationV2`` row for a sorting plus its merge masters.
 
@@ -92,6 +116,7 @@ def clear_curations_for(sorting_key) -> None:
     )
     from spyglass.spikesorting.v2.curation import CurationV2
 
+    drop_unitmatch_selections_for(sorting_key)
     for mid in (SpikeSortingOutput.ConcatMemberCuration & sorting_key).fetch(
         "merge_id"
     ):
@@ -218,6 +243,7 @@ def _clean_session_v2(session_key):
             & [{"recording_id": r["recording_id"]} for r in rec_keys]
         ).fetch("KEY", as_dict=True)
         if sorting_keys:
+            drop_unitmatch_selections_for(sorting_keys)
             merge_ids = (SpikeSortingOutput.CurationV2 & sorting_keys).fetch(
                 "merge_id"
             )
@@ -353,6 +379,7 @@ def clean_session_groups_for_owner(owner: str) -> None:
             SortingSelection.ConcatenatedRecordingSource & concat_id_restr
         ).fetch("KEY", as_dict=True)
         if sort_keys:
+            drop_unitmatch_selections_for(sort_keys)
             for mid in (
                 SpikeSortingOutput.ConcatMemberCuration & sort_keys
             ).fetch("merge_id"):

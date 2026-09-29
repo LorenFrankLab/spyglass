@@ -605,6 +605,7 @@ def test_matching_snapshot_survives_live_group_changes(
             assert len(UnitMatch & pk) == 0
     finally:
         (SessionGroup & group).super_delete(warn=False)
+        _drop(pk)
 
     # A concat input whose boundaries changed after selection is refused.
     concat_key = fx["concat_keys"]["concat_day1"]
@@ -751,5 +752,93 @@ def test_concat_inputs_match_and_track_in_chronological_order(
         (
             MatcherParameters
             & {"matcher_params_name": "daily_concat_pairer_params"}
+        ).super_delete(warn=False)
+        restore_matcher_registry(saved)
+
+
+def test_deleting_a_group_keeps_its_match_run(
+    daily_concat_match_inputs, monkeypatch
+):
+    """Two groups resolving to the same inputs share one match run, and
+    deleting either group (or both) deletes neither the selection nor its
+    populated UnitMatch row: the group is recorded provenance, not a
+    foreign key."""
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    fx = daily_concat_match_inputs
+    cur = fx["curations"]
+    members = [
+        {
+            field: value
+            for field, value in (RecordingSelection & fx["recording_keys"][tag])
+            .fetch1()
+            .items()
+            if field in _MEMBER_FIELDS
+        }
+        for tag in ("a", "b")
+    ]
+    owner = members[0]["team_name"]
+    groups = ["unitmatch_group_first", "unitmatch_group_second"]
+    for name in groups:
+        SessionGroup.create_group(owner, name, members)
+    saved = install_fixture_pairer(
+        monkeypatch,
+        matcher_name="group_survival_pairer",
+        matcher_params_name="group_survival_pairer_params",
+        pairs=[],
+    )
+    choices = {0: cur["single_a"], 1: cur["single_b"]}
+    pk = None
+    try:
+        pk = UnitMatchSelection.insert_selection(
+            owner, groups[0], "group_survival_pairer_params", choices
+        )
+        assert (
+            UnitMatchSelection.insert_selection(
+                owner, groups[1], "group_survival_pairer_params", choices
+            )
+            == pk
+        )
+        # The selection keeps the group it was first discovered from.
+        assert (UnitMatchSelection & pk).fetch1(
+            "session_group_owner", "session_group_name"
+        ) == (owner, groups[0])
+        UnitMatch.populate(pk, reserve_jobs=False)
+        run = (UnitMatch & pk).fetch1()
+
+        (
+            SessionGroup
+            & {"session_group_owner": owner, "session_group_name": groups[0]}
+        ).super_delete(warn=False)
+        assert len(UnitMatchSelection & pk) == 1
+        assert (UnitMatch & pk).fetch1() == run
+        assert len(UnitMatchSelection.Input & pk) == 2
+
+        (
+            SessionGroup
+            & {"session_group_owner": owner, "session_group_name": groups[1]}
+        ).super_delete(warn=False)
+        assert (UnitMatch & pk).fetch1() == run
+        # The recorded provenance stays as written.
+        assert (UnitMatchSelection & pk).fetch1(
+            "session_group_owner", "session_group_name"
+        ) == (owner, groups[0])
+    finally:
+        for name in groups:
+            (
+                SessionGroup
+                & {"session_group_owner": owner, "session_group_name": name}
+            ).super_delete(warn=False)
+        if pk is not None:
+            _drop(pk)
+        (
+            MatcherParameters
+            & {"matcher_params_name": "group_survival_pairer_params"}
         ).super_delete(warn=False)
         restore_matcher_registry(saved)

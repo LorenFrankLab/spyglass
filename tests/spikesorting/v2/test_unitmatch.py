@@ -773,6 +773,7 @@ def two_session_curated_group(chronic_2_session_minirec):
     from tests.spikesorting.v2._ingest_helpers import (
         clean_session_groups_for_owner,
         clear_curations_for,
+        drop_unitmatch_selections_for,
     )
 
     sub = chronic_2_session_minirec
@@ -826,6 +827,7 @@ def two_session_curated_group(chronic_2_session_minirec):
     }
 
     clean_session_groups_for_owner(owner)
+    drop_unitmatch_selections_for(sort_pks)
     for sort_pk in sort_pks:
         for mid in (SpikeSortingOutput.CurationV2 & sort_pk).fetch("merge_id"):
             (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)

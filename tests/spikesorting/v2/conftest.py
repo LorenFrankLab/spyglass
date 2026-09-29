@@ -862,15 +862,13 @@ def daily_concat_match_inputs(chronic_2_session_minirec):
         Sorting,
         SortingSelection,
     )
-    from spyglass.spikesorting.v2.unit_matching import (
-        MatcherParameters,
-        UnitMatchSelection,
-    )
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
     from tests.spikesorting.v2._concat_helpers import select_unmasked_concat
     from tests.spikesorting.v2._ingest_helpers import (
         clean_session_groups_for_owner,
         clear_curations_for,
         configure_v2_run_inputs,
+        drop_unitmatch_selections_for,
     )
 
     sub = chronic_2_session_minirec
@@ -988,15 +986,10 @@ def daily_concat_match_inputs(chronic_2_session_minirec):
         "nwb_file_names": {"a": nwb_a, "b": nwb_b, "c": nwb_c},
     }
 
-    # Explicit-input selections reference no group, so drop every selection
-    # pinning these sorts before their curations go.
-    sort_restriction = [
-        {"sorting_id": key["sorting_id"]} for key in sort_keys.values()
-    ]
-    (
-        UnitMatchSelection
-        & (UnitMatchSelection.Input & sort_restriction).proj()
-    ).super_delete(warn=False)
+    # Selections pin these curations; drop them before the curations go.
+    drop_unitmatch_selections_for(
+        [{"sorting_id": key["sorting_id"]} for key in sort_keys.values()]
+    )
     clean_session_groups_for_owner(owner)
     for name in ("single_a", "single_b", "single_a_first"):
         if name in sort_keys:
