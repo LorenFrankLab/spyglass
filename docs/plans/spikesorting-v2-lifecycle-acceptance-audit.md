@@ -292,24 +292,37 @@ All four new scripts pass Ruff and Python syntax parsing. `git diff --check`
 passes. No production changes were made in this audit pass, and existing
 uncommitted work was retained.
 
-Opt-in probes are deliberately outside normal `test_*.py` collection:
+The end-to-end acceptance probes are pytest modules marked `acceptance`. They
+are collected with the rest of the v2 suite but skipped unless pytest is given
+`--run-acceptance`:
 
-- [`audit_lifecycle.py`](../../tests/spikesorting/v2/scripts/audit_lifecycle.py):
-  real decoder paths, competing Chromium drafts, masked review, fresh-process
+- [`test_lifecycle_acceptance.py`](../../tests/spikesorting/v2/acceptance/test_lifecycle_acceptance.py):
+  real decoder paths, competing Chromium drafts, masked review (every unit
+  listed in the review bundle; a saved draft round-trips), fresh-process
   selection/cache reconstruction.
-- [`audit_handoff.py`](../../tests/spikesorting/v2/scripts/audit_handoff.py):
+- [`test_handoff_acceptance.py`](../../tests/spikesorting/v2/acceptance/test_handoff_acceptance.py):
   database/file recovery, separate accounts, synthetic population comparison.
+
+The scaling scripts stay outside normal `test_*.py` collection:
+
 - [`audit_review_scale.py`](../../tests/spikesorting/v2/scripts/audit_review_scale.py):
   standalone unit-count benchmark; run once per fresh output directory.
 - [`audit_branch_scale.py`](../../tests/spikesorting/v2/scripts/audit_branch_scale.py):
   real curation-history discovery measurements.
 
-Use the v2 Python environment and a disposable test database, for example:
+The probes need the MEArec tetrode and smoke fixtures
+(`python tests/spikesorting/v2/fixtures/_fetch.py mearec_tetrode_60s
+mearec_polymer_smoke`), the `spikesorting-v2-curation` and
+`spikesorting-v2-curation-test` extras, and a Playwright Chromium. Use the v2
+Python environment and a disposable test database, for example:
 
 ```sh
-python -m pytest tests/spikesorting/v2/scripts/audit_lifecycle.py \
-  tests/spikesorting/v2/scripts/audit_handoff.py \
-  tests/spikesorting/v2/scripts/audit_branch_scale.py \
+python -m pytest tests/spikesorting/v2/acceptance --run-acceptance \
+  -p no:xvfb --no-dlc \
+  --container-name=spyglass-lifecycle-audit --container-port=3349 \
+  --base-dir=/tmp/spyglass-lifecycle/tests/data
+
+python -m pytest tests/spikesorting/v2/scripts/audit_branch_scale.py \
   -p no:xvfb -o addopts='' --no-dlc \
   --container-name=spyglass-lifecycle-audit --container-port=3349 \
   --base-dir=/tmp/spyglass-lifecycle/tests/data
@@ -317,6 +330,15 @@ python -m pytest tests/spikesorting/v2/scripts/audit_lifecycle.py \
 python -m tests.spikesorting.v2.scripts.audit_review_scale \
   --units 384 --out /tmp/spyglass-review-scale-384
 ```
+
+In CI the probes run on the nightly schedule and on manual dispatch only, in the
+`pytest-v2` job's single-session shard, inside the `spyglass_v2_curation`
+environment (the one with FigPack and Playwright). That step requires the
+tetrode and smoke fixtures by name, so a missing download fails the run.
+`test_database_and_file_restore` skips there: the job's MySQL is a service
+container reached with `--no-docker`, so there is no Docker client to run
+`mysqldump` and `docker exec` against. Run it locally against a
+Docker-managed test container.
 
 The known failing acceptance paths should fail until fixed; they are not marked
 as passing or hidden with `xfail`. Logs, JSON measurements, screenshots, wheel,
