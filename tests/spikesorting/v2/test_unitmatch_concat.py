@@ -7,7 +7,11 @@ the frozen ``Input`` / ``InputRecording`` rows must reproduce the upstream
 concatenation provenance exactly, the selection must refuse inputs that share
 a session or span days before any bundle is extracted, and a run must keep
 its frozen inputs and order when the group, the session times, a curation or
-a source changes underneath it.
+a source changes underneath it. The last test runs two days of the same
+planted neurons (``planted_matching_days``) through the whole workflow --
+masks, concatenation, motion correction, sorting, curation and the real
+UnitMatchPy backend -- back to each original recording's spike times and
+regions.
 """
 
 from __future__ import annotations
@@ -2601,3 +2605,559 @@ def test_tracked_units_map_to_original_member_times_and_regions(
             warn=False
         )
         restore_matcher_registry(saved)
+
+
+# ---- end to end: two days of the same planted neurons ------------------------
+
+#: The concat MS5 preset: 600-6000 Hz, the 100 uV / 70 % artifact recipe per
+#: member, MS5 (stood in for by the planted sorter), no sorter motion step.
+_WORKFLOW_PRESET = "franklab_concat_hippocampus_30khz_ms5_2026_09"
+_WORKFLOW_MOTION_RECIPE = "dredge_fast_v1"
+#: The benchmark's held-out-gated two-day recall (0.78, see
+#: ``scripts/unitmatch_daily_concat_benchmark.py``) applied to the neurons
+#: planted on both days, rounded down: at least 17 of the 22.
+_WORKFLOW_RECALL_FLOOR = 0.78
+
+
+def _member_layout(day, concat_recording_id) -> list[dict]:
+    """Each member's first session-clock frame, length and concat offset.
+
+    Read from the member ``Recording`` timestamps (known answer: the day's
+    raw clock is ``t0 + frame / fs``); asserts each member is a run of
+    consecutive raw frames inside its planned interval.
+    """
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+    from tests.spikesorting.v2._daily_match_fixtures import SAMPLING_FREQUENCY
+
+    spec, t0, fs = day["spec"], day["t0"], SAMPLING_FREQUENCY
+    rows = (
+        ConcatenatedRecordingSelection.MemberSnapshot
+        & {"concat_recording_id": concat_recording_id}
+    ).fetch(as_dict=True, order_by="member_index")
+    assert [row["interval_list_name"] for row in rows] == [
+        f"daily match {spec.label} member {i}" for i in range(2)
+    ]
+    layout, offset = [], 0
+    for row, (start_s, stop_s) in zip(rows, spec.members_s, strict=True):
+        times = (
+            Recording().get_recording({"recording_id": row["recording_id"]})
+        ).get_times()
+        frames = np.round((times - t0) * fs).astype(np.int64)
+        assert np.array_equal(frames, frames[0] + np.arange(frames.size))
+        assert np.max(np.abs(times - t0 - frames / fs)) < 0.5 / fs
+        assert start_s * fs - 1 <= frames[0] <= start_s * fs + 1
+        assert stop_s * fs - 2 <= frames[-1] <= stop_s * fs
+        layout.append(
+            {
+                "first_frame": int(frames[0]),
+                "n_samples": int(frames.size),
+                "offset": offset,
+            }
+        )
+        offset += frames.size
+    return layout
+
+
+def _sorter_trains(spec, layout) -> dict:
+    """The planted spikes in the concatenation's frame space, by unit id."""
+    from tests.spikesorting.v2._daily_match_fixtures import (
+        expected_member_frames,
+    )
+
+    trains = {}
+    for unit_id, per_member in expected_member_frames(spec).items():
+        parts = []
+        for frames, member in zip(per_member, layout, strict=True):
+            local = frames - member["first_frame"]
+            assert np.all((local >= 0) & (local < member["n_samples"]))
+            parts.append(local + member["offset"])
+        trains[unit_id] = np.concatenate(parts).astype(np.int64)
+    return trains
+
+
+def _planted_daily_sorter(trains_by_n_samples):
+    """A ``Sorting._run_sorter`` stand-in returning the planted units.
+
+    Picks the day by the length of the recording it is handed (the two
+    days' concatenations differ in length) and returns every planted unit
+    at its planted frames outside the exclusion.
+    """
+    import spikeinterface as si
+
+    def _plant(
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        *,
+        job_kwargs=None,
+        execution_params=None,
+        statistics_spans=None,
+    ):
+        del sorter, sorter_params, sorting_id, job_kwargs, execution_params
+        trains = trains_by_n_samples[int(recording.get_num_samples())]
+        spans = np.asarray(statistics_spans, dtype=np.int64)
+        for frames in trains.values():
+            # The sorter only returns spikes it was given (outside the mask).
+            inside = (frames[:, None] >= spans[:, 0]) & (
+                frames[:, None] < spans[:, 1]
+            )
+            assert inside.any(axis=1).all()
+        return si.NumpySorting.from_unit_dict(
+            [{uid: trains[uid] for uid in sorted(trains)}],
+            recording.get_sampling_frequency(),
+        )
+
+    return _plant
+
+
+def _assert_exclusion_is_the_only_mask(sort_key, spec, layout) -> None:
+    """The sort's statistics spans are the two members with the day's
+    exclusion cut out (within one frame of the planned seconds: the
+    artifact stage maps seconds to frames on the member timestamps)."""
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._daily_match_fixtures import SAMPLING_FREQUENCY
+
+    spans = [
+        (int(a), int(b)) for a, b in Sorting().get_statistics_spans(sort_key)
+    ]
+    member, (ex_start, ex_stop) = spec.exclusion
+    m = layout[member]
+    planned = [
+        m["offset"] + round(ex_start * SAMPLING_FREQUENCY) - m["first_frame"],
+        m["offset"] + round(ex_stop * SAMPLING_FREQUENCY) - m["first_frame"],
+    ]
+    ends = [
+        layout[0]["n_samples"],
+        layout[0]["n_samples"] + layout[1]["n_samples"],
+    ]
+    assert len(spans) == 3
+    assert spans[0][0] == 0 and spans[-1][1] == ends[1]
+    gaps = [
+        (spans[i][1], spans[i + 1][0])
+        for i in range(len(spans) - 1)
+        if spans[i][1] != spans[i + 1][0]
+    ]
+    assert len(gaps) == 1
+    assert abs(gaps[0][0] - planned[0]) <= 1
+    assert abs(gaps[0][1] - planned[1]) <= 1
+    assert ends[0] in {edge for span in spans for edge in span}
+
+
+def _sort_both_days(fixture, trains_by_n_samples, monkeypatch, receipts=None):
+    """``run_v2_pipeline`` on each day's concatenation group.
+
+    With ``receipts`` (``estimate_motion`` receipts by day), in ``apply``
+    mode with exactly those estimates; otherwise ``motion_mode="off"``.
+    """
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    summaries = {}
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            Sorting,
+            "_run_sorter",
+            staticmethod(_planted_daily_sorter(trains_by_n_samples)),
+        )
+        for label, day in fixture["days"].items():
+            kwargs = {
+                "concat_session_group_owner": fixture["team"],
+                "concat_session_group_name": day["session_group_name"],
+                "pipeline_preset": _WORKFLOW_PRESET,
+                "manual_excluded_times": day["manual_excluded_times"],
+            }
+            if receipts is not None:
+                kwargs |= {
+                    "motion_mode": "apply",
+                    "motion_correction_params_name": _WORKFLOW_MOTION_RECIPE,
+                    "motion_estimate_id": receipts[label]["motion_estimate_id"],
+                }
+            summaries[label] = run_v2_pipeline(**kwargs)
+    return summaries
+
+
+def _match_days(summaries):
+    """Plan the two daily sorts (named out of order) and run UnitMatch."""
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_sorts,
+        run_v2_unit_match,
+    )
+
+    plan = plan_v2_unit_match_from_sorts(
+        [summaries["day2"]["sorting_id"], summaries["day1"]["sorting_id"]],
+        curation_strategy="manual",
+        manual_curation_choices={
+            s["sorting_id"]: s["root_curation_id"] for s in summaries.values()
+        },
+    )
+    assert plan.ok, plan.errors
+    return plan, run_v2_unit_match(plan)
+
+
+def _run_state(pk, label_of) -> dict:
+    """Tracked units, member spike times, region rows and pairs of a run,
+    read through fresh table objects."""
+    from spyglass.spikesorting.v2.unit_matching import TrackedUnit, UnitMatch
+
+    tracked = []
+    for row in (TrackedUnit() & pk).fetch(as_dict=True):
+        members = (
+            TrackedUnit.Member()
+            & {k: row[k] for k in ("unitmatch_id", "tracked_unit_id")}
+        ).fetch(as_dict=True)
+        tracked.append(
+            {
+                "members": frozenset(
+                    (label_of[str(m["sorting_id"])], int(m["unit_id"]))
+                    for m in members
+                ),
+                "n_sessions_detected": int(row["n_sessions_detected"]),
+                "n_matching_inputs": int(row["n_matching_inputs"]),
+            }
+        )
+    times = {
+        (label_of[str(r.sorting_id)], int(r.unit_id), int(r.recording_index)): (
+            np.asarray(r.spike_times)
+        )
+        for r in TrackedUnit().get_member_spike_times(pk).itertuples()
+    }
+    regions = {
+        (label_of[str(r.sorting_id)], int(r.unit_id), int(r.recording_index)): (
+            r.nwb_file_name,
+            r.interval_list_name,
+            int(r.n_spikes),
+            bool(r.detected),
+            r.electrode_group_name,
+            int(r.electrode_id),
+            r.region_name,
+        )
+        for r in TrackedUnit().get_unit_brain_regions(pk).itertuples()
+    }
+    pairs = {
+        frozenset(
+            {
+                (label_of[str(p["session_a_sorting_id"])], int(p["unit_a_id"])),
+                (label_of[str(p["session_b_sorting_id"])], int(p["unit_b_id"])),
+            }
+        ): float(p["match_probability"])
+        for p in (UnitMatch.Pair() & pk).fetch(as_dict=True)
+    }
+    return {
+        "tracked": sorted(tracked, key=lambda t: sorted(t["members"])),
+        "times": times,
+        "regions": regions,
+        "pairs": pairs,
+    }
+
+
+def _check_run(fixture, summaries, match, mode) -> dict:
+    """Check one matched run against the planted design; return its record.
+
+    Structure, spike times, counts, regions and provenance are asserted for
+    both modes; identity recovery is returned for the caller to assert.
+    """
+    from spyglass.spikesorting.v2.unit_matching import UnitMatch
+    from tests.spikesorting.v2 import _daily_match_fixtures as daily
+
+    days = fixture["days"]
+    label_of = {str(summaries[label]["sorting_id"]): label for label in days}
+    neuron_of = {
+        (spec.label, uid): neuron
+        for spec in daily.DAYS
+        for neuron, uid in spec.unit_ids.items()
+    }
+    expected = {
+        spec.label: daily.expected_member_frames(spec) for spec in daily.DAYS
+    }
+    pk = {"unitmatch_id": match["unit_match_id"]}
+    state = _run_state(pk, label_of)
+
+    # Chronological inputs, each read from its day's (corrected) sort.
+    assert [str(i.sorting_id) for i in match["inputs"]] == [
+        str(summaries["day1"]["sorting_id"]),
+        str(summaries["day2"]["sorting_id"]),
+    ]
+    provenance, _recordings = UnitMatch().get_input_provenance(
+        pk, from_nwb=True
+    )
+    for summary_input, row in zip(
+        match["inputs"], provenance.itertuples(), strict=True
+    ):
+        run = summaries[label_of[str(summary_input.sorting_id)]]
+        assert summary_input.source_kind == "concatenated_recording"
+        assert (
+            summary_input.nwb_file_names
+            == (days[label_of[str(summary_input.sorting_id)]]["nwb_file_name"],)
+            * 2
+        )
+        if mode == "apply":
+            corrected_id = str(run["motion_corrected_recording_id"])
+            assert run["motion_corrected_recording_id"] is not None
+            assert str(summary_input.motion_corrected_recording_id) == (
+                corrected_id
+            )
+            assert summary_input.waveform_traces == "motion_corrected_recording"
+            assert str(row.motion_corrected_recording_id) == corrected_id
+            assert row.waveform_traces == "motion_corrected_recording"
+        else:
+            assert run["motion_corrected_recording_id"] is None
+            assert summary_input.motion_corrected_recording_id is None
+            assert summary_input.waveform_traces == "concatenated_recording"
+            assert row.motion_corrected_recording_id is None
+            assert row.waveform_traces == "concatenated_recording"
+
+    # Every planted unit is in exactly one tracked unit; no tracked unit has
+    # two units of one input; the counts follow from the planted design.
+    all_units = [(label, uid) for label in days for uid in expected[label]]
+    members = [m for t in state["tracked"] for m in t["members"]]
+    assert sorted(members) == sorted(all_units)
+    for t in state["tracked"]:
+        labels = [label for label, _uid in t["members"]]
+        assert len(set(labels)) == len(labels), t
+        sessions = {
+            days[label]["nwb_file_name"]
+            for label, uid in t["members"]
+            if sum(len(f) for f in expected[label][uid])
+        }
+        assert (t["n_sessions_detected"], t["n_matching_inputs"]) == (
+            len(sessions),
+            len(labels),
+        ), t
+
+    # Original-clock spike times and per-recording regions of every member
+    # unit, against the planted frames.
+    fs = daily.SAMPLING_FREQUENCY
+    assert set(state["times"]) == {
+        (label, uid, index) for label, uid in all_units for index in (0, 1)
+    }
+    assert set(state["regions"]) == set(state["times"])
+    for (label, uid, index), got in state["times"].items():
+        want = expected[label][uid][index]
+        t0 = days[label]["t0"]
+        # Seconds back to the raw sample: float64 timestamps differ from
+        # t0 + frame / fs by far less than half a sample, so rounding
+        # recovers the exact frame.
+        assert np.array_equal(
+            np.round((got - t0) * fs).astype(np.int64), want
+        ), (label, uid, index)
+        if want.size:
+            assert np.max(np.abs(got - (t0 + want / fs))) < 0.5 / fs
+        nwb, interval, n_spikes, detected, group, electrode, region = state[
+            "regions"
+        ][(label, uid, index)]
+        assert nwb == days[label]["nwb_file_name"]
+        assert interval == f"daily match {label} member {index}"
+        assert (n_spikes, detected) == (want.size, want.size > 0)
+        curation = {
+            "sorting_id": summaries[label]["sorting_id"],
+            "curation_id": summaries[label]["root_curation_id"],
+        }
+        assert (group, electrode, region) == _own_region(curation, uid, nwb)
+
+    # The neuron firing in one member of day 1 is undetected in the other.
+    partial = daily.ROLES.index("partial")
+    uid = daily.DAYS[0].unit_ids[partial]
+    assert state["regions"][("day1", uid, 0)][2:4] == (0, False)
+    assert state["regions"][("day1", uid, 1)][3] is True
+
+    # Identity recovery, per planted neuron.
+    per_neuron = {}
+    for neuron, role in enumerate(daily.ROLES):
+        units = {
+            (spec.label, spec.unit_ids[neuron])
+            for spec in daily.DAYS
+            if neuron in spec.unit_ids
+        }
+        holders = [t for t in state["tracked"] if t["members"] & units]
+        per_neuron[neuron] = {
+            "role": role,
+            "tracked": [sorted(t["members"]) for t in holders],
+            "matched": any(t["members"] == units for t in holders)
+            and len(units) == 2,
+            "probability": state["pairs"].get(frozenset(units)),
+        }
+    mixed = [
+        sorted(t["members"])
+        for t in state["tracked"]
+        if len({neuron_of[m] for m in t["members"]}) > 1
+    ]
+    record = {
+        "mode": mode,
+        "matched": sorted(n for n, r in per_neuron.items() if r["matched"]),
+        "mixed": mixed,
+        "per_neuron": per_neuron,
+        "pairs": {
+            tuple(sorted(neuron_of[m] for m in pair)): p
+            for pair, p in state["pairs"].items()
+        },
+        "state": state,
+    }
+    print(
+        f"[{mode}] matched {len(record['matched'])}/{len(daily.BOTH_DAYS)}: "
+        f"{record['matched']}; mixed: {mixed}; pairs (neuron, neuron) -> "
+        f"probability: {sorted(record['pairs'].items())}"
+    )
+    return record
+
+
+@pytest.fixture(scope="module")
+def unitmatchpy():
+    """UnitMatchPy, or a skip before any heavier module fixture is built."""
+    return pytest.importorskip("UnitMatchPy")
+
+
+@pytest.mark.slow
+def test_daily_concat_workflow_matches_planted_neurons_end_to_end(
+    unitmatchpy, planted_matching_days, monkeypatch
+):
+    """Two days of the same planted neurons, through the whole workflow.
+
+    Each day (one session, two member intervals with a gap, a manual
+    exclusion that masks planted spikes in one member; day 1 drifts) is
+    run through the public calls: ``estimate_motion`` on the day's
+    concatenation group, ``run_v2_pipeline`` in ``apply`` mode with that
+    estimate (members, member masks, concatenation, corrected recording,
+    sort, root curation), then ``plan_v2_unit_match_from_sorts`` +
+    ``run_v2_unit_match`` with the real UnitMatchPy backend. The sorter is
+    a stand-in that returns the planted units on the frames it is given, so
+    the ground truth is the planted design (``_daily_match_fixtures``), not
+    a sorter's output. Every expectation below comes from that design:
+
+    - each neuron planted on both days is one tracked unit of its day-1 and
+      day-2 units, for at least ``_WORKFLOW_RECALL_FLOOR`` of those neurons
+      (UnitMatchPy misses some; a miss is recorded, not hidden); no tracked
+      unit mixes two neurons; each one-day distractor is a singleton;
+    - every member unit's spike times on each original recording's clock are
+      its planted spikes there, to the sample;
+    - the neuron firing in one member of day 1 is undetected in the other,
+      and each tracked unit's session and input counts follow the design;
+    - region rows name each recording's own session;
+    - both inputs were read from their corrected sorting-input traces;
+    - re-reading through fresh tables and the run's NWB gives the same.
+
+    The same chain with ``motion_mode="off"`` is a control: its structure,
+    times, counts, regions and provenance are asserted the same way; its
+    recovery is printed, not asserted, because the floor assumes inputs
+    free of within-day drift and, uncorrected, day 1's planted drift moves
+    every unit by up to 25 um within the day.
+    """
+    from spyglass.spikesorting.v2.pipeline import estimate_motion
+    from spyglass.spikesorting.v2.unit_matching import UnitMatch
+    from tests.spikesorting.v2 import _daily_match_fixtures as daily
+    from tests.spikesorting.v2._motion_db_helpers import drop_pipeline_sorts
+
+    fx = planted_matching_days
+    specs = {spec.label: spec for spec in daily.DAYS}
+    sorting_ids = []
+    try:
+        receipts, trains_by_n_samples, layouts = {}, {}, {}
+        for label, day in fx["days"].items():
+            receipts[label] = estimate_motion(
+                concat_session_group_owner=fx["team"],
+                concat_session_group_name=day["session_group_name"],
+                pipeline_preset=_WORKFLOW_PRESET,
+                manual_excluded_times=day["manual_excluded_times"],
+                motion_correction_params_name=_WORKFLOW_MOTION_RECIPE,
+            )
+            layouts[label] = _member_layout(
+                day, receipts[label]["concat_recording_id"]
+            )
+            n_samples = sum(m["n_samples"] for m in layouts[label])
+            assert n_samples not in trains_by_n_samples
+            trains_by_n_samples[n_samples] = _sorter_trains(
+                specs[label], layouts[label]
+            )
+        # The exclusion masks real planted spikes.
+        for spec in daily.DAYS:
+            assert daily.excluded_planted_frames(spec).size > 50
+
+        corrected = _sort_both_days(
+            fx, trains_by_n_samples, monkeypatch, receipts=receipts
+        )
+        sorting_ids += [s["sorting_id"] for s in corrected.values()]
+        for label, summary in corrected.items():
+            assert summary["motion_estimate_id"] == (
+                receipts[label]["motion_estimate_id"]
+            )
+            assert summary["concat_recording_id"] == (
+                receipts[label]["concat_recording_id"]
+            )
+            _assert_exclusion_is_the_only_mask(
+                {"sorting_id": summary["sorting_id"]},
+                specs[label],
+                layouts[label],
+            )
+        plan, match = _match_days(corrected)
+        record = _check_run(fx, corrected, match, "apply")
+
+        both = daily.BOTH_DAYS
+        floor = int(np.floor(_WORKFLOW_RECALL_FLOOR * len(both)))
+        assert floor == 17
+        missed = sorted(set(both) - set(record["matched"]))
+        assert len(record["matched"]) >= floor, (
+            f"recovered {len(record['matched'])} of {len(both)} neurons "
+            f"planted on both days (floor {floor}); missed {missed}"
+        )
+        assert record["mixed"] == []
+        for neuron, role in enumerate(daily.ROLES):
+            if role.endswith("_only"):
+                assert len(record["per_neuron"][neuron]["tracked"]) == 1
+                assert len(record["per_neuron"][neuron]["tracked"][0]) == 1
+
+        # Reload: fresh tables, the run's NWB and an idempotent re-run agree.
+        label_of = {
+            str(s["sorting_id"]): label for label, s in corrected.items()
+        }
+        pk = {"unitmatch_id": match["unit_match_id"]}
+        reloaded = _run_state(pk, label_of)
+        assert reloaded["tracked"] == record["state"]["tracked"]
+        assert reloaded["regions"] == record["state"]["regions"]
+        assert reloaded["times"].keys() == record["state"]["times"].keys()
+        for position, times in reloaded["times"].items():
+            np.testing.assert_array_equal(
+                times, record["state"]["times"][position]
+            )
+        nwb_pairs = {
+            frozenset(
+                {
+                    (label_of[str(p.session_a_sorting_id)], int(p.unit_a_id)),
+                    (label_of[str(p.session_b_sorting_id)], int(p.unit_b_id)),
+                }
+            ): float(p.match_probability)
+            for p in UnitMatch().get_pairs(pk).itertuples()
+        }
+        assert nwb_pairs.keys() == record["state"]["pairs"].keys()
+        for pair, probability in nwb_pairs.items():
+            assert probability == pytest.approx(
+                record["state"]["pairs"][pair], abs=1e-6
+            )
+        from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
+
+        rerun = run_v2_unit_match(plan)
+        assert rerun["unit_match_id"] == match["unit_match_id"]
+        assert (rerun["unit_match_status"], rerun["tracked_unit_status"]) == (
+            "reused",
+            "reused",
+        )
+
+        # Control: the same data and chain without motion correction.
+        uncorrected = _sort_both_days(fx, trains_by_n_samples, monkeypatch)
+        sorting_ids += [s["sorting_id"] for s in uncorrected.values()]
+        for label, summary in uncorrected.items():
+            assert summary["concat_recording_id"] == (
+                receipts[label]["concat_recording_id"]
+            )
+            assert summary["sorting_id"] != corrected[label]["sorting_id"]
+        _plan, control_match = _match_days(uncorrected)
+        control = _check_run(fx, uncorrected, control_match, "off")
+        print(
+            f"[summary] corrected matched {len(record['matched'])}, "
+            f"control matched {len(control['matched'])} of {len(both)}; "
+            f"control mixed {control['mixed']}"
+        )
+    finally:
+        drop_pipeline_sorts(sorting_ids)
