@@ -372,11 +372,14 @@ class _NotebookFixtureMatcher:
 
 @pytest.mark.slow
 def test_cross_session_notebook_runs(dj_conn):
-    """``10_Spike_SortingV2_CrossSession`` runs both workflows on two sessions.
+    """``10_Spike_SortingV2_CrossSession`` runs all three workflows.
 
-    Ingests the polymer smoke fixture twice (identical, same-day sessions) and
-    runs the notebook: Part A concatenates and sorts them; Part B sorts each
-    independently and matches units across them.
+    Ingests the polymer smoke fixture three times (identical, same-day
+    sessions a, b and c) and runs the notebook: Part A concatenates and sorts
+    a and b; Part B sorts a and c independently and matches units across
+    them; Part C matches the a+b concatenation directly against c's sort --
+    c lies outside the concatenation, as matching inputs must not share a
+    session.
 
     UnitMatch's bundle extraction needs the optional ``UnitMatchPy`` package, so
     Part B runs only where it is installed (the default v2 test env excludes the
@@ -384,9 +387,9 @@ def test_cross_session_notebook_runs(dj_conn):
     too few units for UnitMatchPy's metric path, so the notebook's matcher is
     pointed (via its ``matcher_params_name`` parameter) at a registered
     lightweight fixture matcher -- the same substrate the unit-match table tests
-    use -- so the full match + tracked-unit chain runs in-process. Without
-    UnitMatchPy, only Part A (concat) is exercised here; the match API is covered
-    by the unit-match table tests.
+    use -- so the full match + tracked-unit chain runs in-process for Parts B
+    and C. Without UnitMatchPy, only Part A (concat) is exercised here; the
+    match API is covered by the unit-match table tests.
     """
     import importlib.util
 
@@ -398,7 +401,11 @@ def test_cross_session_notebook_runs(dj_conn):
     _require_fixture()
     unitmatch_available = importlib.util.find_spec("UnitMatchPy") is not None
     members = []
-    for dest in ("notebook_xsession_a.nwb", "notebook_xsession_b.nwb"):
+    for dest in (
+        "notebook_xsession_a.nwb",
+        "notebook_xsession_b.nwb",
+        "notebook_xsession_c.nwb",
+    ):
         nwb_file_name = copy_and_insert_nwb(_FIXTURE_PATH, dest_name=dest)
         if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
             SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
@@ -420,10 +427,10 @@ def test_cross_session_notebook_runs(dj_conn):
     parameters = {
         "team_name": "notebook_xsession_team",
         "session_group_owner": "notebook_xsession_team",
-        "same_day_members": members,
+        "same_day_members": members[:2],
         "concat_group_name": "notebook_concat",
         "concat_preset": "franklab_concat_hippocampus_30khz_ms5_2026_09",
-        "match_members": members,
+        "match_members": [members[0], members[2]],
         "match_group_name": "notebook_match",
         "single_preset": "franklab_probe_hippocampus_30khz_ms5_2026_06",
         "run_concat": True,
@@ -480,9 +487,29 @@ def test_cross_session_notebook_runs(dj_conn):
     )
     for member_group in selection.groups:
         assert SortedSpikesGroup & dict(member_group.group_key)
-    # Part B matched units into tracked units (only where UnitMatchPy is present).
+    # Parts B and C matched units into tracked units (only where UnitMatchPy
+    # is present).
     if unitmatch_available:
         assert namespace["match_summary"]["n_tracked_units"] >= 1
+        # Part C matched the a+b concatenation against c's single sort.
+        daily_summary = namespace["daily_summary"]
+        inputs = {item.source_kind: item for item in daily_summary["inputs"]}
+        assert len(daily_summary["inputs"]) == 2
+        assert set(inputs) == {"concatenated_recording", "recording"}
+        concat_input = inputs["concatenated_recording"]
+        single_input = inputs["recording"]
+        assert str(concat_input.sorting_id) == str(
+            namespace["concat_summary"]["sorting_id"]
+        )
+        assert concat_input.nwb_file_names == (
+            members[0]["nwb_file_name"],
+            members[1]["nwb_file_name"],
+        )
+        assert str(single_input.sorting_id) == str(
+            namespace["member_summaries"][1]["sorting_id"]
+        )
+        assert single_input.nwb_file_names == (members[2]["nwb_file_name"],)
+        assert daily_summary["n_tracked_units"] >= 1
 
 
 @pytest.mark.slow

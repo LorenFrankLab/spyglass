@@ -359,13 +359,36 @@ elif run_unit_match:
 #
 # For a runnable example without a second concatenation to configure, this
 # matches Part A's same-day concatenation directly against one of Part B's
-# independently sorted, independently curated sessions — substitute another
-# day's concatenation `sorting_id` for a concatenation-vs-concatenation match.
+# independently sorted, independently curated sessions — the first one whose
+# session is not among the concatenation's members (if every Part B session
+# is, the part is skipped with a message). Substitute another day's
+# concatenation `sorting_id` for a concatenation-vs-concatenation match.
 
-if run_concat and run_unit_match and unitmatch_available:
+run_daily_match = run_concat and run_unit_match and unitmatch_available
+if run_daily_match:
+    # No two matching inputs may share a session: pick a Part B sort of a
+    # session outside Part A's concatenation.
+    concat_sessions = set(
+        (SessionGroup.Member & concat_key).fetch("nwb_file_name")
+    )
+    other_session_sorting_ids = [
+        member_summaries[int(member["member_index"])]["sorting_id"]
+        for member in group_members
+        if member["nwb_file_name"] not in concat_sessions
+    ]
+    if not other_session_sorting_ids:
+        run_daily_match = False
+        print(
+            "Skipping Part C: every Part B session is also in Part A's "
+            f"concatenation ({sorted(concat_sessions)}), and no two matching "
+            "inputs may share a session. Add a Part B session recorded "
+            "outside the concatenation to run it."
+        )
+
+if run_daily_match:
     daily_sorting_ids = [
         concat_summary["sorting_id"],  # Part A's same-day concatenation
-        member_summaries[1]["sorting_id"],  # any other day's curated sort
+        other_session_sorting_ids[0],  # a curated sort of another session
     ]
     daily_plan = plan_v2_unit_match_from_sorts(
         daily_sorting_ids,
@@ -406,7 +429,7 @@ if run_concat and run_unit_match and unitmatch_available:
     member_regions = TrackedUnit().get_unit_brain_regions(example_tracked_key)
     display(member_spike_times)  # one row per (member unit, original recording)
     display(member_regions)  # per-recording n_spikes / detected / region
-elif run_concat and run_unit_match:
+elif run_concat and run_unit_match and not unitmatch_available:
     print(
         "UnitMatch extra not installed; skipping Part C. Install the "
         "'spikesorting-v2-matching' extra to match sorts directly."
