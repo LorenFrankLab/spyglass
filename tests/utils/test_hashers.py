@@ -215,3 +215,132 @@ def test_a_child_change_moves_its_container_digest(mini_path, tmp_path):
     assert before.digest_for(object_id) != after.digest_for(
         object_id
     ), "A change beneath a container must change the container's digest"
+
+
+# --- externally-linked objects -----------------------------------------------
+# An NWB copy keeps its bulk in the raw file and links to it. `visititems`
+# follows hard links only, so those objects are never traversed -- and a table
+# that reads one had a read-set digest that could not change.
+
+
+@pytest.fixture
+def mini_copy_path(mini_path):
+    """Path of the `_.nwb` copy, which is the file that holds the links.
+
+    The raw file holds the data; the copy links to it. Only the copy has
+    external links, so it is the copy these tests hash.
+    """
+    from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
+
+    return mini_path.parent / get_nwb_copy_filename(mini_path.name)
+
+
+@pytest.fixture
+def linked_objects(mini_copy_path):
+    """The copy's external links, with the object id behind each.
+
+    Skips rather than fails where a copy has no links: the point is the
+    behaviour of a linked object, and a corpus without one has nothing to say
+    about it.
+    """
+    import h5py
+
+    links = {}
+
+    def walk(group, prefix=""):
+        for key in group.keys():
+            name = f"{prefix}/{key}".lstrip("/")
+            link = group.get(key, getlink=True)
+            if isinstance(link, h5py.ExternalLink):
+                links[name] = link
+                continue
+            if isinstance(link, h5py.SoftLink):
+                continue
+            item = group.get(key)
+            if isinstance(item, h5py.Group):
+                walk(item, name)
+
+    with h5py.File(mini_copy_path, "r") as handle:
+        walk(handle)
+        if not links:
+            pytest.skip("this copy holds no external links")
+        ids = {name: str(handle[name].attrs["object_id"]) for name in links}
+
+    return links, ids
+
+
+def test_externally_linked_objects_are_indexed(mini_copy_path, linked_objects):
+    """A linked object must have a digest, not be silently absent.
+
+    `read_set_digest` scores an unknown id as the constant `"missing"`, so an
+    object outside the index gives a digest that never moves -- and a table
+    reading it would look reusable forever.
+    """
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    _, ids = linked_objects
+    hasher = NwbfileHasher(mini_copy_path, object_ids=True)
+
+    for name, object_id in ids.items():
+        assert hasher.digest_for(object_id) is not None, (
+            f"{name} is linked from another file and has no digest, so "
+            "nothing that reads it can ever be invalidated"
+        )
+
+
+def test_indexing_links_leaves_the_file_hash_byte_identical(
+    mini_copy_path, linked_objects
+):
+    """Extends the stability guarantee to cover the link pass.
+
+    The file hash is stored as provenance and compared across runs, so the
+    link pass must touch `self.objs` and never `self.hashed`. Asserted
+    separately from the object-index test because it is a separate pass with
+    the same obligation.
+    """
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    plain = NwbfileHasher(mini_copy_path)
+    indexed = NwbfileHasher(mini_copy_path, object_ids=True)
+
+    assert plain.hash == indexed.hash, (
+        "Indexing external links must not move the file hash; production "
+        "hashes depend on it"
+    )
+
+
+def test_a_change_to_the_link_target_moves_the_digest(
+    mini_copy_path, mini_path, linked_objects
+):
+    """The point of the whole pass: a changed target invalidates the reader.
+
+    Simulated by moving the raw file's mtime, which any write to it would do.
+    The copy's own bytes are untouched, so its file hash must *not* move --
+    the change belongs to the object index, which is what reuse consults.
+    """
+    import os
+
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    _, ids = linked_objects
+    stat = os.stat(mini_path)
+
+    before = NwbfileHasher(mini_copy_path, object_ids=True)
+    digests = {n: before.read_set_digest([i]) for n, i in ids.items()}
+
+    os.utime(mini_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
+    try:
+        after = NwbfileHasher(mini_copy_path, object_ids=True)
+
+        for name, object_id in ids.items():
+            assert digests[name] != after.read_set_digest([object_id]), (
+                f"{name} reads data in the raw file, so a change there must "
+                "move its digest"
+            )
+        assert (
+            before.hash == after.hash
+        ), "The copy's own bytes did not change, so its file hash must not"
+    finally:
+        # Restored however the test ends: the corpus is shared, and a stray
+        # mtime would invalidate these digests for every later test.
+        os.utime(mini_path, ns=(stat.st_atime_ns, stat.st_mtime_ns))

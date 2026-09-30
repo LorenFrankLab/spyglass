@@ -252,11 +252,131 @@ class NwbfileHasher:
         self.hash = self.compute_hash()
 
         if object_ids:  # before cleanup: reading attrs needs the open file
+            # Links first: they add objects the traversal cannot reach, and
+            # the index below reads whatever `self.objs` holds.
+            self._index_external_links()
             self._index_object_ids()
 
         if not keep_file_open:
             self.cleanup()
             atexit.unregister(self.cleanup)
+
+    def _index_external_links(self) -> None:
+        """Add externally-linked objects to the index, keyed on the target.
+
+        `visititems` follows hard links only, so an object stored in another
+        file is never traversed and never hashed. In an NWB copy that is
+        exactly where the bulk of the data lives: `acquisition/e-series` and
+        `processing/analog` are links into the raw file, read by `Raw` and
+        `SensorData`. Their `object_id`s were therefore absent from the index,
+        and `read_set_digest` scored an absent id as the constant `"missing"` --
+        so those tables' read-sets could never change and their parses looked
+        reusable however much the raw data moved.
+
+        The digest here is the *link target's identity*: which file, which path
+        inside it, and that file's size and mtime. Deliberately not the target's
+        contents -- the raw file is ~20x the copy, and this runs on every plan.
+        What it detects: the target being replaced, resized, or written to at
+        all (any write moves mtime). What it cannot: an edit that preserves
+        size and mtime exactly, which needs deliberate effort to produce.
+
+        Touches `self.objs` only, never `self.hashed`. The file-level hash is
+        stored as provenance and compared across runs, so it must stay
+        byte-identical; this fixes the index that reuse consults, and nothing
+        else.
+        """
+        found = {}
+
+        def walk(group, prefix=""):
+            for key in group.keys():
+                name = f"{prefix}/{key}".lstrip("/")
+                try:
+                    link = group.get(key, getlink=True)
+                except (KeyError, OSError):  # pragma: no cover - unreadable
+                    continue
+
+                if isinstance(link, h5py.ExternalLink):
+                    found[name] = link
+                    continue
+                if isinstance(link, h5py.SoftLink):
+                    continue  # a soft link's target is in this file already
+
+                try:
+                    item = group.get(key)
+                except (KeyError, OSError):  # pragma: no cover
+                    continue
+                if isinstance(item, h5py.Group):
+                    walk(item, name)
+
+        walk(self.file)
+
+        for name, link in found.items():
+            digest = md5(f"{link.filename}::{link.path}".encode())
+
+            target = Path(self.file.filename).parent / link.filename
+            try:
+                stat = target.stat()
+                digest.update(f"{stat.st_size}:{stat.st_mtime_ns}".encode())
+            except OSError:
+                # The target is gone. Say so in the digest rather than hashing
+                # as though nothing were wrong: a vanished link is a change.
+                digest.update(b"target-missing")
+
+            try:  # the dereferenced object, for its object_id attribute
+                obj = self.file[name]
+            except (KeyError, OSError):
+                continue  # target unreachable: nothing to key an id on
+
+            link_digest = digest.hexdigest()
+            self.objs[name] = (obj, link_digest)
+
+            # And everything beneath it. A table rarely reads the linked
+            # container itself: `SensorData` records the id of a series
+            # *inside* `processing/analog`, so indexing only the link left it
+            # unable to notice the raw file moving. The link's identity applies
+            # to the whole subtree -- if that file changed, all of it is
+            # suspect. Deliberately coarse: any change to the target
+            # invalidates every reader of it, which over-invalidates rather
+            # than under-invalidates.
+            if isinstance(obj, h5py.Group):
+                for path, child in self._walk_linked(obj, name):
+                    self.objs[path] = (
+                        child,
+                        md5(f"{link_digest}:{path}".encode()).hexdigest(),
+                    )
+
+    def _walk_linked(self, group, prefix: str):
+        """Yield `(path, object)` for everything under a dereferenced link.
+
+        h5py will read through an external link, so the target's own structure
+        is reachable -- it is only `visititems` on the *source* file that will
+        not follow it.
+
+        Parameters
+        ----------
+        group : h5py.Group
+            The dereferenced link target.
+        prefix : str
+            Path of the link in the source file, so indexed paths read as
+            though the objects lived there.
+
+        Yields
+        ------
+        tuple of (str, h5py object)
+        """
+        for key in group.keys():
+            path = f"{prefix}/{key}"
+            try:
+                child = group.get(key)
+            except (KeyError, OSError):  # pragma: no cover - unreadable
+                continue
+            if child is None:
+                continue
+
+            yield path, child
+
+            if isinstance(child, h5py.Group):
+                yield from self._walk_linked(child, path)
 
     def _index_object_ids(self) -> None:
         """Map each NWB object_id to its h5 path and a subtree digest.
