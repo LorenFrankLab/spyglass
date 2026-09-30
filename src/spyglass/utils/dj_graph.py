@@ -918,6 +918,9 @@ class AbstractGraph(ABC):
         if count > 100:
             raise RecursionError("Cascade1: Recursion limit reached.")
 
+        if count == 0:  # reset nonempty table cache on first cascade
+            self._table_is_nonempty.cache_clear()
+
         # Evaluated once per node here rather than once per outgoing edge
         # inside `_bridge_restr`. Doubles as the emptiness check: a restriction
         # selecting nothing yields an empty bridge on every edge.
