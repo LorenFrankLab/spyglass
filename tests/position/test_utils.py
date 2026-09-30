@@ -200,6 +200,59 @@ def test_vid_maker_filenotfound(sgp):
         )
 
 
+def test_vid_maker_plots_full_batch(sgp):
+    """Every frame of every batch must be attempted exactly once.
+
+    `end_frame` is inclusive, so stopping at it left the last frame of each
+    batch unrendered and each partial video one frame short. Test mode renders
+    10 frames at the default batch_size of 512, so a single batch never
+    revealed this; these batch bounds mirror process_frames over 3 batches.
+    """
+    maker = object.__new__(sgp.v1.dlc_utils_makevid.VideoMaker)
+
+    attempted = []
+    maker._generate_single_frame = attempted.append
+
+    class Bar:
+        def update(self, n=1):
+            pass
+
+    batch_size, n_frames = 10, 25
+    for start in range(0, n_frames, batch_size):
+        end = min(start + batch_size, n_frames) - 1
+        maker.plot_frames(start, end, Bar(), process_pool=False)
+
+    assert attempted == list(range(n_frames)), "plot_frames skipped frames"
+
+
+def test_vid_maker_check_plotted(sgp, tmp_path):
+    """Gaps that shift later frames raise; a lost video tail warns."""
+    maker = object.__new__(sgp.v1.dlc_utils_makevid.VideoMaker)
+    maker.temp_dir = tmp_path
+    maker.pad_len = 2
+    maker.dropped_frames = set()
+    maker.frame_errors = {}
+
+    def only(frames):
+        for stale in tmp_path.glob("plot_*.png"):
+            stale.unlink()
+        for frame in frames:
+            (tmp_path / f"plot_{frame:02d}.png").touch()
+
+    only(range(10))  # complete batch
+    maker._check_plotted(0, 9, last_batch=True)
+
+    only([0, 1, 2, 4, 5, 6, 7, 8, 9])  # gap at 3 pulls 4-9 earlier
+    with pytest.raises(FileNotFoundError):
+        maker._check_plotted(0, 9, last_batch=True)
+
+    only(range(9))  # frame 9 lost
+    with pytest.raises(FileNotFoundError):
+        maker._check_plotted(0, 9, last_batch=False)  # later batches shift
+    maker._check_plotted(0, 9, last_batch=True)  # end of video, so tolerated
+    assert 9 in maker.dropped_frames, "Tolerated loss should be recorded"
+
+
 def test_recent_files(sgp):
     with open("temp1.txt", "w") as f:
         f.write("test1")

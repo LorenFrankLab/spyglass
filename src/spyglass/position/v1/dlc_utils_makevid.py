@@ -516,7 +516,7 @@ class VideoMaker:
         if reason := self.frame_errors.get(frame_ind):
             return reason
         orig = self.temp_dir / f"orig_{self._pad(frame_ind)}.png"
-        return "not extracted" if not orig.exists() else "unknown"
+        return "not extracted" if not orig.exists() else "no error reported"
 
     def _debug_print(self, msg="             ", end=""):
         """Print a self-overwiting message if debug is enabled."""
@@ -528,9 +528,11 @@ class VideoMaker:
     ):
         logger.debug(f"Plotting   frames: {start_frame} - {end_frame}")
 
+        frames = range(start_frame, end_frame + 1)  # end_frame is inclusive
+
         # Single-threaded processing for debugging
         if not process_pool:  # pragma: no cover
-            for frame_ind in range(start_frame, end_frame):  # pragma: no cover
+            for frame_ind in frames:  # pragma: no cover
                 self._generate_single_frame(frame_ind)  # pragma: no cover
                 progress_bar.update()  # pragma: no cover
             return
@@ -538,8 +540,8 @@ class VideoMaker:
         with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
             jobs = {}  # dict of jobs
 
-            frames_left = end_frame - start_frame
-            frames_iter = iter(range(start_frame, end_frame))
+            frames_left = len(frames)
+            frames_iter = iter(frames)
 
             while frames_left:
                 while len(jobs) < self.max_jobs_in_queue:
@@ -559,18 +561,12 @@ class VideoMaker:
                         ret = job.result(timeout=self.timeout)
                     except (IndexError, TimeoutError) as e:  # pragma: no cover
                         ret = type(e).__name__
-                        # Record why, so _check_plotted can name the cause
-                        # instead of reporting an unexplained missing frame.
                         self.frame_errors[jobs[job]] = ret
                     else:
                         if ret is None:  # pragma: no cover
-                            # _generate_single_frame's only None return is the
-                            # path where its extracted frame was absent. The
-                            # worker is a separate process, so that is the one
-                            # signal of it that reaches us.
-                            self.frame_errors[jobs[job]] = (
-                                "worker found no extracted frame"
-                            )
+                            # Workers are separate processes, so their early
+                            # return is the only signal that reaches us.
+                            self.frame_errors[jobs[job]] = "no source frame"
                     self._debug_print(f"Finish: {self._pad(ret)}")
                     progress_bar.update()
                     del jobs[job]

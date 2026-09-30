@@ -61,8 +61,6 @@
         accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
         #1662
 
-### Pipelines
-
 ## [0.6.0] (Sep 1st 2026)
 
 ### Breaking Changes
