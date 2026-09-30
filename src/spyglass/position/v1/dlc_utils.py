@@ -247,10 +247,16 @@ def get_video_info(key, populate_missing: bool = True):
     vf_key = {k: val for k, val in key.items() if k in VideoFile.heading}
     video_query = VideoFile & vf_key
 
-    if not video_query and populate_missing:
-        if not (VideoFile & {"nwb_file_name": vf_key["nwb_file_name"]}):
-            VideoFile().insert_from_nwbfile(vf_key["nwb_file_name"])
-            video_query = VideoFile & vf_key
+    if not video_query and not (
+        VideoFile & {"nwb_file_name": vf_key["nwb_file_name"]}
+    ):
+        if not populate_missing:
+            raise ValueError(
+                f"No VideoFile entries for {vf_key['nwb_file_name']}.\n\tRun "
+                "`VideoFile().insert_from_nwbfile(nwb_file_name)` first."
+            )
+        VideoFile().insert_from_nwbfile(vf_key["nwb_file_name"])
+        video_query = VideoFile & vf_key
 
     if len(video_query) != 1:
         logger.warning(f"Found {len(video_query)} videos for {vf_key}")

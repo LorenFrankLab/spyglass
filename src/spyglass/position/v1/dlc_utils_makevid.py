@@ -459,7 +459,7 @@ class VideoMaker:
         """
         missing = [
             ind
-            for ind in range(start_frame, end_frame)
+            for ind in range(start_frame, end_frame + 1)
             if not (self.temp_dir / f"plot_{self._pad(ind)}.png").exists()
         ]
         if missing:  # pragma: no cover
