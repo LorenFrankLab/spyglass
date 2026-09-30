@@ -1132,11 +1132,7 @@ class AbstractGraph(ABC):
         """
         if not self.cascaded:
             return set()
-        return {
-            table
-            for table, node in self.graph.nodes.items()
-            if not CASCADE_NODE_KEYS.isdisjoint(node)
-        }
+        return self._restricted_nodes()
 
 
 class RestrGraph(AbstractGraph):
