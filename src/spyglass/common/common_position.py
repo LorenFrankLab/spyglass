@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import bottleneck
 import datajoint as dj
 import numpy as np
@@ -614,7 +616,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         # Read every needed value out of the file so nothing downstream holds
         # a handle to it, and so the returned data can be hashed.
         with pynwb.NWBHDF5IO(
-            raw_dir + "/" + video_info["nwb_file_name"], "r"
+            Path(raw_dir) / video_info["nwb_file_name"], "r"
         ) as io:
             nwb_video = io.read().objects[video_info["video_file_object_id"]]
             video_filename = nwb_video.external_file[0]
