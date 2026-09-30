@@ -8,6 +8,7 @@ from enum import Enum
 from functools import cached_property, lru_cache
 from hashlib import md5 as hash_md5
 from itertools import chain as iter_chain
+from numbers import Integral, Real
 from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
 import datajoint as dj
@@ -651,8 +652,36 @@ class AbstractGraph(ABC):
             return restriction, True
         if not len(keys):
             return restriction, False
+        if self._keys_unsafe_to_literalize(keys):
+            return restriction, True
 
         return make_condition(ft_base, list(keys), set()), True
+
+    @staticmethod
+    def _keys_unsafe_to_literalize(keys: List[dict]) -> bool:
+        """Whether restating these keys as literals would select differently.
+
+        Parameters
+        ----------
+        keys : List[dict]
+            Primary keys fetched for the restriction being flattened.
+
+        Returns
+        -------
+        bool
+            True if any value must keep the relational form.
+        """
+        for key in keys:
+            for value in key.values():
+                # 0.1 != its own decimal literal. `Decimal` is not a `Real`
+                if isinstance(value, Real) and not isinstance(value, Integral):
+                    return True
+                # `prep_value` escapes `%` and `\` in a string, not `"`
+                if isinstance(value, str) and '"' in value:
+                    return True
+                if isinstance(value, (bytes, bytearray)):
+                    return True  # rendered as a python repr, not SQL
+        return False
 
     def _can_copy_restr(
         self, table1, table2, restr, attr_map, ft1, ft2
@@ -695,8 +724,15 @@ class AbstractGraph(ABC):
         if projected & set(ft2.heading.names) != set(attr_map):
             return False
 
+        # A partial-NULL composite link has no parent row, but matches the copy
+        if any(ft2.heading.attributes[a].nullable for a in attr_map):
+            return False
+
+        # Lowercase the analyzed copy only: `extract_column_names` misses
+        # `Parent_Attr`, which MySQL resolves, so the check below would pass on
+        # the mapped names alone and copy a condition the target cannot answer.
         restr_attrs = set()
-        make_condition(ft1, restr, restr_attrs)
+        make_condition(ft1, restr.lower(), restr_attrs)
 
         return bool(restr_attrs) and restr_attrs <= set(attr_map)
 
@@ -1422,6 +1458,8 @@ class RestrGraph(AbstractGraph):
 
             self._set_node(table, "restr_list", new_restr_list)
             ft = self._get_ft(table)
+            # Relational, not `_combine_restr`: a string union stays truthy
+            # when it selects nothing, and `as_dict` would keep the empty table
             restriction = self._coerce_to_condition(ft, ft & new_restr_list)
             self._set_node(table, "restr", restriction)
         return self
