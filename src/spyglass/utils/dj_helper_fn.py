@@ -18,10 +18,7 @@ from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
 
 # Restrictions that match every row of their table. `make_condition` returns
-# the bool True for an unrestricted query; "True"/"(True)" are how that is
-# stored by the export log, and "1"/"(1)" the older form from before the bool
-# was converted to a string on the way in.
-TRIVIALLY_TRUE_FORMS = frozenset({"true", "(true)", "1", "(1)"})
+TRIVIALLY_TRUE_FORMS = frozenset({"true", "1"})
 
 
 def is_trivially_true(restriction: Any) -> bool:
@@ -47,7 +44,12 @@ def is_trivially_true(restriction: Any) -> bool:
         return True
     if not isinstance(restriction, str):
         return False
-    return restriction.strip().lower() in TRIVIALLY_TRUE_FORMS
+
+    form = restriction.strip().lower()
+    while form.startswith("(") and form.endswith(")"):
+        form = form[1:-1].strip()  # Trim `(restr)` -> `restr`
+
+    return form in TRIVIALLY_TRUE_FORMS
 
 
 # Tables that should be excluded from the undirected graph when finding paths
