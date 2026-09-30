@@ -127,6 +127,12 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
 
         `table_name` is a plain string, not a foreign key: prospective
         entries routinely name tables whose rows do not exist yet.
+
+        `owner_table` is the table whose parse produced the row, which is not
+        the same question as where the row is going. `IntervalList` receives
+        rows from four different tables on the mini file alone, so "which
+        entries did this table plan last time" cannot be answered from
+        `table_name`, and that question is what makes a parse reusable.
         """
 
         definition = """
@@ -135,6 +141,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         key_hash: varchar(32)            # of the primary key: stable identity
         ---
         state: enum("planned","blocked","failed","exists","conflict","inserted")
+        owner_table = "": varchar(128)   # the table that planned this row
         blob_hash = NULL: varchar(32)    # of the whole entry: change detection
         entry_blob = NULL: longblob      # cleared once migrated
         problem_code = NULL: varchar(64)
@@ -218,6 +225,65 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         with self._safe_context():
             self._clear({"nwb_file_name": nwb_file_name})
 
+    def staged_plan(self, nwb_file_name: str) -> dict:
+        """Return everything staged for a file, in two queries.
+
+        Per-table reuse asks the same two questions of every table -- what was
+        this table's read-set digest, and what did it plan -- and asking them
+        one table at a time cost two round trips each. Measured on the mini
+        file, that made "reuse" 41% *slower* than re-parsing an already-open
+        file: ~36 tables x 2 queries beat parsing 216 entries out of memory.
+        So both questions are answered once, for the whole file, and the
+        per-table check becomes a dict lookup.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+
+        Returns
+        -------
+        dict
+            `{table_name: {"status", "read_set_digest", "reads", "entries"}}`,
+            where `entries` is `{target_table_name: [rows]}`. Empty when
+            nothing is staged. A table whose payload was dropped -- cleared on
+            migration, or never kept because it exceeded the cap -- is omitted,
+            so a caller cannot mistake it for reusable.
+        """
+        master_key = {"nwb_file_name": nwb_file_name}
+
+        tables = (self.Table & master_key).fetch(as_dict=True)
+        if not tables:
+            return {}
+
+        staged = {
+            row["table_name"]: {
+                "status": row["status"],
+                "read_set_digest": row["read_set_digest"],
+                "reads": list(row["reads"] or []),
+                "entries": {},
+            }
+            for row in tables
+        }
+
+        dropped = set()
+        for entry in (self.Entry & master_key).fetch(as_dict=True):
+            owner = entry["owner_table"]
+            if owner not in staged:
+                continue  # staged before this file's plan was last replaced
+            if entry["entry_blob"] is None:
+                dropped.add(owner)
+                continue
+            # Already a dict: DataJoint packs a `longblob` on insert and
+            # unpacks it on fetch, so unpacking again treats a dict as bytes.
+            staged[owner]["entries"].setdefault(entry["table_name"], []).append(
+                entry["entry_blob"]
+            )
+
+        for owner in dropped:
+            staged.pop(owner, None)
+
+        return staged
+
     def stage(self, plan) -> dict:
         """Record a plan, updating the entries it already holds.
 
@@ -276,7 +342,14 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
                 name = getattr(target, "full_table_name", str(target))
                 for entry in entries:
                     rows.append(
-                        self._entry_row(master_key, target, name, entry, state)
+                        self._entry_row(
+                            master_key,
+                            target,
+                            name,
+                            entry,
+                            state,
+                            owner_table=table_plan.table_name,
+                        )
                     )
 
             for problem in table_plan.problems:
@@ -394,6 +467,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         table_name: str,
         entry: dict,
         state: str = "planned",
+        owner_table: str = "",
     ):
         """Build one staged row, hashing its key and its whole payload.
 
@@ -445,6 +519,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             # edit inside it. See entry_digest.
             blob_hash=entry_digest(blob),
             state=state,
+            owner_table=owner_table,
         )
 
         packed = dj.blob.pack(blob)

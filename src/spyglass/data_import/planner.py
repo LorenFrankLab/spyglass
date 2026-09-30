@@ -168,6 +168,7 @@ def plan_nwbfile(
     use_cache: bool = False,
     nwb_file=None,
     nwb_path: str = None,
+    force_replan: bool = False,
 ) -> IngestionPlan:
     """Plan the ingestion of one NWB file, writing nothing.
 
@@ -205,6 +206,10 @@ def plan_nwbfile(
         Absolute path of `nwb_file`, used only for the read-set digests.
         Default None: without it those digests are None, which reads as
         "unknown" and never as "unchanged".
+    force_replan : bool, optional
+        Parse every table even where a staged plan says nothing it read has
+        changed. Default False, reusing what it safely can. Set this when the
+        suspicion is the reuse check itself.
 
     Returns
     -------
@@ -268,6 +273,16 @@ def plan_nwbfile(
     # even when nothing turns out to be reusable.
     hasher = _object_hasher(nwb_file_name, nwb_path, registered)
 
+    # Loaded once for the whole file, not per table: asking per table cost two
+    # round trips each and made reuse slower than parsing. See `staged_plan`.
+    staged, declared = dict(), dict()
+    if not force_replan:
+        from spyglass.common.common_usage import IngestionPlanLog
+
+        staged = IngestionPlanLog().staged_plan(nwb_file_name)
+        if staged:
+            declared = _declared_targets()
+
     key_space = VirtualKeySpace()
     file_problems: List[Problem] = []
 
@@ -311,15 +326,20 @@ def plan_nwbfile(
             )
             continue
 
-        # The key space goes in, so a table resolving a reference to one this
-        # ingestion also fills sees the planned rows. Tables are planned in
-        # dependency order, so a parent's rows are already in it.
-        plan = instance.plan_from_nwbfile(
-            nwb_file_name,
-            config=table_config,
-            nwb_file=nwb_file,
-            key_space=key_space,
-        )
+        plan = None
+        if staged:
+            plan = _reused_plan(instance, staged, hasher, declared)
+
+        if plan is None:
+            # The key space goes in, so a table resolving a reference to one
+            # this ingestion also fills sees the planned rows. Tables are
+            # planned in dependency order, so a parent's rows are already in it.
+            plan = instance.plan_from_nwbfile(
+                nwb_file_name,
+                config=table_config,
+                nwb_file=nwb_file,
+                key_space=key_space,
+            )
 
         problems = list(plan.problems)
         for target, rows in plan.entries:
@@ -373,6 +393,129 @@ def plan_nwbfile(
         save_plan(plan)
 
     return plan
+
+
+def _reused_plan(instance, staged: dict, hasher, targets: dict):
+    """Return a TablePlan rebuilt from storage, or None to parse.
+
+    Per-table reuse (D8): re-run a table's ingestion only if an NWB object
+    *that table read* changed. The last attempt recorded which objects it read
+    and a digest over them; re-hashing the same set now and comparing answers
+    whether anything it depends on moved. Equal means the rows it planned still
+    describe the file.
+
+    This is what makes the expected workflow cheap. A user reads a report,
+    fixes one thing, and re-attempts: only the tables that read the edited
+    object pay for a parse again.
+
+    Returns None for any doubt -- no hasher, nothing staged for this table, a
+    digest that differs, a parse that did not finish cleanly, an undeclared
+    target. Reuse has to be provably safe, while re-parsing is only slow.
+
+    Parameters
+    ----------
+    instance : dj.Table
+        The table whose parse might be reused.
+    staged : dict
+        `IngestionPlanLog.staged_plan` output, loaded once for the whole file.
+    hasher : NwbfileHasher or None
+        The current pass's object index. None means the file could not be
+        hashed, which is never grounds for reuse.
+    targets : dict
+        `{full_table_name: table class}`, from `_declared_targets`.
+
+    Returns
+    -------
+    TablePlan or None
+    """
+    if hasher is None:
+        return None
+
+    record = staged.get(instance.full_table_name)
+    if record is None:
+        return None
+
+    if record["status"] != "ok":
+        # A failed or blocked parse is not worth preserving, and a *skipped*
+        # one must never be: a table that found no source object read nothing,
+        # so its digest is a digest of nothing. Add the object it was looking
+        # for and that digest is unchanged -- reuse would report "still
+        # nothing here" about a file that now has data. An empty read-set
+        # detects a modification but not an appearance. These are also the
+        # cheap tables: finding no source is an early return.
+        return None
+
+    # Re-hash *the stored* read-set: a digest cannot be recomputed without
+    # knowing what went into it, and what a table reads is only known after it
+    # parses -- which is the thing being avoided.
+    digest = hasher.read_set_digest(record["reads"])
+    if digest is None or digest != record["read_set_digest"]:
+        return None
+
+    rehydrated = PlannedEntries()
+    for target_name, rows in record["entries"].items():
+        target = targets.get(target_name)
+        if target is None:
+            return None  # an undeclared target: parse rather than guess
+        rehydrated.add(target, rows)
+
+    # Re-sort parents before children. A parse emits its targets in that order
+    # deliberately -- `PositionSource` yields `IntervalList`, then itself, then
+    # its parts -- and the planner checks foreign keys in iteration order,
+    # adding each target to the key space as it goes. A fetch returns rows in
+    # no meaningful order, so rehydrating them as they arrive reported a parent
+    # as missing from a plan that contained it two entries later.
+    entries = PlannedEntries()
+    for target, rows in rehydrated.in_dependency_order():
+        entries.add(target, rows)
+
+    return TablePlan(
+        table_name=instance.full_table_name,
+        entries=entries,
+        status="ok",
+        problems=(),
+        reads=tuple(record["reads"]),
+        read_set_digest=digest,
+    )
+
+
+def _declared_targets() -> Dict[str, object]:
+    """Return `{full_table_name: table class}` for every declarable target.
+
+    Built from the declared set rather than by walking the schema: a plan can
+    only name a table that ingestion declares, either as one that parses a file
+    or as one that merely receives rows. Parts come along with their masters.
+
+    This is why reuse needs no name-to-class registry -- every target is a real
+    class, carrying its own heading, parents and mixin.
+
+    Returns
+    -------
+    dict
+    """
+    from spyglass.common.populate_all_common import ingestion_tables
+
+    declared = ingestion_tables()
+    found = {}
+
+    for group in declared.values():
+        for table in group:
+            instance = table.as_instance
+            found[instance.full_table_name] = table
+            for part_name in instance.parts():
+                # A part is reachable from its master by class attribute, which
+                # DataJoint names in CamelCase after the final separator.
+                attr = (
+                    part_name.split("__")[-1]
+                    .strip("`")
+                    .title()
+                    .replace("_", "")
+                )
+                part = getattr(table, attr, None)
+                if part is not None:
+                    found[part_name] = part
+
+    return found
 
 
 def _object_hasher(

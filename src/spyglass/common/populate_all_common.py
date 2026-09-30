@@ -1,11 +1,12 @@
 from pathlib import Path
-from typing import List, Union
+from typing import Dict, List, Union
 
 import datajoint as dj
 import yaml
 
 from spyglass.common.common_behav import (
     PositionSource,
+    RawPosition,
     RawCompassDirection,
     StateScriptFile,
     VideoFile,
@@ -38,7 +39,7 @@ from spyglass.common.common_optogenetics import (
 from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
 from spyglass.common.common_subject import Subject
-from spyglass.common.common_task import TaskEpoch
+from spyglass.common.common_task import Task, TaskEpoch
 from spyglass.common.common_usage import InsertError
 from spyglass.settings import base_dir
 from spyglass.utils import logger
@@ -192,26 +193,41 @@ def _insert_from_plan(
     return result
 
 
-def ingestion_table_list() -> List[dj.Table]:
-    """Return every table ingested from an NWB file, parents before children.
+def ingestion_tables() -> Dict[str, List[dj.Table]]:
+    """Return the tables an ingestion touches, in two categories.
 
-    One declared set, shared by the inserter and the planner. The order is
-    written out rather than derived: the schema is fixed at import time, so
-    sorting it on every call costs ~0.17s to rediscover an answer that cannot
-    change. `test_ingestion_table_list_is_dependency_ordered` checks the
-    order against DataJoint's foreign-key graph instead, so a table added in
-    the wrong place fails a test rather than an ingestion.
+    One declared set, shared by the inserter and the planner:
+
+    - `"ingest"` -- tables that **parse the file**, parents before children.
+      The planner walks these in order, so each table's parents are planned
+      before it and a cross-reference resolves against the plan.
+    - `"targets"` -- tables that **receive rows without parsing anything**.
+      `TaskEpoch` emits `Task`, `PositionSource` emits `RawPosition`,
+      `ImportedLFP` emits `LFPElectrodeGroup`. They are declared here rather
+      than discovered by walking the foreign-key graph, so the set a plan can
+      name is written down in one place. Order is irrelevant: nothing parses
+      them.
+
+    Both lists hold real table classes, so a target carries its own heading,
+    parents and mixin -- no name-to-class registry, and no `FreeTable` stand-in.
+
+    The `"ingest"` order is written out rather than derived: the schema is
+    fixed at import time, so sorting on every call costs ~0.17s to rediscover
+    an answer that cannot change. `tests/common/test_ingestion_table_order.py`
+    checks it against DataJoint's own graph, so a table added in the wrong
+    place fails a test rather than an ingestion.
 
     Returns
     -------
-    list
-        SpyglassIngestion table classes, in dependency order.
+    dict
+        `{"ingest": [...], "targets": [...]}`.
     """
+    from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
     from spyglass.lfp.lfp_imported import ImportedLFP
     from spyglass.position.v1.imported_pose import ImportedPose
     from spyglass.spikesorting.imported import ImportedSpikeSorting
 
-    return [
+    ingest = [
         # no parents among these
         CameraDevice,
         DataAcquisitionDeviceAmplifier,
@@ -254,6 +270,34 @@ def ingestion_table_list() -> List[dj.Table]:
         StateScriptFile,  # -> TaskEpoch
         # NwbfileKachery, # Not used by default
     ]
+
+    # Emitted by a table above, never parsed themselves. Every one is a
+    # parent, child or part of something in `ingest` -- a table can only
+    # emit rows for something it is related to -- but they are listed rather
+    # than derived so the set is readable and reviewable.
+    targets = [
+        Task,  # from TaskEpoch
+        RawPosition,  # from PositionSource
+        RawPosition.PosObject,  # from PositionSource
+        LFPElectrodeGroup,  # from ImportedLFP
+        LFPElectrodeGroup.LFPElectrode,  # from ImportedLFP
+    ]
+
+    return {"ingest": ingest, "targets": targets}
+
+
+def ingestion_table_list() -> List[dj.Table]:
+    """Return the tables that parse a file, in dependency order.
+
+    Deprecated shim for `ingestion_tables()["ingest"]`; kept because the
+    ordered parse list is what most callers want and the name says so.
+
+    Returns
+    -------
+    list
+        SpyglassIngestion table classes, in dependency order.
+    """
+    return ingestion_tables()["ingest"]
 
 
 def lab_config() -> dict:

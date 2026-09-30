@@ -152,8 +152,13 @@ def test_dry_run_reports_every_problem_not_just_the_first(
     time as each raised, and stopped writing at the first; a plan names both
     before anything is written.
     """
+    from spyglass.common.common_usage import IngestionPlanLog
     from spyglass.common.populate_all_common import populate_all_common
     from spyglass.utils.mixins.ingestion import IngestionMixin
+
+    # Nothing staged, so nothing is reusable: per-table reuse would skip the
+    # parse this test induces a failure in, and the file would report clean.
+    IngestionPlanLog().clear(mini_copy_name)
 
     broken = {"`common_session`.`_session`", "`common_ephys`.`_electrode`"}
     original = IngestionMixin._parse

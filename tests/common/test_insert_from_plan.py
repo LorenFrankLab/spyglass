@@ -186,8 +186,13 @@ def test_raise_err_raises_after_the_whole_file_is_checked(
     the report named one problem. Here the pass finishes, every problem is
     collected, and the exception carries the lot.
     """
+    from spyglass.common.common_usage import IngestionPlanLog
     from spyglass.common.populate_all_common import populate_all_common
     from spyglass.utils.mixins.ingestion import IngestionMixin
+
+    # Nothing staged, so nothing is reusable -- otherwise the tables this test
+    # breaks are served from the last attempt and never parse at all.
+    IngestionPlanLog().clear(mini_copy_name)
 
     original = IngestionMixin._parse
     broken = {"SampleCount", "DIOEvents"}
