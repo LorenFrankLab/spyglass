@@ -1,6 +1,7 @@
 from typing import List, Union
 
 import h5py
+import re
 
 from spyglass.utils.dj_helper_fn import _resolve_external_table
 from spyglass.utils.h5py_helper_fn import (
@@ -153,10 +154,24 @@ def ensure_weight_units(file: h5py.File, intended_unit: str = "g"):
         return
 
     valid_units = ("kg", "g", "mg", "ug", "g", "ng", "pg")
-    if weight.endswith(tuple(valid_units)):
+
+    numeric_pattern = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+    pattern = rf"^({numeric_pattern})\s*({'|'.join(valid_units)})$"
+    stripped_weight = weight.strip()
+
+    match = re.fullmatch(pattern, stripped_weight)
+
+    if match:
+        value, unit = match.groups()
+        new_weight = f"{value} {unit}"
+    elif re.fullmatch(numeric_pattern, stripped_weight):
+        new_weight = f"{stripped_weight} {intended_unit}"
+    else:
         return
 
-    new_weight = f"{weight} {intended_unit}"
+    if new_weight == weight:
+        return
+
     file[weight_path][()] = new_weight
 
 
