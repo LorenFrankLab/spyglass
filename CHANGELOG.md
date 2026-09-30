@@ -10,9 +10,11 @@
 ```
 -->
 
-## Infrastructure
+### Infrastructure
 
 - Optimize `RestrGraph` generation during export #1673
+- Export logs an unrestricted fetch of a shared table as keys. `Export.populate`
+    rejects older log rows that match a whole shared table. #1673
 
 ## [0.6.0] (Sep 1st 2026)
 
