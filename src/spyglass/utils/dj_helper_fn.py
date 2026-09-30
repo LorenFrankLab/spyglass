@@ -17,6 +17,41 @@ from datajoint.user_tables import TableMeta, UserTable
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 
+# Restrictions that match every row of their table. `make_condition` returns
+TRIVIALLY_TRUE_FORMS = frozenset({"true", "1"})
+
+
+def is_trivially_true(restriction: Any) -> bool:
+    """Whether a restriction matches every row of its table.
+
+    A restriction like this is rarely wrong on its own, but it is dangerous
+    where restrictions are combined: OR-ing anything with it yields it, so a
+    single one widens whatever it touches to the whole table.
+
+    Parameters
+    ----------
+    restriction : Any
+        A restriction, as a bool, a condition string, or anything else. Only
+        the whole-table forms return True; a list or query expression does
+        not, even if it happens to select every row.
+
+    Returns
+    -------
+    bool
+        True if the restriction is one of the whole-table forms.
+    """
+    if restriction is True:
+        return True
+    if not isinstance(restriction, str):
+        return False
+
+    form = restriction.strip().lower()
+    while form.startswith("(") and form.endswith(")"):
+        form = form[1:-1].strip()  # Trim `(restr)` -> `restr`
+
+    return form in TRIVIALLY_TRUE_FORMS
+
+
 # Tables that should be excluded from the undirected graph when finding paths
 # for TableChain objects and searching for an upstream key.
 PERIPHERAL_TABLES = [

@@ -6,7 +6,7 @@
 ### Release Notes
 
 ```python
-# Add alter commands here
+# add table alters here
 ```
 -->
 
@@ -23,6 +23,9 @@
     #1662
 - Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
 - Add `prefer_download` custom config for stream-capable backends #1662
+- Optimize `RestrGraph` generation during export #1673
+- Export logs an unrestricted fetch of a shared table as keys. `Export.populate`
+    rejects older log rows that match a whole shared table. #1673
 
 ### Pipelines
 

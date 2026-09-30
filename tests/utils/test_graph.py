@@ -192,6 +192,57 @@ def test_rg_file_paths(restr_graph):
     assert len(restr_graph.file_paths) > 1, "Unexpected file paths collected."
 
 
+def test_rg_file_externals_no_resolution(leaf, lin_merge_key, monkeypatch):
+    """Collecting file paths must not resolve any filepath attribute.
+
+    Resolving one makes DataJoint stat, checksum, and re-stage the file it
+    points at. That is slow enough to dominate a large export, and it fails
+    outright when a file on disk has drifted from its recorded checksum --
+    even though the cascade only needs a path the external table already
+    stores.
+
+    Builds its own graph rather than using the session-scoped one, since it
+    has to add nodes and set restrictions.
+    """
+    import datajoint.external as dj_external
+
+    from spyglass.utils.dj_graph import RestrGraph
+
+    _ = lin_merge_key  # linearization merge table populated
+
+    graph = RestrGraph(
+        seed_table=leaf,
+        leaves={leaf.full_table_name: True},
+        include_files=True,
+        cascade=True,
+        verbose=False,
+    )
+
+    # Externals are excluded from the dependency graph, so `cascade_files`
+    # skips its externals step unless they are attached first, as the export
+    # flow does in `_add_externals_to_restr_graph`.
+    externals = graph.file_externals
+    for store in ("raw", "analysis"):
+        tbl = externals[store]
+        graph.graph.add_node(tbl.full_table_name, ft=tbl)
+
+    def _resolved(*args, **kwargs):
+        raise AssertionError(
+            "cascade_files resolved a filepath attribute; paths should come "
+            + "from the external table instead"
+        )
+
+    monkeypatch.setattr(
+        dj_external.ExternalTable, "download_filepath", _resolved
+    )
+
+    graph.cascade_files()
+
+    restr = graph._get_restr(externals["analysis"].full_table_name)
+    assert restr, "No restriction set on the analysis externals table."
+    assert "filepath" in restr, "Analysis restriction is not by filepath."
+
+
 def test_rg_invalid_table(restr_graph):
     """Test that an invalid table raises an error."""
     with pytest.raises(ValueError):

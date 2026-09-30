@@ -4,17 +4,15 @@ NOTE: read `ft` as FreeTable and `restr` as restriction.
 """
 
 from abc import ABC, abstractmethod
-from copy import deepcopy
 from enum import Enum
 from functools import cached_property, lru_cache
 from hashlib import md5 as hash_md5
 from itertools import chain as iter_chain
-from pathlib import Path
+from numbers import Integral, Real
 from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
 import datajoint as dj
 from datajoint import FreeTable, Table, VirtualModule
-from datajoint import config as dj_config
 from datajoint.condition import make_condition
 from datajoint.expression import QueryExpression
 from datajoint.hash import key_hash
@@ -22,6 +20,7 @@ from datajoint.user_tables import TableMeta
 from datajoint.utils import get_master, to_camel_case
 from networkx import (
     DiGraph,
+    Graph,
     NetworkXNoPath,
     NodeNotFound,
     all_simple_paths,
@@ -30,9 +29,14 @@ from networkx import (
 from tqdm import tqdm
 
 from spyglass.utils import logger
-from spyglass.utils.database_settings import SHARED_MODULES
+from spyglass.utils.database_settings import table_is_shared
 from spyglass.utils.dj_helper_fn import PERIPHERAL_TABLES  # is_nonempty,
-from spyglass.utils.dj_helper_fn import ensure_names, fuzzy_get, unique_dicts
+from spyglass.utils.dj_helper_fn import (
+    ensure_names,
+    fuzzy_get,
+    is_trivially_true,
+    unique_dicts,
+)
 
 
 def dj_topo_sort(graph: DiGraph) -> List[str]:
@@ -63,6 +67,11 @@ def dj_topo_sort(graph: DiGraph) -> List[str]:
         from networkx.algorithms.dag import topological_sort
 
         return unite_master_parts(list(topological_sort(graph)))
+
+
+# Node attributes this module attaches while cascading. Any one marks a node as
+# reached, see `AbstractGraph.included_tables`.
+CASCADE_NODE_KEYS = frozenset({"restr", "restr_list", "files"})
 
 
 class Direction(Enum):
@@ -114,7 +123,15 @@ class AbstractGraph(ABC):
         child classes. Used in TableChain.
     """
 
-    def __init__(self, seed_table: Table, verbose: bool = False, **kwargs):
+    _fast_bridge = True  # False forces `_bridge_restr` to join. Tests flip it
+
+    def __init__(
+        self,
+        seed_table: Table,
+        verbose: bool = False,
+        graph: DiGraph = None,
+        **kwargs,
+    ):
         """Initialize graph and connection.
 
         Parameters
@@ -123,23 +140,30 @@ class AbstractGraph(ABC):
             Table to use to establish connection and graph
         verbose : bool, optional
             Whether to print verbose output. Default False
+        graph : DiGraph, optional
+            Dependency graph to build from instead of loading a fresh one,
+            sharing one load across a multi-leaf cascade's per-leaf graphs. It
+            is copied and its cascade data discarded.
         """
         self.seed_table = seed_table
         self.connection = seed_table.connection
 
-        # Deepcopy graph to avoid seed `load()` resetting custom attributes
-        seed_table.connection.dependencies.load()
-        graph = seed_table.connection.dependencies
-        orig_conn = graph._conn  # Cannot deepcopy connection
-        graph._conn = None
-        self.graph = deepcopy(graph)
-        graph._conn = orig_conn
+        if graph is None:
+            # Reload once per independent graph.
+            seed_table.connection.dependencies.load()
+            graph = seed_table.connection.dependencies
 
-        # undirect not needed in all cases but need to do before adding ft nodes
-        self.undirect_graph = self.graph.to_undirected()
+        self.graph = graph.copy()  # deep copy not needed, no custom attrs
+        self.graph._loaded = True
+        for _, node in self.graph.nodes(data=True):
+            for key in CASCADE_NODE_KEYS:  # Inherit structure, not restrictions
+                node.pop(key, None)
 
         self.verbose = verbose
+        self.debug_bridge = False  # see `_bridge_result`, costly when set
+        self.max_flat_rows = 5_000  # see `_flatten_restr`
         self.skip_external = True
+        self.spawned_schemas = set()
         self.leaves = set()
         self.visited = set()
         self.to_visit = set()
@@ -193,9 +217,35 @@ class AbstractGraph(ABC):
 
     # ------------------------------ Graph Nodes ------------------------------
 
+    @cached_property
+    def undirect_graph(self) -> Graph:
+        """Get an undirected copy of the dependency graph, structure only.
+
+        Only `TableChain` needs this, and building it eagerly copied every
+        node's data for every graph. Once a cascade has run that data includes
+        FreeTable objects, which hold a connection and must not be copied.
+        Callers only ever use names and edges.
+        """
+        undirected = Graph()
+        undirected.add_nodes_from(self.graph.nodes())
+        undirected.add_edges_from(self.graph.edges())
+        return undirected
+
     def _get_node(self, table: Union[str, Table]):
-        """Get node from graph."""
+        """Get node from graph, spawning unimported schemas as needed.
+
+        A node absent, or present without data, means its schema was never
+        imported. Reached when `skip_external` is False.
+        """
         table = ensure_names(table)
+        if node := self.graph.nodes.get(table):
+            return node
+
+        try:
+            self._spawn_virtual_module(table)
+        except dj.errors.DataJointError:
+            pass  # Schema does not exist, raise below
+
         if not (node := self.graph.nodes.get(table)):
             raise ValueError(
                 f"Table {table} not found in graph."
@@ -218,8 +268,8 @@ class AbstractGraph(ABC):
         Returns
         -------
         Tuple[bool, Dict[str, str]]
-            Tuple of boolean indicating direction and edge data. True if child
-            is child of parent.
+            A direction flag and the edge data. False when the graph holds
+            parent -> child as named, True when the arguments are swapped.
         """
         child = ensure_names(child)
         parent = ensure_names(parent)
@@ -229,9 +279,10 @@ class AbstractGraph(ABC):
         elif edge := self.graph.get_edge_data(child, parent):
             return True, edge
 
-        # Handle alias nodes. `shortest_path` doesn't work with aliases
-        p1 = all_simple_paths(self.graph, child, parent)
-        p2 = all_simple_paths(self.graph, parent, child)
+        # Alias nodes: `shortest_path` can't. cutoff=2 bounds the walk to the
+        # 3-node paths accepted below, which would otherwise be exponential
+        p1 = all_simple_paths(self.graph, child, parent, cutoff=2)
+        p2 = all_simple_paths(self.graph, parent, child, cutoff=2)
         paths = [p for p in iter_chain(p1, p2)]  # list for error handling
         for path in paths:  # Ignore long and non-alias paths
             if len(path) > 3 or (len(path) > 2 and not path[1].isnumeric()):
@@ -242,17 +293,36 @@ class AbstractGraph(ABC):
 
     def _get_restr(self, table):
         """Get restriction from graph node."""
-        if (restr := self._get_node(ensure_names(table)).get("restr")) is None:
+        if self._get_node(ensure_names(table)).get("restr") is None:
             restr_list = self._get_restr_list(table)
             if not restr_list:
                 return None
             ft = self._get_ft(table)
-            self._set_node(
-                table,
-                "restr",
-                self._coerce_to_condition(ft, ft & restr_list),
-            )
+            self._set_node(table, "restr", self._combine_restr(ft, restr_list))
         return self._get_node(ensure_names(table)).get("restr")
+
+    @staticmethod
+    def _combine_restr(
+        ft: FreeTable, restr_list: List
+    ) -> Union[str, QueryExpression]:
+        """OR together the restrictions accumulated on one node.
+
+        Parameters
+        ----------
+        ft : FreeTable
+            The table the restrictions apply to.
+        restr_list : List
+            Restrictions to combine, in the order they were added.
+
+        Returns
+        -------
+        str | QueryExpression
+            The union of the given restrictions. A string when every input is
+            one, else a derived table.
+        """
+        if all(isinstance(r, str) for r in restr_list):
+            return make_condition(ft, list(restr_list), set())
+        return AbstractGraph._coerce_to_condition(ft, ft & restr_list)
 
     def _get_restr_list(self, table):
         """Get restriction list from graph node."""
@@ -263,10 +333,6 @@ class AbstractGraph(ABC):
         ft: FreeTable, r: Any
     ) -> Union[str, QueryExpression]:
         """Coerce restriction to a valid condition.
-
-        If r is a QueryExpression, project to primary key to keep relational.
-        This saves on database requests while propagating restrictions.
-        Otherwise, returns a valid restriction string or condition.
 
         Parameters
         ----------
@@ -279,7 +345,9 @@ class AbstractGraph(ABC):
         Returns
         -------
         str | QueryExpression
-            The restriction as a string or QueryExpression.
+            The restriction as a string or QueryExpression. A QueryExpression
+            is projected to the primary key, staying relational rather than
+            fetching.
         """
 
         if isinstance(r, str):
@@ -289,6 +357,31 @@ class AbstractGraph(ABC):
 
         # dict/list → condition (fallback)
         return make_condition(ft, r, set())
+
+    def _warn_if_trivially_true(self, table, restriction) -> None:
+        """Log that a shared table is being restricted to all of its rows.
+
+        Parameters
+        ----------
+        table : str
+            Table the restriction is being set on.
+        restriction : str | QueryExpression
+            The restriction, already coerced to a condition.
+        """
+        # `TableChain.__init__` uses True placeholder. Hold pending 'found'
+        if (
+            restriction is True
+            and self._get_node(table).get("find_restr")
+            and not getattr(self, "found_restr", False)
+        ):
+            return
+
+        if not is_trivially_true(restriction) or not table_is_shared(table):
+            return
+
+        self._log_truncate(  # verbose graphs say where it came from
+            f"Whole-table restriction on {self._camel(table)}"
+        )
 
     def _set_restr(
         self, table, restriction, replace=False
@@ -313,6 +406,7 @@ class AbstractGraph(ABC):
         """
         ft = self._get_ft(table)
         restriction = self._coerce_to_condition(ft, restriction)
+        self._warn_if_trivially_true(table, restriction)
         existing = self._get_restr(table)
 
         if (not existing) or replace:
@@ -320,8 +414,12 @@ class AbstractGraph(ABC):
             self._set_node(table, "restr", restriction)
             return restriction
 
-        # Merge restrictions
-        restr_list = self._get_restr_list(table) + [restriction]
+        # Merge restrictions. Convergent paths deliver the same condition to a
+        # shared ancestor repeatedly; duplicates widen the OR-list without
+        # widening what it selects.
+        restr_list = self._get_restr_list(table)
+        if restriction not in restr_list:
+            restr_list = restr_list + [restriction]
         self._set_node(table, "restr_list", restr_list)
         # restriction = self._coerce_to_condition(ft, ft & restr_list)
         self._set_node(
@@ -354,17 +452,44 @@ class AbstractGraph(ABC):
 
         return self._get_ft_with_restr(table, restr)
 
+    @lru_cache(maxsize=1024)
+    def _table_is_nonempty(self, table) -> bool:
+        """Whether an unrestricted table has any rows.
+
+        Cached per cascade, not per graph: `cascade1` clears it at the top so a
+        re-cascade sees rows inserted since.
+        """
+        return bool(self._get_ft(table))
+
     def _has_out_prefix(self, table):
-        return (
-            table.split(".")[0].split("_")[0].strip("`") not in SHARED_MODULES
-        )
+        return not table_is_shared(table)
 
     def _spawn_virtual_module(self, table):
+        """Add the tables of a table's schema to the graph, if not imported.
+
+        Parameters
+        ----------
+        table : str
+            Full table name, used to determine the schema to spawn.
+
+        Raises
+        ------
+        DataJointError
+            If the schema does not exist on the database server.
+        """
         schema = table.split(".")[0].strip("`")
-        logger.warning(f"Spawning tables for {schema}")
-        vm = VirtualModule(f"RestrGraph_{schema}", schema)
-        v_graph = vm.schema.connection.dependencies
-        v_graph.load()
+        if schema in self.spawned_schemas:  # Already merged into this graph
+            return
+        self.spawned_schemas.add(schema)
+
+        if schema in self.connection.schemas:
+            v_graph = self.connection.dependencies  # this copy may predate it
+            v_graph.load(force=False)
+        else:
+            logger.warning(f"Spawning tables for {schema}")
+            vm = VirtualModule(f"RestrGraph_{schema}", schema)
+            v_graph = vm.schema.connection.dependencies
+            v_graph.load(force=False)  # registering above cleared the graph
 
         self.graph.add_nodes_from(v_graph.nodes(data=True))
         self.graph.add_edges_from(v_graph.edges(data=True))
@@ -409,9 +534,7 @@ class AbstractGraph(ABC):
 
         Converts any non-string restrictions to string conditions.
         """
-        for table in self.graph.nodes:
-            if not self.graph.nodes.get(table):
-                continue
+        for table in self._restricted_nodes():
             restr = self._get_restr(table)
             if not restr or isinstance(restr, str):
                 continue
@@ -474,26 +597,170 @@ class AbstractGraph(ABC):
 
         path = f"{self._camel(table1)} -> {self._camel(table2)}"
 
-        if not (bool(ft1) and bool(ft2)):
+        # `ft1` emptiness is the caller's check, once per node not per edge
+        if not self._table_is_nonempty(table2):
             self._log_truncate(f"Bridge Link: {path}: result EMPTY INPUT")
             return ["False"]
 
         if bool(set(attr_map.values()) - set(ft1.heading.names)):
             attr_map = {v: k for k, v in attr_map.items()}  # reverse
 
+        if self._fast_bridge and self._can_copy_restr(
+            table1, table2, restr, attr_map, ft1, ft2
+        ):
+            self._log_truncate(f"Bridge Copy: {path}")
+            return restr
+
         ret = ft2 & (ft1.proj(**attr_map))
 
         if self.verbose:  # For debugging. Not required for typical use.
-            if not bool(ret):
-                result = "EMPTY"
-            elif not bool(ft2 - ret.proj()):
-                result = "FULL"
-            else:
-                result = "partial"
-            self._log_truncate(f"Bridge Link: {path}: result {result}")
+            self._log_truncate(
+                f"Bridge Link: {path}{self._bridge_result(ft2, ret)}"
+            )
             logger.debug(ret)
 
         return ret
+
+    def _flatten_restr(self, table, restriction) -> Tuple[Any, bool]:
+        """Replace a derived restriction with the literal keys it selects.
+
+        Parameters
+        ----------
+        table : str
+            Table the restriction applies to.
+        restriction : Any
+            Restriction to flatten.
+
+        Returns
+        -------
+        Tuple[Any, bool]
+            The restriction to propagate, flattened where worthwhile, and
+            whether it selects any rows.
+        """
+        ft_base = self._get_ft(table)
+        # Coerce a copy: declining to flatten must return what was passed in
+        coerced = self._coerce_to_condition(ft_base, restriction)
+        ft = ft_base & coerced
+
+        if not (self._fast_bridge and isinstance(coerced, QueryExpression)):
+            return restriction, bool(ft)
+
+        # One row past the cap distinguishes "at the cap" from "over" it
+        keys = ft.fetch("KEY", limit=self.max_flat_rows + 1)
+
+        if len(keys) > self.max_flat_rows:
+            return restriction, True
+        if not len(keys):
+            return restriction, False
+        if self._keys_unsafe_to_literalize(keys):
+            return restriction, True
+
+        return make_condition(ft_base, list(keys), set()), True
+
+    @staticmethod
+    def _keys_unsafe_to_literalize(keys: List[dict]) -> bool:
+        """Whether restating these keys as literals would select differently.
+
+        Parameters
+        ----------
+        keys : List[dict]
+            Primary keys fetched for the restriction being flattened.
+
+        Returns
+        -------
+        bool
+            True if any value must keep the relational form.
+        """
+        for key in keys:
+            for value in key.values():
+                # 0.1 != its own decimal literal. `Decimal` is not a `Real`
+                if isinstance(value, Real) and not isinstance(value, Integral):
+                    return True
+                # `prep_value` escapes `%` and `\` in a string, not `"`
+                if isinstance(value, str) and '"' in value:
+                    return True
+                if isinstance(value, (bytes, bytearray)):
+                    return True  # rendered as a python repr, not SQL
+        return False
+
+    def _can_copy_restr(
+        self, table1, table2, restr, attr_map, ft1, ft2
+    ) -> bool:
+        """Whether table2's restriction is table1's verbatim, with no join.
+
+        Valid parent to child only: a parent row satisfying the condition need
+        not have any child row, so copying upward over-includes.
+
+        Parameters
+        ----------
+        table1, table2 : str
+            Source and target table names. The restriction is derived for
+            table2 from table1.
+        restr : Any
+            Restriction applied to table1. Only plain string conditions can be
+            copied; anything else may carry its own join semantics.
+        attr_map : dict
+            Mapping of table2 attribute names to table1 attribute names, as
+            oriented by the caller.
+        ft1, ft2 : FreeTable
+            Free tables for table1 (restricted) and table2 (unrestricted).
+
+        Returns
+        -------
+        bool
+            True when the semijoin reduces to the condition itself.
+        """
+        if not self._fast_bridge or not isinstance(restr, str) or not attr_map:
+            return False
+
+        if any(k != v for k, v in attr_map.items()):
+            return False  # renamed across the edge
+
+        if not self.graph.get_edge_data(table1, table2):
+            return False  # table2 is not table1's child
+
+        # The semijoin matches every shared attr, not just the mapped ones
+        projected = set(ft1.primary_key) | set(attr_map)
+        if projected & set(ft2.heading.names) != set(attr_map):
+            return False
+
+        # A partial-NULL composite link has no parent row, but matches the copy
+        if any(ft2.heading.attributes[a].nullable for a in attr_map):
+            return False
+
+        # Lowercase the analyzed copy only: `extract_column_names` misses
+        # `Parent_Attr`, which MySQL resolves, so the check below would pass on
+        # the mapped names alone and copy a condition the target cannot answer.
+        restr_attrs = set()
+        make_condition(ft1, restr.lower(), restr_attrs)
+
+        return bool(restr_attrs) and restr_attrs <= set(attr_map)
+
+    def _bridge_result(self, ft2, ret) -> str:
+        """Describe a bridge result for logging.
+
+        Silent unless `debug_bridge` is set: a full-vs-partial verdict costs an
+        anti-join over the whole unrestricted target, per edge.
+
+        Parameters
+        ----------
+        ft2 : FreeTable
+            The unrestricted target of the bridge.
+        ret : QueryExpression
+            The restriction derived for that target.
+
+        Returns
+        -------
+        str
+            Empty, or a description prefixed with `: result `.
+        """
+        if not self.debug_bridge:
+            return ""
+        if not bool(ret):
+            return ": result EMPTY"
+        return ": result " + (
+            "FULL" if not bool(ft2 - ret.proj()) else "partial"
+        )
 
     def _get_adjacent_path_item(
         self, table: str, direction: Direction = Direction.UP
@@ -619,8 +886,18 @@ class AbstractGraph(ABC):
         if count > 100:
             raise RecursionError("Cascade1: Recursion limit reached.")
 
+        if count == 0:  # reset nonempty table cache on first cascade
+            self._table_is_nonempty.cache_clear()
+
+        # Per node, not per edge. Doubles as the emptiness check
+        restriction, nonempty = self._flatten_restr(table, restriction)
+
         restriction = self._set_restr(table, restriction, replace=replace)
         self.visited.add(table)
+
+        if not nonempty:
+            self._log_truncate(f"Empty restr : {self._camel(table)}")
+            return
 
         if getattr(self, "found_path", None):  # * Avoid refactor #1356
             # * Ideally, would only grab path once
@@ -777,19 +1054,43 @@ class AbstractGraph(ABC):
     @property
     def as_dict(self) -> List[Dict[str, str]]:
         """Return as a list of dictionaries of table_name: restriction"""
-        self.cascade()
+        # `warn=False` as with the other accessors: reading a cascaded graph is
+        # routine, and callers read this repeatedly.
+        self.cascade(warn=False)
         return [
             {"table_name": table, "restriction": self._get_restr(table)}
             for table in self.included_tables
             if self._get_restr(table)
         ]
 
+    def _restricted_nodes(self) -> Set[str]:
+        """Get the tables carrying restrictions or files set by this module.
+
+        Usable mid-assembly, where `included_tables` requires a cascade.
+
+        Returns
+        -------
+        Set[str]
+            Names of tables this module has attached cascade data to.
+        """
+        return {
+            table
+            for table, node in self.graph.nodes.items()
+            if not CASCADE_NODE_KEYS.isdisjoint(node)
+        }
+
     @property
     def included_tables(self) -> Set[str]:
-        """Get all tables included in the graph that are included from the cascade."""
+        """Get the tables a cascade reached, as those carrying cascade data.
+
+        Keyed on cascade attributes, not `visited`, so tables restricted by
+        `_graph_union` count despite never having been traversed. Node
+        truthiness cannot serve: `Dependencies.load` gives every table of every
+        loaded schema a `primary_key`, returning the whole database.
+        """
         if not self.cascaded:
-            return {}
-        return set([table for table, node in self.graph.nodes.items() if node])
+            return set()
+        return self._restricted_nodes()
 
 
 class RestrGraph(AbstractGraph):
@@ -837,8 +1138,11 @@ class RestrGraph(AbstractGraph):
         skip_external : bool, optional
             Whether to skip tables outside of spyglass during cascade. Default
             True. Set to False to continue the cascade into non-spyglass tables.
+        **kwargs : dict
+            Passed to `AbstractGraph`, notably `graph` to build from an already
+            loaded dependency graph rather than reloading one.
         """
-        super().__init__(seed_table, verbose=verbose)
+        super().__init__(seed_table, verbose=verbose, **kwargs)
         self.include_files = include_files
         self.skip_external = skip_external
 
@@ -1014,6 +1318,9 @@ class RestrGraph(AbstractGraph):
             # Then combine results with __add__
             self.cascaded = True  # set now so can be added with (+)
             cascaded_leaves = []
+            # Chained forward: each leaf inherits the prior FreeTables, saving
+            # a heading query per table. Restrictions are stripped on copy
+            shared_graph = self.graph
             for table in tqdm(
                 to_visit,
                 desc="RestrGraph: cascading restrictions",
@@ -1022,6 +1329,7 @@ class RestrGraph(AbstractGraph):
             ):
                 leaf_graph = RestrGraph(
                     seed_table=self.seed_table,
+                    graph=shared_graph,  # Share one load across the leaves
                     leaves=[
                         {
                             "table_name": table,
@@ -1035,6 +1343,7 @@ class RestrGraph(AbstractGraph):
                     skip_external=self.skip_external,
                 )
                 cascaded_leaves.append(leaf_graph)
+                shared_graph = leaf_graph.graph
             logger.debug("adding cascaded leaves")
             self = self + cascaded_leaves
 
@@ -1079,6 +1388,7 @@ class RestrGraph(AbstractGraph):
                 include_files=self.include_files,
                 cascade=False,
                 verbose=self.verbose,
+                skip_external=self.skip_external,
             )
 
         table_dicts = []
@@ -1108,6 +1418,7 @@ class RestrGraph(AbstractGraph):
             include_files=self.include_files,
             cascade=False,
             verbose=self.verbose,
+            skip_external=self.skip_external,  # else stops short of externals
         )
 
     def __and__(self, other: "RestrGraph") -> "RestrGraph":
@@ -1117,22 +1428,18 @@ class RestrGraph(AbstractGraph):
         return self._graph_intersect(other)
 
     def whitelist(self, other: "RestrGraph") -> "RestrGraph":
-        """
-        Return a new RestrGraph restricted to the intersect of both graphs.
-
-        This is a convenience alias for the bitwise AND operator
-        (``self & other``) and has identical semantics and return value.
+        """Alias for ``self & other``.
 
         Parameters
         ----------
         other : RestrGraph
             Another RestrGraph whose restrictions will be intersected with
             this one.
+
         Returns
         -------
         RestrGraph
-            A new RestrGraph representing the intersection of ``self`` and
-            ``other``.
+            The intersection of ``self`` and ``other``.
         """
         return self & other
 
@@ -1151,11 +1458,14 @@ class RestrGraph(AbstractGraph):
 
             self._set_node(table, "restr_list", new_restr_list)
             ft = self._get_ft(table)
+            # Relational, not `_combine_restr`: a string union stays truthy
+            # when it selects nothing, and `as_dict` would keep the empty table
             restriction = self._coerce_to_condition(ft, ft & new_restr_list)
             self._set_node(table, "restr", restriction)
         return self
 
     def _graph_union_list(self, other: "List") -> "RestrGraph":
+        """Merge the restrictions of several cascaded graphs into this one."""
         if not all(isinstance(x, RestrGraph) for x in other):
             raise TypeError("All items in list must be RestrGraph objects.")
         if not self.cascaded and all([x.cascaded for x in other]):
@@ -1206,8 +1516,8 @@ class RestrGraph(AbstractGraph):
 
         1. For any table fk'ing AnalysisNwbfile, add files to node.
         2. For both raw and analysis files, add restrictions to externals tables
-            Uses dj_config['stores'] to determine resolve roots present in the
-            externals tables.
+            Paths come from the externals tables themselves, see
+            `_external_paths`, so no file is touched on disk.
         """
         if not self.include_files:  # Skip if not needed
             return  # if _hash_upstream, may cause 'missing node' error
@@ -1226,8 +1536,6 @@ class RestrGraph(AbstractGraph):
         if not {raw_ext, analysis_ext}.issubset(self.graph.nodes):
             return  # Skip if externals not in graph
 
-        stores = dj_config["stores"]
-
         def set_external(external, file_list=None):
             """Set restriction on external table."""
             if not file_list:
@@ -1240,23 +1548,48 @@ class RestrGraph(AbstractGraph):
             tbl = raw_ext if external == "raw" else analysis_ext
             self._set_restr(tbl, restr)
 
-        analysis_abs_paths = self._get_ft(
-            self.analysis_file_tbl.full_table_name, with_restr=True
-        ).fetch("analysis_file_abs_path")
-        analysis_paths = [
-            str(Path(p).relative_to(stores["analysis"]["location"]))
-            for p in analysis_abs_paths
-        ]
-        set_external("analysis", analysis_paths)
+        set_external(
+            "analysis",
+            self._external_paths(
+                self.analysis_file_tbl.full_table_name,
+                "analysis_file_abs_path",
+                "analysis",
+            ),
+        )
+        set_external(
+            "raw",
+            self._external_paths(
+                "`common_nwbfile`.`nwbfile`", "nwb_file_abs_path", "raw"
+            ),
+        )
 
-        raw_abs_paths = self._get_ft(
-            "`common_nwbfile`.`nwbfile`", with_restr=True
-        ).fetch("nwb_file_abs_path")
-        raw_paths = [
-            str(Path(p).relative_to(stores["raw"]["location"]))
-            for p in raw_abs_paths
-        ]
-        set_external("raw", raw_paths)
+    def _external_paths(
+        self, table_name: str, filepath_attr: str, store: str
+    ) -> List[str]:
+        """Get store-relative paths of the files a restricted table references.
+
+        Read from the external table by hash, not fetched from the file table:
+        fetching a filepath attribute makes DataJoint resolve, stat and
+        checksum every file, so a drifted checksum would fail the cascade.
+
+        Parameters
+        ----------
+        table_name : str
+            Name of the file table, e.g. `common_nwbfile`.`nwbfile`.
+        filepath_attr : str
+            Name of that table's filepath attribute, which stores the hash
+            keying the external table.
+        store : str
+            Store name, `raw` or `analysis`.
+
+        Returns
+        -------
+        List[str]
+            Paths relative to the store's root, for the restricted rows.
+        """
+        ft = self._get_ft(table_name, with_restr=True)
+        external = self.file_externals[store]
+        return list((external & ft.proj(hash=filepath_attr)).fetch("filepath"))
 
     @property
     def file_dict(self) -> Dict[str, List[str]]:
@@ -1370,6 +1703,9 @@ class TableChain(RestrGraph):
             Useful for excluding peripheral tables or other unwanted nodes.
         verbose : bool, optional
             Whether to print verbose output. Default False.
+        **kwargs : dict
+            Passed to `RestrGraph`, notably `graph` to build from an already
+            loaded dependency graph rather than reloading one.
         """
         self.parent = ensure_names(parent)
         self.child = ensure_names(child)
@@ -1378,7 +1714,7 @@ class TableChain(RestrGraph):
             raise ValueError("Parent or child table required.")
 
         seed_table = parent if isinstance(parent, Table) else child
-        super().__init__(seed_table=seed_table, verbose=verbose)
+        super().__init__(seed_table=seed_table, verbose=verbose, **kwargs)
 
         self._ignore_peripheral(except_tables=[self.parent, self.child])
         self._ignore_outside_spy(except_tables=[self.parent, self.child])
