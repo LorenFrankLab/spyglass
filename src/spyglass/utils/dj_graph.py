@@ -152,20 +152,11 @@ class AbstractGraph(ABC):
         self.connection = seed_table.connection
 
         if graph is None:
-            # `force=False`: registering a schema clears the dependency graph,
-            # so a reload still happens whenever one is genuinely needed.
-            seed_table.connection.dependencies.load(force=False)
+            # Reload once per independent graph.
+            seed_table.connection.dependencies.load()
             graph = seed_table.connection.dependencies
 
-        # `copy` rather than `deepcopy`: it gives fresh node attribute dicts,
-        # which is all that is needed to keep this graph's restrictions its
-        # own, without duplicating every attribute value. It also drops the
-        # connection, which cannot be deep-copied.
-        self.graph = graph.copy()
-        # `copy` carries no custom attributes, so the copy reports itself as
-        # unloaded. `ancestors`/`descendants` call `load(force=False)`, which
-        # would then try to query through the connection the copy does not
-        # have. The copied data is loaded, so say so.
+        self.graph = graph.copy()  # deep copy not needed, no custom attrs
         self.graph._loaded = True
         for _, node in self.graph.nodes(data=True):
             for key in CASCADE_NODE_KEYS:  # Inherit structure, not restrictions
