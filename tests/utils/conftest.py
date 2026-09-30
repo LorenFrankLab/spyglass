@@ -355,6 +355,88 @@ def two_parent_tables(SpyglassMixin, dj_conn):
 
 
 @pytest.fixture(scope="function")
+def nullable_link_tables(SpyglassMixin, dj_conn):
+    """Child whose composite foreign key is nullable, with a partial NULL row.
+
+    MySQL accepts a foreign key row in which only some of the linking columns
+    are NULL, and such a row has no parent at all. Copying a parent's condition
+    on a linking column to the child therefore reaches rows the semijoin
+    excludes. `nl_a = 1` matches two parents, whose only child is `nl_child_id
+    = 0`; a copy of the condition would also take `nl_child_id = 1`.
+    """
+    schema = dj.Schema("test_nullable_link", connection=dj_conn)
+
+    @schema
+    class NlParent(SpyglassMixin, dj.Lookup):
+        definition = """
+        nl_a: int
+        nl_b: int
+        ---
+        nl_parent_attr: int
+        """
+        contents = [(1, 1, 10), (1, 2, 11), (2, 1, 12)]
+
+    @schema
+    class NlChild(SpyglassMixin, dj.Manual):
+        definition = """
+        nl_child_id: int
+        ---
+        -> [nullable] NlParent
+        nl_child_attr: int
+        """
+
+    NlChild().insert(
+        [
+            {"nl_child_id": 0, "nl_a": 1, "nl_b": 1, "nl_child_attr": 20},
+            # Partial NULL: parentless, yet matches a copied `nl_a = 1`
+            {"nl_child_id": 1, "nl_a": 1, "nl_b": None, "nl_child_attr": 21},
+            {"nl_child_id": 2, "nl_a": 2, "nl_b": 1, "nl_child_attr": 22},
+        ],
+        skip_duplicates=True,
+    )
+
+    yield {"NlParent": NlParent(), "NlChild": NlChild()}
+
+    schema.drop(force=True)
+
+
+@pytest.fixture(scope="function")
+def quoted_key_tables(SpyglassMixin, dj_conn):
+    """Parent whose primary key holds a double quote, plus a child.
+
+    `prep_value` wraps a string in double quotes while escaping only `%` and
+    `\\`, so restating such a key as a literal condition ends the literal
+    early and the condition no longer parses. Cascading up from the child
+    derives the parent's restriction as a query expression, which is where
+    flattening would otherwise try to restate it.
+    """
+    schema = dj.Schema("test_quoted_key", connection=dj_conn)
+
+    @schema
+    class DqParent(SpyglassMixin, dj.Lookup):
+        definition = """
+        dq_name: varchar(32)
+        ---
+        dq_parent_attr: int
+        """
+        contents = [("plain", 1), ('has"quote', 2)]
+
+    @schema
+    class DqChild(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> DqParent
+        dq_child_id: int
+        ---
+        dq_child_attr: int
+        """
+        contents = [("plain", 0, 10), ('has"quote', 1, 11)]
+
+    yield {"DqParent": DqParent(), "DqChild": DqChild()}
+
+    schema.drop(force=True)
+
+
+@pytest.fixture(scope="function")
 def mutable_graph_tables(SpyglassMixin, dj_conn):
     """Small parent/child schema that tests may insert into.
 

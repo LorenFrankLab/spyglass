@@ -371,16 +371,36 @@ def test_reject_trivially_true(export_tbls):
     ExportSelection, _ = export_tbls
     shared = "`common_position`.`track_graph`"
 
-    for form in ("(True)", "True", "(1)", "1"):
+    # `((TRUE))` is what `Table & "TRUE"` logs: the string is wrapped in an
+    # AndList, and `make_condition` parenthesizes each level.
+    for form in ("(True)", "True", "(1)", "1", "((TRUE))"):
         with pytest.raises(ValueError) as err:
             ExportSelection._reject_trivially_true(
                 shared, ["track_graph_name = 'a'", form], key={"export_id": 1}
             )
         assert shared in str(err.value), "Error should name the table"
+        assert "'export_id': 1" in str(
+            err.value
+        ), "Error should quote the key, to name the rows to inspect"
 
     ExportSelection._reject_trivially_true(  # clean list must not raise
         shared, ["track_graph_name = 'a'", "track_graph_name = 'b'"]
     )
+
+
+def test_condense_restrictions_passes_key(export_tbls):
+    """The rejection raised while condensing names the rows to inspect."""
+    ExportSelection, _ = export_tbls
+    shared = "`common_position`.`track_graph`"
+
+    with pytest.raises(ValueError) as err:
+        ExportSelection._condense_restrictions(
+            shared, ["track_graph_name = 'a'", "True"], key={"paper_id": "p"}
+        )
+
+    assert "'paper_id': 'p'" in str(
+        err.value
+    ), "Condensing dropped the export key on the way to the rejection"
 
 
 def test_allow_trivially_true_custom(export_tbls):

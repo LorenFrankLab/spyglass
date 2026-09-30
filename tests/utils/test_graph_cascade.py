@@ -23,6 +23,13 @@ def AbstractGraph():
     return AbstractGraph
 
 
+@pytest.fixture(scope="session")
+def TableChain():
+    from spyglass.utils.dj_graph import TableChain
+
+    return TableChain
+
+
 def cascade_signature(graph):
     """Return {table_name: sorted primary keys} for every restricted table.
 
@@ -292,6 +299,84 @@ def test_can_copy_restr_direction(RestrGraph, graph_tables):
     ), "Copy shortcut engaged child -> parent, which over-includes."
 
 
+def test_can_copy_restr_mixed_case_attr(RestrGraph, graph_tables):
+    """A condition naming an unmapped attribute in mixed case blocks the copy.
+
+    MySQL identifiers are case-insensitive, but datajoint's
+    `extract_column_names` matches lowercase names only. `Parent_Id` would
+    otherwise contribute no attribute, the check would see only the mapped
+    `intermediate_id`, and the copied condition would be handed to a table
+    with no `parent_id` column.
+    """
+    graph = RestrGraph(seed_table=graph_tables["PkNode"](), verbose=False)
+    inter = graph_tables["IntermediateNode"].full_table_name
+    pk_node = graph_tables["PkNode"].full_table_name
+    attr_map = {"intermediate_id": "intermediate_id"}
+
+    assert not graph._can_copy_restr(
+        inter,
+        pk_node,
+        "intermediate_id = 5 AND Parent_Id = 4",
+        attr_map,
+        graph._get_ft(inter),
+        graph._get_ft(pk_node),
+    ), "Copy shortcut ignored a mixed-case attribute outside the link."
+
+    assert graph._can_copy_restr(
+        inter,
+        pk_node,
+        "Intermediate_Id = 5",
+        attr_map,
+        graph._get_ft(inter),
+        graph._get_ft(pk_node),
+    ), "Copy shortcut declined a mixed-case spelling of the linking attr."
+
+
+def test_no_copy_across_nullable_link(
+    RestrGraph, AbstractGraph, nullable_link_tables
+):
+    """A nullable link forbids the copy: a partial NULL row has no parent.
+
+    The copy rule rests on every child row referencing an existing parent row,
+    which MySQL does not enforce when only some of the linking columns are set.
+    """
+    parent = nullable_link_tables["NlParent"]
+    child = nullable_link_tables["NlChild"]
+    restr = "nl_a = 1"
+
+    def build():
+        return RestrGraph(
+            seed_table=parent,
+            leaves=[
+                {"table_name": parent.full_table_name, "restriction": restr}
+            ],
+            direction="down",
+            cascade=True,
+            verbose=False,
+        )
+
+    graph = build()
+
+    assert not graph._can_copy_restr(
+        parent.full_table_name,
+        child.full_table_name,
+        restr,
+        {"nl_a": "nl_a", "nl_b": "nl_b"},
+        graph._get_ft(parent.full_table_name) & restr,
+        graph._get_ft(child.full_table_name),
+    ), "Copy shortcut engaged across a nullable foreign key."
+
+    reached = graph._get_ft(child.full_table_name, with_restr=True).fetch(
+        "nl_child_id"
+    )
+    assert set(reached) == {0}, (
+        "Cascade reached a parentless child row; expected only the row whose "
+        f"parent matches, got {sorted(reached)}"
+    )
+
+    assert_cascade_parity(AbstractGraph, build, "nullable link")
+
+
 def test_bridge_up_excludes_unreferenced_parents(RestrGraph, graph_tables):
     """Cascading up must not reach parent rows no restricted child references.
 
@@ -393,6 +478,67 @@ def test_flatten_respects_row_cap(RestrGraph, graph_tables):
     ), "Row cap changed which rows the cascade reached."
 
 
+@pytest.mark.parametrize(
+    "keys, expect, msg",
+    [
+        ([{"a": 1, "b": "plain"}], False, "ints and plain strings"),
+        ([{"a": 0.1}], True, "float literal need not compare equal"),
+        ([{"a": 1}, {"a": 2.5}], True, "float in a later key"),
+        ([{"a": 'has"quote'}], True, "double quote ends the literal early"),
+        ([{"a": b"bytes"}], True, "bytes render as a python repr"),
+        ([{"a": True}], False, "bools are integral"),
+        ([{"a": None}], False, "None becomes IS NULL"),
+    ],
+)
+def test_keys_unsafe_to_literalize(AbstractGraph, keys, expect, msg):
+    """Values whose equality literal is not an exact stand-in keep the subquery.
+
+    `make_condition` writes one equality literal per key value. For a FLOAT the
+    printed decimal need not compare equal to the stored value, and for a string
+    holding a double quote the literal does not even parse.
+    """
+    got = AbstractGraph._keys_unsafe_to_literalize(keys)
+    assert got is expect, f"Misjudged {msg}: got {got}"
+
+
+def test_flatten_keeps_unsafe_string_relational(
+    RestrGraph, AbstractGraph, quoted_key_tables
+):
+    """A key holding a double quote must not be restated as a literal.
+
+    `prep_value` escapes `%` and `\\` but not `"`, so the literal ends early
+    and the condition no longer parses.
+    """
+    parent = quoted_key_tables["DqParent"]
+    child = quoted_key_tables["DqChild"]
+
+    def build():
+        return RestrGraph(
+            seed_table=child,
+            leaves=[
+                {
+                    "table_name": child.full_table_name,
+                    "restriction": "dq_child_attr > 9",
+                }
+            ],
+            direction="up",
+            cascade=True,
+            verbose=False,
+        )
+
+    graph = build()
+    got = graph._get_restr(parent.full_table_name)
+
+    assert not isinstance(
+        got, str
+    ), f"Unsafe key was inlined as a literal: {got}"
+    assert (
+        len(graph._get_ft(parent.full_table_name, with_restr=True)) == 2
+    ), "Declining to flatten changed which rows the cascade reached."
+
+    assert_cascade_parity(AbstractGraph, build, "quoted key")
+
+
 def test_enforce_restr_strings(RestrGraph, graph_tables):
     """Every restriction becomes a string, selecting the same rows.
 
@@ -449,6 +595,33 @@ def test_merged_string_restrs_stay_strings(RestrGraph, graph_tables):
 
     assert isinstance(got, str), f"Union of conditions nested, got {type(got)}"
     assert len(Parent & got) == 2, "Union of conditions lost rows."
+
+
+def test_union_drops_empty_restrs(RestrGraph, graph_tables):
+    """A merged union selecting nothing must not survive as a table entry.
+
+    `_graph_union_list` keeps the merged restriction relational for this: a
+    string union is truthy however few rows it selects, so
+    `enforce_restr_strings` would stop reducing a no-op union to `False` and
+    `as_dict` -- hence `Export.Table` -- would gain a row per empty table.
+    """
+    PkNode = graph_tables["PkNode"]()
+    SkNode = graph_tables["SkNode"]()
+    graph = RestrGraph(
+        seed_table=PkNode,
+        leaves=[
+            # Disjoint from every SkNode row, so their shared descendants
+            # merge to a union selecting nothing.
+            {"table_name": PkNode.full_table_name, "restriction": "pk_id = 99"},
+            {"table_name": SkNode.full_table_name, "restriction": "sk_id = 99"},
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+    graph.enforce_restr_strings()
+
+    assert not graph.as_dict, f"Empty unions kept as entries: {graph.as_dict}"
 
 
 def test_duplicate_restrs_deduped(RestrGraph, graph_tables):
@@ -742,6 +915,35 @@ def test_empty_table_then_populated(RestrGraph, mutable_graph_tables):
     ), "Cascade treated a repopulated table as still empty."
 
 
+def test_recascade_sees_new_rows(TableChain, mutable_graph_tables):
+    """Emptiness is only invariant within one cascade, not for a graph's life.
+
+    Unlike `test_empty_table_then_populated`, which builds a fresh graph each
+    time, this cascades the *same* graph twice -- what `TableChain.cascade` and
+    `add_leaf(cascade=True)` do -- so a cache held for the graph's life would
+    still report the child empty.
+    """
+    parent = mutable_graph_tables["MutParent"]
+    child = mutable_graph_tables["MutChild"]
+
+    child.delete_quick()
+
+    chain = TableChain(parent=parent, child=child, direction="down")
+    chain.cascade(restriction="mut_id < 2")
+
+    assert (
+        len(chain._get_ft(child.full_table_name, with_restr=True)) == 0
+    ), "Fixture assumption changed: child should be empty."
+
+    child.insert([(0, 20), (1, 21)], skip_duplicates=True)
+
+    chain.cascade(restriction="mut_id < 2")
+
+    assert (
+        len(chain._get_ft(child.full_table_name, with_restr=True)) == 2
+    ), "Re-cascade served a cached emptiness result from before the inserts."
+
+
 def test_redeclared_table_heading(RestrGraph, redeclare_table):
     """A dropped and re-created table must not be served a stale heading.
 
@@ -929,6 +1131,43 @@ def test_as_dict_quiet_when_cascaded(RestrGraph, graph_tables, caplog):
         _, _ = graph.as_dict, graph.as_dict
 
     assert "Already cascaded" not in caplog.text, "Narrated a routine read."
+
+
+# --------------------------- Whole-table restrictions ---------------------------
+
+WHOLE_TABLE_LOG = "Whole-table restriction"
+
+
+def test_log_whole_table_on_shared(RestrGraph, Nwbfile, caplog):
+    """A restriction matching every row of a shared table is logged."""
+    graph = RestrGraph(seed_table=Nwbfile, verbose=True)
+
+    with caplog.at_level("INFO", logger="spyglass"):
+        graph._set_restr(Nwbfile.full_table_name, True)
+
+    assert (
+        WHOLE_TABLE_LOG in caplog.text
+    ), "Whole-table restriction on a shared table went unreported."
+
+
+def test_no_log_on_search_placeholder(TableChain, Nwbfile, caplog):
+    """The search placeholder must not read as a whole-table restriction.
+
+    `TableChain.__init__` seeds a search leaf with `True` before the search
+    runs, and `Nwbfile` is shared, so a check on the restriction alone reports
+    breadth no caller asked for.
+    """
+    with caplog.at_level("INFO", logger="spyglass"):
+        TableChain(
+            child=Nwbfile,
+            search_restr="nwb_file_name LIKE '%.nwb'",
+            cascade=False,
+            verbose=True,
+        )
+
+    assert (
+        WHOLE_TABLE_LOG not in caplog.text
+    ), "Reported the placeholder restriction of an unfinished search."
 
 
 # ----------------------------- Edge resolution ----------------------------------
