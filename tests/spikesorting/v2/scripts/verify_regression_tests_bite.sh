@@ -3,18 +3,28 @@
 # they were written for.
 #
 # For each row below, this script (a) refuses to start if the target
-# production file already has uncommitted changes, (b) applies a one-line
-# revert of the fix straight to that file with a Python in-place edit that
-# asserts its pattern matched exactly once (never a silent no-op), (c) runs
-# the named test node in its own pytest session, (d) restores the file with
-# ``git checkout --`` from a trap, so an interrupted run always restores, and
-# (e) records whether the test FAILED in its call phase (the check bites, as
-# it should), PASSED despite the revert (SURVIVED -- the test does not catch
-# this regression), or ERRORed/SKIPped (INVALID -- inconclusive, not
-# evidence either way). A pytest "failed" caused by a collection or setup
-# error is not evidence the assertion bites, so each run's ``--junitxml`` is
-# inspected for a <failure> in the call phase specifically, not just a
-# non-zero pytest exit code.
+# production file already has uncommitted changes, (b) runs the named test
+# node against the unmodified tree and requires it to PASS -- a test that
+# already fails, errors or skips proves nothing about the revert, so that row
+# is INVALID ("baseline did not pass") and its revert is never applied, (c)
+# applies a one-line revert of the fix straight to that file with a Python
+# in-place edit that asserts its pattern matched exactly once (never a silent
+# no-op), (d) runs the same test node again in its own pytest session, (e)
+# restores the file with ``git checkout --`` (also from a trap, so an
+# interrupted run always restores), and (f) classifies the reverted run from
+# its ``--junitxml`` report, not from pytest's exit code:
+#
+#   PASS-OF-THE-CHECK  the call phase failed with an AssertionError -- the
+#                      test's assertion caught the regression, as it should.
+#   SURVIVED           the call phase passed despite the revert -- the test
+#                      does not catch this regression. A teardown error after
+#                      a passing call is noted but does not change this: the
+#                      verdict is about the call phase.
+#   INVALID            inconclusive, not evidence either way: the baseline
+#                      did not pass; the call phase raised something other
+#                      than an AssertionError (ImportError, NameError,
+#                      AttributeError, ...); setup or collection errored; the
+#                      test was skipped; or the report held no single test.
 #
 #   1. src/spyglass/spikesorting/v2/_sorting_dispatch.py -- drop
 #      ``seed=random_seed`` from ``pinned_whiten``'s ``sip.whiten`` call, so
@@ -33,17 +43,32 @@
 #      write, so the reloaded recording's channel geometry is never
 #      persisted.
 #
+# This script never creates, modifies or deletes the developer's DataJoint
+# config. The test session's ``dj_config`` fixture writes
+# ``dj_local_conf.json`` (deleting any existing one first) into pytest's
+# current working directory, so every pytest session here runs from a
+# private directory inside the script's temporary directory, with absolute
+# paths for the test node, ``--rootdir``, ``-c <repo>/pyproject.toml`` (the
+# repository's addopts and markers still apply) and ``--base-dir``. The
+# temporary directory, and the config written into it, is removed on exit.
+# ``<repo>/src`` is put first on PYTHONPATH so the session imports the
+# ``spyglass`` package whose files this script reverts, even when an
+# editable install of another checkout is present.
+#
 # This script is run manually, not by CI, after touching any of the four
 # files above or periodically as a suite-health check. It needs the v2 test
 # environment and a database (regression #4 needs a real DataJoint
 # connection and ``tests/_data/raw/minirec20230622.nwb``; it is slow).
 #
-# Usage (from the repo root, v2 env active):
+# Usage (from any directory, v2 env active):
 #     source ~/spyglass_v2_env.sh
 #     bash tests/spikesorting/v2/scripts/verify_regression_tests_bite.sh \
 #       [--container-name NAME] [--container-port PORT]
 #
 # Defaults: --container-name spyglass-pytest-bite, --container-port 33099.
+# Exit status: 0 only when every row is PASS-OF-THE-CHECK and all target
+# files are clean afterwards; 1 otherwise; 2 on bad arguments or a dirty
+# target file at start.
 
 set -euo pipefail
 
@@ -71,8 +96,6 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-WORK_DIR=$(mktemp -d)
-
 # Parallel arrays (indices 0-3), one entry per regression.
 FILES=(
   "src/spyglass/spikesorting/v2/_sorting_dispatch.py"
@@ -94,6 +117,25 @@ DESCRIPTIONS=(
 )
 
 # ---------------------------------------------------------------------------
+# Always restore whichever file is currently reverted and remove the
+# temporary directory, even on Ctrl-C or an unexpected error. Registered
+# before anything is created so no exit path leaks the temporary directory.
+# ---------------------------------------------------------------------------
+CURRENT_FILE=""
+WORK_DIR=""
+# shellcheck disable=SC2329  # invoked by the trap below
+cleanup() {
+  if [ -n "$CURRENT_FILE" ]; then
+    git checkout -- "$CURRENT_FILE"
+    CURRENT_FILE=""
+  fi
+  if [ -n "$WORK_DIR" ]; then
+    rm -rf "$WORK_DIR"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+# ---------------------------------------------------------------------------
 # (a) Refuse to start if any target file already has uncommitted changes.
 # Scoped to exactly these four files -- never touches, checks, or reports on
 # any other path in the working tree.
@@ -105,8 +147,14 @@ if [ -n "$dirty" ]; then
   exit 2
 fi
 
+WORK_DIR=$(mktemp -d)
+# pytest's working directory. The session's dj_config fixture writes
+# dj_local_conf.json here, never into the repository.
+RUN_DIR="$WORK_DIR/pytest-cwd"
+mkdir "$RUN_DIR"
+
 # ---------------------------------------------------------------------------
-# (b) One-line reverts. Each is a Python in-place edit that asserts its
+# (c) One-line reverts. Each is a Python in-place edit that asserts its
 # pattern matched exactly once; a match count of 0 or >1 raises and aborts
 # the whole script (via set -e) rather than silently doing nothing or
 # reverting the wrong thing.
@@ -176,49 +224,103 @@ PY
 }
 
 # ---------------------------------------------------------------------------
-# (e) Always restore whichever file is currently reverted, even on Ctrl-C or
-# an unexpected error.
+# Run one test node in its own pytest session from RUN_DIR (never the
+# repository root) and write its junitxml report. Prints pytest's output;
+# returns pytest's exit status.
 # ---------------------------------------------------------------------------
-CURRENT_FILE=""
-cleanup() {
-  if [ -n "$CURRENT_FILE" ]; then
-    git checkout -- "$CURRENT_FILE"
-    CURRENT_FILE=""
-  fi
-  rm -rf "$WORK_DIR"
+run_node() { # node xml_path
+  (
+    cd "$RUN_DIR"
+    PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
+      python -m pytest \
+      -c "$REPO_ROOT/pyproject.toml" --rootdir="$REPO_ROOT" \
+      -p no:xvfb --no-dlc --no-cov \
+      --base-dir="$REPO_ROOT/tests/_data/" -q -x -rs \
+      --container-name "$CONTAINER_NAME" --container-port "$CONTAINER_PORT" \
+      --junitxml="$2" \
+      "$REPO_ROOT/$1"
+  )
 }
-trap cleanup EXIT INT TERM
 
-# Parse a junitxml report for the single testcase's outcome. Prints one of
-# FAILED_IN_CALL / SURVIVED / ERROR / SKIPPED / NO_TESTCASE.
+# Parse a junitxml report for one test node's outcome. Prints
+# "<KIND><TAB><detail>", KIND being one of PASSED / PASSED_TEARDOWN_ERROR /
+# FAILED_ASSERTION / FAILED_OTHER / ERROR / SKIPPED / NO_TESTCASE.
+#
+# pytest's junitxml writer records a call-phase failure as <failure> whose
+# message is the crash's exception text: "AssertionError: ..." for an
+# assertion with a message or from numpy.testing, or the bare "assert ..."
+# for a plain rewritten assert. Anything else in a <failure> is a different
+# exception type. Setup and teardown errors are <error> elements whose
+# message starts "failed on setup with" / "failed on teardown with";
+# collection errors are "collection failure". A call failure followed by a
+# teardown error is written as two <testcase> elements for the same test.
 classify_junit() { # xml_path
   python3 - "$1" <<'PY'
+import re
 import sys
 import xml.etree.ElementTree as ET
 
+
+def emit(kind, detail=""):
+    detail = " ".join(detail.split())[:240]
+    print(f"{kind}\t{detail}")
+    raise SystemExit
+
+
+def first_line(message):
+    lines = (message or "").strip().splitlines()
+    return lines[0] if lines else ""
+
+
 try:
     root = ET.parse(sys.argv[1]).getroot()
-except ET.ParseError:
-    print("NO_TESTCASE")
-    raise SystemExit
+except (ET.ParseError, OSError):
+    emit("NO_TESTCASE", "no readable junitxml report")
 
 cases = root.findall(".//testcase")
-if len(cases) != 1:
-    print("NO_TESTCASE")
-    raise SystemExit
+failures = [el for case in cases for el in case.findall("failure")]
+errors = [el for case in cases for el in case.findall("error")]
+skips = [el for case in cases for el in case.findall("skipped")]
+teardown_errors = [
+    el
+    for el in errors
+    if el.get("message", "").startswith("failed on teardown")
+]
+other_errors = [el for el in errors if el not in teardown_errors]
 
-case = cases[0]
-if case.find("failure") is not None:
-    print("FAILED_IN_CALL")
-elif case.find("error") is not None:
-    print("ERROR")
-elif case.find("skipped") is not None:
-    print("SKIPPED")
-else:
-    print("SURVIVED")
+note = ""
+if teardown_errors:
+    note = (
+        " (teardown also errored: "
+        + first_line(teardown_errors[0].get("message"))
+        + ")"
+    )
+
+# A collection error can be reported under more than one <testcase> name
+# (with -x, pytest adds a session-level "collection failure" with an empty
+# name beside the module's), so errors are classified before the one-test
+# check.
+if other_errors:
+    emit("ERROR", first_line(other_errors[0].get("message")) + note)
+
+tests = {(case.get("classname"), case.get("name")) for case in cases}
+if len(tests) != 1:
+    emit("NO_TESTCASE", f"expected one test in the report, found {len(tests)}")
+
+if skips:
+    emit("SKIPPED", first_line(skips[0].get("message")) + note)
+if failures:
+    message = failures[0].get("message", "")
+    if re.match(r"(AssertionError\b|assert )", message):
+        emit("FAILED_ASSERTION", first_line(message) + note)
+    emit("FAILED_OTHER", first_line(message) + note)
+if teardown_errors:
+    emit("PASSED_TEARDOWN_ERROR", note.strip())
+emit("PASSED")
 PY
 }
 
+BASELINE_LABELS=()
 RESULT_LABELS=()
 RESULT_DETAILS=()
 ANY_BAD=0
@@ -228,6 +330,7 @@ for i in 0 1 2 3; do
   file="${FILES[$i]}"
   node="${TEST_NODES[$i]}"
   desc="${DESCRIPTIONS[$i]}"
+  baseline_xml="$WORK_DIR/regression_${n}_baseline.xml"
   xml="$WORK_DIR/regression_${n}.xml"
 
   echo
@@ -235,16 +338,34 @@ for i in 0 1 2 3; do
   echo "target: $file"
   echo "test:   $node"
 
+  # (b) The same node must pass on the unmodified tree first.
+  echo "--- baseline (unmodified tree) ---"
+  set +e
+  run_node "$node" "$baseline_xml"
+  pytest_rc=$?
+  set -e
+  classified=$(classify_junit "$baseline_xml")
+  kind=${classified%%$'\t'*}
+  detail=${classified#*$'\t'}
+  if [ "$kind" != "PASSED" ]; then
+    BASELINE_LABELS+=("FAIL")
+    RESULT_LABELS+=("INVALID")
+    RESULT_DETAILS+=("baseline did not pass ($kind, pytest exit $pytest_rc${detail:+: $detail}) -- revert not applied")
+    ANY_BAD=1
+    echo "result: INVALID -- baseline did not pass ($kind); revert not applied"
+    continue
+  fi
+  BASELINE_LABELS+=("pass")
+  echo "baseline passed"
+
+  # (c)-(e) Revert, rerun, restore.
+  echo "--- reverted ---"
   apply_revert "$i"
   CURRENT_FILE="$file"
   echo "reverted (pattern matched exactly once)"
 
   set +e
-  python -m pytest -p no:xvfb --no-dlc --no-cov \
-    --base-dir=./tests/_data/ -q -x -rs \
-    --container-name "$CONTAINER_NAME" --container-port "$CONTAINER_PORT" \
-    --junitxml="$xml" \
-    "$node"
+  run_node "$node" "$xml"
   pytest_rc=$?
   set -e
 
@@ -252,31 +373,39 @@ for i in 0 1 2 3; do
   CURRENT_FILE=""
   echo "restored $file (pytest exit $pytest_rc)"
 
-  outcome=$(classify_junit "$xml")
-  case "$outcome" in
-    FAILED_IN_CALL)
+  # (f) Classify the reverted run.
+  classified=$(classify_junit "$xml")
+  kind=${classified%%$'\t'*}
+  detail=${classified#*$'\t'}
+  case "$kind" in
+    FAILED_ASSERTION)
       label="PASS-OF-THE-CHECK"
-      detail="test failed in its call phase, as required"
+      detail="assertion failed in the call phase, as required${detail:+: $detail}"
       ;;
-    SURVIVED)
+    PASSED | PASSED_TEARDOWN_ERROR)
       label="SURVIVED"
       ANY_BAD=1
-      detail="test PASSED despite the revert -- it does not catch this regression"
+      detail="test PASSED despite the revert -- it does not catch this regression${detail:+ $detail}"
+      ;;
+    FAILED_OTHER)
+      label="INVALID"
+      ANY_BAD=1
+      detail="call phase raised a non-assertion exception, not evidence the assertion bites: $detail"
       ;;
     ERROR)
       label="INVALID"
       ANY_BAD=1
-      detail="test errored (setup/collection), not a call-phase failure"
+      detail="test errored (setup/collection), not a call-phase failure: $detail"
       ;;
     SKIPPED)
       label="INVALID"
       ANY_BAD=1
-      detail="test was skipped -- a skip proves nothing"
+      detail="test was skipped -- a skip proves nothing: $detail"
       ;;
-    NO_TESTCASE)
+    *)
       label="INVALID"
       ANY_BAD=1
-      detail="no single testcase found in the junitxml report (pytest exit $pytest_rc)"
+      detail="$detail (pytest exit $pytest_rc)"
       ;;
   esac
   echo "result: $label -- $detail"
@@ -287,10 +416,11 @@ done
 
 echo
 echo "=== summary ==="
-printf '%-3s %-70s %-20s\n' "#" "regression" "result"
+printf '%-3s %-70s %-9s %-20s\n' "#" "regression" "baseline" "result"
 for i in 0 1 2 3; do
   n=$((i + 1))
-  printf '%-3s %-70s %-20s\n' "$n" "${DESCRIPTIONS[$i]}" "${RESULT_LABELS[$i]}"
+  printf '%-3s %-70s %-9s %-20s\n' "$n" "${DESCRIPTIONS[$i]}" \
+    "${BASELINE_LABELS[$i]}" "${RESULT_LABELS[$i]}"
   echo "    ${RESULT_DETAILS[$i]}"
 done
 
@@ -304,8 +434,9 @@ fi
 
 echo
 if [ "$ANY_BAD" -eq 0 ]; then
-  echo "all four regression tests bite: each failed in its call phase" \
-    "when its fix was reverted, and all target files are clean."
+  echo "all four regression tests bite: each passed on the unmodified tree" \
+    "and failed an assertion in its call phase when its fix was reverted," \
+    "and all target files are clean."
   exit 0
 else
   echo "one or more regressions did not bite as expected -- see SURVIVED /" \
