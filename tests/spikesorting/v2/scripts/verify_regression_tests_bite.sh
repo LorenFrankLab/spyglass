@@ -271,7 +271,8 @@ run_node() { # node xml_path
 
 # Parse a junitxml report for one test node's outcome. Prints
 # "<KIND><TAB><detail>", KIND being one of PASSED / PASSED_TEARDOWN_ERROR /
-# FAILED_ASSERTION / FAILED_OTHER / ERROR / SKIPPED / NO_TESTCASE.
+# FAILED_ASSERTION / ASSERTION_OUTSIDE_TEST / FAILED_OTHER / ERROR / SKIPPED /
+# NO_TESTCASE.
 #
 # pytest's junitxml writer records a call-phase failure as <failure> whose
 # message is the crash's exception text: "AssertionError: ..." for an
@@ -281,8 +282,17 @@ run_node() { # node xml_path
 # message starts "failed on setup with" / "failed on teardown with";
 # collection errors are "collection failure". A call failure followed by a
 # teardown error is written as two <testcase> elements for the same test.
-classify_junit() { # xml_path
-  python3 - "$1" <<'PY'
+#
+# An AssertionError counts only when it was raised in the test module
+# itself: the <failure> text is pytest's traceback, whose final
+# "<path>:<line>: <ExceptionType>" line names the frame that raised. An
+# assert inside SpikeInterface or production code is not the test's check
+# (numpy.testing's frames are hidden by __tracebackhide__, so its failures
+# point at the calling test line). A relative path there is relative to
+# pytest's working directory.
+classify_junit() { # xml_path test_file pytest_cwd
+  python3 - "$1" "$2" "$3" <<'PY'
+import os
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -338,9 +348,32 @@ if skips:
     emit("SKIPPED", first_line(skips[0].get("message")) + note)
 if failures:
     message = failures[0].get("message", "")
-    if re.match(r"(AssertionError\b|assert )", message):
-        emit("FAILED_ASSERTION", first_line(message) + note)
-    emit("FAILED_OTHER", first_line(message) + note)
+    if not re.match(r"(AssertionError\b|assert )", message):
+        emit("FAILED_OTHER", first_line(message) + note)
+    locations = re.findall(
+        r"^(.+):(\d+): ([A-Za-z_][\w.]*)$",
+        failures[0].text or "",
+        flags=re.MULTILINE,
+    )
+    if not locations:
+        emit(
+            "ASSERTION_OUTSIDE_TEST",
+            "no crash location in the traceback: " + first_line(message) + note,
+        )
+    path, line, exc_type = locations[-1]
+    where = f"{path}:{line}"
+    crash = os.path.realpath(os.path.join(sys.argv[3], path))
+    if exc_type != "AssertionError" or crash != os.path.realpath(sys.argv[2]):
+        emit(
+            "ASSERTION_OUTSIDE_TEST",
+            f"{exc_type} raised at {where}, not in the test module: "
+            + first_line(message)
+            + note,
+        )
+    emit(
+        "FAILED_ASSERTION",
+        f"at {os.path.basename(path)}:{line}: " + first_line(message) + note,
+    )
 if teardown_errors:
     emit("PASSED_TEARDOWN_ERROR", note.strip())
 emit("PASSED")
@@ -356,6 +389,7 @@ for i in 0 1 2 3; do
   n=$((i + 1))
   file="${FILES[$i]}"
   node="${TEST_NODES[$i]}"
+  test_file="$REPO_ROOT/${node%%::*}"
   desc="${DESCRIPTIONS[$i]}"
   baseline_xml="$WORK_DIR/regression_${n}_baseline.xml"
   xml="$WORK_DIR/regression_${n}.xml"
@@ -371,7 +405,7 @@ for i in 0 1 2 3; do
   run_node "$node" "$baseline_xml"
   pytest_rc=$?
   set -e
-  classified=$(classify_junit "$baseline_xml")
+  classified=$(classify_junit "$baseline_xml" "$test_file" "$RUN_DIR")
   kind=${classified%%$'\t'*}
   detail=${classified#*$'\t'}
   if [ "$kind" != "PASSED" ]; then
@@ -408,7 +442,7 @@ for i in 0 1 2 3; do
   echo "restored $file (pytest exit $pytest_rc)"
 
   # (f) Classify the reverted run.
-  classified=$(classify_junit "$xml")
+  classified=$(classify_junit "$xml" "$test_file" "$RUN_DIR")
   kind=${classified%%$'\t'*}
   detail=${classified#*$'\t'}
   case "$kind" in
@@ -420,6 +454,11 @@ for i in 0 1 2 3; do
       label="SURVIVED"
       ANY_BAD=1
       detail="test PASSED despite the revert -- it does not catch this regression${detail:+ $detail}"
+      ;;
+    ASSERTION_OUTSIDE_TEST)
+      label="INVALID"
+      ANY_BAD=1
+      detail="AssertionError not raised by the test's own check: $detail"
       ;;
     FAILED_OTHER)
       label="INVALID"
