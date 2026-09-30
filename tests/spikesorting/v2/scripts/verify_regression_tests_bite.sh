@@ -11,8 +11,8 @@
 # in-place edit that asserts its pattern matched exactly once (never a silent
 # no-op), (d) runs the same test node again in its own pytest session, (e)
 # restores the file with ``git checkout --`` (also from a trap, so an
-# interrupted run always restores), and (f) classifies the reverted run from
-# its ``--junitxml`` report, not from pytest's exit code:
+# interrupted run always restores and then stops), and (f) classifies the
+# reverted run from its ``--junitxml`` report, not from pytest's exit code:
 #
 #   PASS-OF-THE-CHECK  the call phase failed with an AssertionError -- the
 #                      test's assertion caught the regression, as it should.
@@ -120,6 +120,9 @@ DESCRIPTIONS=(
 # Always restore whichever file is currently reverted and remove the
 # temporary directory, even on Ctrl-C or an unexpected error. Registered
 # before anything is created so no exit path leaks the temporary directory.
+# Cleanup runs only from the EXIT trap; SIGINT and SIGTERM just exit (130 /
+# 143), which fires it. A trap that cleaned up and returned would let bash
+# resume the loop and start the next revert.
 # ---------------------------------------------------------------------------
 CURRENT_FILE=""
 WORK_DIR=""
@@ -131,9 +134,12 @@ cleanup() {
   fi
   if [ -n "$WORK_DIR" ]; then
     rm -rf "$WORK_DIR"
+    WORK_DIR=""
   fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # ---------------------------------------------------------------------------
 # (a) Refuse to start if any target file already has uncommitted changes.
