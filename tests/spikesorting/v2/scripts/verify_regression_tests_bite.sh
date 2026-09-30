@@ -67,8 +67,13 @@
 #
 # Defaults: --container-name spyglass-pytest-bite, --container-port 33099.
 # Exit status: 0 only when every row is PASS-OF-THE-CHECK and all target
-# files are clean afterwards; 1 otherwise; 2 on bad arguments or a dirty
-# target file at start.
+# files are clean afterwards; 1 otherwise (including a failed restore); 2 on
+# bad arguments or a dirty target file at start; 130 / 143 when interrupted
+# by SIGINT / SIGTERM, after restoring the reverted file and removing the
+# temporary directory. bash handles those signals once the running command
+# returns: Ctrl-C reaches the whole process group and so stops pytest too,
+# but a SIGTERM sent to the script's process alone takes effect only after
+# the running pytest session finishes.
 
 set -euo pipefail
 
@@ -122,20 +127,38 @@ DESCRIPTIONS=(
 # before anything is created so no exit path leaks the temporary directory.
 # Cleanup runs only from the EXIT trap; SIGINT and SIGTERM just exit (130 /
 # 143), which fires it. A trap that cleaned up and returned would let bash
-# resume the loop and start the next revert.
+# resume the loop and start the next revert (see the exit-status notes in
+# the header for when bash acts on the signal). A failed restore is
+# reported loudly, does not skip removing the temporary directory, and
+# makes the script exit non-zero.
 # ---------------------------------------------------------------------------
 CURRENT_FILE=""
 WORK_DIR=""
+RESTORE_FAILED=0
 # shellcheck disable=SC2329  # invoked by the trap below
 cleanup() {
+  local status=$?
   if [ -n "$CURRENT_FILE" ]; then
-    git checkout -- "$CURRENT_FILE"
-    CURRENT_FILE=""
+    restore_current_file
   fi
   if [ -n "$WORK_DIR" ]; then
     rm -rf "$WORK_DIR"
     WORK_DIR=""
   fi
+  if [ "$RESTORE_FAILED" -ne 0 ] && [ "$status" -eq 0 ]; then
+    exit 1
+  fi
+}
+
+# Restore CURRENT_FILE from git. Never aborts the script; a failure is
+# printed and recorded in RESTORE_FAILED.
+restore_current_file() {
+  if ! git checkout -- "$CURRENT_FILE"; then
+    echo "RESTORE FAILED: $CURRENT_FILE is still reverted; restore it" \
+      "with: git checkout -- $CURRENT_FILE" >&2
+    RESTORE_FAILED=1
+  fi
+  CURRENT_FILE=""
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -160,67 +183,65 @@ RUN_DIR="$WORK_DIR/pytest-cwd"
 mkdir "$RUN_DIR"
 
 # ---------------------------------------------------------------------------
-# (c) One-line reverts. Each is a Python in-place edit that asserts its
-# pattern matched exactly once; a match count of 0 or >1 raises and aborts
-# the whole script (via set -e) rather than silently doing nothing or
-# reverting the wrong thing.
+# (c) One-line reverts. replace_once asserts its pattern matched exactly
+# once; a match count of 0 or >1 raises and aborts the whole script (via
+# set -e) rather than silently doing nothing or reverting the wrong thing.
+# It writes a temporary file beside the target and os.replace()s it into
+# place, so an interrupt leaves either the original or the complete revert,
+# never a truncated file.
 # ---------------------------------------------------------------------------
+replace_once() { # path old new
+  python3 - "$1" "$2" "$3" <<'PY'
+import os
+import sys
+import tempfile
+
+path, old, new = sys.argv[1:4]
+with open(path) as fh:
+    text = fh.read()
+count = text.count(old)
+assert count == 1, f"expected exactly 1 match of {old!r} in {path}, found {count}"
+fd, tmp = tempfile.mkstemp(
+    dir=os.path.dirname(os.path.abspath(path)), prefix=".bite-revert-"
+)
+try:
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text.replace(old, new, 1))
+    os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+    os.replace(tmp, path)
+except BaseException:
+    os.unlink(tmp)
+    raise
+PY
+}
+
 apply_revert() { # index
   local idx=$1
   case "$idx" in
     0)
-      python3 - "${FILES[0]}" <<'PY'
-import sys
-path = sys.argv[1]
-text = open(path).read()
-old = "sip.whiten(recording, dtype=np.float64, seed=random_seed)"
-new = "sip.whiten(recording, dtype=np.float64)"
-count = text.count(old)
-assert count == 1, f"expected exactly 1 match of {old!r}, found {count}"
-open(path, "w").write(text.replace(old, new, 1))
-PY
+      replace_once "${FILES[0]}" \
+        "sip.whiten(recording, dtype=np.float64, seed=random_seed)" \
+        "sip.whiten(recording, dtype=np.float64)"
       ;;
     1)
-      python3 - "${FILES[1]}" <<'PY'
-import sys
-path = sys.argv[1]
-text = open(path).read()
-old = "concatenate_recordings(recordings, ignore_times=True)"
-new = "concatenate_recordings(recordings[::-1], ignore_times=True)"
-count = text.count(old)
-assert count == 1, f"expected exactly 1 match of {old!r}, found {count}"
-open(path, "w").write(text.replace(old, new, 1))
-PY
+      replace_once "${FILES[1]}" \
+        "concatenate_recordings(recordings, ignore_times=True)" \
+        "concatenate_recordings(recordings[::-1], ignore_times=True)"
       ;;
     2)
-      python3 - "${FILES[2]}" <<'PY'
-import sys
-path = sys.argv[1]
-text = open(path).read()
-old = (
-    "                t1 = (\n"
-    "                    float(_segment_times_at(recording, "
-    "np.array([end - 1]))[0])\n"
-    "                    + 1.0 / fs\n"
-    "                )\n"
-)
-new = "                t1 = t0 + (end - first) / fs\n"
-count = text.count(old)
-assert count == 1, f"expected exactly 1 match of {old!r}, found {count}"
-open(path, "w").write(text.replace(old, new, 1))
-PY
+      local old_end
+      old_end=$'                t1 = (\n'
+      old_end+=$'                    float(_segment_times_at(recording, '
+      old_end+=$'np.array([end - 1]))[0])\n'
+      old_end+=$'                    + 1.0 / fs\n'
+      old_end+=$'                )\n'
+      replace_once "${FILES[2]}" "$old_end" \
+        $'                t1 = t0 + (end - first) / fs\n'
       ;;
     3)
-      python3 - "${FILES[3]}" <<'PY'
-import sys
-path = sys.argv[1]
-text = open(path).read()
-old = "        _persist_channel_geometry(\n"
-new = "        (lambda *a, **k: None)(\n"
-count = text.count(old)
-assert count == 1, f"expected exactly 1 match of {old!r}, found {count}"
-open(path, "w").write(text.replace(old, new, 1))
-PY
+      replace_once "${FILES[3]}" \
+        $'        _persist_channel_geometry(\n' \
+        $'        (lambda *a, **k: None)(\n'
       ;;
     *)
       echo "apply_revert: bad index $idx" >&2
@@ -366,8 +387,12 @@ for i in 0 1 2 3; do
 
   # (c)-(e) Revert, rerun, restore.
   echo "--- reverted ---"
-  apply_revert "$i"
+  # Marked current before the edit, so an interrupt during it still
+  # restores the file (a checkout of the unmodified file is a no-op; the
+  # file was verified clean at start).
   CURRENT_FILE="$file"
+  echo "reverting $file"
+  apply_revert "$i"
   echo "reverted (pattern matched exactly once)"
 
   set +e
@@ -375,8 +400,11 @@ for i in 0 1 2 3; do
   pytest_rc=$?
   set -e
 
-  git checkout -- "$file"
-  CURRENT_FILE=""
+  restore_current_file
+  if [ "$RESTORE_FAILED" -ne 0 ]; then
+    # Later rows would run against a still-reverted tree; stop here.
+    exit 1
+  fi
   echo "restored $file (pytest exit $pytest_rc)"
 
   # (f) Classify the reverted run.
@@ -435,6 +463,9 @@ if [ -n "$final_dirty" ]; then
   echo
   echo "FAIL: target files are not clean after restore:" >&2
   echo "$final_dirty" >&2
+  ANY_BAD=1
+fi
+if [ "$RESTORE_FAILED" -ne 0 ]; then
   ANY_BAD=1
 fi
 
