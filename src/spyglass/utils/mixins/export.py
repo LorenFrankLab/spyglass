@@ -318,10 +318,11 @@ class ExportMixin(FetchMixin):
             # No export entry needed if no selected entries
             return
 
-        if is_trivially_true(restr_str):
-            self._warn_unrestricted_fetch(restricted_table)
-
         restricted_entries = self._get_restricted_entries(restricted_table)
+
+        if is_trivially_true(restr_str):
+            self._warn_unrestricted_fetch(len(restricted_entries))
+
         self._insert_entries_log(restricted_entries)
         return
 
@@ -338,7 +339,7 @@ class ExportMixin(FetchMixin):
 
         return table_is_shared(self)
 
-    def _warn_unrestricted_fetch(self, restricted_table):
+    def _warn_unrestricted_fetch(self, n_keys: int):
         """Warn that a whole table was fetched while export logging was on.
 
         The fetch is logged as explicit keys, so the export stays correct,
@@ -348,12 +349,13 @@ class ExportMixin(FetchMixin):
 
         Parameters
         ----------
-        restricted_table : Table
-            The table as fetched, i.e. unrestricted.
+        n_keys : int
+            Number of keys logged for the fetch. Taken from the keys the
+            caller already has, rather than a `COUNT` over the same rows.
         """
         self._logger.warning(
             f"Unrestricted fetch of shared table {self.full_table_name} "
-            f"logged for export {self.export_id} as {len(restricted_table)} "
+            f"logged for export {self.export_id} as {n_keys} "
             "keys. If the export does not need the whole table, restrict the "
             "fetch and remove this export's log entries for it."
         )
