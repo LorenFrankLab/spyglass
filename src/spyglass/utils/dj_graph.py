@@ -1507,6 +1507,7 @@ class RestrGraph(AbstractGraph):
         return self
 
     def _graph_union_list(self, other: "List") -> "RestrGraph":
+        """Merge the restrictions of several cascaded graphs into this one."""
         if not all(isinstance(x, RestrGraph) for x in other):
             raise TypeError("All items in list must be RestrGraph objects.")
         if not self.cascaded and all([x.cascaded for x in other]):
@@ -1749,6 +1750,9 @@ class TableChain(RestrGraph):
             Useful for excluding peripheral tables or other unwanted nodes.
         verbose : bool, optional
             Whether to print verbose output. Default False.
+        **kwargs : dict
+            Passed to `RestrGraph`, notably `graph` to build from an already
+            loaded dependency graph rather than reloading one.
         """
         self.parent = ensure_names(parent)
         self.child = ensure_names(child)
@@ -1757,7 +1761,7 @@ class TableChain(RestrGraph):
             raise ValueError("Parent or child table required.")
 
         seed_table = parent if isinstance(parent, Table) else child
-        super().__init__(seed_table=seed_table, verbose=verbose)
+        super().__init__(seed_table=seed_table, verbose=verbose, **kwargs)
 
         self._ignore_peripheral(except_tables=[self.parent, self.child])
         self._ignore_outside_spy(except_tables=[self.parent, self.child])
