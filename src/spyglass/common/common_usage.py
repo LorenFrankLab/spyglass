@@ -389,7 +389,9 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         )
 
     @staticmethod
-    def _condense_restrictions(table_name: str, restr_list) -> str:
+    def _condense_restrictions(
+        table_name: str, restr_list, key: dict = None
+    ) -> str:
         """OR a table's logged restrictions into one condition.
 
         Sorted and de-duplicated so the same selection always produces the same
@@ -405,13 +407,16 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         restr_list : Iterable[str]
             Restrictions logged for that table, in any order, possibly with
             repeats.
+        key : dict, optional
+            Restriction identifying the export, passed through so a rejection
+            names the rows to inspect.
 
         Returns
         -------
         str
             One condition matching the union of the inputs.
         """
-        ExportSelection._reject_trivially_true(table_name, restr_list)
+        ExportSelection._reject_trivially_true(table_name, restr_list, key)
         return make_condition(
             dj.FreeTable(dj.conn(), table_name),
             sorted(set(restr_list)),
@@ -462,7 +467,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
                 {
                     "table_name": table_name,
                     "restriction": self._condense_restrictions(
-                        table_name, restr_list
+                        table_name, restr_list, key
                     ),
                 }
             )
