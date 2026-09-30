@@ -424,6 +424,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         verbose=False,
         cascade=True,
         included_nwb_files=None,
+        show_progress=False,
     ) -> RestrGraph:
         """Return a RestrGraph for a restriction/key's tables/restrictions.
 
@@ -443,6 +444,10 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         included_nwb_files : list, optional
             A whitelist of nwb files to include in the export. Default None
             applies no whitelist restriction.
+        show_progress : bool, optional
+            Show a progress bar over the cascade's leaves. Default False.
+            Separate from `verbose`, which additionally logs per node and per
+            edge.
         """
         selection_tables = self * self.Table & key
         tracked_tables = set(selection_tables.fetch("table_name"))
@@ -474,7 +479,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         if included_nwb_files is None:
             restr_graph = self._add_externals_to_restr_graph(restr_graph, key)
             if cascade:
-                restr_graph.cascade()
+                restr_graph.cascade(show_progress=show_progress)
             return restr_graph
 
         # Restrict the graph to only include entries stemming from the
@@ -510,7 +515,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         )
 
         if cascade:
-            restr_graph.cascade()
+            restr_graph.cascade(show_progress=show_progress)
 
         return restr_graph
 
@@ -665,7 +670,7 @@ class Export(SpyglassMixin, dj.Computed):
         restr_graph = ExportSelection().get_restr_graph(
             paper_key,
             included_nwb_files=included_nwb_files,
-            verbose=True,
+            verbose=debug_mode,
         )
         # Original plus upstream files
         logger.debug("Collecting file paths from export selection")
