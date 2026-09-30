@@ -393,15 +393,19 @@ class AbstractGraph(ABC):
         restriction : str | QueryExpression
             The restriction, already coerced to a condition.
         """
+        # `TableChain.__init__` uses True placeholder. Hold pending 'found'
+        if (
+            restriction is True
+            and self._get_node(table).get("find_restr")
+            and not getattr(self, "found_restr", False)
+        ):
+            return
+
         if not is_trivially_true(restriction) or not table_is_shared(table):
             return
+
         self._log_truncate(  # verbose graphs say where it came from
             f"Whole-table restriction on {self._camel(table)}"
-        )
-        logger.warning(
-            f"Restriction on shared table {ensure_names(table)} matches every "
-            "row. Whatever depends on this graph -- an export, a delete -- "
-            "will cover the whole table."
         )
 
     def _set_restr(
