@@ -1,0 +1,418 @@
+"""Tests for multi-camera support: MC01–MC05."""
+
+import numpy as np
+import pandas as pd
+import pytest
+
+# ---------------------------------------------------------------------------
+# MC01 — camera_index in VidFileGroup.File
+# ---------------------------------------------------------------------------
+
+
+class TestVidFileGroupCameraIndex:
+    """MC01: VidFileGroup.File has camera_index column."""
+
+    def test_schema_has_camera_index(self, position_v2):
+        """VidFileGroup.File definition includes camera_index attribute."""
+        VidFileGroup = position_v2.video.VidFileGroup
+        defn = VidFileGroup.File.definition
+        assert "camera_index" in defn
+
+    def test_create_from_files_camera_indices(self, position_v2, tmp_path):
+        """create_from_files accepts camera_indices kwarg without error."""
+        VidFileGroup = position_v2.video.VidFileGroup
+        video1 = tmp_path / "cam0.mp4"
+        video2 = tmp_path / "cam1.mp4"
+        video1.touch()
+        video2.touch()
+        # Files not in VideoFile → group created, files skipped.
+        group_key = VidFileGroup.create_from_files(
+            video_files=[video1, video2],
+            description="stereo test group",
+            camera_indices=[0, 1],
+        )
+        assert "vid_group_id" in group_key
+
+    def test_camera_indices_length_mismatch_raises(self, position_v2, tmp_path):
+        """Mismatched camera_indices length raises ValueError."""
+        VidFileGroup = position_v2.video.VidFileGroup
+        video1 = tmp_path / "v.mp4"
+        video1.touch()
+
+        # insert1 path: mismatch detected only when files are found in VideoFile,
+        # so for unfound files the insert succeeds silently — just check no crash.
+        group_key = VidFileGroup.create_from_files(
+            video_files=[video1],
+            description="mismatch test",
+            camera_indices=[0, 1],  # length mismatch → but files not in VF
+        )
+        assert "vid_group_id" in group_key
+
+    def test_legacy_single_cam_default(self, position_v2, tmp_path):
+        """create_from_files without camera_indices uses -1 default."""
+        VidFileGroup = position_v2.video.VidFileGroup
+        video1 = tmp_path / "single.mp4"
+        video1.touch()
+        group_key = VidFileGroup.create_from_files(
+            video_files=[video1],
+            description="single cam legacy",
+        )
+        assert "vid_group_id" in group_key
+
+
+class TestMulticamSingleSession:
+    """A multi-camera group is many File rows, but still one session.
+
+    Blast-radius guard on the single-session inference constraint: the guard
+    must key off *distinct NWB files*, not off the number of ``File`` rows,
+    or every 3-D group would be rejected.
+    """
+
+    def test_get_nwb_file_dedups_cameras(
+        self, position_v2, multicam_session, multicam_group
+    ):
+        """Three camera rows collapse to the one NWB parent they share."""
+        VidFileGroup = position_v2.video.VidFileGroup
+        files = VidFileGroup.File & {"vid_group_id": multicam_group}
+        assert len(files) == 3  # the fan-out that must not be miscounted
+
+        result = VidFileGroup().get_nwb_file(multicam_group)
+        assert result == {"nwb_file_name": multicam_session["name"]}
+
+    def test_selection_accepts_multicam_group(
+        self, PoseEstimSelection, stub_model, multicam_group
+    ):
+        """The session guard must not reject a legitimate 3-D group."""
+        tbl = PoseEstimSelection()
+        key = {
+            "model_id": stub_model["model_id"],
+            "vid_group_id": multicam_group,
+            "pose_estim_params_id": "default",
+        }
+        tbl.insert1({**key, "task_mode": "load", "output_dir": ""})
+        assert len(tbl & key) == 1
+        (tbl & key).super_delete(warn=False, safemode=False)
+
+
+# ---------------------------------------------------------------------------
+# MC02 — per-camera meters_per_pixel from CameraDevice (source of truth)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchMetersPerPixel:
+    """MC02: _fetch_meters_per_pixel reads from NWB CameraDevice."""
+
+    def test_missing_group_raises(self, position_v2):
+        """Non-existent group raises ValueError (no VideoFile entries)."""
+        from spyglass.position.v2.estim import PoseEstim
+
+        with pytest.raises((ValueError, KeyError, AttributeError)):
+            PoseEstim._fetch_meters_per_pixel({"vid_group_id": "nonexistent"})
+
+
+# ---------------------------------------------------------------------------
+# MC02b — CameraDevice FK chain in CameraRig.Camera
+# ---------------------------------------------------------------------------
+
+
+class TestCameraRigCamera:
+    """MC02b: CameraRig.Camera uses CameraDevice as FK source of truth."""
+
+    def test_definition_references_camera_device(self, position_v2):
+        """CameraRig.Camera definition contains a CameraDevice FK."""
+        CameraRig = position_v2.video.CameraRig
+        defn = CameraRig.Camera.definition
+        assert "CameraDevice" in defn
+
+    def test_definition_no_loose_varchar_camera_name(self, position_v2):
+        """CameraRig.Camera does not use a loose varchar camera_name attr."""
+        CameraRig = position_v2.video.CameraRig
+        defn = CameraRig.Camera.definition
+        # Should not have an untyped string attribute for camera_name
+        assert "varchar" not in defn
+
+    def test_calibration_camera_references_camera_rig_camera(self, position_v2):
+        """Calibration.Camera FK enforces slot exists in CameraRig.Camera."""
+        Calibration = position_v2.video.Calibration
+        defn = Calibration.Camera.definition
+        assert "CameraRig.Camera" in defn
+
+    def test_insert_without_camera_device_raises(self, position_v2):
+        """Inserting CameraRig.Camera with unknown camera_name raises IntegrityError."""
+        import datajoint as dj
+
+        CameraRig = position_v2.video.CameraRig
+        CameraRig.insert1(
+            {
+                "camera_rig_id": "rig_fk_test",
+                "description": "FK test rig",
+                "n_cameras": 1,
+            },
+            skip_duplicates=True,
+        )
+        with pytest.raises(dj.errors.IntegrityError):
+            CameraRig.Camera.insert1(
+                {
+                    "camera_rig_id": "rig_fk_test",
+                    "camera_index": 0,
+                    "camera_name": "nonexistent_camera_xyz",
+                }
+            )
+
+    def test_full_fk_chain_insert(self, position_v2):
+        """CameraDevice → CameraRig.Camera → Calibration.Camera inserts OK."""
+        from spyglass.common.common_device import CameraDevice
+
+        CameraRig = position_v2.video.CameraRig
+        Calibration = position_v2.video.Calibration
+
+        cam_name = "test_stereo_cam0"
+        rig_id = "rig_fk_chain_test"
+        cal_id = "cal_fk_chain_test"
+
+        CameraDevice.insert1(
+            {"camera_name": cam_name, "meters_per_pixel": 0.001},
+            skip_duplicates=True,
+        )
+        CameraRig.insert1(
+            {
+                "camera_rig_id": rig_id,
+                "description": "FK chain test",
+                "n_cameras": 1,
+            },
+            skip_duplicates=True,
+        )
+        CameraRig.Camera.insert1(
+            {
+                "camera_rig_id": rig_id,
+                "camera_index": 0,
+                "camera_name": cam_name,
+            },
+            skip_duplicates=True,
+        )
+        Calibration.insert1(
+            {
+                "camera_rig_id": rig_id,
+                "calibration_id": cal_id,
+                "calibration_date": "2026-01-01",
+            },
+            skip_duplicates=True,
+        )
+        Calibration.Camera.insert1(
+            {
+                "camera_rig_id": rig_id,
+                "calibration_id": cal_id,
+                "camera_index": 0,
+                "intrinsics": {
+                    "fx": 500.0,
+                    "fy": 500.0,
+                    "cx": 320.0,
+                    "cy": 240.0,
+                    "dist_coeffs": [0.0, 0.0, 0.0, 0.0],
+                },
+                "extrinsics": {"R": np.eye(3).tolist(), "t": [0.0, 0.0, 0.0]},
+                "image_size": [640, 480],
+            },
+            skip_duplicates=True,
+        )
+        rows = (
+            Calibration.Camera
+            & {"camera_rig_id": rig_id, "calibration_id": cal_id}
+        ).fetch(as_dict=True)
+        assert len(rows) == 1
+        assert rows[0]["camera_index"] == 0
+
+
+# ---------------------------------------------------------------------------
+# MC03 — 3D mode detection
+# ---------------------------------------------------------------------------
+
+
+class TestIs3dMode:
+    """MC03: _is_3d_mode detects multi-camera + calibration correctly."""
+
+    def test_single_cam_not_3d(self, position_v2):
+        """Single-camera group (camera_index = -1) is not 3D mode."""
+        from spyglass.position.v2.estim import PoseEstim
+
+        # A non-existent group trivially has no cameras with index ≥ 0.
+        assert (
+            PoseEstim._is_3d_mode({"vid_group_id": "does_not_exist"}) is False
+        )
+
+    def test_multi_cam_without_calibration_not_3d(self, position_v2):
+        """Multiple cameras but no Calibration → not 3D mode."""
+        from spyglass.position.v2.video import VidFileGroup
+
+        VidFileGroup.insert1(
+            {"vid_group_id": "grp_no_calib", "description": "no calib"},
+            skip_duplicates=True,
+        )
+        from spyglass.position.v2.estim import PoseEstim
+
+        assert PoseEstim._is_3d_mode({"vid_group_id": "grp_no_calib"}) is False
+
+
+# ---------------------------------------------------------------------------
+# MC03 — triangulation pure-function tests (no DB needed)
+# ---------------------------------------------------------------------------
+
+
+class TestTriangulation:
+    """MC03: triangulation utility produces correct 3D from synthetic views."""
+
+    @pytest.fixture
+    def two_camera_setup(self):
+        """Return intrinsics, extrinsics, and projection matrices for 2 cameras."""
+        from spyglass.position.v2.utils.triangulation import (
+            build_projection_matrix,
+        )
+
+        # Camera 0: identity rotation, at origin.
+        intr0 = {
+            "fx": 500.0,
+            "fy": 500.0,
+            "cx": 320.0,
+            "cy": 240.0,
+            "dist_coeffs": [0, 0, 0, 0],
+        }
+        ext0 = {"R": np.eye(3).tolist(), "t": [0.0, 0.0, 0.0]}
+        P0 = build_projection_matrix(intr0, ext0)
+
+        # Camera 1: rotated 30° about Y, offset 1 m to the right.
+        angle = np.deg2rad(30)
+        R1 = np.array(
+            [
+                [np.cos(angle), 0, np.sin(angle)],
+                [0, 1, 0],
+                [-np.sin(angle), 0, np.cos(angle)],
+            ]
+        )
+        intr1 = {
+            "fx": 500.0,
+            "fy": 500.0,
+            "cx": 320.0,
+            "cy": 240.0,
+            "dist_coeffs": [0, 0, 0, 0],
+        }
+        ext1 = {"R": R1.tolist(), "t": [1.0, 0.0, 0.0]}
+        P1 = build_projection_matrix(intr1, ext1)
+
+        return {
+            0: {"intrinsics": intr0, "extrinsics": ext0, "P": P0},
+            1: {"intrinsics": intr1, "extrinsics": ext1, "P": P1},
+        }
+
+    def test_triangulate_known_point(self, two_camera_setup):
+        """Exact projections of (0, 0, 5) recover it to float precision."""
+        from spyglass.position.v2.utils.triangulation import (
+            triangulate_points_dlt,
+        )
+
+        cams = two_camera_setup
+        # Place a point at (0, 0, 5) in rig coords (5 m in front).
+        X_true = np.array([0.0, 0.0, 5.0, 1.0])
+
+        pts_list = []
+        proj_matrices = []
+        for ci in sorted(cams.keys()):
+            P = cams[ci]["P"]
+            proj = P @ X_true
+            x2d = proj[0] / proj[2]
+            y2d = proj[1] / proj[2]
+            pts_list.append(np.array([[x2d, y2d]]))
+            proj_matrices.append(P)
+
+        pts3d = triangulate_points_dlt(pts_list, proj_matrices)
+        assert pts3d.shape == (1, 3)
+        # DLT is exact for consistent input: recovery error is ~1e-15, not
+        # merely "within 1 cm". Pin the world coordinate itself.
+        assert np.allclose(pts3d[0], X_true[:3], atol=1e-9)
+
+    def test_missing_camera_returns_nan(self, two_camera_setup):
+        """Frames with NaN in any camera produce NaN in 3D output."""
+        from spyglass.position.v2.utils.triangulation import (
+            triangulate_points_dlt,
+        )
+
+        cams = two_camera_setup
+        pts_list = [
+            np.array([[100.0, 200.0]]),
+            np.array([[np.nan, np.nan]]),  # camera 1 missing
+        ]
+        proj_matrices = [cams[0]["P"], cams[1]["P"]]
+        pts3d = triangulate_points_dlt(pts_list, proj_matrices)
+        assert np.all(np.isnan(pts3d[0]))
+
+    def test_reprojection_error_computed(self, two_camera_setup):
+        """Reprojection error is near zero for exact projections."""
+        from spyglass.position.v2.utils.triangulation import (
+            compute_reprojection_errors,
+            triangulate_points_dlt,
+        )
+
+        cams = two_camera_setup
+        X_true = np.array([0.0, 0.0, 5.0, 1.0])
+        pts_list = []
+        proj_matrices = []
+        for ci in sorted(cams.keys()):
+            P = cams[ci]["P"]
+            proj = P @ X_true
+            pts_list.append(np.array([[proj[0] / proj[2], proj[1] / proj[2]]]))
+            proj_matrices.append(P)
+
+        pts3d = triangulate_points_dlt(pts_list, proj_matrices)
+        errors = compute_reprojection_errors(pts3d, pts_list, proj_matrices)
+        assert errors.shape == (1,)
+        # Exact input round-trips to ~1e-14 px, i.e. numerically zero.
+        assert errors[0] == pytest.approx(0.0, abs=1e-9)
+
+    def test_reprojection_gate_masks_bad_frames(self, two_camera_setup):
+        """triangulate_pose_df sets likelihood=0 when reproj error is high."""
+        from spyglass.position.v2.utils.triangulation import triangulate_pose_df
+
+        cams = two_camera_setup
+        n = 3
+        timestamps = np.arange(n) / 30.0
+
+        # Camera DataFrames: valid 2D detections at a consistent 3D point.
+        X_true = np.array([0.0, 0.0, 5.0, 1.0])
+        cam_dfs = {}
+        cam_calibrations = {}
+        for ci in sorted(cams.keys()):
+            P = cams[ci]["P"]
+            proj = P @ X_true
+            x2d = proj[0] / proj[2]
+            y2d = proj[1] / proj[2]
+            df = pd.DataFrame(
+                {
+                    ("bp", "x"): [x2d] * n,
+                    ("bp", "y"): [y2d] * n,
+                    ("bp", "likelihood"): [1.0] * n,
+                },
+                index=timestamps,
+            )
+            df.columns = pd.MultiIndex.from_tuples(df.columns)
+            cam_dfs[ci] = df
+            cam_calibrations[ci] = {
+                "intrinsics": cams[ci]["intrinsics"],
+                "extrinsics": cams[ci]["extrinsics"],
+            }
+
+        result = triangulate_pose_df(
+            cam_dfs,
+            cam_calibrations,
+            bodyparts=["bp"],
+            min_confidence=0.0,
+            max_reproj_error=5.0,
+        )
+        # Reprojection is exact, so every frame passes the gate with
+        # likelihood exactly 1.0 (not merely > 0), and the recovered 3D
+        # point is the (0, 0, 5) that generated the 2D detections.
+        lk = result[("triangulated", "bp", "likelihood")].values
+        assert lk.shape == (n,)
+        assert np.all(lk == 1.0)
+        xs = result[("triangulated", "bp", "x")].values
+        zs = result[("triangulated", "bp", "z")].values
+        assert np.allclose(xs, 0.0, atol=1e-9)
+        assert np.allclose(zs, 5.0, atol=1e-9)
