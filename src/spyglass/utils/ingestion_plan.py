@@ -399,7 +399,7 @@ class TablePlan:
 
     table_name: str
     entries: "PlannedEntries"
-    status: str = "ok"  # ok | skipped | failed
+    status: str = "ok"  # ok | skipped | failed | blocked
     problems: Tuple[Problem, ...] = ()
     reads: Tuple[str, ...] = ()
     # Digest over the objects this table read, from the file as it was when

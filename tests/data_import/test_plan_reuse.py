@@ -11,27 +11,6 @@ import pytest
 
 
 @pytest.fixture
-def parse_counter(monkeypatch):
-    """Count `_parse` calls per table, so reuse is observable.
-
-    Timing would be the obvious measure and the wrong one: it varies, and a
-    reuse check that silently re-parsed would still look fast on a small file.
-    """
-    from spyglass.utils.mixins.ingestion import IngestionMixin
-
-    calls = []
-    original = IngestionMixin._parse
-
-    def counted(self, ctx):
-        calls.append(self.full_table_name)
-        return original(self, ctx)
-
-    monkeypatch.setattr(IngestionMixin, "_parse", counted)
-
-    return calls
-
-
-@pytest.fixture
 def staged(common, mini_copy_name, mini_insert):
     """A staged plan for the mini file, so there is something to reuse."""
     from spyglass.common.common_usage import IngestionPlanLog

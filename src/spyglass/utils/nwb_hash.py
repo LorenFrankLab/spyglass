@@ -419,6 +419,46 @@ class NwbfileHasher:
 
             self.obj_ids[object_id] = (path, subtree.hexdigest())
 
+        claimed = {path for found in candidates.values() for path in found}
+        self._index_root_object(paths, claimed)
+
+    def _index_root_object(self, paths: list, claimed: set) -> None:
+        """Index the root NWBFile object over the metadata it alone owns.
+
+        The traversal visits the root's members, never the root, so without
+        this the root has no digest and `read_set_digest` scores it as the
+        constant an unknown id gets -- unchangeable, so every table reading
+        file metadata looks reusable however that metadata is edited.
+
+        Scoped to paths no deeper object claims, so an edit inside a
+        container is not also an edit to the file's metadata.
+
+        Parameters
+        ----------
+        paths : list of str
+            Every hashed path, sorted, so the digest is order-independent.
+        claimed : set of str
+            Paths reaching an object with its own `object_id`, including soft
+            links: that object's own entry already answers for them.
+        """
+        attrs = getattr(self.file, "attrs", None)
+        if attrs is None or "object_id" not in attrs:
+            return
+
+        object_id = self._normalize_h5str(attrs["object_id"])
+        if isinstance(object_id, bytes):  # h5py<3 returns bytes
+            object_id = object_id.decode()
+
+        owned = tuple(f"{path}/" for path in claimed)
+        rolled = md5("".encode())
+        for path in paths:
+            if path in claimed or path.startswith(owned):
+                continue
+            rolled.update(path.encode())
+            rolled.update(str(self.objs[path][1]).encode())
+
+        self.obj_ids[str(object_id)] = ("/", rolled.hexdigest())
+
     def _canonical_path(self, paths: list) -> str:
         """Return where an object lives, given every path reaching it.
 

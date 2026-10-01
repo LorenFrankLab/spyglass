@@ -181,7 +181,11 @@ def test_object_indexed_where_it_lives_not_where_it_is_linked(mini_path):
         linked = [
             path
             for path, _ in hasher.obj_ids.values()
-            if isinstance(file.get(path, getlink=True), h5py.SoftLink)
+            # The root NWBFile object is indexed at "/", which is not a link
+            # and has no link info to ask about -- h5py raises rather than
+            # answering.
+            if path != "/"
+            and isinstance(file.get(path, getlink=True), h5py.SoftLink)
         ]
 
     assert not linked, f"Objects indexed at a soft link: {linked}"
@@ -215,6 +219,63 @@ def test_a_child_change_moves_its_container_digest(mini_path, tmp_path):
     assert before.digest_for(object_id) != after.digest_for(
         object_id
     ), "A change beneath a container must change the container's digest"
+
+
+def test_the_root_object_is_indexed_over_the_metadata_it_owns(
+    mini_path, tmp_path
+):
+    """File metadata moves the root's digest; a container's contents do not.
+
+    Every table that reads session, lab, institution or experimenter fields
+    records the *root* NWBFile object. The traversal visits the root's
+    members and never the root, so while it carried no digest those tables
+    hashed to the constant an unknown id scores -- unchangeable, so their
+    parses looked reusable however the metadata was edited.
+
+    Scope matters as much as presence: a root folding in the whole file would
+    never under-invalidate, but would re-plan every metadata reader on any
+    edit anywhere, which is the invariant Phase 6 exists to establish.
+    """
+    import shutil
+
+    import h5py
+
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    copy = tmp_path / "copy_.nwb"
+    shutil.copy2(mini_path, copy)
+
+    before = NwbfileHasher(copy, object_ids=True)
+    with h5py.File(copy, "r") as file:
+        root_id = before._normalize_h5str(file.attrs["object_id"])
+        if isinstance(root_id, bytes):  # h5py<3 returns bytes
+            root_id = root_id.decode()
+    root_id = str(root_id)
+
+    assert (
+        before.digest_for(root_id) is not None
+    ), "The root object must be indexed, or its readers never invalidate"
+
+    with h5py.File(copy, "r+") as file:
+        file["general/lab"].attrs["_probe_of_change"] = "edited"
+
+    after = NwbfileHasher(copy, object_ids=True)
+    assert before.digest_for(root_id) != after.digest_for(
+        root_id
+    ), "Editing file metadata must move the root digest"
+
+    # An edit the root does not own: a deeper object claims this path, so it
+    # answers for the change and the file's metadata is untouched.
+    owned = NwbfileHasher(copy, object_ids=True)
+    with h5py.File(copy, "r+") as file:
+        file["processing/sample_count/sample_count"].attrs[
+            "_probe_of_change"
+        ] = "edited"
+
+    scoped = NwbfileHasher(copy, object_ids=True)
+    assert owned.digest_for(root_id) == scoped.digest_for(
+        root_id
+    ), "An edit inside a container must not count as a metadata change"
 
 
 # --- externally-linked objects -----------------------------------------------
