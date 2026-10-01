@@ -70,29 +70,26 @@ def apply_likelihood_threshold(
         ensure pose data contains likelihood before applying this threshold.
     """
     pose_df = pose_df.copy()
-    idx = pd.IndexSlice
 
     if (
-        isinstance(pose_df.columns, pd.MultiIndex)
-        and pose_df.columns.nlevels >= 2
+        not isinstance(pose_df.columns, pd.MultiIndex)
+        or pose_df.columns.nlevels < 2
     ):
-        coord_level = pose_df.columns.nlevels - 1
-        bodypart_level = coord_level - 1
-        bodyparts = pose_df.columns.get_level_values(bodypart_level).unique()
+        return pose_df
 
-        for bodypart in bodyparts:
-            if pose_df.columns.nlevels == 3:
-                likelihood = pose_df.loc[:, idx[:, bodypart, "likelihood"]]
-                if isinstance(likelihood, pd.DataFrame):
-                    likelihood = likelihood.min(axis=1)
-            else:
-                likelihood = pose_df.loc[:, idx[bodypart, "likelihood"]]
-            # ~(>= thresh) treats NaN as low-confidence (NaN >= thresh is False)
-            low = ~(likelihood >= likelihood_thresh)
-            if pose_df.columns.nlevels == 3:
-                pose_df.loc[low, idx[:, bodypart, ["x", "y"]]] = np.nan
-            else:
-                pose_df.loc[low, idx[bodypart, ["x", "y"]]] = np.nan
+    # One likelihood column per bodypart, whether the caller passed 3-level
+    # (scorer, bodypart, coord) or 2-level columns. Dropping scorer can leave
+    # duplicate bodyparts; min means any scorer below threshold masks.
+    likelihood = pose_df.xs("likelihood", axis=1, level=-1)
+    likelihood.columns = likelihood.columns.get_level_values(-1)
+    likelihood = likelihood.T.groupby(level=0).min().T
+
+    # ~(>= thresh) treats NaN as low-confidence (NaN >= thresh is False)
+    low = ~(likelihood >= likelihood_thresh)
+
+    for col in pose_df.columns:
+        if col[-1] in ("x", "y"):
+            pose_df.loc[low[col[-2]], col] = np.nan
 
     return pose_df
 
