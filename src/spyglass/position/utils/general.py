@@ -241,7 +241,11 @@ def get_video_info(key):
     video_query = VideoFile & vf_key
 
     if not video_query:
-        VideoFile().make(vf_key, verbose=False)
+        # Only ingest when the session has no videos at all, so a genuine
+        # epoch miss is reported below rather than rescanning the file.
+        if not (VideoFile & {"nwb_file_name": vf_key["nwb_file_name"]}):
+            VideoFile().insert_from_nwbfile(vf_key["nwb_file_name"])
+            video_query = VideoFile & vf_key
 
     if len(video_query) != 1:
         logger.warning(f"Found {len(video_query)} videos for {vf_key}")
