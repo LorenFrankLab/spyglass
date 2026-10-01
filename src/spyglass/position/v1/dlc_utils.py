@@ -17,13 +17,9 @@ import pandas as pd
 from position_tools import get_distance
 
 from spyglass.common.common_usage import ActivityLog
-
-# Import validation functions from utils module
 from spyglass.position.utils.validation import validate_list, validate_option
 from spyglass.settings import pose_output_dir, test_mode
 from spyglass.utils.logging import logger, stream_handler
-
-# validate_smooth_params functionality moved to utils.validation module
 
 
 def _set_permissions(directory, mode, username: str, groupname: str = None):
