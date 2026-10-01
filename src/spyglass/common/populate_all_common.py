@@ -52,11 +52,8 @@ def log_insert_error(
 ) -> None:
     """Log a given error to the InsertError table.
 
-    Deprecated in favour of `IngestionPlanLog`, which records a whole file's
-    problems together with the entries they blocked, rather than one row per
-    exception with no memory of what was already staged. `InsertError`
-    remains declared and written to so existing queries keep working; it is
-    no longer where new work should look.
+    Used by the direct insert path. The planned path records problems in
+    `IngestionPlanLog` instead, with the entries they blocked.
 
     Parameters
     ----------

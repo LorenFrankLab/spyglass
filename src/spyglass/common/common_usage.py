@@ -66,19 +66,19 @@ class InsertError(dj.Manual):
     """
 
     def _warn_deprecated(self) -> None:
-        """Say once that these rows are history, and where to look instead."""
+        """Point readers at IngestionPlanLog, once per session."""
         ActivityLog().deprecate_log(
             name="InsertError",
             alt="IngestionPlanLog, which stages entries with their problems",
         )
 
     def fetch(self, *args, **kwargs):
-        """Fetch rows, warning once that the table is no longer written."""
+        """Fetch rows, warning once about deprecation."""
         self._warn_deprecated()
         return super().fetch(*args, **kwargs)
 
     def fetch1(self, *args, **kwargs):
-        """Fetch one row, warning once that the table is no longer written."""
+        """Fetch one row, warning once about deprecation."""
         self._warn_deprecated()
         return super().fetch1(*args, **kwargs)
 
