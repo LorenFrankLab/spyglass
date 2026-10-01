@@ -1,0 +1,871 @@
+"""Unit tests for v2/estim.py targeting uncovered lines for coverage improvement.
+
+Focus areas:
+- OrientationParams method conditionals (lines 60-81)
+- Method logic and parameter validation (lines 304-314)
+- Data processing components (testable portions)
+"""
+
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pandas as pd
+import pytest
+
+# ── Fixtures ──────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def OrientationParams(pv2_estim):
+    yield pv2_estim.OrientationParams
+
+
+@pytest.fixture(scope="module")
+def CentroidParams(pv2_estim):
+    yield pv2_estim.CentroidParams
+
+
+@pytest.fixture(scope="module")
+def SmoothingParams(pv2_estim):
+    yield pv2_estim.SmoothingParams
+
+
+@pytest.fixture(scope="module")
+def PoseParameterSet(pv2_estim):
+    yield pv2_estim.PoseParameterSet
+
+
+@pytest.fixture(scope="module")
+def NDXPoseBuilder(pv2_estim):
+    yield pv2_estim.NDXPoseBuilder
+
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+
+
+class TestOrientationParams:
+    """Test OrientationParams dataclass methods to cover lines 60-81."""
+
+    def test_as_dict_two_pt_method(self, OrientationParams):
+        """Test to_dict() method for two_pt orientation."""
+        params = OrientationParams(
+            method="two_pt",
+            bodypart1="nose",
+            bodypart2="tail",
+            led1="unused",
+            led2="unused",
+            led3="unused",
+        )
+
+        result = params.to_dict()
+
+        # Should exclude led fields and empty values for two_pt method
+        assert "led1" not in result
+        assert "led2" not in result
+        assert "led3" not in result
+        assert result["method"] == "two_pt"
+        assert result["bodypart1"] == "nose"
+        assert result["bodypart2"] == "tail"
+
+    def test_as_dict_bisector_method(self, OrientationParams):
+        """Test to_dict() method for bisector orientation."""
+        params = OrientationParams(
+            method="bisector",
+            bodypart1="unused",
+            bodypart2="unused",
+            led1="red_led",
+            led2="green_led",
+            led3="blue_led",
+        )
+
+        result = params.to_dict()
+
+        # Should exclude bodypart fields and empty values for bisector method
+        assert "bodypart1" not in result
+        assert "bodypart2" not in result
+        assert result["method"] == "bisector"
+        assert result["led1"] == "red_led"
+        assert result["led2"] == "green_led"
+        assert result["led3"] == "blue_led"
+
+    def test_as_dict_none_method(self, OrientationParams):
+        """Test to_dict() method for none orientation."""
+        params = OrientationParams(
+            method="none",
+            bodypart1="unused",
+            bodypart2="unused",
+            led1="unused",
+            led2="unused",
+            led3="unused",
+        )
+
+        result = params.to_dict()
+
+        # Should exclude all bodypart and led fields for none method
+        assert "bodypart1" not in result
+        assert "bodypart2" not in result
+        assert "led1" not in result
+        assert "led2" not in result
+        assert "led3" not in result
+        assert result["method"] == "none"
+
+    def test_as_dict_filters_none_and_empty(self, OrientationParams):
+        """Test that to_dict() filters None values and empty strings."""
+        params = OrientationParams(
+            method="two_pt",
+            bodypart1="nose",
+            bodypart2="",  # Empty string should be filtered
+        )
+
+        result = params.to_dict()
+
+        assert "bodypart2" not in result  # Empty string filtered out
+        assert result["bodypart1"] == "nose"
+
+
+class TestCentroidParams:
+    """Test CentroidParams dataclass methods."""
+
+    def test_as_dict_basic(self, CentroidParams):
+        """Test CentroidParams to_dict() method."""
+        params = CentroidParams(
+            method="centroid",
+            points={"nose": [1, 2], "tail": [3, 4]},
+            max_LED_separation=10.0,
+        )
+
+        result = params.to_dict()
+
+        assert result["method"] == "centroid"
+        assert result["points"] == {"nose": [1, 2], "tail": [3, 4]}
+        assert result["max_LED_separation"] == 10.0
+
+    def test_to_dict_filters_none(self, CentroidParams):
+        """Test that to_dict() filters None values."""
+        params = CentroidParams(
+            method="centroid",
+            points={"nose": [1, 2]},
+            max_LED_separation=None,  # Should be filtered out
+        )
+
+        result = params.to_dict()
+
+        assert "max_LED_separation" not in result
+        assert result["method"] == "centroid"
+        assert result["points"] == {"nose": [1, 2]}
+
+
+class TestSmoothingParams:
+    """Test SmoothingParams dataclass methods to cover lines 108-112."""
+
+    def test_to_dict_basic(self, SmoothingParams):
+        """Test to_dict() with all parameters set."""
+        params = SmoothingParams(
+            interpolate=True,
+            interp_params={"method": "linear"},
+            smooth=True,
+            smoothing_params={"window_length": 5},
+            likelihood_thresh=0.95,
+        )
+
+        result = params.to_dict()
+
+        assert result["interpolate"] is True
+        assert result["smooth"] is True
+        assert result["likelihood_thresh"] == 0.95
+        assert result["interp_params"] == {"method": "linear"}
+        assert result["smoothing_params"] == {"window_length": 5}
+
+    def test_to_dict_filters_none(self, SmoothingParams):
+        """Test that to_dict() filters None values."""
+        params = SmoothingParams(
+            interpolate=True,
+            interp_params=None,  # Should be filtered
+            smooth=False,
+            smoothing_params=None,  # Should be filtered
+            likelihood_thresh=0.90,
+        )
+
+        result = params.to_dict()
+
+        assert "interp_params" not in result
+        assert "smoothing_params" not in result
+        assert result["interpolate"] is True
+        assert result["smooth"] is False
+        assert result["likelihood_thresh"] == 0.90
+
+    def test_to_dict_default_values(self, SmoothingParams):
+        """Test to_dict() with default values."""
+        params = SmoothingParams()
+
+        result = params.to_dict()
+
+        assert result["interpolate"] is True
+        assert result["smooth"] is True
+        assert result["likelihood_thresh"] == 0.95
+        assert "interp_params" not in result
+        assert "smoothing_params" not in result
+
+
+class TestPoseParameterSet:
+    """Test PoseParameterSet methods to cover lines 123-136."""
+
+    def test_to_params_dict_basic(
+        self,
+        OrientationParams,
+        CentroidParams,
+        SmoothingParams,
+        PoseParameterSet,
+    ):
+        """Test to_params_dict() method."""
+        orient = OrientationParams(method="none")
+        centroid = CentroidParams(method="centroid", points={"nose": [1, 2]})
+        smoothing = SmoothingParams()
+
+        param_set = PoseParameterSet(
+            params_name="test_params",
+            orient=orient,
+            centroid=centroid,
+            smoothing=smoothing,
+        )
+
+        result = param_set.to_params_dict()
+
+        assert result["pose_params_id"] == "test_params"
+        assert result["orient"]["method"] == "none"
+        assert result["centroid"]["method"] == "centroid"
+        assert result["smoothing"]["interpolate"] is True
+
+    @patch("spyglass.position.v2.utils.params.validate_orientation_params")
+    @patch("spyglass.position.v2.utils.params.validate_centroid_params")
+    @patch("spyglass.position.v2.utils.params.validate_smoothing_params")
+    def test_validate_calls_validators(
+        self,
+        mock_smooth,
+        mock_cent,
+        mock_orient,
+        OrientationParams,
+        CentroidParams,
+        SmoothingParams,
+        PoseParameterSet,
+    ):
+        """Test that validate() calls all validator functions."""
+        orient = OrientationParams(
+            method="two_pt", bodypart1="nose", bodypart2="tail"
+        )
+        centroid = CentroidParams(method="centroid", points={"nose": [1, 2]})
+        smoothing = SmoothingParams()
+
+        param_set = PoseParameterSet(
+            params_name="test_params",
+            orient=orient,
+            centroid=centroid,
+            smoothing=smoothing,
+        )
+
+        param_set.validate()
+
+        # validate() dispatches each section's to_dict() to its validator.
+        mock_orient.assert_called_once_with(orient.to_dict())
+        mock_cent.assert_called_once_with(centroid.to_dict())
+        mock_smooth.assert_called_once_with(smoothing.to_dict())
+
+
+class TestPoseEstimSelectionMethods:
+    """Test PoseEstimSelection methods to cover _infer_output_dir."""
+
+    def test_infer_output_dir_basic(self, PoseEstimSelection):
+        """Test _infer_output_dir with basic key."""
+        selection = PoseEstimSelection()
+        key = {"model_id": "test_model", "vid_group_id": "test_vid"}
+
+        with (
+            patch("spyglass.position.v2.estim.pose_output_dir", None),
+            patch("pathlib.Path.mkdir") as mock_mkdir,
+        ):
+            result = selection._infer_output_dir(key)
+
+            mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
+            # pose_output_dir=None -> base is cwd/pose_estimation_output
+            assert "pose_estimation_output" in result
+            assert result.endswith("/v2_test_model_test_vid")
+
+    def test_infer_output_dir_with_configured_dir(self, PoseEstimSelection):
+        """Test _infer_output_dir with configured pose_output_dir."""
+        selection = PoseEstimSelection()
+        key = {"model_id": "model123", "vid_group_id": "vid456"}
+
+        with (
+            patch("spyglass.position.v2.estim.pose_output_dir", "/custom/path"),
+            patch("pathlib.Path.mkdir") as mock_mkdir,
+        ):
+            result = selection._infer_output_dir(key)
+
+            mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
+            assert result == "/custom/path/v2_model123_vid456"
+
+    def test_infer_output_dir_missing_keys(self, PoseEstimSelection):
+        """Test _infer_output_dir with missing keys."""
+        selection = PoseEstimSelection()
+        key = {}  # Empty key
+
+        with (
+            patch("spyglass.position.v2.estim.pose_output_dir", None),
+            patch("pathlib.Path.mkdir") as mock_mkdir,
+        ):
+            result = selection._infer_output_dir(key)
+
+            mock_mkdir.assert_called_once()
+            # missing model_id -> "unknown_model"; missing vid_group_id -> ""
+            assert result.endswith("/v2_unknown_model_")
+
+
+class TestPoseEstimSelectionSessionGuard:
+    """One inference task must derive from exactly one Nwbfile.
+
+    ``VidFileGroup`` deliberately permits multi-session groups so a model can
+    train across sessions. Inference has no such freedom: a ``PoseV2`` entry
+    that spans two sessions has no well-defined ``nwb_file_name``. The guard
+    belongs at selection time, before ``populate`` does any work.
+    """
+
+    def test_multi_session_group_rejected(
+        self, PoseEstimSelection, stub_model, two_sessions, multi_session_group
+    ):
+        """insert1 on a two-session group raises, naming the real cause."""
+        with pytest.raises(ValueError) as exc:
+            PoseEstimSelection().insert1(
+                {
+                    "model_id": stub_model["model_id"],
+                    "vid_group_id": multi_session_group,
+                    "pose_estim_params_id": "default",
+                    "task_mode": "load",
+                    "output_dir": "",
+                }
+            )
+
+        msg = str(exc.value)
+        assert multi_session_group in msg
+        for name in two_sessions["names"]:
+            assert name in msg
+        assert "training" in msg.lower()  # points at the legitimate use
+
+    def test_insert_estimation_task_rejects_multi_session(
+        self, PoseEstimSelection, stub_model, multi_session_group
+    ):
+        """The public entry point inherits the guard via self.insert1."""
+        with pytest.raises(ValueError, match="Expected exactly 1 common NWB"):
+            PoseEstimSelection().insert_estimation_task(
+                key={
+                    "model_id": stub_model["model_id"],
+                    "vid_group_id": multi_session_group,
+                },
+                task_mode="load",
+            )
+
+    def test_single_session_group_accepted(
+        self, PoseEstimSelection, stub_model, single_session_group
+    ):
+        """Positive control: a one-session group still inserts."""
+        tbl = PoseEstimSelection()
+        key = {
+            "model_id": stub_model["model_id"],
+            "vid_group_id": single_session_group,
+            "pose_estim_params_id": "default",
+        }
+        tbl.insert1({**key, "task_mode": "load", "output_dir": ""})
+        assert len(tbl & key) == 1
+        (tbl & key).super_delete(warn=False, safemode=False)
+
+
+class TestPoseEstimMakeFetchSessionErrors:
+    """``make_fetch`` must not collapse two distinct failures into one message.
+
+    Defense in depth behind the ``PoseEstimSelection`` guard: rows predating
+    the guard, or written through ``insert`` (plural, which does not route
+    through the guarded ``insert1``), still reach ``make_fetch``.
+    """
+
+    def test_multi_session_names_real_cause(
+        self, PoseEstim, PoseEstimSelection, stub_model, multi_session_group
+    ):
+        """A multi-session group reports the multi-NWB cause, chained."""
+        sel = {
+            "model_id": stub_model["model_id"],
+            "vid_group_id": multi_session_group,
+            "pose_estim_params_id": "default",
+        }
+        # Bypass the insert1 guard on purpose -- see class docstring.
+        PoseEstimSelection().insert(
+            [{**sel, "task_mode": "load", "output_dir": ""}]
+        )
+
+        with pytest.raises(ValueError) as exc:
+            PoseEstim().make_fetch(sel)
+
+        assert "Expected exactly 1 common NWB file" in str(exc.value)
+        assert exc.value.__cause__ is not None  # raise ... from e
+
+        (PoseEstimSelection() & sel).super_delete(warn=False, safemode=False)
+
+    def test_unregistered_videos_keep_own_message(
+        self, PoseEstim, PoseEstimSelection, stub_model, make_vid_group
+    ):
+        """An empty group still reports the registration problem, not multi-NWB."""
+        gid = make_vid_group("pv2_no_videos_grp", [])
+        sel = {
+            "model_id": stub_model["model_id"],
+            "vid_group_id": gid,
+            "pose_estim_params_id": "default",
+        }
+        PoseEstimSelection().insert(
+            [{**sel, "task_mode": "load", "output_dir": ""}]
+        )
+
+        with pytest.raises(ValueError) as exc:
+            PoseEstim().make_fetch(sel)
+
+        msg = str(exc.value)
+        assert "no registered Nwbfile" in msg
+        assert "Expected exactly 1 common NWB file" not in msg
+
+        (PoseEstimSelection() & sel).super_delete(warn=False, safemode=False)
+
+
+class TestMultiSessionTrainingAllowed:
+    """Blast-radius guard: the training path must stay multi-session."""
+
+    def test_training_group_spans_two_sessions(
+        self, pv2_train, VidFileGroup, stub_model, two_sessions
+    ):
+        """ModelSelection accepts the group PoseEstimSelection rejects."""
+        sel = pv2_train.ModelSelection & {
+            "vid_group_id": stub_model["vid_group_id"]
+        }
+        assert len(sel) == 1
+
+        from spyglass.common import Session
+
+        files = VidFileGroup.File & {"vid_group_id": stub_model["vid_group_id"]}
+        assert set((Session & files).fetch("nwb_file_name")) == set(
+            two_sessions["names"]
+        )
+
+
+class TestPoseEstimParams:
+    """Test PoseEstimParams methods for coverage."""
+
+    @patch("spyglass.position.v2.estim.default_pk_name")
+    def test_insert_params_generates_id(self, mock_default_pk, PoseEstimParams):
+        """Test insert_params with generated params_id."""
+        mock_default_pk.return_value = "pep-20261201"
+
+        # Mock the class methods without database
+        with (
+            patch.object(PoseEstimParams, "insert1"),
+            patch.object(PoseEstimParams, "_info_msg"),
+            patch("datajoint.hash.key_hash", return_value="testhash123"),
+            patch.object(
+                PoseEstimParams.__class__,
+                "__and__",
+                return_value=MagicMock(
+                    __bool__=lambda x: False  # No existing entries
+                ),
+            ),
+        ):
+            params = {"orient": {"method": "none"}}
+
+            result = PoseEstimParams.insert_params(params)
+
+            mock_default_pk.assert_called_once_with(
+                prefix="pep", include_hash=False
+            )
+            assert result["pose_estim_params_id"] == "pep-20261201"
+
+    def test_insert_params_with_explicit_id(self, PoseEstimParams):
+        """Test insert_params with explicit params_id."""
+        with (
+            patch.object(PoseEstimParams, "insert1"),
+            patch.object(PoseEstimParams, "_info_msg"),
+            patch("datajoint.hash.key_hash", return_value="testhash123"),
+            patch.object(
+                PoseEstimParams.__class__,
+                "__and__",
+                return_value=MagicMock(
+                    __bool__=lambda x: False  # No existing entries
+                ),
+            ),
+        ):
+            params = {"orient": {"method": "none"}}
+
+            result = PoseEstimParams.insert_params(
+                params, params_id="custom-id"
+            )
+
+            # Should use explicit ID, not call default_pk_name
+            assert result["pose_estim_params_id"] == "custom-id"
+
+    def test_insert_params_existing_hash(self, PoseEstimParams):
+        """Test insert_params with existing params hash."""
+        existing_key = {"pose_estim_params_id": "existing-id"}
+
+        # Mock the entire query chain
+        existing_mock = MagicMock()
+        existing_mock.__bool__ = lambda self: True
+        existing_mock.fetch1.return_value = existing_key
+
+        with (
+            patch("datajoint.hash.key_hash", return_value="existinghash"),
+            patch.object(
+                PoseEstimParams, "__call__", return_value=PoseEstimParams()
+            ),
+            patch.object(
+                PoseEstimParams, "__and__", return_value=existing_mock
+            ),
+        ):
+            params = {"orient": {"method": "none"}}
+
+            result = PoseEstimParams.insert_params(params)
+
+            # Should return existing key without insertion
+            assert result == existing_key
+
+
+class TestCanonicalizePoseColumns:
+    """The pose ingest boundary maps tool-native names to canonical ones.
+
+    Pure-function tests: no database, no DLC/SLEAP inference required.
+    """
+
+    @pytest.fixture
+    def canon_map(self):
+        from spyglass.position.v2.utils.skeleton import build_canonical_map
+
+        return build_canonical_map(["earR", "greenLED", "redLED_C"])
+
+    @staticmethod
+    def _pose_df(bodyparts, scorer="scorer"):
+        tuples = [
+            (scorer, bp, coord)
+            for bp in bodyparts
+            for coord in ("x", "y", "likelihood")
+        ]
+        cols = pd.MultiIndex.from_tuples(
+            tuples, names=["scorer", "bodyparts", "coords"]
+        )
+        arr = np.arange(3 * len(tuples), dtype=float).reshape(3, len(tuples))
+        return pd.DataFrame(arr, columns=cols)
+
+    def test_renames_to_canonical_preserving_values(self, canon_map):
+        from spyglass.position.v2.utils.pose_io import canonicalize_pose_columns
+
+        df = self._pose_df(["EarR", "greenLed"])
+        ear_x = df[("scorer", "EarR", "x")].to_numpy(copy=True)
+        green_y = df[("scorer", "greenLed", "y")].to_numpy(copy=True)
+        before = df.to_numpy(copy=True)
+
+        out, canonical = canonicalize_pose_columns(
+            df, ["EarR", "greenLed"], canon_map
+        )
+
+        assert canonical == ["earR", "greenLED"]
+        assert list(out.columns.get_level_values("bodyparts").unique()) == [
+            "earR",
+            "greenLED",
+        ]
+        # only labels changed: full array identical, data reachable by canon
+        np.testing.assert_array_equal(out.to_numpy(), before)
+        np.testing.assert_array_equal(
+            out[("scorer", "earR", "x")].to_numpy(), ear_x
+        )
+        np.testing.assert_array_equal(
+            out[("scorer", "greenLED", "y")].to_numpy(), green_y
+        )
+
+    def test_unresolved_name_raises_naming_it(self, canon_map):
+        import datajoint as dj
+
+        from spyglass.position.v2.utils.pose_io import canonicalize_pose_columns
+
+        df = self._pose_df(["EarR", "noSuchPartXyz"])
+        with pytest.raises(dj.DataJointError, match="noSuchPartXyz"):
+            canonicalize_pose_columns(df, ["EarR", "noSuchPartXyz"], canon_map)
+
+    def test_two_surface_forms_collapsing_to_one_canonical_raise(
+        self, canon_map
+    ):
+        import datajoint as dj
+
+        from spyglass.position.v2.utils.pose_io import canonicalize_pose_columns
+
+        # both normalize to 'green led' -> canonical 'greenLED' (duplicate col)
+        df = self._pose_df(["greenLED", "green_led"])
+        with pytest.raises(dj.DataJointError, match="canonical"):
+            canonicalize_pose_columns(df, ["greenLED", "green_led"], canon_map)
+
+
+class TestPoseEstimationToDataframe:
+    """Read-side canonicalization: NWB series names resolve to canonical.
+
+    Uses real in-memory ndx-pose series (no DB, no inference).
+    """
+
+    @staticmethod
+    def _series(name, n=4, ndim=2):
+        import ndx_pose
+
+        rng = np.arange(n * ndim, dtype=float).reshape(n, ndim)
+        return ndx_pose.PoseEstimationSeries(
+            name=name,
+            description="test",
+            data=rng,
+            unit="pixels",
+            reference_frame="(0,0) top-left",
+            timestamps=np.linspace(0, 1, n),
+            confidence=np.linspace(0.5, 1.0, n),
+        )
+
+    class _Container:
+        def __init__(self, series):
+            self.pose_estimation_series = {s.name: s for s in series}
+
+    def test_resolves_series_names_to_canonical(self):
+        from spyglass.position.v2.utils.pose_io import (
+            pose_estimation_to_dataframe,
+        )
+        from spyglass.position.v2.utils.skeleton import build_canonical_map
+
+        canon_map = build_canonical_map(["greenLED", "earR"])
+        green = self._series("greenLed_pose")
+        ear = self._series("EarR_pose")
+        pe = self._Container([green, ear])
+
+        df = pose_estimation_to_dataframe(pe, "scorer", False, canon_map)
+
+        parts = list(df.columns.get_level_values("bodyparts").unique())
+        assert parts == ["greenLED", "earR"]
+        # data preserved under canonical name
+        np.testing.assert_array_equal(
+            df[("scorer", "greenLED", "x")].to_numpy(), green.data[:][:, 0]
+        )
+        # real timestamps used as index
+        np.testing.assert_array_equal(df.index.to_numpy(), green.timestamps[:])
+
+    def test_unknown_name_left_unchanged(self):
+        """A legacy/unknown part with no canonical match reads back as-is."""
+        from spyglass.position.v2.utils.pose_io import (
+            pose_estimation_to_dataframe,
+        )
+        from spyglass.position.v2.utils.skeleton import build_canonical_map
+
+        canon_map = build_canonical_map(["greenLED"])
+        pe = self._Container([self._series("mysteryPart_pose")])
+
+        df = pose_estimation_to_dataframe(pe, "scorer", False, canon_map)
+
+        parts = list(df.columns.get_level_values("bodyparts").unique())
+        assert parts == ["mysteryPart"]
+
+    def test_is_3d_reads_z_coordinate(self):
+        from spyglass.position.v2.utils.pose_io import (
+            pose_estimation_to_dataframe,
+        )
+        from spyglass.position.v2.utils.skeleton import build_canonical_map
+
+        canon_map = build_canonical_map(["earR"])
+        pe = self._Container([self._series("EarR_pose", ndim=3)])
+
+        df = pose_estimation_to_dataframe(pe, "scorer", True, canon_map)
+
+        coords = set(df.columns.get_level_values("coords"))
+        assert coords == {"x", "y", "z", "likelihood"}
+
+
+# ── Dependency Injection Test Stubs ──────────────────────────────────────────
+
+
+class StubFileSystem:
+    """Stub filesystem for testing without real file I/O.
+
+    Implements FileSystemProtocol to enable testing of strategy classes
+    without requiring actual files to exist.
+    """
+
+    def __init__(self, files=None, yaml_data=None):
+        self.files = files or {}  # path -> exists boolean
+        self.yaml_data = yaml_data or {}  # path -> dict content
+        self.glob_results = {}  # pattern -> list of matches
+
+    def exists(self, path):
+        """Check if path exists in our stub filesystem."""
+        return self.files.get(str(path), False)
+
+    def glob(self, pattern):
+        """Return pre-configured glob results."""
+        return self.glob_results.get(pattern, [])
+
+    def read_yaml(self, path):
+        """Return pre-configured YAML data."""
+        if str(path) not in self.yaml_data:
+            raise FileNotFoundError(f"No YAML data for {path}")
+        return self.yaml_data[str(path)]
+
+    def getmtime(self, path):
+        """Return a fixed modification time."""
+        return 1640995200.0  # 2022-01-01 00:00:00
+
+
+class TestNDXPoseBuilderTimestamps:
+    """NDXPoseBuilder.build_pose_estimation requires real timestamps."""
+
+    def _make_pose_df(self, n=5, scorer="DLC_scorer", bodypart="nose"):
+        cols = pd.MultiIndex.from_product(
+            [[scorer], [bodypart], ["x", "y", "likelihood"]],
+            names=["scorer", "bodypart", "coords"],
+        )
+        return pd.DataFrame(
+            [[float(i), float(i), 0.99] for i in range(n)], columns=cols
+        )
+
+    def test_raises_when_no_timestamps(self, NDXPoseBuilder):
+        """build_pose_estimation raises ValueError when timestamps=None."""
+        builder = NDXPoseBuilder()
+        df = self._make_pose_df()
+        with pytest.raises(ValueError, match="[Tt]imestamp"):
+            builder.build_pose_estimation(
+                pose_df=df,
+                bodyparts=["nose"],
+                scorer="DLC_scorer",
+                model_id="m1",
+                timestamps=None,
+            )
+
+    def test_raises_on_length_mismatch(self, NDXPoseBuilder):
+        """build_pose_estimation raises when timestamp length != frame count."""
+        builder = NDXPoseBuilder()
+        df = self._make_pose_df(n=5)
+        with pytest.raises(ValueError, match="[Tt]imestamp"):
+            builder.build_pose_estimation(
+                pose_df=df,
+                bodyparts=["nose"],
+                scorer="DLC_scorer",
+                model_id="m1",
+                timestamps=np.arange(3),  # wrong length
+            )
+
+    def test_stored_timestamps_match_provided(self, NDXPoseBuilder):
+        """build_pose_estimation stores the provided timestamps exactly."""
+        builder = NDXPoseBuilder()
+        n = 5
+        df = self._make_pose_df(n=n)
+        ts = np.linspace(0.0, 1.0, n)
+        pose_estimation, _ = builder.build_pose_estimation(
+            pose_df=df,
+            bodyparts=["nose"],
+            scorer="DLC_scorer",
+            model_id="m1",
+            timestamps=ts,
+        )
+        series = list(pose_estimation.pose_estimation_series.values())[0]
+        np.testing.assert_array_equal(series.timestamps[:], ts)
+
+
+class TestPoseEstimFetch1Dataframe:
+    """Unit tests for PoseEstim.fetch1_dataframe.
+
+    Covers the fetch_nwb-based read path without a live DB.
+    """
+
+    def test_uses_fetch_nwb_path(self, pv2_estim):
+        """fetch1_dataframe uses self.fetch_nwb() for path resolution."""
+
+        import ndx_pose
+
+        PoseEstim = pv2_estim.PoseEstim
+
+        # Build a minimal in-memory NWBFile with a PoseEstimation
+        from datetime import datetime, timezone
+
+        from pynwb import NWBFile, ProcessingModule
+
+        n = 3
+        ts = np.linspace(0.0, 0.1, n)
+        x_data = np.column_stack([np.ones(n), np.zeros(n)])
+        confidence = np.ones(n)
+
+        series = ndx_pose.PoseEstimationSeries(
+            name="nose_pose",
+            data=x_data,
+            timestamps=ts,
+            confidence=confidence,
+            unit="pixels",
+            reference_frame="image",
+        )
+        pose_est = ndx_pose.PoseEstimation(
+            name="PoseEstimation",
+            pose_estimation_series=[series],
+            description="unit test",
+            source_software="DLC",
+        )
+        behavior = ProcessingModule(name="behavior", description="test")
+        behavior.add(pose_est)
+        nwbf = NWBFile(
+            session_description="test",
+            identifier="test-id",
+            session_start_time=datetime.now(timezone.utc),
+        )
+        nwbf.add_processing_module(behavior)
+
+        table = PoseEstim()
+        nwb_data = {
+            "analysis_file_name": "fake.nwb",
+            "nwb2load_filepath": "/fake/path.nwb",
+        }
+
+        with (
+            patch.object(table, "fetch1", return_value="fake.nwb"),
+            patch.object(table, "fetch_nwb", return_value=[nwb_data]),
+            patch("spyglass.position.v2.estim.get_nwb_file", return_value=nwbf),
+        ):
+            df = table.fetch1_dataframe()
+
+        assert len(df) == n
+        assert df.columns.names == ["scorer", "bodyparts", "coords"]
+        # nose bodypart should be present (name.replace("_pose", ""))
+        assert "nose" in df.columns.get_level_values("bodyparts")
+        # real timestamps used as index; data decoded from x_data (x=1, y=0)
+        np.testing.assert_array_equal(df.index.to_numpy(), ts)
+        np.testing.assert_array_equal(
+            df.xs("x", level="coords", axis=1).to_numpy().ravel(), np.ones(n)
+        )
+        np.testing.assert_array_equal(
+            df.xs("y", level="coords", axis=1).to_numpy().ravel(), np.zeros(n)
+        )
+
+    def test_raises_when_no_behavior_module(self, pv2_estim):
+        """fetch1_dataframe raises ValueError when NWB has no behavior module."""
+        from datetime import datetime, timezone
+
+        from pynwb import NWBFile
+
+        PoseEstim = pv2_estim.PoseEstim
+
+        nwbf = NWBFile(
+            session_description="test",
+            identifier="test-id-2",
+            session_start_time=datetime.now(timezone.utc),
+        )
+
+        table = PoseEstim()
+        nwb_data = {
+            "analysis_file_name": "fake.nwb",
+            "nwb2load_filepath": "/fake/path.nwb",
+        }
+
+        with (
+            patch.object(table, "fetch1", return_value="fake.nwb"),
+            patch.object(table, "fetch_nwb", return_value=[nwb_data]),
+            patch("spyglass.position.v2.estim.get_nwb_file", return_value=nwbf),
+            pytest.raises(ValueError, match="No behavior module"),
+        ):
+            table.fetch1_dataframe()
