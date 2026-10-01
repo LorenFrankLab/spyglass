@@ -14,7 +14,8 @@ from spyglass.common.common_behav import (  # noqa: F401
     convert_epoch_interval_name_to_position_interval_name,
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.position.v1.dlc_utils import (
+from spyglass.position.utils import DLCProjectReader, do_pose_estimation
+from spyglass.position.utils.general import (
     file_log,
     find_mp4,
     get_video_info,
@@ -23,8 +24,6 @@ from spyglass.position.v1.dlc_utils import (
 from spyglass.position.v1.position_dlc_model import DLCModel
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
-
-from . import dlc_reader
 
 schema = dj.schema("position_v1_dlc_pose_estimation")
 
@@ -239,7 +238,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
         # Trigger PoseEstimation
         if task_mode == "trigger":
-            dlc_reader.do_pose_estimation(
+            do_pose_estimation(
                 video_path,
                 dlc_model,
                 project_path,
@@ -247,7 +246,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 **analyze_video_params,
             )
 
-        dlc_result = dlc_reader.PoseEstimation(output_dir)
+        dlc_result = DLCProjectReader(output_dir)
         creation_time = datetime.fromtimestamp(
             dlc_result.creation_time
         ).strftime("%Y-%m-%d %H:%M:%S")
@@ -432,7 +431,14 @@ def convert_to_cm(df, meters_to_pixels):
     """Converts x and y columns from pixels to cm"""
     CM_TO_METERS = 100
     idx = pd.IndexSlice
-    df.loc[:, idx[("x", "y")]] *= meters_to_pixels * CM_TO_METERS
+    xy_cols = df.loc[:, idx[("x", "y")]]
+    # Scalar multiplication upcasts float32 -> float64; cast back to the
+    # original per-column dtype before assigning through .loc to avoid
+    # pandas' incompatible-dtype FutureWarning (mirrors the fix applied to
+    # the V2 equivalent in position/utils/pose_processing.convert_to_cm).
+    df.loc[:, idx[("x", "y")]] = (
+        xy_cols * (meters_to_pixels * CM_TO_METERS)
+    ).astype(xy_cols.dtypes)
     return df
 
 

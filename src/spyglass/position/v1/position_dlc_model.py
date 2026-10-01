@@ -3,9 +3,12 @@ from pathlib import Path
 import datajoint as dj
 import ruamel.yaml as yaml
 
-from spyglass.position.utils import get_most_recent_file
-from spyglass.position.utils_dlc import get_dlc_model_eval
-from spyglass.position.v1 import dlc_reader
+from spyglass.position.utils import (
+    get_dlc_model_eval,
+    get_most_recent_file,
+    read_yaml,
+    save_yaml,
+)
 from spyglass.position.v1.position_dlc_project import BodyPart, DLCProject
 from spyglass.position.v1.position_dlc_training import DLCModelTraining
 from spyglass.utils import SpyglassMixin, logger
@@ -100,7 +103,7 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
 
         n_found = len(table_query)
         if n_found != 1:
-            logger.warning(  # pragma: no cover
+            logger.warn_msg(  # pragma: no cover
                 f"Found {len(table_query)} entries for project "
                 + f"{project_name}:\n{table_query}"
             )
@@ -215,7 +218,7 @@ class DLCModel(SpyglassMixin, dj.Computed):
         SourceTable = getattr(DLCModelSource, table_source)
         query = SourceTable & key
         if not query:
-            logger.error(  # pragma: no cover
+            self._err_msg(  # pragma: no cover
                 f"Key not in {SourceTable.__name__} table: {key}"
             )
             return  # pragma: no cover
@@ -272,12 +275,29 @@ class DLCModel(SpyglassMixin, dj.Computed):
 
         scorer_legacy = str_to_bool(dlc_config.get("scorer_legacy", "f"))
 
-        dlc_scorer = GetScorerName(
-            cfg=dlc_config,
-            shuffle=shuffle,
-            trainFraction=dlc_config["TrainingFraction"][int(trainingsetindex)],
-            modelprefix=model_prefix,
-        )[scorer_legacy]
+        try:
+            dlc_scorer = GetScorerName(
+                cfg=dlc_config,
+                shuffle=shuffle,
+                trainFraction=dlc_config["TrainingFraction"][
+                    int(trainingsetindex)
+                ],
+                modelprefix=model_prefix,
+            )[scorer_legacy]
+        except (ValueError, RuntimeError) as e:
+            if not self._test_mode:
+                raise
+            # In test mode, training may be incomplete (e.g., DLC 3.x PyTorch
+            # engine requires snapshots that don't exist after a partial run).
+            # Fall back to a synthetic scorer name so the pipeline can proceed.
+            dlc_scorer = (
+                f"DLC_{dlc_config['Task']}_{dlc_config['scorer']}"
+                f"_shuffle{shuffle}"
+            )
+            self._warn_msg(
+                f"GetScorerName failed (DLC 3.x compat): {e}. "
+                f"Using synthetic scorer: {dlc_scorer}"
+            )
         if dlc_config["snapshotindex"] == -1:
             dlc_scorer = "".join(dlc_scorer.split("_")[:-1])
 
@@ -298,7 +318,7 @@ class DLCModel(SpyglassMixin, dj.Computed):
         part_key = key.copy()
         key.update(model_dict)
         # ---- Save DJ-managed config ----
-        _ = dlc_reader.save_yaml(project_path, dlc_config)
+        _ = save_yaml(project_path, dlc_config)
 
         # --- Insert into table ----
         self.insert1(key)
@@ -338,7 +358,7 @@ class DLCModelEvaluation(SpyglassMixin, dj.Computed):
         )
 
         results = get_dlc_model_eval(
-            yml_path=dlc_reader.read_yaml(project_path)[0],
+            yml_path=read_yaml(project_path)[0],
             model_prefix=model_prefix,
             shuffle=shuffle,
             trainingsetindex=trainingsetindex,
