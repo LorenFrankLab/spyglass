@@ -14,6 +14,34 @@ from spyglass.utils.nwb_helper_fn import (
 schema = dj.schema("position_v1_imported_pose")
 
 
+def _named_edges(bodyparts, edges_arr):
+    """Convert integer-index skeleton edges to name pairs.
+
+    TODO(PR8): ``fetch_skeleton`` repeats this inline. Consolidate both into
+    the skeleton utils once PR3 and PR4 are merged and the module layering
+    allows the import.
+
+    Parameters
+    ----------
+    bodyparts : list of str
+        Ordered node names; edge indices refer to positions in this list.
+    edges_arr : array-like or None
+        Iterable of ``(i, j)`` integer index pairs, or None when the
+        skeleton defines no edges.
+
+    Returns
+    -------
+    list of tuple of str
+        ``(bodyparts[i], bodyparts[j])`` for each edge; empty when
+        ``edges_arr`` is None.
+    """
+    if edges_arr is None:
+        return []
+    return [
+        (bodyparts[int(edge[0])], bodyparts[int(edge[1])]) for edge in edges_arr
+    ]
+
+
 @schema
 class ImportedPose(SpyglassIngestion, dj.Manual):
     """
@@ -78,6 +106,9 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
         }
         part_attr = self.BodyPart.table_key_to_obj_attr["self"]
 
+        if self._import_to_v2 and nwb_obj.skeleton is not None:
+            self._insert_v2_skeleton(nwb_obj.skeleton, nwb_file_name)
+
         return {
             IntervalList: [
                 {
@@ -96,6 +127,71 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
                 for part, part_obj in nwb_obj.pose_estimation_series.items()
             ],
         }
+
+    #: Set for the duration of an ``insert_from_nwbfile(import_to_v2=True)``
+    #: call; read by ``generate_entries_from_nwb_object``.
+    _import_to_v2 = False
+
+    def insert_from_nwbfile(
+        self, nwb_file_name, config=None, dry_run=False, import_to_v2=False
+    ):
+        """Ingest all ndx-pose PoseEstimation objects from a registered NWB.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            Spyglass-registered NWB filename (must exist in Nwbfile table).
+        config : dict, optional
+            A configuration dictionary to supplement NWB data. Default None.
+        dry_run : bool, optional
+            If True, do not insert into the database, just return the
+            entries that would be inserted. Default False.
+        import_to_v2 : bool, optional
+            When True, also register each skeleton in the V2 ``Skeleton``
+            table. ndx-pose files hold pose *results*, not trained model
+            weights, so only the skeleton metadata belongs in V2.
+            By default False.
+        """
+        self._import_to_v2 = import_to_v2 and not dry_run
+        try:
+            return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
+        finally:
+            self._import_to_v2 = False
+
+    @staticmethod
+    def _insert_v2_skeleton(skeleton_obj, nwb_file_name):
+        """Register one ndx-pose Skeleton in the V2 ``Skeleton`` table.
+
+        A failed insert is warned rather than raised, so one bad skeleton
+        does not abort the primary ``ImportedPose`` ingestion.
+
+        Parameters
+        ----------
+        skeleton_obj : ndx_pose.Skeleton
+            Skeleton graph attached to the PoseEstimation object.
+        nwb_file_name : str
+            Spyglass-registered NWB filename (used only for logging).
+        """
+        import warnings
+
+        from spyglass.position.v2.train import Skeleton
+
+        bodyparts = [str(node) for node in skeleton_obj.nodes]
+        try:
+            Skeleton().insert1(
+                {
+                    "bodyparts": bodyparts,
+                    "edges": _named_edges(bodyparts, skeleton_obj.edges),
+                },
+                accept_default=True,
+                skip_duplicates=True,
+            )
+        except Exception as sk_exc:  # noqa: BLE001
+            warnings.warn(
+                f"V2 Skeleton insert failed for '{skeleton_obj.name}' "
+                f"in '{nwb_file_name}': {sk_exc}",
+                stacklevel=4,
+            )
 
     def make(self, key):
         """Deprecated in favor of insert_from_nwbfile."""
@@ -150,5 +246,6 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
         skeleton = (self & key).fetch_nwb()[0]["skeleton"]
         nodes = skeleton.nodes[:]
         int_edges = skeleton.edges[:]
+        # TODO(PR8): duplicates _named_edges; see its docstring.
         named_edges = [[nodes[i], nodes[j]] for i, j in int_edges]
         return {"nodes": nodes, "edges": named_edges}
