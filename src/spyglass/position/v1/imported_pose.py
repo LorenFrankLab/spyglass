@@ -2,9 +2,10 @@ import datajoint as dj
 import ndx_pose
 import numpy as np
 import pandas as pd
+import pynwb
 
 from spyglass.common import IntervalList, Nwbfile
-from spyglass.utils.dj_mixin import SpyglassIngestion
+from spyglass.utils.dj_mixin import SpyglassIngestion, SpyglassMixin
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_valid_intervals,
@@ -15,6 +16,10 @@ schema = dj.schema("position_v1_imported_pose")
 
 def _named_edges(bodyparts, edges_arr):
     """Convert integer-index skeleton edges to name pairs.
+
+    TODO(PR8): ``fetch_skeleton`` repeats this inline. Consolidate both into
+    the skeleton utils once PR3 and PR4 are merged and the module layering
+    allows the import.
 
     Parameters
     ----------
@@ -101,6 +106,9 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
         }
         part_attr = self.BodyPart.table_key_to_obj_attr["self"]
 
+        if self._import_to_v2 and nwb_obj.skeleton is not None:
+            self._insert_v2_skeleton(nwb_obj.skeleton, nwb_file_name)
+
         return {
             IntervalList: [
                 {
@@ -120,11 +128,9 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
             ],
         }
 
-    def make(self, key):
-        """Deprecated in favor of insert_from_nwbfile."""
-        raise NotImplementedError(
-            "ImportedPose.make is deprecated. Use insert_from_nwbfile."
-        )
+    #: Set for the duration of an ``insert_from_nwbfile(import_to_v2=True)``
+    #: call; read by ``generate_entries_from_nwb_object``.
+    _import_to_v2 = False
 
     def insert_from_nwbfile(
         self, nwb_file_name, config=None, dry_run=False, import_to_v2=False
@@ -141,73 +147,28 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
             If True, do not insert into the database, just return the
             entries that would be inserted. Default False.
         import_to_v2 : bool, optional
-            When True, also register skeleton graph(s) from the NWB in the V2
-            ``Skeleton`` table.  ndx-pose files hold pose *results*, not
-            trained model weights, so only the skeleton metadata belongs in V2.
+            When True, also register each skeleton in the V2 ``Skeleton``
+            table. ndx-pose files hold pose *results*, not trained model
+            weights, so only the skeleton metadata belongs in V2.
             By default False.
         """
-        entries = super().insert_from_nwbfile(nwb_file_name, config, dry_run)
-
-        if entries and not dry_run and import_to_v2:
-            file_path = Nwbfile().get_abs_path(nwb_file_name)
-            self._import_to_v2_pipeline(file_path, nwb_file_name)
-
-        return entries
-
-    def _import_to_v2_pipeline(self, file_path, nwb_file_name):
-        """Register skeleton from an ndx-pose NWB in the V2 Skeleton table.
-
-        ndx-pose NWBs contain skeleton graphs that are tool-agnostic and belong
-        in ``Skeleton``.  This is the only V2 table populated by
-        ``import_to_v2=True``; model/inference metadata is not created because
-        ndx-pose files hold pose *results*, not trained model weights.
-
-        Errors are logged as warnings so that the primary ``ImportedPose``
-        ingestion is never rolled back by a V2 failure.
-
-        Parameters
-        ----------
-        file_path : str or Path
-            Absolute path to the ndx-pose NWB file.
-        nwb_file_name : str
-            Spyglass-registered NWB filename (used only for logging).
-        """
-        import warnings
-
-        import ndx_pose
-        from pynwb import NWBHDF5IO
-
+        self._import_to_v2 = import_to_v2 and not dry_run
         try:
-            with NWBHDF5IO(str(file_path), mode="r") as io:
-                nwbf = io.read()
-                if nwbf.processing.get("behavior") is None:
-                    return
-                skeletons = [
-                    obj
-                    for obj in nwbf.objects.values()
-                    if isinstance(obj, ndx_pose.Skeleton)
-                ]
-                for skeleton_obj in skeletons:
-                    self._insert_v2_skeleton(skeleton_obj, nwb_file_name)
-        except Exception as exc:  # noqa: BLE001
-            warnings.warn(
-                f"V2 skeleton registration failed for '{nwb_file_name}': "
-                f"{exc}. ImportedPose entries were inserted successfully.",
-                stacklevel=3,
-            )
+            return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
+        finally:
+            self._import_to_v2 = False
 
     @staticmethod
     def _insert_v2_skeleton(skeleton_obj, nwb_file_name):
         """Register one ndx-pose Skeleton in the V2 ``Skeleton`` table.
 
-        A failed insert is logged as a warning rather than raised, so that a
-        single bad skeleton does not abort registration of the others or roll
-        back the primary ``ImportedPose`` ingestion.
+        A failed insert is warned rather than raised, so one bad skeleton
+        does not abort the primary ``ImportedPose`` ingestion.
 
         Parameters
         ----------
         skeleton_obj : ndx_pose.Skeleton
-            Skeleton graph object read from the ndx-pose NWB file.
+            Skeleton graph attached to the PoseEstimation object.
         nwb_file_name : str
             Spyglass-registered NWB filename (used only for logging).
         """
@@ -215,11 +176,13 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
 
         from spyglass.position.v2.train import Skeleton
 
-        bodyparts = list(skeleton_obj.nodes)
-        edges = _named_edges(bodyparts, skeleton_obj.edges)
+        bodyparts = [str(node) for node in skeleton_obj.nodes]
         try:
             Skeleton().insert1(
-                {"bodyparts": bodyparts, "edges": edges},
+                {
+                    "bodyparts": bodyparts,
+                    "edges": _named_edges(bodyparts, skeleton_obj.edges),
+                },
                 accept_default=True,
                 skip_duplicates=True,
             )
@@ -229,6 +192,12 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
                 f"in '{nwb_file_name}': {sk_exc}",
                 stacklevel=4,
             )
+
+    def make(self, key):
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "ImportedPose.make is deprecated. Use insert_from_nwbfile."
+        )
 
     def fetch_pose_dataframe(self, key=None):
         """Fetch pose data as a pandas DataFrame
@@ -277,5 +246,6 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
         skeleton = (self & key).fetch_nwb()[0]["skeleton"]
         nodes = skeleton.nodes[:]
         int_edges = skeleton.edges[:]
+        # TODO(PR8): duplicates _named_edges; see its docstring.
         named_edges = [[nodes[i], nodes[j]] for i, j in int_edges]
         return {"nodes": nodes, "edges": named_edges}
