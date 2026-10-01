@@ -1,10 +1,14 @@
-"""Utilities and protocols for dependency injection in position v2."""
+"""Utilities for position v2.
+
+``RealFileSystem`` is the default for ``PoseToolStrategy(filesystem=...)``;
+tests pass a dict-backed stub there instead of building a project on disk.
+"""
 
 import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Protocol, Union
+from typing import Dict, List, Union
 
 
 def default_pk_name(
@@ -37,78 +41,10 @@ def default_pk_name(
     return f"{prefix}-{when:%Y%m%d}{h}"[:limit]
 
 
-class FileSystemProtocol(Protocol):
-    """Protocol for file system operations.
-
-    Enables dependency injection of file I/O operations into strategy classes.
-    """
-
-    def glob(self, pattern: str) -> List[str]:
-        """Find files matching a glob pattern.
-
-        Parameters
-        ----------
-        pattern : str
-            Glob pattern to match
-
-        Returns
-        -------
-        List[str]
-            List of file paths matching the pattern
-        """
-        ...
-
-    def read_yaml(self, path: Union[str, Path]) -> Dict:
-        """Read a YAML file and return its contents.
-
-        Parameters
-        ----------
-        path : Union[str, Path]
-            Path to the YAML file
-
-        Returns
-        -------
-        Dict
-            The YAML file contents as a dictionary
-        """
-        ...
-
-    def exists(self, path: Union[str, Path]) -> bool:
-        """Check if a path exists.
-
-        Parameters
-        ----------
-        path : Union[str, Path]
-            Path to check
-
-        Returns
-        -------
-        bool
-            True if the path exists, False otherwise
-        """
-        ...
-
-    def getmtime(self, path: Union[str, Path]) -> float:
-        """Get the modification time of a file.
-
-        Parameters
-        ----------
-        path : Union[str, Path]
-            Path to the file
-
-        Returns
-        -------
-        float
-            Modification time as timestamp
-        """
-        ...
-
-
 class RealFileSystem:
-    """Real filesystem implementation of FileSystemProtocol.
+    """File operations a PoseToolStrategy needs to locate a model.
 
-    This is the default implementation that uses actual file system operations.
-    Tests can inject a stub implementation to avoid file system dependencies.
+    Tests inject a stub with these four methods instead.
     """
 
     def glob(self, pattern: str) -> List[str]:

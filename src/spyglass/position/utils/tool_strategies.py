@@ -12,7 +12,7 @@ from typing import Any, Dict, Set
 import datajoint as dj
 import yaml
 
-from .protocols import FileSystemProtocol, RealFileSystem
+from .protocols import RealFileSystem
 
 
 class PoseToolStrategy(ABC):
@@ -22,13 +22,13 @@ class PoseToolStrategy(ABC):
     consistent parameter validation, training, and model management.
     """
 
-    def __init__(self, filesystem: FileSystemProtocol = None):
+    def __init__(self, filesystem=None):
         """Initialize with optional filesystem dependency.
 
         Parameters
         ----------
-        filesystem : FileSystemProtocol, optional
-            File system implementation. If None, uses RealFileSystem.
+        filesystem : optional
+            Anything with RealFileSystem's four methods; defaults to it.
         """
         self._fs = filesystem or RealFileSystem()
 
