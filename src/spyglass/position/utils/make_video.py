@@ -130,7 +130,7 @@ class VideoMaker:
         video_filename,
         position_mean,
         orientation_mean,
-        centroids,
+        bodypart_centroids,
         position_time,
         video_frame_inds=None,
         likelihoods=None,
@@ -165,7 +165,7 @@ class VideoMaker:
             (N, 2) array of centroid x/y positions.
         orientation_mean : np.ndarray
             (N,) array of head orientations in radians.
-        centroids : dict
+        bodypart_centroids : dict
             Dict mapping bodypart name to (N, 2) position array.
         position_time : np.ndarray
             (N,) array of timestamps.
@@ -223,7 +223,7 @@ class VideoMaker:
         self.video_frame_inds = video_frame_inds
         self.position_mean = position_mean
         self.orientation_mean = orientation_mean
-        self.centroids = centroids
+        self.bodypart_centroids = bodypart_centroids
         self.likelihoods = likelihoods
         self.position_time = position_time
         self.percent_frames = percent_frames
@@ -357,7 +357,9 @@ class VideoMaker:
                 label=f"{bodypart} position",
                 alpha=0.6,
             )
-            for color, bodypart in zip(COLOR_SWATCH, self.centroids.keys())
+            for color, bodypart in zip(
+                COLOR_SWATCH, self.bodypart_centroids.keys()
+            )
         }
         self.centroid_position_dot = axes[0].scatter(
             [],
@@ -513,7 +515,7 @@ class VideoMaker:
         for bodypart in self.centroid_plot_objs:
             self.centroid_plot_objs[bodypart].set_offsets(
                 _to_px(
-                    data=self.centroids[bodypart][pos_ind],
+                    data=self.bodypart_centroids[bodypart][pos_ind],
                     cm_to_pixels=self.cm_to_pixels,
                 )
             )
