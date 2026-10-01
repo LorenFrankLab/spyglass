@@ -31,7 +31,7 @@ class DlcConfig:
     # ── I/O ──────────────────────────────────────────────────────────────
     @classmethod
     def read(cls, project_dir) -> "DlcConfig":
-        """Read the config from *project_dir* (defers to DLC's ``read_config``)."""
+        """Read the config from *project_dir* (defers to ``read_yaml``)."""
         from spyglass.position.utils.dlc_io import read_yaml
 
         _, cfg = read_yaml(Path(project_dir))
