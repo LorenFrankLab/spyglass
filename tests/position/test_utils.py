@@ -1,3 +1,6 @@
+import os
+import signal
+from contextlib import contextmanager
 from pathlib import Path
 from time import sleep
 
@@ -200,15 +203,81 @@ def test_vid_maker_filenotfound(sgp):
         )
 
 
-def test_vid_maker_plots_full_batch(sgp):
-    """Every frame of every batch must be attempted exactly once.
+@contextmanager
+def _fail_if_slower_than(seconds, msg):
+    """Turn a hang into a failure.
 
-    `end_frame` is inclusive, so stopping at it left the last frame of each
-    batch unrendered and each partial video one frame short. Test mode renders
-    10 frames at the default batch_size of 512, so a single batch never
-    revealed this; these batch bounds mirror process_frames over 3 batches.
+    plot_frames' `while frames_left` spins forever if that counter disagrees
+    with the frames actually submitted, since a negative count is truthy.
     """
+
+    def raise_timeout(*_):
+        raise AssertionError(msg)
+
+    prev = signal.signal(signal.SIGALRM, raise_timeout)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, prev)
+
+
+def _record_plotted_frame(frame_ind):
+    """Stand in for _generate_single_frame, inside a pool worker.
+
+    Writes the plot _check_plotted looks for, plus a marker that survives the
+    per-batch `*.png` cleanup so the test can count frames after the run.
+    """
+    out = Path(os.environ["SG_TEST_FRAME_DIR"])
+    (out / f"plot_{frame_ind:02d}.png").touch()
+    (out / f"seen_{frame_ind:02d}.log").touch()
+    return frame_ind
+
+
+def _bare_vid_maker(sgp, tmp_path, n_frames, batch_size):
+    """A VideoMaker with only the attrs the frame loop reads."""
     maker = object.__new__(sgp.v1.dlc_utils_makevid.VideoMaker)
+    maker.n_frames, maker.batch_size = n_frames, batch_size
+    maker.pad_len = len(str(n_frames))
+    maker.temp_dir = tmp_path
+    maker.debug = False
+    maker.dropped_frames, maker.frame_errors = set(), {}
+    maker.max_workers, maker.max_jobs_in_queue, maker.timeout = 4, 8, 30
+    return maker
+
+
+def test_vid_maker_renders_every_batch(sgp, tmp_path, monkeypatch):
+    """process_frames must render every frame when there are many batches.
+
+    Test mode renders 10 frames at the default batch_size of 512, always a
+    single batch, so nothing covered batch_size < n_frames. `end_frame` is
+    inclusive, so an exclusive range dropped the last frame of every batch.
+    Drives the real process_frames so its batch bounds and last_batch are
+    under test too, with only ffmpeg stubbed out.
+    """
+    n_frames = 25
+    maker = _bare_vid_maker(sgp, tmp_path, n_frames, batch_size=10)
+
+    monkeypatch.setenv("SG_TEST_FRAME_DIR", str(tmp_path))
+    maker._generate_single_frame = _record_plotted_frame
+    maker.ffmpeg_extract = lambda *_, **__: None
+    maker.ffmpeg_stitch_partial = lambda _, out: Path(out).touch()
+    maker.concat_partial_videos = lambda: None
+
+    with _fail_if_slower_than(60, "process_frames did not finish"):
+        maker.process_frames()  # 3 batches, the last one short
+
+    seen = sorted(
+        int(p.stem.split("_")[1]) for p in tmp_path.glob("seen_*.log")
+    )
+    assert seen == list(range(n_frames)), "Frames skipped across batches"
+    assert not maker.dropped_frames, "No frame should have been dropped"
+
+
+def test_vid_maker_plots_full_batch(sgp, tmp_path):
+    """The single-threaded debug path must cover the same inclusive range."""
+    maker = _bare_vid_maker(sgp, tmp_path, n_frames=25, batch_size=10)
 
     attempted = []
     maker._generate_single_frame = attempted.append
@@ -217,12 +286,9 @@ def test_vid_maker_plots_full_batch(sgp):
         def update(self, n=1):
             pass
 
-    batch_size, n_frames = 10, 25
-    for start in range(0, n_frames, batch_size):
-        end = min(start + batch_size, n_frames) - 1
-        maker.plot_frames(start, end, Bar(), process_pool=False)
+    maker.plot_frames(10, 19, Bar(), process_pool=False)
 
-    assert attempted == list(range(n_frames)), "plot_frames skipped frames"
+    assert attempted == list(range(10, 20)), "plot_frames skipped frames"
 
 
 def test_vid_maker_check_plotted(sgp, tmp_path):
