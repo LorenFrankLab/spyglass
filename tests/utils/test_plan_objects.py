@@ -11,13 +11,26 @@ data table, however badly the file is malformed. Every failure becomes a
 
 import pytest
 
+from dataclasses import dataclass
+
 from spyglass.utils.ingestion_plan import (
     IngestionPlan,
     PlannedEntries,
     Problem,
     TablePlan,
-    _NamedTable,
 )
+
+
+@dataclass(frozen=True)
+class _NamedTable:
+    """A target known only by its name.
+
+    These tests are about the plan objects, so they need a target that names
+    a table without one being declared or reachable.
+    """
+
+    full_table_name: str
+
 
 # ---------------------------------------------------------------------------
 # TablePlan -- one table's share of the work
@@ -129,33 +142,6 @@ def test_plan_surfaces_fatal_problems_separately():
 def test_plan_counts_entries_across_tables():
     """Entry count spans every table's plan."""
     assert _plan(_table_plan(), _table_plan()).entry_count == 4
-
-
-def test_plan_hash_is_stable_and_content_sensitive():
-    """The same plan hashes the same; a different one does not.
-
-    The hash is what lets a later attempt recognise the work it already did.
-    """
-    first = _plan(_table_plan())
-    second = _plan(_table_plan())
-    third = _plan(_table_plan(status="failed"))
-
-    assert first.plan_hash == second.plan_hash
-    assert first.plan_hash != third.plan_hash
-
-
-def test_plan_round_trips_through_a_dict():
-    """A plan can be stored and rebuilt without losing its verdict."""
-    plan = _plan(
-        _table_plan(problems=(Problem("hard", "bad_fk", "parent missing"),))
-    )
-
-    rebuilt = IngestionPlan.from_dict(plan.to_dict())
-
-    assert rebuilt.nwb_file_name == plan.nwb_file_name
-    assert rebuilt.entry_count == plan.entry_count
-    assert len(rebuilt.blocking) == len(plan.blocking)
-    assert rebuilt.plan_hash == plan.plan_hash
 
 
 def test_plan_reports_per_table_status():

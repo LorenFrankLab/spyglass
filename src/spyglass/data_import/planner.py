@@ -20,11 +20,6 @@ from spyglass.utils.ingestion_plan import (
     TablePlan,
     row_key,
 )
-from spyglass.data_import.plan_cache import (
-    load_plan,
-    plan_provenance,
-    save_plan,
-)
 from spyglass.utils.logging import logger
 
 
@@ -165,7 +160,6 @@ def plan_nwbfile(
     nwb_file_name: str,
     config: dict = None,
     tables: Optional[List] = None,
-    use_cache: bool = False,
     nwb_file=None,
     nwb_path: str = None,
     force_replan: bool = False,
@@ -175,14 +169,9 @@ def plan_nwbfile(
     Parsing is the expensive half of ingestion and depends only on the file,
     the config and the Spyglass version. The *verdict* does not: novelty,
     divergence and foreign-key resolution are all read from the database, so
-    a plan describes a moment in it.
-
-    `use_cache` therefore defaults to False. Opt in only when the database
-    cannot have changed since the plan was built -- planning to read the
-    report, then planning again to insert what it approved. Ingest anything
-    in between and the cached verdict is stale: it will still report those
-    entries as novel. Caching the parse alone, and re-checking against the
-    database every time, is the fix; it is not what this does yet.
+    a plan describes a moment in it -- which is why a whole plan is never
+    cached, and why reuse (`force_replan`) is per table and re-checks the
+    database every time.
 
     Parameters
     ----------
@@ -192,10 +181,6 @@ def plan_nwbfile(
         Per-table config, as `populate_all_common` assembles it.
     tables : list, optional
         Tables to plan. Default: every ingestion table, in dependency order.
-    use_cache : bool, optional
-        Read and write the plan cache. Default False; see above for when it
-        is safe. A subset of `tables` does not describe the whole file, so
-        those runs are never cached.
     nwb_file : pynwb.NWBFile, optional
         An already-open file to plan from, for a file that has no `Nwbfile`
         row yet. Default None, fetching the registered copy. Supplying this
@@ -222,17 +207,10 @@ def plan_nwbfile(
     nwb_key = {"nwb_file_name": nwb_file_name}
     registered = bool(Nwbfile & nwb_key)
 
-    # Only a whole-file plan is cacheable: one built for some tables would be
-    # served later as though it covered all of them.
-    cacheable = use_cache and tables is None
+    # `IngestionPlanLog` declares columns for these and has always stored
+    # NULL: the only code that filled them sat behind the plan cache, which
+    # nothing enabled. See the open item in TASKS.md.
     nwb_hash = config_hash = version = None
-    if cacheable:
-        nwb_hash, config_hash, version = plan_provenance(
-            Nwbfile.get_abs_path(nwb_file_name), config
-        )
-        cached = load_plan(nwb_file_name, nwb_hash, config_hash, version)
-        if cached is not None:
-            return cached
 
     if nwb_file is None:
         if not registered:
@@ -388,9 +366,6 @@ def plan_nwbfile(
         config_hash=config_hash,
         spyglass_version=version,
     )
-
-    if cacheable:
-        save_plan(plan)
 
     return plan
 

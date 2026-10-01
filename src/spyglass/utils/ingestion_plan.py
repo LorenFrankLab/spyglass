@@ -21,8 +21,7 @@ other spyglass module -- which is also why it lives here rather than under
 `data_import`, whose package `__init__` reaches `spyglass.common`.
 """
 
-import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from hashlib import md5
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -606,77 +605,6 @@ class IngestionPlan:
         """Return each table's status, keyed by table name."""
         return {plan.table_name: plan.status for plan in self.table_plans}
 
-    @property
-    def plan_hash(self) -> str:
-        """Content hash, stable across runs of identical plans."""
-        return md5(
-            json.dumps(self.to_dict(), sort_keys=True, default=str).encode()
-        ).hexdigest()
-
-    def to_dict(self) -> dict:
-        """Return a JSON-safe mapping of this plan."""
-        return {
-            "nwb_file_name": self.nwb_file_name,
-            "nwb_hash": self.nwb_hash,
-            "spyglass_version": self.spyglass_version,
-            "config_hash": self.config_hash,
-            "fatal": [asdict(p) for p in self.fatal],
-            "table_plans": [
-                {
-                    "table_name": plan.table_name,
-                    "status": plan.status,
-                    "entry_count": plan.entry_count,
-                    "problems": [asdict(p) for p in plan.problems],
-                    "reads": list(plan.reads),
-                    "read_set_digest": plan.read_set_digest,
-                    "entries": [
-                        {
-                            "table": getattr(
-                                target, "full_table_name", str(target)
-                            ),
-                            "rows": [_jsonable(row) for row in rows],
-                        }
-                        for target, rows in plan.entries
-                    ],
-                }
-                for plan in self.table_plans
-            ],
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "IngestionPlan":
-        """Rebuild a plan from `to_dict` output.
-
-        Entries come back as the stored rows keyed by table *name*: the plan
-        is a record, and the tables it names may not be importable here.
-        """
-        table_plans = []
-        for plan in data.get("table_plans", []):
-            entries = PlannedEntries()
-            for target in plan.get("entries", []):
-                entries.add(_NamedTable(target["table"]), target["rows"])
-            table_plans.append(
-                TablePlan(
-                    table_name=plan["table_name"],
-                    entries=entries,
-                    status=plan.get("status", "ok"),
-                    problems=tuple(
-                        Problem(**p) for p in plan.get("problems", [])
-                    ),
-                    reads=tuple(plan.get("reads", [])),
-                    read_set_digest=plan.get("read_set_digest"),
-                )
-            )
-
-        return cls(
-            nwb_file_name=data["nwb_file_name"],
-            table_plans=tuple(table_plans),
-            fatal=tuple(Problem(**p) for p in data.get("fatal", [])),
-            nwb_hash=data.get("nwb_hash"),
-            spyglass_version=data.get("spyglass_version"),
-            config_hash=data.get("config_hash"),
-        )
-
     def __bool__(self) -> bool:
         """True when something blocks this plan."""
         return not self.is_clean
@@ -698,13 +626,6 @@ class IngestionPlan:
             f"IngestionPlan({self.nwb_file_name}, {verdict}, "
             + f"{self.entry_count} entries, {len(self.problems)} problems)"
         )
-
-
-@dataclass(frozen=True)
-class _NamedTable:
-    """A table known only by name, as rebuilt from a stored plan."""
-
-    full_table_name: str
 
 
 def _jsonable(value):
