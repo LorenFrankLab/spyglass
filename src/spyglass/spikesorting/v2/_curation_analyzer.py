@@ -235,18 +235,12 @@ def _raw_contributor_map(key) -> dict[str, list[int]]:
     """Return each curated unit's ordered original-sort contributors."""
     from spyglass.spikesorting.v2.curation import CurationV2
 
-    rows = (CurationV2.MergeGroup & key).fetch(
-        "unit_id",
-        "contributor_unit_id",
-        as_dict=True,
-        order_by=("unit_id", "contributor_unit_id"),
-    )
-    groups: dict[str, list[int]] = {}
-    for row in rows:
-        groups.setdefault(str(int(row["unit_id"])), []).append(
-            int(row["contributor_unit_id"])
-        )
-    return groups
+    return {
+        str(unit_id): contributors
+        for unit_id, contributors in CurationV2._raw_contributor_groups(
+            key
+        ).items()
+    }
 
 
 def hash_sorting_spike_content(sorting) -> str:

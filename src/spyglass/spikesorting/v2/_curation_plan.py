@@ -29,6 +29,7 @@ from typing import NamedTuple
 from spyglass.spikesorting.v2._curation_transforms import (
     build_curated_unit_rows,
     compose_curation_labels,
+    is_merge_preview,
 )
 from spyglass.utils import logger
 
@@ -189,9 +190,9 @@ def build_curation_summary(
 
     Pure formatter: given the already-fetched curation fields, build the
     notebook-printable summary. ``is_merge_preview`` is derived here from the
-    values in hand (not applied AND at least one >1-contributor merge group --
-    the same condition as ``has_unapplied_proposed_merges``) rather than
-    re-fetching. No database access.
+    values in hand (:func:`._curation_transforms.is_merge_preview`, which
+    ``has_unapplied_proposed_merges`` also uses) rather than re-fetching. No
+    database access.
 
     Parameters
     ----------
@@ -225,9 +226,6 @@ def build_curation_summary(
         for kept_unit_id, contributors in unit_contributor_groups.items()
         if len(contributors) > 1
     }
-    is_merge_preview = not bool(merges_applied) and any(
-        len(contribs) > 1 for contribs in unit_contributor_groups.values()
-    )
     return {
         "sorting_id": sorting_id,
         "curation_id": int(curation_id),
@@ -236,7 +234,9 @@ def build_curation_summary(
         "merge_groups": merge_groups,
         "unit_contributor_groups": unit_contributor_groups,
         "merges_applied": bool(merges_applied),
-        "is_merge_preview": is_merge_preview,
+        "is_merge_preview": is_merge_preview(
+            merges_applied, unit_contributor_groups
+        ),
         "merge_id": merge_id,
         "description": str(description),
     }

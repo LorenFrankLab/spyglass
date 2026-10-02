@@ -21,7 +21,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from spyglass.spikesorting.v2._curation_transforms import validate_labels
+from spyglass.spikesorting.v2._curation_transforms import (
+    normalize_label_state,
+    validate_labels,
+)
 from spyglass.spikesorting.v2._lookup_validation import lossless_int
 from spyglass.spikesorting.v2.utils import CurationSource
 
@@ -48,7 +51,7 @@ def find_matching_child_curation(
         for unit_id, unit_labels in labels.items()
         if int(unit_id) in written_unit_ids
     }
-    target_labels = table_cls._normalized_labels(effective_labels)
+    target_labels = normalize_label_state(effective_labels)
     target_merges = table_cls._normalized_real_merge_groups(
         kept_unit_to_contributors
     )
@@ -63,7 +66,7 @@ def find_matching_child_curation(
         }
     ).fetch("KEY", as_dict=True, order_by="curation_id")
     for candidate in candidates:
-        existing_labels = table_cls._normalized_labels(
+        existing_labels = normalize_label_state(
             table_cls._labels_by_unit(candidate)
         )
         if existing_labels != target_labels:
@@ -290,13 +293,7 @@ def resolve_curation_source(
     source_units_abs_path = AnalysisNwbfile.get_abs_path(
         (table_cls & parent_key).fetch1("analysis_file_name")
     )
-    parent_raw_contributors: dict[int, list[int]] = {}
-    for row in (table_cls.MergeGroup & parent_key).fetch(
-        "unit_id", "contributor_unit_id", as_dict=True
-    ):
-        parent_raw_contributors.setdefault(int(row["unit_id"]), []).append(
-            int(row["contributor_unit_id"])
-        )
+    parent_raw_contributors = table_cls._raw_contributor_groups(parent_key)
     parent_labels = table_cls._labels_by_unit(parent_key)
     return (
         source_units,

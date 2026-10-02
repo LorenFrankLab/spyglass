@@ -295,6 +295,97 @@ def normalize_curation_payload(
     )
 
 
+def normalize_label_state(
+    labels: Mapping[int, Iterable] | None,
+) -> dict[int, tuple[str, ...]]:
+    """Normalize ``{unit_id: labels}`` for semantic equality checks.
+
+    Unit ids become ``int``; each unit's labels are coerced through
+    :meth:`CurationLabel.normalize` and sorted into a tuple; units with no
+    labels are dropped. ``None`` is treated as empty.
+    """
+    return {
+        int(unit_id): tuple(
+            sorted(CurationLabel.normalize(label) for label in unit_labels)
+        )
+        for unit_id, unit_labels in (labels or {}).items()
+        if unit_labels
+    }
+
+
+def inherit_parent_labels(
+    parent_labels: Mapping[int, Sequence[str]],
+    kept_unit_to_contributors: Mapping[int, Sequence[int]],
+    *,
+    apply_merge: bool,
+) -> dict[int, list[str]]:
+    """Return the labels each kept unit inherits from its parent curation.
+
+    With ``apply_merge=True`` a kept unit inherits the sorted union of its
+    contributors' parent labels. With ``apply_merge=False`` (preview) every
+    parent unit passes through 1:1, so a kept unit inherits only its own
+    parent labels. Units that inherit no labels are omitted.
+
+    Parameters
+    ----------
+    parent_labels : Mapping[int, Sequence[str]]
+        ``{parent_unit_id: [label, ...]}``.
+    kept_unit_to_contributors : Mapping[int, Sequence[int]]
+        ``{kept_unit_id: [contributor unit ids]}`` in the parent namespace.
+    apply_merge : bool
+        Whether the child commits the merges.
+
+    Returns
+    -------
+    dict[int, list[str]]
+        ``{kept_unit_id: [label, ...]}``.
+    """
+    inherited: dict[int, list[str]] = {}
+    for kept_uid, contributors in kept_unit_to_contributors.items():
+        kept_uid = int(kept_uid)
+        if apply_merge:
+            union: set[str] = set()
+            for contributor in contributors:
+                union.update(parent_labels.get(int(contributor), []))
+            if union:
+                inherited[kept_uid] = sorted(union)
+        else:
+            own = parent_labels.get(kept_uid, [])
+            if own:
+                inherited[kept_uid] = list(own)
+    return inherited
+
+
+def is_merge_preview(
+    merges_applied, unit_contributor_groups: Mapping[int, Sequence[int]]
+) -> bool:
+    """Whether a curation proposes merges it has not applied.
+
+    True when ``merges_applied`` is false and at least one kept unit has more
+    than one contributor (every unit also carries a 1-element self-entry).
+    """
+    return not bool(merges_applied) and any(
+        len(contributors) > 1
+        for contributors in unit_contributor_groups.values()
+    )
+
+
+def group_contributor_rows(
+    rows: Iterable[Mapping], contributor_field: str
+) -> dict[int, list[int]]:
+    """Group merge-provenance rows into ``{unit_id: [contributor, ...]}``.
+
+    ``rows`` are ``MergeGroup`` / ``ParentMergeGroup`` row dicts carrying
+    ``unit_id`` and ``contributor_field``; contributors keep row order.
+    """
+    groups: dict[int, list[int]] = {}
+    for row in rows:
+        groups.setdefault(int(row["unit_id"]), []).append(
+            int(row[contributor_field])
+        )
+    return groups
+
+
 def compose_curation_labels(
     *,
     parent_labels: dict[int, list[str]],
@@ -356,20 +447,9 @@ def compose_curation_labels(
     if label_policy == "replace":
         return {int(k): list(v) for k, v in supplied_labels.items() if v}
 
-    composed: dict[int, list[str]] = {}
-    for kept_uid, contributors in kept_unit_to_contributors.items():
-        kept_uid = int(kept_uid)
-        if apply_merge:
-            union: set[str] = set()
-            for contributor in contributors:
-                union.update(parent_labels.get(int(contributor), []))
-            if union:
-                composed[kept_uid] = sorted(union)
-        else:
-            own = parent_labels.get(kept_uid, [])
-            if own:
-                composed[kept_uid] = list(own)
-
+    composed = inherit_parent_labels(
+        parent_labels, kept_unit_to_contributors, apply_merge=apply_merge
+    )
     for unit_id, labels in supplied_labels.items():
         # An explicit supplied entry overrides the inherited value for that
         # unit (an empty list clears it; the trailing filter drops it).

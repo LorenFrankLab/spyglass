@@ -17,7 +17,12 @@ from typing import Any, Literal
 
 import pandas as pd
 
-from spyglass.spikesorting.v2._curation_transforms import validate_merge_groups
+from spyglass.spikesorting.v2._curation_transforms import (
+    inherit_parent_labels,
+    is_merge_preview,
+    normalize_label_state,
+    validate_merge_groups,
+)
 from spyglass.spikesorting.v2._lookup_validation import lossless_int
 
 # Whether THIS call materialized a row ("computed") or found it already
@@ -86,11 +91,11 @@ def _curation_operation(row, groups, labels, parent_labels):
     else:
         has_merge = any(len(group) > 1 for group in groups.values())
         inherited = _inherited_labels_after_operation(
-            _normalized_labels(parent_labels),
+            normalize_label_state(parent_labels),
             groups,
             merges_applied=bool(row["merges_applied"]),
         )
-        has_labels = _normalized_labels(labels) != inherited
+        has_labels = normalize_label_state(labels) != inherited
         if has_merge and has_labels:
             kind = "merge+label"
         elif has_merge:
@@ -589,26 +594,12 @@ class CurationRef:
         labels = _group_curation_parts(
             (CurationV2.UnitLabel & key).fetch(as_dict=True), "curation_label"
         )
-        groups = _group_curation_parts(
-            (CurationV2.ParentMergeGroup & key).fetch(as_dict=True),
-            "parent_unit_id",
-        )
-        # Match get_unit_contributor_groups: roots use raw contributors;
-        # children use their parent namespace, not inherited raw merges.
-        raw_keys = [
-            {"curation_id": row["curation_id"]}
-            for row in rows
-            if row["curation_id"] not in groups
-        ]
-        if raw_keys:
-            groups.update(
-                _group_curation_parts(
-                    (CurationV2.MergeGroup & key & raw_keys).fetch(
-                        as_dict=True
-                    ),
-                    "contributor_unit_id",
-                )
+        groups = {
+            int(row["curation_id"]): CurationV2.get_unit_contributor_groups(
+                {**key, "curation_id": row["curation_id"]}
             )
+            for row in rows
+        }
         by_parent: dict[int, list[dict[str, Any]]] = {}
         for row in rows:
             by_parent.setdefault(int(row["parent_curation_id"]), []).append(row)
@@ -628,10 +619,11 @@ class CurationRef:
                 labels.get(cid, {}),
                 labels.get(int(row["parent_curation_id"]), {}),
             )
-            preview = not row["merges_applied"] and any(
-                len(group) > 1 for group in contributors.values()
+            status = (
+                "preview"
+                if is_merge_preview(row["merges_applied"], contributors)
+                else "committed"
             )
-            status = "preview" if preview else "committed"
             lines.append(
                 f"{prefix}{marker} curation {cid} "
                 f"[{status}; {operation.producer}/"
@@ -696,16 +688,6 @@ class CurationRef:
         )
 
 
-def _normalized_labels(
-    labels: Mapping[int, Sequence[str]],
-) -> dict[int, tuple[str, ...]]:
-    return {
-        int(unit_id): tuple(sorted(map(str, unit_labels)))
-        for unit_id, unit_labels in labels.items()
-        if unit_labels
-    }
-
-
 def _inherited_labels_after_operation(
     parent_labels: Mapping[int, tuple[str, ...]],
     groups: Mapping[int, Sequence[int]],
@@ -715,16 +697,12 @@ def _inherited_labels_after_operation(
     """Predict label inheritance so a pure merge is not called a label edit."""
     if not merges_applied:
         return dict(parent_labels)
-    inherited: dict[int, tuple[str, ...]] = {}
-    for child_id, parent_ids in groups.items():
-        labels = {
-            label
-            for parent_id in parent_ids
-            for label in parent_labels.get(int(parent_id), ())
-        }
-        if labels:
-            inherited[int(child_id)] = tuple(sorted(labels))
-    return inherited
+    return {
+        unit_id: tuple(labels)
+        for unit_id, labels in inherit_parent_labels(
+            parent_labels, groups, apply_merge=True
+        ).items()
+    }
 
 
 @dataclass(frozen=True)

@@ -34,6 +34,8 @@ from spyglass.spikesorting.v2 import (
 )
 from spyglass.spikesorting.v2._curation_transforms import (
     build_merge_provenance_rows,
+    group_contributor_rows,
+    is_merge_preview,
     normalize_curation_payload,
     validate_curation_label_rows,
 )
@@ -847,17 +849,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         )
 
     # ---- insert_curation steps ---------------------------------------------
-
-    @staticmethod
-    def _normalized_labels(labels: dict | None) -> dict[int, tuple[str, ...]]:
-        """Normalize ``{unit_id: labels}`` for semantic equality checks."""
-        return {
-            int(unit_id): tuple(
-                sorted(CurationLabel.normalize(label) for label in unit_labels)
-            )
-            for unit_id, unit_labels in (labels or {}).items()
-            if unit_labels
-        }
 
     @staticmethod
     def _normalized_real_merge_groups(
@@ -1770,9 +1761,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             merges_applied = (cls & key).fetch1("merges_applied")
         if bool(merges_applied):
             return False
-        return any(
-            len(contribs) > 1
-            for contribs in cls.get_unit_contributor_groups(key).values()
+        return is_merge_preview(
+            merges_applied, cls.get_unit_contributor_groups(key)
         )
 
     @classmethod
@@ -2048,8 +2038,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         Used by ``get_merged_sorting`` (which filters ``len(contribs) > 1``, so
         self-entries are auto-skipped) and ``has_unapplied_proposed_merges``.
         For RAW-contributor provenance ("which original raw units contributed
-        to kept unit X?") query the ``CurationV2.MergeGroup`` part directly --
-        it always stays in the raw ``Sorting.Unit`` namespace.
+        to kept unit X?") use ``_raw_contributor_groups`` -- ``MergeGroup``
+        always stays in the raw ``Sorting.Unit`` namespace.
 
         Parameters
         ----------
@@ -2067,30 +2057,43 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         # presence of ParentMergeGroup rows is the child discriminator (a child
         # always has at least the per-unit self-entries).
         if cls.ParentMergeGroup & key:
-            part, contributor_field = cls.ParentMergeGroup, "parent_unit_id"
-        else:
-            part, contributor_field = cls.MergeGroup, "contributor_unit_id"
-        # ``order_by`` makes BOTH the outer dict key order and the contributor
-        # list order deterministic (DataJoint gives no ordering without it).
-        # ``units_to_merge`` -- and therefore the ids SI's MergeUnitsSorting
-        # assigns on the lazy merge path -- depends on the dict insertion
-        # order; an unordered fetch would let DB row-order quirks leak into the
-        # lazy merged-unit ids.
-        rows = (part & key).fetch(
+            return cls._fetch_contributor_groups(
+                cls.ParentMergeGroup & key, "parent_unit_id"
+            )
+        return cls._raw_contributor_groups(key)
+
+    @classmethod
+    def _raw_contributor_groups(cls, key) -> dict[int, list[int]]:
+        """Return each unit's raw ``MergeGroup`` contributors.
+
+        ``{unit_id: [contributor_unit_id, ...]}`` -- raw ``Sorting.Unit``
+        provenance for every unit under ``key``, in ascending unit and
+        contributor order.
+        """
+        return cls._fetch_contributor_groups(
+            cls.MergeGroup & key, "contributor_unit_id"
+        )
+
+    @staticmethod
+    def _fetch_contributor_groups(
+        relation, contributor_field: str
+    ) -> dict[int, list[int]]:
+        """Fetch merge-provenance rows grouped by kept unit, in id order.
+
+        ``order_by`` makes BOTH the outer dict key order and each contributor
+        list (ascending) deterministic; DataJoint gives no ordering without
+        it. ``units_to_merge`` -- and therefore the ids SI's
+        MergeUnitsSorting assigns on the lazy merge path -- depends on the
+        dict insertion order, so an unordered fetch would let DB row-order
+        quirks leak into the lazy merged-unit ids.
+        """
+        rows = relation.fetch(
             "unit_id",
             contributor_field,
             as_dict=True,
             order_by=("unit_id", contributor_field),
         )
-        groups: dict[int, list[int]] = {}
-        for row in rows:
-            uid = int(row["unit_id"])
-            groups.setdefault(uid, []).append(int(row[contributor_field]))
-        # Sort contributor lists deterministically so callers can
-        # rely on stable ordering when comparing across runs.
-        for uid in groups:
-            groups[uid].sort()
-        return groups
+        return group_contributor_rows(rows, contributor_field)
 
     @classmethod
     def get_merged_sorting(cls, key: dict) -> "si.BaseSorting":

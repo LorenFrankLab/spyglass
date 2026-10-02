@@ -594,16 +594,7 @@ def _review_context_table(curation_key: dict, review_config: dict | None):
 
     proposed_labels = evaluation.proposed_labels
     suggested_groups = evaluation.suggested_merges
-    raw_provenance: dict[int, list[int]] = {}
-    for row in (CurationV2.MergeGroup & curation_key).fetch(
-        "unit_id",
-        "contributor_unit_id",
-        as_dict=True,
-        order_by=("unit_id", "contributor_unit_id"),
-    ):
-        raw_provenance.setdefault(int(row["unit_id"]), []).append(
-            int(row["contributor_unit_id"])
-        )
+    raw_provenance = CurationV2._raw_contributor_groups(curation_key)
 
     def groups_for(unit_id: int) -> str:
         groups = [group for group in suggested_groups if unit_id in group]
