@@ -154,9 +154,9 @@ or `log_export` positionally must pass them by keyword.
     `<1.13`), `spikeinterface==0.104.3`, `probeinterface>=0.3.2` (was `<0.3`),
     `jax<0.10` (was `<0.7.2`), `non-local-detector==0.6.9`,
     `ripple-detection>=1.7`, `deeplabcut[tf]>=3.0`, `keypoint-moseq>=0.6`;
-    declare `networkx` and `pydantic>=2`; drop the `panel>=1.4` pin, which Spyglass does not
-    import and which blocked `keypoint-moseq` 0.6 (it pins `panel==0.14.4`)
-    #1609
+    declare `networkx` and `pydantic>=2`; drop the `panel>=1.4` pin, which
+    Spyglass does not import and which blocked `keypoint-moseq` 0.6 (it pins
+    `panel==0.14.4`) #1609
 - `environment.yml` and `environment_min.yml` move to NumPy 2 and `scipy>=1.13`;
     `environment.yml` installs `torch>=2` from pip instead of conda
     `pytorch<1.12` and no longer installs `mountainsort4`, which does not run on
@@ -169,15 +169,15 @@ or `log_export` positionally must pass them by keyword.
     (FigPack browser review, ipywidgets), and the test-only
     `spikesorting-v2-curation-test` and `spikesorting-v2-validation` #1609
 - The `spikesorting-v2` extra requires `filelock>=3.15`: earlier releases reset
-    a reused singleton lock's counter, so the v2 analyzer cache's nested
-    acquire deadlocks #1609
+    a reused singleton lock's counter, so the v2 analyzer cache's nested acquire
+    deadlocks #1609
 - `Nwbfile.get_abs_path` and `AnalysisNwbfile.create` reject a file name that is
     not a bare file name (a path separator, `..`, or an absolute path) #1609
 - Creating an analysis NWB file no longer fails where `conda` is unavailable;
     the environment record says so instead #1609
-- Orphan checks (`delete_orphans`, `AnalysisNwbfile.get_orphans` and
-    `cleanup`, `IntervalList.cleanup`) no longer raise when a child table shares
-    a secondary attribute with the parent, as v2's `ConcatMemberCuration` does;
+- Orphan checks (`delete_orphans`, `AnalysisNwbfile.get_orphans` and `cleanup`,
+    `IntervalList.cleanup`) no longer raise when a child table shares a
+    secondary attribute with the parent, as v2's `ConcatMemberCuration` does;
     which rows count as orphans is otherwise unchanged. Add
     `spyglass.utils.dj_helper_fn.get_child_references` #1609
 - `spyglass.utils.nwb_helper_fn.get_raw_eseries_path` accepts `object_id=`; add
