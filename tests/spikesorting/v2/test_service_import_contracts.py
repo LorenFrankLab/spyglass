@@ -39,6 +39,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_metric_curation_plots",
     "_motion",
     "_motion_report",
+    "_motion_selection_insert",
     "_nwb_metadata_helpers",
     "_pipeline_presets",
     "_pipeline_types",
