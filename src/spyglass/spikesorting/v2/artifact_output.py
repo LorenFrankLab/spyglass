@@ -25,7 +25,7 @@ from collections import Counter
 
 import datajoint as dj
 
-from spyglass.spikesorting.v2.artifact import (
+from spyglass.spikesorting.v2.artifact import (  # noqa: F401 (part FKs)
     RecordingArtifactDetection,
     SharedGroupArtifactDetection,
 )
@@ -38,35 +38,8 @@ schema = dj.schema("spikesorting_v2_artifact_output")
 # FK identifier stays under MySQL's 64-char limit for the long
 # ``shared_group_artifact_detection`` source; the two tokens
 # (``recording_source`` / ``shared_group_source``) are substrings of neither
-# sibling's table name, so ``_merge_insert``'s ``part_name`` filter stays
-# unambiguous. (This merge dispatches inline via the ``&`` checks in
-# ``_artifact_source_part_name`` / ``getattr(cls, source)`` below, so it needs
-# no module-level source-class map.)
-
-
-def _artifact_source_part_name(detection_key: dict) -> str:
-    """Return the merge part name for a populated artifact-detection key.
-
-    Dispatches on which result table holds the ``artifact_detection_id``.
-    Because the id is content-addressed over ``source_kind`` + params +
-    source, it lives in exactly one of the two tables.
-
-    Raises
-    ------
-    KeyError
-        If ``detection_key`` is not a populated ``RecordingArtifactDetection``
-        or ``SharedGroupArtifactDetection`` (registration into the merge
-        follows populate).
-    """
-    if RecordingArtifactDetection & detection_key:
-        return "RecordingSource"
-    if SharedGroupArtifactDetection & detection_key:
-        return "SharedGroupSource"
-    raise KeyError(
-        f"{detection_key} is not a populated RecordingArtifactDetection or "
-        "SharedGroupArtifactDetection; populate the detection before "
-        "registering it into ArtifactDetectionOutput."
-    )
+# sibling's table name, so ``_Merge``'s source-name-to-part matching stays
+# unambiguous.
 
 
 @schema
@@ -134,19 +107,30 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
         skip_duplicates : bool, optional
             Passed through to ``_merge_insert``; a re-register is a no-op.
 
+        Raises
+        ------
+        KeyError
+            If ``detection_key`` is not a populated
+            ``RecordingArtifactDetection`` or ``SharedGroupArtifactDetection``
+            (registration into the merge follows populate).
+
         Notes
         -----
-        The part name is resolved from which source table holds the id.
-        Passing ``part_name`` scopes ``_merge_insert``'s match to the intended
-        source, and ``if part & key: continue`` inside ``_merge_insert`` makes
-        a re-register a no-op.
+        ``_merge_insert`` registers the key under the source part whose
+        parent table holds the id (the id is content-addressed over its
+        source, so exactly one does) and skips a part that already holds it,
+        so a re-register is a no-op.
         """
-        part_name = _artifact_source_part_name(detection_key)
-        cls()._merge_insert(
-            [detection_key],
-            part_name=part_name,
-            skip_duplicates=skip_duplicates,
-        )
+        try:
+            cls()._merge_insert(
+                [detection_key], skip_duplicates=skip_duplicates
+            )
+        except ValueError as exc:  # no source table holds the id
+            raise KeyError(
+                f"{detection_key} is not a populated RecordingArtifactDetection "
+                "or SharedGroupArtifactDetection; populate the detection "
+                "before registering it into ArtifactDetectionOutput."
+            ) from exc
 
     @classmethod
     def get_merge_id(cls, detection_key: dict):
