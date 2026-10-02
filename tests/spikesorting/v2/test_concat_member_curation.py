@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from tests.spikesorting.v2._concat_helpers import select_unmasked_concat
+from tests.spikesorting.v2._sorter_stub import plant_sorter
 
 
 @pytest.fixture(scope="module")
@@ -100,7 +101,7 @@ def concat_member_curation(chronic_2_session_minirec):
     )
     patch = pytest.MonkeyPatch()
     try:
-        patch.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+        plant_sorter(patch, _plant)
         Sorting.populate(sorting_key, reserve_jobs=False)
     finally:
         patch.undo()

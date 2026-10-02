@@ -12,6 +12,8 @@ import numpy as np
 import pytest
 import spikeinterface as si
 
+from tests.spikesorting.v2._sorter_stub import plant_sorter
+
 
 @pytest.mark.parametrize("winner_already_committed", [True, False])
 def test_duplicate_compute_keeps_winners_analyzer(
@@ -40,7 +42,7 @@ def test_duplicate_compute_keeps_winners_analyzer(
             sampling_frequency=original.get_sampling_frequency(),
         )
 
-    monkeypatch.setattr(Sorting, "_run_sorter", staticmethod(alternate))
+    plant_sorter(monkeypatch, alternate)
     # Exercise the real compute/NWB/insert path with the two possible orderings.
     # Only the sorter is substituted to make the nondeterministic difference
     # explicit; _allow_insert reproduces DataJoint's populate dispatch context.
@@ -48,9 +50,7 @@ def test_duplicate_compute_keeps_winners_analyzer(
     loser = table.make_compute(key, *fetched)
     try:
         if not winner_already_committed:
-            monkeypatch.setattr(
-                Sorting, "_run_sorter", staticmethod(lambda *a, **k: original)
-            )
+            plant_sorter(monkeypatch, lambda *a, **k: original)
             winner = table.make_compute(key, *fetched)
             table.make_insert(key, *winner)
         with pytest.raises(dj.errors.DuplicateError):
