@@ -42,6 +42,19 @@ def _union_intersecting_lists(lists):
 
 
 def _reverse_associations(assoc_dict):
+    """Turn a unit-association map into one candidate group per key.
+
+    Parameters
+    ----------
+    assoc_dict : dict
+        Keys are unit IDs; values are lists of the units associated with
+        that key (empty or ``None`` for none).
+
+    Returns
+    -------
+    list of list
+        ``[key, *values]`` for each key, in key order.
+    """
     return [
         [key] + values if values else [key]
         for key, values in assoc_dict.items()
@@ -54,7 +67,7 @@ def _merge_dict_to_list(merge_groups: dict) -> List:
 
     Parameters
     ----------
-    merge_dict : dict
+    merge_groups : dict
         dict of merge groups;
         keys are unit IDs and values are the units to be merged
 
