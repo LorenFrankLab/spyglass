@@ -1,11 +1,13 @@
 """``Sorting.Unit`` row construction behind ``Sorting``.
 
-``build_sorting_unit_rows`` turns the per-unit peak metadata that
-``Sorting._populate_unit_part`` fetched into the ``Sorting.Unit`` rows;
+``build_unit_rows_from_analyzer`` loads the analyzer ``Sorting.make_compute``
+just built and resolves each unit's peak channel, peak amplitude and spike
+count; ``build_sorting_unit_rows`` turns that per-unit peak metadata into the
+``Sorting.Unit`` rows;
 ``_to_int_unit_id`` coerces a sorter's unit id to the int PK v2 stores (raising
 the typed ``NonIntegerUnitIDError`` when it cannot). Pure (DB-free) row
-construction -- the analyzer load, the peak/sort-group/electrode fetches, and
-the ``Sorting.Unit.insert`` stay in the table class.
+construction -- the sort-group/electrode fetches and the
+``Sorting.Unit.insert`` stay with the table class.
 
 Why this lives in its own module rather than in ``sorting.py``:
 ``sorting.py`` is a DataJoint *schema* module -- importing it activates
@@ -17,8 +19,10 @@ pure/IO services" direction as ``_artifact_compute`` / ``_selection_identity``
 ``_sorting_dispatch`` / ``_sorting_artifact_mask`` / ``_sorting_analyzer``.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import: ``_to_int_unit_id`` lazy-imports only the typed
-``NonIntegerUnitIDError``. Neither function touches the DB at call time.
+connection at import: ``build_unit_rows_from_analyzer`` imports
+SpikeInterface and the analyzer loader inside the function, and
+``_to_int_unit_id`` lazy-imports the typed ``NonIntegerUnitIDError``. No
+function touches the DB at call time.
 """
 
 from __future__ import annotations
@@ -126,3 +130,72 @@ def build_sorting_unit_rows(
             }
         )
     return rows
+
+
+def build_unit_rows_from_analyzer(
+    *,
+    sorting,
+    analyzer_folder,
+    sorter_row,
+    electrode_by_id,
+    sort_group_id,
+    nwb_file_name,
+    key,
+):
+    """Build the ``Sorting.Unit`` rows from the freshly built analyzer.
+
+    Run once in ``make_compute`` after upstream inputs are resolved in
+    ``make_fetch``; this helper performs no DB writes. The analyzer folder
+    ``_build_analyzer`` just wrote is loaded here, each unit's peak channel
+    + amplitude is resolved under the sorter's configured detection
+    polarity (clusterless ``peak_sign`` / MountainSort ``detect_sign``, not
+    SI's ``"neg"`` default, so a positive-going detection attributes each
+    unit to its true peak channel), and the rows are assembled by
+    ``build_sorting_unit_rows`` (which raises on a sort-group/recording
+    channel-id mismatch). The resulting rows are reused for BOTH the NWB
+    unit columns and the ``Sorting.Unit`` insert, so the file and the DB
+    cannot drift.
+
+    Empty for a zero-unit sort: ``_build_analyzer`` skips the
+    ``create_sorting_analyzer`` call when ``sorting.get_num_units() == 0``
+    (SI's ``estimate_sparsity`` crashes on empty sortings), so the analyzer
+    folder does not exist; there is nothing to load or insert.
+    """
+    if sorting.get_num_units() == 0:
+        return []
+
+    from spikeinterface.core import template_tools
+
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        load_analyzer_folder,
+    )
+    from spyglass.spikesorting.v2.utils import resolve_peak_sign
+
+    analyzer = load_analyzer_folder(analyzer_folder)
+    peak_sign = resolve_peak_sign(sorter_row["params"])
+    peak_channels = template_tools.get_template_extremum_channel(
+        analyzer, peak_sign=peak_sign, outputs="id"
+    )
+    # ``mode="extremum"`` measures the amplitude at the template PEAK
+    # (matching ``get_template_extremum_channel`` above), not SI's
+    # ``mode="at_index"`` default which reads the alignment-sample value
+    # -- that under-reports the peak AND can land on a different channel
+    # than the attributed electrode. ``abs_value=True`` (SI default)
+    # returns the non-negative magnitude ``peak_amplitude_uv`` stores.
+    peak_amplitudes = template_tools.get_template_extremum_amplitude(
+        analyzer, peak_sign=peak_sign, mode="extremum"
+    )
+    n_spikes_by_unit = {
+        unit_id: int(len(sorting.get_unit_spike_train(unit_id=unit_id)))
+        for unit_id in sorting.unit_ids
+    }
+    return build_sorting_unit_rows(
+        unit_ids=sorting.unit_ids,
+        peak_channels=peak_channels,
+        peak_amplitudes=peak_amplitudes,
+        n_spikes_by_unit=n_spikes_by_unit,
+        electrode_by_id=electrode_by_id,
+        key=key,
+        sort_group_id=sort_group_id,
+        nwb_file_name=nwb_file_name,
+    )

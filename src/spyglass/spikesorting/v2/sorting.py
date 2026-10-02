@@ -67,7 +67,7 @@ from spyglass.spikesorting.v2._sorting_dispatch import (
     run_si_sorter,
     sorter_distribution_version,
 )
-from spyglass.spikesorting.v2._sorting_units import build_sorting_unit_rows
+from spyglass.spikesorting.v2 import _sorting_units
 from spyglass.spikesorting.v2._source_resolution import (
     EffectiveSource,
     EffectiveTraces,
@@ -2340,7 +2340,7 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             # reuse them for BOTH the NWB unit columns and the Sorting.Unit insert in
             # make_insert -- so the file and the DB cannot drift, and the peak
             # channel/amplitude are not computed twice.
-            unit_rows = self._build_unit_rows_from_analyzer(
+            unit_rows = _sorting_units.build_unit_rows_from_analyzer(
                 sorting=sorting_obj,
                 analyzer_folder=staged_analyzer.folder,
                 sorter_row=sorter_row,
@@ -3484,80 +3484,11 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def _build_unit_rows_from_analyzer(
-        *,
-        sorting,
-        analyzer_folder,
-        sorter_row,
-        electrode_by_id,
-        sort_group_id,
-        nwb_file_name,
-        key,
-    ):
-        """Build the ``Sorting.Unit`` rows from the freshly built analyzer.
-
-        Run once in ``make_compute`` after upstream inputs are resolved in
-        ``make_fetch``; this helper performs no DB writes. The analyzer folder
-        ``_build_analyzer`` just wrote is loaded here, each unit's peak channel
-        + amplitude is resolved under the sorter's configured detection
-        polarity (clusterless ``peak_sign`` / MountainSort ``detect_sign``, not
-        SI's ``"neg"`` default, so a positive-going detection attributes each
-        unit to its true peak channel), and the rows are assembled by
-        ``build_sorting_unit_rows`` (which raises on a sort-group/recording
-        channel-id mismatch). The resulting rows are reused for BOTH the NWB
-        unit columns and the ``Sorting.Unit`` insert, so the file and the DB
-        cannot drift.
-
-        Empty for a zero-unit sort: ``_build_analyzer`` skips the
-        ``create_sorting_analyzer`` call when ``sorting.get_num_units() == 0``
-        (SI's ``estimate_sparsity`` crashes on empty sortings), so the analyzer
-        folder does not exist; there is nothing to load or insert.
-        """
-        if sorting.get_num_units() == 0:
-            return []
-
-        from spikeinterface.core import template_tools
-
-        from spyglass.spikesorting.v2._analyzer_cache import (
-            load_analyzer_folder,
-        )
-        from spyglass.spikesorting.v2.utils import resolve_peak_sign
-
-        analyzer = load_analyzer_folder(analyzer_folder)
-        peak_sign = resolve_peak_sign(sorter_row["params"])
-        peak_channels = template_tools.get_template_extremum_channel(
-            analyzer, peak_sign=peak_sign, outputs="id"
-        )
-        # ``mode="extremum"`` measures the amplitude at the template PEAK
-        # (matching ``get_template_extremum_channel`` above), not SI's
-        # ``mode="at_index"`` default which reads the alignment-sample value
-        # -- that under-reports the peak AND can land on a different channel
-        # than the attributed electrode. ``abs_value=True`` (SI default)
-        # returns the non-negative magnitude ``peak_amplitude_uv`` stores.
-        peak_amplitudes = template_tools.get_template_extremum_amplitude(
-            analyzer, peak_sign=peak_sign, mode="extremum"
-        )
-        n_spikes_by_unit = {
-            unit_id: int(len(sorting.get_unit_spike_train(unit_id=unit_id)))
-            for unit_id in sorting.unit_ids
-        }
-        return build_sorting_unit_rows(
-            unit_ids=sorting.unit_ids,
-            peak_channels=peak_channels,
-            peak_amplitudes=peak_amplitudes,
-            n_spikes_by_unit=n_spikes_by_unit,
-            electrode_by_id=electrode_by_id,
-            key=key,
-            sort_group_id=sort_group_id,
-            nwb_file_name=nwb_file_name,
-        )
-
-    @staticmethod
     def _populate_unit_part(unit_rows):
         """Insert the pre-built ``Sorting.Unit`` rows.
 
         The rows are built ONCE in ``make_compute``
-        (:meth:`_build_unit_rows_from_analyzer`) and threaded through, so this
+        (:func:`._sorting_units.build_unit_rows_from_analyzer`) and threaded through, so this
         is a pure insert with no analyzer load or DB read. An empty list (a
         zero-unit sort) is a no-op.
         """

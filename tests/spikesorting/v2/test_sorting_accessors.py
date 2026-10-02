@@ -436,7 +436,7 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
 ):
     """A peak channel absent from the sort group raises RuntimeError.
 
-    ``_populate_unit_part`` resolves each unit's peak channel to a
+    ``build_unit_rows_from_analyzer`` resolves each unit's peak channel to a
     ``SortGroupV2.SortGroupElectrode`` row; a channel id outside the group
     is a recording/sort-group mismatch and must fail loudly. We monkeypatch
     the extremum-channel lookup to return an out-of-group id and call the
@@ -451,6 +451,9 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
         SortingSelection,
     )
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._sorting_units import (
+        build_unit_rows_from_analyzer,
+    )
 
     recording_id = SortingSelection.resolve_source(populated_sorting).key[
         "recording_id"
@@ -482,7 +485,7 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
     )
 
     # The per-unit row construction (peak attribution + channel-mismatch guard)
-    # now lives in ``_build_unit_rows_from_analyzer`` (run once in
+    # is ``_sorting_units.build_unit_rows_from_analyzer`` (run once in
     # make_compute); the Electrode FK / sort group are resolved at fetch time.
     sort_group_id, electrode_by_id, _region = (
         Sorting._fetch_unit_electrode_metadata(recording_id, nwb_file_name)
@@ -491,7 +494,7 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
         SortingSelection * SorterParameters & populated_sorting
     ).fetch1()
     with pytest.raises(RuntimeError, match=str(bad_channel)):
-        Sorting._build_unit_rows_from_analyzer(
+        build_unit_rows_from_analyzer(
             sorting=sorting,
             analyzer_folder=analyzer_folder,
             sorter_row=sorter_row,
