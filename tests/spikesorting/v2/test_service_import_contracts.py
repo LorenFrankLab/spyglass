@@ -52,6 +52,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_sorting_artifact_mask",
     "_sorting_dispatch",
     "_sorting_fetch",
+    "_sorting_selection_insert",
     "_sorting_units",
     "_unitmatch_backend",
     "_units_nwb",
