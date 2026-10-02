@@ -538,18 +538,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             ints. Each group must have at least 2 members (a single-unit
             group is rejected as a likely typo). The merged unit inherits
             the peak channel + amplitude of the highest-amplitude
-            contributor. For ``apply_merge=True`` the merged unit gets a
-            fresh id ``max(source unit_ids) + 1``, assigned in ASCENDING
-            MIN-CONTRIBUTOR order (``sorted(groups, key=min)``), INDEPENDENT
-            of the order the caller lists the groups. The lazy preview path
-            (``get_merged_sorting`` on an apply_merge=False curation) numbers
-            merges the same way, so the applied and lazy paths assign the
-            SAME fresh id to the SAME content group (guarded by
-            ``test_lazy_vs_applied_merge_frames_equal`` and
-            ``test_curation_two_merge_groups_assign_ids_in_canonical_min_order``).
-            Merged-unit ids are arbitrary labels: only which group receives
-            ``max+1`` changes with input order -- spike content and unit
-            count are identical.
+            contributor. For ``apply_merge=True`` each merged unit gets a
+            fresh id from ``max(source unit_ids) + 1`` upward, assigned in
+            ascending min-contributor order regardless of the order the
+            groups are listed; ``get_merged_sorting`` on a preview numbers
+            merges the same way, so both paths give a group the same id.
             For ``apply_merge=False`` (preview) every original unit --
             contributors included -- keeps its own id in
             ``CurationV2.Unit``; the proposed merge is recorded in
@@ -563,10 +556,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             through 1:1 -- units, spike trains, AND labels are all
             preserved -- and the proposed merges are recorded in
             ``CurationV2.MergeGroup`` for lazy application via
-            ``get_merged_sorting()`` (so a preview can be reviewed before
-            committing). Empty and singleton merge groups are rejected
-            (rather than treated as no-ops/renames) to surface likely
-            typos.
+            ``get_merged_sorting()``.
         description
             Free-text curation description.
         curation_source
@@ -1938,37 +1928,18 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
           both the recording and concat selections -- so it filters whichever
           family routes and, alone, matches both.
 
-        So a cross-table restriction over the v2 part-table convention keys --
-        the recording keys (``nwb_file_name``, ``team_name``, ``sort_group_id``,
-        ``interval_list_name``, ``recording_id``, ``artifact_detection_id``), the
-        cross-source ``preprocessing_params_name``, the concat keys above, and
-        the shared sort / curation keys (``sorter``, ``sorter_params_name``,
-        ``sorting_id``, ``motion_corrected_recording_id``, ``curation_id``) --
-        resolves to the ``CurationV2`` rows it selects. Mixing recording and concat source keys is rejected (a sort
-        has exactly one input source); ``preprocessing_params_name`` may combine
-        with either.
+        Accepted keys: the recording keys (``nwb_file_name``, ``team_name``,
+        ``sort_group_id``, ``interval_list_name``, ``recording_id``,
+        ``artifact_detection_id``), the cross-source
+        ``preprocessing_params_name``, the concat keys above, and the shared
+        sort / curation keys (``sorter``, ``sorter_params_name``,
+        ``sorting_id``, ``motion_corrected_recording_id``, ``curation_id``).
+        Mixing recording and concat source keys is rejected (a sort has
+        exactly one input source).
 
-        This method is the SINGLE owner of v2's source-part join topology.
-        ``SpikeSortingOutput._get_restricted_merge_ids_v2`` delegates here
-        instead of re-implementing v2 schema knowledge in the merge master,
-        so a new v2 source part (e.g. concat) is taught to exactly one
-        place. Returns a ``CurationV2`` query (callers map it to merge ids
-        via ``SpikeSortingOutput.CurationV2``), or ``None`` in lenient mode
-        (``strict=False``) when the key names no v2 column.
+        This method is the single owner of v2's source-part join topology;
+        ``SpikeSortingOutput._get_restricted_merge_ids_v2`` delegates here.
 
-        Unknown restriction keys raise ``ValueError`` when ``strict`` (the
-        default -- a deliberate query, where an unknown key is a typo;
-        silently dropping it would return wrong-but-non-empty results);
-        when ``strict=False`` (the multi-source ``get_restricted_merge_ids``
-        dispatch) an unknown key instead returns ``None`` (the caller then
-        contributes no v2 rows), since it names another pipeline's column and
-        this is not a v2 query.
-        ``restrict_by_artifact=True`` honors
-        the v2 IntervalList convention where the artifact-removed
-        valid_times row is named
-        ``f"artifact_detection_{artifact_detection_id}"``; callers can
-        supply either the bare ``artifact_detection_id`` or the
-        artifact-detection IntervalList and both resolve.
         ``artifact_detection_id=None`` means "no artifact-detection pass"
         (no standalone or concat-member detection selected), NOT "match
         anything" -- only an absent key is a wildcard. A detection ID matches
@@ -2006,7 +1977,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         ------
         ValueError
             If ``strict`` is True and ``key`` contains restriction keys
-            that are not v2 columns.
+            that are not v2 columns, or if ``key`` mixes recording and
+            concat source keys.
         """
 
         return _curation_restriction.resolve_restriction(
