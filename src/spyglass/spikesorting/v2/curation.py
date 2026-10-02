@@ -27,24 +27,17 @@ import datajoint as dj
 
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
-from spyglass.spikesorting.v2 import _curation_insert, _curation_restriction
+from spyglass.spikesorting.v2 import (
+    _curation_insert,
+    _curation_readers,
+    _curation_restriction,
+)
 from spyglass.spikesorting.v2._curation_transforms import (
     build_merge_provenance_rows,
     normalize_curation_payload,
     validate_curation_label_rows,
 )
-from spyglass.spikesorting.v2._signal_math import _MERGE_DEDUP_DELTA_MS
-from spyglass.spikesorting.v2._units_nwb import (
-    abs_spike_times_dataframe,
-    build_lazy_merged_sorting_from_samples,
-    build_lazy_merged_sorting,
-    empty_spike_times_dataframe,
-    read_units_abs_spike_times,
-    read_units_abs_times_and_sample_indices,
-    recording_timestamps,
-    sorting_from_units_nwb,
-    write_curated_units_nwb,
-)
+from spyglass.spikesorting.v2._units_nwb import write_curated_units_nwb
 from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 from spyglass.spikesorting.v2.utils import (
     CurationLabel,
@@ -1728,27 +1721,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def _load_curation_recording_meta(cls, key):
-        """Fetch the master row + upstream recording metadata for a curation.
-
-        Returns ``(row, recording_row, fs, abs_path)``: the ``CurationV2``
-        master row, the upstream ``Recording`` row, its sampling frequency,
-        and the curated-units NWB path. Shared by ``get_sorting`` and
-        ``get_merged_sorting`` so the master row is fetched ONCE and its
-        ``sorting_id`` threaded into ``_upstream_recording_row`` (skipping a
-        redundant lookup). The curated-units NWB itself is NOT read here --
-        callers read it lazily so ``get_sorting`` can short-circuit a
-        zero-unit curation without touching the filesystem.
-        """
-        row = (cls & key).fetch1()
-        recording_row = cls._upstream_recording_row(
-            key, sorting_id=row["sorting_id"]
-        )
-        fs = float(recording_row["sampling_frequency"])
-        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-        return row, recording_row, fs, abs_path
-
-    @classmethod
     def get_sorting(
         cls, key: dict, as_dataframe: bool = False
     ) -> "si.BaseSorting | pd.DataFrame":
@@ -1795,62 +1767,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             by ``unit_id`` with ``spike_times`` and ``curation_label``
             columns.
         """
-        import spikeinterface as si
 
-        row, recording_row, fs, abs_path = cls._load_curation_recording_meta(
-            key
+        return _curation_readers.get_sorting(
+            cls, key, as_dataframe=as_dataframe
         )
-
-        # A curation created with apply_merge=False records PROPOSED merges in
-        # MergeGroup but does NOT apply them: get_sorting (what consumers such
-        # as SortedSpikesGroup / decoding read via SpikeSortingOutput) returns
-        # the UNMERGED preview units. Warn here so ad-hoc inspection is not
-        # silently misled; the decoding CONSUMERS additionally RAISE via
-        # SpikeSortingOutput.assert_decoding_merge_ids_ok so a preview curation
-        # never reaches a decode.
-        if cls.has_unapplied_proposed_merges(
-            key, merges_applied=row["merges_applied"]
-        ):
-            logger.warning(
-                "CurationV2.get_sorting: curation "
-                f"(sorting_id={row['sorting_id']}, "
-                f"curation_id={row['curation_id']}) has proposed merges that "
-                "are NOT applied (apply_merge=False); this returns the "
-                "UNMERGED units. Use get_merged_sorting to apply the proposal, "
-                "or re-curate with apply_merge=True to commit it."
-            )
-
-        if len(cls.Unit & key) == 0:
-            # Zero-unit curations are valid (a user may curate a
-            # zero-unit sort; the Empty/Boundary invariant allows an
-            # empty ``CurationV2.Unit``).
-            logger.warning(
-                "CurationV2.get_sorting: curation "
-                f"(sorting_id={row['sorting_id']}, "
-                f"curation_id={row['curation_id']}) has zero units; "
-                "returning an empty sorting."
-            )
-            if not as_dataframe:
-                return si.NumpySorting.from_unit_dict({}, sampling_frequency=fs)
-            df = empty_spike_times_dataframe()
-            df["curation_label"] = []
-            return df
-
-        if not as_dataframe:
-            return sorting_from_units_nwb(
-                abs_path, fs, lambda: recording_timestamps(recording_row)
-            )
-
-        abs_times = read_units_abs_spike_times(abs_path)
-        # Reuse the shared spike-times DataFrame builder (the same one
-        # Sorting.get_sorting(as_dataframe=True) uses) so the base spike_times
-        # column + unit_id index cannot drift between the two, then join the
-        # ``curation_label`` lists from ``UnitLabel`` so external notebook code
-        # reading ``df["curation_label"]`` works without poking the part table.
-        labels_by_unit = cls._labels_by_unit(key)
-        df = abs_spike_times_dataframe(abs_times)
-        df["curation_label"] = [labels_by_unit.get(u, []) for u in df.index]
-        return df
 
     @classmethod
     def has_unapplied_proposed_merges(cls, key, *, merges_applied=None) -> bool:
@@ -2253,51 +2173,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             when merges were already applied or no group has more than
             one contributor.
         """
-        # merges_applied OR no multi-contributor group -> the base sorting
-        # already IS the result; delegate to get_sorting (its read is
-        # unavoidable in those cases).
-        if bool((cls & key).fetch1("merges_applied")):
-            return cls.get_sorting(key)
-        merge_groups = cls.get_unit_contributor_groups(key)
-        units_to_merge = [
-            contribs
-            for kept_uid, contribs in merge_groups.items()
-            if len(contribs) > 1
-        ]
-        if not units_to_merge:
-            return cls.get_sorting(key)
 
-        # Read the curated units NWB once, then rebuild the merged sorting via
-        # the pure compute core. v2-written units NWBs carry stored sample
-        # frames and avoid the recording timeline; older/manual files fall
-        # back to the full timestamp-vector mapping. Calling get_sorting here
-        # would re-open the units NWB and emit a spurious "merges NOT applied"
-        # warning -- we ARE applying them. The merge is deduplicated in ABSOLUTE time
-        # (gap-correct on disjoint recordings); see the helper docstrings.
-        _row, recording_row, fs, abs_path = cls._load_curation_recording_meta(
-            key
-        )
-        # Both columns are needed (dedup is in absolute time, frames are reused
-        # when present) -- read them from a single NWB open.
-        abs_times, sample_indices, _obs = (
-            read_units_abs_times_and_sample_indices(abs_path)
-        )
-        if sample_indices is not None:
-            return build_lazy_merged_sorting_from_samples(
-                abs_times,
-                sample_indices,
-                units_to_merge,
-                fs,
-                delta_s=_MERGE_DEDUP_DELTA_MS / 1000.0,
-            )
-        timestamps = recording_timestamps(recording_row)
-        return build_lazy_merged_sorting(
-            abs_times,
-            units_to_merge,
-            timestamps,
-            fs,
-            delta_s=_MERGE_DEDUP_DELTA_MS / 1000.0,
-        )
+        return _curation_readers.get_merged_sorting(cls, key)
 
     def get_unit_brain_regions(
         self,
@@ -2475,32 +2352,3 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             * _Electrode
             * BrainRegion
         )
-
-    @classmethod
-    def _upstream_recording_row(cls, key, *, sorting_id=None) -> dict:
-        """Fetch the upstream Recording row for a CurationV2 key.
-
-        Used by ``get_sorting`` to recover the recording's
-        sampling-frequency and timestamp metadata (matching the
-        ``Sorting.get_sorting`` round-trip convention). For a concat-backed
-        sort this is the ``ConcatenatedRecording`` row (the timeline the curated
-        spike times were written against), NOT a per-member ``Recording``.
-        ``@classmethod`` so it can be invoked from the other classmethod
-        accessors.
-
-        ``key`` may be a single dict or the list-of-dict form the
-        merge dispatcher passes; the restriction-based fetch
-        normalizes both. Pass ``sorting_id`` when the caller already
-        holds the master row to skip the redundant ``sorting_id`` lookup.
-        """
-        from spyglass.spikesorting.v2.recording import Recording
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecording,
-        )
-
-        if sorting_id is None:
-            sorting_id = (cls & key).fetch1("sorting_id")
-        source = SortingSelection.resolve_source({"sorting_id": sorting_id})
-        if source.kind == "recording":
-            return (Recording & source.key).fetch1()
-        return (ConcatenatedRecording & source.key).fetch1()

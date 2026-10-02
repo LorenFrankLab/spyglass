@@ -26,6 +26,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_concat_recording",
     "_curation_insert",
     "_curation_plan",
+    "_curation_readers",
     "_curation_restriction",
     "_curation_routing",
     "_curation_transforms",
