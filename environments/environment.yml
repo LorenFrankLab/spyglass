@@ -27,7 +27,6 @@ dependencies:
   - numpy>=2,<3
   - pip
   - position_tools
-  - pybind11  # req by mountainsort4 -> isosplit5
   - pydotplus
   - python>=3.10,<3.13
   - ripple_detection
@@ -42,5 +41,6 @@ dependencies:
       # edeno) -- it drags in a numpy<2 pin -- whereas the pip ``torch>=2``
       # wheels are numpy>=2-compatible. The v2 SI 0.104 stack needs torch>=2.
       - torch>=2
-      - mountainsort4
+      # No mountainsort4: its ml_ms4alg backend does not run on numpy>=2. Run
+      # MountainSort4 from environments/environment_spikesorting_legacy.yml.
       - ..
