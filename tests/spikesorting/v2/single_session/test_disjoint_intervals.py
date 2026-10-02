@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from tests.spikesorting.v2._ingest_helpers import _clean_session_v2
+from tests.spikesorting.v2._sorter_stub import plant_sorter
 
 # ---------- Boundary-spike round-trip (clip decision gate) -----------------
 
@@ -28,7 +29,7 @@ def test_boundary_spike_round_trip_does_not_raise(
     Construction strategy
     ---------------------
     The shipped sorters do not deterministically produce a boundary
-    spike, so we monkey-patch ``Sorting._run_sorter`` to return a
+    spike, so ``plant_sorter`` substitutes a sorter that returns a
     hand-built ``NumpySorting`` with one unit whose spike train
     includes ``n_samples - 1`` and one earlier in-bounds spike. The
     rest of ``Sorting.make`` runs normally:
@@ -102,10 +103,9 @@ def test_boundary_spike_round_trip_does_not_raise(
     )
     (Sorting & sort_pk).super_delete(warn=False)
 
-    # Monkey-patch ``_run_sorter`` to deterministically return a
+    # Plant a sorter that deterministically returns a
     # ``NumpySorting`` with a spike at exactly ``n_samples - 1`` on
-    # the artifact-masked recording. ``_run_sorter`` is a
-    # ``@staticmethod`` so we patch the class attribute directly.
+    # the artifact-masked recording.
     def _boundary_run_sorter(
         sorter,
         sorter_params,
@@ -131,9 +131,7 @@ def test_boundary_spike_round_trip_does_not_raise(
             sampling_frequency=recording.get_sampling_frequency(),
         )
 
-    monkeypatch.setattr(
-        Sorting, "_run_sorter", staticmethod(_boundary_run_sorter)
-    )
+    plant_sorter(monkeypatch, _boundary_run_sorter)
 
     Sorting.populate(sort_pk, reserve_jobs=False)
     assert Sorting & sort_pk, (
@@ -178,7 +176,7 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
 
     Builds a Recording over two DISJOINT sort intervals -- so the
     persisted timeline is gap-preserving (non-uniform) -- and
-    monkeypatches ``_run_sorter`` to plant a spike near the start
+    uses ``plant_sorter`` to plant a spike near the start
     (chunk 1) and one near the end (chunk 2, after the gap). Both
     ``Sorting.get_sorting`` and ``CurationV2.get_sorting`` must read the
     planted FRAME indices back exactly.
@@ -311,9 +309,7 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
             sampling_frequency=recording.get_sampling_frequency(),
         )
 
-    monkeypatch.setattr(
-        Sorting, "_run_sorter", staticmethod(_planted_run_sorter)
-    )
+    plant_sorter(monkeypatch, _planted_run_sorter)
     Sorting.populate(sort_pk, reserve_jobs=False)
     assert Sorting & sort_pk, "disjoint Sorting.populate failed"
     assert planted["affine_post_gap"] != int(
@@ -456,9 +452,7 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
             sampling_frequency=recording.get_sampling_frequency(),
         )
 
-    monkeypatch.setattr(
-        Sorting, "_run_sorter", staticmethod(_planted_run_sorter)
-    )
+    plant_sorter(monkeypatch, _planted_run_sorter)
     Sorting.populate(sort_pk, reserve_jobs=False)
     assert Sorting & sort_pk, "disjoint no-artifact Sorting.populate failed"
 
@@ -619,9 +613,7 @@ def test_reloaded_two_interval_artifact_exposes_gap(
             sampling_frequency=recording.get_sampling_frequency(),
         )
 
-    monkeypatch.setattr(
-        Sorting, "_run_sorter", staticmethod(_capturing_run_sorter)
-    )
+    plant_sorter(monkeypatch, _capturing_run_sorter)
     Sorting.populate(sort_pk, reserve_jobs=False)
     assert Sorting & sort_pk, "disjoint Sorting.populate failed"
 
@@ -743,9 +735,7 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
             [{0: u0, 1: u1}], sampling_frequency=fs_local
         )
 
-    monkeypatch.setattr(
-        Sorting, "_run_sorter", staticmethod(_two_unit_gap_boundary_sorter)
-    )
+    plant_sorter(monkeypatch, _two_unit_gap_boundary_sorter)
     Sorting.populate(sort_pk, reserve_jobs=False)
     assert Sorting & sort_pk
 
@@ -1162,9 +1152,7 @@ def test_disjoint_multi_gap_readback_and_artifact(
             sampling_frequency=recording.get_sampling_frequency(),
         )
 
-    monkeypatch.setattr(
-        Sorting, "_run_sorter", staticmethod(_planted_run_sorter)
-    )
+    plant_sorter(monkeypatch, _planted_run_sorter)
     Sorting.populate(sort_pk, reserve_jobs=False)
     si_sorting = Sorting().get_sorting(sort_pk)
     frames = np.sort(np.asarray(si_sorting.get_unit_spike_train(unit_id=0)))
