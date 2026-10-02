@@ -1635,97 +1635,12 @@ class MotionCorrectedRecording(
     def _rebuild_nwb_artifact(self, key) -> None:
         """Rebuild a missing corrected artifact from the SAVED motion.
 
-        Locked on the corrected recording, double-checked under the lock,
-        then ``make_fetch`` / ``make_compute`` write a fresh temp artifact:
-        the saved estimate is reapplied, never estimated again, under the
-        installed SpikeInterface even if it differs from the one the
-        selection was made with. Only a temp
-        whose ``content_hash`` equals the stored one is installed
-        (``install_rebuilt_recording``); otherwise it is removed,
-        ``RecordingContentDriftError`` is raised and the canonical slot is
-        left untouched. A selection whose interpolation recipe now resolves
-        differently, or whose application algorithm version changed, cannot
-        reproduce the stored traces: ``RecordingContentDriftError`` names
-        the missing file and the repair before anything is computed.
+        The rebuild is
+        :func:`._recording_nwb.rebuild_motion_corrected_artifact`; it calls
+        ``make_fetch`` and ``make_compute`` on this instance.
+        :func:`._recording_nwb.ensure_artifact_file` calls this method on
+        every trace-artifact table.
         """
-        from pathlib import Path
+        from spyglass.spikesorting.v2 import _recording_nwb
 
-        from spyglass.spikesorting.v2._motion import (
-            motion_corrected_recording_artifact_lock,
-            resolve_interpolation_params,
-        )
-        from spyglass.spikesorting.v2._recording_nwb import (
-            install_rebuilt_recording,
-        )
-        from spyglass.spikesorting.v2.exceptions import (
-            RecordingContentDriftError,
-        )
-        from spyglass.spikesorting.v2.recording import (
-            _unlink_staged_analysis_file,
-        )
-        from spyglass.utils import logger
-
-        row = (self & key).fetch1()
-        analysis_file_name = row["analysis_file_name"]
-        canonical_abs = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        with motion_corrected_recording_artifact_lock(
-            row["motion_corrected_recording_id"]
-        ):
-            if Path(canonical_abs).exists():
-                return
-            logger.info(
-                "MotionCorrectedRecording.get_recording: cache miss for "
-                f"{analysis_file_name!r}; reapplying the saved motion..."
-            )
-            master_key = {
-                "motion_corrected_recording_id": row[
-                    "motion_corrected_recording_id"
-                ]
-            }
-            fetched = self.make_fetch(master_key)
-            # The content hash is the guard (as for Recording), so a rebuild
-            # under another SpikeInterface version is allowed and installed
-            # only if it reproduces the stored traces. A changed recipe
-            # resolution or application algorithm cannot reproduce them.
-            stale = _motion_compute.stale_corrected_selection_fields(
-                fetched.selection,
-                resolve_interpolation_params(fetched.interpolation_params),
-                check_spikeinterface_version=False,
-            )
-            if stale:
-                raise RecordingContentDriftError(
-                    "MotionCorrectedRecording._rebuild_nwb_artifact: the "
-                    f"corrected recording file {analysis_file_name!r} is "
-                    "missing and cannot be rebuilt: its selection is stale "
-                    f"({'; '.join(stale)}), so reapplying the saved motion "
-                    "would not reproduce the stored traces. Restore the file "
-                    "from a backup, or delete this MotionCorrectedRecording "
-                    "row and everything made from it (sorts, curations) and "
-                    "repopulate them from a new "
-                    "MotionCorrectedRecordingSelection."
-                )
-            computed = self.make_compute(
-                master_key,
-                *fetched,
-                allow_spikeinterface_version_change=True,
-            )
-            if computed.content_hash != row["content_hash"]:
-                _unlink_staged_analysis_file(
-                    computed.analysis_file_name,
-                    context="MotionCorrectedRecording._rebuild_nwb_artifact",
-                )
-                raise RecordingContentDriftError(
-                    "MotionCorrectedRecording._rebuild_nwb_artifact: rebuilt "
-                    f"content_hash {computed.content_hash} does not match the "
-                    f"stored content_hash {row['content_hash']} for "
-                    f"{analysis_file_name!r}. The current environment no "
-                    "longer reproduces this corrected recording (e.g. a "
-                    "SpikeInterface/BLAS upgrade). The canonical artifact was "
-                    "NOT modified. Recover by restoring a backup or deleting "
-                    "and repopulating the MotionCorrectedRecording row."
-                )
-            install_rebuilt_recording(
-                AnalysisNwbfile.get_abs_path(computed.analysis_file_name),
-                canonical_abs,
-                analysis_file_name,
-            )
+        return _recording_nwb.rebuild_motion_corrected_artifact(self, key)
