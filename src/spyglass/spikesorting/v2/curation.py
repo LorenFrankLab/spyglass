@@ -854,7 +854,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             "inserting or raising."
         )
 
-    # ---- insert_curation steps (extracted helpers) -----------------------
+    # ---- insert_curation steps ---------------------------------------------
 
     @staticmethod
     def _normalized_labels(labels: dict | None) -> dict[int, tuple[str, ...]]:

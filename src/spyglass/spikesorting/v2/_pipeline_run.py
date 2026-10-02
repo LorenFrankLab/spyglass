@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 # The best-effort advisory lock lives in the DB-free ``_db_locking`` leaf
 # (so domain tables can serialize without importing this orchestration module);
-# re-exported under the private names this module's callers + tests already use.
+# imported here under the private names this module's callers and tests use.
 from spyglass.spikesorting.v2._db_locking import (
     POPULATE_LOCK_TIMEOUT_S as _POPULATE_LOCK_TIMEOUT_S,
 )

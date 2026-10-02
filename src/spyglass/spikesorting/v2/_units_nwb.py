@@ -856,7 +856,7 @@ def _write_sorting_units_nwb_body(
 ):
     """Fill the staged sort-units ``AnalysisNwbfile`` (no cleanup on failure).
 
-    Split out of :func:`write_sorting_units_nwb` so the staged-file cleanup-on-
+    Separate from :func:`write_sorting_units_nwb` so the staged-file cleanup-on-
     error wrapper there stays a thin try/except. Returns
     ``(analysis_file_name, units_object_id)``.
 
@@ -1145,7 +1145,7 @@ def _write_curated_units_nwb_body(
 ):
     """Fill the staged curated-units ``AnalysisNwbfile`` (no cleanup on error).
 
-    Split out of :func:`write_curated_units_nwb` so its staged-file cleanup-on-
+    Separate from :func:`write_curated_units_nwb` so its staged-file cleanup-on-
     error wrapper stays a thin try/except. Returns ``(analysis_file_name,
     units_object_id, nwb_file_name, n_spikes_by_uid)``. ``obs_intervals_by_uid``
     (``{unit_id: (n, 2) array}`` or ``None`` for a legacy source) carries the

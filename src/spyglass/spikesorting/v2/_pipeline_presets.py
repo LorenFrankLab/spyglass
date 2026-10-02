@@ -1,9 +1,8 @@
 """Pipeline presets: the dated franklab production recipe bundles.
 
-Extracted verbatim from ``pipeline.py`` (behavior-preserving) to keep the
-orchestration facade small. ``pipeline.py`` re-exports the public names
-(``list_pipeline_presets``, ``describe_pipeline_presets``,
-``describe_pipeline_preset``) so notebook import paths are unchanged.
+Holds the preset registry, its ``list_*`` / ``describe_*`` views, and
+``register_pipeline_preset`` / ``clone_pipeline_preset`` for user presets.
+``pipeline.py`` re-exports the public names.
 """
 
 from __future__ import annotations

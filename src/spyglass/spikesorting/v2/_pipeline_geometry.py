@@ -1,10 +1,8 @@
-"""Sort-group geometry reporting + plotting, extracted from ``pipeline.py``.
+"""Sort-group geometry reporting and plotting.
 
-Behavior-preserving: ``describe_sort_groups``, ``_sort_group_geometry_rows``,
-and ``plot_sort_group_geometry`` (plus their ``_SORT_GROUP_COLUMNS`` constant)
-move here verbatim. ``pipeline.py`` re-exports the two public functions so
-notebook import paths are unchanged. Self-contained (no dependency on the
-other pipeline submodules).
+Holds ``describe_sort_groups`` (one row per sort group) and
+``plot_sort_group_geometry``. ``pipeline.py`` re-exports both. Imports no
+other pipeline submodule.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """DB-free helpers for the FigPack curation tables.
 
-Pure logic split out of ``figpack_curation`` so it is unit-testable without a
+Pure logic kept out of ``figpack_curation`` so it is unit-testable without a
 DataJoint connection or the optional ``figpack`` packages: the content-addressed
 config hash, the default label set, and the translation between FigPack's
 ``sorting_curation`` annotation state and v2's ``(labels, merge_groups)`` form,
