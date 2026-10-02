@@ -1769,25 +1769,20 @@ class MotionCorrectedRecordingSelection(
             If a row with the same identity has a non-deterministic id (a raw
             insert bypassing :meth:`insert_selection`).
         """
-        from spyglass.spikesorting.v2.exceptions import (
-            DuplicateSelectionError,
+        from spyglass.spikesorting.v2._selection_identity import (
+            existing_selection_pk,
         )
 
-        existing = list(
-            (cls & master_row).fetch("motion_corrected_recording_id")
-        )
-        bypassed = [cid for cid in existing if cid != deterministic_id]
-        if bypassed:
-            raise DuplicateSelectionError(
+        return existing_selection_pk(
+            list((cls & master_row).fetch("motion_corrected_recording_id")),
+            deterministic_id,
+            pk_field="motion_corrected_recording_id",
+            bypass_message=lambda bypassed: (
                 "MotionCorrectedRecordingSelection has rows for "
                 f"{master_row} whose motion_corrected_recording_id is not the "
                 f"deterministic id {deterministic_id}: {bypassed}. Drop them "
                 "and re-insert via insert_selection."
-            )
-        return (
-            {"motion_corrected_recording_id": deterministic_id}
-            if existing
-            else None
+            ),
         )
 
 
