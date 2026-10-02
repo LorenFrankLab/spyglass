@@ -36,6 +36,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_pipeline_presets",
     "_pipeline_types",
     "_recipe_catalog",
+    "_recording_fetch",
     "_recording_geometry",
     "_recording_nwb",
     "_recording_preprocessing",
