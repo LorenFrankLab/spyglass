@@ -23,14 +23,18 @@ import datajoint as dj
 
 from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
+from spyglass.spikesorting.v2 import (
+    _concat_recording_fetch,
+    _recording_nwb,
+    _session_group_insert,
+)
 from spyglass.spikesorting.v2._recording_nwb import StoredTraces
 from spyglass.spikesorting.v2._staged_outputs import (
     StagedOutputCleanupMixin,
     StagedOutputs,
 )
 from spyglass.spikesorting.v2.artifact import (
-    RecordingArtifactDetection,
-    RecordingArtifactSelection,
+    RecordingArtifactDetection,  # noqa: F401
 )
 from spyglass.spikesorting.v2.recording import (
     PreprocessingParameters,  # noqa: F401
@@ -41,7 +45,7 @@ from spyglass.spikesorting.v2.utils import (
     SelectionMasterInsertGuard,
     _validate_params,
 )
-from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
 if TYPE_CHECKING:
     import spikeinterface as si
@@ -255,88 +259,11 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             If a member dict carries ``recording_date`` (dates are derived),
             or if members span multiple dates without ``allow_multi_day=True``.
         """
-        from spyglass.spikesorting.v2.exceptions import (
-            SessionGroupDateError,
-            SessionGroupInputError,
+        from spyglass.spikesorting.v2.exceptions import SessionGroupInputError
+
+        rows = _session_group_insert.group_member_rows(
+            session_group_owner, session_group_name, members, allow_multi_day
         )
-
-        if not members:
-            raise SessionGroupInputError(
-                "SessionGroup.create_group: members is empty; a group needs "
-                "at least one sorting member (nwb_file_name, sort_group_id, "
-                "interval_list_name)."
-            )
-
-        required_keys = ("nwb_file_name", "sort_group_id", "interval_list_name")
-        rows: list[dict] = []
-        start_times: list = []
-        for i, member in enumerate(members):
-            missing = [k for k in required_keys if k not in member]
-            if missing:
-                raise SessionGroupInputError(
-                    f"SessionGroup.create_group: member {i} is missing required "
-                    f"key(s) {missing}; each member needs {list(required_keys)} "
-                    "(plus an optional team_name)."
-                )
-            if "recording_date" in member:
-                raise SessionGroupDateError(
-                    "SessionGroup.create_group: recording_date is derived "
-                    "from Session.session_start_time and must not be supplied "
-                    "in member dictionaries; remove it."
-                )
-            session_match = Session & {"nwb_file_name": member["nwb_file_name"]}
-            if not session_match:
-                raise SessionGroupInputError(
-                    f"SessionGroup.create_group: member {i} references "
-                    f"nwb_file_name {member['nwb_file_name']!r}, which is not an "
-                    "ingested Session. Ingest it first (e.g. insert_sessions)."
-                )
-            start_times.append(session_match.fetch1("session_start_time"))
-            rows.append(
-                {
-                    **member,
-                    "team_name": member.get("team_name", session_group_owner),
-                    "session_group_owner": session_group_owner,
-                    "session_group_name": session_group_name,
-                    "member_index": i,
-                }
-            )
-
-        # Reject duplicate logical members. The Member PK is member_index only
-        # (order is load-bearing), so two rows with the same
-        # (nwb_file_name, sort_group_id, interval_list_name, team_name) would
-        # insert without a schema error and silently concatenate the same
-        # recording twice -- scientifically suspect. Catch it at create time.
-        identities = [
-            (
-                row["nwb_file_name"],
-                row["sort_group_id"],
-                row["interval_list_name"],
-                row["team_name"],
-            )
-            for row in rows
-        ]
-        if len(set(identities)) != len(identities):
-            duplicates = sorted(
-                {ident for ident in identities if identities.count(ident) > 1}
-            )
-            raise SessionGroupInputError(
-                "SessionGroup.create_group: duplicate logical member(s) "
-                f"{duplicates} (same nwb_file_name / sort_group_id / "
-                "interval_list_name / team_name). Each member must be distinct; "
-                "concatenating the same recording twice is not supported."
-            )
-
-        unique_dates = distinct_recording_dates(start_times)
-        if len(unique_dates) > 1 and not allow_multi_day:
-            raise SessionGroupDateError(
-                "SessionGroup.create_group: members span "
-                f"{len(unique_dates)} distinct recording dates "
-                f"({unique_dates}); multi-day groups require "
-                "allow_multi_day=True. The recommended path for cross-day "
-                "analyses is sort-then-match across independent sortings, "
-                "not concatenation."
-            )
 
         try:
             with cls.connection.transaction:
@@ -509,152 +436,10 @@ class ConcatenatedRecordingSelection(
             If more than one selection row already matches the identity (a raw
             insert bypassed this helper).
         """
-        from spyglass.spikesorting.v2._concat_recording import (
-            member_recording_selection_key,
-            member_set_hash,
-        )
-        from spyglass.spikesorting.v2._selection_identity import (
-            deterministic_id,
-        )
-        from spyglass.spikesorting.v2.exceptions import (
-            MissingRecordingForConcatError,
-        )
-        from spyglass.spikesorting.v2.recording import (
-            Recording,
-            RecordingSelection,
-        )
-
-        if "motion_correction_params_name" in key:
-            raise ValueError(
-                "ConcatenatedRecordingSelection.insert_selection does not "
-                "take motion_correction_params_name: concatenation never "
-                "corrects motion. Select the concat without it, then run the "
-                "motion stage on the resulting concat (run_v2_pipeline(..., "
-                'motion_mode="apply", motion_correction_params_name=...)). '
-                'The "Applying rigid_fast correction to a concatenation" '
-                "section of the Spike Sorting v2 docs shows the motion-stage "
-                "call."
+        identity, set_hash, concat_recording_id, snapshot_rows, artifacts = (
+            _session_group_insert.plan_concat_selection(
+                cls, key, artifact_detection_ids
             )
-        extra = sorted(
-            set(key) - set(cls._IDENTITY_FIELDS) - {"concat_recording_id"}
-        )
-        if extra:
-            raise ValueError(
-                "ConcatenatedRecordingSelection.insert_selection received "
-                f"unknown field(s) {extra}. Pass only "
-                f"{list(cls._IDENTITY_FIELDS)} (a concat_recording_id is "
-                "ignored)."
-            )
-        missing_fields = [f for f in cls._IDENTITY_FIELDS if f not in key]
-        if missing_fields:
-            raise ValueError(
-                "ConcatenatedRecordingSelection.insert_selection requires "
-                f"field(s) {missing_fields}. Required identity fields are "
-                f"{list(cls._IDENTITY_FIELDS)}."
-            )
-        identity = {f: key[f] for f in cls._IDENTITY_FIELDS}
-        group_key = {
-            "session_group_owner": identity["session_group_owner"],
-            "session_group_name": identity["session_group_name"],
-        }
-        preprocessing_params_name = identity["preprocessing_params_name"]
-
-        # Precondition: the group must be non-empty, and every member needs a
-        # populated Recording for the shared preprocessing recipe. A Recording
-        # exists iff its RecordingSelection row exists AND the Computed Recording
-        # populated. The empty-group check is explicit: without it the loop
-        # passes vacuously and make_fetch later fails indexing members[0].
-        # Members are read in member_index order so the frozen snapshot (and its
-        # folded hash) records the concatenation order.
-        members = (SessionGroup.Member & group_key).fetch(
-            as_dict=True, order_by="member_index"
-        )
-        if not members:
-            raise ValueError(
-                "ConcatenatedRecordingSelection.insert_selection: SessionGroup "
-                f"{group_key} has no members. Create it via "
-                "SessionGroup.create_group() with at least one member first."
-            )
-        from spyglass.spikesorting.v2._lookup_validation import lossless_int
-
-        artifacts = {
-            lossless_int(index, "member_index"): (
-                None if value is None else uuid.UUID(str(value))
-            )
-            for index, value in artifact_detection_ids.items()
-        }
-        expected_members = {int(member["member_index"]) for member in members}
-        if set(artifacts) != expected_members:
-            raise ValueError(
-                "artifact_detection_ids must name every member exactly once: "
-                f"expected {sorted(expected_members)}, got {sorted(artifacts)}."
-            )
-        # Reject members in different physical electrode spaces (different sort
-        # group electrodes / brain regions). The concat result is read in the
-        # anchor member's electrode frame, so this must hold regardless of
-        # whether the per-member Recording caches are populated yet.
-        assert_members_share_electrode_space(members)
-        # Freeze each member's logical identity + its resolved Recording
-        # (recording_id + content_hash) into an ordered snapshot. The snapshot is
-        # the authority every downstream concat path reads (never the live
-        # SessionGroup.Member set), and its LOGICAL set hash is folded into the
-        # concat id so a different ordered member set is a different concat.
-        snapshot_rows: list[dict] = []
-        missing: list[dict] = []
-        for member in members:
-            rec_sel_key = member_recording_selection_key(
-                member, preprocessing_params_name
-            )
-            rec_sel = RecordingSelection & rec_sel_key
-            rec_pk = rec_sel.fetch1("KEY") if rec_sel else None
-            content_hashes = (
-                (Recording & rec_pk).fetch("content_hash")
-                if rec_pk is not None
-                else []
-            )
-            if rec_pk is None or len(content_hashes) == 0:
-                missing.append(rec_sel_key)
-                continue
-            artifact_id = artifacts[int(member["member_index"])]
-            if artifact_id is not None and not (
-                RecordingArtifactDetection * RecordingArtifactSelection
-                & {**rec_pk, "artifact_detection_id": artifact_id}
-            ):
-                raise ValueError(
-                    f"Member {member['member_index']}: artifact detection "
-                    f"{artifact_id} must be populated for recording {rec_pk}."
-                )
-            snapshot_rows.append(
-                {
-                    "member_index": int(member["member_index"]),
-                    "nwb_file_name": member["nwb_file_name"],
-                    "sort_group_id": int(member["sort_group_id"]),
-                    "interval_list_name": member["interval_list_name"],
-                    "team_name": member["team_name"],
-                    "recording_id": str(rec_pk["recording_id"]),
-                    "recording_content_hash": str(content_hashes[0]),
-                    "artifact_detection_id": artifact_id,
-                }
-            )
-        if missing:
-            raise MissingRecordingForConcatError(
-                "ConcatenatedRecordingSelection.insert_selection requires "
-                "every member's Recording to be populated under "
-                f"preprocessing_params_name={preprocessing_params_name!r} "
-                f"first. Missing {len(missing)} member(s): {missing}. Run "
-                "Recording.populate(...) for each missing key, then retry."
-            )
-
-        # Content-address the concat_recording_id from the logical identity AND
-        # the ordered member-set hash (mirrors RecordingSelection /
-        # SortingSelection): two callers that request the same (group,
-        # preprocessing) over the same ordered member set compute the
-        # same id, so the PK-uniqueness constraint -- not a check-then-insert
-        # dedup race -- is the concurrency guard. A different member set folds to
-        # a different id rather than silently reusing this concat.
-        set_hash = member_set_hash(snapshot_rows)
-        concat_recording_id = deterministic_id(
-            "concat_recording", {**identity, "member_set_hash": set_hash}
         )
 
         existing = cls._find_existing_pk(
@@ -858,122 +643,16 @@ class ConcatenatedRecording(
 
     @staticmethod
     def _resolve_snapshot_recordings(snapshot_rows):
-        """Verify each FROZEN member's ``Recording`` and build the load plan.
+        """Verify each frozen member's ``Recording`` and build the load plan.
 
-        The fetch-side half of the materialization contract, driven off the
-        frozen ``ConcatenatedRecordingSelection.MemberSnapshot`` (never the live
-        ``SessionGroup.Member`` set). For each member, in ``member_index`` order,
-        confirm its frozen ``recording_id`` still resolves to a populated
-        ``Recording`` AND that the recording's current ``content_hash`` still
-        matches the one frozen at selection. No SI/NWB I/O -- the heavy load
-        lives in :meth:`_load_member_recordings`, which ``make_compute`` drives
-        off the returned plan.
-
-        Never calls ``Recording.populate``: the selection-time precondition in
-        ``insert_selection`` guarantees every member was cached when the concat
-        id was minted. This re-checks (a row could be deleted later) and, by
-        comparing ``content_hash``, refuses to materialize / rebuild from member
-        data that drifted out from under the frozen id.
-
-        Parameters
-        ----------
-        snapshot_rows : list[dict]
-            ``ConcatenatedRecordingSelection.MemberSnapshot`` rows, ordered by
-            ``member_index`` (each carrying ``recording_id`` +
-            ``recording_content_hash`` and the member's logical identity).
-
-        Returns
-        -------
-        list[dict]
-            member_index-ordered plan dicts ``{"member_index" (int),
-            "nwb_file_name" (str), "interval_list_name" (str), "recording_pk"
-            (dict whose ``recording_id`` is the str UUID -- DeepHash-stable for
-            the tri-part carrier), ``artifact_detection_id`` (str or None),
-            and ``valid_times`` (array or None for explicit no-mask)}``.
-
-        Raises
-        ------
-        MissingRecordingForConcatError
-            If any frozen member's ``Recording`` row is gone.
-        ConcatMemberDriftError
-            If a frozen member's current ``Recording.content_hash`` diverges
-            from the one captured in the snapshot.
+        The verification is
+        :func:`._concat_recording_fetch.resolve_snapshot_recordings` (see it
+        for the plan's fields and the errors). ``make_fetch``, member curation
+        and UnitMatch call this method.
         """
-        from spyglass.spikesorting.v2.exceptions import (
-            ConcatMemberDriftError,
-            MissingRecordingForConcatError,
+        return _concat_recording_fetch.resolve_snapshot_recordings(
+            snapshot_rows
         )
-        from spyglass.spikesorting.v2.recording import Recording
-
-        member_plan = []
-        missing: list[dict] = []
-        drifted: list[dict] = []
-        for row in snapshot_rows:
-            recording_id = row["recording_id"]
-            content_hashes = (Recording & {"recording_id": recording_id}).fetch(
-                "content_hash"
-            )
-            if len(content_hashes) == 0:
-                missing.append({"recording_id": str(recording_id)})
-                continue
-            current_hash = str(content_hashes[0])
-            if current_hash != str(row["recording_content_hash"]):
-                drifted.append(
-                    {
-                        "member_index": int(row["member_index"]),
-                        "recording_id": str(recording_id),
-                        "snapshot_content_hash": str(
-                            row["recording_content_hash"]
-                        ),
-                        "current_content_hash": current_hash,
-                    }
-                )
-                continue
-            member_plan.append(
-                {
-                    "member_index": int(row["member_index"]),
-                    "nwb_file_name": row["nwb_file_name"],
-                    "interval_list_name": row["interval_list_name"],
-                    "recording_pk": {"recording_id": str(recording_id)},
-                    "artifact_detection_id": (
-                        str(row["artifact_detection_id"])
-                        if row["artifact_detection_id"] is not None
-                        else None
-                    ),
-                    "valid_times": (
-                        RecordingArtifactDetection().get_artifact_removed_intervals(
-                            {
-                                "artifact_detection_id": row[
-                                    "artifact_detection_id"
-                                ]
-                            }
-                        )
-                        if row["artifact_detection_id"] is not None
-                        else None
-                    ),
-                }
-            )
-        if missing:
-            raise MissingRecordingForConcatError(
-                "ConcatenatedRecording.make: "
-                f"{len(missing)} frozen member Recording row(s) are gone: "
-                f"{missing}. The member set was frozen at insert_selection; "
-                "restore the missing Recording(s), or DELETE this concat and "
-                "re-run ConcatenatedRecordingSelection.insert_selection (which "
-                "re-snapshots and mints a new concat_recording_id). Run "
-                "Recording.populate(...) for each missing key first."
-            )
-        if drifted:
-            raise ConcatMemberDriftError(
-                "ConcatenatedRecording.make: "
-                f"{len(drifted)} frozen member(s) have a Recording whose current "
-                f"content_hash no longer matches the snapshot: {drifted}. The "
-                "concatenation would be built from different underlying data than "
-                "concat_recording_id was minted for. Restore the original member "
-                "recording content, or DELETE this concat and re-run "
-                "insert_selection to mint a new concat for the changed inputs."
-            )
-        return member_plan
 
     @staticmethod
     def _load_member_recordings(member_plan, member_traces):
@@ -1051,44 +730,7 @@ class ConcatenatedRecording(
         ConcatMemberDriftError
             If a frozen member's recording content drifted from the snapshot.
         """
-        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-        from spyglass.spikesorting.v2.recording import Recording
-
-        # The populate key carries only concat_recording_id; every member and
-        # parameter query restricts with the fetched selection row, not the
-        # UUID-only key, so independent concat selections never cross-restrict.
-        sel = (ConcatenatedRecordingSelection & key).fetch1()
-        preprocessing_params_name = sel["preprocessing_params_name"]
-        # The frozen snapshot -- not the live SessionGroup.Member set -- is the
-        # authority: a later member edit mints a NEW concat id on re-selection
-        # and never silently changes what THIS concat materializes.
-        snapshot = (ConcatenatedRecordingSelection.MemberSnapshot & key).fetch(
-            as_dict=True, order_by="member_index"
-        )
-        if not snapshot:
-            raise SchemaBypassError(
-                "ConcatenatedRecording.make_fetch: selection "
-                f"{dict(key)} has no MemberSnapshot rows. The frozen member set "
-                "is written by ConcatenatedRecordingSelection.insert_selection; "
-                "this selection was inserted by a raw bypass. Drop it and "
-                "re-insert via insert_selection."
-            )
-        # Re-assert electrode-space compatibility at the compute boundary against
-        # the frozen snapshot, defending a raw ``allow_direct_insert`` selection
-        # whose members span different physical electrode spaces (same SI channel
-        # ids/geometry, different DB electrodes/regions).
-        assert_members_share_electrode_space(snapshot)
-        member_plan = self._resolve_snapshot_recordings(snapshot)
-        member_traces = tuple(
-            Recording().resolve_stored_traces(plan["recording_pk"])
-            for plan in member_plan
-        )
-        return ConcatRecordingFetched(
-            member_plan=member_plan,
-            member_traces=member_traces,
-            preprocessing_params_name=preprocessing_params_name,
-            anchor_nwb_file_name=snapshot[0]["nwb_file_name"],
-        )
+        return _concat_recording_fetch.fetch_concat_inputs(self, key)
 
     def make_compute(
         self,
@@ -1127,19 +769,15 @@ class ConcatenatedRecording(
             member sample counts (which would misalign the ``MemberBoundary``
             back-mapping).
         """
-        import numpy as np
-
         from spyglass.spikesorting.v2._concat_recording import (
             build_concatenated_recording,
-            concat_continuity,
+            concat_provenance_tables,
+            concat_span_arrays,
             cumulative_member_boundaries,
             mask_member_recordings,
             observation_intervals,
         )
         from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
-        from spyglass.spikesorting.v2._sorting_artifact_mask import (
-            statistics_spans,
-        )
         from spyglass.spikesorting.v2._units_nwb import (
             _base_intervals_from_recording,
         )
@@ -1164,18 +802,11 @@ class ConcatenatedRecording(
         # loaded, whose persisted timestamps still carry each member's own
         # gaps; the concatenation below replaces them with one synthetic
         # continuous timeline.
-        continuity = concat_continuity(recordings, member_sample_counts)
-        continuity_spans = np.asarray(continuity.spans, dtype=np.int64).reshape(
-            -1, 2
+        continuity_spans, continuity_start_s, continuity_end_s, statistics = (
+            concat_span_arrays(
+                recordings, member_sample_counts, artifact_ranges
+            )
         )
-        continuity_start_s = np.asarray(continuity.start_s, dtype=np.float64)
-        continuity_end_s = np.asarray(continuity.end_s, dtype=np.float64)
-        statistics = np.asarray(
-            statistics_spans(
-                sum(member_sample_counts), artifact_ranges, continuity.spans
-            ),
-            dtype=np.int64,
-        ).reshape(-1, 2)
         recordings = masked_recordings
 
         concatenated = build_concatenated_recording(recordings)
@@ -1206,53 +837,16 @@ class ConcatenatedRecording(
         # Anchor the analysis NWB to the FIRST member's session (deterministic
         # parent, resolved in make_fetch); full multi-session provenance stays
         # queryable through ConcatenatedRecordingSelection -> SessionGroup.Member.
-        # Self-describing provenance: a header and the ordered member map with
-        # per-member frame boundaries, so split_sorting_by_session is
-        # reconstructable from the file alone.
-        from spyglass.spikesorting.v2._nwb_provenance import (
-            CONCAT_MEMBER_COLUMNS,
-            CONCAT_MEMBERS,
-            CONCAT_PROVENANCE,
-            build_long_provenance_table,
-            build_provenance_table,
+        provenance_tables = concat_provenance_tables(
+            concat_recording_id=key["concat_recording_id"],
+            preprocessing_params_name=preprocessing_params_name,
+            anchor_nwb_file_name=anchor_nwb_file_name,
+            member_plan=member_plan,
+            member_sample_counts=member_sample_counts,
+            boundaries=boundaries,
+            artifact_ranges=artifact_ranges,
+            obs_intervals=obs_intervals,
         )
-
-        member_rows = []
-        concat_start = 0
-        for plan, n_samples, cum_end in zip(
-            member_plan, member_sample_counts, boundaries
-        ):
-            member_rows.append(
-                {
-                    "member_index": int(plan["member_index"]),
-                    "recording_id": str(plan["recording_pk"]["recording_id"]),
-                    "nwb_file_name": plan["nwb_file_name"],
-                    "interval_list_name": plan["interval_list_name"],
-                    "artifact_detection_id": plan["artifact_detection_id"]
-                    or "none",
-                    "start_sample": 0,
-                    "end_sample": int(n_samples),
-                    "concat_start_sample": int(concat_start),
-                    "concat_end_sample": int(cum_end),
-                }
-            )
-            concat_start = int(cum_end)
-        provenance_tables = [
-            build_provenance_table(
-                CONCAT_PROVENANCE,
-                {
-                    "concat_recording_id": str(key["concat_recording_id"]),
-                    "preprocessing_params_name": preprocessing_params_name,
-                    "anchor_nwb_file_name": anchor_nwb_file_name,
-                    "n_members": len(member_plan),
-                    "artifact_frame_ranges": artifact_ranges,
-                    "obs_intervals": obs_intervals.tolist(),
-                },
-            ),
-            build_long_provenance_table(
-                CONCAT_MEMBERS, member_rows, CONCAT_MEMBER_COLUMNS
-            ),
-        ]
         analysis_file_name, object_id, content_hash = write_nwb_artifact(
             concatenated,
             anchor_nwb_file_name,
@@ -1390,120 +984,12 @@ class ConcatenatedRecording(
     def _rebuild_nwb_artifact(self, key) -> None:
         """Rebuild a missing concat artifact -- locked, atomic, content-verified.
 
-        The concat analog of ``Recording._rebuild_nwb_artifact``. Acquire
-        ``concat_recording_artifact_lock(concat_recording_id)``, double-check the
-        file is still missing under the lock (a peer may have rebuilt while we
-        waited), then re-run the materialization (``make_fetch`` -> ``make_compute``
-        -- which also re-verifies the frozen member set against the live
-        recordings) to a FRESH temp analysis file, fingerprint it, and only on a
-        ``content_hash`` match ``os.replace`` it into the canonical slot and
-        refresh the DataJoint ``~external`` byte checksum. A rebuild whose
-        fingerprint diverges from the stored ``content_hash`` raises
-        ``RecordingContentDriftError`` and never touches the canonical slot --
-        drifted bytes are never served.
-
-        Cleanup contract (all-or-nothing): the temp is unlinked on any failure;
-        if ``os.replace`` ran but the checksum refresh then failed, the canonical
-        is unlinked to return the slot to the missing state for the next (locked)
-        ``get_recording``. Ordering is load-bearing -- the atomic ``os.replace``
-        precedes ``_resolve_external``.
-
-        An irreproducible rebuild (e.g. a changed SpikeInterface or NWB read
-        path) surfaces loudly as ``RecordingContentDriftError`` rather than
-        silently serving different bytes (the fingerprint's trace rounding
-        absorbs sub-µV noise).
-        Safe to call directly (it takes the lock itself) and from
-        ``get_recording`` (which does not hold the lock).
+        The rebuild is :func:`._recording_nwb.rebuild_concat_nwb_artifact`; it
+        calls ``make_fetch`` and ``make_compute`` on this instance.
+        :func:`._recording_nwb.ensure_artifact_file` calls this method on every
+        trace-artifact table, so it stays on the class.
         """
-        from pathlib import Path
-
-        import numpy as np
-
-        from spyglass.spikesorting.v2._concat_recording import (
-            concat_recording_artifact_lock,
-        )
-        from spyglass.spikesorting.v2._recording_nwb import (
-            install_rebuilt_recording,
-        )
-        from spyglass.spikesorting.v2.exceptions import (
-            RecordingContentDriftError,
-        )
-        from spyglass.spikesorting.v2.recording import (
-            _unlink_staged_analysis_file,
-        )
-
-        row = (self & key).fetch1()
-        concat_recording_id = row["concat_recording_id"]
-        analysis_file_name = row["analysis_file_name"]
-        canonical_abs = AnalysisNwbfile.get_abs_path(analysis_file_name)
-
-        with concat_recording_artifact_lock(concat_recording_id):
-            # Double-checked: a peer rebuilt (or the file was never gone) while
-            # we waited for the lock -- nothing to do.
-            if Path(canonical_abs).exists():
-                return
-
-            logger.info(
-                "ConcatenatedRecording.get_recording: cache miss for "
-                f"{analysis_file_name!r} (reason=missing cache); rebuilding "
-                "the concatenated artifact..."
-            )
-            fetched = self.make_fetch(key)
-            # make_compute writes a FRESH (unregistered) temp analysis file and
-            # returns its readback content fingerprint as ``content_hash``.
-            computed = self.make_compute(key, *fetched)
-            temp_abs = AnalysisNwbfile.get_abs_path(computed.analysis_file_name)
-
-            if computed.content_hash != row["content_hash"]:
-                _unlink_staged_analysis_file(
-                    computed.analysis_file_name,
-                    context="ConcatenatedRecording._rebuild_nwb_artifact",
-                )
-                raise RecordingContentDriftError(
-                    "ConcatenatedRecording._rebuild_nwb_artifact: rebuilt "
-                    f"content_hash {computed.content_hash} does not match the "
-                    f"stored content_hash {row['content_hash']} for "
-                    f"{analysis_file_name!r}. The current environment no longer "
-                    "reproduces this concatenated recording (e.g. a "
-                    "SpikeInterface/BLAS upgrade or a changed member recording). "
-                    "The canonical artifact "
-                    "was NOT modified. Recover by restoring a backup, rerunning "
-                    "under the original environment, or deleting and repopulating "
-                    "the ConcatenatedRecording row (and its downstream)."
-                )
-            # The traces fingerprint does not include the stored spans:
-            # downstream sorts estimate noise from the statistics spans and
-            # motion estimation reads the continuity spans and their first
-            # and last timestamps, so a rebuild must reproduce them exactly.
-            drifted = [
-                name
-                for name, shape in (
-                    ("statistics_spans", (-1, 2)),
-                    ("continuity_spans", (-1, 2)),
-                    ("continuity_start_s", (-1,)),
-                    ("continuity_end_s", (-1,)),
-                )
-                if not np.array_equal(
-                    np.asarray(getattr(computed, name)).reshape(shape),
-                    np.asarray(row[name]).reshape(shape),
-                )
-            ]
-            if drifted:
-                _unlink_staged_analysis_file(
-                    computed.analysis_file_name,
-                    context="ConcatenatedRecording._rebuild_nwb_artifact",
-                )
-                raise RecordingContentDriftError(
-                    "ConcatenatedRecording._rebuild_nwb_artifact: rebuilt "
-                    f"{drifted} do not match the stored values for "
-                    f"{analysis_file_name!r}. The canonical artifact was NOT "
-                    "modified. Delete and repopulate the "
-                    "ConcatenatedRecording row (and its downstream)."
-                )
-
-            install_rebuilt_recording(
-                temp_abs, canonical_abs, analysis_file_name
-            )
+        return _recording_nwb.rebuild_concat_nwb_artifact(self, key)
 
     def split_sorting_by_session(self, sorting, key) -> dict:
         """Back-map a concat-frame sorting into per-member local sortings.
