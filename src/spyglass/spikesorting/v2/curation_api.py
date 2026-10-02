@@ -1145,7 +1145,8 @@ def merge_and_evaluate(
     ValueError
         If ``groups`` is empty or malformed (a group with fewer than two
         ids, a repeated id, overlapping groups, or a non-integer id), or
-        references unit ids absent from ``parent_curation``. Groups are
+        references unit ids absent from ``parent_curation``, or if
+        ``parent_curation`` is an uncommitted merge preview. Groups are
         checked after the parent evaluation is populated.
     """
     parent = _require_parent_ref(parent_curation, caller="merge_and_evaluate")

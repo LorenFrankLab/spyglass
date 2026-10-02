@@ -422,8 +422,8 @@ class FigPackReview:
 
         The way back to "the review I was editing" without its id: a
         review's identity includes the parent's children at the time it
-        started, so once a child has been committed ``start_review`` over
-        the same parent begins a NEW review (fresh seeded bundle) rather
+        started, so once the parent gains a child (a merge preview included)
+        ``start_review`` over the same parent begins a NEW review (fresh seeded bundle) rather
         than reusing the one holding your saved edits. Resume the earlier
         one from here; each review's ``preview_import()`` shows whether its
         saved edits differ from the parent and ``uri`` names its bundle.
@@ -866,7 +866,8 @@ def start_review(
     that recipe (or checks the supplied ``evaluation``), then builds the
     FigPack review view, reusing an existing view with the same inputs. A
     review's identity includes the parent's children at the time it starts,
-    so once a child has been committed the same call starts a new review;
+    so once the parent gains a child (a merge preview included) the same call
+    starts a new review;
     use :meth:`FigPackReview.find` to resume an earlier one.
 
     Parameters
@@ -894,7 +895,8 @@ def start_review(
         accepts) to include in the review. Each must belong to ``parent``
         and none may repeat. Default ``()`` includes none.
     display_options : ReviewDisplayOptions or mapping, optional
-        Bounds the browser payload -- per-unit amplitude sample and
+        Bounds the browser payload -- per-unit raster and amplitude samples,
+        their firing-rate budgets, the initial point budget, and the
         correlogram pair filter -- and is persisted with the review, never
         affecting the scientific evaluation. A mapping may only use
         ``ReviewDisplayOptions`` field names. Default ``None`` uses the
@@ -919,8 +921,9 @@ def start_review(
         If ``display_options`` has unknown or invalid fields; an annotation
         set belongs to a different curation or is listed twice; ``profile``
         does not resolve to exactly one ``CurationReviewProfile`` row or no
-        longer matches its pinned hash; or ``evaluation`` is not over
-        ``parent`` with the profile's recipe names.
+        longer matches its pinned hash; ``evaluation`` is not over
+        ``parent`` with the profile's recipe names; or ``parent`` is an
+        uncommitted merge preview.
     CurationNotFoundError
         If ``parent`` no longer identifies its curation generation (the row
         was deleted or its numeric id reused).
@@ -928,8 +931,9 @@ def start_review(
         If the ``CurationEvaluation`` row for ``evaluation`` is not
         populated.
     FigPackUploadError
-        If ``upload=True``, ``ephemeral=False``, and ``FIGPACK_API_KEY`` is
-        not set.
+        If the view must be built with ``upload=True`` and
+        ``ephemeral=False`` while ``FIGPACK_API_KEY`` is not set (an existing
+        hosted view is reused without uploading).
     """
     resolved_display = ReviewDisplayOptions.from_mapping(display_options)
     from spyglass.spikesorting.v2.figpack_curation import (
