@@ -35,7 +35,7 @@ import datajoint as dj
 import numpy as np
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.spikesorting.v2 import _motion_selection_insert
+from spyglass.spikesorting.v2 import _motion_compute, _motion_selection_insert
 from spyglass.spikesorting.v2._params.motion_estimation import (
     MOTION_ESTIMATION_SCHEMA_VERSION,
     MotionEstimationParamsSchema,
@@ -845,36 +845,13 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             On a stale selection, spans out of acquisition order, or any
             estimation failure (see ``estimate_motion_in_spans``).
         """
-        import spikeinterface as si
-
         from spyglass.spikesorting.v2 import _motion
         from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
-        from spyglass.spikesorting.v2._sorting_artifact_mask import (
-            artifact_frame_ranges,
-            continuity_from_timestamps,
-            statistics_spans,
-        )
 
         resolved = _motion.resolve_estimation_params(params)
         resolved_hash = _motion.resolved_params_hash(resolved)
-        stale = _stale_fields(
-            [
-                (
-                    "resolved configuration hash",
-                    resolved_hash,
-                    selection["resolved_params_hash"],
-                ),
-                (
-                    "SpikeInterface version",
-                    si.__version__,
-                    selection["spikeinterface_version"],
-                ),
-                (
-                    "motion algorithm version",
-                    _motion.MOTION_ALGORITHM_VERSION,
-                    selection["motion_algorithm_version"],
-                ),
-            ]
+        stale = _motion_compute.stale_estimate_selection_fields(
+            selection, resolved_hash
         )
         if stale:
             raise ValueError(
@@ -889,24 +866,11 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         )
         recording.annotate(is_filtered=True)
         n_samples = int(recording.get_num_samples())
-        if lineage.kind == "recording":
-            continuity, continuity_start_s, continuity_end_s = (
-                continuity_from_timestamps(recording)
+        continuity, continuity_start_s, continuity_end_s, statistics = (
+            _motion_compute.estimation_spans(
+                recording, lineage, source_row, artifact_valid_times, n_samples
             )
-            excluded = []
-            if artifact_valid_times is not None:
-                excluded = artifact_frame_ranges(
-                    recording,
-                    artifact_valid_times,
-                    artifact_detection_id=lineage.artifact_detection_id,
-                    recording_id=lineage.key["recording_id"],
-                )
-            statistics = statistics_spans(n_samples, excluded, continuity)
-        else:
-            continuity = _motion.normalize_spans(source_row["continuity_spans"])
-            continuity_start_s = source_row["continuity_start_s"]
-            continuity_end_s = source_row["continuity_end_s"]
-            statistics = _motion.normalize_spans(source_row["statistics_spans"])
+        )
 
         sampling_frequency = float(recording.get_sampling_frequency())
         clock = _motion.build_estimation_clock(
@@ -1307,79 +1271,6 @@ _ESTIMATE_APPLICATION_FIELDS = (
 )
 
 
-def _stale_fields(checks) -> list[str]:
-    """Describe each ``(name, current, selected)`` check whose values differ.
-
-    Parameters
-    ----------
-    checks : iterable of (str, object, object)
-        A field's name, its value now and its value on the selection.
-
-    Returns
-    -------
-    list[str]
-        One ``"<name> <current> != selected <selected>"`` per stale field.
-    """
-    return [
-        f"{name} {now!r} != selected {then!r}"
-        for name, now, then in checks
-        if now != then
-    ]
-
-
-def _stale_corrected_selection_fields(
-    selection: dict,
-    resolved_interpolation_params: dict,
-    *,
-    check_spikeinterface_version: bool,
-) -> list[str]:
-    """Describe what changed since a corrected recording was selected.
-
-    Parameters
-    ----------
-    selection : dict
-        The ``MotionCorrectedRecordingSelection`` row.
-    resolved_interpolation_params : dict
-        Its ``MotionInterpolationParameters`` row's ``params`` blob, resolved
-        by ``_motion.resolve_interpolation_params``.
-    check_spikeinterface_version : bool
-        Also compare the installed SpikeInterface version.
-
-    Returns
-    -------
-    list[str]
-        One description per stale field (:func:`_stale_fields`); empty when
-        the selection is current.
-    """
-    import spikeinterface as si
-
-    from spyglass.spikesorting.v2 import _motion
-
-    checks = [
-        (
-            "resolved interpolation hash",
-            _motion.resolved_params_hash(resolved_interpolation_params),
-            selection["resolved_params_hash"],
-        )
-    ]
-    if check_spikeinterface_version:
-        checks.append(
-            (
-                "SpikeInterface version",
-                si.__version__,
-                selection["spikeinterface_version"],
-            )
-        )
-    checks.append(
-        (
-            "motion interpolation algorithm version",
-            _motion.MOTION_INTERPOLATION_ALGORITHM_VERSION,
-            selection["motion_interpolation_algorithm_version"],
-        )
-    )
-    return _stale_fields(checks)
-
-
 def _live_source_row(
     lineage: SourceLineage, motion_estimate_id, selected_hash: str
 ) -> tuple:
@@ -1759,19 +1650,7 @@ class MotionCorrectedRecording(
             or an application failure (see
             ``_motion.apply_motion_on_estimation_clock``).
         """
-        import spikeinterface as si
-
         from spyglass.spikesorting.v2 import _motion
-        from spyglass.spikesorting.v2._nwb_provenance import (
-            CONCAT_MEMBER_COLUMNS,
-            CONCAT_MEMBERS,
-            MOTION_CONTINUITY_SPAN_COLUMNS,
-            MOTION_CONTINUITY_SPANS,
-            MOTION_CORRECTION_PROVENANCE,
-            build_long_provenance_table,
-            build_provenance_table,
-            read_long_provenance,
-        )
         from spyglass.spikesorting.v2._recording_geometry import (
             flatten_planar_geometry,
         )
@@ -1784,7 +1663,7 @@ class MotionCorrectedRecording(
         )
 
         resolved = _motion.resolve_interpolation_params(interpolation_params)
-        stale = _stale_corrected_selection_fields(
+        stale = _motion_compute.stale_corrected_selection_fields(
             selection,
             resolved,
             check_spikeinterface_version=(
@@ -1804,29 +1683,9 @@ class MotionCorrectedRecording(
         source.annotate(is_filtered=True)
         n_samples = int(source.get_num_samples())
         sampling_frequency = float(source.get_sampling_frequency())
-        mismatched = [
-            name
-            for name, now, then in (
-                ("n_samples", n_samples, int(estimate["n_samples"])),
-                (
-                    "sampling_frequency",
-                    sampling_frequency,
-                    float(estimate["sampling_frequency"]),
-                ),
-                (
-                    "channel_ids",
-                    source.channel_ids.tolist(),
-                    np.asarray(estimate["channel_ids"]).tolist(),
-                ),
-            )
-            if now != then
-        ]
-        if mismatched:
-            raise ValueError(
-                f"MotionCorrectedRecording {key}: the source's {mismatched} "
-                "differ from the saved estimate's; the estimate does not "
-                "describe these traces."
-            )
+        _motion_compute.assert_source_matches_estimate(
+            key, source, estimate, n_samples, sampling_frequency
+        )
         timestamps = _LazyRecordingTimestamps(source, 0, n_samples)
         source_filtering = _series_filtering(
             source_path, source_electrical_series_path
@@ -1834,19 +1693,7 @@ class MotionCorrectedRecording(
 
         # The estimate stored the flattened positions it was computed on.
         flatten_planar_geometry(source)
-        source_locations = np.asarray(
-            source.get_channel_locations(), dtype=np.float64
-        )
-        estimate_locations = np.asarray(
-            estimate["channel_locations"], dtype=np.float64
-        )
-        if not np.array_equal(source_locations, estimate_locations):
-            raise ValueError(
-                f"MotionCorrectedRecording {key}: the source's contact "
-                f"positions {source_locations.tolist()} differ from the saved "
-                f"estimate's {estimate_locations.tolist()}; the estimate does "
-                "not describe this geometry."
-            )
+        _motion_compute.assert_geometry_matches_estimate(key, source, estimate)
 
         clock = _estimation_clock_of(estimate)
         statistics = np.asarray(
@@ -1869,71 +1716,18 @@ class MotionCorrectedRecording(
         interpolation_text = ", ".join(
             f"{name}={resolved[name]}" for name in sorted(resolved)
         )
-        provenance_tables = [
-            build_provenance_table(
-                MOTION_CORRECTION_PROVENANCE,
-                {
-                    "motion_corrected_recording_id": str(
-                        key["motion_corrected_recording_id"]
-                    ),
-                    "motion_estimate_id": str(selection["motion_estimate_id"]),
-                    "motion_interpolation_params_name": selection[
-                        "motion_interpolation_params_name"
-                    ],
-                    "interpolation": resolved,
-                    "motion_interpolation_algorithm_version": int(
-                        selection["motion_interpolation_algorithm_version"]
-                    ),
-                    "source_content_hash": str(source_content_hash),
-                    "removed_channel_ids": applied.removed_channel_ids,
-                    "spikeinterface_version": si.__version__,
-                    "source_kind": source_kind,
-                    "source_key": {
-                        name: str(value) for name, value in source_key.items()
-                    },
-                    "statistics_spans": statistics.tolist(),
-                    "estimation_clock_sampling_frequency": (
-                        clock.sampling_frequency
-                    ),
-                },
-            ),
-            build_long_provenance_table(
-                MOTION_CONTINUITY_SPANS,
-                [
-                    {
-                        "span_index": index,
-                        "start_sample": int(start),
-                        "end_sample": int(end),
-                        "source_start_s": float(source_start),
-                        "source_end_s": float(source_end),
-                        "estimation_start_s": float(estimation_start),
-                    }
-                    for index, (
-                        (start, end),
-                        source_start,
-                        source_end,
-                        estimation_start,
-                    ) in enumerate(
-                        zip(
-                            clock.spans,
-                            clock.source_start_s,
-                            clock.source_end_s,
-                            clock.estimation_start_s,
-                            strict=True,
-                        )
-                    )
-                ],
-                MOTION_CONTINUITY_SPAN_COLUMNS,
-            ),
-        ]
-        if source_kind == "concatenated_recording":
-            provenance_tables.append(
-                build_long_provenance_table(
-                    CONCAT_MEMBERS,
-                    read_long_provenance(source_path, CONCAT_MEMBERS),
-                    CONCAT_MEMBER_COLUMNS,
-                )
-            )
+        provenance_tables = _motion_compute.motion_correction_provenance_tables(
+            key,
+            selection,
+            resolved,
+            source_content_hash,
+            applied,
+            source_kind,
+            source_key,
+            statistics,
+            clock,
+            source_path,
+        )
         analysis_file_name, object_id, content_hash = write_nwb_artifact(
             corrected,
             nwb_file_name,
@@ -2070,7 +1864,7 @@ class MotionCorrectedRecording(
             # under another SpikeInterface version is allowed and installed
             # only if it reproduces the stored traces. A changed recipe
             # resolution or application algorithm cannot reproduce them.
-            stale = _stale_corrected_selection_fields(
+            stale = _motion_compute.stale_corrected_selection_fields(
                 fetched.selection,
                 resolve_interpolation_params(fetched.interpolation_params),
                 check_spikeinterface_version=False,
