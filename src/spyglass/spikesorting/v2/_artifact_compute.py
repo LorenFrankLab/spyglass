@@ -6,23 +6,14 @@ These two functions are the pure-compute core of artifact detection --
 ``numpy`` and ``spikeinterface``; they touch no DataJoint schema, table, or
 ``spyglass.common`` import.
 
-Why this lives in its own module rather than in ``artifact.py``:
-``_ArtifactDetectionMixin._scan_artifact_frames`` runs these via SpikeInterface's
-``ChunkRecordingExecutor``, which on a multi-process pool (``n_jobs>1``) spawns
-worker processes. On macOS the start method is ``spawn``, so each worker is a
-fresh interpreter that re-imports the module DEFINING the worker function.
-``artifact.py`` is a DataJoint *schema* module -- importing it activates
-``dj.schema(...)`` and the ``from spyglass.common import ...`` side-effect import,
-both of which open a DB connection AT IMPORT. A worker only needs these two
-DB-free functions, so defining them here keeps the spawn re-import connection-free:
-``n_jobs>1`` artifact detection then works even when a worker (or a DB-isolated
-HPC compute node) cannot reach the database, and avoids one redundant DB
-connection per worker. ``artifact.py`` re-exports both names, so existing
-``from ...v2.artifact import _compute_artifact_chunk`` call sites keep working.
-
-These kernels are kept as a self-contained, DB-free copy so the
-spawn-workers need no DB connection -- importing an equivalent helper from a
-schema module would pull DataJoint back in at spawn-import time.
+Why they are not in ``artifact.py``: ``scan_artifact_frames`` runs them via
+SpikeInterface's ``ChunkRecordingExecutor``, whose ``n_jobs>1`` pool spawns
+workers (``spawn`` on macOS) that re-import the module DEFINING the worker
+function. Importing a schema module such as ``artifact.py`` opens a DB
+connection, so keeping the kernels here lets ``n_jobs>1`` detection run on
+workers (or DB-isolated HPC nodes) that cannot reach the database. Do not
+import helpers from a schema module here. ``artifact.py`` re-exports both
+names.
 """
 
 from __future__ import annotations

@@ -8,15 +8,6 @@ input and resolves the artifact-free statistics spans for each source kind.
 ``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
 compute), so these functions operate purely on the SpikeInterface recording.
 
-Why this lives in its own module rather than in ``sorting.py``:
-``sorting.py`` is a DataJoint *schema* module -- importing it activates
-``dj.schema(...)`` and the source-part / merge dependencies. The mask needs
-none of that at import, so ``Sorting`` stays a thin orchestrator. Same "thin
-DataJoint shell over pure/IO services" direction as ``_artifact_compute`` /
-``_selection_identity`` / ``_analyzer_cache`` / ``_curation_transforms`` /
-``_units_nwb`` / ``_sorting_dispatch`` / ``_sorting_units`` /
-``_sorting_analyzer``.
-
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: numpy / SpikeInterface / the typed
 ``EmptyArtifactValidTimesError`` are imported lazily inside the function, which

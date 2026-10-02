@@ -11,17 +11,7 @@ pure pynwb IO;
 ``write_curated_units_nwb`` is the exception -- it resolves the source
 sort itself (``Sorting`` / ``SortingSelection`` / ``RecordingSelection``
 fetches) before writing, so ``CurationV2.insert_curation`` stays a thin
-orchestrator.
-
-Why this lives in its own module rather than in ``sorting.py``:
-``sorting.py`` is a DataJoint *schema* module -- importing it activates
-``dj.schema(...)`` and the source-part / merge dependencies. The units-NWB
-IO needs none of that, so ``Sorting`` becomes a thin orchestrator (fetch
-row -> resolve path -> call these -> insert) and ``CurationV2`` can reach
-the SHARED readback helpers here instead of reaching into ``Sorting``'s
-private methods. Same "thin DataJoint shell over pure/IO services"
-direction as ``_artifact_compute`` / ``_selection_identity`` /
-``_analyzer_cache`` / ``_curation_transforms``.
+orchestrator. ``Sorting`` and ``CurationV2`` share the readback helpers here.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: like ``_analyzer_cache``, the only DataJoint

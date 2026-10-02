@@ -22,15 +22,6 @@ The table threads already-fetched DB state in (the tri-part
 compute), and the file row is registered by the caller inside its DataJoint
 transaction, so this write path stays a thin file-write service.
 
-Why this lives in its own module rather than in ``recording.py``:
-``recording.py`` is a DataJoint *schema* module -- importing it activates
-``dj.schema(...)`` and the source-part dependencies. The NWB-write logic needs
-none of that at import, so ``Recording`` becomes a thin orchestrator (fetch ->
-call these -> insert / verify). Same "thin DataJoint shell over pure/IO
-services" direction as ``_artifact_compute`` / ``_selection_identity`` /
-``_analyzer_cache`` / ``_curation_transforms`` / ``_units_nwb`` /
-``_sorting_dispatch``.
-
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / numpy / pynwb / spyglass
 dependencies are imported lazily inside the function. ``write_nwb_artifact``

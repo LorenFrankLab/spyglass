@@ -1,11 +1,8 @@
 """Pure + SpikeInterface helpers behind the concatenated-recording cache.
 
-``ConcatenatedRecording`` is a DataJoint *schema* module: importing it activates
-``dj.schema(...)`` and the source-part dependencies. The concat math and the
-SpikeInterface concatenate call needs none of that at import, so
-they live here and the table becomes a thin orchestrator (fetch -> call these ->
-write -> insert). Same "thin DataJoint shell over pure/IO services" direction as
-``_recording_nwb`` / ``_selection_identity`` / ``_signal_math``.
+The concat math and the SpikeInterface concatenate call, kept out of the
+``session_group`` schema module so ``ConcatenatedRecording`` only fetches,
+calls these, writes, and inserts.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import; the SpikeInterface dependency is imported lazily inside

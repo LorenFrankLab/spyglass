@@ -22,15 +22,6 @@ this order:
    reference -- on the restricted recording. These are per-sample spatial
    operations, so the joins cannot contaminate them.
 
-Why this lives in its own module rather than in ``recording.py``:
-``recording.py`` is a DataJoint *schema* module -- importing it activates
-``dj.schema(...)`` and the source-part dependencies. The preprocessing logic
-needs none of that at import, so ``Recording`` stays a thin orchestrator
-(fetch -> call these -> insert / verify). Same "thin DataJoint shell over
-pure/IO services" direction as ``_artifact_compute`` / ``_selection_identity``
-/ ``_analyzer_cache`` / ``_curation_transforms`` / ``_units_nwb`` /
-``_sorting_dispatch``.
-
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / numpy / spyglass dependencies are
 imported lazily inside the functions. No function here touches the DB at

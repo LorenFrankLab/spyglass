@@ -9,15 +9,6 @@ Pure (DB-free) row construction -- the sort-group/electrode fetches
 (``_sorting_fetch.fetch_unit_electrode_metadata``) and the
 ``Sorting.Unit.insert`` live outside this module.
 
-Why this lives in its own module rather than in ``sorting.py``:
-``sorting.py`` is a DataJoint *schema* module -- importing it activates
-``dj.schema(...)`` and the source-part / merge dependencies. This row
-construction needs none of that at import, so ``Sorting`` stays a thin
-orchestrator (fetch -> call these -> insert). Same "thin DataJoint shell over
-pure/IO services" direction as ``_artifact_compute`` / ``_selection_identity``
-/ ``_analyzer_cache`` / ``_curation_transforms`` / ``_units_nwb`` /
-``_sorting_dispatch`` / ``_sorting_artifact_mask`` / ``_sorting_analyzer``.
-
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: ``build_unit_rows_from_analyzer`` imports
 SpikeInterface and the analyzer loader inside the function, and

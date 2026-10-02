@@ -8,29 +8,12 @@ threads already-fetched DB state in (the tri-part
 ``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
 compute), so the geometry math here is DB-free.
 
-Why this lives in its own module rather than in ``recording.py``:
-``recording.py`` is a DataJoint *schema* module -- importing it activates
-``dj.schema(...)`` and the source-part dependencies. The geometry logic needs
-none of that at import, so ``Recording`` becomes a thin orchestrator (fetch ->
-call these -> insert / verify). Same "thin DataJoint shell over pure/IO
-services" direction as ``_artifact_compute`` / ``_selection_identity`` /
-``_analyzer_cache`` / ``_curation_transforms`` / ``_units_nwb`` /
-``_sorting_dispatch``.
-
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / numpy / probeinterface / spyglass
-dependencies are imported lazily inside the functions. Three functions
-inherently touch the DB / DataJoint at CALL time via lazy imports:
-``fetch_sort_group_probe_info`` (an ``Electrode * Probe`` fetch),
-``fetch_sort_group_contact_positions`` and ``fetch_interior_bad_channel_ids``
-(both an ``Electrode * Probe.Electrode`` fetch).
-``maybe_apply_tetrode_geometry``, its gate predicate
-(``tetrode_repair_applies``), the plane-normalization helpers
-(``classify_missing_geometry``, ``select_distinct_plane``,
-``normalize_channel_locations``,
-``assert_unique_contact_positions``, ``flatten_planar_geometry``) and the
-pitch/adjacency helpers
-(``_shank_pitch``, ``_interior_bad_channel_ids``) are pure.
+dependencies are imported lazily inside the functions. Only the ``fetch_*``
+functions (``fetch_sort_group_probe_info``,
+``fetch_sort_group_contact_positions``, ``fetch_interior_bad_channel_ids``)
+read the DB, at call time; the rest touch no database.
 """
 
 from __future__ import annotations

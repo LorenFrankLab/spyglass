@@ -41,11 +41,9 @@ import numpy as np
 
 from spyglass.common import IntervalList, Session  # noqa: F401
 
-# Pure-compute worker kernels live in a DB-free module so that a spawned
-# ``n_jobs>1`` artifact-detection worker (macOS ``spawn`` re-imports the
-# function's defining module) does NOT open a DB connection at import. Re-export
-# here so existing ``from ...v2.artifact import _compute_artifact_chunk`` call
-# sites keep working. See ``_artifact_compute`` for the rationale.
+# The worker kernels live in the DB-free ``_artifact_compute`` so a spawned
+# ``n_jobs>1`` worker opens no DB connection (see its docstring); re-exported
+# for ``from ...v2.artifact import _compute_artifact_chunk`` callers.
 from spyglass.spikesorting.v2._artifact_compute import (  # noqa: F401
     _compute_artifact_chunk,
     _init_artifact_worker,

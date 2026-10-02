@@ -10,15 +10,6 @@ threads already-fetched DB state in (the tri-part
 ``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
 compute), so the restriction hot path here is DB-free.
 
-Why this lives in its own module rather than in ``recording.py``:
-``recording.py`` is a DataJoint *schema* module -- importing it activates
-``dj.schema(...)`` and the source-part dependencies. The restriction logic
-needs none of that at import, so ``Recording`` becomes a thin orchestrator
-(fetch -> call these -> insert / verify). Same "thin DataJoint shell over
-pure/IO services" direction as ``_artifact_compute`` / ``_selection_identity``
-/ ``_analyzer_cache`` / ``_curation_transforms`` / ``_units_nwb`` /
-``_sorting_dispatch``.
-
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / numpy / spyglass dependencies are
 imported lazily inside the functions. ``restrict_recording`` touches the DB at

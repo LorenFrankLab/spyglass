@@ -11,28 +11,14 @@ and the raw ``MergeGroup`` / ``ParentMergeGroup`` provenance rows
 They are pure Python: given the already-fetched source ``Unit`` rows (raw
 ``Sorting.Unit`` for a root, the parent ``CurationV2.Unit`` for a child) and
 the caller's label / merge-group payloads, they decide WHAT to insert without
-touching the database.
-
-Why this lives in its own module rather than in ``curation.py``:
-``curation.py`` is a DataJoint *schema* module -- importing it activates
-``dj.schema(...)`` and pulls the merge-table / NWB dependencies. The
-transforms here need none of that, so ``CurationV2`` becomes a thin
-orchestrator (fetch ``Sorting.Unit`` -> call these -> insert) while the
-parity-critical merge/label logic lives in one hermetically-testable
-place. This is the same "thin DataJoint shell over pure services"
-direction as ``_artifact_compute`` / ``_selection_identity`` /
-``_analyzer_cache``.
+touching the database, so the merge/label logic is testable without one.
 
 DEPENDENCY-LIGHT BY CONTRACT. This module opens no database connection
-and activates no ``dj.schema`` at import. Its own imports are limited to
-the standard library and dependency-light enum / validation helpers,
-rather than through ``utils`` (which imports
-DataJoint / SpikeInterface at load). So the transform layer itself does
-not depend on the heavy table-support module. (Importing it as a
-``spyglass`` submodule still triggers ``spyglass``'s package ``__init__``,
-which loads DataJoint -- that is package-wide and unavoidable; the point
-here is that these transforms add no DB/SpikeInterface dependency of their
-own.)
+and activates no ``dj.schema`` at import. Its imports are limited to the
+standard library and dependency-light enum / validation helpers, not
+``utils`` (which imports DataJoint / SpikeInterface at load). (The
+``spyglass`` package ``__init__`` still loads DataJoint; these transforms
+add no DB/SpikeInterface dependency of their own.)
 """
 
 from __future__ import annotations
