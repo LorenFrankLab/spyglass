@@ -100,7 +100,35 @@ class MatcherProtocol(Protocol):
         self,
         session_inputs: list[SessionMatcherInput],
         params: dict,
-    ) -> list[MatchPair]: ...
+    ) -> list[MatchPair]:
+        """Match units across the prepared per-input bundles.
+
+        Parameters
+        ----------
+        session_inputs : list[SessionMatcherInput]
+            One wrapper-prepared bundle per matching input, in ``input_index``
+            (chronological) order. Each bundle's ``curation_key`` is the
+            identity the matcher echoes back on the pairs it returns.
+        params : dict
+            The matcher's ``MatcherParameters.params`` blob, validated at
+            insert time against the params schema registered with this
+            backend (see :func:`register_matcher`).
+
+        Returns
+        -------
+        list[MatchPair]
+            One :class:`MatchPair` per matched unit pair, each side identified
+            by the ``(sorting_id, curation_id)`` of an input's
+            ``curation_key`` plus a unit id from that input's bundle. The two
+            sides must come from different inputs, every key must be one of
+            the ``curation_key`` values passed in, and an unordered pair must
+            appear at most once (not also in reversed orientation). Order is
+            not significant; the caller orients and orders the pairs, and
+            ``UnitMatch.make`` raises ``ValueError`` on a pair that breaks
+            these rules. ``[]`` when fewer than two inputs are given or
+            nothing matches.
+        """
+        ...
 
 
 #: name -> backend instance

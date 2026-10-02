@@ -69,6 +69,31 @@ def _artifact_source_part_name(detection_key: dict) -> str:
 
 @schema
 class ArtifactDetectionOutput(_Merge, SpyglassMixin):
+    """Merge table of the populated artifact detections a sort can mask against.
+
+    Each master row is one registered detection: ``merge_id`` is a uuid that
+    ``_merge_insert`` hashes from the source key and ``source``, and ``source``
+    names the one part table that holds the detection's
+    ``artifact_detection_id``:
+
+    - ``RecordingSource`` -> ``RecordingArtifactDetection`` (one recording);
+    - ``SharedGroupSource`` -> ``SharedGroupArtifactDetection`` (one detection
+      shared across a group of recordings).
+
+    A detection registers itself here, via :meth:`insert_detection`, in the
+    same transaction that materializes its result row; the sort and
+    motion-estimate selection inserts register a populated but unregistered
+    detection the same idempotent way. Downstream selections reference a
+    detection by this table's ``merge_id`` projected as
+    ``artifact_detection_merge_id``:
+    ``SortingSelection.ArtifactDetectionSource`` (the optional artifact mask
+    of a sort) and
+    ``MotionEstimateSelection.ArtifactDetectionSource`` (the optional artifact
+    mask of a single-recording motion estimate). Use :meth:`get_merge_id` to
+    go from a detection to its ``merge_id`` and
+    :meth:`resolve_artifact_detection_id` to go back.
+    """
+
     definition = """
     merge_id: uuid
     ---
@@ -76,6 +101,8 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
     """
 
     class RecordingSource(SpyglassMixin, dj.Part):  # noqa: F811
+        """Merge part for a single-recording ``RecordingArtifactDetection``."""
+
         definition = """
         -> master
         ---
@@ -83,6 +110,8 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
         """
 
     class SharedGroupSource(SpyglassMixin, dj.Part):  # noqa: F811
+        """Merge part for a cross-recording ``SharedGroupArtifactDetection``."""
+
         definition = """
         -> master
         ---
