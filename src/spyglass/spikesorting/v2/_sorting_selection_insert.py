@@ -292,8 +292,8 @@ def find_existing_pk(
 
     ``table_cls`` is the ``SortingSelection`` class.
     """
-    from spyglass.spikesorting.v2.exceptions import (
-        DuplicateSelectionError,
+    from spyglass.spikesorting.v2._selection_identity import (
+        existing_selection_pk,
     )
 
     candidates = (
@@ -311,9 +311,11 @@ def find_existing_pk(
         )
         == motion_corrected_recording_id
     }
-    bypassed = [sid for sid in master_ids if sid != deterministic_id]
-    if bypassed:
-        raise DuplicateSelectionError(
+    return existing_selection_pk(
+        master_ids,
+        deterministic_id,
+        pk_field="sorting_id",
+        bypass_message=lambda bypassed: (
             f"SortingSelection has {len(master_ids)} master rows for "
             f"{master_restriction | source_restriction} with "
             f"artifact_detection_id={artifact_detection_id} and "
@@ -323,8 +325,8 @@ def find_existing_pk(
             "non-deterministic selection row (a raw insert or a legacy "
             "non-content-addressed row); drop it and re-insert via "
             "insert_selection."
-        )
-    return {"sorting_id": deterministic_id} if master_ids else None
+        ),
+    )
 
 
 def validate_motion_correction_source(plan) -> None:
