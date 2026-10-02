@@ -247,13 +247,9 @@ class _LazyConcatenatedTimestamps(_LazyTimestamps):
         return self.parts[part_idx][idx - int(self.offsets[part_idx])]
 
 
-def _recording_start_time(recording) -> float | None:
-    """Best-effort public lookup of a regular recording's first timestamp."""
-    get_start_time = getattr(recording, "get_start_time", None)
-    if get_start_time is None:
-        return None
-    start = get_start_time(segment_index=0)
-    return None if start is None else float(start)
+def _recording_start_time(recording) -> float:
+    """Return the single-segment recording's first timestamp (seconds)."""
+    return float(recording.get_start_time(segment_index=0))
 
 
 def _recording_num_frames(recording) -> int:
