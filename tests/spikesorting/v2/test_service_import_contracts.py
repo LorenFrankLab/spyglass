@@ -48,6 +48,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_signal_math",
     "_sort_group_insert",
     "_sort_group_planning",
+    "_sorter_parameters",
     "_sorting_analyzer",
     "_sorting_artifact_mask",
     "_sorting_dispatch",
