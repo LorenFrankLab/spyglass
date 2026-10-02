@@ -172,7 +172,6 @@ def legacy_si_sorter_rows() -> list:
     installed = set(sis.installed_sorters())
     rows = []
     skipped_not_installed = []
-    skipped_matlab = []
     for sorter in sis.available_sorters():
         if sorter in curated:
             # See SorterParameters.insert_default_legacy_si_sorters: a curated
@@ -181,7 +180,6 @@ def legacy_si_sorter_rows() -> list:
         if sorter.lower() in MATLAB_SORTERS:
             # A local 'default' row would be rejected at populate; MATLAB
             # rows are inserted explicitly with a container backend.
-            skipped_matlab.append(sorter)
             continue
         if sorter not in installed:
             # Same gate as insert_default: a wrapper exposes defaults even
