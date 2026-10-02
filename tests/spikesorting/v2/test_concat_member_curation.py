@@ -655,3 +655,19 @@ def test_delete_cascades_member_rows_and_reclaims_files(
         & [{"analysis_file_name": name} for name in analysis_names]
     )
     assert not any(path.exists() for path in paths)
+
+
+def test_analysis_orphans_query_with_member_table_declared(dj_conn):
+    """The member table shares the secondary ``nwb_file_name`` with
+    ``AnalysisNwbfile``; the registry's orphan query must still run, since
+    ``AnalysisNwbfile().cleanup()`` relies on it."""
+    from spyglass.common import AnalysisNwbfile
+    from spyglass.spikesorting.v2.concat_member_curation import (  # noqa: F401
+        ConcatMemberCuration,
+    )
+
+    referenced = AnalysisNwbfile & ConcatMemberCuration.proj(
+        "analysis_file_name"
+    )
+    orphans = AnalysisNwbfile().get_orphans()
+    assert not (orphans & referenced.proj())

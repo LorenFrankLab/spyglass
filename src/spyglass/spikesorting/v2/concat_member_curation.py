@@ -218,46 +218,12 @@ class ConcatMemberCuration(
         candidates = [
             {"analysis_file_name": name} for name in sorted(deleted_names)
         ]
-        orphan_names = {
+        orphan_names = sorted(
             str(name)
-            for name in (AnalysisNwbfile & candidates).fetch(
-                "analysis_file_name"
-            )
-        }
-        # ``AnalysisNwbfile.get_orphans()`` subtracts every child relation in
-        # one expression. That is invalid when a child (including this table)
-        # shares another secondary attribute such as ``nwb_file_name`` with the
-        # registry. Inspect the actual FK map instead and remove a candidate as
-        # soon as any child still references its analysis-file key.
-        for child, foreign_key in AnalysisNwbfile.children(
-            as_objects=True, foreign_key_info=True
-        ):
-            child_attrs = [
-                child_attr
-                for child_attr, parent_attr in foreign_key["attr_map"].items()
-                if parent_attr == "analysis_file_name"
-            ]
-            if len(child_attrs) != 1:
-                # The registry has a one-column primary key. An unexpected FK
-                # shape is safer to treat as referenced than to delete through.
-                logger.warning(
-                    "Deferring concat-member analysis cleanup because child "
-                    f"{child.full_table_name} has unexpected AnalysisNwbfile "
-                    f"FK mapping {foreign_key['attr_map']}."
-                )
-                return []
-            child_attr = child_attrs[0]
-            referenced = {
-                str(name)
-                for name in (
-                    child
-                    & [{child_attr: name} for name in sorted(orphan_names)]
-                ).fetch(child_attr)
-            }
-            orphan_names -= referenced
-            if not orphan_names:
-                return []
-        orphan_names = sorted(orphan_names)
+            for name in (AnalysisNwbfile & candidates)
+            .get_orphans()
+            .fetch("analysis_file_name")
+        )
         if orphan_names:
             orphan_paths = {
                 Path(AnalysisNwbfile.get_abs_path(name)).resolve()

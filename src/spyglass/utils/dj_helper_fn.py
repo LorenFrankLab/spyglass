@@ -262,6 +262,31 @@ def fetch_nwb(*attrs, **kwargs):
     )
 
 
+def get_child_references(table):
+    """Get the parent keys each child table references.
+
+    Each element holds one child's distinct foreign-key values, renamed to the
+    parent's attribute names. Subtracting the list from ``table`` leaves rows
+    no child references. Unlike subtracting the child tables themselves, this
+    never joins on another attribute both tables happen to share, which
+    DataJoint refuses when it is secondary in both.
+    """
+    table = table() if inspect.isclass(table) else table
+    references = []
+    for child, foreign_key in table.children(
+        as_objects=True, foreign_key_info=True
+    ):
+        attr_map = foreign_key["attr_map"]  # child attribute -> parent
+        referenced = dj.U(*attr_map) & child
+        renames = {
+            parent: child_attr
+            for child_attr, parent in attr_map.items()
+            if parent != child_attr
+        }
+        references.append(referenced.proj(**renames) if renames else referenced)
+    return references
+
+
 def get_child_tables(table):
     """Get all child tables of a given table."""
     table = table() if inspect.isclass(table) else table

@@ -22,7 +22,7 @@ from datajoint.table import Table
 from hdmf.common import DynamicTable
 from pynwb.core import ScratchData
 
-from spyglass.utils.dj_helper_fn import get_child_tables
+from spyglass.utils.dj_helper_fn import get_child_references
 from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import (
@@ -1228,7 +1228,7 @@ class AnalysisMixin(BaseMixin):
 
     def get_orphans(self):
         """Clean up orphaned entries and external files."""
-        return self - get_child_tables(self)
+        return self - get_child_references(self)
 
     def log(self, *args, **kwargs):
         """Null log method. Revert to _disabled_log to turn back on."""

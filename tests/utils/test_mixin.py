@@ -177,6 +177,36 @@ def test_mixin_del_orphans(dj_conn, Mixin, MixinChild):
     assert post_del == 0, "Delete orphans not working."
 
 
+def test_mixin_del_orphans_with_shared_secondary_attr(dj_conn):
+    """A child sharing a secondary attribute with its parent is still
+    subtracted by its foreign key alone."""
+    from spyglass.utils import SpyglassMixin
+
+    schema = dj.Schema("test_orphshared", {}, connection=dj_conn)
+
+    @schema
+    class SharedParent(SpyglassMixin, dj.Lookup):
+        definition = """
+        id : int
+        ---
+        label : int
+        """
+        contents = [(0, 5), (1, 5)]
+
+    @schema
+    class SharedChild(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> SharedParent
+        ---
+        label : int
+        """
+        contents = [(0, 7)]
+
+    assert SharedParent().delete_orphans(dry_run=True).fetch("id").tolist() == [
+        1
+    ]
+
+
 def test_test_mode_property_uses_settings(schema_test, Mixin):
     """Test that _test_mode property uses spyglass.settings.config.
 
