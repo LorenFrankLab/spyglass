@@ -24,6 +24,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_artifact_naming",
     "bad_channels",
     "_concat_recording",
+    "_concat_recording_fetch",
     "_curation_insert",
     "_curation_plan",
     "_curation_readers",
