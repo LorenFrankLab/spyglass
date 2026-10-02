@@ -9,33 +9,17 @@ those rows back (``read_artifact_removed_intervals``, and for one recording
 ``read_recording_artifact_valid_times``), and the delete-time
 IntervalList cleanup policy (``collect_artifact_interval_rows_to_remove``
 + ``remove_artifact_interval_rows``). The construction functions are
-pure (non-DB) compute over SpikeInterface objects -- aside from
-``detect_artifacts``'s diagnostic ``logger`` calls; the persistence
-functions touch the DB at CALL time via lazy imports so the table class
-stays a thin orchestrator (fetch -> compute -> write/delete).
-
-Why this lives in its own module rather than in ``artifact.py``:
-``artifact.py`` is a DataJoint *schema* module -- importing it activates
-``dj.schema(...)`` and the source-part dependencies. The interval
-construction needs none of that at import, so the artifact-detection tables
-become thin orchestrators. Same "thin DataJoint shell over pure/IO
-services" direction as ``_artifact_compute`` / ``_selection_identity`` /
-``_analyzer_cache`` / ``_curation_transforms`` / ``_units_nwb`` /
-``_sorting_dispatch`` / ``_recording_restriction`` / ``_recording_geometry`` /
-``_recording_preprocessing`` / ``_recording_nwb``.
+pure (non-DB) compute over SpikeInterface objects, aside from
+``detect_artifacts``'s diagnostic ``logger`` calls. The per-chunk kernels
+live in ``_artifact_compute``; ``scan_artifact_frames`` drives them through
+SpikeInterface's ``ChunkRecordingExecutor``.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all numpy / SpikeInterface / spyglass dependencies
-are imported lazily inside the functions. The persistence functions
-(``read_artifact_removed_intervals``, ``read_recording_artifact_valid_times``,
-``collect_artifact_interval_rows_to_remove``,
-``remove_artifact_interval_rows``) DO touch the DB at call time -- they
-lazy-import ``common.IntervalList`` plus the split result tables
-``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection`` back from
-``artifact`` (a backward import that is cycle-free because ``artifact`` is
-fully imported by call time). The pure-compute kernels live in
-``_artifact_compute``; ``scan_artifact_frames`` drives them through
-SpikeInterface's ``ChunkRecordingExecutor``.
+are imported lazily inside the functions. The persistence functions touch
+the DB at call time, lazy-importing ``common.IntervalList`` and the
+``artifact`` result tables (cycle-free, since ``artifact`` is fully imported
+by then).
 """
 
 from __future__ import annotations
@@ -44,26 +28,17 @@ from __future__ import annotations
 def scan_artifact_frames(recording, validated, job_kwargs=None):
     """Flag contiguous artifact-frame RUNS via a chunked ``ChunkRecordingExecutor``.
 
-    Scans the recording chunk by chunk (defaulting to
-    ``chunk_duration='1s'`` when ``job_kwargs`` carries no chunk-size key,
-    so the scan is bounded
-    for every caller, not only the production path that merges SI's global
-    job kwargs) and concatenates the per-chunk flagged-frame RUN ranges into one
-    ascending ``(n_runs, 2)`` array. The per-chunk traces working set is bounded
-    by the chunk size -- roughly ``4 × chunk_frames × n_channels × 4 bytes`` (raw
-    int slice + float32 µV copy + abs + z-score intermediate) -- rather than
-    by the full recording, which a full-``get_traces`` load would
-    materialize at ``~4 × n_samples × n_channels × 4 bytes`` (≈110 GB for a
-    1-hour 64-channel 30 kHz recording). Returning run RANGES (not one index per
-    flagged frame) also bounds the collected result to the number of artifact
-    EVENTS, so even a heavily-flagged recording never materializes an
-    O(n_bad_frames) index array here or in ``detect_artifacts``.
+    Scans chunk by chunk (``chunk_duration='1s'`` when ``job_kwargs`` has no
+    chunk-size key) and concatenates the per-chunk flagged-frame RUN ranges
+    into one ascending ``(n_runs, 2)`` array. Peak memory is about
+    ``4 × chunk_frames × n_channels × 4 bytes`` per chunk instead of the full
+    recording (≈110 GB for 1 h, 64 channels, 30 kHz), and returning runs
+    rather than per-frame indices bounds the result by the number of
+    artifact events.
 
-    ``job_kwargs`` is the merged SI job-kwargs blob; only recognized
-    ``job_keys`` (``n_jobs``, ``chunk_duration``, ``pool_engine``, ...) are
-    forwarded to the executor. ``n_jobs=1`` (the default) runs
-    serially in-process and passes the live recording to each worker; a
-    multi-process pool receives the ``to_dict()`` blob instead.
+    Only SI ``job_keys`` from ``job_kwargs`` reach the executor. ``n_jobs=1``
+    (the default) runs serially and passes the live recording to the worker;
+    a process pool receives the ``to_dict()`` blob instead.
 
     Parameters
     ----------
@@ -107,15 +82,9 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
 
     resolved = dict(job_kwargs or {})
     exec_kwargs = {k: resolved[k] for k in job_keys if k in resolved}
-    # Chunk BY DEFAULT. ChunkRecordingExecutor with no chunk-size key
-    # processes the whole recording in a single chunk -- i.e. the exact
-    # full-traces memory profile this restoration removed. A caller that
-    # reaches here without a chunk key (any direct ``detect_artifacts``
-    # call, not just the production ``make_compute`` path that merges SI's
-    # global ``chunk_duration='1s'``) must still be bounded, so default the
-    # chunk to 1 s of data. Callers can override via job_kwargs (and a
-    # single-pass-in-memory mode is still reachable with an explicit
-    # ``chunk_size`` spanning the recording).
+    # With no chunk-size key ChunkRecordingExecutor loads the whole recording
+    # as one chunk, so default to 1 s for callers (e.g. direct
+    # ``detect_artifacts`` calls) that did not merge SI's global job kwargs.
     _CHUNK_KEYS = (
         "chunk_size",
         "chunk_duration",
@@ -145,12 +114,8 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
     if not per_chunk:
         return np.empty((0, 2), dtype=np.int64)
     runs = np.concatenate(per_chunk)  # (total_runs, 2) ascending (start, end)
-    # Semantic guard on the TOTAL flagged sample count, cheap from the runs.
-    # Detection carries runs (not per-frame ids), so peak memory here is
-    # already O(n_runs) regardless of how many samples are flagged; this stays
-    # as a loud check that masking more than the bound is a misconfiguration --
-    # it fails at detection time rather than letting the mask stage expand the
-    # complement of a near-empty valid_times per-frame for SI.
+    # Flagging more than the bound is a misconfigured detector: fail here
+    # rather than at the mask stage.
     total_flagged = int(np.sum(runs[:, 1] - runs[:, 0] + 1)) if runs.size else 0
     assert_artifact_frame_fraction(
         total_flagged,
@@ -252,18 +217,11 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     fs = assert_positive_sampling_frequency(
         recording.get_sampling_frequency(), context="detect_artifacts: "
     )
-    # Recorded chunks (split at wall-clock discontinuities) AND the inter-chunk
-    # gap frame indices, from a chunked scan that never materializes the full
-    # timestamp vector. ``recording.get_times()`` would allocate a concrete
-    # float64 array of every sample (~824 MB for 1 h @ 30 kHz), plus another
-    # full-length temporary for the ``np.diff`` gap scan below; the chunked
-    # ``base_intervals_and_gaps`` bounds peak memory to ~one chunk instead. For
-    # a contiguous recording ``base_intervals`` is a single ``[t0, t_end]`` and
-    # ``gap_after`` is empty; for disjoint sort intervals there is one interval
-    # per chunk, so the detect=False / zero-artifact returns AND the artifact
-    # complement below never span an inter-chunk gap (which would inflate
-    # obs_intervals duration and let sub-min_length slivers survive by borrowing
-    # gap time).
+    # Recorded chunks (split at wall-clock gaps) and the frame index of the last
+    # sample before each gap (diff > 1.5 sample periods), read chunk by chunk
+    # rather than via ``get_times()`` (~824 MB for 1 h at 30 kHz). Every
+    # returned interval stays inside one chunk: one spanning a gap would
+    # inflate obs_intervals and let sub-min_length slivers borrow gap time.
     base_intervals, gap_after = base_intervals_and_gaps(recording, fs)
     if not validated.detect:
         logger.info(
@@ -272,8 +230,6 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         )
         return np.asarray(base_intervals)
 
-    # Log the threshold configuration so a population report can
-    # audit which detection mode actually fired per row.
     logger.info(
         "Artifact detection: scanning with "
         f"amplitude_threshold_uv={validated.amplitude_threshold_uv}, "
@@ -327,23 +283,12 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
             "all-channel requirement."
         )
 
-    # Chunked scan via ChunkRecordingExecutor (see
-    # ``scan_artifact_frames``). The per-frame detection math --
-    # µV traces (gain+offset applied by SpikeInterface), amplitude
-    # threshold, and the
-    # across-channel (``axis=1``) z-score with its ``+1e-12`` std
-    # epsilon -- lives in the module-level ``_compute_artifact_chunk``
-    # worker. The z-score is computed on each frame's own columns, so
-    # chunk boundaries (which split the time axis) leave the flagged
-    # frame set unchanged (a test pins this equivalence). The worker
-    # OR-combines the two detectors (an AND would make the dual-threshold
-    # mode strictly less sensitive than either single-threshold mode). The worker returns contiguous flagged-frame
-    # RUNS (start, end_inclusive), not one id per flagged frame, so this
-    # carries O(n_runs) -- not O(n_bad_frames) -- through the join below.
+    # The per-frame math (in ``_artifact_compute``) OR-combines the amplitude
+    # and across-channel z-score detectors; the z-score uses each frame's own
+    # channels, so chunk boundaries do not change the flagged set.
     runs = scan_artifact_frames(recording, validated, job_kwargs)
     if len(runs) == 0:
-        # Warn so a downstream consumer noticing "all valid times" can
-        # see whether detection was attempted-and-empty vs skipped.
+        # Distinguishes attempted-and-empty from the detect=False skip.
         logger.warning(
             "Artifact detection: scan found zero artifact frames"
             f"{context} (amplitude_threshold_uv="
@@ -359,29 +304,14 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     )
     join_window_frames = int(np.ceil(validated.join_window_ms * 1e-3 * fs))
 
-    # Inter-chunk wall-clock gaps: ``gap_after`` (the frame index of the last
-    # sample before each gap, diff > 1.5 sample periods) was computed alongside
-    # ``base_intervals`` by the chunked scan above -- identical to
-    # ``np.flatnonzero(np.diff(recording.get_times()) > 1.5 / fs)`` but without
-    # the full-vector allocation. Frame indices are contiguous across a gap, so
-    # BOTH the join below and the removal-window expansion further down must be
-    # gap-aware -- otherwise an artifact near a chunk edge bridges/spills into
-    # the neighboring chunk across the gap.
+    # Frame indices are contiguous across a wall-clock gap, so the join and the
+    # removal-window expansion must both be gap-aware: frame-adjacent artifacts
+    # in different chunks are seconds apart, and joining or dilating across
+    # the gap would over-mask the neighboring chunk.
     n = recording.get_num_samples(segment_index=0)
 
-    # Build artifact intervals in frame indices, then convert to
-    # seconds and subtract per base chunk. Join nearby artifact frames
-    # into spans, but NEVER across a timestamp gap: two artifacts in
-    # different chunks are frame-adjacent yet seconds apart in
-    # wall-clock, so joining them would create a span straddling the
-    # gap that over-masks the earlier chunk's tail. The gap-aware
-    # guard below keeps the join from bridging a large disjoint gap.
-    #
-    # The scan returns contiguous flagged-frame RUNS, but a fixed-size chunk can
-    # straddle a wall-clock gap, so a single run may span one. Split runs at gaps
-    # first (so no run crosses a discontinuity), then join adjacent runs within
-    # join_window. The final valid_times are identical to a per-frame join's,
-    # but no per-frame array is ever materialized.
+    # Split runs at gaps first (a scan chunk can straddle one), then join runs
+    # within join_window; the result equals a per-frame join's.
     runs = _split_runs_at_gaps(runs, gap_after)
     spans = []
     cur_start = int(runs[0, 0])
@@ -400,13 +330,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
             cur_end = r_end
     spans.append((cur_start, cur_end))
 
-    # Cap the removal-window expansion at the CHUNK boundary on each
-    # side, for the same reason: a frame-space window (``end_f +
-    # half_window_frames``) on an artifact near a chunk edge would
-    # reach into the neighboring chunk's first samples across the gap
-    # and -- after per-chunk clipping -- remove them. Capping the
-    # window at the chunk frame bounds keeps it from crossing a gap
-    # orders of magnitude larger than the window.
+    # Cap the removal-window expansion at the chunk boundary on each side.
     clipped_spans = []
     for start_f, end_f in spans:
         left = gap_after[gap_after < start_f]
@@ -415,30 +339,16 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         chunk_end = int(right[0]) if right.size else n - 1
         start_f = max(chunk_start, start_f - half_window_frames)
         end_f = min(chunk_end, end_f + half_window_frames)
-        # ``end_f`` is the INCLUSIVE last artifact sample, but the
-        # interval is stored as a half-open ``[start, end)`` where
-        # ``end`` is the first non-artifact sample. Otherwise the
-        # complement (saved as valid_times) would silently include
-        # ``timestamps[end_f]`` -- an artifact sample -- in the
-        # next valid interval, and ``Sorting._apply_artifact_mask``
-        # would fail to mask that sample before the sort.
-        #
-        # When ``end_f == chunk_end`` (artifact reaches the chunk's last
-        # sample), ``end_f + 1`` indexes the NEXT chunk's first
-        # timestamp, so this intermediate interval can span the
-        # inter-chunk gap. That is harmless:
-        # ``artifact_intervals`` is a local never exposed to consumers,
-        # and the per-chunk subtraction below clips each interval to its
-        # own base chunk. The half-open ``end`` is exactly the same
-        # array element the next chunk uses as its ``base_start``, so the
-        # clip is an identity (not a float coincidence) and the saved
-        # valid_times never cross the gap.
+        # Half-open [start, end): ``end_f`` is the inclusive last artifact
+        # sample, so ``end_f + 1`` keeps it out of the complement (the saved
+        # valid_times). At a chunk's last sample, ``end_f + 1`` is the next
+        # chunk's first timestamp; the per-chunk subtraction below clips to
+        # exactly that element (its ``base_start``), so valid_times never
+        # cross the gap.
         clipped_spans.append((start_f, min(end_f + 1, n - 1)))
 
-    # Map every span's two boundary frames to times in ONE lazy
-    # ``_segment_times_at`` read (a noisy recording can have hundreds of spans;
-    # batching avoids that many tiny h5py reads) instead of indexing a
-    # materialized full vector.
+    # One batched read for every span boundary (a noisy recording can have
+    # hundreds of spans; per-span reads are many tiny h5py reads).
     boundary_frames = np.array(
         [frame for span in clipped_spans for frame in span], dtype=np.int64
     )
@@ -448,14 +358,9 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         for i in range(len(clipped_spans))
     ]
 
-    # Subtract artifact intervals from each recorded base chunk
-    # SEPARATELY so a kept valid interval never spans an inter-chunk
-    # wall-clock gap. Subtracting from one envelope
-    # ``[timestamps[0], timestamps[-1]]`` would reintroduce the gaps
-    # ``Recording.make`` excluded -- inflating obs_intervals duration
-    # and letting a sub-min_length sliver survive by borrowing gap
-    # time. ``artifact_intervals`` is start-sorted; clip each to the
-    # current chunk and walk the complement within it.
+    # Subtract per base chunk, not from one ``[t0, t_end]`` envelope, so no
+    # kept interval spans a gap ``Recording.make`` excluded.
+    # ``artifact_intervals`` is start-sorted.
     kept = []
     artifact_index = 0
     n_artifact_intervals = len(artifact_intervals)
@@ -484,12 +389,9 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         if cursor < base_end:
             kept.append([cursor, base_end])
 
-    # Drop valid-interval slivers shorter than ``min_length_s``
-    # (default 1.0 s) before returning. Without this, a noisy
-    # recording with frequent artifacts leaves millisecond-scale
-    # slivers between artifact intervals that downstream
-    # ``Sorting._apply_artifact_mask`` iterates one by one; SI
-    # sorters may also crash on micro-intervals.
+    # Drop slivers shorter than ``min_length_s``: a noisy recording otherwise
+    # leaves millisecond intervals the mask iterates one by one, and SI
+    # sorters may crash on them.
     if kept:
         kept = [
             [start, end]
@@ -497,11 +399,8 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
             if (end - start) >= validated.min_length_s
         ]
     if not kept:
-        # Artifacts WERE found (we are past the zero-frames early return), but
-        # removal-window dilation + the min_length_s sliver filter dropped
-        # every valid interval. Warn here (mirroring the zero-frames warning)
-        # so the operator sees the cause at detection time rather than three
-        # stages later as an EmptyArtifactValidTimesError at sort time.
+        # Surface the cause now rather than as an
+        # EmptyArtifactValidTimesError at sort time.
         logger.warning(
             "Artifact detection: after removing artifacts and dropping "
             f"intervals shorter than min_length_s={validated.min_length_s}, "
@@ -641,19 +540,12 @@ def read_artifact_removed_intervals(key, as_dict=False):
         SharedGroupArtifactDetection,
     )
 
-    # Validate the key BEFORE routing so a missing ``artifact_detection_id``
-    # surfaces this clear ValueError.
     if "artifact_detection_id" not in key:
         raise ValueError(
             "get_artifact_removed_intervals: key must include "
             "'artifact_detection_id'."
         )
-    # Route by which split result table content-addresses the id (the id is
-    # unique across the two sources, so it lives in exactly one). Each table's
-    # get_artifact_removed_intervals shapes the return: a bare array for the
-    # single-recording source (unless as_dict), the per-member dict for the
-    # shared-group source. The merge_id is exposed only at the SortingSelection
-    # boundary; this reader stays keyed on the per-source artifact_detection_id.
+    # The id is unique across the two result tables, so it is in exactly one.
     if RecordingArtifactDetection & key:
         return RecordingArtifactDetection().get_artifact_removed_intervals(
             key, as_dict=as_dict
@@ -832,13 +724,10 @@ def remove_artifact_interval_rows(restrictions):
     """
     from spyglass.common import IntervalList
 
-    # Clean up the matching IntervalList rows through the cautious
-    # ``.delete(safemode=False)`` (IntervalList is a SpyglassMixin, so its
-    # ``.delete`` IS the cautious path; safemode=False only suppresses the
-    # re-prompt -- the user already passed the same team-permission check on the
-    # parent artifact-detection rows above keyed by the same nwb_file_name, so the
-    # IntervalList check is a re-verification, not a bypass). super_delete here
-    # would silently delete other users' rows under shared lab sessions.
+    # SpyglassMixin ``.delete`` re-checks team permission (the caller already
+    # passed it on the detection rows for the same nwb_file_name);
+    # safemode=False only skips the re-prompt. ``super_delete`` would skip
+    # the check and could delete other users' rows in a shared session.
     for restriction in restrictions:
         rows = IntervalList & restriction
         if len(rows) == 0:
