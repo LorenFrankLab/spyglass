@@ -141,7 +141,10 @@ MountainSort5 sorter.
 ```python
 from spyglass.common.common_lab import LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
-from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+from spyglass.spikesorting.v2.pipeline import (
+    run_v2_pipeline,
+    select_units_for_analysis,
+)
 from spyglass.spikesorting.v2.recording import SortGroupV2
 
 nwb_file_name = "your_session.nwb"  # already ingested via insert_sessions
@@ -164,12 +167,14 @@ run_summary = run_v2_pipeline(
 )
 # A default run stops at the UNCURATED root. run_summary["root_merge_id"] is
 # fine for a quick look, but is NOT analysis-ready, and
-# run_summary["analysis_merge_id"] is None -- there is deliberately nothing
+# run_summary["auto_labeled_merge_id"] is None -- there is deliberately nothing
 # called "merge_id" to copy straight into a decode.
 root_merge_id = run_summary["root_merge_id"]  # quick inspection only
 
 # For downstream science, curate first. auto_curate=True commits an
-# auto-labeled child and fills analysis_merge_id (the analysis-ready handle):
+# auto-labeled child and fills auto_labeled_merge_id. That child still holds
+# every unit (its labels are suggestions), so choose the analysis population
+# explicitly before decoding:
 analysis_summary = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
     sort_group_id=0,
@@ -178,7 +183,10 @@ analysis_summary = run_v2_pipeline(
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
     auto_curate=True,
 )
-merge_id = analysis_summary["analysis_merge_id"]  # send THIS downstream
+receipt = select_units_for_analysis(
+    analysis_summary.auto_labeled_curation, policy="v2_unflagged_units"
+)
+spike_times, unit_ids = receipt.fetch_spike_data(return_unit_ids=True)
 ```
 
 See
