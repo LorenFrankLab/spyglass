@@ -373,6 +373,36 @@ def _insert_recompute_outcome(
             )
 
 
+def _remove_matched_selections(
+    selection, recompute_table, versions_table, restriction, *, dry_run
+) -> int:
+    """Body of both ``*RecomputeSelection.remove_matched`` classmethods.
+
+    ``versions_table`` supplies the artifact primary key a matched
+    ``recompute_table`` row is projected onto. Returns the redundant count.
+    """
+    matched = recompute_table & "matched=1"
+    artifact_pk = versions_table.primary_key
+    matched_artifacts = (dj.U(*artifact_pk) & matched).fetch(
+        "KEY", as_dict=True
+    )
+    redundant = (selection & restriction & matched_artifacts) - matched.proj()
+    # Materialize the redundant PKs before deleting: ``redundant`` is built
+    # by antijoining the Recompute table, so a cascading delete on it
+    # directly would reference the child table in its own FROM clause
+    # (MySQL error 1093). Restricting by concrete fetched keys avoids that
+    # while still cascading the failed (matched=0) child rows.
+    redundant_keys = redundant.fetch("KEY")
+    count = len(redundant_keys)
+    if dry_run or count == 0:
+        logger.info(
+            f"remove_matched: {count} redundant rows (dry_run={dry_run})."
+        )
+        return count
+    (selection & redundant_keys).delete(safemode=False)
+    return count
+
+
 # =====================================================================
 # Recording artifact recompute
 # =====================================================================
@@ -611,26 +641,13 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
         the Recompute->Selection FK. Selections whose own recompute matched are
         kept; they are the verification record.
         """
-        matched = RecordingArtifactRecompute & "matched=1"
-        artifact_pk = RecordingArtifactVersions.primary_key
-        matched_artifacts = (dj.U(*artifact_pk) & matched).fetch(
-            "KEY", as_dict=True
+        return _remove_matched_selections(
+            cls,
+            RecordingArtifactRecompute,
+            RecordingArtifactVersions,
+            restriction,
+            dry_run=dry_run,
         )
-        redundant = (cls & restriction & matched_artifacts) - matched.proj()
-        # Materialize the redundant PKs before deleting: ``redundant`` is built
-        # by antijoining the Recompute table, so a cascading delete on it
-        # directly would reference the child table in its own FROM clause
-        # (MySQL error 1093). Restricting by concrete fetched keys avoids that
-        # while still cascading the failed (matched=0) child rows.
-        redundant_keys = redundant.fetch("KEY")
-        count = len(redundant_keys)
-        if dry_run or count == 0:
-            logger.info(
-                f"remove_matched: {count} redundant rows (dry_run={dry_run})."
-            )
-            return count
-        (cls & redundant_keys).delete(safemode=False)
-        return count
 
 
 @schema
@@ -927,16 +944,10 @@ def _insert_recording_comparison(
     """
 
     matched = combined_hash(fresh) == content_hash
-    _, missing_old, missing_new, differing = compare_hash_dicts(current, fresh)
     with table._safe_context():
-        table.insert1({**key, "matched": matched, "created_at": created_at})
-        name_rows = [
-            {**key, "name": n, "missing_from": "old"} for n in missing_old
-        ] + [{**key, "name": n, "missing_from": "new"} for n in missing_new]
-        if name_rows:
-            table.Name().insert(name_rows)
-        if differing:
-            table.Hash().insert([{**key, "name": n} for n in differing])
+        _insert_comparison(
+            table, key, current, fresh, created_at, matched=matched
+        )
 
 
 # =====================================================================
@@ -1189,33 +1200,16 @@ class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
     def remove_matched(cls, restriction=True, *, dry_run: bool = True) -> int:
         """Remove redundant selection rows for already-verified analyzers.
 
-        Mirrors v1 ``remove_matched`` (see the recording variant): drop
-        selections targeting a sort with a matched recompute (any env) that are
-        not themselves the matched attempt. A redundant selection may carry a
-        FAILED (matched=0) recompute child from another env, so this uses
-        cautious ``delete`` (not ``delete_quick``) to cascade that child rather
-        than hitting the Recompute->Selection FK.
+        Same rule as
+        :meth:`RecordingArtifactRecomputeSelection.remove_matched`, per sort.
         """
-        matched = SortingAnalyzerRecompute & "matched=1"
-        artifact_pk = SortingAnalyzerVersions.primary_key
-        matched_artifacts = (dj.U(*artifact_pk) & matched).fetch(
-            "KEY", as_dict=True
+        return _remove_matched_selections(
+            cls,
+            SortingAnalyzerRecompute,
+            SortingAnalyzerVersions,
+            restriction,
+            dry_run=dry_run,
         )
-        redundant = (cls & restriction & matched_artifacts) - matched.proj()
-        # Materialize the redundant PKs before deleting: ``redundant`` is built
-        # by antijoining the Recompute table, so a cascading delete on it
-        # directly would reference the child table in its own FROM clause
-        # (MySQL error 1093). Restricting by concrete fetched keys avoids that
-        # while still cascading the failed (matched=0) child rows.
-        redundant_keys = redundant.fetch("KEY")
-        count = len(redundant_keys)
-        if dry_run or count == 0:
-            logger.info(
-                f"remove_matched: {count} redundant rows (dry_run={dry_run})."
-            )
-            return count
-        (cls & redundant_keys).delete(safemode=False)
-        return count
 
 
 @schema
@@ -1353,15 +1347,8 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
                 )
         return f"Total: {bytes_to_human_readable(total)}"
 
-    def recheck(self, key) -> bool:
-        """Rerun the comparison for one row.
-
-        Uses cautious ``delete`` (not ``delete_quick``) so the diff part rows
-        cascade and the team-permission guard applies, then re-populates.
-        """
-        (self & key).delete(safemode=False)
-        self.populate(key, reserve_jobs=False)
-        return bool((self & key & "matched=1"))
+    # Same delete-then-repopulate rerun as the recording recompute.
+    recheck = RecordingArtifactRecompute.recheck
 
     def update_secondary(self, restriction=True) -> None:
         """Backfill ``created_at`` (analyzer folders use populate time)."""
@@ -1638,11 +1625,18 @@ def _artifact_created_at(rec_key: dict):
     return dt.datetime.fromtimestamp(abs_path.stat().st_mtime)
 
 
-def _insert_comparison(table, key, stored_hashes, new_hashes, created_at):
-    """Insert the matched row plus Name/Hash diff part rows."""
-    matched, missing_old, missing_new, differing = compare_hash_dicts(
+def _insert_comparison(
+    table, key, stored_hashes, new_hashes, created_at, *, matched=None
+):
+    """Insert the master row plus Name/Hash diff part rows.
+
+    ``matched`` defaults to the two hash dicts being equal.
+    """
+    dicts_match, missing_old, missing_new, differing = compare_hash_dicts(
         stored_hashes, new_hashes
     )
+    if matched is None:
+        matched = dicts_match
     table.insert1({**key, "matched": matched, "created_at": created_at})
     name_rows = [
         {**key, "name": n, "missing_from": "old"} for n in missing_old
