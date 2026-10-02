@@ -11,11 +11,8 @@ The trace iterator reads ``(n_samples, n_channels)`` slices via the
 recording's ``get_traces(...)``, using the SpikeInterface 0.104
 ``return_in_uV`` kwarg.
 
-The timestamps iterator takes a 1D ``timestamps`` vector and
-``sampling_frequency`` directly and builds its own recording-segment
-wrapper internally: the ``_TimestampsExtractor`` / ``_TimestampsSegment``
-indirection is a private detail (HDMF's base iterator hooks expect a
-recording-segment-like object), not the caller's responsibility.
+The timestamps iterator slices a 1D ``timestamps`` vector directly, so a
+lazy timestamp vector materializes only the chunk HDMF requests.
 """
 
 from __future__ import annotations
@@ -105,80 +102,17 @@ class SpikeInterfaceRecordingDataChunkIterator(GenericDataChunkIterator):
         )
 
 
-class _TimestampsSegment(si.BaseRecordingSegment):
-    """One-segment shim that lets the timestamps array masquerade as a recording.
-
-    Private helper: the chunked iterator hands the segment's
-    ``get_traces`` slice to HDMF, which expects a recording-segment-like
-    interface. The shim has no API surface beyond the iterator.
-    """
-
-    def __init__(self, timestamps, sampling_frequency, t_start, dtype):
-        si.BaseRecordingSegment.__init__(
-            self,
-            sampling_frequency=sampling_frequency,
-            t_start=t_start,
-        )
-        # Keep lazy timestamp vectors uncopied so long recordings can stream
-        # generated timestamps chunk by chunk; eager array-like inputs still
-        # route through ``np.asarray`` for a deterministic dtype.
-        self._dtype = np.dtype(dtype)
-        self._timeseries = (
-            timestamps
-            if getattr(timestamps, "_spyglass_lazy_timestamps", False)
-            else np.asarray(timestamps, dtype=self._dtype)
-        )
-
-    def get_num_samples(self) -> int:
-        return self._timeseries.shape[0]
-
-    def get_traces(
-        self,
-        start_frame=None,
-        end_frame=None,
-        channel_indices=None,
-    ) -> np.ndarray:
-        # ``_timeseries`` is 1-D, so the slice is already 1-D ``(stop-start,)``;
-        # return it directly. Do not ``np.squeeze`` it: that is a no-op for
-        # normal chunks but collapses a length-1 tail
-        # (``n_samples % buffer == 1``) to a 0-d scalar.
-        return np.asarray(
-            self._timeseries[start_frame:end_frame], dtype=self._dtype
-        )
-
-
-class _TimestampsExtractor(si.BaseRecording):
-    """Private one-channel recording wrapper around a timestamps vector."""
-
-    def __init__(self, timestamps, sampling_frequency=30e3):
-        si.BaseRecording.__init__(
-            self, sampling_frequency, channel_ids=[0], dtype=np.float64
-        )
-        self.add_recording_segment(
-            _TimestampsSegment(
-                timestamps=timestamps,
-                sampling_frequency=sampling_frequency,
-                t_start=None,
-                dtype=np.float64,
-            )
-        )
-
-
 class TimestampsDataChunkIterator(GenericDataChunkIterator):
     """HDMF chunked iterator over a 1D ``(n_samples,)`` timestamps vector.
 
-    The constructor takes the raw timestamps array + sampling frequency
-    directly. The internal ``_TimestampsExtractor`` indirection is kept
-    private because HDMF's base iterator hooks expect a
-    recording-segment-like object; callers should not import it.
-    ``timestamps`` may also be a Spyglass lazy timestamp vector; in that
-    case only the chunks requested by HDMF are materialized.
+    Each buffer is a direct slice of ``timestamps``. A Spyglass lazy
+    timestamp vector is kept as-is, so only the chunks requested by HDMF are
+    materialized; any other array-like is converted once to ``float64``.
     """
 
     def __init__(
         self,
         timestamps,
-        sampling_frequency: float,
         buffer_gb: Optional[float] = None,
         buffer_shape: Optional[tuple] = None,
         chunk_mb: Optional[float] = None,
@@ -194,8 +128,6 @@ class TimestampsDataChunkIterator(GenericDataChunkIterator):
             The wall-clock timestamps vector to stream. Lazy timestamp vectors
             are consumed chunk-by-chunk without first converting the whole
             object to a NumPy array.
-        sampling_frequency : float
-            Sampling frequency of the recording, in Hz.
         buffer_gb : float, optional
             Target buffer size in GB. ``None`` uses HDMF's default.
         buffer_shape : tuple, optional
@@ -209,9 +141,10 @@ class TimestampsDataChunkIterator(GenericDataChunkIterator):
         progress_bar_options : dict, optional
             Keyword options forwarded to the progress bar.
         """
-        self._extractor = _TimestampsExtractor(
-            timestamps=timestamps,
-            sampling_frequency=sampling_frequency,
+        self._timestamps = (
+            timestamps
+            if getattr(timestamps, "_spyglass_lazy_timestamps", False)
+            else np.asarray(timestamps, dtype=np.float64)
         )
         super().__init__(
             buffer_gb=buffer_gb,
@@ -223,21 +156,14 @@ class TimestampsDataChunkIterator(GenericDataChunkIterator):
         )
 
     def _get_data(self, selection: Tuple[slice]) -> Iterable:
-        # ``_get_maxshape`` returns a 1-tuple, so HDMF passes a
-        # 1-tuple ``(slice,)`` here (not ``(slice, slice)`` as a
-        # 2D shape would). ``selection[0]`` is the row-axis slice;
-        # the timestamps "recording" has a single channel and no
-        # column-axis selection exists.
-        return self._extractor.get_traces(
-            segment_index=0,
-            channel_ids=[0],
-            start_frame=selection[0].start,
-            end_frame=selection[0].stop,
-            return_in_uV=False,
-        )
+        # ``_get_maxshape`` is a 1-tuple, so HDMF passes a 1-tuple
+        # ``(slice,)``. The slice of the 1-D vector is already 1-D; do not
+        # ``np.squeeze`` it, which would collapse a length-1 final chunk
+        # (``n_samples % buffer == 1``) to a 0-d scalar.
+        return np.asarray(self._timestamps[selection[0]], dtype=np.float64)
 
     def _get_dtype(self):
-        return self._extractor.get_dtype()
+        return np.dtype(np.float64)
 
     def _get_maxshape(self):
-        return (self._extractor.get_num_samples(segment_index=0),)
+        return (self._timestamps.shape[0],)

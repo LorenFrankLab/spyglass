@@ -744,7 +744,6 @@ def write_nwb_artifact(
         )
         timestamps_iterator = TimestampsDataChunkIterator(
             timestamps=timestamps,
-            sampling_frequency=sampling_frequency,
             buffer_gb=write_buffer_gb(1, sampling_frequency),
         )
 
