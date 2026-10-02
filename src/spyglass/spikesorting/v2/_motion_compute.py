@@ -164,8 +164,9 @@ def estimation_spans(
     -------
     continuity : list of tuple of int
         Half-open frame ranges of uninterrupted acquisition.
-    continuity_start_s, continuity_end_s : numpy.ndarray
-        ``(n_spans,)`` first and last timestamp of each span, in seconds.
+    continuity_start_s, continuity_end_s : sequence of float
+        First and last timestamp of each span, in seconds (lists for a single
+        recording, the stored arrays for a concatenation).
     statistics : list of tuple of int
         Half-open frame ranges of the valid samples.
     """
