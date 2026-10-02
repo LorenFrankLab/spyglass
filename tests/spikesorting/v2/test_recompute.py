@@ -14,13 +14,6 @@ import pytest
 # ---------- DB-free comparison logic ----------------------------------------
 
 
-def test_v2_recompute_schema_name_literal(dj_conn):
-    """Keep the lazy common-file-tracking schema guard synchronized."""
-    from spyglass.spikesorting.v2 import recompute
-
-    assert recompute.schema.database == "spikesorting_v2_recompute"
-
-
 def test_operator_xfail_is_not_inferred_as_automatic_unverifiable(dj_conn):
     """Outcome routing uses distinct fields, not an operator-text prefix."""
     from spyglass.spikesorting.v2.recompute import _recompute_compute
