@@ -559,9 +559,9 @@ def statistics_spans(
     excluded_ranges : list[tuple[int, int]]
         Half-open artifact-masked frame ranges (need not be sorted/merged).
     boundary_spans : list[tuple[int, int]]
-        Half-open frame spans that never cross a join (e.g. from
+        Disjoint half-open frame spans that never cross a join (e.g. from
         ``boundary_spans_from_timestamps`` / ``_concat_recording.
-        concat_continuity``).
+        concat_continuity``); adjacent spans may touch.
 
     Returns
     -------
@@ -573,23 +573,21 @@ def statistics_spans(
     ValueError
         If no artifact-free frame lies inside any boundary span.
     """
+    from spyglass.spikesorting.v2._signal_math import intersect_intervals
     from spyglass.utils import logger
 
     n_samples = int(n_samples)
     valid = complement_frame_ranges(excluded_ranges, n_samples)
     valid_samples = sum(b - a for a, b in valid)
-    out: list[tuple[int, int]] = []
-    for a, b in valid:
-        for c, d in boundary_spans:
-            lo, hi = max(a, c), min(b, d)
-            if lo < hi:
-                out.append((lo, hi))
+    out = [
+        (int(a), int(b))
+        for a, b in intersect_intervals(valid, boundary_spans, merge=False)
+    ]
     if not out:
         raise ValueError(
             "statistics_spans: no artifact-free samples inside any "
             "acquisition span."
         )
-    out = sorted(out)
     masked_fraction = (
         (n_samples - valid_samples) / n_samples if n_samples else 0.0
     )

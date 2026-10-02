@@ -289,7 +289,7 @@ def subtract_intervals(base, removed, *, inclusive_stop=False) -> list[tuple]:
     return kept
 
 
-def _normalize(intervals):
+def _normalize(intervals, *, merge=True):
     """Sort by start, merge overlapping/adjacent/duplicate rows, drop
     zero-length rows.
 
@@ -297,7 +297,8 @@ def _normalize(intervals):
     :func:`intersect_interval_sets`) against a caller-supplied interval set
     that is unsorted or carries overlapping/duplicate rows -- notably the
     identical-input fast path below, which would otherwise return duplicate
-    rows unchanged when both operands are identically duplicated.
+    rows unchanged when both operands are identically duplicated. With
+    ``merge=False`` the rows are only filtered and sorted.
     """
     import numpy as np
 
@@ -306,17 +307,27 @@ def _normalize(intervals):
     if len(intervals) == 0:
         return intervals
     intervals = intervals[np.argsort(intervals[:, 0], kind="stable")]
+    if not merge:
+        return intervals
     return np.asarray(
         merge_sorted_intervals(intervals.tolist()), dtype=float
     ).reshape(-1, 2)
 
 
-def intersect_intervals(left, right):
-    """Intersect sorted, disjoint intervals, omitting zero-length overlaps."""
+def intersect_intervals(left, right, *, merge=True):
+    """Intersect two interval sets, omitting zero-length overlaps.
+
+    Each operand is sorted and stripped of zero-length rows first. By
+    default its overlapping or touching rows are also merged, so the result
+    has no touching rows. With ``merge=False`` touching rows stay separate
+    and every shared edge survives in the result (e.g. ``[(0, 10)]`` with
+    ``[(0, 5), (5, 10)]`` gives both halves); each operand must then
+    already be disjoint.
+    """
     import numpy as np
 
-    left = _normalize(left)
-    right = _normalize(right)
+    left = _normalize(left, merge=merge)
+    right = _normalize(right, merge=merge)
     if np.array_equal(left, right):
         return left
     result = []
