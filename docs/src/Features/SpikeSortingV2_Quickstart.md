@@ -325,6 +325,9 @@ For a concatenated (multi-member) sort the receipt holds one per-member group
     ([Curation](../notebooks/10_Spike_SortingV2_Curation.ipynb),
     [Presets](../notebooks/10_Spike_SortingV2_Presets.ipynb),
     [Cross-Session](../notebooks/10_Spike_SortingV2_CrossSession.ipynb)).
+- **Find what to import:** the
+    [Spike Sorting v2 API map](./SpikeSortingV2_API.md) lists the supported
+    entry points and their import paths.
 
 For multiple shanks/tetrodes, continue with the
 [whole-session notebook](../../../notebooks/10_Spike_SortingV2_Presets.ipynb):
