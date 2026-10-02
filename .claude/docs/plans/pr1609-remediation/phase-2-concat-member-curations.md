@@ -27,7 +27,7 @@ Ships as a new PR against `master` after #1609 merges. Schema-additive (one new 
 ## Deliberately not in this phase
 
 - Re-labeling or re-merging per member: labels and merges are applied once on the concat `CurationV2` and propagated verbatim (owner decision pending in [overview Open Question 2](overview.md#open-questions); default is verbatim).
-- Feeding member rows into `UnitMatch`: cross-session tracking keeps consuming the concat curation; members of one concat group are already the same units by construction.
+- Feeding member rows into `UnitMatch`: cross-session tracking keeps consuming the concat curation; members of one concat group are already the same units by construction. (Correction, 2026-10-01: this was not true when written -- UnitMatch then took one curation per `SessionGroup` member and could not match a concat curation. Matching independently sorted daily concatenations was added later as new functionality; see `pr1609-review-fixes/phase-4c-concat-unitmatch.md`.)
 - Any change to `ConcatenatedRecording`'s stored timeline or to `ignore_times=True`: the concat recording stays synthetic; only the member rows are wall-clock.
 - Curation UX (viewing merged units, FigPack) for concat sorts → `.claude/docs/plans/curation-ux-overhaul/`.
 
