@@ -303,6 +303,7 @@ def test_open_curation_analyzer_yields_disk_backed_working_copy(
 def test_single_low_level_analyzer_builder():
     """Evaluation and the interactive merged wrapper share build_analyzer."""
     from spyglass.spikesorting.v2 import _curation_analyzer as resolver
+    from spyglass.spikesorting.v2 import _evaluation_analyzers
 
     resolver_source = inspect.getsource(resolver.build_merged_analyzer)
     metric_source = (
@@ -315,7 +316,9 @@ def test_single_low_level_analyzer_builder():
     ).read_text()
     start = metric_source.index("    def make_compute(")
     end = metric_source.index("    def make_insert(", start)
-    evaluation_source = metric_source[start:end]
+    evaluation_source = metric_source[start:end] + inspect.getsource(
+        _evaluation_analyzers
+    )
     assert "build_analyzer(" in resolver_source
     assert "build_analyzer(" in evaluation_source
     assert "_resolve_curation_analyzer" not in evaluation_source

@@ -36,6 +36,7 @@ import datajoint as dj
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v2 import (
     _evaluation_acceptance,
+    _evaluation_analyzers,
     _metric_curation,
     _metric_curation_fetch,
 )
@@ -63,7 +64,7 @@ from spyglass.spikesorting.v2._staged_outputs import (
     StagedOutputCleanupMixin,
     StagedOutputs,
 )
-from spyglass.spikesorting.v2._units_nwb import StoredUnits, read_stored_units
+from spyglass.spikesorting.v2._units_nwb import StoredUnits
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.exceptions import (
     UnsupportedDirectInsertError,
@@ -854,22 +855,11 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         stage the output file (see :mod:`._recording_nwb`). The heavy NWB
         write remains outside the commit transaction.
         """
-        import tempfile
-        from pathlib import Path
-
         import spikeinterface as si
 
-        from spyglass.spikesorting.v2._analyzer_cache import (
-            analyzer_cache_lock,
-        )
         from spyglass.spikesorting.v2._nwb_provenance import (
             CURATION_EVALUATION_PROVENANCE,
             build_provenance_table,
-        )
-        from spyglass.spikesorting.v2._recompute import analyzer_role_hashes
-        from spyglass.spikesorting.v2._sorting_analyzer import (
-            build_analyzer,
-            load_or_rebuild_analyzer_from_resolved,
         )
         from spyglass.spikesorting.v2._source_resolution import (
             read_effective_recording,
@@ -981,141 +971,26 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             )
             base_provenance["observation_intervals_hash"] = interval_hash
 
-            if sorting_inputs.use_fast_path:
-                # Root / label-only: the cached raw-sort analyzers already carry
-                # this curation's unit set. Hold the per-sort lock around the
-                # canonical-folder load/rebuild + metric-extension mutation
-                # (_compute_metrics / _metric_curation.compute_merge_groups
-                # mutate the shared analyzer in place).
-                raw_sorting = read_stored_units(sorting_inputs.raw_units)
-                with analyzer_cache_lock(sorting_inputs.sorting_id):
-                    display_analyzer = load_or_rebuild_analyzer_from_resolved(
-                        sorting_id=sorting_inputs.sorting_id,
-                        n_units=sorting_inputs.raw_n_units,
-                        analyzer_folder=Path(
-                            analyzer_inputs.display_analyzer_folder
-                        ),
-                        waveform_params=analyzer_inputs.display_waveform_params,
-                        recording=recording,
-                        sorting=raw_sorting,
-                        sorter_row=analyzer_inputs.sorter_row,
-                        job_kwargs=analyzer_inputs.analyzer_job_kwargs,
-                        statistics_spans=statistics_spans,
-                    )
-                    metric_analyzer = None
-                    if wants_pc:
-                        metric_analyzer = load_or_rebuild_analyzer_from_resolved(
-                            sorting_id=sorting_inputs.sorting_id,
-                            n_units=sorting_inputs.raw_n_units,
-                            analyzer_folder=Path(
-                                analyzer_inputs.metric_analyzer_folder
-                            ),
-                            waveform_params=analyzer_inputs.metric_waveform_params,
-                            recording=recording,
-                            sorting=raw_sorting,
-                            sorter_row=analyzer_inputs.sorter_row,
-                            job_kwargs=analyzer_inputs.analyzer_job_kwargs,
-                            statistics_spans=statistics_spans,
-                        )
-                    metrics_df, labels_by_unit, merge_groups = (
-                        _metric_curation.evaluate_analyzers(
-                            self,
-                            display_analyzer,
-                            metric_analyzer,
-                            metric_names=metric_inputs.metric_names,
-                            metric_kwargs=metric_inputs.metric_kwargs,
-                            skip_pc_metrics=metric_inputs.skip_pc_metrics,
-                            metric_job_kwargs=metric_inputs.metric_job_kwargs,
-                            template_metric_columns=metric_inputs.template_metric_columns,
-                            auto_merge_preset=metric_inputs.auto_merge_preset,
-                            auto_merge_kwargs=metric_inputs.auto_merge_kwargs,
-                            rule_rows=metric_inputs.rule_rows,
-                            expected_unit_ids=sorting_inputs.expected_unit_ids,
-                            observation_metrics=observation_metrics,
-                            statistics_spans=statistics_spans,
-                        )
-                    )
-            else:
-                # Applied-merge: build curation-scoped TEMP analyzers over the
-                # merged curated sorting. Never published to the canonical
-                # analyzer cache (identity is curation-scoped, not sorting-
-                # scoped); cleaned on success and failure by TemporaryDirectory.
-                curated_sorting = read_stored_units(
-                    sorting_inputs.curated_units
-                )
-                compute_key = {"sorting_id": sorting_inputs.sorting_id}
-                from spyglass.settings import temp_dir as spyglass_temp_dir
-                from spyglass.spikesorting.v2._analyzer_cache import (
-                    ANALYZER_FOLDER_SUFFIX,
-                    load_analyzer_folder,
-                )
-
-                with tempfile.TemporaryDirectory(dir=spyglass_temp_dir) as tmp:
-                    # Same binary_folder convention (and memmap loader) as the
-                    # canonical cache, in a private temp folder.
-                    display_folder = Path(tmp) / (
-                        f"display{ANALYZER_FOLDER_SUFFIX}"
-                    )
-                    build_analyzer(
-                        curated_sorting,
-                        recording,
-                        compute_key,
-                        sorter_row=analyzer_inputs.sorter_row,
-                        job_kwargs=analyzer_inputs.analyzer_job_kwargs,
-                        analyzer_folder=display_folder,
-                        waveform_params=analyzer_inputs.display_waveform_params,
-                        statistics_spans=statistics_spans,
-                    )
-                    display_analyzer = load_analyzer_folder(display_folder)
-                    metric_analyzer = None
-                    if wants_pc:
-                        metric_folder = Path(tmp) / (
-                            f"metric{ANALYZER_FOLDER_SUFFIX}"
-                        )
-                        build_analyzer(
-                            curated_sorting,
-                            recording,
-                            compute_key,
-                            sorter_row=analyzer_inputs.sorter_row,
-                            job_kwargs=analyzer_inputs.analyzer_job_kwargs,
-                            analyzer_folder=metric_folder,
-                            waveform_params=analyzer_inputs.metric_waveform_params,
-                            statistics_spans=statistics_spans,
-                        )
-                        metric_analyzer = load_analyzer_folder(metric_folder)
-                    metrics_df, labels_by_unit, merge_groups = (
-                        _metric_curation.evaluate_analyzers(
-                            self,
-                            display_analyzer,
-                            metric_analyzer,
-                            metric_names=metric_inputs.metric_names,
-                            metric_kwargs=metric_inputs.metric_kwargs,
-                            skip_pc_metrics=metric_inputs.skip_pc_metrics,
-                            metric_job_kwargs=metric_inputs.metric_job_kwargs,
-                            template_metric_columns=metric_inputs.template_metric_columns,
-                            auto_merge_preset=metric_inputs.auto_merge_preset,
-                            auto_merge_kwargs=metric_inputs.auto_merge_kwargs,
-                            rule_rows=metric_inputs.rule_rows,
-                            expected_unit_ids=sorting_inputs.expected_unit_ids,
-                            observation_metrics=observation_metrics,
-                            statistics_spans=statistics_spans,
-                        )
-                    )
-
-            # On the fast path the metrics were computed over the canonical
-            # raw-sort analyzer -- regeneratable scratch not pinned in the
-            # schema -- so snapshot its content hash for stale detection. The
-            # merged path's temp analyzer is pinned by the committed curation +
-            # recipe (both reachable), so it records NULL.
-            # Snapshot EVERY canonical analyzer the metrics were computed over on
-            # the fast path: the display analyzer always, plus the whitened metric
-            # analyzer when PC/NN metrics consumed it (metric_analyzer is None
-            # otherwise). The merged path's temp analyzers are pinned by the
-            # committed curation + recipe, so None.
-            source_analyzer_hashes = (
-                analyzer_role_hashes(display_analyzer, metric_analyzer)
+            # A root / label-only curation keeps the raw sort's unit set and is
+            # evaluated on the sort's cached analyzers; an applied-merge
+            # curation is evaluated on temporary analyzers over its merged
+            # sorting. Only the cached analyzers get a source-hash snapshot.
+            evaluate = (
+                _evaluation_analyzers.evaluate_cached_analyzers
                 if sorting_inputs.use_fast_path
-                else None
+                else _evaluation_analyzers.evaluate_temporary_analyzers
+            )
+            metrics_df, labels_by_unit, merge_groups, source_analyzer_hashes = (
+                evaluate(
+                    self,
+                    recording,
+                    sorting_inputs=sorting_inputs,
+                    analyzer_inputs=analyzer_inputs,
+                    metric_inputs=metric_inputs,
+                    wants_pc=wants_pc,
+                    observation_metrics=observation_metrics,
+                    statistics_spans=statistics_spans,
+                )
             )
             # Self-describing provenance: the evaluation inputs + the source
             # provenance the row stores (analyzer-hash manifest, SI version) plus
