@@ -1164,13 +1164,10 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     content_hash: char(64)
     """
 
-    # ``_parallel_make = True`` lets Spyglass's ``PopulateMixin``
-    # dispatch parallel populate via a non-daemon process pool. The
-    # tri-part ``make_fetch`` / ``make_compute`` / ``make_insert``
-    # methods below are what actually fire under
-    # ``inspect.isgeneratorfunction(self.make)`` -- the inherited
-    # generator from ``AutoPopulate.make`` is left in place so
-    # DataJoint sees a generator function and routes through tri-part.
+    # ``_parallel_make = True`` lets Spyglass's ``PopulateMixin`` populate in
+    # parallel via a non-daemon process pool. The inherited generator
+    # ``AutoPopulate.make`` is left in place so DataJoint routes through the
+    # tri-part ``make_fetch`` / ``make_compute`` / ``make_insert`` methods.
     _parallel_make = True
 
     def make_fetch(self, key):
@@ -1212,19 +1209,13 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> RecordingComputed:
         """Run the preprocessing + streaming write outside any DB transaction.
 
-        Long-running step (open raw NWB, channel slice, bandpass, frame
-        slice, reference, stream ElectricalSeries into a fresh
-        ``AnalysisNwbfile``, hash the persisted file). Returning
-        happens before the framework opens its commit transaction so
-        a 20-minute write here does not hold any DB lock. Reads only the
+        The long write (often many minutes) holds no DB lock. Reads only the
         inputs ``make_fetch`` resolved (the raw NWB path included); the one
         DB access left is staging the output file (see
-        :mod:`._recording_nwb`).
-
-        Pipeline body is shared with ``_rebuild_nwb_artifact`` via
-        ``_compute_recording_artifact``; this method only handles
-        the populate-side staging contract and the
-        ``RecordingComputed`` boxing.
+        :mod:`._recording_nwb`). The preprocessing and write are shared with
+        ``_rebuild_nwb_artifact`` via ``_compute_recording_artifact``; this
+        method adds the over-request warning and the save expectation that
+        ``make_insert`` checks.
 
         Parameters
         ----------
@@ -1267,13 +1258,10 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         RecordingComputed
             Computed artifact metadata unpacked into ``make_insert``.
         """
-        # Every v2 compute stage calls ``_resolved_job_kwargs(...)`` so the
-        # override channels (DataJoint config + per-row blob) are honored
-        # and testable. The Recording streaming write path uses HDMF's
-        # chunked iterator and does not consume SI-style job_kwargs
-        # yet, so the resolved dict is informational. The resolver
-        # still runs so a monkey-patched ``_resolved_job_kwargs`` in
-        # tests confirms this stage's resolution path is wired.
+        # The streaming write uses HDMF's chunked iterator, not SI job_kwargs,
+        # so the resolved dict is unused; the call keeps this stage's
+        # resolution path wired like every other compute stage (tests patch
+        # ``_resolved_job_kwargs`` to confirm it).
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         _resolved_job_kwargs(preprocessing_job_kwargs)
@@ -1393,28 +1381,23 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ):
         """Run the truncation check and atomically register the artifact.
 
-        DataJoint's tri-part dispatch already opens the master
-        transaction around this method, so the inner
-        ``transaction_or_noop`` block becomes a no-op (it yields
-        without re-opening when a transaction is active). The wrap
-        is kept defensively: if ``make_insert`` is ever called
-        outside ``populate()``, the ``AnalysisNwbfile`` registration
-        and the ``self.insert1`` still commit atomically. Removing a failed
-        attempt's staged file (a truncation refusal included) is
-        ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
-        call leaves that to its caller.
-
-        The truncation check fires when the requested valid_times exceed
-        the raw recording coverage (#1585), or when interval
-        intersection/filtering drops more than the tolerated boundary
-        slop. Persisted ``ElectricalSeries`` length parity is enforced
-        by the writer/PyNWB path; this guard compares requested chunk
-        duration against the in-memory recording surface. Tolerance is
+        The check compares the saved duration with the intended one (the
+        sort interval intersected with the raw valid times, after
+        ``min_segment_length`` filtering), so it fires on dropped packets or
+        interval misalignment; a request past the raw coverage was already
+        clipped with a warning in ``make_compute``. Tolerance is
         ``(n_intended_intervals + 1.5)`` sample intervals: the +1.5 covers
         the off-by-one NWB boundary (``last_ts = (N-1)/fs``, not ``N/fs``),
         and the per-interval term absorbs the independent sample-grid
         snapping of each consolidated interval, which otherwise accumulates
         across disjoint epochs and spuriously trips a fixed 1.5-sample slack.
+
+        The ``transaction_or_noop`` wrap is a no-op inside ``populate()``'s
+        transaction and keeps the ``AnalysisNwbfile`` registration and the
+        row insert atomic on a direct call. Removing a failed attempt's
+        staged file (a truncation refusal included) is
+        ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
+        call leaves that to its caller.
 
         Parameters
         ----------
@@ -1469,18 +1452,10 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         nwb_file_name = sel["nwb_file_name"]
         interval_list_name = sel["interval_list_name"]
 
-        # Truncation check: compare the SAVED duration against the duration
-        # we INTENDED to save -- the sort interval intersected with the raw
-        # valid times AND filtered by ``min_segment_length`` (computed in
-        # ``make_compute`` the same way ``restrict_recording`` filters).
-        # Comparing against the raw requested chunks instead would
-        # spuriously flag (a) inter-chunk gaps on the disjoint path and
-        # (b) intentionally-dropped sub-``min_segment_length`` slivers as
-        # truncation. Using ``expected_saved_total`` leaves the guard
-        # firing only on genuine packet loss / interval misalignment.
-        # ``duration_s`` is the persisted span (``saved_end - saved_start``,
-        # computed once in ``_compute_recording_artifact``); reuse it as the
-        # SAVED duration here rather than recomputing the same difference.
+        # Compare with the intended duration, not the requested chunks, so
+        # inter-chunk gaps and intentionally dropped sub-min_segment_length
+        # slivers are not flagged. ``duration_s`` is the persisted span
+        # (``saved_end - saved_start``).
         tolerance = self._truncation_tolerance(
             n_intended_intervals, sampling_frequency
         )
@@ -1497,9 +1472,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 "packets or interval misalignment."
             )
 
-        # ``transaction_or_noop`` no-ops inside the framework transaction;
-        # kept as defensive scaffolding so the registration stays atomic if
-        # ``make_insert`` is ever called outside ``populate()``.
         with transaction_or_noop(self.connection):
             AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
             self.insert1(

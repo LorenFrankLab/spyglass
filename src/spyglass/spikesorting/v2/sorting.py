@@ -439,47 +439,30 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     def insert_default_legacy_si_sorters(cls):
         """Insert ('sorter','default') rows for installed non-curated sorters.
 
-        Opt-in back-compat helper for users porting v1 workflows that name
-        a non-curated sorter via ``('kilosort2_5','default')`` or similar.
-        For each entry of ``sis.available_sorters()`` it reads the SI
-        wrapper class's own default parameters
-        (``sis.sorter_dict[sorter]._dynamic_params()`` -- the algorithm
-        knobs WITHOUT SpikeInterface's global job kwargs, which
-        ``get_default_sorter_params`` folds in for any wrapper with
-        ``requires_binary_data=True``) and validates the result through
-        ``GenericSorterParamsSchema`` (``extra='allow'``) so the row passes
-        without typo-rejection, then against the wrapper vocabulary (built
-        from that same ``_dynamic_params``) so a row that would be rejected
-        at insert is skipped with a warning instead of aborting the batch.
+        Opt-in helper for users porting v1 workflows that name a non-curated
+        sorter via ``('kilosort2_5','default')`` or similar. Each row holds
+        the SI wrapper's own algorithm defaults (without SI's global job
+        kwargs), validated through ``GenericSorterParamsSchema`` and the
+        wrapper vocabulary; a row that would be rejected at insert is skipped
+        with a warning instead of aborting the batch.
 
-        Two classes of sorter are skipped (logged at INFO):
+        Three classes of sorter are skipped:
 
-        - **Not installed.** Gated on
-          ``spikeinterface.sorters.installed_sorters()`` -- the SAME gate
-          ``insert_default`` uses (see the install-gate rationale at
-          :meth:`insert_default`). A wrapper class exposes its defaults
-          even when its binary is absent (e.g. ``kilosort2_5``,
-          ``ironclust``), so enumerating
-          ``available_sorters()`` alone would ship rows that fail at
-          ``Sorting.populate`` time with an unhelpful "sorter not
-          installed" error. Inserting only *installed* sorters keeps the
-          back-compat value (rows a user can actually run) without that
-          trap.
+        - **Not installed** (not in ``installed_sorters()``, the same gate as
+          :meth:`insert_default`; logged at INFO). A wrapper exposes defaults
+          even when its binary is absent, and such a row would only fail at
+          ``Sorting.populate``.
+        - **MATLAB** sorters, which need a container ``execution_params``; a
+          local ``'default'`` row would be rejected at populate.
         - **Curated** (mountainsort4, mountainsort5, kilosort4,
-          spykingcircus2, tridesclous2, clusterless_thresholder) -- they
-          already have their own typed schemas with ``extra='forbid'``,
-          and SI's defaults for those sorters include keys those schemas
-          intentionally strip (e.g. ``MountainSort5Schema`` strips
-          ``filter`` / ``freq_min`` because the upstream recording is
-          already filtered). Routing SI's full default dict through the
-          typed schema would either fail validation or quietly drop keys --
-          neither is what a v1 caller expects. The opt-in targets the
-          NON-curated escape-hatch sorters that fall back to
-          ``GenericSorterParamsSchema`` anyway.
+          spykingcircus2, tridesclous2, clusterless_thresholder). Their typed
+          ``extra='forbid'`` schemas intentionally strip some SI defaults
+          (e.g. ``MountainSort5Schema`` drops ``filter`` / ``freq_min``
+          because the recording is already filtered), so SI's full default
+          dict would fail validation or lose keys.
 
-        This helper is deliberately NOT called by ``initialize_v2_defaults``
-        -- users who do not need v1 sorter names should not pay for the
-        inserts. Idempotent via ``skip_duplicates=True``.
+        Not called by ``initialize_v2_defaults``. Idempotent via
+        ``skip_duplicates=True``.
 
         Examples
         --------
@@ -1170,11 +1153,9 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     # vs concatenated_recording) and dispatches accordingly, so the default
     # ``key_source`` (the full ``SortingSelection``) is correct -- no antijoin.
 
-    # Tri-part dispatch + parallel populate. ``Sorting.make`` is the
-    # longest of the three Computed stages (sorters routinely take
-    # 5-20 minutes); moving the run outside the framework
-    # transaction is the dominant motivation. Parallel populate via
-    # the non-daemon process pool is the secondary benefit.
+    # Tri-part make keeps the sort (routinely 5-20 minutes) outside the
+    # populate transaction; ``_parallel_make`` allows parallel populate via
+    # the non-daemon process pool.
     _parallel_make = True
 
     def make_fetch(self, key):
@@ -1254,29 +1235,16 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """Sort, build analyzer, stage Units NWB outside any DB transaction.
 
         Reads only the inputs ``make_fetch`` resolved; the one DB access left
-        is staging the units NWB file (see :mod:`._recording_nwb`).
+        is staging the units NWB file (see :mod:`._recording_nwb`). Loads the
+        effective traces, silences a single recording's artifact frames at
+        0 uV and resolves the statistics spans
+        (:func:`._sorting_artifact_mask.sorting_statistics_spans`), runs the
+        sorter, removes excess spikes, builds the analyzer in a private staged
+        folder, and stages the units NWB without registering it.
 
-        The long-running steps run here:
-
-        - load the cached preprocessed recording,
-        - apply the artifact mask if ``artifact_detection_id`` is set (masked
-          samples are 0 uV: a recording that keeps a nonzero channel offset,
-          an unfiltered and unreferenced source, is sorted as float32
-          microvolts; any other recording keeps its stored samples),
-        - resolve the statistics spans (artifact-free frame ranges that
-          never cross a selection or member join),
-        - dispatch ``_run_sorter`` (clusterless thresholder or SI
-          sorter; tempdir + Singularity + container carve-outs apply),
-        - ``_remove_excess_spikes`` (boundary safety),
-        - ``_build_analyzer`` (writes the ``analyzer_folder`` on disk),
-        - ``_write_units_nwb`` (stages the AnalysisNwbfile on disk
-          without registering it).
-
-        Cleanup contract (compute failure): if anything raises between
-        ``_build_analyzer`` and the end of this method, the analyzer
-        folder and any staged units NWB are removed before the
-        exception propagates. DataJoint will not call ``make_insert``
-        once this raises, so cleanup has to happen here.
+        DataJoint does not call ``make_insert`` once this raises, so cleanup
+        happens here: any exception after the analyzer is staged discards the
+        staged analyzer, and a failed units-NWB write removes its own file.
 
         Parameters
         ----------
@@ -1286,9 +1254,8 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             Resolved sort input source from ``make_fetch`` (selects whether the
             statistics spans are derived here or read from the concat row).
         recording_id : str
-            The anchor ``recording_id`` from ``make_fetch`` (the sort's own
-            recording, or the first concat member's), threaded forward so the
-            ``Sorting.Unit`` Electrode FK resolves against the anchor member.
+            The anchor ``recording_id`` (the sort's own recording, or the first
+            concat member's) that the ``Sorting.Unit`` Electrode FK uses.
         sel_row : dict
             The ``SortingSelection`` row (with ``artifact_detection_id``).
         sorter_row : dict
@@ -1300,15 +1267,20 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             Artifact-removed valid-times window, or ``None`` when no
             artifact-detection pass is configured.
         display_waveform_params_name : str
-            The DISPLAY recipe resolved in ``make_fetch``; selects the analyzer
-            cache folder and is persisted by ``make_insert``.
+            The DISPLAY recipe; selects the analyzer cache folder and is
+            persisted by ``make_insert``.
         display_waveform_params : dict
-            That recipe's resolved params blob, fed to ``_build_analyzer`` so
-            the window / subsample are not hardcoded. Resolved in
-            ``make_fetch``; no DB write occurs here.
+            That recipe's resolved params blob, passed to ``_build_analyzer``.
         execution_params : dict
-            The validated sorter execution backend / container provenance from
-            ``make_fetch``, passed to the sorter dispatch.
+            The validated sorter execution backend / container provenance,
+            passed to the sorter dispatch.
+        sort_group_id : int
+            The anchor recording's sort group.
+        electrode_by_id : dict
+            ``{electrode_id: SortGroupElectrode row}`` for that sort group.
+        region_by_electrode : dict
+            ``{electrode_id: region_name}``; an electrode without a region has
+            no entry.
         concat_statistics_spans : numpy.ndarray or None
             A concat source's stored statistics spans, used as is; ``None``
             for a single-recording source.
@@ -1332,17 +1304,10 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             Carrier of the computed sorting, staged units NWB, analyzer
             folder, and lookups threaded into ``make_insert``.
         """
-        # Load the sort input from the effective traces: the cached Recording
-        # for a single-recording source, the materialized ConcatenatedRecording
-        # for a concat source (a missing file was rebuilt in make_fetch), read
-        # by path with no DB access. ``recording_id``
-        # is the anchor (threaded from make_fetch) used for the per-unit
-        # Electrode FK, NOT necessarily the loaded recording's own id. A single
-        # recording's traces load unmasked because the artifact mask is applied
-        # below (``sorting_statistics_spans``), whose excluded ranges also
-        # feed the statistics spans. Concat and motion-corrected masks are
-        # already materialized. Both modes pass observation intervals to the
-        # units writer.
+        # Read by path with no DB access. A single recording's traces load
+        # unmasked: sorting_statistics_spans applies its artifact mask, whose
+        # excluded ranges also feed the statistics spans. Concat and
+        # motion-corrected traces are stored already masked.
         from spyglass.spikesorting.v2._source_resolution import (
             read_persisted_traces,
         )
@@ -1370,24 +1335,15 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         # wrapper does not accept it.
         sorter_params.pop("schema_version", None)
 
-        # Resolve job_kwargs ONCE per compute stage so the resolved dict
-        # flows into BOTH ``sis.run_sorter`` AND
-        # ``analyzer.compute`` so a user's ``n_jobs=N`` override --
-        # via ``dj.config['custom']['spikesorting_v2_job_kwargs']``
-        # or via the per-row ``job_kwargs`` blob -- propagates to
-        # both stages from one resolution. The sort itself is the
-        # longer of the two; honoring job_kwargs only in
-        # ``_build_analyzer`` would leave the sorter ignoring them.
+        # One resolution feeds both the sorter and the analyzer build, so an
+        # n_jobs override (dj.config or the row's job_kwargs) reaches both.
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
-        # Producer provenance (secondary, never identity). The effective seed
-        # is resolved from the SAME per-row blob ``job_kwargs`` was, so it bottoms
-        # out on ``_resolved_job_kwargs`` and equals the value the seed sites
-        # consume below (``job_kwargs['random_seed']``) -- stored == used, not a
-        # parallel computation that could drift.
         import spikeinterface as si
 
+        # The stored seed is resolved from the same row blob as job_kwargs, so
+        # it equals the job_kwargs['random_seed'] the sort consumes.
         # reject_ambient_seed: a seed-dependent sort's seed MUST live in the
         # SorterParameters row (part of sorter_params_name -> sorting_id), never
         # the ambient dj.config layer, or a later ambient-seed change would
@@ -1809,22 +1765,10 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         Recompute is in-place; the DataJoint row is not deleted on a
         missing analyzer folder.
 
-        Raises ``ZeroUnitAnalyzerError`` for a zero-unit sort: SI cannot
-        build a ``SortingAnalyzer`` over zero units, so no folder was
-        written by ``_build_analyzer`` (it returns the would-be path).
-        Loading it would surface a confusing SI/file error; this raises
-        a clear signal instead. For a zero-unit sort this raises; use
-        ``get_sorting`` (which returns an empty sorting, with a warning,
-        rather than raising) if only the unit list is needed.
-
-        This raise-vs-degrade split with ``get_sorting`` is intentional,
-        not an inconsistency: a zero-unit *sorting* is a valid (empty)
-        object SI represents natively, so ``get_sorting`` returns it and
-        downstream consumers handle a quiet shank uniformly; a zero-unit
-        *analyzer* has no valid representation, so there is nothing to
-        return and a typed error is the honest contract (returning ``None``
-        or a phantom folder would only defer the failure). Callers that
-        want to branch without catching can precheck
+        A zero-unit sort has no analyzer (SI cannot build one over zero
+        units), so this raises ``ZeroUnitAnalyzerError``, whereas
+        ``get_sorting`` returns the valid empty sorting with a warning. To
+        branch without catching, precheck
         ``(Sorting & key).fetch1("n_units") > 0``.
 
         Parameters
@@ -1845,7 +1789,6 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             raises ``AnalyzerFolderInvalidError`` instead -- the recompute audit
             uses this to OBSERVE a missing/reclaimed/corrupt analyzer rather
             than silently rebuild-then-hash it.
-
         load_extensions : bool, optional
             Load all saved extensions by default so SI save/select/merge methods
             retain them. Internal read-only inspection may pass False to load
@@ -1859,6 +1802,8 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         Raises
         ------
+        ZeroUnitAnalyzerError
+            If the sort has zero units.
         AnalyzerFolderMissingError
             If ``rebuild=False`` and the analyzer folder is absent on disk.
         AnalyzerFolderInvalidError
