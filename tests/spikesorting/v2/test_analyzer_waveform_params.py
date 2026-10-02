@@ -407,7 +407,7 @@ def test_recording_source_display_recipe_resolved_by_region(
         assert display == expected_display
 
 
-def test_make_fetch_resolves_hippocampus_display_blob(dj_conn):
+def test_make_fetch_resolves_hippocampus_display_blob(dj_conn, monkeypatch):
     """``Sorting.make_fetch`` resolves AND fetches the hippocampus 0.5/0.5 blob.
 
     The build-window unit tests prove ``build_analyzer`` honors a 0.5/0.5 blob,
@@ -432,6 +432,14 @@ def test_make_fetch_resolves_hippocampus_display_blob(dj_conn):
     PreprocessingParameters.insert_default()
     SorterParameters.insert_default()
     AnalyzerWaveformParameters.insert_default()
+    # The planted Recording row names no real file. make_fetch's last step
+    # resolves the traces file (rebuilding it when missing), which this
+    # recipe check does not read, so resolve it to a placeholder path.
+    monkeypatch.setattr(
+        SortingSelection,
+        "ensure_effective_traces",
+        staticmethod(lambda traces: "planted-traces.nwb"),
+    )
     with _planted_source_sort(
         RecordingSelection,
         "recording_id",
