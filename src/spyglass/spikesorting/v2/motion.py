@@ -23,18 +23,26 @@ Tables:
 ``SortingSelection.MotionCorrectionSource`` selects a corrected recording as
 a sort's input. The DB-free computation
 (parameter resolution, the estimation adapter, the ``Motion`` serialization,
-applying a saved estimate) lives in ``_motion``.
+applying a saved estimate) lives in ``_motion``. The selection insert paths
+are in ``_motion_selection_insert``, the pure ``make_compute`` steps in
+``_motion_compute``, the reads behind ``MotionEstimate.report`` in
+``_motion_report_inputs``, and the corrected artifact's rebuild in
+``_recording_nwb``.
 """
 
 from __future__ import annotations
 
-import uuid
 from typing import NamedTuple
 
 import datajoint as dj
 import numpy as np
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting.v2 import (
+    _motion_compute,
+    _motion_report_inputs,
+    _motion_selection_insert,
+)
 from spyglass.spikesorting.v2._params.motion_estimation import (
     MOTION_ESTIMATION_SCHEMA_VERSION,
     MotionEstimationParamsSchema,
@@ -408,192 +416,7 @@ class MotionEstimateSelection(
         SchemaBypassError
             If the deterministic master exists with other source parts.
         """
-        from spyglass.spikesorting.v2._motion import (
-            motion_estimate_selection_identity,
-        )
-        from spyglass.spikesorting.v2._selection_identity import (
-            reject_unknown_fields,
-        )
-        from spyglass.spikesorting.v2.artifact import (
-            assert_artifact_detection_covers_recording,
-        )
-        from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
-
-        caller = "MotionEstimateSelection.insert_selection"
-        reject_unknown_fields(key, cls._INPUT_FIELDS, caller=caller)
-        recording_id = key.get("recording_id")
-        concat_recording_id = key.get("concat_recording_id")
-        if (recording_id is None) == (concat_recording_id is None):
-            raise ValueError(
-                f"{caller}: pass exactly one of recording_id or "
-                "concat_recording_id."
-            )
-        artifact_detection_id = key.get("artifact_detection_id")
-        if artifact_detection_id is not None:
-            artifact_detection_id = uuid.UUID(str(artifact_detection_id))
-            if concat_recording_id is not None:
-                raise ValueError(
-                    f"{caller}: a concatenated recording carries its own "
-                    "member artifact masks; artifact_detection_id applies to "
-                    "a single recording only."
-                )
-        params_name = key.get("motion_estimation_params_name")
-        if params_name is None:
-            raise ValueError(
-                f"{caller}: motion_estimation_params_name is required."
-            )
-
-        if concat_recording_id is not None:
-            _assert_concat_tables_current()
-            source_kind = "concatenated_recording"
-            source_key = {
-                "concat_recording_id": uuid.UUID(str(concat_recording_id))
-            }
-            source_part = cls.ConcatenatedRecordingSource
-        else:
-            source_kind = "recording"
-            source_key = {"recording_id": uuid.UUID(str(recording_id))}
-            source_part = cls.RecordingSource
-        source_table = _SOURCE_TABLES[source_kind]
-
-        params_key = {"motion_estimation_params_name": params_name}
-        _ensure_lookup_row_exists(
-            MotionEstimationParameters,
-            params_key,
-            helper_name=caller,
-            insert_default_path="MotionEstimationParameters.insert_default()",
-        )
-        estimation_params = (MotionEstimationParameters & params_key).fetch1(
-            "params"
-        )
-        content_hashes = (source_table & source_key).fetch("content_hash")
-        if len(content_hashes) == 0:
-            raise ValueError(
-                f"{caller}: {source_key} is not in {source_table.__name__}. "
-                "Populate it before selecting a motion estimate on it."
-            )
-        problem = _source_filter_problem(source_kind, source_key)
-        if problem is not None:
-            raise ValueError(
-                f"{caller}: {source_key} cannot be motion-estimated: {problem}"
-            )
-        if source_kind == "recording":
-            assert_artifact_detection_covers_recording(
-                recording_id=source_key["recording_id"],
-                artifact_detection_id=artifact_detection_id,
-                caller=caller,
-            )
-
-        motion_estimate_id, master_row = motion_estimate_selection_identity(
-            source_kind=source_kind,
-            source_id=next(iter(source_key.values())),
-            source_content_hash=content_hashes[0],
-            artifact_detection_id=artifact_detection_id,
-            motion_estimation_params_name=params_name,
-            estimation_params=estimation_params,
-        )
-        explicit = key.get("motion_estimate_id")
-        if explicit is not None and uuid.UUID(str(explicit)) != (
-            motion_estimate_id
-        ):
-            raise ValueError(
-                f"{caller}: motion_estimate_id {explicit} does not match the "
-                f"id derived from this selection ({motion_estimate_id})."
-            )
-
-        def _existing():
-            return cls._find_existing_pk(
-                master_row,
-                source_part,
-                source_key,
-                artifact_detection_id,
-                motion_estimate_id,
-            )
-
-        existing = _existing()
-        if existing is not None:
-            return existing
-        return cls._insert_rows(
-            {"motion_estimate_id": motion_estimate_id, **master_row},
-            source_part,
-            {"motion_estimate_id": motion_estimate_id, **source_key},
-            artifact_detection_id,
-            refetch=_existing,
-        )
-
-    @classmethod
-    def _insert_rows(
-        cls,
-        master_row,
-        source_part,
-        source_row,
-        artifact_detection_id,
-        *,
-        refetch,
-    ) -> dict:
-        """Insert the master and its parts atomically, locked against deletion.
-
-        The same protocol as ``SortingSelection.insert_selection``: an
-        artifact-bound selection must own its transaction (the advisory lock
-        that serializes it against the detection's deletion is released when
-        this returns), the artifact's merge id is resolved before the
-        transaction, and a duplicate-key race refetches the winner.
-        """
-        from contextlib import ExitStack
-
-        from spyglass.spikesorting.v2._db_locking import required_advisory_lock
-        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
-        art_merge_id = None
-        if artifact_detection_id is not None:
-            if cls.connection.in_transaction:
-                raise ValueError(
-                    "MotionEstimateSelection.insert_selection: refusing to link "
-                    "an artifact detection while a caller-owned transaction is "
-                    "open; the lock that serializes it against the detection's "
-                    "deletion is released before your transaction commits. "
-                    "Call insert_selection outside the transaction."
-                )
-            art_key = {"artifact_detection_id": artifact_detection_id}
-            try:
-                art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
-            except KeyError:
-                ArtifactDetectionOutput.insert_detection(art_key)
-                art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
-
-        with ExitStack() as art_lock:
-            if art_merge_id is not None:
-                art_lock.enter_context(
-                    required_advisory_lock(
-                        ArtifactDetectionOutput,
-                        {"artifact_detection_id": artifact_detection_id},
-                    )
-                )
-            try:
-                with transaction_or_noop(cls.connection):
-                    cls.insert1(master_row, allow_direct_insert=True)
-                    source_part.insert1(source_row)
-                    if art_merge_id is not None:
-                        cls.ArtifactDetectionSource.insert1(
-                            {
-                                "motion_estimate_id": master_row[
-                                    "motion_estimate_id"
-                                ],
-                                "artifact_detection_merge_id": art_merge_id,
-                            }
-                        )
-            except dj.errors.DuplicateError as exc:
-                existing = refetch()
-                if existing is not None:
-                    return existing
-                raise SchemaBypassError(
-                    "MotionEstimateSelection master "
-                    f"{master_row['motion_estimate_id']} exists but its "
-                    "source/artifact parts do not match this selection (a "
-                    "raw-insert orphan). Drop the orphan master and use "
-                    "insert_selection()."
-                ) from exc
-        return {"motion_estimate_id": master_row["motion_estimate_id"]}
+        return _motion_selection_insert.insert_estimate_selection(cls, key)
 
     @classmethod
     def _find_existing_pk(
@@ -836,22 +659,6 @@ _ESTIMATION_CLOCK_COLUMNS = {
 }
 
 
-def _id_restriction(value, field: str):
-    """Restrict by ``field`` given its value or any mapping holding it.
-
-    A ``uuid.UUID`` or ``str`` becomes ``{field: value}``; a mapping holding
-    ``field`` (e.g. a pipeline receipt) keeps only that field; anything else
-    is returned unchanged as a restriction.
-    """
-    from collections.abc import Mapping
-
-    if isinstance(value, (uuid.UUID, str)):
-        return {field: value}
-    if isinstance(value, Mapping) and field in value:
-        return {field: value[field]}
-    return value
-
-
 def _estimation_clock_of(row: dict):
     """The ``_motion.EstimationClock`` stored in a ``MotionEstimate`` row.
 
@@ -1029,36 +836,13 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             On a stale selection, spans out of acquisition order, or any
             estimation failure (see ``estimate_motion_in_spans``).
         """
-        import spikeinterface as si
-
         from spyglass.spikesorting.v2 import _motion
         from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
-        from spyglass.spikesorting.v2._sorting_artifact_mask import (
-            artifact_frame_ranges,
-            continuity_from_timestamps,
-            statistics_spans,
-        )
 
         resolved = _motion.resolve_estimation_params(params)
         resolved_hash = _motion.resolved_params_hash(resolved)
-        stale = _stale_fields(
-            [
-                (
-                    "resolved configuration hash",
-                    resolved_hash,
-                    selection["resolved_params_hash"],
-                ),
-                (
-                    "SpikeInterface version",
-                    si.__version__,
-                    selection["spikeinterface_version"],
-                ),
-                (
-                    "motion algorithm version",
-                    _motion.MOTION_ALGORITHM_VERSION,
-                    selection["motion_algorithm_version"],
-                ),
-            ]
+        stale = _motion_compute.stale_estimate_selection_fields(
+            selection, resolved_hash
         )
         if stale:
             raise ValueError(
@@ -1073,24 +857,11 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         )
         recording.annotate(is_filtered=True)
         n_samples = int(recording.get_num_samples())
-        if lineage.kind == "recording":
-            continuity, continuity_start_s, continuity_end_s = (
-                continuity_from_timestamps(recording)
+        continuity, continuity_start_s, continuity_end_s, statistics = (
+            _motion_compute.estimation_spans(
+                recording, lineage, source_row, artifact_valid_times, n_samples
             )
-            excluded = []
-            if artifact_valid_times is not None:
-                excluded = artifact_frame_ranges(
-                    recording,
-                    artifact_valid_times,
-                    artifact_detection_id=lineage.artifact_detection_id,
-                    recording_id=lineage.key["recording_id"],
-                )
-            statistics = statistics_spans(n_samples, excluded, continuity)
-        else:
-            continuity = _motion.normalize_spans(source_row["continuity_spans"])
-            continuity_start_s = source_row["continuity_start_s"]
-            continuity_end_s = source_row["continuity_end_s"]
-            statistics = _motion.normalize_spans(source_row["statistics_spans"])
+        )
 
         sampling_frequency = float(recording.get_sampling_frequency())
         clock = _motion.build_estimation_clock(
@@ -1303,176 +1074,12 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             selects no frame, if the corrected recording was made from
             another estimate, or if a trace channel is not in it.
         """
-        from spyglass.spikesorting.v2 import _motion, _motion_report
-
-        if trace_window_s is not None and corrected_key is None:
-            raise ValueError(
-                "MotionEstimate.report: trace_window_s compares original and "
-                "corrected traces; pass corrected_key too."
-            )
-        key = _id_restriction(key, "motion_estimate_id")
-        estimate_key = (self & key).fetch1("KEY")
-        row = (
-            (self & estimate_key)
-            .proj(
-                "motion",
-                "resolved_params",
-                "statistics_spans",
-                "peaks_per_continuity_span",
-                "channel_ids",
-                "channel_locations",
-                *_ESTIMATION_CLOCK_COLUMNS.values(),
-            )
-            .fetch1()
-        )
-        lineage = MotionEstimateSelection.resolve_source(estimate_key)
-        member_join_frames = ()
-        if lineage.kind == "concatenated_recording":
-            ends = (ConcatenatedRecording.MemberBoundary & lineage.key).fetch(
-                "end_sample", order_by="member_index"
-            )
-            member_join_frames = tuple(int(end) for end in ends[:-1])
-
-        corrected = None
-        border_mode = None
-        if corrected_key is not None:
-            corrected = (
-                MotionCorrectedRecording
-                & _id_restriction(
-                    corrected_key, "motion_corrected_recording_id"
-                )
-            ).fetch1()
-            corrected_key = {
-                name: corrected[name]
-                for name in MotionCorrectedRecording.primary_key
-            }
-            selection = (
-                MotionCorrectedRecordingSelection & corrected_key
-            ).fetch1()
-            if str(selection["motion_estimate_id"]) != str(
-                estimate_key["motion_estimate_id"]
-            ):
-                raise ValueError(
-                    "MotionEstimate.report: corrected recording "
-                    f"{corrected_key['motion_corrected_recording_id']} was "
-                    f"made from motion estimate "
-                    f"{selection['motion_estimate_id']}, not "
-                    f"{estimate_key['motion_estimate_id']}."
-                )
-            border_mode = _motion.resolve_interpolation_params(
-                (
-                    MotionInterpolationParameters
-                    & {
-                        "motion_interpolation_params_name": selection[
-                            "motion_interpolation_params_name"
-                        ]
-                    }
-                ).fetch1("params")
-            )["border_mode"]
-
-        motion = _motion.motion_from_storage_dict(row["motion"])
-        clock = _estimation_clock_of(row)
-        inputs = _motion_report.MotionReportInputs(
-            motion=motion,
-            clock=clock,
-            statistics_spans=row["statistics_spans"],
-            peaks_per_continuity_span=row["peaks_per_continuity_span"],
-            channel_ids=list(row["channel_ids"]),
-            channel_locations=row["channel_locations"],
-            max_gap_s=float(row["resolved_params"]["max_gap_s"]),
-            member_join_frames=member_join_frames,
-            border_mode=border_mode,
-            removed_channel_ids=(
-                None
-                if corrected is None
-                else list(corrected["removed_channel_ids"])
-            ),
-        )
-        trace_window = None
-        if trace_window_s is not None:
-            trace_window = self._trace_window(
-                estimate_key,
-                corrected_key,
-                corrected,
-                clock,
-                motion.dim,
-                trace_window_s,
-                trace_channel_ids,
-            )
-        summary = _motion_report.motion_report_summary(inputs)
-        summary["motion_estimate_id"] = estimate_key["motion_estimate_id"]
-        summary["motion_corrected_recording_id"] = (
-            None
-            if corrected_key is None
-            else corrected_key["motion_corrected_recording_id"]
-        )
-        return (
-            _motion_report.plot_motion_report(inputs, trace_window, summary),
-            summary,
-        )
-
-    @staticmethod
-    def _trace_window(
-        estimate_key,
-        corrected_key,
-        corrected,
-        clock,
-        depth_dim,
-        trace_window_s,
-        trace_channel_ids,
-    ):
-        """Original and corrected traces of a few channels over a window.
-
-        The window's source-clock times are mapped to frames with each
-        span's affine map (:func:`._motion_report.frame_of_source_time`);
-        the corrected recording has the source's frames. Both are read in
-        microvolts (:func:`._motion.recording_in_microvolts`).
-        """
-        from spyglass.spikesorting.v2 import _motion, _motion_report
-
-        start_frame, end_frame = (
-            int(f)
-            for f in _motion_report.frame_of_source_time(
-                clock, np.asarray(trace_window_s, dtype=np.float64)
-            )
-        )
-        if end_frame <= start_frame:
-            raise ValueError(
-                f"MotionEstimate.report: trace_window_s {trace_window_s} "
-                "selects no frame of the source."
-            )
-        kept = list(corrected["channel_ids"])
-        if trace_channel_ids is None:
-            trace_channel_ids = _motion_report.default_trace_channels(
-                kept, corrected["channel_locations"], depth_dim
-            )
-        missing = [c for c in trace_channel_ids if c not in kept]
-        if missing:
-            raise ValueError(
-                f"MotionEstimate.report: trace channels {missing} are not in "
-                f"corrected recording "
-                f"{corrected_key['motion_corrected_recording_id']} (its "
-                f"channels: {kept})."
-            )
-        table, lineage, _ = _estimate_source(estimate_key["motion_estimate_id"])
-        frames = {
-            "start_frame": start_frame,
-            "end_frame": end_frame,
-            "channel_ids": list(trace_channel_ids),
-        }
-        original = _motion.recording_in_microvolts(
-            table().get_recording(lineage.key)
-        ).get_traces(**frames)
-        corrected_traces = _motion.recording_in_microvolts(
-            MotionCorrectedRecording().get_recording(corrected_key)
-        ).get_traces(**frames)
-        return _motion_report.TraceWindow(
-            source_time_s=_motion_report.source_time_of_frames(
-                clock, np.arange(start_frame, end_frame)
-            ),
-            channel_ids=list(trace_channel_ids),
-            original_uv=original,
-            corrected_uv=corrected_traces,
+        return _motion_report_inputs.motion_estimate_report(
+            self,
+            key,
+            corrected_key,
+            trace_window_s,
+            trace_channel_ids=trace_channel_ids,
         )
 
 
@@ -1489,79 +1096,6 @@ _ESTIMATE_APPLICATION_FIELDS = (
     "channel_ids",
     "channel_locations",
 )
-
-
-def _stale_fields(checks) -> list[str]:
-    """Describe each ``(name, current, selected)`` check whose values differ.
-
-    Parameters
-    ----------
-    checks : iterable of (str, object, object)
-        A field's name, its value now and its value on the selection.
-
-    Returns
-    -------
-    list[str]
-        One ``"<name> <current> != selected <selected>"`` per stale field.
-    """
-    return [
-        f"{name} {now!r} != selected {then!r}"
-        for name, now, then in checks
-        if now != then
-    ]
-
-
-def _stale_corrected_selection_fields(
-    selection: dict,
-    resolved_interpolation_params: dict,
-    *,
-    check_spikeinterface_version: bool,
-) -> list[str]:
-    """Describe what changed since a corrected recording was selected.
-
-    Parameters
-    ----------
-    selection : dict
-        The ``MotionCorrectedRecordingSelection`` row.
-    resolved_interpolation_params : dict
-        Its ``MotionInterpolationParameters`` row's ``params`` blob, resolved
-        by ``_motion.resolve_interpolation_params``.
-    check_spikeinterface_version : bool
-        Also compare the installed SpikeInterface version.
-
-    Returns
-    -------
-    list[str]
-        One description per stale field (:func:`_stale_fields`); empty when
-        the selection is current.
-    """
-    import spikeinterface as si
-
-    from spyglass.spikesorting.v2 import _motion
-
-    checks = [
-        (
-            "resolved interpolation hash",
-            _motion.resolved_params_hash(resolved_interpolation_params),
-            selection["resolved_params_hash"],
-        )
-    ]
-    if check_spikeinterface_version:
-        checks.append(
-            (
-                "SpikeInterface version",
-                si.__version__,
-                selection["spikeinterface_version"],
-            )
-        )
-    checks.append(
-        (
-            "motion interpolation algorithm version",
-            _motion.MOTION_INTERPOLATION_ALGORITHM_VERSION,
-            selection["motion_interpolation_algorithm_version"],
-        )
-    )
-    return _stale_fields(checks)
 
 
 def _live_source_row(
@@ -1670,71 +1204,7 @@ class MotionCorrectedRecordingSelection(
         DuplicateSelectionError
             If a matching row has a non-deterministic id.
         """
-        from spyglass.spikesorting.v2._motion import (
-            motion_corrected_selection_identity,
-        )
-        from spyglass.spikesorting.v2._selection_identity import (
-            reject_unknown_fields,
-        )
-        from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
-
-        caller = "MotionCorrectedRecordingSelection.insert_selection"
-        reject_unknown_fields(key, cls._INPUT_FIELDS, caller=caller)
-        missing = [
-            name
-            for name in (
-                "motion_estimate_id",
-                "motion_interpolation_params_name",
-            )
-            if key.get(name) is None
-        ]
-        if missing:
-            raise ValueError(f"{caller}: {missing} are required.")
-        motion_estimate_id = uuid.UUID(str(key["motion_estimate_id"]))
-        params_name = key["motion_interpolation_params_name"]
-        params_key = {"motion_interpolation_params_name": params_name}
-        _ensure_lookup_row_exists(
-            MotionInterpolationParameters,
-            params_key,
-            helper_name=caller,
-            insert_default_path=(
-                "MotionInterpolationParameters.insert_default()"
-            ),
-        )
-        if not (MotionEstimate & {"motion_estimate_id": motion_estimate_id}):
-            raise ValueError(
-                f"{caller}: motion estimate {motion_estimate_id} is not "
-                "populated. Populate MotionEstimate before selecting a "
-                "corrected recording on it."
-            )
-        _estimate_source(motion_estimate_id)
-        corrected_id, master_row = motion_corrected_selection_identity(
-            motion_estimate_id=motion_estimate_id,
-            motion_interpolation_params_name=params_name,
-            interpolation_params=(
-                MotionInterpolationParameters & params_key
-            ).fetch1("params"),
-        )
-        explicit = key.get("motion_corrected_recording_id")
-        if explicit is not None and uuid.UUID(str(explicit)) != corrected_id:
-            raise ValueError(
-                f"{caller}: motion_corrected_recording_id {explicit} does not "
-                f"match the id derived from this selection ({corrected_id})."
-            )
-        existing = cls._find_existing_pk(master_row, corrected_id)
-        if existing is not None:
-            return existing
-        try:
-            cls.insert1(
-                {"motion_corrected_recording_id": corrected_id, **master_row},
-                allow_direct_insert=True,
-            )
-        except dj.errors.DuplicateError:
-            existing = cls._find_existing_pk(master_row, corrected_id)
-            if existing is None:
-                raise
-            return existing
-        return {"motion_corrected_recording_id": corrected_id}
+        return _motion_selection_insert.insert_corrected_selection(cls, key)
 
     @classmethod
     def resolve_source(cls, key: dict) -> SourceLineage:
@@ -2007,19 +1477,7 @@ class MotionCorrectedRecording(
             or an application failure (see
             ``_motion.apply_motion_on_estimation_clock``).
         """
-        import spikeinterface as si
-
         from spyglass.spikesorting.v2 import _motion
-        from spyglass.spikesorting.v2._nwb_provenance import (
-            CONCAT_MEMBER_COLUMNS,
-            CONCAT_MEMBERS,
-            MOTION_CONTINUITY_SPAN_COLUMNS,
-            MOTION_CONTINUITY_SPANS,
-            MOTION_CORRECTION_PROVENANCE,
-            build_long_provenance_table,
-            build_provenance_table,
-            read_long_provenance,
-        )
         from spyglass.spikesorting.v2._recording_geometry import (
             flatten_planar_geometry,
         )
@@ -2032,7 +1490,7 @@ class MotionCorrectedRecording(
         )
 
         resolved = _motion.resolve_interpolation_params(interpolation_params)
-        stale = _stale_corrected_selection_fields(
+        stale = _motion_compute.stale_corrected_selection_fields(
             selection,
             resolved,
             check_spikeinterface_version=(
@@ -2052,29 +1510,9 @@ class MotionCorrectedRecording(
         source.annotate(is_filtered=True)
         n_samples = int(source.get_num_samples())
         sampling_frequency = float(source.get_sampling_frequency())
-        mismatched = [
-            name
-            for name, now, then in (
-                ("n_samples", n_samples, int(estimate["n_samples"])),
-                (
-                    "sampling_frequency",
-                    sampling_frequency,
-                    float(estimate["sampling_frequency"]),
-                ),
-                (
-                    "channel_ids",
-                    source.channel_ids.tolist(),
-                    np.asarray(estimate["channel_ids"]).tolist(),
-                ),
-            )
-            if now != then
-        ]
-        if mismatched:
-            raise ValueError(
-                f"MotionCorrectedRecording {key}: the source's {mismatched} "
-                "differ from the saved estimate's; the estimate does not "
-                "describe these traces."
-            )
+        _motion_compute.assert_source_matches_estimate(
+            key, source, estimate, n_samples, sampling_frequency
+        )
         timestamps = _LazyRecordingTimestamps(source, 0, n_samples)
         source_filtering = _series_filtering(
             source_path, source_electrical_series_path
@@ -2082,19 +1520,7 @@ class MotionCorrectedRecording(
 
         # The estimate stored the flattened positions it was computed on.
         flatten_planar_geometry(source)
-        source_locations = np.asarray(
-            source.get_channel_locations(), dtype=np.float64
-        )
-        estimate_locations = np.asarray(
-            estimate["channel_locations"], dtype=np.float64
-        )
-        if not np.array_equal(source_locations, estimate_locations):
-            raise ValueError(
-                f"MotionCorrectedRecording {key}: the source's contact "
-                f"positions {source_locations.tolist()} differ from the saved "
-                f"estimate's {estimate_locations.tolist()}; the estimate does "
-                "not describe this geometry."
-            )
+        _motion_compute.assert_geometry_matches_estimate(key, source, estimate)
 
         clock = _estimation_clock_of(estimate)
         statistics = np.asarray(
@@ -2117,71 +1543,18 @@ class MotionCorrectedRecording(
         interpolation_text = ", ".join(
             f"{name}={resolved[name]}" for name in sorted(resolved)
         )
-        provenance_tables = [
-            build_provenance_table(
-                MOTION_CORRECTION_PROVENANCE,
-                {
-                    "motion_corrected_recording_id": str(
-                        key["motion_corrected_recording_id"]
-                    ),
-                    "motion_estimate_id": str(selection["motion_estimate_id"]),
-                    "motion_interpolation_params_name": selection[
-                        "motion_interpolation_params_name"
-                    ],
-                    "interpolation": resolved,
-                    "motion_interpolation_algorithm_version": int(
-                        selection["motion_interpolation_algorithm_version"]
-                    ),
-                    "source_content_hash": str(source_content_hash),
-                    "removed_channel_ids": applied.removed_channel_ids,
-                    "spikeinterface_version": si.__version__,
-                    "source_kind": source_kind,
-                    "source_key": {
-                        name: str(value) for name, value in source_key.items()
-                    },
-                    "statistics_spans": statistics.tolist(),
-                    "estimation_clock_sampling_frequency": (
-                        clock.sampling_frequency
-                    ),
-                },
-            ),
-            build_long_provenance_table(
-                MOTION_CONTINUITY_SPANS,
-                [
-                    {
-                        "span_index": index,
-                        "start_sample": int(start),
-                        "end_sample": int(end),
-                        "source_start_s": float(source_start),
-                        "source_end_s": float(source_end),
-                        "estimation_start_s": float(estimation_start),
-                    }
-                    for index, (
-                        (start, end),
-                        source_start,
-                        source_end,
-                        estimation_start,
-                    ) in enumerate(
-                        zip(
-                            clock.spans,
-                            clock.source_start_s,
-                            clock.source_end_s,
-                            clock.estimation_start_s,
-                            strict=True,
-                        )
-                    )
-                ],
-                MOTION_CONTINUITY_SPAN_COLUMNS,
-            ),
-        ]
-        if source_kind == "concatenated_recording":
-            provenance_tables.append(
-                build_long_provenance_table(
-                    CONCAT_MEMBERS,
-                    read_long_provenance(source_path, CONCAT_MEMBERS),
-                    CONCAT_MEMBER_COLUMNS,
-                )
-            )
+        provenance_tables = _motion_compute.motion_correction_provenance_tables(
+            key,
+            selection,
+            resolved,
+            source_content_hash,
+            applied,
+            source_kind,
+            source_key,
+            statistics,
+            clock,
+            source_path,
+        )
         analysis_file_name, object_id, content_hash = write_nwb_artifact(
             corrected,
             nwb_file_name,
@@ -2266,97 +1639,12 @@ class MotionCorrectedRecording(
     def _rebuild_nwb_artifact(self, key) -> None:
         """Rebuild a missing corrected artifact from the SAVED motion.
 
-        Locked on the corrected recording, double-checked under the lock,
-        then ``make_fetch`` / ``make_compute`` write a fresh temp artifact:
-        the saved estimate is reapplied, never estimated again, under the
-        installed SpikeInterface even if it differs from the one the
-        selection was made with. Only a temp
-        whose ``content_hash`` equals the stored one is installed
-        (``install_rebuilt_recording``); otherwise it is removed,
-        ``RecordingContentDriftError`` is raised and the canonical slot is
-        left untouched. A selection whose interpolation recipe now resolves
-        differently, or whose application algorithm version changed, cannot
-        reproduce the stored traces: ``RecordingContentDriftError`` names
-        the missing file and the repair before anything is computed.
+        The rebuild is
+        :func:`._recording_nwb.rebuild_motion_corrected_artifact`; it calls
+        ``make_fetch`` and ``make_compute`` on this instance.
+        :func:`._recording_nwb.ensure_artifact_file` calls this method on
+        every trace-artifact table.
         """
-        from pathlib import Path
+        from spyglass.spikesorting.v2 import _recording_nwb
 
-        from spyglass.spikesorting.v2._motion import (
-            motion_corrected_recording_artifact_lock,
-            resolve_interpolation_params,
-        )
-        from spyglass.spikesorting.v2._recording_nwb import (
-            install_rebuilt_recording,
-        )
-        from spyglass.spikesorting.v2.exceptions import (
-            RecordingContentDriftError,
-        )
-        from spyglass.spikesorting.v2.recording import (
-            _unlink_staged_analysis_file,
-        )
-        from spyglass.utils import logger
-
-        row = (self & key).fetch1()
-        analysis_file_name = row["analysis_file_name"]
-        canonical_abs = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        with motion_corrected_recording_artifact_lock(
-            row["motion_corrected_recording_id"]
-        ):
-            if Path(canonical_abs).exists():
-                return
-            logger.info(
-                "MotionCorrectedRecording.get_recording: cache miss for "
-                f"{analysis_file_name!r}; reapplying the saved motion..."
-            )
-            master_key = {
-                "motion_corrected_recording_id": row[
-                    "motion_corrected_recording_id"
-                ]
-            }
-            fetched = self.make_fetch(master_key)
-            # The content hash is the guard (as for Recording), so a rebuild
-            # under another SpikeInterface version is allowed and installed
-            # only if it reproduces the stored traces. A changed recipe
-            # resolution or application algorithm cannot reproduce them.
-            stale = _stale_corrected_selection_fields(
-                fetched.selection,
-                resolve_interpolation_params(fetched.interpolation_params),
-                check_spikeinterface_version=False,
-            )
-            if stale:
-                raise RecordingContentDriftError(
-                    "MotionCorrectedRecording._rebuild_nwb_artifact: the "
-                    f"corrected recording file {analysis_file_name!r} is "
-                    "missing and cannot be rebuilt: its selection is stale "
-                    f"({'; '.join(stale)}), so reapplying the saved motion "
-                    "would not reproduce the stored traces. Restore the file "
-                    "from a backup, or delete this MotionCorrectedRecording "
-                    "row and everything made from it (sorts, curations) and "
-                    "repopulate them from a new "
-                    "MotionCorrectedRecordingSelection."
-                )
-            computed = self.make_compute(
-                master_key,
-                *fetched,
-                allow_spikeinterface_version_change=True,
-            )
-            if computed.content_hash != row["content_hash"]:
-                _unlink_staged_analysis_file(
-                    computed.analysis_file_name,
-                    context="MotionCorrectedRecording._rebuild_nwb_artifact",
-                )
-                raise RecordingContentDriftError(
-                    "MotionCorrectedRecording._rebuild_nwb_artifact: rebuilt "
-                    f"content_hash {computed.content_hash} does not match the "
-                    f"stored content_hash {row['content_hash']} for "
-                    f"{analysis_file_name!r}. The current environment no "
-                    "longer reproduces this corrected recording (e.g. a "
-                    "SpikeInterface/BLAS upgrade). The canonical artifact was "
-                    "NOT modified. Recover by restoring a backup or deleting "
-                    "and repopulating the MotionCorrectedRecording row."
-                )
-            install_rebuilt_recording(
-                AnalysisNwbfile.get_abs_path(computed.analysis_file_name),
-                canonical_abs,
-                analysis_file_name,
-            )
+        return _recording_nwb.rebuild_motion_corrected_artifact(self, key)
