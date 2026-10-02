@@ -388,12 +388,13 @@ def get_unit_brain_regions(table, tracked_unit_key) -> "pd.DataFrame":
     The body of ``TrackedUnit.get_unit_brain_regions`` (see its docstring).
     ``table`` is the ``TrackedUnit`` instance.
     """
+    import datajoint as dj
     import pandas as pd
 
-    from spyglass.common.common_ephys import Electrode
-    from spyglass.common.common_region import BrainRegion
+    from spyglass.spikesorting.v2._pipeline_geometry import (
+        sort_group_electrode_regions,
+    )
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.recording import SortGroupV2
     from spyglass.spikesorting.v2.unit_matching import (
         UnitMatch,
         UnitMatchSelection,
@@ -406,11 +407,50 @@ def get_unit_brain_regions(table, tracked_unit_key) -> "pd.DataFrame":
         "subregion_name",
         "subsubregion_name",
     ]
-    rows = []
-    checked = set()
-    members = (table.Member & tracked_unit_key) * CurationV2.Unit.proj(
+    member_rel = table.Member & tracked_unit_key
+    members = member_rel * CurationV2.Unit.proj(
         "electrode_group_name", "electrode_id"
     )
+    # Bulk-read everything the member loop looks up: the members' matchable
+    # units, their per-recording spike counts, their inputs' recordings, and
+    # those recordings' sort-group electrode regions.
+    matchable = UnitMatch.MatchableUnit & member_rel
+    input_indices: dict[tuple, list[int]] = {}
+    for row in matchable.fetch(as_dict=True):
+        unit = (row["unitmatch_id"], row["sorting_id"])
+        unit += (int(row["curation_id"]), int(row["unit_id"]))
+        input_indices.setdefault(unit, []).append(int(row["input_index"]))
+    n_spikes_by_key = {
+        (
+            row["unitmatch_id"],
+            int(row["input_index"]),
+            int(row["unit_id"]),
+            int(row["recording_index"]),
+        ): int(row["n_spikes"])
+        for row in (UnitMatch.RecordingSpikeCount & matchable).fetch(
+            as_dict=True
+        )
+    }
+    input_recordings = UnitMatchSelection.InputRecording & matchable
+    recordings_by_input: dict[tuple, list[dict]] = {}
+    for row in input_recordings.fetch(as_dict=True, order_by="recording_index"):
+        recordings_by_input.setdefault(
+            (row["unitmatch_id"], int(row["input_index"])), []
+        ).append(row)
+    regions_by_electrode = {
+        (
+            row["nwb_file_name"],
+            int(row["sort_group_id"]),
+            row["electrode_group_name"],
+            int(row["electrode_id"]),
+        ): {column: row[column] for column in region_columns}
+        for row in sort_group_electrode_regions(
+            input_recordings.proj("nwb_file_name", "sort_group_id")
+        ).fetch("nwb_file_name", "sort_group_id", *region_columns, as_dict=True)
+    }
+
+    rows = []
+    checked = set()
     for member in members.fetch(as_dict=True):
         run = {"unitmatch_id": member["unitmatch_id"]}
         unit_key = {
@@ -418,42 +458,34 @@ def get_unit_brain_regions(table, tracked_unit_key) -> "pd.DataFrame":
             "curation_id": int(member["curation_id"]),
             "unit_id": int(member["unit_id"]),
         }
-        input_index = int(
-            (UnitMatch.MatchableUnit & run & unit_key).fetch1("input_index")
+        indices = input_indices.get(
+            (run["unitmatch_id"], *unit_key.values()), []
         )
+        if len(indices) != 1:
+            raise dj.DataJointError(
+                f"UnitMatch.MatchableUnit has {len(indices)} rows for unit "
+                f"{unit_key} of run {run}; expected exactly one."
+            )
+        input_index = indices[0]
         input_key = {**run, "input_index": input_index}
         if (str(run["unitmatch_id"]), input_index) not in checked:
             _assert_run_input_unchanged("get_unit_brain_regions", input_key)
             checked.add((str(run["unitmatch_id"]), input_index))
-        n_spikes_by_recording = dict(
-            zip(
-                *(
-                    UnitMatch.RecordingSpikeCount
-                    & input_key
-                    & {"unit_id": unit_key["unit_id"]}
-                ).fetch("recording_index", "n_spikes")
-            )
-        )
-        for recording in (UnitMatchSelection.InputRecording & input_key).fetch(
-            as_dict=True, order_by="recording_index"
+        for recording in recordings_by_input.get(
+            (run["unitmatch_id"], input_index), []
         ):
             electrode = {
                 "electrode_group_name": member["electrode_group_name"],
                 "electrode_id": int(member["electrode_id"]),
             }
-            regions = (
+            regions = regions_by_electrode.get(
                 (
-                    SortGroupV2.SortGroupElectrode
-                    & {
-                        "nwb_file_name": recording["nwb_file_name"],
-                        "sort_group_id": int(recording["sort_group_id"]),
-                    }
-                    & electrode
+                    recording["nwb_file_name"],
+                    int(recording["sort_group_id"]),
+                    *electrode.values(),
                 )
-                * Electrode
-                * BrainRegion
-            ).fetch(*region_columns, as_dict=True)
-            if len(regions) != 1:
+            )
+            if regions is None:
                 raise ValueError(
                     "TrackedUnit.get_unit_brain_regions: electrode "
                     f"{electrode} of unit {unit_key} is not in sort group "
@@ -462,9 +494,14 @@ def get_unit_brain_regions(table, tracked_unit_key) -> "pd.DataFrame":
                     f"{input_index}, recording_index "
                     f"{recording['recording_index']})."
                 )
-            n_spikes = int(
-                n_spikes_by_recording[int(recording["recording_index"])]
-            )
+            n_spikes = n_spikes_by_key[
+                (
+                    run["unitmatch_id"],
+                    input_index,
+                    unit_key["unit_id"],
+                    int(recording["recording_index"]),
+                )
+            ]
             rows.append(
                 {
                     "unitmatch_id": str(member["unitmatch_id"]),
@@ -479,7 +516,7 @@ def get_unit_brain_regions(table, tracked_unit_key) -> "pd.DataFrame":
                     "unit_id": unit_key["unit_id"],
                     "n_spikes": n_spikes,
                     "detected": n_spikes > 0,
-                    **regions[0],
+                    **regions,
                 }
             )
     columns = [

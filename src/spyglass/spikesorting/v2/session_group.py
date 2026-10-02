@@ -68,31 +68,24 @@ def _member_electrode_signature(member: dict) -> tuple:
     signature while members on different sort groups, probes, or regions
     diverge. An electrode without a region maps to ``None``.
     """
-    from spyglass.common.common_ephys import Electrode
-    from spyglass.common.common_region import BrainRegion
     from spyglass.spikesorting.v2._concat_recording import (
         electrode_signature_from_rows,
     )
-
-    restriction = {
-        "nwb_file_name": member["nwb_file_name"],
-        "sort_group_id": member["sort_group_id"],
-    }
-    electrode_rows = (SortGroupV2.SortGroupElectrode & restriction).fetch(
-        "electrode_group_name", "electrode_id", as_dict=True
+    from spyglass.spikesorting.v2._pipeline_geometry import (
+        sort_group_electrode_regions,
     )
+
+    electrode_rows = sort_group_electrode_regions(
+        {
+            "nwb_file_name": member["nwb_file_name"],
+            "sort_group_id": member["sort_group_id"],
+        }
+    ).fetch("electrode_group_name", "electrode_id", "region_name", as_dict=True)
     region_by_key = {
-        (
-            str(row["electrode_group_name"]),
-            int(row["electrode_id"]),
-        ): str(row["region_name"])
-        for row in (
-            (SortGroupV2.SortGroupElectrode & restriction)
-            * Electrode
-            * BrainRegion
-        ).fetch(
-            "electrode_group_name", "electrode_id", "region_name", as_dict=True
+        (str(row["electrode_group_name"]), int(row["electrode_id"])): str(
+            row["region_name"]
         )
+        for row in electrode_rows
     }
     return electrode_signature_from_rows(electrode_rows, region_by_key)
 
@@ -309,15 +302,9 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         bool
             ``True`` iff the group's members span two or more session dates.
         """
-        nwb_file_names = [
-            {"nwb_file_name": n}
-            for n in set((cls.Member & key).fetch("nwb_file_name"))
-        ]
-        if not nwb_file_names:
-            return False
-        # One batched Session query for all member sessions, not one fetch1
-        # per member.
-        start_times = (Session & nwb_file_names).fetch("session_start_time")
+        start_times = (
+            Session & (cls.Member & key).proj("nwb_file_name")
+        ).fetch("session_start_time")
         return len(distinct_recording_dates(start_times)) > 1
 
 

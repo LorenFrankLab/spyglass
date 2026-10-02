@@ -2,7 +2,9 @@
 
 Holds ``describe_sort_groups`` (one row per sort group) and
 ``plot_sort_group_geometry``. ``pipeline.py`` re-exports both. Imports no
-other pipeline submodule.
+other pipeline submodule. ``sort_group_electrode_regions`` is the sort-group
+electrode-to-region join the curation, concatenation-member and UnitMatch
+readers share.
 """
 
 from __future__ import annotations
@@ -45,6 +47,21 @@ def _nullable_int(value):
     return None if _missing(value) else int(value)
 
 
+def sort_group_electrode_regions(restriction):
+    """Join ``SortGroupElectrode & restriction`` to Electrode and BrainRegion.
+
+    ``Electrode`` carries a non-null ``BrainRegion`` foreign key, so the
+    relation has exactly one row per restricted sort-group electrode.
+    """
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.common.common_region import BrainRegion
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    return (
+        (SortGroupV2.SortGroupElectrode & restriction) * Electrode * BrainRegion
+    )
+
+
 def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
     """Return a notebook-friendly summary of v2 sort groups for a session.
 
@@ -73,8 +90,6 @@ def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
     """
     import pandas as pd
 
-    from spyglass.common.common_ephys import Electrode
-    from spyglass.common.common_region import BrainRegion
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     def _sorted_nullable_ints(values):
@@ -95,20 +110,18 @@ def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
     if not master_rows:
         return pd.DataFrame(columns=_SORT_GROUP_COLUMNS)
 
+    rows_by_group: dict[int, list[dict]] = {}
+    for row in sort_group_electrode_regions(
+        {"nwb_file_name": nwb_file_name}
+    ).fetch(as_dict=True):
+        rows_by_group.setdefault(int(row["sort_group_id"]), []).append(row)
+
     rows = []
     for master in sorted(
         master_rows, key=lambda row: int(row["sort_group_id"])
     ):
         sort_group_id = int(master["sort_group_id"])
-        restriction = {
-            "nwb_file_name": nwb_file_name,
-            "sort_group_id": sort_group_id,
-        }
-        electrode_rows = (
-            (SortGroupV2.SortGroupElectrode & restriction)
-            * Electrode
-            * BrainRegion
-        ).fetch(as_dict=True)
+        electrode_rows = rows_by_group.get(sort_group_id, [])
 
         reference_mode = master["reference_mode"]
         reference_electrode_id = (
@@ -168,10 +181,8 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
     if not master_by_group:
         return []
 
-    member_rows = (
-        (SortGroupV2.SortGroupElectrode & {"nwb_file_name": nwb_file_name})
-        * Electrode
-        * BrainRegion
+    member_rows = sort_group_electrode_regions(
+        {"nwb_file_name": nwb_file_name}
     ).fetch(as_dict=True)
 
     # Reference electrodes for 'specific'-reference groups are NOT sort-group

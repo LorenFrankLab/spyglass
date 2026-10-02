@@ -2273,13 +2273,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             BrainRegion``) covering every electrode in the sort group (the
             anchor member's sort group for concat sorts).
         """
-        from spyglass.common.common_ephys import Electrode as _Electrode
-        from spyglass.common.common_region import BrainRegion
-        from spyglass.spikesorting.v2.recording import (
-            RecordingSelection,
-            SortGroupV2,
-        )
         from spyglass.spikesorting.v2 import _sorting_fetch
+        from spyglass.spikesorting.v2._pipeline_geometry import (
+            sort_group_electrode_regions,
+        )
+        from spyglass.spikesorting.v2.recording import RecordingSelection
 
         sorting_id = (cls & key).fetch1("sorting_id")
         source = SortingSelection.resolve_source({"sorting_id": sorting_id})
@@ -2296,12 +2294,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         nwb_file_name, sort_group_id = (
             RecordingSelection & recording_key
         ).fetch1("nwb_file_name", "sort_group_id")
-        sg_restriction = {
-            "nwb_file_name": nwb_file_name,
-            "sort_group_id": sort_group_id,
-        }
-        return (
-            (SortGroupV2.SortGroupElectrode & sg_restriction)
-            * _Electrode
-            * BrainRegion
+        return sort_group_electrode_regions(
+            {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
         )

@@ -704,19 +704,16 @@ class ConcatMemberCuration(
     @classmethod
     def get_sort_group_info(cls, key: dict) -> "dj.Table":
         """Return all electrodes and regions for this member's sort group."""
-        from spyglass.common.common_ephys import Electrode as _Electrode
-        from spyglass.common.common_region import BrainRegion
-        from spyglass.spikesorting.v2.recording import SortGroupV2
+        from spyglass.spikesorting.v2._pipeline_geometry import (
+            sort_group_electrode_regions,
+        )
 
         snapshot = cls._member_snapshot_row(key)
-        restriction = {
-            "nwb_file_name": snapshot["nwb_file_name"],
-            "sort_group_id": int(snapshot["sort_group_id"]),
-        }
-        return (
-            (SortGroupV2.SortGroupElectrode & restriction)
-            * _Electrode
-            * BrainRegion
+        return sort_group_electrode_regions(
+            {
+                "nwb_file_name": snapshot["nwb_file_name"],
+                "sort_group_id": int(snapshot["sort_group_id"]),
+            }
         )
 
     @classmethod
