@@ -36,14 +36,14 @@ def _legacy_runtime_message(component: str) -> str:
     return (
         f"{component} requires the legacy SpikeInterface 0.99 environment. "
         "Existing v0/v1 rows, and their saved recordings, sortings, and "
-        "binary-folder waveforms, remain readable under the new pin; only "
-        "waveform extraction, populate, curation, and recompute are gated. "
+        "binary-folder waveforms, remain readable under the new pin; "
+        "computing new v0/v1 waveforms, quality metrics, artifact detection, "
+        "burst curation, and clusterless features is not. "
         "To continue this workflow: "
-        "either downgrade to a legacy Spyglass install pinned to "
-        "spikeinterface<0.101 in a separate conda environment, or switch new "
-        "processing to the modern v2 spike-sorting pipeline (see "
-        "src/spyglass/spikesorting/v2/ and the CHANGELOG entry for the "
-        "SpikeInterface 0.104 boundary)."
+        "either run it in a separate legacy environment built from "
+        "environments/environment_spikesorting_legacy.yml, or switch new "
+        "processing to the modern v2 spike-sorting pipeline (see 'Two "
+        "environments, one database' in the Spike Sorting v2 migration guide)."
     )
 
 

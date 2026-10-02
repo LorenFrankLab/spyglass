@@ -1,9 +1,10 @@
 # Isolated conda environment for the legacy (v0/v1) spike-sorting tests.
 #
 # The repo now pins ``spikeinterface==0.104.3`` for the v2 pipeline (see
-# pyproject.toml), but the v0/v1 active populate / curation / recompute
-# paths call SpikeInterface APIs that were removed in 0.101+ and are gated
-# behind ``_require_legacy_si_environment`` (see
+# pyproject.toml), but the v0/v1 waveform, quality-metric, artifact-detection,
+# burst-curation and clusterless-feature paths call SpikeInterface APIs that
+# were removed in 0.101+ and are gated behind
+# ``_require_legacy_si_environment`` (see
 # src/spyglass/spikesorting/_legacy_runtime.py), which raises under SI >=
 # 0.101. The main `run-tests` CI job installs the 0.104 pin and therefore
 # ``--ignore``s tests/spikesorting/v0 and v1; this file is the conda
