@@ -31,6 +31,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_figpack_curation",
     "_lookup_validation",
     "_metric_curation",
+    "_metric_curation_fetch",
     "_metric_curation_plots",
     "_motion",
     "_motion_report",
