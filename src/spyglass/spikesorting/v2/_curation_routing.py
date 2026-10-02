@@ -77,11 +77,8 @@ _ALLOWED_KEYS = frozenset(
     _REC_KEYS + _CONCAT_KEYS + _SHARED_SOURCE_KEYS + _SORT_KEYS + _CURATION_KEYS
 )
 
-# Sentinel distinguishing "the restriction names no artifact_detection_id"
-# (a wildcard -- no artifact restriction) from an explicit
-# ``artifact_detection_id=None`` (no standalone or concat-member detection).
-# A bare ``None`` is already taken for the
-# anti-join, so absence needs its own marker; only an absent key is a wildcard.
+# Sentinel for an absent ``artifact_detection_id`` (a wildcard), distinct from
+# an explicit ``None`` (no standalone or concat-member detection).
 NO_ARTIFACT_RESTRICTION = object()
 
 # The same distinction for ``motion_corrected_recording_id``: absent is a
@@ -187,11 +184,8 @@ def classify_and_normalize_restriction(
                 "use the artifact-detection interval to restrict."
             )
 
-    # ``parse_artifact_detection_interval_list_name`` returns a str and a caller
-    # may pass either a str or a UUID, but ``artifact_detection_id`` is a uuid
-    # column. Normalize to a ``uuid.UUID`` so the ArtifactDetectionSource
-    # intersection downstream is unambiguous and a malformed id fails fast here
-    # rather than silently matching nothing.
+    # The parser returns a str and callers may pass a str or UUID; normalize to
+    # ``uuid.UUID`` so a malformed id fails here rather than matching nothing.
     if key.get("artifact_detection_id") is not None:
         key["artifact_detection_id"] = uuid.UUID(
             str(key["artifact_detection_id"])
@@ -212,10 +206,8 @@ def classify_and_normalize_restriction(
     # concat-vs-recording contradiction -- they live on both source selections.
     shared_restriction = {k: key[k] for k in _SHARED_SOURCE_KEYS if k in key}
     if concat_restriction and rec_restriction:
-        # On the normal (non-raising) path the unresolved-name warning is
-        # emitted at the table boundary. This path raises before returning, so
-        # the boundary is never reached; emit inline here first to preserve the
-        # original warn-then-raise order on this (doubly-degenerate) input.
+        # The table boundary that normally emits this warning is never reached
+        # on this raising path, so warn before raising.
         if unresolved_name_warning is not None:
             logger.warning(unresolved_name_warning)
         raise ValueError(
