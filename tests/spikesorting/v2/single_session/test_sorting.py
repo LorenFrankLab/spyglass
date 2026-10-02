@@ -743,7 +743,10 @@ def test_changed_second_fetch_leaves_no_staged_sort_outputs(
 
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        analyzer_path,
+        remove_analyzer_cache,
+    )
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -797,6 +800,10 @@ def test_changed_second_fetch_leaves_no_staged_sort_outputs(
         }
     )
     (Sorting & sort_pk).super_delete(warn=False)
+    # The sorting_id is deterministic, so an earlier test of the same sort may
+    # have published its analyzer; ``super_delete`` skips ``Sorting.delete``'s
+    # cache cleanup, so remove the folders here to start from none.
+    remove_analyzer_cache(sort_pk["sorting_id"], missing_ok=True)
     canonical = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
     assert not canonical.exists()
 
