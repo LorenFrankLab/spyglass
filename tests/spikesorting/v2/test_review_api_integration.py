@@ -435,16 +435,16 @@ def test_review_explicit_annotation_set_identity_and_display(
             map(int, (Sorting.Unit & sorting_key).fetch("unit_id"))
         )
         definition = UnitAnnotationDefinition.insert_definition(
-            "phase4_figpack_score", 1, "float"
+            "review_display_score", 1, "float"
         )
         annotation_set = CurationUnitAnnotationSet.from_dataframe(
             root,
             definition,
             pd.DataFrame(
-                {"phase4_figpack_score": [0.25, 0.75]},
+                {"review_display_score": [0.25, 0.75]},
                 index=pd.Index(unit_ids, name="unit_id"),
             ),
-            producer="phase4-review-test",
+            producer="review-annotation-test",
         )
         profile = _ensure_test_profile()
 

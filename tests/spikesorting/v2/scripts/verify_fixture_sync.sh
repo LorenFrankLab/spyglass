@@ -3,7 +3,7 @@
 # locally and (if a v1 worktree exists with the fixture path) match
 # across worktrees by sha256.
 #
-# A0.4 preflight: the v1 capture and the v2 test both fingerprint the
+# Preflight: the v1 capture and the v2 test both fingerprint the
 # NWB by sha256; if the two worktrees see different bytes the
 # nwb_sha256 invariant FAILs in a misleading way. This script
 # surfaces that mismatch BEFORE captures run.

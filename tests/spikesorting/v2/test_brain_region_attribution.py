@@ -343,8 +343,8 @@ def test_multi_region_attribution_through_merge_dispatch(region_60s_sort):
     merge-level ``SpikeSortingOutput.get_unit_brain_regions`` dispatcher.
 
     Hardens the smoke-fixture ``test_multi_region_unit_attribution`` in two
-    ways the review flagged: (1) it self-guards on >=2 units with distinct
-    peak electrodes AND >=2 distinct expected regions, so the per-unit
+    ways: (1) it self-guards on >=2 units with distinct peak electrodes AND
+    >=2 distinct expected regions, so the per-unit
     discrimination is genuine rather than collapsing to a single-unit case;
     (2) it exercises the merge dispatcher (the consumer-facing path), which
     the smoke test bypasses by calling ``CurationV2`` directly.
@@ -353,7 +353,7 @@ def test_multi_region_attribution_through_merge_dispatch(region_60s_sort):
     MEArec ground-truth soma and asserting the peak electrode is the
     soma-nearest contact) was investigated and NOT adopted -- on this polymer
     geometry the peak channel is the soma-nearest electrode only ~50% of the
-    time (top-3), so such an assertion would be flaky. See the phase doc.
+    time (top-3), so such an assertion would be flaky.
     """
     from spyglass.common.common_ephys import Electrode
     from spyglass.common.common_region import BrainRegion

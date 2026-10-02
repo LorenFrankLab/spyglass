@@ -345,7 +345,7 @@ def test_rules_payloads_match_does_not_conflate_bool_and_int():
     assert rules_payloads_match({"k": True}, {"k": True})
 
 
-# ---------- SIG-2: SNR peak_sign follows the sorter's polarity --------------
+# ---------- SNR peak_sign follows the sorter's polarity --------------------
 
 
 @pytest.mark.parametrize(

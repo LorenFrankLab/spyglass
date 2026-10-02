@@ -1083,7 +1083,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
         }
     )
     # The reference change folds into the identity, so this is a NEW recording,
-    # not rec_pk_unref -- exactly the OP-3/OP-4 honesty guarantee.
+    # not rec_pk_unref -- a changed resolved input never reuses the old id.
     assert rec_pk_ref != rec_pk_unref
     Recording.populate(rec_pk_ref, reserve_jobs=False)
     traces_ref = Recording().get_recording(rec_pk_ref).get_traces()

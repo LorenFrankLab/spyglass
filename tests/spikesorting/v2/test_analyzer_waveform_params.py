@@ -326,9 +326,9 @@ def test_display_waveform_params_name_not_in_sorting_identity(dj_conn):
 def test_concat_display_recipe_resolved_from_concat_preprocessing(dj_conn):
     """A concat-backed sort resolves its recipe from the concat selection.
 
-    Parent-phase concat populate is gated, so this drives the resolver with
-    direct source-part rows (FK checks off) rather than a populated
-    ``ConcatenatedRecording``: the resolver must read the
+    Drives the resolver with direct source-part rows (FK checks off) rather
+    than a populated ``ConcatenatedRecording``, keeping this a fast unit test:
+    the resolver must read the
     ``ConcatenatedRecordingSelection -> PreprocessingParameters`` FK, NOT a
     member ``RecordingSelection``.
     """

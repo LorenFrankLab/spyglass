@@ -84,7 +84,8 @@ def test_recording_plan_is_deterministic():
 def test_recording_plan_input_hash_changes_recording_id():
     """The resolved-input hash is folded into the identity: a changed input
     set (a different hash under the SAME FK set) mints a different
-    recording_id. This is the OP-3/OP-4 honesty guarantee."""
+    recording_id, so a recording whose sort-group electrodes or interpolated
+    bad channels changed is never reused under the old id."""
     id_a = build_recording_selection_plan(
         dict(_FULL_REC), recording_input_hash=_REC_HASH
     ).recording_id

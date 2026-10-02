@@ -3,9 +3,9 @@ attributed electrode.
 
 Regression guard for the two coupled defects in sort-time unit attribution:
 
-* F1: ``get_template_extremum_amplitude`` defaulted to ``mode="at_index"``
+* Value: ``get_template_extremum_amplitude`` defaulted to ``mode="at_index"``
   (the value at the alignment sample), under-reporting the true peak.
-* F2: ``at_index`` re-picks its own best channel, which could differ from
+* Channel: ``at_index`` re-picks its own best channel, which could differ from
   the electrode FK (``get_template_extremum_channel``, ``mode="extremum"``).
 
 The fix passes ``mode="extremum"`` (and the configured ``peak_sign``) to the
@@ -79,12 +79,12 @@ def test_peak_amplitude_is_extremum_on_attributed_electrode(populated_sorting):
             best_idx = int(np.argmax(chan_peak))
             expected_amp = float(chan_peak[best_idx])
 
-        # F2: amplitude is on the SAME channel as the attributed electrode.
+        # Channel: amplitude is on the SAME channel as the attributed electrode.
         assert chan_ids[best_idx] == int(row["electrode_id"]), (
             f"unit {uid}: peak amplitude channel {chan_ids[best_idx]} != "
             f"attributed electrode {int(row['electrode_id'])}"
         )
-        # F1: stored amplitude is the extremum (not the at-index value).
+        # Value: stored amplitude is the extremum (not the at-index value).
         assert np.isclose(
             abs(float(row["peak_amplitude_uv"])),
             expected_amp,

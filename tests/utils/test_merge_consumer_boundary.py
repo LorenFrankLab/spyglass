@@ -38,7 +38,8 @@ def two_source_merge(dj_conn, mini_dict):
     pointing at the same already-ingested sample raw NWB file (so
     ``fetch_nwb`` finds a real file on disk without building analysis
     files). One row is inserted into each source, giving the merge master
-    the >=2-source-type condition the A2 bug requires.
+    the >=2-source-type condition the multi-source ``fetch_nwb`` bug
+    requires.
 
     Yields a dict with the activated classes and the two merge_ids
     (``merge_id_a`` owns the ``LeafA`` file, ``merge_id_b`` the ``LeafB``).
@@ -374,8 +375,8 @@ def test_fetch_nwb_return_merge_ids_single_source_unchanged(two_source_merge):
 
     Guards the shared-method change: scoping merge_id resolution to the
     current source must not perturb the single-source path (which is what
-    every real merge master uses today). Reverting the A2 fix leaves this
-    green -- it asserts the behavior the fix preserves, not the bug it
+    every real merge master uses today). Reverting the multi-source fix leaves
+    this green -- it asserts the behavior the fix preserves, not the bug it
     removes.
     """
     Merge = two_source_merge["Merge"]

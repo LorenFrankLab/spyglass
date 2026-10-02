@@ -840,8 +840,8 @@ def test_remove_field_does_not_change_default_recording(
 def test_bad_marked_specific_reference_materializes(handling_session):
     """A ``specific`` sort group whose reference electrode is flagged
     ``bad_channel='True'`` (e.g. a dedicated ground) still materializes: the
-    reference is subtracted then dropped, and phase 3 adds no reference-quality
-    raise and never interpolates the reference."""
+    reference is subtracted then dropped, with no reference-quality raise and
+    no interpolation of the reference."""
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,

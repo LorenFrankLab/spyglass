@@ -6,10 +6,11 @@ Locks two contracts a silent error would corrupt:
 * ``RecordingArtifactDetection._detect_artifacts`` returns valid_times that are
   start-sorted, non-overlapping, within the recording bounds, >= min_length_s,
   exclude the detected artifact, and never span an inter-chunk wall-clock gap
-  (the disjoint case also proves a chunk-boundary artifact IS masked -- the L1
-  edge is unreachable because removal_window_ms>0 widens every artifact).
+  (the disjoint case also proves a chunk-boundary artifact IS masked -- an
+  artifact ending on a chunk's final sample cannot collapse to a single
+  unmasked sample because removal_window_ms>0 widens every artifact).
 
-Plus an L2 pin: the clamp-vs-raise boundary of ``_spike_times_to_frames``.
+Plus a pin on the clamp-vs-raise boundary of ``_spike_times_to_frames``.
 """
 
 from __future__ import annotations
@@ -172,8 +173,8 @@ def test_detect_artifacts_output_structure_contiguous():
 
 
 # --------------------------------------------------------------------------- #
-# C. _detect_artifacts on a DISJOINT recording (L1-safe: chunk-boundary
-#    artifact IS masked, valid_times never span the gap)
+# C. _detect_artifacts on a DISJOINT recording (a chunk-boundary artifact
+#    IS masked, valid_times never span the gap)
 # --------------------------------------------------------------------------- #
 
 
@@ -190,8 +191,8 @@ def test_detect_artifacts_disjoint_masks_chunk_boundary_artifact():
     n = times.size
     traces = np.zeros((n, 4), dtype="float32")
     # Artifact on the LAST 10 frames of chunk A (ends exactly on the chunk's
-    # final sample -- the L1 edge). With removal_window_ms>0 it is widened to
-    # the left, so it stays multi-sample and is masked correctly.
+    # final sample -- the chunk-boundary edge). With removal_window_ms>0 it is
+    # widened to the left, so it stays multi-sample and is masked correctly.
     traces[per_chunk - 10 : per_chunk, :] = 5000.0
     rec = _rec(traces, fs=fs, times=times)
     params = _artifact_params()
@@ -206,8 +207,8 @@ def test_detect_artifacts_disjoint_masks_chunk_boundary_artifact():
     # The chunk-boundary artifact frame (chunk A's final sample) is excluded.
     art_t = times[per_chunk - 1]
     assert not np.any((vt[:, 0] <= art_t) & (art_t <= vt[:, 1])), (
-        "a chunk-boundary artifact must be masked (L1 edge is unreachable "
-        "with removal_window_ms>0)"
+        "a chunk-boundary artifact must be masked (the chunk-final-sample "
+        "edge is unreachable with removal_window_ms>0)"
     )
     # No valid interval spans the inter-chunk gap [2 s, 5 s].
     spans_gap = np.any((vt[:, 0] < 2.5) & (vt[:, 1] > 4.5))
@@ -305,7 +306,7 @@ def test_detect_artifacts_recovers_planted_interval_times():
 
 
 # --------------------------------------------------------------------------- #
-# D. L2 pin: _spike_times_to_frames clamp-vs-raise boundary
+# D. _spike_times_to_frames clamp-vs-raise boundary pin
 # --------------------------------------------------------------------------- #
 
 

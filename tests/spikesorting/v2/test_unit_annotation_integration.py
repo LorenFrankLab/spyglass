@@ -220,29 +220,29 @@ def test_typed_annotation_sets_and_explicit_common_reader(
         assert root.created_by == dj.config["database.user"]
 
         score_definition = UnitAnnotationDefinition.insert_definition(
-            "phase4_custom_score",
+            "typed_annotation_score",
             1,
             "float",
             physical_unit="a.u.",
-            description="Phase 4 integration score",
+            description="Typed annotation integration score",
         )
         with pytest.raises(ValueError, match="immutable"):
             UnitAnnotationDefinition.insert_definition(
-                "phase4_custom_score",
+                "typed_annotation_score",
                 1,
                 "float",
                 physical_unit="changed",
             )
 
         score_frame = pd.DataFrame(
-            {"phase4_custom_score": [1.0000000000000002, 2.25]},
+            {"typed_annotation_score": [1.0000000000000002, 2.25]},
             index=pd.Index(unit_ids, name="unit_id"),
         )
         score = CurationUnitAnnotationSet.from_dataframe(
             root,
             score_definition,
             score_frame,
-            producer="phase4-test",
+            producer="typed-annotation-test",
             producer_version="1.0",
             producer_parameters={"window": 4},
         )
@@ -250,7 +250,7 @@ def test_typed_annotation_sets_and_explicit_common_reader(
             root,
             score_definition,
             score_frame,
-            producer="phase4-test",
+            producer="typed-annotation-test",
             producer_version="1.0",
             producer_parameters={"window": 4},
         )
@@ -283,7 +283,7 @@ def test_typed_annotation_sets_and_explicit_common_reader(
                     root,
                     score_definition,
                     changed_frame,
-                    producer="phase4-test",
+                    producer="typed-annotation-test",
                     producer_version="1.0",
                     producer_parameters={"window": 4},
                 )
@@ -291,7 +291,7 @@ def test_typed_annotation_sets_and_explicit_common_reader(
             root,
             score_definition,
             changed_frame,
-            producer="phase4-test",
+            producer="typed-annotation-test",
             producer_version="1.0",
             producer_parameters={"window": 4},
         )
@@ -299,9 +299,9 @@ def test_typed_annotation_sets_and_explicit_common_reader(
         assert len(CurationUnitAnnotationSet & root.as_key()) == 2
 
         for name, value_type, values, expected_dtype in (
-            ("phase4_custom_count", "int", [1, 2], "int64"),
-            ("phase4_custom_flag", "bool", [True, False], "bool"),
-            ("phase4_custom_note", "text", ["", "stable"], "object"),
+            ("typed_annotation_count", "int", [1, 2], "int64"),
+            ("typed_annotation_flag", "bool", [True, False], "bool"),
+            ("typed_annotation_note", "text", ["", "stable"], "object"),
         ):
             definition = UnitAnnotationDefinition.insert_definition(
                 name, 1, value_type
@@ -312,16 +312,16 @@ def test_typed_annotation_sets_and_explicit_common_reader(
                 pd.DataFrame(
                     {name: values}, index=pd.Index(unit_ids, name="unit_id")
                 ),
-                producer="phase4-test",
+                producer="typed-annotation-test",
             )
             assert str(ref.to_dataframe().dtypes.iloc[0]) == expected_dtype
 
         special_definition = UnitAnnotationDefinition.insert_definition(
-            "phase4_special_float", 1, "float"
+            "typed_annotation_special_float", 1, "float"
         )
         special_frame = pd.DataFrame(
             {
-                "phase4_special_float": pd.Series(
+                "typed_annotation_special_float": pd.Series(
                     [None, float("nan")], dtype="object"
                 ).to_numpy()
             },
@@ -331,7 +331,7 @@ def test_typed_annotation_sets_and_explicit_common_reader(
             root,
             special_definition,
             special_frame,
-            producer="phase4-test",
+            producer="typed-annotation-test",
         )
         special_round_trip = special.to_dataframe()
         assert special_round_trip.iloc[0, 0] is None
@@ -341,7 +341,7 @@ def test_typed_annotation_sets_and_explicit_common_reader(
                 root,
                 special_definition,
                 special_round_trip,
-                producer="phase4-test",
+                producer="typed-annotation-test",
             )
             == special
         )
@@ -351,7 +351,7 @@ def test_typed_annotation_sets_and_explicit_common_reader(
                 root,
                 score_definition,
                 pd.DataFrame(
-                    {"phase4_custom_score": ["bad", "type"]},
+                    {"typed_annotation_score": ["bad", "type"]},
                     index=pd.Index(unit_ids, name="unit_id"),
                 ),
             )
@@ -360,7 +360,7 @@ def test_typed_annotation_sets_and_explicit_common_reader(
                 root,
                 score_definition,
                 pd.DataFrame(
-                    {"phase4_custom_score": [0.5]},
+                    {"typed_annotation_score": [0.5]},
                     index=pd.Index([max(unit_ids) + 100], name="unit_id"),
                 ),
             )

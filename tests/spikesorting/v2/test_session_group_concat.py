@@ -1758,7 +1758,7 @@ def test_concat_chronic_real_dataset_memory_runtime(request, dj_conn):
     Skipped by default. Given a real 1-hour, 30 kHz chronic NWB via
     ``SPIKESORTING_V2_CHRONIC_TEST_PATH``, ingests it, builds a same-day
     ``SessionGroup`` over its lowest sort group (one shank / ~32 channels for a
-    polymer probe), and runs the Phase end-to-end path
+    polymer probe), and runs the concatenation end-to-end path
     (``ConcatenatedRecording.populate`` then concat-backed ``Sorting.populate``).
     Asserts peak RSS < 8 GB and total runtime < 10 min on a 16-core machine,
     and logs the materialization vs sort timings separately so concatenation

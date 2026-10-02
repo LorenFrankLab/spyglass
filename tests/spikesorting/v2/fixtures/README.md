@@ -157,6 +157,6 @@ and the `FIXTURE_URLS` in `_fetch.py` are committed.
 
 ## Baselines
 
-`baselines/` holds the v1 spike-sorting baseline that Phase 1 parity tests
+`baselines/` holds the v1 spike-sorting baseline that the v1 ↔ v2 parity tests
 compare against. Unlike the fixtures, the small `.pkl` / `.json` baseline
 artifacts **are** committed; see [`../baseline_capture.py`](../baseline_capture.py).

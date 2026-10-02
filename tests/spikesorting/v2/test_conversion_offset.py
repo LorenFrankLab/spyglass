@@ -97,7 +97,8 @@ def test_no_filter_reference_zeroes_channel_offset(
     referencing the offset must be zeroed (the per-channel constant DC cancels
     under referencing), matching what the bandpass path already does.
 
-    Fails before SIG-1 (offsets stay at 1000 uV).
+    Fails without the reference-path offset zeroing (offsets stay at
+    1000 uV).
     """
     from spyglass.spikesorting.v2._recording_preprocessing import (
         apply_spatial_preprocessing,

@@ -352,7 +352,7 @@ def test_recording_input_hash_bad_channel_order_independent():
 
 
 def test_recording_input_hash_sensitive_to_membership():
-    """Adding/removing an electrode (the OP-4 drift) changes the hash."""
+    """Adding/removing a sort-group electrode changes the hash."""
     assert _rih(electrode_ids=[0, 1, 2]) != _rih(electrode_ids=[0, 1, 2, 3])
 
 
@@ -365,7 +365,7 @@ def test_recording_input_hash_sensitive_to_reference():
 
 
 def test_recording_input_hash_sensitive_to_interpolate_set():
-    """A changed interpolate bad-channel set (the OP-3 drift) changes the
+    """A changed live bad-channel set on the interpolate path changes the
     hash; an empty set is distinct from a non-empty one."""
     assert _rih(interpolated_bad_channel_ids=[]) != _rih(
         interpolated_bad_channel_ids=[5]

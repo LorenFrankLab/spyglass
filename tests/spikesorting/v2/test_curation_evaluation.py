@@ -1574,9 +1574,9 @@ def test_final_snr_peak_sign_uses_sorter_polarity(
 ):
     """make_fetch injects the sorter's resolved peak_sign into snr kwargs.
 
-    Same SIG-2 fix as CurationEvaluation: the planted MS5 sort carries
-    ``detect_sign=-1`` -> ``'neg'`` (the regression-pinned value), confirming the
-    helper is wired into CurationEvaluation's DB-fetch stage.
+    Same sorter-polarity SNR fix as CurationEvaluation: the planted MS5 sort
+    carries ``detect_sign=-1`` -> ``'neg'`` (the regression-pinned value),
+    confirming the helper is wired into CurationEvaluation's DB-fetch stage.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
