@@ -49,7 +49,7 @@ backend `ml_ms4alg` does not build on NumPy 2, so it could never run. Run MS4 in
 the legacy environment or through the containerized MS4 preset
 (`franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`).
 
-The legacy environment file currently requires relaxing the SI/NumPy pins in
+The legacy environment file currently requires relaxing the SI/probeinterface pins in
 `pyproject.toml` before the environment build (see the comments at the top of
 that file). That is a development-time procedure for the legacy suite, **not**
 the normal user path: users who only need to *read* v0/v1 results use the modern
@@ -109,8 +109,9 @@ The schema changes covered here are:
   tables/parts are declared on import.
 - The concatenation tables are redeclared. Concatenation no longer applies
   motion correction, so `ConcatenatedRecording` loses its `motion_preset`
-  column and its foreign key to the removed `MotionCorrectionParameters` table
-  in `spikesorting_v2_session_group`, and `concat_recording_id` values change.
+  column, `ConcatenatedRecordingSelection` loses its foreign key to the removed
+  `MotionCorrectionParameters` table in `spikesorting_v2_session_group`, and
+  `concat_recording_id` values change.
   It gains `statistics_spans` (`NOT NULL`, no default; noise, whitening, and the
   nn-noise cluster read it for every concat-backed sort) and the
   `continuity_spans` / `continuity_start_s` / `continuity_end_s` columns.
@@ -460,8 +461,10 @@ TrackedUnit = unit_matching_module.TrackedUnit
     `IntervalList` rows are tagged `pipeline="spikesorting_artifact_detection_v2"`
     (v1: `spikesorting_artifact_v1`). The artifact amplitude threshold is
     `amplitude_threshold_uv` (default 500), compared against gain- and
-    offset-scaled microvolt traces; v1's `amplitude_thresh_uV` defaulted to
-    3000.
+    offset-scaled microvolt traces. v1's `amplitude_thresh_uV` (default 3000)
+    was compared against unscaled traces, so it is in the recording's raw
+    units despite its name; to port a v1 threshold, multiply it by the
+    recording's gain in µV per unit.
 
 - **Parameter rows are named differently — no back-compat aliases.** The June
     2026 catalog correction renames every Frank-lab row to a dated,

@@ -14,8 +14,8 @@ Spike Sorting v2 pipeline (#1609). To upgrade:
     SpikeInterface, probeinterface, JAX and `non-local-detector` pins all
     change; see Infrastructure below.
 - To produce new v0/v1 spike-sorting output, also keep a second environment
-    built from `environments/environment_spikesorting_legacy.yml` (follow the
-    steps in its header). Both environments use the same database. See
+    built from `environments/environment_spikesorting_legacy.yml` (follow steps
+    1-3 in its header). Both environments use the same database. See
     [Two environments, one database](Features/SpikeSortingV2_Migration.md#two-environments-one-database).
 - Run the `UnitAnnotation` migration below once, before writing new annotations.
 - If you used Spike Sorting v2 on a development database before this release,
@@ -38,7 +38,7 @@ from spyglass.decoding.v1.core import DecodingParameters
 from spyglass.position.v1.position_dlc_project import DLCProject
 from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
 
-FirFilterParameters().alter()  # #1463
+FirFilterParameters().alter()  # #1464
 DecodingParameters().alter()  # #1463
 DLCProject().alter()  # #1534
 UnitSelectionParams().alter()  # #1670; only needed to use unit_criteria
@@ -84,7 +84,10 @@ must be run in the legacy environment:
 - loading a Zarr-format waveform folder
 
 MountainSort4 also needs the legacy environment: its `ml_ms4alg` backend does
-not run on NumPy 2.
+not run on NumPy 2. The `spike_location` waveform feature is now v2-only and
+raises `NotImplementedError` for v0/v1 sorts in either environment, so v0/v1
+`UnitWaveformFeatures` selections need a features row without it (such as
+`amplitude`).
 
 #### Spike-sorting recordings read the raw `ElectricalSeries` by name (#1609)
 
@@ -110,20 +113,26 @@ or `log_export` positionally must pass them by keyword.
     v1 curations made with `apply_merge=True`.
 - `UnitAnnotation.unit_id` stores the NWB unit id. `add_annotation` refuses a
     merge that still holds position-based annotations until the migration in the
-    release notes has run, and now runs inside a caller's open transaction. A
-    new `UnitAnnotationPositionalIdMigration` table records the migration.
+    release notes has run. It now runs inside a caller's open transaction, so
+    the caller must roll back if it fails. A new
+    `UnitAnnotationPositionalIdMigration` table records the migration.
 - An include-label filter on a curation whose units carry no labels now selects
     no units (previously every unit).
 - Firing-rate smoothing on `SpikeSortingOutput` and `SortedSpikesGroup` no
     longer runs across gaps in the time axis.
 - `SortedSpikesDecodingV1` combines a user-supplied
     `decoding_kwargs["is_missing"]` with the missingness derived from the
-    decoding intervals (it used to be replaced by it). For populations that
-    include v2 sorts, encoding and decoding are also restricted to the time
+    decoding intervals. Previously a supplied `is_missing` replaced the interval
+    mask, so time outside the decoding intervals was decoded. For populations
+    that include v2 sorts, encoding and decoding are also restricted to the time
     every unit was observed; when no observed training time remains it raises
     `ValueError`. Results record the intervals used in
     `spyglass_observation_intervals`, `spyglass_encoding_intervals` and
     `spyglass_decoding_intervals` attributes.
+- Clusterless amplitude marks (v0 `UnitMarks`, v1 `UnitWaveformFeatures`) and
+    v0/v1 `BurstPair` peak amplitudes are read at the spike-aligned sample
+    rather than the waveform midpoint. Values change for waveform parameters
+    whose `ms_before` and `ms_after` differ.
 - `MuaEventsV1` smooths, normalizes and detects events within each contiguous
     observed run, and numbers events uniquely in time order. Results change for
     intervals with more than one valid-time segment.
@@ -149,6 +158,9 @@ or `log_export` positionally must pass them by keyword.
     `pytorch<1.12` and no longer installs `mountainsort4`, which does not run on
     NumPy 2. The DLC and MoSeq environments stay on NumPy < 2 and drop their
     conda `pytorch` and `jax` pins #1609
+- The `moseq-cpu` / `moseq-gpu` extras and the MoSeq environments do not
+    currently install: every `keypoint-moseq` 0.6 release pins `panel==0.14.4`,
+    which conflicts with Spyglass's `panel>=1.4` #1609
 - Add `environments/environment_spikesorting_v2.yml` and
     `environments/environment_spikesorting_legacy.yml` #1609
 - Add optional extras `spikesorting-v2` (MountainSort5, torch),
@@ -182,9 +194,8 @@ or `log_export` positionally must pass them by keyword.
 - Decoding
 
     - `UnitWaveformFeatures` accepts v2 sorts, with amplitudes in µV. v0/v1
-        amplitudes are raw counts, so do not mix v0/v1 and v2 marks in one
-        decoder. The `spike_location` feature raises `NotImplementedError` for
-        v0/v1 sorts #1609
+        amplitudes are raw counts, so do not mix v0/v1 and v2 marks in one decoder
+        #1609
 
 - Spike Sorting
 
