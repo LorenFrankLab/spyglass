@@ -307,7 +307,7 @@ def _read_gt_spike_frames(nwb_file_name, fs):
     import pynwb
 
     from spyglass.common.common_nwbfile import Nwbfile
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         get_ground_truth_units_table,
     )
 

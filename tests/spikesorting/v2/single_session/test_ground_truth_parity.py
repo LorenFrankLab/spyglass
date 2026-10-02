@@ -120,7 +120,7 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
     import spikeinterface as si
 
     from spyglass.common.common_nwbfile import Nwbfile
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         get_ground_truth_units_table,
     )
 
@@ -375,7 +375,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
         np.arange(len(aggregated.unit_ids), dtype=np.int64)
     )
 
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         get_ground_truth_units_table,
     )
 
@@ -1662,7 +1662,7 @@ def test_mountainsort4_ground_truth(
         np.arange(len(aggregated.unit_ids), dtype=np.int64)
     )
 
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         get_ground_truth_units_table,
     )
 
@@ -1934,7 +1934,7 @@ def test_clusterless_thresholder_ground_truth(
     ).astype(np.float64)
     assert sampling_frequency is not None and sampling_frequency > 0
 
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         get_ground_truth_units_table,
     )
 

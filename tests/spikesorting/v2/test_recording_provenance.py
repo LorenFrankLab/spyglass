@@ -281,7 +281,7 @@ def test_channel_name_resolution_path_real_nwb(
 
     import pynwb
 
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         _add_probe_and_electrodes,
         tetrode_probe_layout,
     )

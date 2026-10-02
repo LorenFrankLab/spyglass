@@ -468,7 +468,7 @@ def _build_nwbfile(fixture_name: str, session_start: datetime):
         ),
         session_id=f"mearec_{fixture_name}",
         keywords=["spike sorting", "simulation", "ground truth"],
-        source_script="spyglass.spikesorting.v2._fixtures.mearec_to_nwb",
+        source_script="tests.spikesorting.v2.fixtures.mearec_to_nwb",
         source_script_file_name="mearec_to_nwb.py",
     )
     nwbfile.subject = Subject(

@@ -20,7 +20,7 @@ deterministic, so they are regenerated locally or in CI from
 
 The polymer probe geometry (4 shanks × 32 contacts, 26 µm pitch) mirrors the
 Frank-lab reference probe metadata `128c-4s6mm6cm-15um-26um-sl`. It is defined
-once in [`mearec_to_nwb.py`](../../../../src/spyglass/spikesorting/v2/_fixtures/mearec_to_nwb.py)
+once in [`mearec_to_nwb.py`](mearec_to_nwb.py)
 (`polymer_probe_layout`) and shared by fixture generation and NWB conversion so
 the MEArec channel order always matches the NWB electrode order.
 

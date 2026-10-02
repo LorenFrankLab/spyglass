@@ -168,7 +168,7 @@ def _write_xz_probe_nwb(
         ShanksElectrode,
     )
 
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import _build_nwbfile
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import _build_nwbfile
 
     contacts = [(int(eid), int(shank)) for eid, shank in contacts]
     geometry = _xz_geometry(contacts)

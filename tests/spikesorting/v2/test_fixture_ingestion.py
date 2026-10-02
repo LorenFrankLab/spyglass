@@ -57,7 +57,7 @@ def test_mearec_fixture_ingests_full_electrode_table(mearec_smoke_ingested):
     """All 128 polymer-probe contacts land in the Electrode table."""
     from spyglass.common import Electrode
 
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         polymer_probe_layout,
     )
 
@@ -72,7 +72,7 @@ def test_mearec_fixture_registers_probe_with_correct_shanks(
     """The probe ingestion path produces the expected ProbeType / Probe.Electrode."""
     from spyglass.common.common_device import Probe, ProbeType
 
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         polymer_probe_layout,
     )
 
@@ -99,7 +99,7 @@ def test_mearec_fixture_writes_sidecar_ground_truth_units(
     import pynwb
 
     from spyglass.common.common_nwbfile import Nwbfile
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         get_ground_truth_units_table,
     )
 
@@ -149,7 +149,7 @@ def test_mearec_fixture_gain_required(monkeypatch, dtype):
     import numpy as np
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._fixtures import mearec_to_nwb
+    from tests.spikesorting.v2.fixtures import mearec_to_nwb
 
     # Fresh NumpyRecording has no gain_to_uV/offset_to_uV.
     gainless = si.NumpyRecording(
@@ -208,7 +208,7 @@ def _patch_load_recordings(monkeypatch, recgen):
     """
     import MEArec
 
-    from spyglass.spikesorting.v2._fixtures import mearec_to_nwb
+    from tests.spikesorting.v2.fixtures import mearec_to_nwb
 
     monkeypatch.setattr(MEArec, "load_recordings", lambda *a, **k: recgen)
     return mearec_to_nwb
@@ -217,7 +217,7 @@ def _patch_load_recordings(monkeypatch, recgen):
 @pytest.mark.fast
 def test_normalize_cell_type_canonicalizes_and_rejects():
     """``_normalize_cell_type`` strips/upper-cases and rejects drift."""
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         _normalize_cell_type,
     )
 

@@ -231,7 +231,7 @@ def test_ground_truth_population_after_auto_labels(workflow, monkeypatch):
     from spikeinterface.comparison import compare_sorter_to_ground_truth
 
     from spyglass.spikesorting.analysis.v1 import group as gm
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         get_ground_truth_units_table,
     )
     from spyglass.spikesorting.v2._recipe_catalog import FRANKLAB_CURATION_RULES

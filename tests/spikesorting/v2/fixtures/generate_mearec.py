@@ -38,20 +38,23 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import ProbeLayout
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import ProbeLayout
 
 # The bootstrap must run before importing Spyglass, so resolve and import the
-# standalone test-environment helper by path rather than as a package.
+# standalone test-environment helper by path rather than as a package. The
+# repository root makes the `tests` package (and its fixture converter)
+# importable when this file runs as a script.
 _THIS_DIR = Path(__file__).resolve().parent
 _V2_TEST_DIR = _THIS_DIR.parent
-if str(_V2_TEST_DIR) not in sys.path:
-    sys.path.insert(0, str(_V2_TEST_DIR))
+for _path in (_V2_TEST_DIR, _THIS_DIR.parents[3]):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 from test_env import bootstrap_v2_test_environment  # noqa: E402
 
-# Spyglass and its `_fixtures` helpers are imported lazily inside functions,
-# always after `bootstrap_v2_test_environment` has repointed `dj.config` at the
-# isolated test database -- never at module import time.
+# Spyglass is imported lazily inside functions, always after
+# `bootstrap_v2_test_environment` has repointed `dj.config` at the isolated
+# test database -- never at module import time.
 
 _DEFAULT_BASE_DIR = "tests/_data/spikesorting_v2"
 _DEFAULT_PREFIX = "pytests"
@@ -129,13 +132,8 @@ class GenProfile:
 
 
 def _profiles() -> dict[str, tuple[GenProfile, tuple[FixtureSpec, ...]]]:
-    """Return ``{profile_name: (GenProfile, (FixtureSpec, ...))}`` mapping.
-
-    Defined as a function rather than a module-level constant because building
-    a ``ProbeLayout`` imports from ``spyglass.spikesorting.v2._fixtures``,
-    which must happen only after ``bootstrap_v2_test_environment`` has run.
-    """
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    """Return ``{profile_name: (GenProfile, (FixtureSpec, ...))}`` mapping."""
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         neuropixels_probe_layout,
         polymer_probe_layout,
         tetrode_probe_layout,
@@ -583,7 +581,7 @@ def _verify_ingestion(nwb_path: Path, spec: FixtureSpec) -> dict:
     # instead that the sidecar table is present and non-empty.
     import pynwb
 
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         get_ground_truth_units_table,
     )
 
@@ -686,7 +684,7 @@ def generate_fixtures(
                 "writing a fresh manifest with only the regenerated entries."
             )
 
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         mearec_to_spyglass_nwb,
     )
 

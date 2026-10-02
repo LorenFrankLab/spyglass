@@ -496,7 +496,7 @@ def synthesize_minirec_nwb(
     import pynwb
     from spikeinterface.core import generate_ground_truth_recording
 
-    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+    from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         _add_probe_and_electrodes,
         _add_raw_ephys,
         _build_nwbfile,
@@ -602,7 +602,7 @@ def inject_raw_nan(
         Column (channel) index into ``data`` to corrupt.
     series_name : str
         Acquisition ``ElectricalSeries`` name. Default ``"e-series"``, the
-        name the MEArec fixture generator (``_fixtures/mearec_to_nwb.py``)
+        name the MEArec fixture generator (``fixtures/mearec_to_nwb.py``)
         writes.
 
     Returns
