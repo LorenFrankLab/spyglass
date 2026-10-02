@@ -26,7 +26,7 @@ def basic_args(dummy_video):
         video_filename=dummy_video,
         position_mean=np.zeros((n, 2)),
         orientation_mean=np.zeros(n),
-        centroids={"head": np.zeros((n, 2))},
+        bodypart_centroids={"head": np.zeros((n, 2))},
         position_time=np.arange(n, dtype=float),
         output_video_filename="out.mp4",
         key_hash="testhash",
@@ -104,10 +104,10 @@ class TestVideoMakerInit:
         assert vm.batch_size == 64
 
     def test_centroids_stored(self, basic_args):
-        """centroids dict is stored as-is."""
+        """bodypart_centroids dict is stored as-is."""
         vm = _make_vm(basic_args)
-        assert list(vm.centroids) == ["head"]
-        assert np.array_equal(vm.centroids["head"], np.zeros((10, 2)))
+        assert list(vm.bodypart_centroids) == ["head"]
+        assert np.array_equal(vm.bodypart_centroids["head"], np.zeros((10, 2)))
 
 
 class TestMakeVideoPassthrough:
