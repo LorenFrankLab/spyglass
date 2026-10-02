@@ -8,6 +8,11 @@ import spikeinterface as si
 
 from spyglass.common.common_ephys import Electrode
 from spyglass.spikesorting import _si_compat
+
+# Re-exported: v0/v1 import it from this module.
+from spyglass.spikesorting._recording_timestamps import (  # noqa: F401
+    _get_recording_timestamps,
+)
 from spyglass.utils import logger
 
 
@@ -310,28 +315,6 @@ def read_raw_nwb_recording(
     else:  # SpikeInterface 0.99.x
         kwargs["electrical_series_name"] = series_path.rsplit("/", 1)[-1]
     return se.read_nwb_recording(nwb_file_abs_path, **kwargs)
-
-
-def _get_recording_timestamps(recording):
-    num_segments = recording.get_num_segments()
-
-    if num_segments <= 1:
-        return recording.get_times()
-
-    frames_per_segment = [0] + [
-        recording.get_num_frames(segment_index=i) for i in range(num_segments)
-    ]
-
-    cumsum_frames = np.cumsum(frames_per_segment)
-    total_frames = np.sum(frames_per_segment)
-
-    timestamps = np.zeros((total_frames,))
-    for i in range(num_segments):
-        start_index = cumsum_frames[i]
-        end_index = cumsum_frames[i + 1]
-        timestamps[start_index:end_index] = recording.get_times(segment_index=i)
-
-    return timestamps
 
 
 def _reformat_metrics(metrics: Dict[str, Dict[str, float]]) -> List[Dict]:
