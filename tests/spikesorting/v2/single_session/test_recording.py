@@ -1733,7 +1733,7 @@ def test_recording_fresh_write_cleanup_unlinks_staged_file(
     from spyglass.common import IntervalList  # noqa: F401
     from spyglass.common.common_lab import LabTeam
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import recording as rec_mod
+    from spyglass.spikesorting.v2 import _recording_nwb
     from spyglass.spikesorting.v2 import utils as utils_mod
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -1787,10 +1787,14 @@ def test_recording_fresh_write_cleanup_unlinks_staged_file(
     monkeypatch.setattr(
         utils_mod, "_get_recording_timestamps", _raise_after_write
     )
-    # recording.py imports the symbol at call time from utils, so patching
-    # the utils module is sufficient; guard against a module-level rebind.
+    # The artifact pipeline (``_recording_nwb.compute_recording_artifact``)
+    # imports the symbol at call time from utils, so patching the utils module
+    # is sufficient; guard against a module-level rebind.
     monkeypatch.setattr(
-        rec_mod, "_get_recording_timestamps", _raise_after_write, raising=False
+        _recording_nwb,
+        "_get_recording_timestamps",
+        _raise_after_write,
+        raising=False,
     )
 
     try:

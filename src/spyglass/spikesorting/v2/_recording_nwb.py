@@ -2,6 +2,9 @@
 
 ``read_recording_nwb`` opens an explicit series with lazy timestamp access,
 including when workers or analyzers reconstruct the extractor.
+``compute_recording_artifact`` runs the preprocessing pipeline from the raw
+NWB to a staged artifact (staging through ``Recording._write_nwb_artifact``),
+and ``recording_provenance_table`` builds the source-lineage table it embeds.
 ``write_nwb_artifact`` streams the preprocessed traces and the wall-clock
 timestamps vector into an ``AnalysisNwbfile`` for ``Recording.make_compute``
 (and the rebuild path), then hashes the persisted file for the cache contract.
@@ -26,9 +29,10 @@ DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / numpy / pynwb / spyglass
 dependencies are imported lazily inside the function. ``write_nwb_artifact``
 touches the DB / DataJoint at CALL time via lazy imports (``AnalysisNwbfile``
-path resolution + file create). It also lazily imports the
-``_ELECTRICAL_SERIES_NAME`` constant from ``recording`` at call time -- by then
-``recording`` is fully imported, so there is no import cycle.
+path resolution + file create). It also lazily imports names from
+``recording`` (the ``_ELECTRICAL_SERIES_NAME`` constant, the
+``RecordingArtifactResult`` carrier, the staged-file cleanup helper) at call
+time -- by then ``recording`` is fully imported, so there is no import cycle.
 
 STAGING IS THE ONE DB ACCESS A TRI-PART ``make_compute`` MAY KEEP. Its inputs
 belong in ``make_fetch``, whose result DataJoint re-checks inside the insert
@@ -45,7 +49,13 @@ registered only in ``make_insert``.
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
+
+if TYPE_CHECKING:
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingArtifactResult
 
 
 class StoredTraces(NamedTuple):
@@ -809,3 +819,327 @@ def write_nwb_artifact(
         raise
 
     return analysis_file_name, object_id, content_hash
+
+
+def recording_provenance_table(
+    *,
+    recording_id,
+    raw_object_id,
+    preprocessing_params_name,
+    sort_group_id,
+    reference_mode,
+    bad_channel_handling,
+):
+    """Build the recording source-provenance scratch table.
+
+    Re-emits, into the artifact NWB, the source lineage ``make_fetch``
+    resolved from the DB so the file is interpretable without the database:
+    the raw source object id, the recording id, the preprocessing recipe,
+    the sort group, the resolved reference mode, the bad-channel handling,
+    and the producing SpikeInterface version. Returns a one-element list
+    (``write_nwb_artifact``'s ``provenance_tables`` contract).
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        RECORDING_PROVENANCE,
+        build_provenance_table,
+    )
+
+    return [
+        build_provenance_table(
+            RECORDING_PROVENANCE,
+            {
+                "recording_id": str(recording_id),
+                "raw_object_id": str(raw_object_id),
+                "preprocessing_params_name": str(preprocessing_params_name),
+                "sort_group_id": int(sort_group_id),
+                "reference_mode": str(reference_mode),
+                "bad_channel_handling": str(bad_channel_handling),
+                "spikeinterface_version": si.__version__,
+            },
+        )
+    ]
+
+
+def compute_recording_artifact(
+    table_cls,
+    *,
+    raw_path: str,
+    raw_object_id: str,
+    nwb_file_name: str,
+    interval_list_name: str,
+    channel_ids: list,
+    reference_mode: str,
+    reference_electrode_id: int | None,
+    sort_valid_times,
+    raw_valid_times,
+    preprocessing_params: PreprocessingParamsSchema,
+    probe_types: tuple,
+    electrode_group_names: tuple,
+    bad_channel_ids: tuple = (),
+    existing_analysis_file_name: str | None = None,
+    provenance_tables=None,
+) -> RecordingArtifactResult:
+    """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
+
+    The stage order is: read -> channel-select -> normalize the channel
+    geometry -> temporal preprocessing (phase-shift, bandpass) on the
+    CONTINUOUS recording -> time restriction -> spatial preprocessing
+    (bad-channel interpolation, reference) -> tetrode geometry repair ->
+    distinct-position check. Filtering before the restriction is what
+    keeps a selected interval free of the transient a concatenation join
+    would otherwise inject.
+
+    Pipeline body shared between ``Recording.make_compute`` and
+    ``Recording._rebuild_nwb_artifact``; both stage a fresh, unregistered file
+    (``existing_analysis_file_name=None``). The rebuild path installs that
+    staged file into the canonical slot via ``os.replace`` only after a
+    verified ``content_hash`` match -- it does not overwrite in place.
+
+    Parameters
+    ----------
+    table_cls : type
+        The ``Recording`` class. The file is staged through its
+        ``_write_nwb_artifact``, called on the class so a patched writer
+        takes effect.
+    raw_path : str
+        Absolute path to the raw NWB file to read.
+    raw_object_id : str
+        NWB object id of the raw acquisition ElectricalSeries
+        (``Raw.raw_object_id``); selects the source series to read.
+    nwb_file_name : str
+        Name of the session's raw NWB file.
+    interval_list_name : str
+        ``IntervalList`` name selecting the sort interval.
+    channel_ids : list
+        Sorted electrode ids for the sort group.
+    reference_mode : str
+        Referencing mode (e.g. ``'none'``, ``'specific'``).
+    reference_electrode_id : int or None
+        Reference electrode id; non-``None`` only for ``'specific'``.
+    sort_valid_times : numpy.ndarray
+        Requested sort interval ``valid_times``, shape
+        ``(n_intervals, 2)`` in seconds.
+    raw_valid_times : numpy.ndarray
+        Raw data ``valid_times``, shape ``(n_intervals, 2)`` in
+        seconds.
+    preprocessing_params : PreprocessingParamsSchema
+        Validated preprocessing parameters.
+    probe_types : tuple
+        Per-channel ``probe_type`` for the sort group.
+    electrode_group_names : tuple
+        Per-channel ``electrode_group_name`` for the sort group.
+    bad_channel_ids : tuple, optional
+        Interior bad channels to re-include on the ``interpolate``
+        path; defaults to ``()`` (empty, the ``remove`` path).
+    existing_analysis_file_name : str or None, optional
+        When ``None`` (default), stage a fresh ``AnalysisNwbfile``;
+        otherwise overwrite this existing file (the rebuild path).
+
+    Returns
+    -------
+    RecordingArtifactResult
+        ``(analysis_file_name, object_id, content_hash, saved_start,
+        saved_end, sampling_frequency, n_channels, duration_s)`` -- the
+        metadata needed for the ``RecordingComputed`` boxing.
+        ``saved_start``/``saved_end``/``duration_s`` describe the
+        PERSISTED timestamps (the override when set).
+
+    Notes
+    -----
+    Cleanup contract: ``_write_nwb_artifact`` either writes a
+    full file or raises before any registration. On a
+    write/hash failure it unlinks the partial file before
+    propagating, on BOTH the fresh-write and the rebuild path:
+
+    Both callers stage a fresh, unregistered file, so the freshly staged
+    file is removed on a write/hash failure and a half-written artifact
+    never outlives a failed compute. The rebuild caller
+    (``_rebuild_nwb_artifact``) additionally fingerprints the staged file
+    and installs it into the canonical slot via ``os.replace`` ONLY on a
+    verified ``content_hash`` match; a rebuild that COMPLETES but whose
+    content drifted is REJECTED by the caller (it raises
+    ``RecordingContentDriftError``), the staged temp is discarded, and the
+    canonical slot is never written -- drifted bytes are never served. The
+    rebuild is reached only from ``get_recording`` when the cache file is
+    already absent, so there is no valid cache to lose, and the DataJoint
+    row (its ``content_hash``) plus the raw NWB always allow the next
+    ``get_recording`` to regenerate it.
+    """
+    from spyglass.spikesorting.v2._recording_geometry import (
+        assert_unique_contact_positions,
+        maybe_apply_tetrode_geometry,
+        normalize_channel_locations,
+    )
+    from spyglass.spikesorting.v2._recording_preprocessing import (
+        apply_spatial_preprocessing,
+        apply_temporal_preprocessing,
+    )
+
+    # Aliased: the bare name is the local ``filtering_description`` below.
+    from spyglass.spikesorting.v2._recording_preprocessing import (
+        filtering_description as _filtering_description_svc,
+    )
+    from spyglass.spikesorting.v2._recording_restriction import (
+        restrict_recording,
+        select_sort_group_channels,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        RecordingArtifactResult,
+        _unlink_staged_analysis_file,
+    )
+    from spyglass.spikesorting.v2.utils import _get_recording_timestamps
+
+    # Name the exact raw acquisition, including when the file also has LFP.
+    # Rate-based raw ElectricalSeries can reconstruct selected timestamps
+    # lazily from (t_start, sampling_frequency, frame index). Explicit
+    # timestamp series may be irregular, so retain their explicit vector.
+    raw_series_path, load_time_vector = raw_eseries_path_and_timestamp_mode(
+        raw_path, raw_object_id
+    )
+    recording = read_recording_nwb(
+        raw_path,
+        load_time_vector=load_time_vector,
+        electrical_series_path=raw_series_path,
+    )
+    sampling_frequency = float(recording.get_sampling_frequency())
+
+    # Channel-slice first, then filter the CONTINUOUS recording, and only
+    # then restrict in time. Restricting first would hand the lazy bandpass
+    # a concatenation of the selected intervals, and its margin would be
+    # read across the artificial joins -- so every interval edge, and a
+    # short interval in its entirety, would be filter transient rather than
+    # signal. SpikeInterface's ``FrameSliceRecording`` of a filter pulls
+    # that margin from the continuous parent instead, so each retained
+    # sample is filtered with its true temporal context. The spatial steps
+    # are per-sample across channels, so they are unaffected by the joins
+    # and run afterwards, on the restricted recording only.
+    recording = select_sort_group_channels(
+        recording,
+        nwb_file_abs_path=raw_path,
+        sort_group_channel_ids=channel_ids,
+        reference_mode=reference_mode,
+        reference_electrode_id=reference_electrode_id,
+        bad_channel_handling=preprocessing_params.bad_channel_handling,
+        bad_channel_ids=bad_channel_ids,
+    )
+    # Choose the plane from the contacts that STAY on the sort surface.
+    # The slice above also carries the ``specific`` reference, which
+    # ``apply_spatial_preprocessing`` subtracts and drops; because
+    # ``Probe.Electrode`` rel_* are per probe TYPE, a reference on another
+    # probe of the same type duplicates a member's raw position and would
+    # veto every plane for a group that is distinct without it.
+    # The interior bad channels the ``interpolate`` path re-includes DO
+    # stay; the reference is excluded even when it is one of them (which
+    # is also how ``apply_spatial_preprocessing`` treats it).
+    retained = {int(c) for c in channel_ids}
+    if preprocessing_params.bad_channel_handling == "interpolate":
+        retained |= {int(c) for c in bad_channel_ids}
+    if reference_mode == "specific":
+        retained -= {int(reference_electrode_id)}
+    retained_channel_ids = sorted(retained)
+    recording = normalize_channel_locations(
+        recording, channel_ids=retained_channel_ids
+    )
+    recording, temporal_steps = apply_temporal_preprocessing(
+        recording, preprocessing_params
+    )
+    recording, timestamps_override, n_selected_intervals = restrict_recording(
+        recording=recording,
+        nwb_file_name=nwb_file_name,
+        interval_list_name=interval_list_name,
+        sort_valid_times=sort_valid_times,
+        raw_valid_times=raw_valid_times,
+        min_segment_length=preprocessing_params.min_segment_length,
+    )
+    recording, spatial_steps = apply_spatial_preprocessing(
+        recording,
+        reference_mode=reference_mode,
+        reference_electrode_id=reference_electrode_id,
+        validated=preprocessing_params,
+        bad_channel_handling=preprocessing_params.bad_channel_handling,
+        bad_channel_ids=bad_channel_ids,
+    )
+    applied_steps = {**temporal_steps, **spatial_steps}
+    recording = maybe_apply_tetrode_geometry(
+        recording=recording,
+        probe_types=probe_types,
+        electrode_group_names=electrode_group_names,
+        sort_group_channel_ids=channel_ids,
+    )
+    assert_unique_contact_positions(recording)
+
+    # Provenance string for the persisted ElectricalSeries, built from the
+    # steps ACTUALLY applied (the ``applied_steps`` report): a fixed
+    # "Bandpass filter + common reference" string would misdescribe the
+    # saved artifact for the no_filter preset or reference_mode='none'
+    # (DANDI / archival), and a requested-but-skipped phase-shift must not
+    # be listed.
+    filtering_description = _filtering_description_svc(
+        preprocessing_params.bandpass_filter, reference_mode, applied_steps
+    )
+
+    analysis_file_name = None
+    try:
+        (
+            analysis_file_name,
+            object_id,
+            content_hash,
+        ) = table_cls._write_nwb_artifact(
+            recording=recording,
+            nwb_file_name=nwb_file_name,
+            existing_analysis_file_name=existing_analysis_file_name,
+            timestamps_override=timestamps_override,
+            filtering_description=filtering_description,
+            provenance_tables=provenance_tables,
+        )
+        # For a single contiguous interval, derive saved
+        # start/end/duration from the persisted override
+        # so the row matches the cached timestamps rather than the
+        # frame-slice's uncorrected ``get_times()``. For a
+        # multi-interval concat the override is the gap-spanning
+        # wall-clock envelope; its span would over-count by the gaps
+        # and break the truncation guard, so use the concat's own
+        # gap-excluded times there.
+        if n_selected_intervals == 1:
+            saved_times = _get_recording_timestamps(
+                recording, override=timestamps_override
+            )
+            saved_start = float(saved_times[0])
+            saved_end = float(saved_times[-1])
+        else:
+            # ``concatenate_recordings(ignore_times=True)`` gives a
+            # synthetic contiguous 0-based time axis. Avoid materializing
+            # that full vector just to read the first/last value.
+            n_samples = int(recording.get_num_samples(segment_index=0))
+            saved_start = 0.0
+            saved_end = (
+                0.0 if n_samples == 0 else (n_samples - 1) / sampling_frequency
+            )
+        n_channels = int(recording.get_num_channels())
+        duration_s = float(saved_end - saved_start)
+    except Exception:
+        # Only unlink on fresh-write failures; on rebuild the
+        # file IS the cache and partial-write damage is surfaced
+        # via the caller's hash-mismatch warning.
+        if (
+            existing_analysis_file_name is None
+            and analysis_file_name is not None
+        ):
+            _unlink_staged_analysis_file(
+                analysis_file_name,
+                context="Recording._compute_recording_artifact",
+            )
+        raise
+
+    return RecordingArtifactResult(
+        analysis_file_name=analysis_file_name,
+        object_id=object_id,
+        content_hash=content_hash,
+        sampling_frequency=sampling_frequency,
+        saved_start=saved_start,
+        saved_end=saved_end,
+        n_channels=n_channels,
+        duration_s=duration_s,
+    )
