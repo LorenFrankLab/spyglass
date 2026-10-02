@@ -1,8 +1,8 @@
 """Plugin interface + registry for cross-session unit matchers.
 
 A *matcher* takes wrapper-prepared waveform bundles, one per matching input,
-and returns pairwise cross-session unit matches. The interface is deliberately narrow so
-external backends (UnitMatch first, others later) can be added without touching
+and returns pairwise cross-session unit matches. The interface is deliberately
+narrow so backends (UnitMatch ships built in) can be added without touching
 the DataJoint tables:
 
 - :class:`SessionMatcherInput` -- one wrapper-prepared bundle per matching

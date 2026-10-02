@@ -125,9 +125,9 @@ def fetch_waveform_params(waveform_params_name: str) -> dict:
     Resolution is **strict**: the params come from the tracked
     ``AnalyzerWaveformParameters`` DB row, so a sort can never build / rebuild
     an analyzer whose waveform parameters are not recorded and queryable in the
-    database (the v1-like provenance goal). A missing row raises a clear,
-    actionable error rather than silently falling back to hardcoded / catalog
-    defaults -- run ``initialize_v2_defaults()`` (or
+    database (the same provenance v1 keeps in ``WaveformParameters``). A
+    missing row raises a clear, actionable error rather than silently falling
+    back to hardcoded / catalog defaults -- run ``initialize_v2_defaults()`` (or
     ``AnalyzerWaveformParameters.insert_default()``) to install the shipped
     region rows, or insert the custom row, first.
     """
@@ -824,7 +824,7 @@ def build_analyzer(
     # ``return_in_uV=False`` (see below).
     whiten = bool(waveform_params.get("whiten"))
     # Channel sparsity comes from the tracked recipe (``SparsityParams``); a
-    # blob predating the field means SI's radius/100 um default, which the
+    # blob without the field means SI's radius/100 um default, which the
     # schema default reproduces exactly.
     from spyglass.spikesorting.v2._params.analyzer_waveform import (
         SparsityParams,

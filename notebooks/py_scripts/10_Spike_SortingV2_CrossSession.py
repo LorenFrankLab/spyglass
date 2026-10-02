@@ -449,6 +449,6 @@ elif run_concat and run_unit_match and not unitmatch_available:
 # - Organize sorts and filter units with
 #   [Spike Sorting Analysis](./11_Spike_Sorting_Analysis.ipynb).
 # - For the matcher's parameters, internals, overlap restrictions, and the
-#   held-out matching-recovery evidence (including the per-day
+#   synthetic matching-recovery benchmark (including the per-day
 #   motion-correction alignment limitation), see
 #   `docs/src/Features/SpikeSortingV2.md`.

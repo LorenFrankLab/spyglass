@@ -6,7 +6,7 @@ the selection request, normalize ids, compute the deterministic content-
 addressed primary key, and assemble the master + source part rows to
 insert. The orchestrator then runs find-existing, the FK pre-checks, and
 the atomic insert transaction (with duplicate-PK race recovery) on the
-returned plan. (The split artifact selections derive their content-addressed
+returned plan. (The artifact selections derive their content-addressed
 id inline in ``_insert_artifact_selection``, so they need no plan builder
 here.)
 
@@ -125,8 +125,8 @@ def build_recording_selection_plan(
     shared with ``preflight_v2_pipeline``; the hash is folded in identically at
     both sites so the two cannot derive different ids. The hash also enters
     ``master_restriction`` so find-existing is scoped to the specific input set
-    -- two membership sets under one ``sort_group_id`` are distinct rows, not a
-    false "non-deterministic bypass".
+    -- two membership sets under one ``sort_group_id`` are distinct rows, not
+    a false "non-deterministic selection row" error.
 
     Raises
     ------

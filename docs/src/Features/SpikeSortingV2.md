@@ -57,8 +57,8 @@ mutually-exclusive source part tables -- `RecordingSource` (a single-session
 `ConcatenatedRecording`). Single-recording sorts can add an artifact-detection
 pass through the internal `ArtifactDetectionOutput` merge (a
 `RecordingArtifactDetection` or `SharedGroupArtifactDetection`). Concat sources
-already contain their frozen member masks; concatenation itself no longer
-corrects motion, so they accept no additional sorting-stage artifact input.
+already contain their frozen member masks; concatenation itself does not
+correct motion, so they accept no additional sorting-stage artifact input.
 The artifact merge is internal -- user workflows never import it. A sort can
 optionally add a third source part, `MotionCorrectionSource`, pointing at a
 `MotionCorrectedRecording` computed from the same base source and mask -- see
@@ -947,7 +947,8 @@ continuation review; compute/select child-scoped sets explicitly.
 
 `run_v2_pipeline` returns a mapping-compatible `RunResult`. Its `root_curation`
 and `auto_labeled_curation` attributes are generation-pinned `CurationRef`s, so
-callers no longer have to rename `root_curation_id` to `curation_id` by hand.
+callers pass them on directly instead of renaming `root_curation_id` to
+`curation_id` by hand.
 `auto_labeled_curation` is `None` until an analysis curation actually exists; it
 never silently falls back to the root.
 
@@ -1033,9 +1034,8 @@ merged unit). The recommended flow is accept-merge-then-evaluate: accept the
 merge, RE-EVALUATE the merged child, then write final labels with
 `use_evaluation_labels` / `overlay_evaluation_labels`. `preview_merges` drafts
 an unapplied merge for review (a preview row downstream consumers reject until
-committed); every merge action requires at least one real
-
-> =2-member group.
+committed); every merge action requires at least one real group of two or
+more units.
 
 `use_evaluation_labels` (default verdict) and `overlay_evaluation_labels` (keep
 \+ add) are deliberately separate methods so the label choice is explicit at the
@@ -1143,8 +1143,9 @@ profile = (
 ).fetch1()
 ```
 
-The profile binds `franklab_default` metrics to the approved dated Frank-lab
-rules, an ordered property/label display, and `label_import_mode="replace"`.
+The profile binds `franklab_default` metrics to the dated Frank-lab rules
+(`franklab_default_auto_curation_2026_09`), an ordered property/label display,
+and `label_import_mode="replace"`.
 Publishing location, credentials, ephemeral mode, and annotation-set choices are
 intentionally supplied per review rather than stored in the profile.
 
@@ -1409,9 +1410,9 @@ not retroactively drop its members — recreate the group to apply later flags.
 The `bad_channel_handling` preprocessing parameter chooses what happens to the
 curated `Electrode.bad_channel='True'` channels at materialization:
 
-- **`"remove"` (default)** — byte-identical to before the option existed. A sort
-    group is its declared members, and the curated-bad channels that grouping
-    already excluded stay excluded. Use this for tetrodes and sparse/custom
+- **`"remove"` (default)** — no bad channel is added back. A sort group is its
+    declared members, and the curated-bad channels that grouping already
+    excluded stay excluded. Use this for tetrodes and sparse/custom
     groups (the coherence-style geometry has no meaning there), and whenever you
     want the sorter to see only the good channels.
 - **`"interpolate"`** — re-includes the group's **pitch-adjacent interior**
@@ -1440,7 +1441,7 @@ recording_key = RecordingSelection.insert_selection(
 The handling runs **between** the bandpass filter and the reference (matching
 the IBL/AIND destripe order). The persisted `ElectricalSeries.filtering`
 provenance lists `interpolate N bad channels` only when N > 0, so the default
-`remove` path is unchanged.
+`remove` path records no interpolation step.
 
 This consumes the **curated** flags only — it does **no** detection (that is
 `suggest_bad_channels`, above). The same ordering contract applies: the flags
@@ -1451,8 +1452,8 @@ group. Convention boundary: `Electrode.bad_channel='True'` means a *quality-bad*
 (dead/noise-class) channel only — a manually set flag on an outside-brain
 channel must use `remove`, never `interpolate` (which would invent signal). The
 `specific` reference electrode is never a handling target; a
-`bad_channel='True'` reference (e.g. a dedicated ground) materializes exactly as
-before.
+`bad_channel='True'` reference (e.g. a dedicated ground) is still used as the
+reference under either option.
 
 ### Drift QC (motion estimate, never applied)
 
@@ -1483,7 +1484,7 @@ motion = DriftEstimate().get_motion(
 
 The estimate uses a single default preset (`dredge_fast`, stored on the row for
 provenance); there is deliberately no parameters Lookup. `dredge_fast` requires
-`torch`, so the `spikesorting-v2` extra now installs it. `compute_motion`
+`torch`, so the `spikesorting-v2` extra installs it. `compute_motion`
 localizes peaks spatially, so it consumes the recording's channel locations (the
 cached `Recording` carries probe geometry).
 
@@ -1510,8 +1511,8 @@ Motion correction is a stage independent of concatenation: `motion_mode` on
 helpers) is `"off"` (the default), `"estimate"`, or `"apply"`, for a
 single-session **or** a concat run alike.
 
-- `"off"` -- no motion stage; the sort is exactly today's uncorrected sort
-  (same `sorting_id`).
+- `"off"` -- no motion stage; the sort is the ordinary uncorrected sort (the
+  same `sorting_id` as a run that does not pass `motion_mode`).
 - `"estimate"` -- saves a `MotionEstimate` on the recording (or
   `ConcatenatedRecording`) under its mask, for inspection, but still sorts
   the uncorrected traces (same `sorting_id` as `"off"`).
@@ -1830,7 +1831,7 @@ matching both alike. Pass the key explicitly (to `CurationV2.resolve_restriction
 one of a source's corrected or uncorrected sorts.
 
 **Database privileges.** `SortingSelection.MotionCorrectionSource`'s foreign
-key means importing `spyglass.spikesorting.v2.sorting` now also declares the
+key means importing `spyglass.spikesorting.v2.sorting` also declares the
 `spikesorting_v2_motion` schema (`MotionEstimationParameters`,
 `MotionInterpolationParameters`, `MotionCorrectionParameters`,
 `MotionEstimateSelection`, `MotionEstimate`,
@@ -1863,11 +1864,11 @@ polymer shank** (planted rigid/nonrigid drift, jumps, and no-motion controls;
   is only barely wide enough (by 6 µm) for SpikeInterface's own nonrigid
   window-count check to accept it as more than one window.
 
-**The preregistered held-out benchmark failed for both shipped recipes.**
-After development, gates and cases were fixed in advance in
-`tests/spikesorting/v2/motion_acceptance_held_out.json` and run once
-(2026-09-26) on held-out seeds 1000-1004 of the same simulated shank, sorted
-with MountainSort5:
+**A held-out benchmark failed for both shipped recipes.** Its cases and
+pass/fail limits, recorded in
+`tests/spikesorting/v2/motion_acceptance_held_out.json`, were fixed before it
+was run on seeds 1000-1004 of the same simulated shank, which were not used
+during development; recordings were sorted with MountainSort5 (2026-09-26):
 
 - `dredge_fast` failed 3 checks, all on nonrigid drift (sorting accuracy too
   far below the oracle-motion correction, and too many false-positive units).
@@ -1881,16 +1882,16 @@ with MountainSort5:
   and the fidelity checks against the oracle-motion correction and against the
   uncorrected recording.
 
-These verdicts come from the harness version pinned in that manifest. A later
-harness fix (the uncorrected fidelity baseline is now measured on the
-corrected recording's output channels) changes results only for recipes that
-remove channels, which no gate covered. The estimator has also changed since
-the run: it now drops peaks whose detection window crosses an acquisition gap
-or concatenation member join, and it now estimates on microvolts (a source
-that is not float microvolts with gain 1 and offset 0 used to be estimated on
-its raw values). The benchmark's results therefore do not validate the
-current estimator on discontinuous inputs (acquisition gaps, concatenations)
-or on sources that are not unit-calibrated float microvolts.
+These results come from the benchmark-harness version pinned in that
+manifest, run against an earlier estimator. That estimator did not drop
+peaks whose detection window crosses an acquisition gap or concatenation
+member join, and it estimated on raw stored values rather than microvolts for
+a source that is not float microvolts with gain 1 and offset 0. The current
+harness also measures the uncorrected fidelity baseline on the corrected
+recording's output channels, which matters only for recipes that remove
+channels; neither benchmarked recipe does. The results therefore do not
+validate the current estimator on discontinuous inputs (acquisition gaps,
+concatenations) or on sources that are not unit-calibrated float microvolts.
 
 No real lab polymer recording with drift was available to test on.
 
@@ -1900,11 +1901,13 @@ experimental. `dredge_v1` and
 (insert a `MotionEstimationParameters` row naming it explicitly) so it can
 still be compared, but ships with no default row.
 
-#### Reproducing the old concat `rigid_fast` correction
+#### Applying `rigid_fast` correction to a concatenation
 
-Concatenation used to apply SpikeInterface's `rigid_fast` preset with
-`remove_channels` interpolation automatically. It no longer corrects motion. To
-reproduce that correction anyway, insert a `rigid_fast` estimation row, combine
+Concatenation does not correct motion. Pre-release versions of v2 applied
+SpikeInterface's `rigid_fast` preset with `remove_channels` interpolation
+automatically during concatenation. To reproduce that correction (not
+recommended; see the development evidence above), insert a `rigid_fast`
+estimation row, combine
 it with the shipped `kriging_remove_channels_v1` interpolation row in a new
 `MotionCorrectionParameters` row, and run the motion stage with
 `motion_mode="apply"`:
@@ -2191,7 +2194,7 @@ implant). Two levels of matcher validation exist, with different CI status:
     fixture is hosted, so this runs in the matching-extra CI lane whenever that
     fixture is fetched (scheduled / manual runs); it skips cleanly on per-PR
     runs that don't fetch it.
-- **Ground-truth AUC gate** (`test_v2_unitmatch_polymer_mearec_ground_truth`)
+- **Ground-truth AUC check** (`test_v2_unitmatch_polymer_mearec_ground_truth`)
     requires AUC > 0.85 on a *two-session* polymer recording with planted
     correspondences. It is verified **locally** only: the two-session polymer
     fixtures are not uploaded (their URLs in
@@ -2372,8 +2375,8 @@ Key behaviors and caveats:
     match threshold, prior and score distributions from the units present in
     each run, so with few units per session (about 20 or fewer) results can
     change noticeably from run to run and occasionally include bursts of
-    false matches, including a unit matched to two partners. In development
-    pilots for the daily-concatenation benchmark below, UnitMatchPy 3.2.7
+    false matches, including a unit matched to two partners. In synthetic
+    trial runs for the daily-concatenation benchmark below, UnitMatchPy 3.2.7
     raised an `IndexError` (`get_threshold`, via `overlord.py`) at about 12
     units in one session -- keep well above that floor. Match only
     well-isolated curated units ([UnitMatch issue
@@ -2428,10 +2431,10 @@ Key behaviors and caveats:
 **Motion correction registers each day to that day's own mean position, not
 across days.** There is no cross-day registration step: if the corrected days
 are offset from each other by more than a few micrometers, matching degrades
-sharply. In synthetic pilots on a 32-contact single-column polymer layout (26
-um pitch), a rigid position offset of 3 / 6 / 12 um between two otherwise
-identical, motion-corrected days recovered 22 / 12 / 1 of 24 planted neurons
-(in the same pilot series, a static twin with no drift at all recovered
+sharply. In synthetic simulations on a 32-contact single-column polymer
+layout (26 um pitch), a rigid position offset of 3 / 6 / 12 um between two
+otherwise identical, motion-corrected days recovered 22 / 12 / 1 of 24 planted
+neurons (in the same simulations, a static twin with no drift at all recovered
 23/24, and a separate dredge_fast-corrected run with no offset between days
 recovered 22/24). Before matching corrected daily sorts, confirm
 by other means (e.g. a stable stereotaxic reference, or comparing the two
@@ -2444,7 +2447,7 @@ this for you.
 Two complementary checks, both **synthetic only** -- no real lab multi-day
 recording was evaluated:
 
-- **A preregistered, held-out-gated benchmark**
+- **A ground-truth benchmark with thresholds set before evaluation**
     (`tests/spikesorting/v2/scripts/unitmatch_daily_concat_benchmark.py`, run
     through `tests/spikesorting/v2/test_unitmatch_daily_concat.py`) drives the
     same production code path (`extract_unitmatch_bundle`,
@@ -2454,14 +2457,15 @@ recording was evaluated:
     neurons: shared, partial-member, and per-day distractor roles) and
     `three_day` (21-25 units/day, 31 neurons: stable, gradually drifting,
     day-1/day-3 reappearing, and conflicting-identity roles), each on a
-    16-channel, 2-column, 20 um-pitch synthetic probe. Every gate's threshold
-    was derived from 40 development seeds (0-39) *before* the held-out
-    evaluation, then checked exactly once against 40 held-out seeds (100-139;
-    2026-09-29, macOS arm64). All gates **passed**. Those seeds are now spent:
-    the tests re-run them as regression checks, not new held-out evaluations,
-    and the gates have not yet been evaluated on another platform.
+    16-channel, 2-column, 20 um-pitch synthetic probe. Each threshold was
+    derived from 40 development seeds (0-39) as the pooled development rate
+    minus a margin (at least 3 bootstrap standard errors and at least 0.05),
+    and then evaluated on 40 different seeds (100-139) that played no part in
+    setting it (2026-09-29, macOS arm64). Every threshold was met. The tests
+    re-run seeds 100-139; the thresholds have been checked on macOS arm64
+    only.
 
-    | scenario | gated metric | held-out result |
+    | scenario | metric and threshold | result on seeds 100-139 |
     | --- | --- | --- |
     | two_day | `pair_tracked:all` >= 0.78 | 0.8350 (668/800) |
     | two_day | `pair_tracked:partial` >= 0.74 | 0.8063 (129/160) |
@@ -2476,13 +2480,14 @@ recording was evaluated:
     | three_day | `distractor_emitted` <= 0.23 | 0.1500 (54/360) |
     | both | structural invariants (`same_input_group`, `recording_count_mismatch`, `sessions_detected_mismatch`, `matching_inputs_mismatch`) | 0 violations, both scenarios |
 
-    Two `three_day` classes fall below the gating rule's 0.50 cut-off and are
-    reported as **ungated diagnostics**, not pass/fail: `pair_tracked:gradual`
-    (a per-neuron amplitude loss of 15% and a 4 um shift per day; held-out
-    147/480 = 0.306) and `pair_tracked:conflict` (a mover neuron placed as
-    close to a fixed partner as to its own day-1 template by construction;
-    held-out 234/480 = 0.487). Both are out of reach at these magnitudes by
-    design, not a regression to chase.
+    A recall class whose derived lower bound falls below 0.50 gets no
+    threshold and is reported as a **diagnostic** only. Two `three_day`
+    classes are in that group: `pair_tracked:gradual` (a per-neuron amplitude
+    loss of 15% and a 4 um shift per day; 147/480 = 0.306 on seeds 100-139)
+    and `pair_tracked:conflict` (a mover neuron placed as close to a fixed
+    partner as to its own day-1 template by construction; 234/480 = 0.487).
+    Both are hard by construction at these magnitudes, so low recall there is
+    expected.
 - **An end-to-end workflow test**
     (`test_daily_concat_workflow_matches_planted_neurons_end_to_end` in
     `tests/spikesorting/v2/test_unitmatch_concat.py`) runs 24 planted neurons
@@ -2493,9 +2498,9 @@ recording was evaluated:
     32-contact single-column polymer layout (26 um pitch) with a planted rigid
     drift on day 1 and a static day 2, chosen so the two days' *corrected*
     positions line up (see the limitation above). With per-day motion
-    correction applied, it recovered **19 of 22** cross-day neurons (floor 17,
-    from the benchmark's held-out two-day recall gate applied to this
-    scenario's neuron count); the same scenario **without** motion correction
+    correction applied, it recovered **19 of 22** cross-day neurons (the test
+    requires at least 17: the benchmark's two-day recall threshold of 0.78
+    applied to 22 neurons); the same scenario **without** motion correction
     recovered **13 of 22**. This probe layout differs from the benchmark's
     (single column vs. two columns, 26 vs. 20 um pitch), so the 0.78 floor is
     carried over across layouts, not re-derived for this one.
@@ -2559,7 +2564,7 @@ SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})
 
 Clusterless decoding works for v2 sorts under SpikeInterface 0.104:
 `UnitWaveformFeatures` (the decoding input) extracts per-spike amplitudes for a
-v2 `merge_id` from a freshly built `SortingAnalyzer` — it no longer requires the
+v2 `merge_id` from a freshly built `SortingAnalyzer` — it does not require the
 legacy SI 0.99 environment or the removed `extract_waveforms`. The `amplitude`
 feature (used by clusterless decoding), `full_waveform`, and `spike_location`
 are supported for v2 sources; any other feature is rejected with a clear
@@ -2679,22 +2684,23 @@ the `spikesorting-v2-matching` extra.
 v2's `Recording` write path is built for production-scale data and concurrent
 use:
 
-- **Streaming Recording writes.** `Recording.make` now streams the preprocessed
+- **Streaming Recording writes.** `Recording.make` streams the preprocessed
     `ElectricalSeries` to NWB via HDMF's `GenericDataChunkIterator` with a
     channel-count-scaled write buffer (≈30 s of data, capped at 5 GB). The full
     trace array is never materialized in RAM. This is a bounded write strategy,
     not an hour-long capacity guarantee: sorting, analyzers and browser pair
-    payloads have their own costs. See the
-    [measured validation record](../../plans/spikesorting-v2-sorting-ux-validation.md)
-    for tested workloads and remaining lab/hardware checks. The chunked-write
+    payloads have their own costs, and hour-long lab recordings have not been
+    measured. See
+    [Release workload measurement](./SpikeSortingV2StorageManagement.md#release-workload-measurement)
+    for the script that measures a workload. The chunked-write
     helpers live in `spikesorting.v2._nwb_iterators` (port of v1's
     `SpikeInterfaceRecordingDataChunkIterator` and
     `TimestampsDataChunkIterator`).
 - **Tri-part `make` + `_parallel_make = True`** on `Recording`, the
     artifact-detection result tables (`RecordingArtifactDetection` /
     `SharedGroupArtifactDetection`), and `Sorting`. The compute step runs
-    outside DataJoint's framework transaction, so a 20-minute sort no longer
-    holds the row locks that would block other users from declaring or modifying
+    outside DataJoint's framework transaction, so a 20-minute sort does not
+    hold the row locks that would block other users from declaring or modifying
     tables on the same database. Set
     `dj.config["custom"]["spikesorting_v2_job_kwargs"] = {"n_jobs": N}` to
     thread N workers through every compute stage (the resolver is wired into
@@ -2720,7 +2726,7 @@ v2 also matches v1 behavior on many points. Key user-visible items:
     so that case raises `ValueError` unless you pass `reuse_existing=True`
     (reuse the root) or curate as a child with
     `parent_curation_id=<existing root curation_id>`.
-- The `apply_merge` kwarg name is back (v1 spelling); `labels=None` is accepted
+- The `apply_merge` kwarg keeps its v1 spelling; `labels=None` is accepted
     (semantically equivalent to `{}`).
 - `Sorting.get_sorting(key, as_dataframe=True)` and
     `CurationV2.get_sorting(key, as_dataframe=True)` both return a pandas
@@ -2748,7 +2754,7 @@ pass `delete_existing_entries=True, confirm=True` (the existing v2 kwargs). If
 you only want to add rows for previously-unseen sort groups, supply explicit
 `sort_group_ids=` so v2 knows which to insert.
 
-Test fixtures that previously relied on the v1 short-circuit must opt into the
+Test fixtures written for the v1 short-circuit must opt into the
 explicit flow above -- there is no v2 equivalent of `test_mode`.
 
 ### Inspecting scientific evidence and choosing a population
@@ -2783,9 +2789,9 @@ The [curation notebook](../../../notebooks/10_Spike_SortingV2_Curation.ipynb)
 contains runnable waveform, spike-on-trace, pair correlogram/peak, early/middle/
 late, and raster examples using an exact final curation. Display sampling and
 pair thresholds can omit evidence from the summary; use targeted views rather
-than treating absence as proof. Metric predicates now persist the selected unit IDs and their evaluation/criteria
-provenance in `SortedSpikesGroup.UnitSelection`; fetching and decoding read that
-same population.
+than treating absence as proof. Metric predicates persist the selected unit IDs
+and their evaluation/criteria provenance in `SortedSpikesGroup.UnitSelection`;
+fetching and decoding read that same population.
 
 The
 [whole-session notebook](../../../notebooks/10_Spike_SortingV2_Presets.ipynb)
@@ -2927,11 +2933,11 @@ with unavailable time. Ordinary prediction preserves gaps; parameter estimation
 labels missing time `-1`. Saved results include effective intervals. An empty
 training or decoding interval raises a clear error.
 
-Legacy/imported populations without snapshots retain their previous coverage
-behavior and report unknown sources. Mixed populations apply known restrictions
-without inventing missing metadata. Other custom downstream analyses must use
-the exposed intervals explicitly; these changes do not redefine every external
-SI metric or implement clusterless masking.
+Legacy/imported populations without snapshots contribute no observation
+restriction and are listed in `unknown_sources`. Mixed populations apply known
+restrictions without inventing missing metadata. Other custom downstream
+analyses must use the exposed intervals explicitly; observed-time support does
+not redefine every external SI metric or implement clusterless masking.
 
 ### Manual recording exclusions
 
@@ -2949,11 +2955,11 @@ For concatenated sorting, pass `manual_excluded_times={member_index:
 session timestamps. Automatic and manual masks are composed before
 concatenation and survive reconstruction and member export; if you apply the
 optional motion stage afterward, its estimate excludes the same masked samples
-and its corrected recording re-applies the mask. No per-spike editing is
-introduced.
+and its corrected recording re-applies the mask. Manual exclusions mask time
+ranges; they do not edit individual spikes.
 
 For existing development databases, follow the
 [preproduction upgrade/recreation sequence](SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database)
 before initializing defaults or creating selections. It covers manual exclusions,
-observed-time fields, curation identity, and the new analysis-selection part.
+observed-time fields, curation identity, and the analysis-selection part.
 No production migration is performed automatically.

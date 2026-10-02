@@ -8,10 +8,10 @@ Tables:
     DriftEstimate        -- per-Recording probe-motion QC estimate (never
                             applied to the traces; populated on demand).
 
-``insert1`` on the Lookup tables is live and Pydantic-validates the
-``params`` blob. ``SortGroupV2.set_group_by_*`` constructors,
+``insert1`` on the Lookup tables Pydantic-validates the ``params`` blob.
+``SortGroupV2.set_group_by_*`` constructors,
 ``RecordingSelection.insert_selection``, and ``Recording.make`` /
-``get_recording`` are also live. The recording write applies bandpass
+``get_recording`` are the entry points. The recording write applies bandpass
 filtering + common-reference referencing (no whitening; that is deferred
 to the sort stage so motion correction never sees whitened data).
 """
@@ -135,7 +135,7 @@ class DeletionPreview(NamedTuple):
         each team owns that this overwrite would cascade-delete. Sort groups in
         one session can belong to different teams, so an overwrite can delete
         *another* team's downstream rows; this surfaces that blast radius. It
-        does not block (per the v2 model ``team_name`` is a provenance tag, not
+        does not block (in v2, ``team_name`` is a provenance tag, not
         access enforcement) -- the operator reviews it before confirming.
     """
 
@@ -180,9 +180,10 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     # ``reference_mode`` is validated against the ``ReferenceMode`` Literal
     # in ``insert1`` / ``insert`` (varchar, not a MySQL enum -- the mode set
     # may grow; see ``ReferenceMode``). ``reference_electrode_id`` is
-    # non-null iff ``reference_mode == 'specific'``. This replaced a single
-    # ``sort_reference_electrode_id`` int whose magic sentinels (-1 none,
-    # -2 global median, >=0 specific) conflated mode with channel id.
+    # non-null iff ``reference_mode == 'specific'``. v1's ``SortGroup``
+    # instead stores a single ``sort_reference_electrode_id`` int whose magic
+    # sentinels (-1 none, -2 global median, >=0 specific) conflate mode with
+    # channel id.
 
     class SortGroupElectrode(SpyglassMixinPart):
         """Electrodes belonging to one sort group."""
@@ -262,11 +263,10 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     def update1(self, row):
         """Validate the MERGED reference state before an in-place edit.
 
-        A reference change is now ALLOWED (it mints a distinct recording via the
+        A reference change is ALLOWED: it mints a distinct recording via the
         ``recording_input_hash`` folded into ``recording_id``, and re-populating
         an old ``recording_id`` raises ``RecordingInputDriftError`` rather than
-        serving stale bytes -- so the old "reject every reference edit" guard is
-        gone). But the RESULTING state must stay valid: validate the merged
+        serving stale bytes. But the RESULTING state must stay valid: validate the merged
         (current row + update payload) reference fields, and for a final
         ``'specific'`` mode reject a reference electrode that is also a group
         member. ``insert1`` and the part table enforce these at insert; without
@@ -1018,7 +1018,7 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
            caught and the existing row is returned.
         4. Raises ``DuplicateSelectionError`` if ANY existing row for this
            logical identity has a non-deterministic ``recording_id`` (a raw
-           ``dj.insert`` bypass or a pre-determinism legacy row) -- even a
+           ``dj.insert`` bypass or a legacy non-content-addressed row) -- even a
            single one -- an integrity bug, not user error.
 
         Parameters
@@ -1112,7 +1112,7 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         * the row at ``deterministic_id`` is the canonical, content-
           addressed selection -> return ``{"recording_id": ...}``;
         * ANY row with a different ``recording_id`` is non-deterministic
-          (a raw ``insert`` bypass or a pre-determinism legacy row) and
+          (a raw ``insert`` bypass or a legacy non-content-addressed row) and
           violates the content-addressed-identity invariant -> raise
           ``DuplicateSelectionError`` so it is reset rather than silently
           returned or ``[0]``-indexed.
@@ -1131,8 +1131,8 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 f"whose recording_id is not the deterministic id "
                 f"{deterministic_id}: {bypassed}. This is a "
                 "non-deterministic selection row (a raw insert or a "
-                "pre-determinism legacy row); drop it and re-insert via "
-                "insert_selection."
+                "legacy non-content-addressed row); drop it and re-insert "
+                "via insert_selection."
             )
         return {"recording_id": deterministic_id} if existing else None
 
@@ -1431,7 +1431,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
         # The sort group's interior curated-bad channels to re-include and fill
         # on the ``interpolate`` path -- empty for ``remove`` (which re-includes
-        # nothing, so the slice and output are byte-identical to today). Sorted
+        # nothing, so the slice is exactly the members). Sorted
         # tuple so the fetched value is DeepHash-stable like the others.
         bad_channel_ids: tuple = ()
         if preprocessing_params.bad_channel_handling == "interpolate":
@@ -1508,8 +1508,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         slice, reference, stream ElectricalSeries into a fresh
         ``AnalysisNwbfile``, hash the persisted file). Returning
         happens before the framework opens its commit transaction so
-        a 20-minute write here does not hold any DB lock -- the
-        original motivation for the tri-part refactor. Reads only the
+        a 20-minute write here does not hold any DB lock. Reads only the
         inputs ``make_fetch`` resolved (the raw NWB path included); the one
         DB access left is staging the output file (see
         :mod:`._recording_nwb`).
@@ -2222,10 +2221,11 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         assert_unique_contact_positions(recording)
 
         # Provenance string for the persisted ElectricalSeries, built from the
-        # steps ACTUALLY applied (the ``applied_steps`` report): the old
-        # hardcoded "Bandpass filter + common reference" misdescribed the saved
-        # artifact for the no_filter preset or reference_mode='none' (DANDI /
-        # archival), and a requested-but-skipped phase-shift must not be listed.
+        # steps ACTUALLY applied (the ``applied_steps`` report): a fixed
+        # "Bandpass filter + common reference" string would misdescribe the
+        # saved artifact for the no_filter preset or reference_mode='none'
+        # (DANDI / archival), and a requested-but-skipped phase-shift must not
+        # be listed.
         filtering_description = _filtering_description_svc(
             preprocessing_params.bandpass_filter, reference_mode, applied_steps
         )

@@ -45,10 +45,10 @@ def truncation_tolerance(
     error (up to ~1 sample per interval) accumulates with the interval
     count; the ``+1.5`` then covers the ``(N-1)/fs`` concat off-by-one.
 
-    A fixed ``1.5 / fs`` slack (the pre-fix value) false-positives on
-    legitimate disjoint multi-epoch sorts -- numerically ~13% of
-    single-interval and ~40% of 20-interval requests -- and then
-    deletes the just-written file. Scaling by interval count drops that
+    A fixed ``1.5 / fs`` slack would false-positive on legitimate
+    disjoint multi-epoch sorts -- numerically ~13% of single-interval
+    and ~40% of 20-interval requests -- and the guard would then
+    delete the just-written file. Scaling by interval count drops that
     to 0% while still catching genuine packet loss / interval
     misalignment, which drops far more than ``n + 1.5`` samples.
 
@@ -642,9 +642,9 @@ def select_sort_group_channels(
     # Base slice = the sort group's declared members. Add the ``specific``
     # reference (sliced in only for subtraction, dropped after referencing) and,
     # on the ``interpolate`` path, the group's interior curated-bad channels so
-    # they are present to be filled. ``remove`` adds neither curated-bad channel,
-    # so the slice is byte-identical to today (the members, already sorted in
-    # ``make_fetch``; ``sorted(set(...))`` preserves that order/dedup).
+    # they are present to be filled. ``remove`` adds no curated-bad channel,
+    # so the slice is exactly the members (already sorted in ``make_fetch``;
+    # ``sorted(set(...))`` preserves that order/dedup).
     extra: list[int] = []
     if reference_mode == "specific":
         extra.append(int(reference_electrode_id))

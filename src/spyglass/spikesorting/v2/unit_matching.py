@@ -1945,14 +1945,15 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         ]
         # A populated UnitMatch always wrote a non-empty MatchableUnit snapshot
         # (make_fetch rejects an input with zero matchable units), so an empty
-        # snapshot under an existing UnitMatch means the row predates the
-        # MatchableUnit part. Fail loud rather than silently deriving zero tracked
+        # snapshot under an existing UnitMatch means the row was written by a
+        # Spyglass version without the MatchableUnit part. Fail loud rather than silently deriving zero tracked
         # units (or raising obscurely on a Pair edge outside an empty universe).
         if not node_universe:
             raise ValueError(
                 "TrackedUnit.make: UnitMatch row "
-                f"{key} has no UnitMatch.MatchableUnit snapshot (it predates the "
-                "frozen-universe part). Re-populate UnitMatch (delete + populate) "
+                f"{key} has no UnitMatch.MatchableUnit snapshot (it was written "
+                "by a Spyglass version that did not record one). Re-populate "
+                "UnitMatch (delete + populate) "
                 "so the matchable set is recorded before deriving tracked units."
             )
 
@@ -2415,7 +2416,8 @@ def _node_detections(key) -> tuple[dict, dict]:
     ------
     ValueError
         A matchable unit has no spike counts for its input's recordings (the
-        ``UnitMatch`` row predates the counts); re-populate ``UnitMatch``.
+        ``UnitMatch`` row was written by a Spyglass version that did not
+        record them); re-populate ``UnitMatch``.
     """
     nwb_by_recording = {
         (int(row["input_index"]), int(row["recording_index"])): row[
@@ -2458,8 +2460,9 @@ def _node_detections(key) -> tuple[dict, dict]:
         raise ValueError(
             f"TrackedUnit.make: UnitMatch row {key} has no "
             "UnitMatch.RecordingSpikeCount rows for every recording of "
-            f"matchable units {sorted(missing)} (the row predates the "
-            "per-recording counts). Re-populate UnitMatch (delete + populate) "
+            f"matchable units {sorted(missing)} (the row was written by a "
+            "Spyglass version that did not record per-recording counts). "
+            "Re-populate UnitMatch (delete + populate) "
             "before deriving tracked units."
         )
     return input_by_node, detected_sessions_by_node

@@ -73,7 +73,7 @@ def artifact_frame_ranges(
         disjoint input; an unsorted/overlapping list would silently
         under-mask. (The fetched ``obs_intervals`` are monotonic in
         practice; this guards a hand-built curation override. Strict
-        input is intentional -- silent sort/merge is deferred.)
+        input is intentional: the walker never silently sorts or merges.)
     """
     import numpy as np
 
@@ -157,14 +157,13 @@ def artifact_frame_ranges(
     # boundary count, not n_samples). The persisted recording's timestamps are
     # monotonically non-decreasing by construction (Recording.make) -- the
     # invariant the searchsorted-equivalent ``frames_for_times`` mapping assumes
-    # (the prior full-vector ``assert_monotonic_timestamps`` guard would force
-    # the materialization this avoids).
+    # (a full-vector ``assert_monotonic_timestamps`` guard would force the
+    # materialization this avoids).
     n_samples = int(recording.get_num_samples(segment_index=0))
     if n_samples == 0:
         raise ValueError(
             "apply_artifact_mask: recording has zero samples; there is "
-            "nothing to mask (the prior get_times() path raised on the empty "
-            "timestamp vector)."
+            "nothing to mask."
         )
     t_first, t_last = (
         float(t)
@@ -172,14 +171,13 @@ def artifact_frame_ranges(
             recording, np.array([0, n_samples - 1], dtype=np.int64)
         )
     )
-    # Bounded (two-endpoint) monotonicity tripwire replacing the removed
-    # full-vector ``assert_monotonic_timestamps``: catch gross corruption
+    # Bounded (two-endpoint) monotonicity tripwire in place of a full-vector
+    # ``assert_monotonic_timestamps``: catch gross corruption
     # (empty/reversed/NaN-bracketed vector) loudly instead of silently
     # mis-masking, without materializing. NOTE: this checks only the endpoints
     # -- an INTERIOR backward step (which Recording.make's ordering invariant
-    # rules out) is no longer detected here, unlike the pre-refactor whole-
-    # vector scan; the chunked ``detect_artifacts`` path still validates
-    # monotonicity per chunk.
+    # rules out) is not detected here; the chunked ``detect_artifacts`` path
+    # validates monotonicity per chunk.
     if not (np.isfinite(t_first) and np.isfinite(t_last) and t_last >= t_first):
         raise ValueError(
             "apply_artifact_mask: recording endpoints are non-finite or step "
@@ -210,8 +208,7 @@ def artifact_frame_ranges(
     # Walk the valid intervals left-to-right in seconds, collecting the
     # complement (artifact gaps) as ``(start_time, end_time)`` pairs;
     # ``end_time is None`` marks the open tail that extends to the exclusive
-    # end of the recording (frame n_samples, matching the old
-    # ``end = len(timestamps)``). The boundary times are then batch-mapped to
+    # end of the recording (frame n_samples). The boundary times are then batch-mapped to
     # frames in one binary search each.
     gap_time_pairs: list[tuple[float, float | None]] = []
     cursor = t_first
@@ -278,7 +275,7 @@ def artifact_frame_ranges(
     # Data-sanity guard: a valid_times that keeps almost nothing makes the
     # artifact complement span most of the recording. The interval-native
     # silence_periods below keeps peak memory O(n_ranges) regardless of how many
-    # samples are masked, so this is NO LONGER a memory guard -- it is a loud
+    # samples are masked, so this is NOT a memory guard -- it is a loud
     # "you are masking more than the bound; the sort would run on a sliver"
     # data-sanity check, mainly for a hand-built valid_times override (the normal
     # pipeline's detect_artifacts guard fires first; see the strict-input note).
@@ -390,14 +387,12 @@ def silence_frame_ranges(recording, frame_ranges):
     # Mask the artifact RANGES with the interval-native ``silence_periods``
     # rather than expanding them to one trigger per sample. ``list_periods``
     # takes ``(start, end_frame)`` tuples per segment with a HALF-OPEN ``end``
-    # (frames ``[start, end)`` are zeroed -- matching ``frame_ranges`` and the
-    # prior ``np.arange(s, e)`` expansion, verified), zeros them lazily in a
-    # ``SilencedPeriodsRecording``, and never materializes an
-    # O(n_artifact_frames) index array. This also sidesteps the SI 0.104
-    # ``remove_artifacts`` boundary bug the per-frame path worked around
-    # (single-sample triggers left the first frame of a contiguous run unmasked
-    # under ``ms_before/ms_after=0``); ``silence_periods`` zeros the slice
-    # directly, so no run edge is dropped.
+    # (frames ``[start, end)`` are zeroed -- matching ``frame_ranges``), zeros
+    # them lazily in a ``SilencedPeriodsRecording``, and never materializes an
+    # O(n_artifact_frames) index array. This also sidesteps an SI 0.104
+    # ``remove_artifacts`` boundary bug (single-sample triggers leave the first
+    # frame of a contiguous run unmasked under ``ms_before/ms_after=0``);
+    # ``silence_periods`` zeros the slice directly, so no run edge is dropped.
     masked = sip.silence_periods(
         recording,
         list_periods=[frame_ranges],

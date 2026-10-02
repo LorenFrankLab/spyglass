@@ -146,7 +146,7 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
         return np.empty((0, 2), dtype=np.int64)
     runs = np.concatenate(per_chunk)  # (total_runs, 2) ascending (start, end)
     # Semantic guard on the TOTAL flagged sample count, cheap from the runs.
-    # Detection now CARRIES runs (not per-frame ids), so peak memory here is
+    # Detection carries runs (not per-frame ids), so peak memory here is
     # already O(n_runs) regardless of how many samples are flagged; this stays
     # as a loud check that masking more than the bound is a misconfiguration --
     # it fails at detection time rather than letting the mask stage expand the
@@ -164,10 +164,10 @@ def _split_runs_at_gaps(runs, gap_after):
     """Split each ``(start, end_inclusive)`` run at every wall-clock gap inside it.
 
     A fixed-size scan chunk can straddle a wall-clock discontinuity, so a single
-    contiguous flagged-frame run may span a gap. The prior per-frame join treated
-    such a boundary as a split point (its ``crosses_gap`` test); splitting runs
-    here restores that, so no run fed to the join spans a gap and the joined
-    spans -- and therefore the final valid_times -- are unchanged. Bounded by
+    contiguous flagged-frame run may span a gap. A gap must be a split point for
+    the join, so splitting runs here guarantees no run fed to the join spans a
+    gap, and the joined spans -- and therefore the final valid_times -- equal
+    those of a per-frame join that splits at every gap. Bounded by
     ``n_runs + n_gaps`` (both small), never by the flagged-frame count.
 
     Parameters
@@ -335,10 +335,9 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # epsilon -- lives in the module-level ``_compute_artifact_chunk``
     # worker. The z-score is computed on each frame's own columns, so
     # chunk boundaries (which split the time axis) leave the flagged
-    # frame set unchanged; this is the equivalence the regression test
-    # pins. The worker OR-combines the two detectors (an AND would make
-    # the dual-threshold mode strictly less sensitive than either
-    # single-threshold mode). The worker returns contiguous flagged-frame
+    # frame set unchanged (a test pins this equivalence). The worker
+    # OR-combines the two detectors (an AND would make the dual-threshold
+    # mode strictly less sensitive than either single-threshold mode). The worker returns contiguous flagged-frame
     # RUNS (start, end_inclusive), not one id per flagged frame, so this
     # carries O(n_runs) -- not O(n_bad_frames) -- through the join below.
     runs = scan_artifact_frames(recording, validated, job_kwargs)
@@ -381,8 +380,8 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # The scan returns contiguous flagged-frame RUNS, but a fixed-size chunk can
     # straddle a wall-clock gap, so a single run may span one. Split runs at gaps
     # first (so no run crosses a discontinuity), then join adjacent runs within
-    # join_window. This is frame-equivalent to the prior per-frame join -- the
-    # final valid_times are identical -- but never materializes a per-frame array.
+    # join_window. The final valid_times are identical to a per-frame join's,
+    # but no per-frame array is ever materialized.
     runs = _split_runs_at_gaps(runs, gap_after)
     spans = []
     cur_start = int(runs[0, 0])
@@ -722,7 +721,7 @@ def read_owned_artifact_intervals(detection_cls, key):
     Source-agnostic reader for the split ``*ArtifactDetection`` result
     tables: reads the detection row's OWN ``RemovedInterval`` part rows and
     the ``IntervalList`` rows they own, keyed by ``nwb_file_name``. Because
-    the source kind is now structural (a ``RecordingArtifactDetection`` owns
+    the source kind is structural (a ``RecordingArtifactDetection`` owns
     exactly one row; a ``SharedGroupArtifactDetection`` owns one per distinct
     member ``nwb_file_name``), this reader stays uniform -- the per-table
     ``get_artifact_removed_intervals`` shapes the return (a bare array for a

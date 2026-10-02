@@ -713,7 +713,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     def check_rule_integrity(cls, restriction=True) -> list[dict]:
         """Return master rows whose Rule rows are malformed or missing.
 
-        ``insert``/``insert1`` on ``AutoCurationRules.Rule`` now raise, but
+        ``insert``/``insert1`` on ``AutoCurationRules.Rule`` raise, but
         out-of-band writes (``insert_quick`` / raw SQL) can still bypass
         whole-payload validation; this surfaces a CUSTOM rows-set that does
         nothing (preset ``none`` and no rules) or rule rows that fail the rule
@@ -2665,7 +2665,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ``waveforms`` extension, replacing v1 ``MetricCuration.get_waveforms``.
         Committed merged curations resolve their own analyzer and unit namespace.
         ``fetch_all`` is accepted for v1 signature parity; the sort-time
-        waveform subsample is returned (a full re-extract is out of scope).
+        waveform subsample is returned (full re-extraction is not supported).
         """
         if fetch_all:
             logger.warning(

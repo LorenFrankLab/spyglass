@@ -18,7 +18,7 @@ This module is deliberately DB-free: it operates on already-fetched curation
 lists, so the curation-strategy logic is unit-tested without a database. The
 DataJoint plumbing (fetching the candidates, running the plan) lives in
 ``_pipeline_run``. The low-level ``UnitMatchSelection`` stays explicit and
-pinned -- this only redesigns the UX layer that assembles the pins.
+pinned; this module is only the layer that assembles the pins.
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ if TYPE_CHECKING:
     import pandas as pd
 
 # Every curation strategy is an explicit declaration of intent; there is
-# deliberately no default (an implicit "latest" is exactly what the pinned
-# design forbids).
+# deliberately no default (an implicit "latest" is exactly what pinning
+# exists to prevent).
 STRATEGIES: tuple[str, ...] = (
     "final_curated",
     "auto_curated",

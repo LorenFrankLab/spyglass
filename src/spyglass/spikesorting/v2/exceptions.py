@@ -505,8 +505,8 @@ class ConcatSplitError(RuntimeError):
     and every input spike frame must land in exactly one member. This is raised
     when the boundaries are not strictly increasing, do not cover the recording
     (a final boundary short of the concat sample count), or when an input spike
-    frame falls outside ``[0, final_boundary)`` -- which the previous silent slice
-    dropped. Message names the offending boundary / spike count so the caller can
+    frame falls outside ``[0, final_boundary)`` -- which a plain slice would
+    silently drop. Message names the offending boundary / spike count so the caller can
     see the conservation violation rather than getting a silently truncated split.
     """
 

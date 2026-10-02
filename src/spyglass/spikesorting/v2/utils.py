@@ -122,7 +122,7 @@ def split_leading_restrictions(args: tuple) -> tuple[list, tuple]:
     cautious-delete layer reads the first positional as the truthy
     ``force_permission`` and would then cascade-delete EVERY row of the
     unrestricted instance. The v2 table ``delete`` overrides
-    (``Sorting``, guarding a 5-50 GB per-row analyzer folder; the split
+    (``Sorting``, guarding a 5-50 GB per-row analyzer folder; the
     ``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection``, guarding
     owned ``IntervalList`` rows + the merge registration) defend against the
     easy-to-mistype
@@ -164,7 +164,7 @@ class SelectionMasterInsertGuard:
     lookup-row FKs, and inserts the row(s). Only ``SortingSelection`` is
     part-bearing -- its optional ``ArtifactDetectionSource`` pass genuinely
     CANNOT be verified from the master row alone (it lives in a part table). The
-    two split artifact selections carry their source as a REQUIRED FK on the
+    two artifact selections carry their source as a REQUIRED FK on the
     master (structural exactly-one-source), and ``RecordingSelection`` has no
     source part either; routing all of them through the same boundary keeps one
     consistent create path.
@@ -495,7 +495,7 @@ def find_orphaned_masters(master_table, part_tables: list) -> list[dict]:
     Backs ``SortingSelection.prune_orphaned_selections`` and
     ``MotionEstimateSelection.prune_orphaned_selections``: ``part_tables`` is
     that master's XOR source-part set
-    ``[RecordingSource, ConcatenatedRecordingSource]``. (The split artifact
+    ``[RecordingSource, ConcatenatedRecordingSource]``. (The artifact
     selections and ``MotionCorrectedRecordingSelection`` carry their input as
     a REQUIRED FK on the master, so they cannot be orphaned and have no
     ``prune_orphaned_selections``.)
@@ -581,8 +581,7 @@ def resolve_peak_sign(params) -> str:
     * MountainSort 4/5 carry ``detect_sign`` (``-1`` neg, ``1`` pos,
       ``0`` both).
     * Kilosort4 / SpykingCircus2 / Tridesclous2 / the generic schema
-      carry neither; fall back to ``"neg"`` (SI's default, matching the
-      prior behavior for those sorters).
+      carry neither; fall back to ``"neg"`` (SI's default).
 
     Parameters
     ----------
@@ -615,8 +614,8 @@ def write_buffer_gb(
 ) -> float:
     """Streaming-write buffer size (GB) bounded to ~``max_seconds`` of data.
 
-    A fixed buffer (the prior 5 GB) buffers the WHOLE recording for narrow
-    sort groups -- a 4-channel tetrode is ~87 min in 5 GB -- defeating the
+    A fixed 5 GB buffer would hold the WHOLE recording for narrow sort
+    groups -- a 4-channel tetrode is ~87 min in 5 GB -- defeating the
     HDMF streaming write and spiking RAM under parallel per-group workers.
     Scale the buffer with channel count so every group buffers ~the same
     bounded duration, capped at ``cap_gb`` so wide groups are unchanged.

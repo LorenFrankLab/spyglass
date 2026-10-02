@@ -280,7 +280,7 @@ jobs:
       # to read ground-truth units). NEURON + LFPy are deliberately NOT
       # installed: they are needed only to *generate* fixtures, and this job
       # downloads the canonical fixtures via _fetch.py instead. The
-      # ``spikesorting-v2`` extra now brings torch (the DriftEstimate
+      # ``spikesorting-v2`` extra brings torch (the DriftEstimate
       # drift-QC table's dredge preset needs it; torch 2.x keeps numpy>=2).
       # It does NOT install
       # ``spikesorting-v2-matching``: that is kept separate for dependency
@@ -301,7 +301,7 @@ jobs:
       # A clean, reproducible modern install must be consistent (pip check)
       # AND able to run the default sorter, not merely import its wrapper:
       # run MountainSort5 on two seconds of synthetic data. A wrapper without
-      # a runnable algorithm (the old mountainsort4 default) is not a sorter.
+      # a runnable algorithm (e.g. mountainsort4 without ml_ms4alg) is not a sorter.
       run: |
         pip check
         python - <<'EOF'
@@ -344,7 +344,7 @@ jobs:
     - name: Download 60s polymer fixture (scheduled / manual full runs)
       # Pulled into the suite only on the nightly cron / manual dispatch -- it
       # un-skips the merge frame-equality check, the MS5 ground-truth accuracy
-      # gate (single_session/test_ground_truth_parity.py), and the clusterless sparse-id
+      # check (single_session/test_ground_truth_parity.py), and the clusterless sparse-id
       # case. Per-PR runs skip those via their ``*_PATH.exists()`` guards;
       # their behaviour is also covered per-PR on the smoke fixture (e.g.
       # test_lazy_vs_applied_merge_frames_equal), so nothing is silently
@@ -382,7 +382,7 @@ jobs:
       # minirec20230622 is a real Frank-lab tetrode session: its contacts sit
       # in the x-z plane (rel_y == 0), which is exactly the geometry the x-y
       # projection SpikeInterface reaches for first collapses. It drives the
-      # geometry round-trip gate in single_session/test_recording.py, which
+      # geometry round-trip check in single_session/test_recording.py, which
       # skips cleanly when the file is absent (per-PR runs cover the repair
       # path on a synthesized all-zero tetrode instead). Same Box URL the
       # run-tests and pytest-legacy jobs use; the videos come along because
@@ -416,12 +416,12 @@ jobs:
         curl_opts $VID_DIR $VID_ONE $VID1URL
         curl_opts $VID_DIR $VID_TWO $VID2URL
     - name: Select required fixtures for this run
-      # Names the fixtures that MUST drive their gates on this tier (matching
+      # Names the fixtures that MUST drive their tests on this tier (matching
       # the download steps above). conftest's pytest_sessionstart fails the
-      # session if any are absent, so a green run honestly means the gates ran
+      # session if any are absent, so a green run honestly means those tests ran
       # rather than silently skipping on a missing fixture. ``minirec20230622``
       # lives in the shared raw data directory rather than the v2 fixtures
-      # directory; the gate looks in both.
+      # directory; the check looks in both.
       run: |
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
           REQ="mearec_polymer_smoke mearec_polymer_128ch_60s mearec_neuropixels_60s mearec_tetrode_60s minirec20230622"
@@ -454,8 +454,9 @@ jobs:
     # Runs in a SEPARATE conda env (the matching extra pulls torch +
     # CUDA; kept out of the default v2 env for weight, not numpy). The
     # test logic is a single resolver assertion (numpy major >= 2) plus
-    # import gates -- if a future UnitMatchPy re-forces numpy<2 (as
-    # 3.2.8+ did), the assertion fires and the resolver ticket re-opens.
+    # import checks -- if a future UnitMatchPy re-forces numpy<2 (as
+    # 3.2.8+ did), the assertion fires and the UnitMatchPy pin must be
+    # revisited.
     - name: Matching-extra resolver evidence (separate env)
       # Heavy separate-env lane: runs in ONE shard only (unit) so the matrix
       # does not build its conda env + run the matcher suite three times. The
@@ -479,7 +480,7 @@ jobs:
         conda create -y -n spyglass_v2_matching python=3.11
         # Install tolerates failure: upstream resolver breakages are
         # often transient (network, build-wheel) and NOT what this
-        # gate measures. The resolver-evidence signal comes from the
+        # step measures. The resolver-evidence signal comes from the
         # pytest run below. With SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED=1
         # the test fails (not skips) when the post-install deps are
         # absent, so a permanent extra-declaration bug cannot pose as
@@ -488,14 +489,15 @@ jobs:
         conda run -n spyglass_v2_matching pip install \
           -e ".[test,spikesorting-v2,spikesorting-v2-matching]" || true
         # This env is the only one with UnitMatchPy installed, so it owns the
-        # cross-session matcher gates: the resolver-evidence assertion plus the
+        # cross-session matcher tests: the resolver-evidence assertion plus the
         # rest of the matcher suite. Its DB tests use this job's own MySQL
         # service (services.mysql above; --no-docker skips starting a database
-        # container). The two-session polymer ground-truth AUC gate is collected
+        # container). The two-session polymer ground-truth AUC check is collected
         # here too but skips without its fixtures; the next step is the one that
         # requires them.
         # This env is the only one with UnitMatchPy installed, so it also owns
-        # the cross-session NOTEBOOK end-to-end test: notebook 14's Part B match
+        # the cross-session NOTEBOOK end-to-end test: the Cross-Session
+        # notebook's Part B match
         # needs UnitMatchPy (bundle extraction), so the default v2 job (no
         # matching extra) runs only its concat half. Fetch the smoke fixture it
         # drives off (no ``|| true``: an absent smoke fixture must fail the step,
@@ -524,7 +526,7 @@ jobs:
           tests/spikesorting/v2/test_motion_consumers.py::test_corrected_concat_bundle_keeps_windows_in_spans \
           tests/spikesorting/v2/test_notebook_execution.py::test_cross_session_notebook_runs \
           --no-docker --no-dlc -q
-    # --- Two-session matcher ground-truth gate. Tier: nightly schedule and
+    # --- Two-session matcher ground-truth check. Tier: nightly schedule and
     # manual dispatch, in the unit shard, inside the spyglass_v2_matching env
     # the step above builds. test_v2_unitmatch_polymer_mearec_ground_truth
     # needs mearec_polymer_128ch_2sessions_{s1,s2}.nwb, which are NOT hosted
@@ -551,23 +553,24 @@ jobs:
     # (23-25 s and ~2.5 GB peak RSS per case on a macOS arm64 laptop, ~50 min
     # in all; longer on a hosted runner), plus a paired off / dredge /
     # dredge_fast run on one shank of the MEArec drift fixture. That cost, for
-    # ungated evidence, is why this is not a nightly job.
+    # evidence with no pass/fail limits, is why this is not a nightly job.
     # It publishes DEVELOPMENT EVIDENCE as the motion-benchmark-development
     # artifact: per case, motion error, corrected-signal fidelity, sorting
     # precision / recall / accuracy, over-merged and over-split units,
-    # channels lost at the border, runtime and peak memory. It is NOT an
-    # acceptance run and promotes no motion recipe: the development manifest
-    # carries no gates, so test_benchmark_meets_manifest_gates skips, and a
+    # channels lost at the border, runtime and peak memory. It is NOT a
+    # validation and promotes no motion recipe: the development manifest sets
+    # no pass/fail limits, so test_benchmark_meets_manifest_gates skips, and a
     # case that fails to run fails test_benchmark_case. The held-out manifest
-    # (motion_acceptance_held_out.json) is deliberately not run here: its seeds
-    # were spent on its one evaluation, which FAILED its gates for both
-    # DREDge recipes. A new held-out evaluation needs a new manifest with
-    # fresh seeds, committed before it is run.
+    # (motion_acceptance_held_out.json) is deliberately not run here: its
+    # limits were fixed before its seeds were evaluated, both DREDge recipes
+    # failed them, and re-running those same seeds is no longer an independent
+    # test. A new held-out evaluation needs a new manifest with seeds never
+    # used before, committed before it is run.
     # SPYGLASS_V2_REQUIRE_FIXTURES is set on this command only (overriding the
     # job-wide list): conftest's pytest_sessionstart downloads the drift
     # fixture and fails the session naming it if it is absent, instead of the
     # representative run skipping. ``!cancelled()`` keeps this independent of
-    # the steps above: the two-session matcher gate is expected to be red on
+    # the steps above: the two-session matcher check is expected to be red on
     # manual runs, and a failure there must not suppress this evidence.
     - name: Motion-correction development benchmark (manual dispatch only)
       if: ${{ !cancelled() && matrix.shard.name == 'unit' && github.event_name == 'workflow_dispatch' }}
@@ -603,8 +606,8 @@ jobs:
         conda create -y -n spyglass_v2_curation python=3.11
         # NO ``|| true``: a failed curation install must fail the step. The
         # figpack tests below gate on a figpack import, so a silent install
-        # failure would leave them skipping while CI stayed green -- exactly the
-        # gap this lane closes.
+        # failure would leave them skipping while CI stayed green -- which this
+        # lane exists to prevent.
         conda run -n spyglass_v2_curation pip install \
           -e ".[test,spikesorting-v2,spikesorting-v2-curation,spikesorting-v2-curation-test]"
         # Headless Chromium for the Playwright browser tests (pinned with the
@@ -697,9 +700,9 @@ jobs:
       # one pass. numpy needs no rewrite: the committed floor (numpy>=1.26,<3)
       # already admits the 1.x line, and the legacy env file pins numpy<2
       # itself. Installing the 0.104 stack and downgrading afterward instead
-      # left a numpy-2 / neo-0.14 set the SI-0.99 line cannot use, which
-      # surfaced in turn as the np.issctype, probeinterface-0.3.x
-      # contact-check, and recompute namespace-mismatch failures. This never
+      # leaves a numpy-2 / neo-0.14 set the SI-0.99 line cannot use, which
+      # surfaces as np.issctype, probeinterface-0.3.x contact-check, and
+      # recompute namespace-mismatch failures. This never
       # touches the committed pins.
       run: |
         sed -i \

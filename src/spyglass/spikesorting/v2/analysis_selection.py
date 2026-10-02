@@ -62,7 +62,7 @@ def _label_policy(include, exclude) -> LabelPolicy:
     )
 
 
-# New v2 policies (see the module doc). Inserted into ``UnitSelectionParams``
+# The v2 policies (see the module doc). Inserted into ``UnitSelectionParams``
 # on first use by ``ensure_v2_unit_selection_policies`` -- additive only.
 V2_UNIT_SELECTION_POLICIES: Mapping[str, LabelPolicy] = MappingProxyType(
     {

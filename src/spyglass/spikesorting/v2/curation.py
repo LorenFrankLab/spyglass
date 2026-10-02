@@ -5,9 +5,9 @@ Tables:
 
 ``curation_source`` is restricted to true CurationV2 provenance values
 (``manual``, ``figpack``, ``curation_evaluation`` -- a child accepted from a
-``CurationEvaluation`` output; ``analyzer_curation`` is a legacy value kept on
-the enum for back-compat). External or ground-truth NWB Units continue to use
-``ImportedSpikeSorting``; v2 does NOT duplicate them into ``CurationV2``.
+``CurationEvaluation`` output; ``analyzer_curation`` remains a valid enum
+value, but no v2 workflow writes it). External or ground-truth NWB Units
+continue to use ``ImportedSpikeSorting``; v2 does NOT duplicate them into ``CurationV2``.
 
 ``insert_curation`` writes each curation atomically across the master,
 ``Unit``, and ``UnitLabel`` parts and, for single-recording sorts, the
@@ -581,8 +581,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         curation_source
             Provenance for how this curation row was created. Must be one of
             'manual' (default), 'figpack', or 'curation_evaluation' (a
-            child accepted from a CurationEvaluation). 'analyzer_curation' is a
-            legacy value retained on the enum.
+            child accepted from a CurationEvaluation). 'analyzer_curation' is
+            also a valid enum value, though no v2 workflow writes it.
         reuse_existing : bool, optional
             When a root curation already exists for the sorting and the
             caller passes non-default parameters (labels / merge_groups /
@@ -620,7 +620,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             labels on absorbed contributors do not vanish). ``"replace"`` makes
             the supplied ``labels`` the entire child state. A root curation has
             no parent, so ``"inherit"`` reduces to the supplied labels (the
-            historical full-state insert).
+            full label state).
 
         Returns
         -------
@@ -2556,8 +2556,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             # Every SortingSelection has exactly one input source, so the master
             # itself IS the recording-source union concat-source set --
             # restricting through one source part here would silently drop the
-            # other (the bug that omitted concat-backed curations from broad v2
-            # merge queries).
+            # other (e.g. omit concat-backed curations from a broad v2 merge
+            # query).
             sort_master = SortingSelection
         # Artifact dependencies live on the standalone sort's optional part
         # or on frozen concat members. None excludes both; a UUID matches any
@@ -2578,7 +2578,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                     - masked_concats.proj()
                 )
             else:
-                # ``ArtifactDetectionSource`` now stores the
+                # ``ArtifactDetectionSource`` stores the
                 # ``artifact_detection_merge_id`` (the ArtifactDetectionOutput
                 # merge PK), NOT the natural ``artifact_detection_id`` -- a dict
                 # restriction with the natural id would be a dropped (unknown)
@@ -2806,11 +2806,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             return cls.get_sorting(key)
 
         # Read the curated units NWB once, then rebuild the merged sorting via
-        # the pure compute core. New units NWBs carry stored sample frames and
-        # avoid the recording timeline; legacy/manual files fall back to the
-        # full timestamp-vector mapping. Calling get_sorting here would re-open
-        # the units NWB and emit a spurious "merges NOT applied" warning -- we
-        # ARE applying them. The merge is deduplicated in ABSOLUTE time
+        # the pure compute core. v2-written units NWBs carry stored sample
+        # frames and avoid the recording timeline; older/manual files fall
+        # back to the full timestamp-vector mapping. Calling get_sorting here
+        # would re-open the units NWB and emit a spurious "merges NOT applied"
+        # warning -- we ARE applying them. The merge is deduplicated in ABSOLUTE time
         # (gap-correct on disjoint recordings); see the helper docstrings.
         _row, recording_row, fs, abs_path = cls._load_curation_recording_meta(
             key

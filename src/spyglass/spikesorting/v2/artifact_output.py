@@ -10,8 +10,8 @@ source part tables. Like ``LFPOutput`` / ``PositionOutput`` it is an
 before a ``SortingSelection`` can reference it), not a terminal one like
 ``SpikeSortingOutput``.
 
-The single ``dj.Computed`` ``ArtifactDetection`` it supersedes was REMOVED and
-split into the two source-specific result tables above; the ``*Output`` suffix
+Detection results live in the two source-specific result tables above, not
+in one ``dj.Computed`` ``ArtifactDetection`` table; the ``*Output`` suffix
 (vs a bare ``*Detection``) matches ``SpikeSortingOutput`` / ``PositionOutput`` /
 ``LFPOutput``. It stays internal: each result table registers itself here at
 materialization (producer-owned) and the sorting stage reads it back;

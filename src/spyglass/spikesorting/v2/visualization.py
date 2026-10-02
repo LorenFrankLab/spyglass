@@ -15,7 +15,7 @@ These wrappers are intentionally thin: Spyglass resolves the DataJoint key and
 chooses the correct recording / analyzer / metric table; SpikeInterface owns the
 plotting and export behavior. Spyglass never copies SI plotting logic.
 
-Routing (the load-bearing invariant, see the table contract):
+Routing (the load-bearing invariant):
 
 - Recording-only widgets (``plot_recording_traces`` / ``plot_recording_probe_map``)
   read the saved **preprocessed** ``Recording`` extractor, not any analyzer.

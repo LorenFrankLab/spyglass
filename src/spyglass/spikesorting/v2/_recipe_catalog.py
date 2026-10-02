@@ -539,10 +539,11 @@ def sorter_default_contents() -> tuple:
                 # MAD multiplier. (For Frank-lab data gain==1 uV/count so
                 # 100 "uv" == 100 counts == 100 uV either way.) The
                 # explicit ``noise_levels=[1.0]`` is the equivalent
-                # advanced override and is kept as a belt-and-suspenders
-                # regression guard against the 1,400x noise_levels
-                # divergence; the runtime uses it verbatim (explicit
-                # noise_levels take precedence over ``threshold_unit``).
+                # advanced override, kept as a belt-and-suspenders guard:
+                # without it, a row whose ``threshold_unit`` were lost would
+                # read the 100 as a MAD multiplier. The runtime uses it
+                # verbatim (explicit noise_levels take precedence over
+                # ``threshold_unit``).
                 # The smoke / synthetic-fixture rows set
                 # ``threshold_unit="mad"`` EXPLICITLY (no noise_levels) so SI
                 # computes per-channel MAD and the threshold tracks the
@@ -821,8 +822,8 @@ def pipeline_preset_specs() -> dict[str, dict]:
                 "The 'default' clusterless SorterParameters row sets "
                 "threshold_unit='uv' with detect_threshold=100, so traces are "
                 "scaled to microvolts before detection -- a true 100 µV "
-                "threshold, not a MAD multiplier. Preproc/artifact rows are "
-                "unchanged from the prior clusterless preset."
+                "threshold, not a MAD multiplier. Preprocessing and artifact "
+                "detection use the 'default' rows."
             ),
         ),
         "franklab_neuropixels_ks4_2026_06": dict(

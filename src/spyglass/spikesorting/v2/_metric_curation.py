@@ -144,15 +144,15 @@ def apply_label_rules(
         a metric computation failure and raises regardless of
         ``missing_policy``. When ``expected_missing`` is ``None`` (the
         default), every non-finite value follows ``missing_policy`` as if it
-        were expected -- today's behavior.
+        were expected.
 
     Returns
     -------
     dict[int, list[str]]
         ``unit_id -> [label, ...]`` containing ONLY units that matched at
         least one rule. Units with no labels are absent (the caller omits the
-        ragged label column entirely when this dict is empty, per the #1625
-        empty-list-of-lists fix).
+        ragged label column entirely when this dict is empty, because an
+        empty list-of-lists column cannot be written; see #1625).
 
     Raises
     ------
@@ -214,7 +214,7 @@ def apply_label_rules(
 
         if expected_missing is None:
             # No classifier was given: every non-finite value is handled by
-            # missing_policy alone, exactly as before this parameter existed.
+            # missing_policy alone.
             policy_missing_ids = missing_unit_ids
         else:
             expected_set = expected_missing.get(metric_name)
@@ -263,7 +263,7 @@ def apply_label_rules(
         ):
             # A per-unit NaN is an expected low-spike skip, but a metric that
             # is missing for EVERY unit means the rule made no real
-            # comparison at all -- the silently-inert-rule regression. Say so
+            # comparison at all, so the rule is silently inert. Say so
             # without raising: "pass" applied no labels; "fail" applied its
             # label to everyone for that reason, not because any unit
             # crossed the threshold.

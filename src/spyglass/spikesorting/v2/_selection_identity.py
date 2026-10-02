@@ -18,10 +18,10 @@ the DB, and an HPC job array re-importing this module in a spawned worker
 (macOS ``spawn`` re-imports the defining module) must never trigger a
 connection. Keep it to the standard library.
 
-Canonicalization is the footgun this module exists to kill: a v2 sort was
-once duplicated because a ``str`` ``artifact_detection_id`` never compared
-equal to the stored ``uuid.UUID``. Every value that has proven dangerous is
-normalized to a single representation here so
+Canonicalization is the footgun this module exists to kill: a ``str``
+``artifact_detection_id`` never compares equal to the stored ``uuid.UUID``, so
+an unnormalized id would silently duplicate a sort. Every value type that can
+alias this way is normalized to a single representation here so
 ``uuid.UUID(x)`` and ``str(x)`` -- and a ``numpy`` vs a plain
 ``sort_group_id`` -- produce the SAME identity.
 """
@@ -64,8 +64,8 @@ def _canonical_scalar(value):
       UUID string).
     * ``uuid.UUID`` -> canonical lowercase string.
     * a UUID-ish ``str`` -> the same canonical lowercase string, so a
-      ``str`` and a ``uuid.UUID`` of the same value share one identity --
-      this is the str-vs-UUID ``artifact_detection_id`` bug, fixed at the source.
+      ``str`` and a ``uuid.UUID`` of the same value share one identity
+      (a ``str`` ``artifact_detection_id`` cannot duplicate a selection).
     * ``bool`` -> kept as ``bool``. ``bool`` is an ``int`` subclass; do
       not collapse ``True``/``False`` into ``1``/``0``.
     * ``int`` and integer-like ids (e.g. a ``numpy`` ``sort_group_id``,
@@ -411,7 +411,8 @@ def sorting_identity_payload(
     A sort that reads a motion-corrected recording of its source adds
     ``motion_corrected_recording_id`` (normalized to a ``uuid.UUID``). The
     term is omitted, not stored as ``None``, for an uncorrected sort, so an
-    uncorrected sort keeps the id it had before corrected sorts existed.
+    uncorrected sort's payload (and id) is exactly the payload without the
+    motion term.
 
     Parameters
     ----------

@@ -32,7 +32,8 @@ def _electrode_group_sort_key(name):
     ``int(name)`` raises ``ValueError`` on names like ``"probeA"``; this
     key sorts all-numeric names numerically (and ahead of any non-numeric
     name), then non-numeric names lexically -- so purely numeric group
-    names keep their natural order while arbitrary names no longer crash.
+    names keep their natural order while arbitrary names sort instead of
+    raising.
     ``isdecimal`` (not ``isdigit``) is the gate so the predicate matches
     exactly the strings ``int()`` accepts.
     """
@@ -257,7 +258,8 @@ def _plan_sort_groups_by_column(
     validate a resolved ``"specific"`` reference. ``sort_group_ids`` is
     the per-input-group id list (already resolved by the caller, same
     length as ``groups``); a skipped group leaves a gap in the assigned
-    ids, matching the historical behavior.
+    ids (survivors are not renumbered, so each keeps the id the caller
+    assigned it).
 
     Returns ``(proposed, skipped)`` where each ``proposed`` entry is
     ``(sort_group_id, group_electrodes, reference_mode,

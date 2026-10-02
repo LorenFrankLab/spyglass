@@ -295,11 +295,10 @@ def _recompute_compute(
 ) -> RecomputeComputed:
     """Shared off-transaction compute for the recompute QC tables.
 
-    Branches the outcomes the monolithic ``make()`` handled, all of which end
-    in an INSERT: ``xfail`` (explicit skip), ``unverifiable`` (legacy
-    provenance cannot support a deterministic comparison), ``error`` (a caught
-    regeneration failure -> ``matched=0``, retryable), and ``compare`` (a real
-    hash comparison). ``regen`` is a no-arg callable returning
+    Branches the four outcomes, all of which end in an INSERT: ``xfail``
+    (explicit skip), ``unverifiable`` (legacy provenance cannot support a
+    deterministic comparison), ``error`` (a caught regeneration failure ->
+    ``matched=0``, retryable), and ``compare`` (a real hash comparison). ``regen`` is a no-arg callable returning
     ``(stored_hashes, new_hashes)``.
     """
     if xfail_reason:
@@ -679,7 +678,7 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
     # Tri-part dispatch: the trace regeneration (re-preprocess to a fresh NWB +
     # hash) is the long step and stays OUTSIDE the framework transaction
     # (mirroring Recording / Sorting). A regen failure is encoded as the 'error'
-    # outcome (matched=0), not raised, preserving the monolithic behavior.
+    # outcome (matched=0), not raised, so the QC row is still recorded.
     _parallel_make = True
 
     def make_fetch(self, key) -> RecomputeFetched:
@@ -1227,7 +1226,7 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
 
     Legacy inventories without deterministic ``noise_levels`` provenance are
     recorded as explicitly unverifiable instead of producing a misleading hash
-    mismatch against today's seed-pinned rebuild.
+    mismatch against the current seed-pinned rebuild.
     """
 
     definition = """
@@ -1585,7 +1584,7 @@ def _recompute_analyzer_hashes(inputs: AnalyzerRegenInputs, rounding: int):
     # recording build_analyzer starts from (it 2D-projects + whitens per recipe,
     # so a whitened metric analyzer is not double-whitened). The sorting is
     # recipe-independent. (make_fetch can still rebuild a reclaimed RECORDING
-    # cache -- a separate, known self-heal, out of scope here.)
+    # cache, through the recording's own self-heal.)
     recording = read_canonical_recording(source.recording)
     sorting = read_stored_units(source.units)
 

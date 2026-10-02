@@ -690,8 +690,8 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             # Append a MAPPING row (not a positional tuple) so the insert hook
             # backfills the omitted execution_params (default local execution) +
             # its schema version -- a positional row would have to enumerate all
-            # SorterParameters columns and would break the moment the table gains
-            # one (as it did with execution_params).
+            # SorterParameters columns and would break whenever the table gains
+            # a column.
             rows.append(
                 {
                     "sorter": sorter,
@@ -926,7 +926,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             motion itself.
         DuplicateSelectionError
             If any matching master has a non-deterministic ``sorting_id``
-            (a raw ``insert`` bypass or a pre-determinism legacy row) --
+            (a raw ``insert`` bypass or a legacy non-content-addressed row) --
             even a single one; an integrity bug, not user error.
         SchemaBypassError
             If a deterministic master exists but its recording/artifact-detection
@@ -991,7 +991,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
         # Pre-check the recording source exists so the most common mistake --
         # selecting a sort before the recording is populated -- gives an
-        # actionable "populate first" message. The master no longer FKs the
+        # actionable "populate first" message. The master does not FK the
         # recording (the FK lives on the source part), so a missing recording
         # would otherwise surface only as a source-part FK violation classified
         # as a schema-bypass, which mis-frames a routine populate-first error.
@@ -1060,7 +1060,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                     raise SchemaBypassError(
                         "SortingSelection: artifact_detection_id "
                         f"{plan.artifact_detection_id} is not materialized in "
-                        "the split detection tables (or was concurrently "
+                        "the artifact detection tables (or was concurrently "
                         "deleted). Populate the artifact detection before "
                         "linking it to a sort."
                     ) from key_exc
@@ -1181,7 +1181,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         * the master at ``deterministic_id`` is the canonical, content-
           addressed selection -> return ``{"sorting_id": ...}``;
         * ANY master with a different ``sorting_id`` is non-deterministic
-          (a raw ``insert`` bypass or pre-determinism legacy row) and
+          (a raw ``insert`` bypass or a legacy non-content-addressed row) and
           violates the content-addressed-identity invariant -> raise
           ``DuplicateSelectionError`` so it is reset rather than silently
           returned.
@@ -1217,8 +1217,8 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 f"motion_corrected_recording_id={motion_corrected_recording_id} "
                 "whose sorting_id is not the "
                 f"deterministic id {deterministic_id}: {bypassed}. This is a "
-                "non-deterministic selection row (a raw insert or pre-"
-                "determinism legacy row); drop it and re-insert via "
+                "non-deterministic selection row (a raw insert or a legacy "
+                "non-content-addressed row); drop it and re-insert via "
                 "insert_selection."
             )
         return {"sorting_id": deterministic_id} if master_ids else None
@@ -1355,9 +1355,8 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         This includes concat sorts, whose detections instead live on frozen
         ``ConcatenatedRecordingSelection.MemberSnapshot`` rows. ``None`` here
         does not imply that a concat source is unmasked. This is the accessor
-        for the optional sorting-stage input; its
-        natural-key contract (return the ``artifact_detection_id`` or ``None``)
-        is unchanged by the merge hop.
+        for the optional sorting-stage input; it returns the natural
+        ``artifact_detection_id`` (or ``None``), never the merge id.
 
         Raises
         ------
@@ -1683,8 +1682,8 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     # The SortingAnalyzer cache folder is intentionally NOT a column: it is
     # large (5-50 GB) regeneratable scratch resolved at runtime from
     # (sorting_id, display_waveform_params_name) via _analyzer_cache.analyzer_path.
-    # Persisting an absolute path here previously drifted from the
-    # accessor-computed path whenever temp_dir changed between runs.
+    # Persisting an absolute path here would drift from the
+    # accessor-computed path whenever temp_dir changes between runs.
 
     class Unit(SpyglassMixinPart):
         """Per-unit metadata persisted at sort time.
@@ -2148,7 +2147,7 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         - ``_write_units_nwb`` (stages the AnalysisNwbfile on disk
           without registering it).
 
-        Cleanup contract (failure-mode A): if anything raises between
+        Cleanup contract (compute failure): if anything raises between
         ``_build_analyzer`` and the end of this method, the analyzer
         folder and any staged units NWB are removed before the
         exception propagates. DataJoint will not call ``make_insert``
@@ -2572,10 +2571,10 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         Spike times are persisted by ``_write_units_nwb`` in two forms:
         absolute ``spike_times`` for NWB interoperability, and Spyglass's
-        ``spike_sample_index`` sidecar for efficient frame-based readback. New
-        files reconstruct directly from ``spike_sample_index``; older/manual
-        files without that column fall back to the previous absolute-time
-        search against the recording timestamps.
+        ``spike_sample_index`` sidecar for efficient frame-based readback.
+        Files with that column reconstruct directly from it; older/manual
+        files without it fall back to an absolute-time search against the
+        recording timestamps.
 
         Returns a ``NumpySorting`` (segment frame indices, ``t_start=0``),
         so ``get_unit_spike_train(uid)`` yields the original recording
@@ -2793,8 +2792,8 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         decision, not an analyzer-curation recompute.
 
         Job kwargs are resolved from this sort's ``SorterParameters`` row
-        (per the Job-Kwargs Resolution convention); explicit ``kwargs`` win on
-        conflict. The computed extensions persist to the on-disk analyzer
+        (``_resolved_job_kwargs``: SpikeInterface globals, then ``dj.config``,
+        then the row blob); explicit ``kwargs`` win on conflict. The computed extensions persist to the on-disk analyzer
         folder (SI's ``binary_folder`` format saves them automatically).
 
         Parameters
@@ -3081,9 +3080,8 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
           folder (``analyzer_path(sorting_id, display_waveform_params_name)``)
           no longer exists on disk (the
           regeneratable scratch was removed out of band). Reported only --
-          deleting the *row* is a destructive DB operation the human decides on
-          (per the Spyglass destructive-op contract); this method NEVER
-          auto-deletes a row.
+          deleting the *row* is a destructive DB operation left to the user;
+          this method NEVER auto-deletes a row.
         - **Reclaimed**: a missing analyzer folder with a
           ``SortingAnalyzerRecompute.deleted=1`` audit trail. This is expected
           storage reclamation, not an unexpected DB-side orphan.
@@ -3469,8 +3467,8 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         Thin delegator to :func:`._units_nwb.write_sorting_units_nwb`;
         kept as a ``Sorting`` staticmethod because ``make_insert`` calls
         ``self._write_units_nwb(...)`` and the v2 tests both monkeypatch
-        ``Sorting._write_units_nwb`` (the Mode-A analyzer-cleanup audit)
-        and call it directly (the zero-unit guard test). The NWB staging
+        ``Sorting._write_units_nwb`` (to check analyzer cleanup when the units
+        write fails) and call it directly (the zero-unit guard test). The NWB staging
         IO -- absolute-timeline spike times, the ``obs_intervals`` +
         ``curation_label`` columns, the per-unit metadata + source-provenance
         scratch, and the zero-unit empty-Units guard -- lives in the service

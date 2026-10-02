@@ -1,6 +1,6 @@
 """Artifact detection over a preprocessed Recording.
 
-Tables (source-specific split; unified downstream by the
+Tables (one result table per source kind; unified downstream by the
 ``ArtifactDetectionOutput`` merge in ``artifact_output.py``):
     ArtifactDetectionParameters       -- threshold detection parameters.
     SharedArtifactGroup (+ Member)    -- opt-in cross-recording detection (#928).
@@ -438,7 +438,7 @@ def _insert_artifact_selection(
     manual_excluded_times=None,
     extra_row,
 ) -> dict:
-    """Idempotently insert one split artifact-detection selection row.
+    """Idempotently insert one artifact-detection selection row.
 
     Shared body for ``RecordingArtifactSelection.insert_selection`` and
     ``SharedGroupArtifactSelection.insert_selection``. Derives the
@@ -449,16 +449,15 @@ def _insert_artifact_selection(
     stable) -- validates any caller-supplied id, ensures the params row exists,
     and inserts the single selection row.
 
-    Because the recording source is now a required FK on the master row (not
-    an XOR part), a selection cannot exist with zero or two sources: the
-    orphan / ambiguous states the pre-split ``_find_existing_pk`` /
-    ``resolve_source`` guarded against are structurally unrepresentable, so
-    this insert only handles the concurrent duplicate-id race.
+    Because the recording source is a required FK on the master row (not an
+    XOR part table), a selection cannot exist with zero or two sources: orphan
+    and ambiguous source states are structurally unrepresentable, so this
+    insert only handles the concurrent duplicate-id race.
 
     Parameters
     ----------
     selection_cls : dj.Manual
-        The split selection table to insert into.
+        The source-specific selection table to insert into.
     artifact_detection_params_name : str
         The ``ArtifactDetectionParameters`` row name.
     recording_id : uuid or str, optional
@@ -540,11 +539,9 @@ class RecordingArtifactSelection(
 ):
     """Single-recording artifact-detection request.
 
-    Source-specific split of the former
-    ``ArtifactDetectionSelection.RecordingSource``: the recording source is a
-    required FK on the master row, so "exactly one recording source" is
-    structural (a row cannot exist with zero or two sources) rather than a
-    runtime-asserted invariant.
+    The recording source is a required FK on the master row, so "exactly one
+    recording source" is structural (a row cannot exist with zero or two
+    sources) rather than a runtime-asserted invariant.
     """
 
     definition = """
@@ -590,13 +587,12 @@ class SharedGroupArtifactSelection(
 ):
     """Cross-recording (shared-group) artifact-detection request.
 
-    Source-specific split of the former
-    ``ArtifactDetectionSelection.SharedGroupSource``. ``member_set_hash``
-    snapshots the group's sorted (order-independent) member ``recording_id``
-    set at selection time; ``SharedGroupArtifactDetection.make_fetch``
-    re-derives it from the current members and rejects a drift (the identity
-    is ``{params, group}`` only, so a live member edit could otherwise change
-    the scanned set under a fixed ``artifact_detection_id``).
+    ``member_set_hash`` snapshots the group's sorted (order-independent)
+    member ``recording_id`` set at selection time;
+    ``SharedGroupArtifactDetection.make_fetch`` re-derives it from the current
+    members and rejects a drift (the identity is ``{params, group}`` only, so
+    a live member edit could otherwise change the scanned set under a fixed
+    ``artifact_detection_id``).
     """
 
     definition = """
@@ -656,11 +652,10 @@ class SharedGroupArtifactSelection(
 def insert_artifact_detection(key: dict) -> dict:
     """Insert an artifact-detection selection, dispatching on source kind.
 
-    Single-entry UX over the two split selections: a single-recording key
-    (``recording_id``) routes to :class:`RecordingArtifactSelection`, a
-    cross-recording key (``shared_artifact_group_name``) to
-    :class:`SharedGroupArtifactSelection`. Preserves the call shape of the
-    former ``ArtifactDetectionSelection.insert_selection``.
+    Single entry point over the two source-specific selections: a
+    single-recording key (``recording_id``) routes to
+    :class:`RecordingArtifactSelection`, a cross-recording key
+    (``shared_artifact_group_name``) to :class:`SharedGroupArtifactSelection`.
 
     Parameters
     ----------
@@ -729,7 +724,7 @@ class SharedGroupArtifactFetched(NamedTuple):
 
 
 class _ArtifactDetectionMixin:
-    """Shared source-agnostic detection machinery for the split result tables.
+    """Shared source-agnostic detection machinery for both result tables.
 
     ``RecordingArtifactDetection`` and ``SharedGroupArtifactDetection`` differ
     only in how ``make_fetch`` / ``make_compute`` resolve and LOAD their source
@@ -748,8 +743,7 @@ class _ArtifactDetectionMixin:
     """
 
     # Tri-part dispatch moves the long-running detection loop OUTSIDE the
-    # framework transaction (see the pre-split ``ArtifactDetection`` for the
-    # DataJoint #1170 / Spyglass #1030 background).
+    # framework transaction (background: DataJoint #1170 / Spyglass #1030).
     _parallel_make = True
     _single_source: bool = True
 
@@ -1076,8 +1070,7 @@ class RecordingArtifactDetection(
 ):
     """Artifact-removed valid times for a single ``Recording``.
 
-    Source-specific split of the pre-split ``ArtifactDetection`` recording
-    branch. The recording source is structural (the selection master carries a
+    The recording source is structural (the selection master carries a
     required ``Recording`` FK), so ``make_fetch`` resolves it directly without
     a source-kind branch. Writes exactly one ``IntervalList`` row keyed by the
     recording's parent ``nwb_file_name``.
@@ -1185,8 +1178,7 @@ class SharedGroupArtifactDetection(
 ):
     """Artifact-removed valid times for a ``SharedArtifactGroup``.
 
-    Source-specific split of the pre-split ``ArtifactDetection`` shared-group
-    branch. ``make_fetch`` re-derives the group's member set and rejects a
+    ``make_fetch`` re-derives the group's member set and rejects a
     drift from the ``member_set_hash`` frozen on the selection (the identity is
     ``{params, group}`` only). ``make_compute`` unions the members' channels
     (``si.aggregate_channels``) and scans ONCE; ``make_insert`` writes the same
@@ -1402,7 +1394,7 @@ def assert_artifact_detection_covers_recording(
 
     artifact_detection_key = {"artifact_detection_id": artifact_detection_id}
     target_recording_id = str(recording_id)
-    # Route by which split result table content-addresses the id (it lives
+    # Route by which result table content-addresses the id (it lives
     # in exactly one). Require the detection POPULATED: a detection must be
     # materialized before it can be linked (it registers itself into
     # ArtifactDetectionOutput at materialization).

@@ -75,7 +75,7 @@ def read_units_abs_spike_times(abs_path) -> dict:
 def read_units_spike_sample_indices(abs_path) -> dict | None:
     """Return ``{unit_id: spike_sample_index}`` or ``None`` if absent.
 
-    New v2 units NWBs store sample frames alongside absolute ``spike_times`` so
+    v2-written units NWBs store sample frames alongside absolute ``spike_times`` so
     Spyglass readback can reconstruct ``NumpySorting`` objects without reading
     the upstream recording's full timestamp vector. ``None`` is the compatibility
     signal for older/manual units NWBs that lack the column; callers then fall
@@ -122,8 +122,8 @@ def read_units_abs_times_and_sample_indices(abs_path, *, unit_ids=None):
     preview / full-write paths that need all of them (see
     ``curation_source_unit_ids``). A requested id absent from the table is
     skipped: the caller's kept-set is authoritative, and a genuinely-missing
-    source unit surfaces as a downstream KeyError exactly as it did before this
-    filter existed.
+    source unit surfaces as a downstream KeyError, as it would without the
+    filter.
     """
     import numpy as np
     import pynwb
@@ -469,8 +469,8 @@ def build_lazy_merged_sorting(
         ``_dedup_merged_spike_times`` (the SAME helper the
         ``apply_merge=True`` staged path uses, so the previewed train is
         identical to the stored one) and assigned a fresh
-        ``max(unit_ids) + 1`` id in ``units_to_merge`` order (matching the
-        prior SI ``MergeUnitsSorting`` id assignment).
+        ``max(unit_ids) + 1`` id in ``units_to_merge`` order (matching SI
+        ``MergeUnitsSorting``'s id assignment).
     """
     import numpy as np
     import spikeinterface as si
@@ -669,7 +669,7 @@ def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
 def _base_intervals_from_recording(recording, fs):
     """Return recorded time chunks without materializing full timestamps.
 
-    The chunked/affine scan now lives in ``_signal_math.base_intervals_and_gaps``
+    The chunked/affine scan lives in ``_signal_math.base_intervals_and_gaps``
     (which generalizes it to also emit the inter-chunk gap frame indices the
     artifact path needs); this writer only needs the per-chunk base intervals.
     """
@@ -780,9 +780,9 @@ def read_sorting_statistics_spans(
         raise RuntimeError(
             f"Sorting sorting_id={str(sorting_id)!r} has no persisted "
             f"statistics spans in its units NWB {str(abs_path)!r}; it was "
-            "written before they were recorded. Delete and repopulate this "
-            "Sorting (and its downstream) so noise and whitening statistics "
-            "are estimated from its artifact-free spans."
+            "written by a Spyglass version that did not record them. Delete "
+            "and repopulate this Sorting (and its downstream) so noise and "
+            "whitening statistics are estimated from its artifact-free spans."
         )
     return [(int(a), int(b)) for a, b in values[STATISTICS_SPANS_FIELD]]
 
@@ -1255,8 +1255,8 @@ def _write_curated_units_nwb_body(
             # ``list(nwb_sorting.get('curation_label', []))`` and
             # expect a list per unit -- they would misparse a
             # comma-separated string by splitting on every
-            # character. The ``CurationV2.UnitLabel`` docstring
-            # already described this shape.
+            # character. This is the shape the ``CurationV2.UnitLabel``
+            # docstring describes.
             #
             # Call ``add_unit(...)`` for every unit FIRST, then add
             # the column with ``data=label_values`` AFTER -- this

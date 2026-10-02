@@ -20,9 +20,9 @@ DESIGN NOTES.
 - **Bypass the DataJoint ``~external`` checksum on readback.** The helper opens
   the absolute path directly via SpikeInterface / pynwb. It is NEVER resolved
   through ``AnalysisNwbfile.get_abs_path``, whose checksum-validating fallback
-  would re-raise -- against the *stale* checksum -- the exact failure the
-  content-fingerprint design fixes, before a single byte could be read during a
-  rebuild.
+  would re-raise against the *stale* checksum (a byte-different but
+  content-identical rebuild never matches it) before a single byte could be
+  read.
 
 - **Geometry from the persisted electrodes region, not ``get_channel_locations``.**
   The persisted ``ElectricalSeries.electrodes`` region is the stable on-disk

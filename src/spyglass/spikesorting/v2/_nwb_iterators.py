@@ -139,9 +139,9 @@ class _TimestampsSegment(si.BaseRecordingSegment):
         channel_indices=None,
     ) -> np.ndarray:
         # ``_timeseries`` is 1-D, so the slice is already 1-D ``(stop-start,)``;
-        # return it directly. The old ``np.squeeze`` was a no-op for normal
-        # chunks but collapsed a length-1 tail (``n_samples % buffer == 1``)
-        # to a 0-d scalar, which only survived by HDMF's broadcast-assignment.
+        # return it directly. Do not ``np.squeeze`` it: that is a no-op for
+        # normal chunks but collapses a length-1 tail
+        # (``n_samples % buffer == 1``) to a 0-d scalar.
         return np.asarray(
             self._timeseries[start_frame:end_frame], dtype=self._dtype
         )

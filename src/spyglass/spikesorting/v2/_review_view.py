@@ -18,8 +18,8 @@ from spyglass.spikesorting.v2._figpack_curation import FIGPACK_INSTALL_HINT
 
 #: Fixed height (px) reserved for the curation control when expanded. A
 #: LayoutItem with only ``max_size`` reserves NO space when a sibling has
-#: ``stretch``, which collapsed the control to its title and made its buttons
-#: unclickable; the pane is collapsible so the scientific views can take the
+#: ``stretch``, which would collapse the control to its title and leave its
+#: buttons unclickable; the pane is collapsible so the scientific views can take the
 #: whole height while inspecting.
 CURATION_CONTROL_HEIGHT = 150
 

@@ -487,7 +487,7 @@ def assert_consistent_channel_geometry(named_positions) -> None:
 
     UnitMatch derives geometry from the FIRST session's channel positions and
     runs per-channel loops that require every session to share that geometry;
-    cross-probe / cross-day geometry matching is out of scope. This pure check
+    cross-probe / cross-day geometry matching is not supported. This pure check
     raises a clear ``ValueError`` on the first session whose positions differ
     (by shape or value) from the first session's. Shared by the backend
     ``match()`` (after bundle extraction) and ``UnitMatchSelection.insert_selection``
@@ -518,7 +518,7 @@ def assert_consistent_channel_geometry(named_positions) -> None:
         ):
             raise ValueError(
                 "UnitMatch requires all sessions to share one probe geometry "
-                "(cross-probe / cross-day geometry matching is out of scope), "
+                "(cross-probe / cross-day geometry matching is not supported), "
                 f"but session {label} has channel positions {positions.shape} "
                 f"that differ from session {ref_label}'s {ref_positions.shape}. "
                 "Group only sessions recorded on the same probe."
@@ -568,8 +568,8 @@ class UnitMatchBackend:
         # UnitMatch assumes ONE probe across the group: it derives geometry from
         # the first session's channel positions and runs per-channel loops that
         # require every session to share that geometry. Cross-probe matching is
-        # out of scope, so reject mismatched geometry up front with a clear error
-        # rather than letting UnitMatch fail deep in a shape mismatch. The same
+        # not supported, so reject mismatched geometry up front with a clear
+        # error rather than letting UnitMatch fail deep in a shape mismatch. The same
         # check runs as a preflight in UnitMatchSelection.insert_selection (before
         # bundle extraction); this is the post-extraction backstop.
         assert_consistent_channel_geometry(

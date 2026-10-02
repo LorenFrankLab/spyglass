@@ -296,7 +296,12 @@ def _source_filter_problem(source_kind: str, source_key: dict) -> str | None:
 
 
 def _assert_concat_tables_current() -> None:
-    """Refuse concat tables whose live heading predates motion's removal."""
+    """Refuse concat tables that still carry in-concat motion columns.
+
+    See ``_motion.assert_concat_schema_current``: a pre-production v2
+    database whose concat tables were not recreated may hold
+    already-corrected concat traces.
+    """
     from spyglass.spikesorting.v2._motion import assert_concat_schema_current
 
     assert_concat_schema_current(
@@ -394,9 +399,10 @@ class MotionEstimateSelection(
             whose preprocessing recipe applies no temporal filter
             (:func:`._motion.unfiltered_source_problem`; for a concat, the
             concatenation's recipe), an artifact detection that does not
-            belong to the recording, concat
-            tables that predate motion's removal from concatenation, or a
-            mismatched explicit ``motion_estimate_id``.
+            belong to the recording, concat tables that still carry
+            in-concat motion-correction columns (an un-recreated
+            pre-production schema), or a mismatched explicit
+            ``motion_estimate_id``.
         DuplicateSelectionError
             If a matching row has a non-deterministic ``motion_estimate_id``.
         SchemaBypassError
@@ -927,8 +933,9 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
 
         Rebuilds a missing source NWB through the owning table's own verified
         self-heal. Refuses a source whose ``content_hash`` changed since
-        selection, and concat tables that predate motion's removal from
-        concatenation. A concat source's continuity spans and their start
+        selection, and concat tables that still carry in-concat
+        motion-correction columns (an un-recreated pre-production schema). A
+        concat source's continuity spans and their start
         times come from its row.
 
         Raises

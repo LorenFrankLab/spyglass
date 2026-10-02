@@ -43,8 +43,8 @@ downstream code keys off `merge_id` regardless of which produced the sort.
 | Check            | `pip check`; `preflight_v2_pipeline(...)` reports `sorter_installed` / `sorter_runtime_available`              | `pip check`; the v1 tutorials                                                |
 
 Both environments share the same MySQL database and the same `SPYGLASS_BASE_DIR`
-artifacts. The modern install no longer pulls the `mountainsort4` package: it
-installs only a wrapper (the sorter *looks* installed) while the algorithm
+artifacts. The modern install does not include the `mountainsort4` package: it
+would install only a wrapper (the sorter *looks* installed) while the algorithm
 backend `ml_ms4alg` does not build on NumPy 2, so it could never run. Run MS4 in
 the legacy environment or through the containerized MS4 preset
 (`franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`).
@@ -55,17 +55,18 @@ that file). That is a development-time procedure for the legacy suite, **not**
 the normal user path: users who only need to *read* v0/v1 results use the modern
 install; users who must *produce* new v0/v1 output should follow the legacy file
 verbatim and restore `pyproject.toml` afterwards. Packaging both stacks as
-installable profiles from unchanged metadata is deferred.
+installable profiles from unchanged metadata is not yet supported.
 
 ### Upgrading a preproduction v2 database
 
-This is the authoritative sequence for this preproduction branch. New databases
-declare the current schema automatically. For disposable development results,
-prefer a **fresh development database** and rerun ingestion, sorting, and
-curation. Keep v1/production databases separate. Pre-mask concatenated results
-must be rerun: adding columns cannot reconstruct their missing artifact
-provenance. The staged path below retains standalone development results; it
-is not a production migration.
+This sequence upgrades a database created by a pre-release (preproduction)
+version of v2. New databases declare the current schema automatically. For
+disposable development results, prefer a **fresh development database** and
+rerun ingestion, sorting, and curation. Keep v1/production databases separate.
+Concatenated results made before member artifact masks were stored
+(pre-mask concatenations) must be rerun: adding columns cannot reconstruct
+their missing artifact provenance. The staged path below retains standalone
+development results; it is not a production migration.
 
 Before an in-place upgrade, stop v2 workers and preserve the development database,
 analysis files, local review bundles (`annotations.json`,
@@ -287,7 +288,7 @@ from spyglass.spikesorting.v2.session_group import (
 )
 from spyglass.spikesorting.v2.sorting import SortingSelection
 
-# Trial deployments registered concat-backed CurationV2 rows in
+# Pre-release versions registered concat-backed CurationV2 rows in
 # SpikeSortingOutput on a synthetic timeline. Inspect, then remove them.
 for row in CurationV2.audit_concat_merge_rows():
     (SpikeSortingOutput & {"merge_id": row["merge_id"]}).super_delete(
@@ -466,10 +467,9 @@ TrackedUnit = unit_matching_module.TrackedUnit
     units despite its name; to port a v1 threshold, multiply it by the
     recording's gain in µV per unit.
 
-- **Parameter rows are named differently — no back-compat aliases.** The June
-    2026 catalog correction renames every Frank-lab row to a dated,
-    content-stable name and drops the brief v1-name alias shim, so old strings
-    no longer resolve — update them:
+- **Parameter rows are named differently — no back-compat aliases.** Every
+    Frank-lab row has a dated, content-stable name, and no alias maps the v1
+    names onto them, so v1 strings do not resolve — update them:
 
     - `PreprocessingParameters`: v1's single `default` → `default`; the production
         region recipes are `franklab_hippocampus_2026_06` (600 Hz high-pass) and
@@ -502,15 +502,15 @@ TrackedUnit = unit_matching_module.TrackedUnit
 
 - **Sort-group referencing inherits the configured reference by default**
     (matching v1). `SortGroupV2.set_group_by_shank` and
-    `set_group_by_electrode_table_column` now read each group's
+    `set_group_by_electrode_table_column` read each group's
     `Electrode.original_reference_electrode` and map it per group to a
     `reference_mode` — `-1` / `None` → `"none"`, `-2` → `"global_median"`, a
-    non-negative id → `"specific"` (that electrode). This replaces the earlier v2
-    default of no reference (`"none"`). Override knobs: `set_group_by_shank`
-    takes v1's per-group `references={electrode_group: ref_id}` dict back, and
+    non-negative id → `"specific"` (that electrode). Override knobs:
+    `set_group_by_shank` accepts v1's per-group
+    `references={electrode_group: ref_id}` dict, and
     both helpers accept a call-wide `reference_mode=` (with
     `reference_electrode_id=` for `"specific"`) that forces one mode on every
-    group; the two are mutually exclusive. **Three things now fail loud at group
+    group; the two are mutually exclusive. **Three things fail loud at group
     creation that v1 tolerated:** electrodes in one group with *mixed*
     configured references raise instead of silently mis-referencing (v1 built a
     `ValueError` but never raised it); a `"specific"` reference that is itself a
@@ -606,7 +606,7 @@ for metric definitions, bin validity, and decoder restrictions.
     content-identical rebuild.
 - **Pinned SpikeInterface (`==0.104.3`) + KS4/MS5 snapshot tests.** A SI version
     bump that would change a sorter's `extra="allow"` defaults surfaces as a
-    deliberate, audited test failure.
+    test failure, so the change has to be reviewed deliberately.
 - **Analyzer-folder disk-leak audit.**
     `Sorting.find_orphaned_analyzer_folders(dry_run=True)` surfaces 5–50 GB
     on-disk leaks from delete-override bypass.
@@ -631,19 +631,17 @@ for metric definitions, bin validity, and decoder restrictions.
     shipped-default parameter row whose content has diverged from the shipped
     content (e.g. a hand-edited blob); `initialize_v2_defaults` runs it and
     warns.
-- **Tracked, region-specific analyzer waveform window — expect a
-    `peak_amplitude_uv` / template-metric shift.** The analyzer window and
-    subsample are no longer hardcoded: they come from a named, DB-tracked
-    `AnalyzerWaveformParameters` row resolved from the sort's preprocessing
-    recipe (hippocampus `0.5/0.5 ms`, cortex `1.0/2.0 ms`; both 20000 spikes),
-    recorded on `Sorting.display_waveform_params_name`. Relative to the earlier
-    v2 hardcoded `1.0/2.0 ms` window with a 500-spike subsample, every
-    template-derived value shifts — `peak_amplitude_uv`, SNR, amplitude — for
-    ALL sorts (the larger 20000 subsample), and **further for hippocampus**
-    sorts (the narrower window). Spike-train metrics (firing rate, ISI, presence
-    ratio) are unchanged. This is a deliberate, content-addressed shift, not a
-    regression; re-curate against the new values rather than comparing absolute
-    amplitudes across the v1→v2 boundary.
+- **Tracked, region-specific analyzer waveform window.** The analyzer window
+    and subsample come from a named, DB-tracked `AnalyzerWaveformParameters`
+    row resolved from the sort's preprocessing recipe (hippocampus
+    `0.5/0.5 ms`, cortex `1.0/2.0 ms`; both 20000 spikes), recorded on
+    `Sorting.display_waveform_params_name`. Template-derived values —
+    `peak_amplitude_uv`, SNR, amplitude — depend on that window and subsample;
+    spike-train metrics (firing rate, ISI, presence ratio) do not. Pre-release
+    v2 sorts used a fixed `1.0/2.0 ms` window with a 500-spike subsample, so
+    their template-derived values differ for all sorts and further for
+    hippocampus sorts; re-curate against the current values rather than
+    comparing absolute amplitudes across the v1→v2 boundary.
 
 ## 4. What has a v2 replacement
 
@@ -651,7 +649,7 @@ The post-sort (curation / metric) surfaces have v2 replacements. The only
 surface that stays v1-only is the stored per-pair burst metrics
 (`BurstPairUnit`); everything else below has a v2 path.
 
-- **Available in v2** — `metric_curation` now provides
+- **Available in v2** — `metric_curation` provides
     `QualityMetricParameters`, `AutoCurationRules`,
     `CurationEvaluationSelection`, and `CurationEvaluation`. This replaces v1
     `MetricCuration` for SI quality metrics, auto-labels, and merge suggestions.
@@ -666,8 +664,9 @@ surface that stays v1-only is the stored per-pair burst metrics
     `silhouette`) are computed on a **whitened** metric analyzer (decorrelated
     space), while amplitudes and voltage/spike-train metrics (`snr`,
     `amplitude_cutoff`, `firing_rate`, `isi_violation`, …) stay on the
-    unwhitened display analyzer — so expect PC/NN values to differ from any
-    earlier single-analyzer v2 run (re-curate against the new scores). The
+    unwhitened display analyzer — so PC/NN values differ from those of
+    pre-release v2 runs that used a single analyzer (re-curate against the
+    current scores). The
     metric recipe is tracked on
     `CurationEvaluationSelection.metric_waveform_params_name`. Quality-metric
     curation is provided by `CurationEvaluation`.
@@ -683,7 +682,7 @@ surface that stays v1-only is the stored per-pair burst metrics
 - **Available in v2** — `RecordingRecompute` is replaced by two explicit
     verification families: `RecordingArtifactRecompute*` for recording/artifact
     NWB files and `SortingAnalyzerRecompute*` for analyzer folders.
-- **Available in v2** — cross-session unit matching is delivered:
+- **Available in v2** — cross-session unit matching:
     `unit_matching` and `matcher_protocol` back the `UnitMatch` / `TrackedUnit`
     tables, and `ConcatenatedRecording` / `SessionGroup` implement same-day
     chronic concatenate-and-sort.
@@ -751,8 +750,8 @@ correct** differences:
 - **Disjoint (multi-interval) sorts: no obs/valid interval spans a gap.** v2
     splits artifact-removed valid_times and no-artifact obs_intervals at the
     recorded-chunk boundaries, so observation durations and firing-rate windows
-    exclude the inter-interval wall-clock gaps (v1/early-v2 could report a
-    single gap-spanning envelope).
+    exclude the inter-interval wall-clock gaps (v1 and pre-release v2 could
+    report a single gap-spanning envelope).
 - **KS4 may differ after a SpikeInterface version bump** — caught by the
     pinned-version snapshot test rather than appearing silently.
 - **Seed pinning improves preprocessing reproducibility, but MS4/MS5/KS4 are not
@@ -764,21 +763,21 @@ correct** differences:
     spike-by-spike equality. The deterministic `clusterless_thresholder` path is
     the tight parity reference.
 
-The whole-session and curation notebooks now show the complete population
+The whole-session and curation notebooks show the complete population
 handoff and detailed inspection routes. Metric predicates passed to `select_units_for_analysis` with an explicit
 evaluation persist the selected population; decoding reads the same membership. Native split/per-spike edits and Phy edit re-import
 remain unsupported.
 
-Concat selections now require explicit per-member artifact detection IDs (or
+Concat selections require explicit per-member artifact detection IDs (or
 explicit `None` values). The standard runner resolves these automatically from
 the preset. Masks precede concatenation, participate in concat identity, and
 survive rebuilds and per-session exports as `obs_intervals`. Concatenation
-itself no longer corrects motion -- that is a separate, optional stage (see
+itself does not correct motion -- that is a separate, optional stage (see
 [Optional motion correction](./SpikeSortingV2.md#optional-motion-correction))
 that can layer on top of either a single-session `Recording` or a
 `ConcatenatedRecording`; if you apply it to a concat, its estimate/correction
-reads the same masks. Old concat materializations cannot satisfy the new
-selection; follow the
+reads the same masks. Concat materializations from a pre-release database
+cannot satisfy this selection; follow the
 [preproduction database sequence](#upgrading-a-preproduction-v2-database),
 which drops and redeclares the concat tables, and rerun them. Raw SI duration metrics
 retain SI definitions. V2 `observed_*` metrics and

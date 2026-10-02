@@ -539,7 +539,7 @@ def build_curated_unit_rows(
     # contributors still get a CurationV2.Unit row (preview parity),
     # so give each a 1-element self-entry so every Unit row has at
     # least one MergeGroup row with its own ``unit_id`` -- a
-    # ``Unit * MergeGroup`` join on unit_id no longer drops them.
+    # ``Unit * MergeGroup`` join on unit_id does not drop them.
     # get_merged_sorting filters ``len(contribs) > 1`` so the
     # self-entries are auto-skipped when reconstructing merges.
     if not apply_merge:

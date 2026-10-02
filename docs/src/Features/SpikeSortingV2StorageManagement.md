@@ -73,7 +73,7 @@ verdicts, then inventories the published folder again. `attempt_all()` also
 refreshes legacy inventories and folders rebuilt by DB-free workers using a
 path/size/mtime fingerprint, without reading waveform payloads.
 
-## The deletion gate (do not weaken)
+## When deletion is allowed
 
 `delete_files()` refuses to delete unless there is a `matched=1` recompute row
 **whose `env_id` is the current `UserEnvironment`**:
@@ -113,7 +113,7 @@ whole volume into RAM. Measured on a 415 MB waveform volume
 dirty pages included) versus ~2.3x for `zarr`; a lazy load plus one unit's read
 costs ~0.17x versus >= 1x for an eager load. The scientific waveform sample
 (`max_spikes_per_unit`, the recipe window, sparsity) is never reduced to meet a
-memory target -- only the storage and load paths changed.
+memory target -- the savings come only from the storage format and load path.
 
 The analyzer's recording reference is saved as `recording.pickle`, including
 artifact exclusions and recipe preprocessing. This avoids SI 0.104.3's JSON
@@ -152,10 +152,15 @@ analyzers live on shared storage.
 
 Validate locking on the actual server/client mounts before deploying multiple
 nodes: hold a cache lock on node A and verify that a short acquisition on node B
-times out; release or terminate A and verify that B can acquire it. Then run the
-two-worker publication, rebuild, and interruption tasks in the
-[release-readiness audit](../../plans/spikesorting-v2-release-readiness-audit.md).
-A successful local-filesystem test does not establish shared-mount behavior.
+times out; release or terminate A and verify that B can acquire it. Then, from
+two hosts on the same mount and MySQL server: populate the same selection on
+both (duplicate work must not replace the committed result) and different
+selections (each must progress independently); read or rebuild an analyzer on
+one host while the other evaluates or publishes it (no incomplete store may be
+exposed); and terminate a worker, or interrupt its database connection, before
+publication, then retry from the other host (the retry must adopt the committed
+result and clean up). A successful local-filesystem test does not establish
+shared-mount behavior.
 Lock errors propagate rather than allowing unprotected cache writes.
 
 ## Release workload measurement
@@ -280,19 +285,19 @@ set tied into its identity.
     upstream `FreeTable` cascade do not call these Python cleanup hooks; after
     such a bypass, review `AnalysisNwbfile().cleanup(dry_run=True)` before
     applying cleanup.
-- **Recompute/reclamation: deferred.** There is no
-    `ConcatenatedRecordingArtifact*` recompute trio yet — a concat cache that is
+- **Recompute/reclamation: not provided.** There is no
+    `ConcatenatedRecordingArtifact*` recompute trio — a concat cache that is
     deleted out of band is rebuilt and verified on demand by `get_recording()`,
-    which covers correctness. A dedicated audit + `delete_files` reclamation
-    surface (the analogue of the recording trio above) is deferred until concat
-    outputs are first retained at scale, and should reuse the shared recompute
-    helpers rather than a bespoke table family.
+    which covers correctness. There is no dedicated audit + `delete_files`
+    reclamation surface (the analogue of the recording trio above); one is
+    worth adding once concat outputs are retained at scale, and it should reuse
+    the shared recompute helpers rather than a bespoke table family.
 
 ## Motion-correction artifacts
 
 The optional motion stage (see
 [Optional motion correction](./SpikeSortingV2.md#optional-motion-correction))
-adds two new, opt-in artifact families -- nothing is written unless a run
+adds two opt-in artifact families -- nothing is written unless a run
 passes `motion_mode="estimate"` or `"apply"`.
 
 - **`MotionEstimate`** -- a relational row per saved estimate: the
@@ -334,11 +339,10 @@ passes `motion_mode="estimate"` or `"apply"`.
     `SortingSelection`/`Sorting` -- a sort can never end up pointing at a
     deleted corrected recording. The same protection covers a
     `MotionEstimate` a `MotionCorrectedRecordingSelection` still references.
-- **Recompute/reclamation: deferred, like concat.** There is no
+- **Recompute/reclamation: not provided, like concat.** There is no
     `MotionCorrectedRecordingArtifact*` recompute trio; a missing artifact is
-    rebuilt and verified on demand as above, which covers correctness. A
-    dedicated audit/reclamation surface is deferred with the same rationale
-    as the concat family.
+    rebuilt and verified on demand as above, which covers correctness. As for
+    the concat family, there is no dedicated audit/reclamation surface.
 
 ## Admin surface
 

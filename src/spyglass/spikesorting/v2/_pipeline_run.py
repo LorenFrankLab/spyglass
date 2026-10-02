@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
-# The best-effort advisory lock now lives in the DB-free ``_db_locking`` leaf
+# The best-effort advisory lock lives in the DB-free ``_db_locking`` leaf
 # (so domain tables can serialize without importing this orchestration module);
 # re-exported under the private names this module's callers + tests already use.
 from spyglass.spikesorting.v2._db_locking import (

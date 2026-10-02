@@ -2,9 +2,9 @@
 
 Timestamp <-> frame conversion, interval consolidation, and the
 absolute-time merge dedup used by the recording, artifact, sorting, and
-curation stages. Split out of ``utils.py`` for cohesion; these functions
-are pure (NumPy + ``logger`` only, no DataJoint / SpikeInterface table
-access) and are re-exported from ``utils`` for backward compatibility.
+curation stages. These functions are pure (NumPy + ``logger`` only, no
+DataJoint / SpikeInterface table access) and are re-exported from ``utils``,
+so ``from .utils import ...`` call sites can import them from either module.
 """
 
 from __future__ import annotations
@@ -205,9 +205,8 @@ def _normalize(intervals):
     Guards :func:`intersect_intervals` (and, through it,
     :func:`intersect_interval_sets`) against a caller-supplied interval set
     that is unsorted or carries overlapping/duplicate rows -- notably the
-    identical-input fast path below, which previously compared the raw
-    operands and returned duplicate rows unchanged when both operands were
-    identically duplicated.
+    identical-input fast path below, which would otherwise return duplicate
+    rows unchanged when both operands are identically duplicated.
     """
     import numpy as np
 

@@ -27,10 +27,9 @@ existing rows via the insert_selection helpers and returns the same
 run summary (with the same root_merge_id) without inserting duplicates.
 
 This module is a thin facade: the implementation lives in the
-``_pipeline_*`` submodules (presets, geometry, preflight, reporting, run),
-split for readability. Every public name is re-exported here so notebook and
-user import paths (``from spyglass.spikesorting.v2.pipeline import ...``) are
-unchanged.
+``_pipeline_*`` submodules (presets, geometry, preflight, reporting, run).
+Every public name is re-exported here, so notebook and user code imports from
+one path (``from spyglass.spikesorting.v2.pipeline import ...``).
 """
 
 from __future__ import annotations

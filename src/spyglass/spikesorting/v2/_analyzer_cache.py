@@ -6,16 +6,15 @@ database artifact: a valid ``Sorting`` row keeps its FK-guaranteed upstream
 ``Recording`` / NWB, so the analyzer can always be rebuilt. This module is
 the single place that decides WHERE that cache lives, so the location is a
 pure function of ``sorting_id`` + one configured root rather than an
-absolute path scattered through (or persisted by) the ``Sorting`` table --
-which is the path-drift class of bug this replaces.
+absolute path scattered through (or persisted by) the ``Sorting`` table,
+which would go stale when the root or a parent directory moves.
 
 Resolution (``analyzer_cache_root``):
 
 1. ``dj.config["custom"]["spikesorting_v2_analyzer_dir"]`` when set -- point
    it at shared storage for a persistent cache;
 2. otherwise ``Path(temp_dir) / "spikesorting_v2" / "analyzers"`` -- scratch
-   semantics under Spyglass's configured temp directory (the default, and
-   identical to the path used before this module existed).
+   semantics under Spyglass's configured temp directory (the default).
 
 Changing the root is an explicit cache-relocation choice: old folders simply
 become cache misses (``get_analyzer`` rebuilds into the new root) and can be
@@ -31,9 +30,9 @@ is bounded by the worker chunk buffers rather than
 ``n_spikes * n_samples * n_channels``. :func:`load_analyzer_folder` is the one
 loader: it maps ``waveforms.npy`` lazily (``mmap_mode="r"``) instead of SI's
 eager ``np.load``, so opening a cache for review or metrics does not read the
-whole waveform volume either. Pre-launch ``.zarr`` caches are not read; they
-are disposable and simply rebuild under this convention (delete the old
-``*.zarr`` folders under the analyzer root by hand).
+whole waveform volume either. Analyzer folders in any other format (such as
+``*.zarr``) are never read: the cache rebuilds under this convention, and
+those folders can be deleted from the analyzer root by hand.
 
 This module reads ``dj.config`` and ``temp_dir`` but opens no DB connection
 and activates no ``dj.schema``; the reads happen at call time so import stays

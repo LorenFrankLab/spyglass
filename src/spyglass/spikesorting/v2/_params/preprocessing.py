@@ -87,40 +87,29 @@ class PreprocessingParamsSchema(BaseModel):
     ``AnalyzerWaveformParameters.params["whiten"]``. A ``whiten`` key here is
     rejected (``extra="forbid"``) rather than accepted as an inert field.
 
+    The runtime applies the steps in the order phase-shift -> bandpass
+    filter -> bad-channel handling -> common reference (see
+    ``apply_temporal_preprocessing`` / ``apply_spatial_preprocessing``).
+
     ``schema_version`` history:
     * 2 added ``min_segment_length`` (drops sub-second slivers from
       the intersected sort interval before the sorter sees them) and
       removed ``CommonReferenceParams.reference`` (dead field).
     * 3 made ``bandpass_filter`` optional (``None`` = skip filtering,
       so the ``"no_filter"`` preset is a real disable instead of a
-      wide-band pass) and flipped the ``whiten`` default to ``None``
-      to match the runtime (whitening is deferred to sorter/analyzer
-      parameter rows, so the schema must not default to claiming it is
-      configured). The
-      runtime preprocessing ORDER also changed at 3, from
-      reference->filter to **bandpass filter->reference** (the
-      signal-processing-preferred order; see
-      ``apply_temporal_preprocessing`` /
-      ``apply_spatial_preprocessing``). The params blob shape is
-      unchanged, so ``schema_version`` is NOT bumped -- only the runtime
-      interpretation moved; dev rows are regenerated, not migrated.
-    * 3 also added the optional ``phase_shift`` sub-model (ADC sample-shift
-      correction for multiplexed acquisition; off by default, ``None``).
-      The blob shape only grows by an optional field that defaults to
-      ``None``, so existing rows validate unchanged and ``schema_version``
-      is again NOT bumped; dev rows are regenerated.
-    * 4 removed the inert ``whiten`` field (it was never applied by any
-      recording cache; whitening ownership is the sorter / analyzer rows
-      above). Dev rows are regenerated, not migrated.
-    * 3 also added ``bad_channel_handling`` (``"remove"`` | ``"interpolate"``,
-      default ``"remove"``) controlling how curated ``Electrode.bad_channel``
-      flags are handled at materialization. ``"remove"`` is byte-identical to
-      pre-field behavior (the flagged channels were already excluded at sort-
-      group creation), so existing rows validate unchanged and output is
-      identical -- ``schema_version`` is again NOT bumped; dev rows are
-      regenerated. Detection of bad channels is a separate concern handled by
-      ``suggest_bad_channels`` (it writes the flags this field consumes), not a
-      preprocessing parameter.
+      wide-band pass).
+    * 4 removed the ``whiten`` field (whitening belongs to the sorter /
+      analyzer rows above).
+
+    Two optional fields carry no version bump because a row that omits them
+    validates unchanged and produces identical output: ``phase_shift`` (ADC
+    sample-shift correction for multiplexed acquisition; ``None`` = off) and
+    ``bad_channel_handling`` (``"remove"`` | ``"interpolate"``, default
+    ``"remove"``), which controls how curated ``Electrode.bad_channel`` flags
+    are handled at materialization. Under ``"remove"`` the flagged channels
+    stay excluded, as they already are at sort-group creation. Detection of
+    bad channels is a separate concern handled by ``suggest_bad_channels``
+    (it writes the flags this field consumes), not a preprocessing parameter.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -142,20 +131,19 @@ class PreprocessingParamsSchema(BaseModel):
     # ``sort_interval.intersect(..., min_length=...)``.
     bad_channel_handling: Literal["remove", "interpolate"] = "remove"
     # How curated ``Electrode.bad_channel='True'`` flags are handled at
-    # materialization. ``"remove"`` (default) is byte-identical to today: the
-    # flagged channels were already excluded at sort-group creation and stay
-    # out. ``"interpolate"`` re-includes the group's pitch-adjacent interior
+    # materialization. ``"remove"`` (default) keeps them out: the flagged
+    # channels are already excluded at sort-group creation. ``"interpolate"`` re-includes the group's pitch-adjacent interior
     # flagged channels and fills them from good neighbours so geometry-aware
     # sorters see a complete probe. Detection is NOT done here -- the flags come
     # from ``suggest_bad_channels`` or manual curation.
 
     def to_pre_motion_dict(self) -> dict:
-        """Return the stage-1 dict (phase-shift + filter + reference). Cached.
+        """Return the pre-motion preprocessing dict. Cached.
 
         ``phase_shift`` / ``bandpass_filter`` are ``None`` when the
         corresponding step is disabled; the runtime skips it in that case.
-        ``bad_channel_handling`` is included because the handling step runs in
-        stage 1 (between filter and reference).
+        ``bad_channel_handling`` is included because the handling step runs
+        before motion correction (between filter and reference).
         """
         return {
             "phase_shift": (

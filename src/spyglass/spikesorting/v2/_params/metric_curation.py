@@ -16,8 +16,9 @@ Two structured parameter tables back analyzer curation:
 
 Concurrency parameters (``n_jobs``, ``chunk_duration``, ``progress_bar``) do
 NOT live on these schemas. They are stored on the per-row ``job_kwargs`` blob
-column and resolved at populate time by ``_resolved_job_kwargs`` per the
-shared Job-Kwargs Resolution convention.
+column and resolved at populate time by ``_resolved_job_kwargs``
+(SpikeInterface globals, then
+``dj.config['custom']['spikesorting_v2_job_kwargs']``, then the row's blob).
 """
 
 from __future__ import annotations

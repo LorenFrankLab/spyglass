@@ -22,7 +22,8 @@ Strictness policy:
 Concurrency parameters (``n_jobs``, ``chunk_duration``, ``progress_bar``)
 do NOT live on these schemas. They are stored on the per-row
 ``job_kwargs`` blob column and resolved by ``_resolved_job_kwargs`` at
-populate time per the shared-contracts Job-Kwargs Resolution convention.
+populate time (SpikeInterface globals, then
+``dj.config['custom']['spikesorting_v2_job_kwargs']``, then the row's blob).
 """
 
 from __future__ import annotations
@@ -39,8 +40,7 @@ from pydantic import (
 
 # A MAD multiplier for peak detection is conventionally ~3-15; a value
 # above this with threshold_unit='mad' and no explicit noise_levels is
-# almost certainly a microvolt threshold left in the wrong unit (audit
-# finding #7).
+# almost certainly a microvolt threshold left in the wrong unit.
 _MAX_PLAUSIBLE_MAD_MULTIPLIER = 50.0
 
 
@@ -119,7 +119,7 @@ class MountainSort5Schema(BaseModel):
     ``scheme2_max_num_snippets_per_training_batch`` bounds training memory.
     ``schema_version`` 2 added these long-recording / PCA / spatial fields;
     a version-1 row validates unchanged (every new field defaults to the
-    wrapper default the old rows already ran with).
+    SpikeInterface wrapper default, which a version-1 row also ran with).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -264,12 +264,12 @@ class ClusterlessThresholderSchema(BaseModel):
     schema_version: int = 4
     # Default 100.0 is the production/real-data clusterless threshold: a
     # microvolt / native-unit value under the default ``threshold_unit='uv'``
-    # below (which derives noise_levels=[1.0]). The OLD default paired 100
-    # with ``threshold_unit='mad'``, making it a 100x-MAD threshold that
-    # detected almost nothing -- the bare-schema footgun fixed here (audit
-    # finding #7). The synthetic/smoke fixture sets ``threshold_unit='mad'``
-    # EXPLICITLY (a ~5x-MAD multiplier suits the simulation), so it does not
-    # rely on this unit default.
+    # below (which derives noise_levels=[1.0]). Paired with
+    # ``threshold_unit='mad'`` instead, 100 would be a 100x-MAD threshold that
+    # detects almost nothing, so the unit default must stay 'uv' while the
+    # threshold default is 100. The synthetic/smoke fixture sets
+    # ``threshold_unit='mad'`` EXPLICITLY (a ~5x-MAD multiplier suits the
+    # simulation), so it does not rely on this unit default.
     detect_threshold: float = Field(default=100.0, gt=0.0)
     threshold_unit: Literal["uv", "mad"] = Field(
         default="uv",
@@ -279,7 +279,7 @@ class ClusterlessThresholderSchema(BaseModel):
             "the runtime scales the recording to microvolts (scale_to_uV, "
             "using the stored NWB gain) before detection, so detect_threshold "
             "is a TRUE microvolt threshold (for unity-gain Frank-lab data it "
-            "equals the old raw-count value); 'mad' lets SpikeInterface "
+            "equals the raw-count value); 'mad' lets SpikeInterface "
             "estimate per-channel MAD (a multiplier). The default 'uv' pairs "
             "with the "
             "default detect_threshold=100 to give the production/real-data "

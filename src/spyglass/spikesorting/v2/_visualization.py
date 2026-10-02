@@ -12,7 +12,7 @@ SpikeInterface are imported lazily inside the functions that need them. The
 facade (``visualization.py``) owns the key -> recording / analyzer /
 metric-table resolution that does need the schema classes.
 
-The single load-bearing routing invariant lives in the table contract, not
+The single load-bearing routing invariant is enforced by the table layer, not
 here: visualization/export helpers read the UNWHITENED display analyzer (real
 waveforms / locations / templates) or the saved preprocessed recording, never
 the whitened metric analyzer. This module only encodes which display-safe

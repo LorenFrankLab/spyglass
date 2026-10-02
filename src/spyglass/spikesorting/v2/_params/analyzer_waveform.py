@@ -4,7 +4,7 @@
 subsample (``max_spikes_per_unit``), whitening, and channel sparsity of the
 ``SortingAnalyzer`` that produced a sort's templates / waveforms, so those
 settings are tracked in the database rather than hardcoded in the analyzer
-build (mirroring the v1 ``WaveformParameters`` table v2 had regressed from).
+build (as v1 does with its ``WaveformParameters`` table).
 ``AnalyzerWaveformParamsSchema`` validates that blob.
 
 Sparsity (``SparsityParams``) selects which channels each unit's waveforms are
@@ -25,7 +25,9 @@ recipe, not a user-tunable knob.
 
 Concurrency parameters (``n_jobs``, ``chunk_duration``, ``progress_bar``) do NOT
 live on this schema; the analyzer build resolves its job kwargs from the sort's
-``SorterParameters`` row, per the shared Job-Kwargs Resolution convention.
+``SorterParameters`` row via ``_resolved_job_kwargs`` (SpikeInterface globals,
+then ``dj.config['custom']['spikesorting_v2_job_kwargs']``, then the row's
+blob).
 """
 
 from __future__ import annotations
@@ -48,8 +50,7 @@ class SparsityParams(BaseModel):
     so a row cannot record a value the build does not use. Defaults
     equal SpikeInterface 0.104.3's ``estimate_sparsity`` defaults
     (``radius`` / 100 um / ``"neg"`` / 100 spikes / 1.0-2.5 ms snippets), so a
-    recipe that omits ``sparsity`` builds exactly what it built before this
-    field existed.
+    recipe that omits ``sparsity`` gets SpikeInterface's default sparsity.
     """
 
     model_config = ConfigDict(extra="forbid")

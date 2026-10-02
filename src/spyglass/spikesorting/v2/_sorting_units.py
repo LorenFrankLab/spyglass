@@ -57,8 +57,7 @@ def build_sorting_unit_rows(
 ) -> list[dict]:
     """Build the ``Sorting.Unit`` rows from per-unit peak metadata.
 
-    Pure (DB-free) row construction extracted from
-    ``Sorting._populate_unit_part``; the analyzer load, ``peak_sign`` /
+    Pure (DB-free) row construction for ``Sorting._populate_unit_part``; the analyzer load, ``peak_sign`` /
     sort-group / electrode fetches, and the ``Sorting.Unit.insert`` stay in the
     table class. Each unit becomes one row carrying the peak channel's Electrode
     FK fields (resolved through ``electrode_by_id``), the peak template

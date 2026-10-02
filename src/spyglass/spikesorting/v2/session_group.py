@@ -500,9 +500,8 @@ class ConcatenatedRecordingSelection(
         ------
         ValueError
             If a required identity field is missing, or ``key`` carries any
-            other field -- including the removed
-            ``motion_correction_params_name`` (motion correction is a
-            separate stage, never part of a concat).
+            other field -- including ``motion_correction_params_name``
+            (motion correction is a separate stage, never part of a concat).
         MissingRecordingForConcatError
             If any member has no populated ``Recording`` under
             ``preprocessing_params_name``.
@@ -527,14 +526,14 @@ class ConcatenatedRecordingSelection(
 
         if "motion_correction_params_name" in key:
             raise ValueError(
-                "ConcatenatedRecordingSelection.insert_selection no longer "
-                "takes motion_correction_params_name: concatenation never "
+                "ConcatenatedRecordingSelection.insert_selection does not "
+                "take motion_correction_params_name: concatenation never "
                 "corrects motion. Select the concat without it, then run the "
                 "motion stage on the resulting concat (run_v2_pipeline(..., "
                 'motion_mode="apply", motion_correction_params_name=...)). '
-                'The "Reproducing the old concat rigid_fast correction" section '
-                "of the Spike Sorting v2 docs shows how to reproduce the old "
-                "correction."
+                'The "Applying rigid_fast correction to a concatenation" '
+                "section of the Spike Sorting v2 docs shows the motion-stage "
+                "call."
             )
         extra = sorted(
             set(key) - set(cls._IDENTITY_FIELDS) - {"concat_recording_id"}
@@ -729,7 +728,7 @@ class ConcatenatedRecordingSelection(
         member sets do not collide -- each resolves to its own deterministic id.
         Any master matching this (identity, member set) whose
         ``concat_recording_id`` is NOT the deterministic id is a raw-insert /
-        pre-determinism legacy bypass of the content-addressed invariant, and is
+        legacy bypass of the content-addressed invariant, and is
         rejected rather than silently returned. Used by ``insert_selection`` for
         both the pre-insert lookup and the post-duplicate-key refetch.
         """
@@ -754,8 +753,8 @@ class ConcatenatedRecordingSelection(
                 f"{member_set_hash}) whose concat_recording_id is not the "
                 f"deterministic id {deterministic_concat_recording_id}: "
                 f"{bypassed}. This is a non-deterministic selection row (a raw "
-                "insert or pre-determinism legacy row); drop it and re-insert "
-                "via insert_selection."
+                "insert or legacy non-content-addressed row); drop it and "
+                "re-insert via insert_selection."
             )
         return (
             {"concat_recording_id": deterministic_concat_recording_id}
@@ -1022,8 +1021,8 @@ class ConcatenatedRecording(
     # ``_parallel_make = True`` + the tri-part ``make_fetch`` / ``make_compute``
     # / ``make_insert`` keep the long SpikeInterface concat + NWB write
     # OUTSIDE the framework's commit transaction (mirroring
-    # ``Recording`` / ``Sorting``); a single ``make()`` held the lock for the
-    # whole materialization.
+    # ``Recording`` / ``Sorting``), so no lock is held for the whole
+    # materialization.
     _parallel_make = True
 
     def make_fetch(self, key) -> ConcatRecordingFetched:

@@ -34,11 +34,11 @@ from typing import NamedTuple
 # algorithm runtime is a compiled MATLAB binary that ships only as a container
 # image, so they CANNOT run on a ``backend="local"`` execution row -- a local
 # row for one of these raises a clear error (see
-# ``assert_matlab_sorter_has_container_backend``). This replaces the old
-# name-based ``singularity_image=True`` auto-fallback: the container backend now
-# comes from tracked ``SorterParameters.execution_params`` provenance, never
-# from the sorter name alone, so an existing custom Kilosort/IronClust row is
-# never silently reinterpreted as local execution.
+# ``assert_matlab_sorter_has_container_backend``). Unlike v1's name-based
+# ``singularity_image=True`` auto-fallback, the container backend comes from
+# tracked ``SorterParameters.execution_params`` provenance, never from the
+# sorter name alone, so a custom Kilosort/IronClust row is never silently
+# reinterpreted as local execution.
 #
 # This set coincides today with
 # ``_params.sorter._INTERNAL_WHITEN_NO_KWARG_SORTERS`` but encodes a DIFFERENT
@@ -262,10 +262,10 @@ def matlab_container_required_message(sorter: str) -> str:
         "IronClust) whose runtime ships only as a container image; it cannot "
         "run with execution backend 'local'. Insert a SorterParameters row "
         "whose execution_params selects backend='docker' or 'singularity' with "
-        "an explicit container_image. (The old name-based "
-        "singularity_image=True fallback was removed in favor of tracked "
-        "execution provenance, so an existing local row for this sorter is no "
-        "longer silently containerized.)"
+        "an explicit container_image. (Unlike v1, v2 never infers a "
+        "container from the sorter name: execution comes from tracked "
+        "provenance, so a local row for this sorter is never silently "
+        "containerized.)"
     )
 
 
@@ -274,8 +274,8 @@ def assert_matlab_sorter_has_container_backend(
 ) -> None:
     """Raise if a MATLAB-backed sorter is on a local execution backend.
 
-    The explicit execution-policy check that replaced the old name-based
-    Singularity auto-fallback. Shared by ``run_si_sorter`` (which raises) and
+    The explicit execution-policy check (v1 instead picks Singularity from the
+    sorter name). Shared by ``run_si_sorter`` (which raises) and
     ``preflight`` (which surfaces the same message as a failed check) so the two
     cannot drift.
     """
@@ -547,8 +547,9 @@ def _clusterless_noise_levels(
     * ``"uv"`` -> ``[1.0]``; the caller (``run_clusterless_thresholder``)
       scales the recording to microvolts (``scale_to_uV``) before
       ``detect_peaks``, so ``detect_threshold`` is a genuine microvolt
-      threshold. (For Frank-lab data gain==1 uV/count, so this matches the
-      old raw-count behavior; for non-unity-gain rigs it is the fix.)
+      threshold. (For Frank-lab data gain==1 uV/count, so this equals a
+      raw-count threshold; for non-unity-gain rigs it converts the threshold
+      to true microvolts.)
     * ``"mad"`` -> ``None`` so SpikeInterface estimates per-channel MAD
       and ``detect_threshold`` is a MAD multiplier (scale-relative, so the
       recording is NOT uV-scaled on this path).
@@ -578,7 +579,8 @@ def run_clusterless_thresholder(
     microvolts (``scale_to_uV``, using the stored NWB gain) before
     ``detect_peaks``, so ``detect_threshold`` is a TRUE microvolt
     threshold. For Frank-lab data gain==1 uV/count so this is a no-op;
-    for non-unity-gain rigs it is the fix. A scalar (singleton list) is
+    for non-unity-gain rigs it converts a raw-count threshold into true
+    microvolts. A scalar (singleton list) is
     broadcast to length ``n_channels``
     because SI's ``locally_exclusive`` indexes ``noise_levels[chan]
     * detect_threshold`` per channel. When the params row omits
@@ -646,8 +648,8 @@ def run_clusterless_thresholder(
     # detect_threshold is a MAD multiplier).
     #
     # The fallback is "uv" (matching ClusterlessThresholderSchema's
-    # default), NOT "mad": a row missing ``threshold_unit`` -- a legacy
-    # pre-v4 row, or a default-shaped row carrying only
+    # default), NOT "mad": a row missing ``threshold_unit`` -- a row with
+    # ``schema_version`` < 4, or a default-shaped row carrying only
     # noise_levels=[1.0] -- is interpreted as a microvolt threshold and
     # scaled, not silently thresholded in native counts (which on Intan
     # 0.195 uV/count data would make "100" ~19.5 uV instead of 100 uV).
@@ -714,7 +716,7 @@ def run_clusterless_thresholder(
         # 5σ) can flip ~10-20 borderline peaks per shank. Per PR
         # #3359's stated principle
         # (*"seed must be explicit and no implicit"*) Spyglass IS
-        # the explicit-seeder. Same fix + same user-override
+        # the explicit-seeder. Same seed pin + same user-override
         # mechanism as the ``sip.whiten`` pin in
         # ``run_si_sorter`` -- set ``random_seed`` in the per-
         # row ``SorterParameters.job_kwargs`` blob to override.
@@ -802,7 +804,7 @@ def run_si_sorter(
 
     Scratch is anchored under ``spyglass.settings.temp_dir`` via
     ``tempfile.TemporaryDirectory`` so the dir is cleaned on
-    successful exit AND on raise (fixes the tempdir leak).
+    successful exit AND on raise (no scratch dir is leaked).
     For a CONTAINER backend the scratch is ``os.chmod 0o777`` so an SI
     sorter subprocess with a different uid (rootless container, slurm
     scenarios) can write into it; a local run keeps the 0o700 default.
@@ -823,8 +825,8 @@ def run_si_sorter(
     explicit pinned image) plus the container-install controls
     (``build_run_sorter_container_kwargs``). MATLAB-backed sorters
     (Kilosort 2.5 / 3, IronClust) MUST select a container backend -- a local
-    row raises (``assert_matlab_sorter_has_container_backend``); the old
-    name-based ``singularity_image=True`` auto-fallback is gone. The
+    row raises (``assert_matlab_sorter_has_container_backend``); unlike v1,
+    the sorter name never selects ``singularity_image=True``. The
     ``MATLAB_SORTER_STRIP_KWARGS`` (``tempdir`` / ``mp_context`` /
     ``max_threads_per_process``) are stripped only when a MATLAB sorter runs on
     a container backend (they do not survive containerization).

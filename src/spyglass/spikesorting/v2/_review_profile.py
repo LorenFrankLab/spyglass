@@ -352,7 +352,9 @@ class ReviewDisplayOptions:
             )
         fields = dict(value)
         if fields.get("version") == 1:
-            # Old saved bundles keep their explicit fixed budgets.
+            # Version-1 options used fixed 2000-point budgets with no
+            # duration scaling; keep them so a version-1 bundle reopens with
+            # the same displayed points.
             fields.setdefault("max_raster_spikes_per_unit", 2000)
             fields.setdefault("max_amplitudes_per_unit", 2000)
             fields.setdefault("raster_max_firing_rate", None)

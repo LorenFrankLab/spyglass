@@ -25,7 +25,7 @@ this order:
 Why this lives in its own module rather than in ``recording.py``:
 ``recording.py`` is a DataJoint *schema* module -- importing it activates
 ``dj.schema(...)`` and the source-part dependencies. The preprocessing logic
-needs none of that at import, so ``Recording`` becomes a thin orchestrator
+needs none of that at import, so ``Recording`` stays a thin orchestrator
 (fetch -> call these -> insert / verify). Same "thin DataJoint shell over
 pure/IO services" direction as ``_artifact_compute`` / ``_selection_identity``
 / ``_analyzer_cache`` / ``_curation_transforms`` / ``_units_nwb`` /
@@ -208,7 +208,7 @@ def apply_spatial_preprocessing(
     #     fills the interior curated-bad channels
     #     ``select_sort_group_channels`` re-included. On ``remove`` those
     #     channels were never re-added, so ``bad_channel_ids`` is empty here
-    #     and this is a no-op (today's behavior). The ``specific`` reference is
+    #     and this is a no-op. The ``specific`` reference is
     #     present only for subtraction (dropped after ``common_reference``) and
     #     is never a handling target.
     if bad_channel_handling not in ("remove", "interpolate"):
