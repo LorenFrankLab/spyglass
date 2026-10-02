@@ -1,7 +1,6 @@
 # Spike Sorting v2 Module Split Implementation Plan
 
-**Status:** Not started. Split design to be discussed with the owner before
-execution (see "Open questions").
+**Status:** Not started. Design settled (see "Decisions").
 
 **Goal:** Make the four largest v2 table modules readable by moving long method
 bodies and private helpers out of the table classes, with no change to behavior,
@@ -205,13 +204,18 @@ starting a module, and re-run `patch_inventory.py`.
   `_sorting_fetch.py`. `resolve_anchor_nwb_file_name` (2080) is public: keep it
   on the class as a delegate.
 - **`Sorting.find_orphaned_analyzer_folders`** (3065, 176): body →
-  `_analyzer_cache.py` (cache path policy already lives there).
+  `_analyzer_cache.py` (cache path policy already lives there). Keep
+  `delete` (2989) and the small maintenance wrappers (`_rebuild_analyzer_folder`,
+  the plot/export delegates) on the class.
 - **`SortingSelection.insert_selection`** (880, 272) and
   `_validate_motion_correction_source` (1227): new
   `_sorting_selection_insert.py`. `_find_existing_pk` (1154) is patched: keep
-  it as a delegate and call it through the class. The `resolve_*` /
-  `load_stored_traces` methods are the public source-resolution API: keep them;
-  their bodies may move into `_source_resolution.py`.
+  it as a delegate and call it through the class. Keep the bodies of the
+  `resolve_*`, `ensure_effective_traces`, `resolve_stored_units` and
+  `load_stored_traces` methods on the class: most are short table-specific
+  fetches that read best beside the source-part definitions, and
+  `resolve_effective_source` (1411, 85) shows how the `_source_resolution.py`
+  carriers and trace readers fit together.
 - **`SorterParameters.insert`** (317, 142) and
   `insert_default_legacy_si_sorters` (569, 143): row validation and legacy row
   construction → new `_sorter_parameters.py`.
@@ -325,14 +329,22 @@ check the end-to-end pipeline still registers tables and runs.
 Follow the repo's test-run rules: one pytest session at a time, only the listed
 modules (a full v2 sweep runs over an hour).
 
-## Open questions (owner)
+## Decisions (owner, 2026-10-02)
 
-- Is the per-module target size (~1,400-2,000 lines) the goal, or should the
-  split go further (for example splitting `Sorting` maintenance methods)?
-- Should `SortingSelection`'s public `resolve_*` bodies move into
-  `_source_resolution.py`, or stay on the class as the readable reference?
-- Order: recording → sorting → metric_curation → curation, or curation first
-  because it has the most value?
+- **Stopping criterion is readability, not a line count.** The per-module
+  sizes above are estimates. A module is done when its table classes mainly
+  contain definitions, documented entry points, and staging/transaction
+  orchestration. Extract substantial algorithms and cohesive I/O workflows; do
+  not add a module only to reach a line count. Reassess further splits after
+  the four PRs, from the resulting code.
+- **`SortingSelection.resolve_*` bodies stay on the class** for this pass (see
+  the sorting task). `_source_resolution.py` keeps owning the carriers,
+  validation helpers and trace readers.
+- **Order stays recording → sorting → metric_curation → curation.** Recording
+  establishes the extraction and delegation mechanics; sorting exercises
+  patched dispatch and analyzer lifecycle handling; metric curation applies the
+  same patterns to evaluation and acceptance; curation's reuse, retry, staging
+  and transaction paths go last, once those conventions are established.
 
 ## Review
 
