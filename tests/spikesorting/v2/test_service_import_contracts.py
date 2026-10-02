@@ -40,6 +40,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_motion",
     "_motion_compute",
     "_motion_report",
+    "_motion_report_inputs",
     "_motion_selection_insert",
     "_nwb_metadata_helpers",
     "_pipeline_presets",
