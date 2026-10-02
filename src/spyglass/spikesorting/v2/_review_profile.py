@@ -1,9 +1,13 @@
-"""Dependency-light normalization for persisted curation review profiles.
+"""Normalization for persisted curation review profiles.
 
 The DataJoint table lives in :mod:`review_profile`; this module owns the
 canonical semantic payload and hash without importing DataJoint or the optional
 FigPack runtime.  It deliberately reuses the existing FigPack configuration
 helpers so profile and figure configuration cannot drift on list semantics.
+The displayable metric columns come from SpikeInterface's quality-metric
+metadata (``_metric_curation.si_quality_metric_output_columns``), so checking
+a profile's displayed properties against its metric recipe imports
+SpikeInterface.
 """
 
 from __future__ import annotations
