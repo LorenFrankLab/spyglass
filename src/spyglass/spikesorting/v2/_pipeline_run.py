@@ -459,78 +459,119 @@ def _build_run_source(
     PipelineInputError
         If concat manual exclusions name an absent member.
     """
+    if not is_concat:
+        return _build_single_session_source(
+            source_inputs=source_inputs,
+            bundle=bundle,
+            manual_excluded_times=manual_excluded_times,
+            run_summary=run_summary,
+            stage_seconds=stage_seconds,
+        )
+    return _build_concat_source(
+        source_inputs=source_inputs,
+        bundle=bundle,
+        manual_excluded_times=manual_excluded_times,
+        run_summary=run_summary,
+        stage_seconds=stage_seconds,
+    )
+
+
+def _build_single_session_source(
+    *,
+    source_inputs: dict,
+    bundle,
+    manual_excluded_times,
+    run_summary: dict,
+    stage_seconds: dict,
+) -> _RunSource:
+    """Select and populate the ``Recording`` and its artifact detection.
+
+    The artifact-detection stage is ``"skipped"`` when the preset runs none.
+    Parameters and return as in :func:`_build_run_source`.
+    """
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
     )
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,
     )
 
-    if not is_concat:
-        nwb_file_name = source_inputs["nwb_file_name"]
-        sort_group_id = source_inputs["sort_group_id"]
-        # Single-session: recording (+ optional artifact detection).
-        run_summary["source_mode"] = "single_session"
-        recording_key = RecordingSelection.insert_selection(
+    nwb_file_name = source_inputs["nwb_file_name"]
+    sort_group_id = source_inputs["sort_group_id"]
+    # Single-session: recording (+ optional artifact detection).
+    run_summary["source_mode"] = "single_session"
+    recording_key = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": int(sort_group_id),
+            "interval_list_name": source_inputs["interval_list_name"],
+            "preprocessing_params_name": bundle.preprocessing_params_name,
+            "team_name": source_inputs["team_name"],
+        }
+    )
+    (
+        _,
+        run_summary["recording_status"],
+        stage_seconds["recording"],
+    ) = _run_stage(
+        "recording",
+        bool(Recording & recording_key),
+        lambda: _populate_once(Recording, recording_key),
+        run_summary,
+    )
+    run_summary["recording_id"] = recording_key["recording_id"]
+
+    # A None artifact name means the preset runs no artifact detection: skip
+    # the RecordingArtifactSelection/populate stage and sort straight off the
+    # recording (no ArtifactDetectionSource row), the form concat also uses.
+    if bundle.artifact_detection_params_name is None:
+        artifact_detection_id = None
+        run_summary["artifact_detection_status"] = "skipped"
+        stage_seconds["artifact_detection"] = 0.0
+    else:
+        artifact_detection_key = RecordingArtifactSelection.insert_selection(
             {
-                "nwb_file_name": nwb_file_name,
-                "sort_group_id": int(sort_group_id),
-                "interval_list_name": source_inputs["interval_list_name"],
-                "preprocessing_params_name": bundle.preprocessing_params_name,
-                "team_name": source_inputs["team_name"],
+                "recording_id": recording_key["recording_id"],
+                "artifact_detection_params_name": bundle.artifact_detection_params_name,
+                "manual_excluded_times": manual_excluded_times,
             }
         )
         (
             _,
-            run_summary["recording_status"],
-            stage_seconds["recording"],
+            run_summary["artifact_detection_status"],
+            stage_seconds["artifact_detection"],
         ) = _run_stage(
-            "recording",
-            bool(Recording & recording_key),
-            lambda: _populate_once(Recording, recording_key),
+            "artifact_detection",
+            bool(RecordingArtifactDetection & artifact_detection_key),
+            lambda: _populate_once(
+                RecordingArtifactDetection, artifact_detection_key
+            ),
             run_summary,
         )
-        run_summary["recording_id"] = recording_key["recording_id"]
+        artifact_detection_id = artifact_detection_key["artifact_detection_id"]
+    run_summary["artifact_detection_id"] = artifact_detection_id
+    source = {
+        "recording_id": recording_key["recording_id"],
+        "artifact_detection_id": artifact_detection_id,
+    }
+    return _RunSource(source, None)
 
-        # A None artifact name means the preset runs no artifact detection: skip
-        # the RecordingArtifactSelection/populate stage and sort straight off the
-        # recording (no ArtifactDetectionSource row), the form concat also uses.
-        if bundle.artifact_detection_params_name is None:
-            artifact_detection_id = None
-            run_summary["artifact_detection_status"] = "skipped"
-            stage_seconds["artifact_detection"] = 0.0
-        else:
-            artifact_detection_key = RecordingArtifactSelection.insert_selection(
-                {
-                    "recording_id": recording_key["recording_id"],
-                    "artifact_detection_params_name": bundle.artifact_detection_params_name,
-                    "manual_excluded_times": manual_excluded_times,
-                }
-            )
-            (
-                _,
-                run_summary["artifact_detection_status"],
-                stage_seconds["artifact_detection"],
-            ) = _run_stage(
-                "artifact_detection",
-                bool(RecordingArtifactDetection & artifact_detection_key),
-                lambda: _populate_once(
-                    RecordingArtifactDetection, artifact_detection_key
-                ),
-                run_summary,
-            )
-            artifact_detection_id = artifact_detection_key[
-                "artifact_detection_id"
-            ]
-        run_summary["artifact_detection_id"] = artifact_detection_id
-        source = {
-            "recording_id": recording_key["recording_id"],
-            "artifact_detection_id": artifact_detection_id,
-        }
-        return _RunSource(source, None)
+
+def _build_concat_source(
+    *,
+    source_inputs: dict,
+    bundle,
+    manual_excluded_times,
+    run_summary: dict,
+    stage_seconds: dict,
+) -> _RunSource:
+    """Build each member's recording and artifact mask, then the concat.
+
+    Parameters, return and errors as in :func:`_build_run_source`.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
     # Member detections are inputs to the masked concat.
     run_summary["source_mode"] = "concat"
@@ -564,6 +605,75 @@ def _build_run_source(
         raise PipelineInputError(
             f"Manual exclusions name absent concat members: {sorted(unknown_members)}"
         )
+    member_recording_keys = _build_member_recordings(
+        members, bundle, run_summary, stage_seconds
+    )
+    artifact_ids = _build_member_artifacts(
+        members,
+        member_recording_keys,
+        bundle,
+        manual_excluded_times,
+        run_summary,
+        stage_seconds,
+    )
+
+    concat_key = ConcatenatedRecordingSelection.insert_selection(
+        {
+            "session_group_owner": concat_session_group_owner,
+            "session_group_name": concat_session_group_name,
+            "preprocessing_params_name": bundle.preprocessing_params_name,
+        },
+        artifact_detection_ids=artifact_ids,
+    )
+    (
+        _,
+        run_summary["concat_recording_status"],
+        stage_seconds["concat_recording"],
+    ) = _run_stage(
+        "concat_recording",
+        bool(ConcatenatedRecording & concat_key),
+        lambda: _populate_once(ConcatenatedRecording, concat_key),
+        run_summary,
+    )
+    run_summary["concat_recording_id"] = concat_key["concat_recording_id"]
+    concat_row = (ConcatenatedRecording & concat_key).fetch1()
+    valid_duration = sum(
+        end - start for start, end in concat_row["obs_intervals"]
+    )
+    run_summary["artifact_masked_duration_s"] = float(
+        concat_row["total_duration_s"] - valid_duration
+    )
+    source = {"concat_recording_id": concat_key["concat_recording_id"]}
+    return _RunSource(source, dict(concat_key))
+
+
+def _build_member_recordings(
+    members: list[dict],
+    bundle,
+    run_summary: dict,
+    stage_seconds: dict,
+) -> list[dict]:
+    """Select and populate every concat member's ``Recording`` as one stage.
+
+    Parameters
+    ----------
+    members : list[dict]
+        The ``SessionGroup.Member`` rows, in ``member_index`` order.
+    bundle : _PipelinePreset
+        The validated preset.
+    run_summary, stage_seconds : dict
+        The run's accumulating summary and per-stage seconds (mutated).
+
+    Returns
+    -------
+    list[dict]
+        The members' ``RecordingSelection`` keys, in member order.
+    """
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+
     member_recording_keys = [
         RecordingSelection.insert_selection(
             {
@@ -595,6 +705,46 @@ def _build_run_source(
     run_summary["member_recording_ids"] = [
         key["recording_id"] for key in member_recording_keys
     ]
+    return member_recording_keys
+
+
+def _build_member_artifacts(
+    members: list[dict],
+    member_recording_keys: list[dict],
+    bundle,
+    manual_excluded_times,
+    run_summary: dict,
+    stage_seconds: dict,
+) -> dict:
+    """Select and populate every member's artifact detection as one stage.
+
+    Records each member's detection id, status and masked duration in
+    ``run_summary["member_artifacts"]``. The stage is ``"skipped"`` when the
+    preset runs no artifact detection.
+
+    Parameters
+    ----------
+    members : list[dict]
+        The ``SessionGroup.Member`` rows, in ``member_index`` order.
+    member_recording_keys : list[dict]
+        The members' ``RecordingSelection`` keys, in the same order.
+    bundle, manual_excluded_times
+        As validated by :func:`_validate_run_request` (exclusions keyed by
+        ``member_index``).
+    run_summary, stage_seconds : dict
+        The run's accumulating summary and per-stage seconds (mutated).
+
+    Returns
+    -------
+    dict
+        ``member_index`` to ``artifact_detection_id`` (``None`` without
+        artifact detection), the concat selection's member masks.
+    """
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
 
     artifact_ids = {int(member["member_index"]): None for member in members}
     run_summary["member_artifacts"] = []
@@ -667,35 +817,7 @@ def _build_run_source(
             _populate_member_artifacts,
             run_summary,
         )
-
-    concat_key = ConcatenatedRecordingSelection.insert_selection(
-        {
-            "session_group_owner": concat_session_group_owner,
-            "session_group_name": concat_session_group_name,
-            "preprocessing_params_name": bundle.preprocessing_params_name,
-        },
-        artifact_detection_ids=artifact_ids,
-    )
-    (
-        _,
-        run_summary["concat_recording_status"],
-        stage_seconds["concat_recording"],
-    ) = _run_stage(
-        "concat_recording",
-        bool(ConcatenatedRecording & concat_key),
-        lambda: _populate_once(ConcatenatedRecording, concat_key),
-        run_summary,
-    )
-    run_summary["concat_recording_id"] = concat_key["concat_recording_id"]
-    concat_row = (ConcatenatedRecording & concat_key).fetch1()
-    valid_duration = sum(
-        end - start for start, end in concat_row["obs_intervals"]
-    )
-    run_summary["artifact_masked_duration_s"] = float(
-        concat_row["total_duration_s"] - valid_duration
-    )
-    source = {"concat_recording_id": concat_key["concat_recording_id"]}
-    return _RunSource(source, dict(concat_key))
+    return artifact_ids
 
 
 def _run_motion_estimate(
