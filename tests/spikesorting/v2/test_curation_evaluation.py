@@ -19,6 +19,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from tests.spikesorting.v2._sorter_stub import plant_sorter
+
 # ---------- committed-curation predicate ------------------------------------
 
 
@@ -1732,7 +1734,7 @@ def test_make_compute_reads_units_without_sample_frames_without_the_db(
 def planted_zero_unit_sort(dj_conn):
     """A populated Sorting with ZERO units (an empty planted sorting).
 
-    Mirrors ``planted_two_unit_sort`` but the monkeypatched ``_run_sorter``
+    Mirrors ``planted_two_unit_sort`` but the planted sorter stand-in
     returns an empty ``NumpySorting``, so the Sorting row commits with
     ``n_units=0`` and a root curation has zero units -- the input for the
     zero-unit CurationEvaluation contract.
@@ -1823,7 +1825,7 @@ def planted_zero_unit_sort(dj_conn):
 
     mp = pytest.MonkeyPatch()
     try:
-        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant_empty))
+        plant_sorter(mp, _plant_empty)
         Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
         mp.undo()

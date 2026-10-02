@@ -19,6 +19,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from tests.spikesorting.v2._sorter_stub import plant_sorter
+
 _SMOKE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_smoke.nwb"
 )
@@ -135,7 +137,7 @@ def masked_planted_sort(dj_conn):
 
     mp = pytest.MonkeyPatch()
     try:
-        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+        plant_sorter(mp, _plant)
         Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
         mp.undo()
