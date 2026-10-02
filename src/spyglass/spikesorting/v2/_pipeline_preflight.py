@@ -40,6 +40,10 @@ _SORTER_RUNTIME_BACKENDS: dict[str, tuple[str, ...]] = {
     "mountainsort4": ("ml_ms4alg",),
 }
 
+# Relative tolerance for a recording's sampling rate against the rate a
+# preset is tuned for; 0.5% absorbs float drift in an estimated rate.
+_SAMPLING_RATE_TOLERANCE = 0.005
+
 
 def motion_request_problem(
     motion_mode, motion_correction_params_name, motion_estimate_id=None
@@ -160,6 +164,17 @@ def _singularity_runtime_available() -> tuple[bool, str]:
             "(`pip install spython`)",
         )
     return True, "Singularity + Python `spython` package available"
+
+
+def _container_runtime_available(execution_backend: str) -> tuple[bool, str]:
+    """Return ``(ok, detail)`` for a container execution backend's runtime.
+
+    ``"docker"`` probes :func:`_docker_runtime_available`; any other container
+    backend probes :func:`_singularity_runtime_available`.
+    """
+    if execution_backend == "docker":
+        return _docker_runtime_available()
+    return _singularity_runtime_available()
 
 
 def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
@@ -619,6 +634,25 @@ def resolve_preset_sort_config(bundle) -> "dict | None":
     ).as_dict()
 
 
+def _raising_check(
+    caller: "str | None" = None,
+) -> "Callable[[str, Any, str], bool]":
+    """A check callback that raises ``PreflightError`` on the first failure.
+
+    Lets the raising concat preflight run the same ``_check_*`` helpers as the
+    report-building :func:`preflight_v2_pipeline`. The failing check's fix is
+    the message, prefixed with ``"{caller}: "`` when ``caller`` is given.
+    """
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+
+    def _check(name: str, ok, fix: str) -> bool:
+        if not bool(ok):
+            raise PreflightError(fix if caller is None else f"{caller}: {fix}")
+        return True
+
+    return _check
+
+
 def assert_preset_compute_rows(
     bundle, *, caller: str = "run_v2_pipeline", sort_checks: bool = True
 ) -> None:
@@ -631,108 +665,41 @@ def assert_preset_compute_rows(
     preflight calls this, including its member artifact recipe, so a concat
     run fails fast on a missing row instead of deep
     in the member/concat populate, matching the single-session preflight. The
-    param-row existence queries mirror ``preflight_v2_pipeline``'s (kept in its
-    report-building form there); the sorter binary/runtime check reuses the
-    shared :func:`_check_local_sorter_runtime` via a raise-style adapter.
-    ``caller`` names the public entry point in every message;
-    ``sort_checks=False`` stops after the preprocessing and artifact rows
-    (a caller that builds the source without sorting it).
+    param-row checks run ``preflight_v2_pipeline``'s own ``_check_*`` helpers
+    through :func:`_raising_check`, so the first failing check raises with its
+    fix prefixed by ``caller``. ``sort_checks=False`` stops after the
+    preprocessing and artifact rows (a caller that builds the source without
+    sorting it).
     """
     import spikeinterface.sorters as sis
 
     from spyglass.spikesorting.v2._params.sorter import (
         validate_execution_params,
     )
-    from spyglass.spikesorting.v2._recipe_catalog import (
-        waveform_params_for_preprocessing,
-    )
     from spyglass.spikesorting.v2._sorting_dispatch import (
         MATLAB_SORTERS,
         matlab_container_required_message,
     )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.exceptions import PreflightError
-    from spyglass.spikesorting.v2.recording import PreprocessingParameters
-    from spyglass.spikesorting.v2.sorting import (
-        AnalyzerWaveformParameters,
-        SorterParameters,
-    )
+    from spyglass.spikesorting.v2.sorting import SorterParameters
 
-    if not (
-        PreprocessingParameters
-        & {"preprocessing_params_name": bundle.preprocessing_params_name}
-    ):
-        raise PreflightError(
-            f"{caller}: PreprocessingParameters row "
-            f"{bundle.preprocessing_params_name!r} is missing. Run "
-            "initialize_v2_defaults()."
-        )
-    if bundle.artifact_detection_params_name is not None:
-        if not (
-            ArtifactDetectionParameters
-            & {
-                "artifact_detection_params_name": (
-                    bundle.artifact_detection_params_name
-                )
-            }
-        ):
-            raise PreflightError(
-                f"{caller}: ArtifactDetectionParameters row "
-                f"{bundle.artifact_detection_params_name!r} is missing. Run "
-                "initialize_v2_defaults()."
-            )
+    check = _raising_check(caller)
+    _check_source_param_rows(check, bundle)
     if not sort_checks:
         return
-    sorter_params_query = SorterParameters & {
-        "sorter": bundle.sorter,
-        "sorter_params_name": bundle.sorter_params_name,
-    }
-    if not sorter_params_query:
-        raise PreflightError(
-            f"{caller}: SorterParameters row (sorter="
-            f"{bundle.sorter!r}, sorter_params_name="
-            f"{bundle.sorter_params_name!r}) is missing. Run "
-            "initialize_v2_defaults()."
-        )
-    # Same wrapper-vocabulary check as the single-session preflight: a params
-    # key the installed SI wrapper rejects fails here, before the member /
-    # concat populate.
-    from spyglass.spikesorting.v2._params.sorter import (
-        validate_sorter_params_against_wrapper,
-    )
-
-    sorter_row = sorter_params_query.fetch1()
-    try:
-        validate_sorter_params_against_wrapper(
-            sorter_row["sorter"], sorter_row["params"]
-        )
-    except ValueError as exc:
-        raise PreflightError(f"{caller}: {exc}") from exc
-    display_waveform_params_name = waveform_params_for_preprocessing(
-        bundle.preprocessing_params_name
+    sorter_params_query = _check_sorter_param_rows(
+        check, bundle, sort_checks=True
     )[0]
-    if not (
-        AnalyzerWaveformParameters
-        & {"waveform_params_name": display_waveform_params_name}
-    ):
-        raise PreflightError(
-            f"{caller}: AnalyzerWaveformParameters row "
-            f"{display_waveform_params_name!r} (the display analyzer recipe for "
-            f"preprocessing {bundle.preprocessing_params_name!r}) is missing. "
-            "Run initialize_v2_defaults()."
-        )
+    _check_display_waveform_params(check, bundle, sort_checks=True)
 
-    def _raise_check(name, ok, fix):
-        if not bool(ok):
-            raise PreflightError(fix)
-        return True
-
-    # Sorter binary/runtime, dispatched on the execution backend exactly like
-    # the single-session preflight: a LOCAL backend needs the sorter installed
-    # here; a CONTAINER backend needs the container runtime (the sorter runtime
-    # lives in the image, so a missing LOCAL install is irrelevant, but a
-    # missing container runtime is a blocking failure -- preflight never falls
-    # back to local execution).
+    # Sorter binary/runtime, dispatched on the execution backend like the
+    # single-session ``_check_sorter_execution``: a LOCAL backend needs the
+    # sorter installed here; a CONTAINER backend needs the container runtime
+    # (the sorter runtime lives in the image, so a missing LOCAL install is
+    # irrelevant, but a missing container runtime is a blocking failure --
+    # preflight never falls back to local execution). The MATLAB and local
+    # runtime messages carry no ``caller`` prefix; the container message does
+    # and, unlike the single-session one, names no preset.
     execution_params = validate_execution_params(
         sorter_params_query.fetch1("execution_params")
     )
@@ -744,13 +711,12 @@ def assert_preset_compute_rows(
                 matlab_container_required_message(bundle.sorter)
             )
         _check_local_sorter_runtime(
-            bundle, sis, SorterParameters._NON_SI_SORTERS, _raise_check
+            bundle, sis, SorterParameters._NON_SI_SORTERS, _raising_check()
         )
     else:
-        if execution_backend == "docker":
-            runtime_ok, runtime_detail = _docker_runtime_available()
-        else:
-            runtime_ok, runtime_detail = _singularity_runtime_available()
+        runtime_ok, runtime_detail = _container_runtime_available(
+            execution_backend
+        )
         if not runtime_ok:
             raise PreflightError(
                 f"{caller}: the {execution_backend} execution backend "
@@ -820,7 +786,7 @@ def assert_concat_preflight(
     # fails fast on a missing metric / rule / metric-waveform recipe rather than
     # after the member + concat + sort compute.
     if auto_curate:
-        _assert_auto_curation_rows(bundle, caller)
+        _check_auto_curation_rows(_raising_check(caller), bundle)
 
     assert_preset_compute_rows(bundle, caller=caller, sort_checks=sort_checks)
     if motion_mode != "off":
@@ -927,7 +893,7 @@ def _assert_concat_member_inputs(
         )
         if (
             abs(actual_rate - bundle.sampling_rate_hz)
-            > 0.005 * bundle.sampling_rate_hz
+            > _SAMPLING_RATE_TOLERANCE * bundle.sampling_rate_hz
         ):
             raise PreflightError(
                 f"{caller}: {tag} samples at {actual_rate:g} Hz but "
@@ -937,57 +903,6 @@ def _assert_concat_member_inputs(
                 "detect_interval snippet window at that rate). Every member "
                 "must share the preset's acquisition rate."
             )
-
-
-def _assert_auto_curation_rows(bundle, caller: str) -> None:
-    """Raise ``PreflightError`` if a row ``auto_curate=True`` needs is missing.
-
-    The preset's ``QualityMetricParameters`` and ``AutoCurationRules`` rows
-    and its whitened metric ``AnalyzerWaveformParameters`` row.
-    """
-    from spyglass.spikesorting.v2._recipe_catalog import (
-        waveform_params_for_preprocessing,
-    )
-    from spyglass.spikesorting.v2.exceptions import PreflightError
-    from spyglass.spikesorting.v2.metric_curation import (
-        AutoCurationRules,
-        QualityMetricParameters,
-    )
-    from spyglass.spikesorting.v2.sorting import (
-        AnalyzerWaveformParameters,
-    )
-
-    if not (
-        QualityMetricParameters
-        & {"metric_params_name": bundle.metric_params_name}
-    ):
-        raise PreflightError(
-            f"{caller}: QualityMetricParameters row "
-            f"{bundle.metric_params_name!r} (the auto-curation metric set) "
-            "is missing. Run initialize_v2_defaults()."
-        )
-    if not (
-        AutoCurationRules
-        & {"auto_curation_rules_name": bundle.auto_curation_rules_name}
-    ):
-        raise PreflightError(
-            f"{caller}: AutoCurationRules row "
-            f"{bundle.auto_curation_rules_name!r} (the auto-curation rule "
-            "set) is missing. Run initialize_v2_defaults()."
-        )
-    metric_waveform_params_name = waveform_params_for_preprocessing(
-        bundle.preprocessing_params_name
-    )[1]
-    if not (
-        AnalyzerWaveformParameters
-        & {"waveform_params_name": metric_waveform_params_name}
-    ):
-        raise PreflightError(
-            f"{caller}: AnalyzerWaveformParameters row "
-            f"{metric_waveform_params_name!r} (the whitened metric analyzer "
-            "recipe auto-curation scores on) is missing. Run "
-            "initialize_v2_defaults()."
-        )
 
 
 def _assert_concat_motion_stage(
@@ -1937,12 +1852,13 @@ def preflight_v2_pipeline(
     # The sorter-only checks (the sorter row and its params, the display
     # analyzer row, the sampling rate and the sorter execution) are skipped
     # for a caller that builds no sort (``sort_checks=False``).
-    (
-        sorter_params_query,
-        sorter_params_exist,
-        sorter_row,
-        effective_config,
-    ) = _check_sorter_param_rows(_check, bundle, sort_checks=sort_checks)
+    sorter_params_query, sorter_params_exist, sorter_row = (
+        _check_sorter_param_rows(_check, bundle, sort_checks=sort_checks)
+    )
+    # What run_sorter would receive, resolved by the dispatcher's own resolver.
+    effective_config = (
+        resolve_preset_sort_config(bundle) if sorter_params_exist else None
+    )
     display_waveform_params_name = _check_display_waveform_params(
         _check, bundle, sort_checks=sort_checks
     )
@@ -2212,13 +2128,11 @@ def _check_source_param_rows(
 def _check_sorter_param_rows(
     check: "Callable[[str, Any, str], bool]", bundle, *, sort_checks: bool
 ) -> tuple:
-    """Check the preset's ``SorterParameters`` row and resolve what it runs.
+    """Check the preset's ``SorterParameters`` row and its parameters.
 
     The row's params are re-checked against the installed SI wrapper's
     parameter vocabulary (a custom row inserted before the wrapper changed, or
-    under a different SI, would otherwise fail minutes into the sort), and the
-    effective configuration is resolved by the dispatcher's own resolver so
-    the report states exactly what run_sorter would receive.
+    under a different SI, would otherwise fail minutes into the sort).
 
     Returns
     -------
@@ -2228,9 +2142,6 @@ def _check_sorter_param_rows(
         Whether the row exists; False when ``sort_checks`` is False.
     sorter_row : dict or None
         The fetched row, or ``None`` when it was not checked.
-    effective_config : dict or None
-        ``EffectiveSortConfig.as_dict()``, or ``None`` when the row was not
-        checked.
     """
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
@@ -2246,7 +2157,6 @@ def _check_sorter_param_rows(
         "Run initialize_v2_defaults().",
     )
     sorter_row = None
-    effective_config = None
     if sorter_params_exist:
         from spyglass.spikesorting.v2._params.sorter import (
             validate_sorter_params_against_wrapper,
@@ -2261,13 +2171,7 @@ def _check_sorter_param_rows(
             check("sorter_params_valid", False, str(exc))
         else:
             check("sorter_params_valid", True, "")
-        effective_config = resolve_preset_sort_config(bundle)
-    return (
-        sorter_params_query,
-        sorter_params_exist,
-        sorter_row,
-        effective_config,
-    )
+    return sorter_params_query, sorter_params_exist, sorter_row
 
 
 def _check_display_waveform_params(
@@ -2372,10 +2276,9 @@ def _check_sampling_rate(
         raw = Raw & {"nwb_file_name": nwb_file_name}
         if raw:
             actual_rate = float(raw.fetch1("sampling_rate"))
-            # 0.5% tolerance absorbs float drift in an estimated rate.
             rate_ok = (
                 abs(actual_rate - bundle.sampling_rate_hz)
-                <= 0.005 * bundle.sampling_rate_hz
+                <= _SAMPLING_RATE_TOLERANCE * bundle.sampling_rate_hz
             )
             check(
                 "sampling_rate_matches",
@@ -2453,10 +2356,9 @@ def _check_sorter_execution(
             # missing CONTAINER runtime is an actionable, blocking
             # selected-preset error -- preflight never silently falls back to
             # local execution.
-            if execution_backend == "docker":
-                runtime_ok, runtime_detail = _docker_runtime_available()
-            else:
-                runtime_ok, runtime_detail = _singularity_runtime_available()
+            runtime_ok, runtime_detail = _container_runtime_available(
+                execution_backend
+            )
             check(
                 "container_runtime_available",
                 runtime_ok,
