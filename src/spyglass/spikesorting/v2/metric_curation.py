@@ -34,13 +34,10 @@ from typing import NamedTuple
 import datajoint as dj
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting.v2 import _metric_curation
 from spyglass.spikesorting.v2._metric_curation import (
-    apply_label_rules,
+    _requested_pc_metrics,
     apply_snr_peak_sign,
-    assert_rule_metrics_computed,
-    escalate_si_metric_errors,
-    expected_missing_units,
-    isi_violation_fraction,
     rules_payloads_match,
 )
 from spyglass.spikesorting.v2._metric_curation_nwb import (
@@ -50,18 +47,13 @@ from spyglass.spikesorting.v2._metric_curation_nwb import (
     write_analyzer_curation_tables,
 )
 from spyglass.spikesorting.v2._params.metric_curation import (
-    _available_pca_metric_names,
     prepare_auto_curation_rules,
     prepare_quality_metric_row,
-    required_extensions_for_metrics,
 )
 from spyglass.spikesorting.v2._recipe_catalog import (
     auto_curation_default_payloads,
     quality_metric_default_rows,
     waveform_params_for_preprocessing,
-)
-from spyglass.spikesorting.v2._sorting_analyzer import (
-    STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
 )
 from spyglass.spikesorting.v2._source_resolution import EffectiveTraces
 from spyglass.spikesorting.v2._staged_outputs import (
@@ -93,54 +85,6 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 schema = dj.schema("spikesorting_v2_metric_curation")
 
-# Extensions CurationEvaluation adds to the sort-time analyzer before metrics and
-# auto-merge. The sort-time base set (random_spikes, noise_levels, templates,
-# waveforms) is already present; these derive from it. ``principal_components``
-# is added separately, only when PCA metrics are requested.
-_CURATION_EXTENSIONS = STANDARD_DISPLAY_ANALYZER_EXTENSIONS
-
-# Pinned principal_components params for the whitened METRIC analyzer. The
-# recording is already SPATIALLY whitened (sip.whiten decorrelates channels);
-# SI's PCA then computes components on those decorrelated waveforms and, with
-# whiten=True, normalizes the component variances -- the standard input space
-# for the PC/NN cluster-separation metrics. These are SI 0.104's defaults
-# (including dtype), pinned explicitly so a future SI default change cannot
-# silently alter the whitened-space PCA (and therefore the PC/NN metric values).
-_PCA_EXTENSION_PARAMS = {
-    "n_components": 5,
-    "mode": "by_channel_local",
-    "whiten": True,
-    "dtype": "float32",
-}
-
-
-def _pca_params_match(existing: dict) -> bool:
-    """True if a stored ``principal_components`` matches the pinned params.
-
-    Compared key-by-key over ``_PCA_EXTENSION_PARAMS`` only (SI may store extra
-    keys); ``dtype`` is normalized through ``np.dtype`` so the stored
-    ``dtype('float32')`` matches the pinned ``"float32"`` string.
-    """
-    import numpy as np
-
-    for key, pinned in _PCA_EXTENSION_PARAMS.items():
-        value = existing.get(key)
-        if key == "dtype":
-            if value is None or np.dtype(value) != np.dtype(pinned):
-                return False
-        elif value != pinned:
-            return False
-    return True
-
-
-_AUTO_MERGE_EXTRA_EXTENSIONS = {
-    # SI's ``feature_neighbors`` preset includes the ``knn`` step, whose
-    # required extensions are templates, spike_locations, and spike_amplitudes.
-    # The sort-time/base curation extension set already covers templates and
-    # spike_amplitudes; add spike_locations only for that preset.
-    "feature_neighbors": ("spike_locations",),
-}
-
 
 def _nwb_file_name_for_sorting(sorting_key: dict) -> str:
     """Return the analyzer-curation NWB parent ``nwb_file_name`` for a sort.
@@ -151,21 +95,6 @@ def _nwb_file_name_for_sorting(sorting_key: dict) -> str:
     ``SessionGroup.Member``).
     """
     return Sorting.resolve_anchor_nwb_file_name(sorting_key)
-
-
-def _requested_pc_metrics(metric_names) -> list[str]:
-    """PC/NN metrics among ``metric_names`` (route to the whitened analyzer).
-
-    PCA-based metrics (``d_prime``, ``mahalanobis``, ``nearest_neighbor``,
-    ``nn_advanced``, ``silhouette`` in SI 0.104) need the ``principal_components``
-    extension and measure cluster separation, so they compute in the
-    decorrelated (whitened) space -- the whitened METRIC analyzer; everything
-    else stays on the unwhitened DISPLAY analyzer. The PCA set is the same one
-    the insert-time validator uses (``_available_pca_metric_names``), so routing
-    and validation cannot disagree about which metrics are PCA-based.
-    """
-    pca = set(_available_pca_metric_names())
-    return [name for name in metric_names if name in pca]
 
 
 def _assert_is_metric_recipe(waveform_params_name: str) -> None:
@@ -1251,8 +1180,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 # Root / label-only: the cached raw-sort analyzers already carry
                 # this curation's unit set. Hold the per-sort lock around the
                 # canonical-folder load/rebuild + metric-extension mutation
-                # (_compute_metrics / _compute_merge_groups mutate the shared
-                # analyzer in place).
+                # (_compute_metrics / _metric_curation.compute_merge_groups
+                # mutate the shared analyzer in place).
                 raw_sorting = read_stored_units(sorting_inputs.raw_units)
                 with analyzer_cache_lock(sorting_inputs.sorting_id):
                     display_analyzer = load_or_rebuild_analyzer_from_resolved(
@@ -1284,7 +1213,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                             statistics_spans=statistics_spans,
                         )
                     metrics_df, labels_by_unit, merge_groups = (
-                        self._evaluate_analyzers(
+                        _metric_curation.evaluate_analyzers(
+                            self,
                             display_analyzer,
                             metric_analyzer,
                             metric_names=metric_inputs.metric_names,
@@ -1349,7 +1279,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                         )
                         metric_analyzer = load_analyzer_folder(metric_folder)
                     metrics_df, labels_by_unit, merge_groups = (
-                        self._evaluate_analyzers(
+                        _metric_curation.evaluate_analyzers(
+                            self,
                             display_analyzer,
                             metric_analyzer,
                             metric_names=metric_inputs.metric_names,
@@ -1543,172 +1474,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         }
 
     # ---- compute helpers (DB-free; SI work) ------------------------------
-
-    def _evaluate_analyzers(
-        self,
-        display_analyzer,
-        metric_analyzer,
-        *,
-        metric_names,
-        metric_kwargs,
-        skip_pc_metrics,
-        metric_job_kwargs,
-        template_metric_columns,
-        auto_merge_preset,
-        auto_merge_kwargs,
-        rule_rows,
-        expected_unit_ids,
-        observation_metrics=None,
-        statistics_spans=None,
-    ):
-        """Compute metrics / labels / merge suggestions and enforce namespace.
-
-        Reuses ``_compute_metrics`` / ``_compute_merge_groups`` and
-        ``apply_label_rules`` over the curation's analyzers, then enforces
-        the unit-namespace invariant BEFORE labels/merges are returned (and
-        before the NWB write): the metric index must equal the curation's unit
-        set, and every suggested merge member must be a unit in that set. This
-        catches a stale temp analyzer, accidental raw-sort analyzer reuse, or a
-        preview row that slipped past selection. ``statistics_spans`` (the
-        sort's persisted spans; ``None`` = the whole recording) are forwarded
-        to ``_compute_metrics``.
-
-        Rule-referenced metrics must be computed wherever SpikeInterface can
-        compute them: a metric SpikeInterface failed (``_compute_metrics``'s
-        ``rule_columns``), or a non-finite value for a unit that meets the
-        metric's preconditions (``expected_missing_units``), raises
-        ``ValueError`` instead of leaving the rule silently inert. A NaN for a
-        unit SpikeInterface cannot assess (e.g. below ``nn_advanced``'s
-        ``min_spikes``) follows the rule's ``missing_policy``.
-
-        The whole evaluation holds ``SI_METRIC_STATE_LOCK``
-        (``_si_metric_patches``), taken after any ``analyzer_cache_lock``
-        the caller holds, so evaluations on different threads of one process
-        run one after another.
-        """
-        from spyglass.spikesorting.v2._si_metric_patches import (
-            SI_METRIC_STATE_LOCK,
-        )
-
-        # SpikeInterface's metric defaults (which the classifier reads) and
-        # Spyglass's capture of SpikeInterface warnings are process-wide:
-        # hold the lock from the computes through the classification so no
-        # evaluation on another thread changes them in between. The merge
-        # suggestions stay inside too: SI's auto-merge can compute
-        # quality_metrics itself (spikeinterface/curation/auto_merge.py:256).
-        with SI_METRIC_STATE_LOCK:
-            rule_columns = frozenset(row["metric_name"] for row in rule_rows)
-            metrics_df = self._compute_metrics(
-                display_analyzer,
-                metric_analyzer,
-                metric_names,
-                metric_kwargs,
-                skip_pc_metrics,
-                metric_job_kwargs,
-                template_metric_columns=template_metric_columns,
-                statistics_spans=statistics_spans,
-                rule_columns=rule_columns,
-            )
-            self._assert_unit_namespace(metrics_df, expected_unit_ids)
-            if observation_metrics is not None:
-                metrics_df = metrics_df.join(observation_metrics)
-            n_spikes_by_unit = self._spike_counts(
-                display_analyzer, metric_analyzer
-            )
-            total_samples = display_analyzer.get_total_samples()
-            if (
-                metric_analyzer is not None
-                and metric_analyzer.get_total_samples() != total_samples
-            ):
-                raise ValueError(
-                    "The display and metric analyzers disagree on the "
-                    f"recording's total samples (display={total_samples}, "
-                    f"metric={metric_analyzer.get_total_samples()}); both "
-                    "must be built from the same traces, since the "
-                    "eligibility classifier rates every metric's spikes over "
-                    "one duration."
-                )
-            expected_missing = expected_missing_units(
-                rule_columns,
-                n_spikes_by_unit=n_spikes_by_unit,
-                # SI rates spikes over total samples / fs, not the time-vector
-                # span (spikeinterface/metrics/utils.py:100-126).
-                total_samples=total_samples,
-                sampling_frequency=display_analyzer.sampling_frequency,
-                metric_kwargs=metric_kwargs or {},
-            )
-            assert_rule_metrics_computed(
-                metrics_df, rule_columns, expected_missing
-            )
-            labels_by_unit = apply_label_rules(
-                metrics_df, rule_rows, expected_missing=expected_missing
-            )
-            merge_groups = self._compute_merge_groups(
-                display_analyzer,
-                auto_merge_preset,
-                auto_merge_kwargs,
-                metric_job_kwargs,
-            )
-            self._assert_merge_membership(merge_groups, expected_unit_ids)
-            return metrics_df, labels_by_unit, merge_groups
-
-    @staticmethod
-    def _spike_counts(display_analyzer, metric_analyzer) -> dict[int, int]:
-        """Per-unit spike counts, identical on both analyzers.
-
-        The voltage metrics count spikes on the display analyzer and the
-        PC/NN metrics on the whitened metric analyzer (when there is one).
-        Both are built from the same sorting, so their full per-unit counts
-        must agree; the eligibility classifier uses one set for both.
-        """
-        counts = {
-            int(unit_id): int(n)
-            for unit_id, n in (
-                display_analyzer.sorting.count_num_spikes_per_unit().items()
-            )
-        }
-        if metric_analyzer is not None:
-            metric_counts = {
-                int(unit_id): int(n)
-                for unit_id, n in (
-                    metric_analyzer.sorting.count_num_spikes_per_unit().items()
-                )
-            }
-            if metric_counts != counts:
-                raise ValueError(
-                    "The display and metric analyzers disagree on per-unit "
-                    f"spike counts (display={counts}, metric={metric_counts}); "
-                    "both must be built from the same sorting."
-                )
-        return counts
-
-    @staticmethod
-    def _assert_unit_namespace(metrics_df, expected_unit_ids) -> None:
-        """Raise unless the metric index equals the curation's unit set."""
-        computed = {int(u) for u in metrics_df.index}
-        expected = {int(u) for u in expected_unit_ids}
-        if computed != expected:
-            raise ValueError(
-                "CurationEvaluation namespace invariant violated: computed "
-                f"metric unit ids {sorted(computed)} != the curation's unit set "
-                f"{sorted(expected)}. The metrics must be scored over the "
-                "evaluated curation's own units (e.g. the merged unit set), not "
-                "the raw-sort analyzer; this indicates a stale temp analyzer or "
-                "accidental raw-analyzer reuse."
-            )
-
-    @staticmethod
-    def _assert_merge_membership(merge_groups, expected_unit_ids) -> None:
-        """Raise unless every suggested merge member is a curation unit."""
-        expected = {int(u) for u in expected_unit_ids}
-        for group in merge_groups:
-            members = {int(u) for u in group}
-            if not members <= expected:
-                raise ValueError(
-                    "CurationEvaluation merge-suggestion invariant violated: "
-                    f"suggested merge {sorted(members)} contains units outside "
-                    f"the curation's unit set {sorted(expected)}."
-                )
 
     # ---- fetch helpers (read the persisted scratch tables) ---------------
 
@@ -2147,365 +1912,20 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ):
         """Compute quality metrics, routing PC/NN metrics to the whitened one.
 
-        Voltage / spike-train metrics (``snr``, ``amplitude_*``,
-        ``firing_rate``, ``num_spikes``, ``presence_ratio``, ``isi_violation``)
-        compute on the unwhitened DISPLAY analyzer -- whitening normalizes
-        per-channel variance, so SNR / amplitude on whitened traces would be
-        meaningless. PC / cluster-separation metrics (the SI PCA-metric set)
-        compute on the whitened METRIC analyzer, where decorrelated separation
-        is meaningful. The two frames are merged by unit id. Spyglass's
-        ``isi_violation`` fraction is added from the (recipe-independent) spike
-        times. ``job_kwargs`` drive the heavy extension computation.
-
-        ``template_metric_columns`` (SI output COLUMN names) are surfaced from
-        the DISPLAY analyzer's ``template_metrics`` extension -- waveform SHAPE
-        must come from real, unwhitened templates, exactly as ``snr`` does. The
-        columns are selected directly (config already holds column names, so no
-        name->column mapping) and joined onto the result by unit id; they are
-        exposed for downstream cell typing, never thresholded here.
-
-        ``statistics_spans`` are the sort's artifact-free, join-free frame
-        spans (``Sorting.get_statistics_spans``); ``nn_noise_overlap`` draws
-        its noise cluster only from inside them. They are set (via
-        ``noise_cluster_spans``) around both metric computes, which run in
-        this process. ``sd_ratio``'s noise standard deviation is likewise
-        estimated from the span samples, and its correction for the unit's
-        own template variance counts only the spikes and samples inside
-        them. ``None`` (or one span covering the recording) keeps
-        SpikeInterface's whole-recording estimates.
-
-        ``rule_columns`` are the metric columns auto-curation rules
-        threshold. SpikeInterface turns a metric that raises into a warning
-        and an all-NaN column; around every compute that can run quality or
-        template metrics, such a failure raises ``ValueError`` if it hits a
-        rule column and is logged otherwise (``escalate_si_metric_errors``).
-        The default, empty, escalates nothing.
+        See :func:`._metric_curation.compute_metrics`. Tests patch it, so it
+        stays on the class and the evaluation calls it through the class.
         """
-        import numpy as np
-        import pandas as pd
-        from spikeinterface.metrics.quality import compute_quality_metrics
-
-        from spyglass.spikesorting.v2._si_metric_patches import (
-            isolated_si_metric_defaults,
-            noise_cluster_spans,
+        return _metric_curation.compute_metrics(
+            display_analyzer,
+            metric_analyzer,
+            metric_names,
+            metric_kwargs,
+            skip_pc_metrics,
+            job_kwargs=job_kwargs,
+            template_metric_columns=template_metric_columns,
+            statistics_spans=statistics_spans,
+            rule_columns=rule_columns,
         )
-        from spyglass.spikesorting.v2._sorting_analyzer import (
-            ensure_extensions,
-        )
-
-        metric_kwargs = metric_kwargs or {}
-        pc_names = _requested_pc_metrics(metric_names)
-        pc_set = set(pc_names)
-        voltage_names = [m for m in metric_names if m not in pc_set]
-
-        frames = []
-        # Voltage / spike-train metrics -> unwhitened display analyzer.
-        if voltage_names:
-            # Compute each requested voltage metric's display-safe extension
-            # dependencies (read from SI's registry, not hardcoded) beyond the
-            # default curation set -- otherwise SI silently skips a metric whose
-            # extension is absent (e.g. ``drift`` needs ``spike_locations``),
-            # leaving the column missing and any rule thresholding it never
-            # firing. ``principal_components`` is excluded defensively: it is
-            # metric-analyzer-only and voltage metrics never depend on it.
-            base_present = {
-                "random_spikes",
-                "noise_levels",
-                "templates",
-                "waveforms",
-                *_CURATION_EXTENSIONS,
-            }
-            extra_extensions = [
-                ext
-                for ext in required_extensions_for_metrics(
-                    voltage_names, base_present
-                )
-                if ext != "principal_components"
-            ]
-            # _CURATION_EXTENSIONS includes template_metrics.
-            with escalate_si_metric_errors(rule_columns):
-                ensure_extensions(
-                    display_analyzer,
-                    list(_CURATION_EXTENSIONS) + extra_extensions,
-                    job_kwargs=job_kwargs,
-                )
-            if "sd_ratio" in voltage_names:
-                # SI's sd_ratio divides by get_noise_levels(method="std") on
-                # this analyzer's recording, which returns a cached
-                # noise_level_std_* property when present. Cache the std of
-                # the span samples there (same seed and budget as the
-                # analyzer's MAD), so masked zeros do not bias it low.
-                # Covering spans cache nothing and leave SI's estimator.
-                # SI's correction for the unit's own template variance must
-                # then count spikes and samples over the same spans; the
-                # patched metric reads them from noise_cluster_spans below
-                # (SI runs each metric in this thread).
-                from spyglass.spikesorting.v2._si_metric_patches import (
-                    patch_sd_ratio_statistics_spans,
-                )
-                from spyglass.spikesorting.v2._sorting_dispatch import (
-                    cache_span_noise_levels,
-                )
-
-                cache_span_noise_levels(
-                    display_analyzer.recording,
-                    statistics_spans,
-                    return_in_uV=display_analyzer.return_in_uV,
-                    seed=(job_kwargs or {}).get("random_seed", 0),
-                    method="std",
-                )
-                patch_sd_ratio_statistics_spans()
-            # SI would otherwise keep this row's kwargs as its defaults for
-            # every later compute in the process.
-            with (
-                noise_cluster_spans(statistics_spans),
-                isolated_si_metric_defaults(),
-                escalate_si_metric_errors(rule_columns),
-            ):
-                voltage_df = compute_quality_metrics(
-                    display_analyzer,
-                    metric_names=voltage_names,
-                    metric_params={
-                        k: v
-                        for k, v in metric_kwargs.items()
-                        if k in voltage_names
-                    }
-                    or None,
-                    skip_pc_metrics=True,
-                    # The analyzer is shared across curations; SI preserves
-                    # the stored quality_metrics by default, so a prior
-                    # curation's columns would leak into this result (and an
-                    # auto-rule could threshold a stale metric). Compute only
-                    # THIS row's metrics.
-                    delete_existing_metrics=True,
-                )
-            voltage_df.index = voltage_df.index.astype(int)
-            frames.append(voltage_df)
-
-        # PC / cluster-separation metrics -> whitened metric analyzer.
-        if pc_names and not skip_pc_metrics:
-            if metric_analyzer is None:
-                raise ValueError(
-                    "PC/NN metrics were requested but no whitened metric "
-                    "analyzer was provided -- make_compute must build it when "
-                    "PC metrics are requested."
-                )
-            # nn_noise_overlap needs a 'median' template AND SI 0.104.3's metric
-            # is broken for sparse analyzers (it derives the peak channel from a
-            # dense median but indexes the sparse noise cluster -> IndexError,
-            # swallowed as NaN). Ensure the median operator, then install the
-            # sparse fix. The PC compute below runs n_jobs=1 so the fix (a
-            # main-process monkeypatch) is the code that actually runs.
-            from spyglass.spikesorting.v2._si_metric_patches import (
-                patch_nn_noise_overlap_sparsity,
-            )
-
-            ensure_extensions(
-                metric_analyzer, ["templates"], job_kwargs=job_kwargs
-            )
-            templates_operators = list(
-                metric_analyzer.get_extension("templates").params.get(
-                    "operators"
-                )
-                or []
-            )
-            if "median" not in templates_operators:
-                metric_analyzer.compute(
-                    "templates", operators=[*templates_operators, "median"]
-                )
-            patch_nn_noise_overlap_sparsity()
-            # Enforce the pinned PCA params even if a stale/manual analyzer
-            # already carries principal_components computed with different ones
-            # (ensure_extensions skips a present extension without checking its
-            # params): drop a mismatched extension so it recomputes pinned.
-            if metric_analyzer.has_extension("principal_components"):
-                existing_pca = dict(
-                    metric_analyzer.get_extension("principal_components").params
-                )
-                if not _pca_params_match(existing_pca):
-                    logger.warning(
-                        "CurationEvaluation: principal_components on the metric "
-                        f"analyzer has params {existing_pca} != pinned "
-                        f"{_PCA_EXTENSION_PARAMS}; deleting and recomputing "
-                        "with the pinned params so PC/NN metrics are consistent."
-                    )
-                    metric_analyzer.delete_extension("principal_components")
-            ensure_extensions(
-                metric_analyzer,
-                ["principal_components"],
-                job_kwargs=job_kwargs,
-                extension_params={
-                    "principal_components": _PCA_EXTENSION_PARAMS
-                },
-            )
-            with (
-                noise_cluster_spans(statistics_spans),
-                isolated_si_metric_defaults(),
-                escalate_si_metric_errors(rule_columns),
-            ):
-                pc_df = compute_quality_metrics(
-                    metric_analyzer,
-                    metric_names=pc_names,
-                    metric_params={
-                        k: v for k, v in metric_kwargs.items() if k in pc_names
-                    }
-                    or None,
-                    skip_pc_metrics=False,
-                    # As above: compute only this row's PC metrics, never
-                    # inherit a prior curation's stored quality_metrics on this
-                    # analyzer.
-                    delete_existing_metrics=True,
-                    # nn_noise_overlap's sparse fix and its span-restricted
-                    # noise cluster (patch_nn_noise_overlap_sparsity /
-                    # noise_cluster_spans) are a main-process monkeypatch and a
-                    # ContextVar; SI parallelises nn_advanced with spawned
-                    # workers that re-import SI and would see neither, so pin
-                    # the PC/NN metric compute to the main process.
-                    n_jobs=1,
-                )
-            pc_df.index = pc_df.index.astype(int)
-            frames.append(pc_df)
-
-        if not frames:
-            raise ValueError(
-                "_compute_metrics: no metrics to compute -- metric_names "
-                f"{sorted(metric_names)} contains only PC/NN metrics but "
-                "skip_pc_metrics=True. Set skip_pc_metrics=False to compute "
-                "them, or include a voltage-based metric."
-            )
-        if len(frames) > 1:
-            # The display and metric analyzers derive from the SAME canonical
-            # sorting, so the voltage and PC frames must share a unit-id index.
-            # Concat defaults to an OUTER join that would silently NaN-fill a
-            # mismatched unit (and a label rule would then never fire on the
-            # NaN); assert the set invariant loudly. Ordering differences are
-            # harmless, so reindex PC metrics to the display order before
-            # concatenating.
-            if set(frames[0].index) != set(frames[1].index):
-                raise ValueError(
-                    "voltage and PC metric frames have mismatched unit ids "
-                    f"(voltage={sorted(frames[0].index)}, "
-                    f"pc={sorted(frames[1].index)}); both derive from the same "
-                    "canonical sorting, so this indicates an analyzer build "
-                    "divergence and the metrics cannot be safely merged."
-                )
-            frames[1] = frames[1].reindex(frames[0].index)
-            metrics_df = pd.concat(frames, axis=1)
-        else:
-            metrics_df = frames[0]
-
-        if (
-            "isi_violation" in metric_names
-            and "isi_violations_count" in metrics_df.columns
-        ):
-            counts = metrics_df["isi_violations_count"].to_numpy()
-            n_by_unit = display_analyzer.sorting.count_num_spikes_per_unit()
-            n_spikes = np.array(
-                [n_by_unit[int(u)] for u in metrics_df.index], dtype=float
-            )
-            metrics_df["isi_violation"] = isi_violation_fraction(
-                counts, n_spikes
-            )
-
-        # Surfacing the configured shape columns must not depend on a voltage
-        # metric having grown the display extensions: a PC-only row (e.g.
-        # metric_names=["nn_advanced"], skip_pc_metrics=False) skips the voltage
-        # branch above, so ensure template_metrics on the display analyzer
-        # whenever shape columns are requested -- otherwise they would be
-        # silently dropped rather than surfaced.
-        if template_metric_columns and not display_analyzer.has_extension(
-            "template_metrics"
-        ):
-            with escalate_si_metric_errors(rule_columns):
-                ensure_extensions(
-                    display_analyzer,
-                    ["template_metrics"],
-                    job_kwargs=job_kwargs,
-                )
-
-        metrics_df = CurationEvaluation._surface_template_columns(
-            metrics_df, display_analyzer, template_metric_columns
-        )
-        return metrics_df
-
-    @staticmethod
-    def _surface_template_columns(
-        metrics_df, display_analyzer, template_metric_columns
-    ):
-        """Join configured waveform-shape columns onto the metric frame.
-
-        Reads the already-computed ``template_metrics`` extension from the
-        DISPLAY (unwhitened) analyzer per the display-vs-metric routing
-        contract, selects the configured output COLUMNS directly (no
-        name->column mapping), and joins them by unit id so a unit missing from
-        either frame yields ``NaN`` rather than a misaligned row. Surfaces, does
-        not threshold. A no-op when no columns are configured or the extension
-        is absent (e.g. a PC-only row that never grew the display extensions).
-        """
-        if not template_metric_columns:
-            return metrics_df
-        if not display_analyzer.has_extension("template_metrics"):
-            return metrics_df
-        tm_df = display_analyzer.get_extension("template_metrics").get_data()
-        # Select the configured columns directly (config holds column names, so
-        # no name->column mapping), never shadowing a same-named quality-metric
-        # column with a template one.
-        present = [
-            c
-            for c in template_metric_columns
-            if c in tm_df.columns and c not in metrics_df.columns
-        ]
-        missing = [c for c in template_metric_columns if c not in tm_df.columns]
-        if missing:
-            # Validation guarantees the configured columns are real
-            # single-channel output columns, so this only fires if SI's default
-            # template_metrics compute omits a validated column -- an
-            # upstream-version drift signal, surfaced loudly, not silent.
-            logger.warning(
-                "template_metric_columns %s absent from computed "
-                "template_metrics columns %s; surfacing %s only.",
-                missing,
-                list(tm_df.columns),
-                present,
-            )
-        # Copy the selected columns before retyping the index so the analyzer's
-        # cached template_metrics frame is never mutated in place.
-        selected = tm_df[present].copy()
-        selected.index = selected.index.astype(int)
-        return metrics_df.join(selected)
-
-    @staticmethod
-    def _compute_merge_groups(
-        analyzer, auto_merge_preset, auto_merge_kwargs, job_kwargs=None
-    ):
-        """Return proposed merge groups for a preset (``[]`` for 'none')."""
-        if auto_merge_preset == "none":
-            return []
-        from spikeinterface.curation import compute_merge_unit_groups
-
-        from spyglass.spikesorting.v2._sorting_analyzer import (
-            ensure_extensions,
-        )
-
-        extensions = list(_CURATION_EXTENSIONS)
-        extensions.extend(
-            _AUTO_MERGE_EXTRA_EXTENSIONS.get(auto_merge_preset, ())
-        )
-        ensure_extensions(analyzer, extensions, job_kwargs=job_kwargs)
-        merge_job_kwargs = {
-            key: value
-            for key, value in (job_kwargs or {}).items()
-            if key != "random_seed"
-        }
-        compute_kwargs = dict(auto_merge_kwargs or {})
-        compute_kwargs.update(merge_job_kwargs)
-        groups = compute_merge_unit_groups(
-            analyzer,
-            preset=auto_merge_preset,
-            compute_needed_extensions=False,
-            **compute_kwargs,
-        )
-        return [[int(u) for u in group] for group in groups]
 
     @staticmethod
     def _write_empty(abs_path, *, provenance_tables=None):
