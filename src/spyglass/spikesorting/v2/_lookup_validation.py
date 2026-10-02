@@ -185,6 +185,65 @@ def _jsonable_blob(blob):
     return json.loads(json.dumps(blob, default=_coerce))
 
 
+def parameter_row_fingerprint(
+    table_name: str,
+    row: dict,
+    *,
+    sorter_keyed: bool = False,
+    matcher_keyed: bool = False,
+) -> str:
+    """Return the content fingerprint of one blob-valued parameter row.
+
+    Reads ``params``, ``params_schema_version``, ``job_kwargs`` and, when
+    present, ``execution_params`` / ``execution_params_schema_version`` from
+    ``row`` -- a stored row (``fetch(as_dict=True)``) or a validated insert
+    row -- coerces each blob with :func:`_jsonable_blob`, and hands them to
+    :func:`~spyglass.spikesorting.v2._parameter_identity.parameter_fingerprint`.
+    The row name is never read.
+
+    Parameters
+    ----------
+    table_name : str
+        The fingerprint ``table`` field (e.g. ``"SorterParameters"``).
+    row : dict
+        The parameter row.
+    sorter_keyed, matcher_keyed : bool, optional
+        Fold ``row["sorter"]`` / ``row["matcher"]`` into the identity
+        (``SorterParameters`` / ``MatcherParameters``).
+    """
+    # A dict insert may omit the ``params_schema_version`` column (the
+    # DataJoint column default fills it at write time, so the validated dict
+    # has no such key yet). The validated ``params`` blob always carries the
+    # authoritative inner ``schema_version``, and
+    # ``_assert_schema_version_matches`` keeps the outer column in lockstep
+    # with it, so fall back to the blob when the column is absent.
+    version = row.get("params_schema_version")
+    if version is None:
+        version = row["params"]["schema_version"]
+    # Only SorterParameters carries execution_params; for the single-key
+    # Lookups it is absent and the fingerprint omits it (None). The outer
+    # ``execution_params_schema_version`` falls back to the blob's inner
+    # ``schema_version`` the same way.
+    exec_params = _jsonable_blob(row.get("execution_params"))
+    exec_version = None
+    if exec_params is not None:
+        exec_version = row.get("execution_params_schema_version")
+        if exec_version is None:
+            exec_version = exec_params.get("schema_version")
+        if exec_version is not None:
+            exec_version = int(exec_version)
+    return parameter_fingerprint(
+        table_name,
+        params=_jsonable_blob(row["params"]),
+        params_schema_version=int(version),
+        job_kwargs=_jsonable_blob(row.get("job_kwargs")),
+        sorter=row.get("sorter") if sorter_keyed else None,
+        matcher=row.get("matcher") if matcher_keyed else None,
+        execution_params=exec_params,
+        execution_params_schema_version=exec_version,
+    )
+
+
 def reject_duplicate_parameter_content(
     table,
     validated_rows,
@@ -230,43 +289,12 @@ def reject_duplicate_parameter_content(
     if allow_duplicate_params:
         return
 
-    def _version(row: dict) -> int:
-        # A dict insert may omit the ``params_schema_version`` column (the
-        # DataJoint column default fills it at write time, so the validated
-        # dict has no such key yet). The validated ``params`` blob always
-        # carries the authoritative inner ``schema_version``, and
-        # ``_assert_schema_version_matches`` keeps the outer column in
-        # lockstep with it, so fall back to the blob when the column is
-        # absent rather than KeyError-ing on a perfectly valid insert.
-        version = row.get("params_schema_version")
-        if version is None:
-            version = row["params"]["schema_version"]
-        return int(version)
-
-    def _exec_version(row: dict, exec_params) -> int | None:
-        # Only SorterParameters carries execution_params; for the single-key
-        # Lookups it is absent and the fingerprint omits it (None). A dict
-        # insert may omit the outer ``execution_params_schema_version`` column,
-        # so fall back to the validated blob's inner ``schema_version`` the same
-        # way ``_version`` does for ``params_schema_version``.
-        if exec_params is None:
-            return None
-        version = row.get("execution_params_schema_version")
-        if version is None:
-            version = exec_params.get("schema_version")
-        return int(version) if version is not None else None
-
     def _fingerprint(row: dict) -> str:
-        exec_params = _jsonable_blob(row.get("execution_params"))
-        return parameter_fingerprint(
+        return parameter_row_fingerprint(
             table_name,
-            params=_jsonable_blob(row["params"]),
-            params_schema_version=_version(row),
-            job_kwargs=_jsonable_blob(row.get("job_kwargs")),
-            sorter=row.get("sorter") if sorter_keyed else None,
-            matcher=row.get("matcher") if matcher_keyed else None,
-            execution_params=exec_params,
-            execution_params_schema_version=_exec_version(row, exec_params),
+            row,
+            sorter_keyed=sorter_keyed,
+            matcher_keyed=matcher_keyed,
         )
 
     def _pk(row: dict):

@@ -200,8 +200,8 @@ def _preprocessing_parameter_records(
     preproc_use: dict[str, list[str]],
 ) -> list[dict]:
     """Catalog records for every ``PreprocessingParameters`` row."""
-    from spyglass.spikesorting.v2._parameter_identity import (
-        parameter_fingerprint,
+    from spyglass.spikesorting.v2._lookup_validation import (
+        parameter_row_fingerprint,
     )
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.utils import _jsonable_blob
@@ -220,11 +220,8 @@ def _preprocessing_parameter_records(
                 "sampling_rate_hz": _num_axis(used, "sampling_rate_hz"),
                 "adjacency_radius_um": None,
                 "params_schema_version": int(row["params_schema_version"]),
-                "_fp": parameter_fingerprint(
-                    "PreprocessingParameters",
-                    params=params,
-                    params_schema_version=int(row["params_schema_version"]),
-                    job_kwargs=_jsonable_blob(row["job_kwargs"]),
+                "_fp": parameter_row_fingerprint(
+                    "PreprocessingParameters", row
                 ),
                 "is_shipped_default": (
                     row["preprocessing_params_name"] in shipped_preproc
@@ -243,8 +240,8 @@ def _artifact_parameter_records(
     artifact_use: dict[str, list[str]],
 ) -> list[dict]:
     """Catalog records for every ``ArtifactDetectionParameters`` row."""
-    from spyglass.spikesorting.v2._parameter_identity import (
-        parameter_fingerprint,
+    from spyglass.spikesorting.v2._lookup_validation import (
+        parameter_row_fingerprint,
     )
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.utils import _jsonable_blob
@@ -267,11 +264,8 @@ def _artifact_parameter_records(
                 "sampling_rate_hz": _num_axis(used, "sampling_rate_hz"),
                 "adjacency_radius_um": None,
                 "params_schema_version": int(row["params_schema_version"]),
-                "_fp": parameter_fingerprint(
-                    "ArtifactDetectionParameters",
-                    params=params,
-                    params_schema_version=int(row["params_schema_version"]),
-                    job_kwargs=_jsonable_blob(row["job_kwargs"]),
+                "_fp": parameter_row_fingerprint(
+                    "ArtifactDetectionParameters", row
                 ),
                 "is_shipped_default": (
                     row["artifact_detection_params_name"] in shipped_artifact
@@ -290,8 +284,8 @@ def _sorter_parameter_records(
     sorter_use: dict[tuple[str, str], list[str]],
 ) -> list[dict]:
     """Catalog records for every ``SorterParameters`` row."""
-    from spyglass.spikesorting.v2._parameter_identity import (
-        parameter_fingerprint,
+    from spyglass.spikesorting.v2._lookup_validation import (
+        parameter_row_fingerprint,
     )
     from spyglass.spikesorting.v2.sorting import SorterParameters
     from spyglass.spikesorting.v2.utils import _jsonable_blob
@@ -314,19 +308,10 @@ def _sorter_parameter_records(
                     float(radius) if radius is not None else None
                 ),
                 "params_schema_version": int(row["params_schema_version"]),
-                "_fp": parameter_fingerprint(
-                    "SorterParameters",
-                    params=params,
-                    params_schema_version=int(row["params_schema_version"]),
-                    job_kwargs=_jsonable_blob(row["job_kwargs"]),
-                    sorter=row["sorter"],
-                    # execution_params is part of SorterParameters' real
-                    # identity (local vs container backend); omitting it here
-                    # would falsely flag two backend variants as duplicates.
-                    execution_params=_jsonable_blob(row["execution_params"]),
-                    execution_params_schema_version=int(
-                        row["execution_params_schema_version"]
-                    ),
+                # Folds in the sorter and execution_params (local vs
+                # container backend), as the duplicate-content guard does.
+                "_fp": parameter_row_fingerprint(
+                    "SorterParameters", row, sorter_keyed=True
                 ),
                 "is_shipped_default": key in shipped_sorter,
                 "recommendation_status": _str_axis(

@@ -802,8 +802,8 @@ def clone_pipeline_preset(
         )
     base = _PIPELINE_PRESETS[base_name]
 
-    from spyglass.spikesorting.v2._parameter_identity import (
-        parameter_fingerprint,
+    from spyglass.spikesorting.v2._lookup_validation import (
+        parameter_row_fingerprint,
     )
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
@@ -930,23 +930,9 @@ def clone_pipeline_preset(
             stage["schema_cls"].model_validate(blob).model_dump()
         )
 
-    def _fingerprint(
-        stage,
-        *,
-        params,
-        params_schema_version,
-        job_kwargs,
-        execution_params,
-        execution_params_schema_version,
-    ):
-        return parameter_fingerprint(
-            stage["table_name"],
-            params=_jsonable_blob(params),
-            params_schema_version=int(params_schema_version),
-            job_kwargs=_jsonable_blob(job_kwargs),
-            sorter=stage["sorter"],
-            execution_params=execution_params,
-            execution_params_schema_version=execution_params_schema_version,
+    def _fingerprint(stage, row):
+        return parameter_row_fingerprint(
+            stage["table_name"], row, sorter_keyed=stage["sorter"] is not None
         )
 
     # Step 2 -- insert the derived rows atomically. For each touched stage,
@@ -958,19 +944,20 @@ def clone_pipeline_preset(
     with PreprocessingParameters._safe_context():
         for name in touched:
             stage = stages[name]
-            exec_params = stage.get("base_execution_params")
-            exec_psv = (
-                stage.get("base_execution_params_schema_version")
-                if stage["sorter"] is not None
-                else None
-            )
             derived_fp = _fingerprint(
                 stage,
-                params=derived_params[name],
-                params_schema_version=stage["base_params_schema_version"],
-                job_kwargs=stage["base_job_kwargs"],
-                execution_params=exec_params,
-                execution_params_schema_version=exec_psv,
+                {
+                    "params": derived_params[name],
+                    "params_schema_version": stage[
+                        "base_params_schema_version"
+                    ],
+                    "job_kwargs": stage["base_job_kwargs"],
+                    "sorter": stage["sorter"],
+                    "execution_params": stage.get("base_execution_params"),
+                    "execution_params_schema_version": stage.get(
+                        "base_execution_params_schema_version"
+                    ),
+                },
             )
 
             new_restriction = {stage["pk_field"]: new_name}
@@ -978,35 +965,7 @@ def clone_pipeline_preset(
                 new_restriction["sorter"] = stage["sorter"]
             existing = stage["table"] & new_restriction
             if existing:
-                if stage["sorter"] is not None:
-                    e_params, e_psv, e_jk, e_ep, e_epsv = existing.fetch1(
-                        "params",
-                        "params_schema_version",
-                        "job_kwargs",
-                        "execution_params",
-                        "execution_params_schema_version",
-                    )
-                    existing_fp = _fingerprint(
-                        stage,
-                        params=e_params,
-                        params_schema_version=e_psv,
-                        job_kwargs=e_jk,
-                        execution_params=_jsonable_blob(e_ep),
-                        execution_params_schema_version=int(e_epsv),
-                    )
-                else:
-                    e_params, e_psv, e_jk = existing.fetch1(
-                        "params", "params_schema_version", "job_kwargs"
-                    )
-                    existing_fp = _fingerprint(
-                        stage,
-                        params=e_params,
-                        params_schema_version=e_psv,
-                        job_kwargs=e_jk,
-                        execution_params=None,
-                        execution_params_schema_version=None,
-                    )
-                if existing_fp == derived_fp:
+                if _fingerprint(stage, existing.fetch1()) == derived_fp:
                     continue  # idempotent: the derived row already exists
                 raise ValueError(
                     f"clone_pipeline_preset: a {stage['table_name']} row named "
