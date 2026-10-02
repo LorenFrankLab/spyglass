@@ -973,22 +973,23 @@ def test_clusterless_detect_peaks_strips_threshold_unit(dj_conn, monkeypatch):
 
 
 def _stub_recording_with_2d_probe():
-    """Recording stub for the ``_build_analyzer`` unit tests below.
+    """Two-channel recording with a planar probe for the tests below.
 
-    ``_build_analyzer`` projects the probe to 2D (via ``recording.get_probe()``)
-    before building the analyzer; these tests stub the analyzer factory, so the
-    recording only needs to report an already-planar probe (``ndim == 2``) so
-    the projection step is skipped.
+    These ``_build_analyzer`` tests stub the analyzer factory, so the recording
+    only has to pass the checks ``_build_analyzer`` runs before building:
+    distinct 2D contact positions (``assert_unique_contact_positions``) and an
+    already-planar probe (``ndim == 2``), so the 2D projection step is skipped.
     """
+    import numpy as np
+    import spikeinterface as si
+    from probeinterface import generate_linear_probe
 
-    class _Probe:
-        ndim = 2
-
-    class _Recording:
-        def get_probe(self):
-            return _Probe()
-
-    return _Recording()
+    recording = si.NumpyRecording(
+        np.zeros((100, 2), dtype="float32"), sampling_frequency=30_000.0
+    )
+    probe = generate_linear_probe(num_elec=2, ypitch=20)
+    probe.set_device_channel_indices(np.arange(2))
+    return recording.set_probe(probe)
 
 
 def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
