@@ -122,8 +122,9 @@ optional-dependencies.moseq-gpu = [
   "keypoint-moseq>=0.6",
 ]
 optional-dependencies.spikesorting-v2 = [
-  # Cross-process lock serializing concurrent AnalyzerCuration jobs that share a
-  # sort's analyzer-cache folder (see _analyzer_cache.analyzer_curation_lock).
+  # Cross-process locks for the shared analyzer cache
+  # (_analyzer_cache.analyzer_cache_lock) and the recording, concat and motion
+  # cache rebuilds.
   # Pure-Python and tiny; declared explicitly rather than relied on transitively
   # via torch.
   "filelock",

@@ -321,8 +321,9 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         run unchanged.
 
         A fresh analyzer is built rather than reusing the persisted v2
-        ``Sorting`` analyzer because that one subsamples waveforms to
-        ``max_spikes_per_unit=500`` and uses an asymmetric window, whereas
+        ``Sorting`` analyzer because that one subsamples waveforms
+        (``max_spikes_per_unit``, 20000 in the shipped recipes) with the
+        recipe's waveform window, whereas
         clusterless decoding needs every spike's amplitude (``method="all"``)
         aligned 1:1 with the full ``spike_times``. ``sparse=False`` keeps the
         full per-channel mark for every unit.

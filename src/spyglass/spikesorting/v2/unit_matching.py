@@ -182,7 +182,7 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     definition = """
     matcher_params_name: varchar(64)
     ---
-    matcher: varchar(32)         # 'unitmatch' now; 'deepunitmatch' future plugin
+    matcher: varchar(32)         # registered matcher backend (e.g. 'unitmatch')
     params: blob                 # validated against the per-matcher Pydantic model
     params_schema_version=1: int
     job_kwargs=null: blob
@@ -1894,8 +1894,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     n_sessions_detected: int   # distinct original sessions (nwb files) in which a member unit has at least one spike
     n_matching_inputs: int     # distinct matching inputs among the member units
     median_match_probability=NULL: float  # NULL for singleton tracked units
-    policy_used: varchar(32)              # 'strict' ships today; future policies
-                                          # are pure inserts (no migration)
+    policy_used: varchar(32)              # tracked-unit derivation policy ('strict')
     """
 
     class Member(SpyglassMixinPart):

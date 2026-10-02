@@ -17,7 +17,9 @@ DISTINCT source part types and exercises:
 Under SI 0.104 the only two source types whose ``fetch_nwb`` works are
 ``CurationV2`` (the v2 pipeline) and ``ImportedSpikeSorting`` (reads
 ``nwb_file.units`` directly; only its ``get_recording``/``get_sorting`` raise
-NotImplementedError). v0/v1 sources are import-incompatible with SI 0.104.
+NotImplementedError). v0/v1 modules import and their rows stay queryable
+under SI 0.104, but creating v0/v1 rows needs the legacy SI 0.99 environment,
+so this module uses the two sources this environment can populate.
 The ``ImportedSpikeSorting`` source needs an NWB with a populated ``units``
 table -- the MEArec fixtures deliberately keep ``nwbfile.units`` empty, so we
 plant a small units table onto a copy and ingest it as its own session.
