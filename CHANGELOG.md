@@ -85,8 +85,10 @@ must be run in the legacy environment:
 
 MountainSort4 also needs the legacy environment: its `ml_ms4alg` backend does
 not run on NumPy 2. The `spike_location` waveform feature is now v2-only and
-raises `NotImplementedError` for v0/v1 sorts in either environment, so v0/v1
-`UnitWaveformFeatures` selections need a features row without it (such as
+raises `NotImplementedError` for v0/v1 sorts in either environment. For v0/v1
+sorts it never produced per-unit values: each unit received the locations of
+every unit's spikes, so the features did not align with the unit's spike times.
+v0/v1 `UnitWaveformFeatures` selections need a features row without it (such as
 `amplitude`).
 
 #### Spike-sorting recordings read the raw `ElectricalSeries` by name (#1609)
