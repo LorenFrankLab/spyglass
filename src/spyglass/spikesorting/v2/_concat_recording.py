@@ -778,17 +778,14 @@ def concat_span_arrays(
 
 
 def observation_intervals(n_samples, sampling_frequency, artifact_ranges):
-    """Return kept concat intervals in seconds from ordered half-open ranges."""
+    """Return kept concat intervals in seconds from half-open frame ranges."""
     import numpy as np
 
-    intervals = []
-    cursor = 0
-    for start, end in artifact_ranges:
-        if start > cursor:
-            intervals.append((cursor, start))
-        cursor = end
-    if cursor < n_samples:
-        intervals.append((cursor, n_samples))
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        complement_frame_ranges,
+    )
+
+    intervals = complement_frame_ranges(artifact_ranges, n_samples)
     return (
         np.asarray(intervals, dtype=float).reshape(-1, 2) / sampling_frequency
     )

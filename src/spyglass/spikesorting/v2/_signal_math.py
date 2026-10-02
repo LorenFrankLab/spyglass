@@ -226,6 +226,69 @@ def merge_sorted_intervals(intervals) -> list[list]:
     return merged
 
 
+def subtract_intervals(base, removed, *, inclusive_stop=False) -> list[tuple]:
+    """Remove ``removed`` from each ``base`` interval separately.
+
+    Each base interval is cut on its own, so no output spans the space
+    between two base intervals. ``removed`` must be sorted by start; its rows
+    may overlap one another, and a row that does not overlap a base interval
+    (including a zero-length row) leaves it unchanged.
+
+    Parameters
+    ----------
+    base : iterable of (start, stop)
+        Intervals to cut, in seconds.
+    removed : sequence of (start, stop)
+        Half-open ``[start, stop)`` intervals to remove, sorted by start.
+    inclusive_stop : bool, optional
+        ``False`` (default): a base interval's ``stop`` is an exclusive
+        bound. A removal starting at ``stop`` does not touch the interval,
+        and only pieces of positive length are kept.
+        ``True``: ``stop`` is the time of the interval's last sample. A
+        removal starting exactly at ``stop`` removes that sample, so the
+        piece before it ends at ``np.nextafter(stop, -np.inf)`` -- the
+        predecessor float keeps it distinguishable from a kept inclusive
+        endpoint -- and a zero-length final piece ``(stop, stop)`` (the
+        lone last sample) is kept.
+
+    Returns
+    -------
+    list[tuple[float, float]]
+        Kept ``(start, stop)`` pieces in base order.
+    """
+    import numpy as np
+
+    removed = list(removed)
+    # Running max of the removal stops: every row before the first index
+    # whose running max passes a base start ends at or before that start.
+    reach = np.maximum.accumulate(
+        np.asarray(removed, dtype=float).reshape(-1, 2)[:, 1]
+    )
+    kept = []
+    for start, stop in base:
+        start, stop = float(start), float(stop)
+        cursor = start
+        first = int(np.searchsorted(reach, start, side="right"))
+        for cut_start, cut_stop in removed[first:]:
+            if cut_start > stop or (cut_start == stop and not inclusive_stop):
+                break
+            if cut_stop <= cursor or cut_stop <= cut_start:
+                continue  # already removed, or zero length
+            if cursor < cut_start:
+                # cut_start == stop only with inclusive_stop: end the piece at
+                # the predecessor float so it is not read as a kept endpoint.
+                end = (
+                    np.nextafter(cut_start, -np.inf)
+                    if cut_start == stop
+                    else cut_start
+                )
+                kept.append((cursor, end))
+            cursor = max(cursor, cut_stop)
+        if cursor < stop or (inclusive_stop and cursor == stop):
+            kept.append((cursor, stop))
+    return kept
+
+
 def _normalize(intervals):
     """Sort by start, merge overlapping/adjacent/duplicate rows, drop
     zero-length rows.

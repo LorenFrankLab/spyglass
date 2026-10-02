@@ -68,29 +68,15 @@ def apply_manual_exclusions(valid_times, excluded_times, min_length_s):
     """
     import numpy as np
 
+    from spyglass.spikesorting.v2._signal_math import subtract_intervals
+
     exclusions = normalize_manual_exclusions(excluded_times)
     if not exclusions or len(valid_times) == 0:
         return valid_times
-    kept = []
-    for start, stop in valid_times:
-        cursor = float(start)
-        for bad_start, bad_stop in exclusions:
-            if bad_stop <= cursor:
-                continue
-            if bad_start > stop:
-                break
-            if cursor < bad_start:
-                # Internal valid stops map to the first excluded sample. The
-                # predecessor float also distinguishes a deliberately excluded
-                # final sample from an inclusive recording/chunk endpoint.
-                cut = (
-                    np.nextafter(bad_start, -np.inf)
-                    if bad_start == stop
-                    else bad_start
-                )
-                kept.append((cursor, cut))
-            cursor = max(cursor, bad_stop)
-        if cursor <= stop:
-            kept.append((cursor, float(stop)))
+    # Internal valid stops map to the first excluded sample. With
+    # ``inclusive_stop`` an exclusion starting at a valid stop ends the kept
+    # piece at the predecessor float, distinguishing a deliberately excluded
+    # final sample from an inclusive recording/chunk endpoint.
+    kept = subtract_intervals(valid_times, exclusions, inclusive_stop=True)
     times = np.asarray(kept, dtype=float).reshape(-1, 2)
     return times[(times[:, 1] - times[:, 0]) >= min_length_s]

@@ -55,6 +55,7 @@ def observed_intervals(recording, valid_times):
     )
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
         artifact_frame_ranges,
+        complement_frame_ranges,
     )
 
     if len(valid_times) == 0:
@@ -64,22 +65,19 @@ def observed_intervals(recording, valid_times):
     fs = recording.sampling_frequency
     boundaries = np.r_[0, base_intervals_and_gaps(recording).gap_after + 1, n]
     kept = []
-    cursor = 0
-    for start, stop in [*excluded, (n, n)]:
-        if cursor < start:
-            cuts = np.r_[
-                cursor,
-                boundaries[(boundaries > cursor) & (boundaries < start)],
-                start,
-            ].astype(np.int64)
-            for first, end in pairwise(cuts):
-                t0 = float(_segment_times_at(recording, np.array([first]))[0])
-                t1 = (
-                    float(_segment_times_at(recording, np.array([end - 1]))[0])
-                    + 1.0 / fs
-                )
-                kept.append((t0, t1))
-        cursor = stop
+    for start, stop in complement_frame_ranges(excluded, n):
+        cuts = np.r_[
+            start,
+            boundaries[(boundaries > start) & (boundaries < stop)],
+            stop,
+        ].astype(np.int64)
+        for first, end in pairwise(cuts):
+            t0 = float(_segment_times_at(recording, np.array([first]))[0])
+            t1 = (
+                float(_segment_times_at(recording, np.array([end - 1]))[0])
+                + 1.0 / fs
+            )
+            kept.append((t0, t1))
     result = np.asarray(kept, dtype=float).reshape(-1, 2)
     if len(result) > 1:
         bad = np.flatnonzero(result[1:, 0] < result[:-1, 1])

@@ -211,6 +211,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         _segment_times_at,
         assert_positive_sampling_frequency,
         base_intervals_and_gaps,
+        subtract_intervals,
     )
     from spyglass.utils import logger
 
@@ -363,33 +364,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # Subtract per base chunk, not from one ``[t0, t_end]`` envelope, so no
     # kept interval spans a gap ``Recording.make`` excluded.
     # ``artifact_intervals`` is start-sorted.
-    kept = []
-    artifact_index = 0
-    n_artifact_intervals = len(artifact_intervals)
-    for base_start, base_end in base_intervals:
-        while (
-            artifact_index < n_artifact_intervals
-            and artifact_intervals[artifact_index][1] <= base_start
-        ):
-            artifact_index += 1
-        cursor = base_start
-        scan_index = artifact_index
-        while (
-            scan_index < n_artifact_intervals
-            and artifact_intervals[scan_index][0] < base_end
-        ):
-            art_start, art_end = artifact_intervals[scan_index]
-            clipped_start = max(art_start, base_start)
-            clipped_end = min(art_end, base_end)
-            if clipped_end <= clipped_start:
-                scan_index += 1
-                continue  # artifact does not overlap this chunk
-            if clipped_start > cursor:
-                kept.append([cursor, clipped_start])
-            cursor = max(cursor, clipped_end)
-            scan_index += 1
-        if cursor < base_end:
-            kept.append([cursor, base_end])
+    kept = subtract_intervals(base_intervals, artifact_intervals)
 
     # Drop slivers shorter than ``min_length_s``: a noisy recording otherwise
     # leaves millisecond intervals the mask iterates one by one, and SI
