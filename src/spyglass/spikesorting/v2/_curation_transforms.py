@@ -584,3 +584,94 @@ def build_curated_unit_rows(
         for unit_id, src, n_spikes in specs
     ]
     return unit_rows, kept_to_contributors
+
+
+def build_merge_provenance_rows(
+    *,
+    sorting_id,
+    curation_id: int,
+    kept_unit_to_contributors: dict[int, list[int]],
+    parent_raw_contributors: dict[int, list[int]] | None,
+) -> tuple[list[dict], list[dict]]:
+    """Build the raw ``MergeGroup`` + parent ``ParentMergeGroup`` rows.
+
+    Returns ``(merge_group_rows, parent_merge_group_rows)``.
+
+    For a ROOT (``parent_raw_contributors is None``) the contributors in
+    ``kept_unit_to_contributors`` are already raw ``Sorting.Unit`` ids, so
+    ``MergeGroup`` rows are written verbatim and there is no parent
+    operation (``parent_merge_group_rows`` is empty).
+
+    For a CHILD the contributors are PARENT ``CurationV2.Unit`` ids. Each
+    is expanded through the parent's raw provenance
+    (``parent_raw_contributors``) so ``MergeGroup`` stays raw + FK-safe
+    (a fresh merged parent id is never written there), while the immediate
+    parent operation is recorded verbatim in ``ParentMergeGroup`` (parent
+    namespace, validated against the parent unit set by construction --
+    every contributor came from the parent ``Unit`` rows).
+    """
+    if parent_raw_contributors is None:
+        merge_group_rows = [
+            {
+                "sorting_id": sorting_id,
+                "curation_id": curation_id,
+                "unit_id": int(kept_uid),
+                "contributor_unit_id": int(contributor_uid),
+            }
+            for kept_uid, contributors in kept_unit_to_contributors.items()
+            for contributor_uid in contributors
+        ]
+        return merge_group_rows, []
+
+    merge_group_rows = []
+    parent_merge_group_rows = []
+    for kept_uid, parent_contributors in kept_unit_to_contributors.items():
+        kept_uid = int(kept_uid)
+        # Raw provenance: union the parent contributors' raw contributors
+        # (deduped + sorted) so a unit physically derived from raw N
+        # appears once, queryable, and FK-satisfiable against Sorting.Unit.
+        # Every parent unit has a MergeGroup self-entry when the parent was
+        # created via insert_curation; a missing key means the parent lacks
+        # raw provenance (e.g. hand-inserted, bypassing insert_curation) --
+        # surface that as a named integrity error rather than a bare
+        # KeyError mid-transaction.
+        missing = [
+            int(p)
+            for p in parent_contributors
+            if int(p) not in parent_raw_contributors
+        ]
+        if missing:
+            raise ValueError(
+                "CurationV2.insert_curation: parent unit(s) "
+                f"{sorted(missing)} have no CurationV2.MergeGroup raw "
+                "provenance, so a child's raw contributors cannot be "
+                "resolved. The parent curation must have been created via "
+                "insert_curation (every unit gets a MergeGroup self-entry)."
+            )
+        raw_ids = sorted(
+            {
+                int(raw)
+                for parent_uid in parent_contributors
+                for raw in parent_raw_contributors[int(parent_uid)]
+            }
+        )
+        merge_group_rows.extend(
+            {
+                "sorting_id": sorting_id,
+                "curation_id": curation_id,
+                "unit_id": kept_uid,
+                "contributor_unit_id": raw,
+            }
+            for raw in raw_ids
+        )
+        # Immediate parent operation: which parent units were composed.
+        parent_merge_group_rows.extend(
+            {
+                "sorting_id": sorting_id,
+                "curation_id": curation_id,
+                "unit_id": kept_uid,
+                "parent_unit_id": int(parent_uid),
+            }
+            for parent_uid in sorted(int(u) for u in parent_contributors)
+        )
+    return merge_group_rows, parent_merge_group_rows
