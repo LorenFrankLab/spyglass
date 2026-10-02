@@ -1,6 +1,6 @@
 # Spike Sorting v2 Module Split Implementation Plan
 
-**Status (2026-10-02, local `spikesorting-v2`, unpushed):**
+**Status (2026-10-02): all four modules done on local `spikesorting-v2`, unpushed.**
 - Recording done: `recording.py` 2,564 -> 1,869; new `_recording_fetch.py`,
   `_sort_group_insert.py`; artifact pipeline + rebuild in `_recording_nwb.py`.
   `make_insert`, `_insert_sort_group_rows`, `_write_nwb_artifact` stayed
@@ -19,7 +19,15 @@
   payloads -> `_recipe_catalog`. `make_compute` (~300 lines: staging + the
   fast-path/merged-path analyzer acquisition) and the short diagnostics stay;
   reassess `make_compute` after curation.
-- curation: not started.
+- curation done: `curation.py` 3,044 -> 2,354; new `_curation_insert.py`,
+  `_curation_restriction.py`, `_curation_readers.py`; merge-provenance rows ->
+  `_curation_transforms`. `insert_curation`'s body stays on the class:
+  `test_v1_parity.py::test_curation_v2_nwb_write_outside_transaction` pins
+  the stage-before-commit order in its source, and it is staging/transaction
+  orchestration. Staging, the transaction, `delete`, the creation wrappers and
+  `summarize_curation` stay.
+- Candidates for the post-split reassessment: `CurationEvaluation.make_compute`
+  (analyzer acquisition branches), `CurationV2.summarize_curation`.
 
 **Goal:** Make the four largest v2 table modules readable by moving long method
 bodies and private helpers out of the table classes, with no change to behavior,
