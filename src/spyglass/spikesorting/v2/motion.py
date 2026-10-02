@@ -615,8 +615,8 @@ class MotionEstimateSelection(
         DuplicateSelectionError
             If a match has a non-deterministic ``motion_estimate_id``.
         """
-        from spyglass.spikesorting.v2.exceptions import (
-            DuplicateSelectionError,
+        from spyglass.spikesorting.v2._selection_identity import (
+            existing_selection_pk,
         )
 
         candidates = ((cls * source_part) & master_row & source_key).fetch(
@@ -628,16 +628,18 @@ class MotionEstimateSelection(
             if cls.resolve_artifact_detection({"motion_estimate_id": candidate})
             == artifact_detection_id
         }
-        bypassed = [mid for mid in matching if mid != deterministic_id]
-        if bypassed:
-            raise DuplicateSelectionError(
+        return existing_selection_pk(
+            matching,
+            deterministic_id,
+            pk_field="motion_estimate_id",
+            bypass_message=lambda bypassed: (
                 "MotionEstimateSelection has rows for "
                 f"{source_key} / {master_row['motion_estimation_params_name']} "
                 "whose motion_estimate_id is not the deterministic id "
                 f"{deterministic_id}: {bypassed}. Drop them and re-insert via "
                 "insert_selection."
-            )
-        return {"motion_estimate_id": deterministic_id} if matching else None
+            ),
+        )
 
     @classmethod
     def resolve_artifact_detection(cls, key: dict):
