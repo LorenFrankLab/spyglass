@@ -2872,7 +2872,7 @@ class PoseV2(SpyglassMixin, dj.Computed):
         position_time = timestamps / fps
 
         # --- raw bodypart positions + likelihoods from PoseEstim ---
-        centroids: dict = {}
+        bodypart_centroids: dict = {}
         likelihoods: dict = {}
         estim_restriction = {
             k: entry[k]
@@ -2886,7 +2886,7 @@ class PoseV2(SpyglassMixin, dj.Computed):
                 scorer = pose_df.columns.get_level_values(0)[0]
                 bodyparts = pose_df.columns.get_level_values(1).unique()
                 for bp in bodyparts:
-                    centroids[bp] = pose_df.loc[
+                    bodypart_centroids[bp] = pose_df.loc[
                         :, idx[scorer, bp, ["x", "y"]]
                     ].values
                     likelihoods[bp] = pose_df.loc[
@@ -2908,7 +2908,7 @@ class PoseV2(SpyglassMixin, dj.Computed):
             video_filename=str(video_path),
             position_mean=position_mean,
             orientation_mean=orientation_mean,
-            centroids=centroids,
+            bodypart_centroids=bodypart_centroids,
             position_time=position_time,
             video_frame_inds=video_frame_inds,
             likelihoods=likelihoods or None,
