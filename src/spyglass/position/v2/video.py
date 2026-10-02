@@ -624,7 +624,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
 
         def _record_match(restriction, vp):
             """Narrow VideoFile lookup for path, updating parent variables."""
-            key, cands = VideoFile()._narrow_key_lookup(vp, restriction)
+            key, cands = VideoFile()._get_key_for_video_path(vp, restriction)
             matched[vp] = key
             if not key:
                 ambiguous[vp] = cands
