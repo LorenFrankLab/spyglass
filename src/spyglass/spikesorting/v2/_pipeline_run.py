@@ -1,10 +1,11 @@
-"""End-to-end orchestration runners, extracted from ``pipeline.py``.
+"""End-to-end pipeline runners.
 
-Behavior-preserving: ``_STAGE_STATUSES``, ``_run_stage``, ``run_v2_pipeline``,
-and ``run_v2_pipeline_session`` move here verbatim. ``pipeline.py`` becomes a
-thin facade re-exporting these (and every other public name) so user import
-paths are unchanged. Top of the run -> preflight -> presets dependency DAG;
-also imports the two shared run-summary helpers from ``_pipeline_reporting``.
+Holds ``run_v2_pipeline`` (one sort group or one concat SessionGroup),
+``run_v2_pipeline_session`` (every sort group of a session), the motion
+``estimate_motion`` entry point, the UnitMatch run/plan helpers, and the
+per-stage helpers they share. ``pipeline.py`` re-exports the public names.
+Imports ``_pipeline_preflight``, ``_pipeline_presets``, and the run-summary
+helpers in ``_pipeline_reporting``; none of those import this module.
 """
 
 from __future__ import annotations
@@ -1396,10 +1397,12 @@ def run_v2_pipeline(
     if build_figpack_view:
         _assert_figpack_installed()
 
-    # Activate the table schemas every run stage uses here, after the DB-free
-    # checks and before preflight or any populate, so a module that cannot
-    # import fails the run before any compute. The stage helpers below import
-    # the names they use.
+    # Import the merge, sorting, and curation table modules after the DB-free
+    # checks and before preflight, so a schema that cannot activate fails the
+    # run before any compute. The names are unused here (each stage helper
+    # imports what it uses); the auto-curation (``metric_curation``) and
+    # FigPack (``_figpack_curation``) modules are imported only by their
+    # stages.
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import (
         CONCAT_MERGE_GATE_MESSAGE,
@@ -2519,10 +2522,10 @@ def _run_session_preflight(
         motion_mode=motion_mode,
         motion_correction_params_name=motion_correction_params_name,
     )
-    # Capture each group's non-blocking advisories. OK groups run below with
-    # preflight=False (the DB checks are not repeated), so without this their
-    # preflight warnings would never reach the run summary and the batch
-    # warning count would under-report.
+    # Capture each group's non-blocking advisories. OK groups run in
+    # _run_session_group with preflight=False (the DB checks are not
+    # repeated), so without this their preflight warnings would never reach
+    # the run summary and the batch warning count would under-report.
     for row in session_report.group_reports:
         if row.get("warnings"):
             preflight_warnings_by_group[row["sort_group_id"]] = list(
@@ -2640,9 +2643,9 @@ def _run_session_group(
             # _run_warnings reads too.
             warnings=preflight_warnings_by_group.get(sort_group_id, []),
         )
-    # Fold this group's preflight advisories (captured above) into its
-    # run summary; the per-group run did no preflight, so there is no
-    # overlap with the stage warnings it already carries.
+    # Fold this group's preflight advisories (captured by
+    # _run_session_preflight) into its run summary; the per-group run did no
+    # preflight, so there is no overlap with the stage warnings it carries.
     group_preflight_warnings = preflight_warnings_by_group.get(
         sort_group_id, []
     )

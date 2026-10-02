@@ -1,11 +1,13 @@
-"""Notebook-facing reporting helpers extracted from ``pipeline.py``.
+"""Notebook-facing reporting helpers for the v2 pipeline.
 
-Behavior-preserving extraction: ``describe_parameter_rows``, ``describe_units``
-(+ its ``_observed_duration_s`` helper), and ``describe_run`` (+ its
-``_run_*`` summary helpers) move here verbatim. ``pipeline.py`` re-exports the
-public names so user import paths are unchanged. ``_run_warnings`` /
-``_run_metadata`` are shared with ``run_v2_pipeline_session`` and imported
-back by the run module (keeping the run -> reporting dependency acyclic).
+Holds ``describe_parameter_rows`` (parameter catalog table),
+``verify_v2_default_catalog`` (stored-vs-shipped default audit),
+``describe_units`` (per-unit table for one sort), and ``describe_run``
+(receipt table for a run result) with their row builders. ``pipeline.py``
+re-exports the ``describe_*`` functions and the package ``__init__`` re-exports
+``verify_v2_default_catalog``. ``_pipeline_run`` imports
+``_run_warnings`` / ``_run_metadata`` from here; this module never imports
+``_pipeline_run``.
 """
 
 from __future__ import annotations

@@ -1,11 +1,12 @@
-"""Pre-populate configuration checks, extracted from ``pipeline.py``.
+"""Read-only configuration checks run before any pipeline populate.
 
-Behavior-preserving: the ``Preflight*`` dataclasses, the
-``_SORTER_RUNTIME_BACKENDS`` map, ``preflight_v2_pipeline``,
-``_resolve_session_sort_group_ids``, and ``preflight_v2_pipeline_session``
-move here verbatim. ``pipeline.py`` re-exports the public names so user
-import paths are unchanged. Depends only on ``_pipeline_presets``
-(``_PIPELINE_PRESETS``); the run module depends on this one (run -> preflight).
+Holds ``preflight_v2_pipeline`` / ``preflight_v2_pipeline_session`` and their
+``Preflight*`` report types, the ``assert_*`` guards the runners call when
+preflight is skipped, motion-recipe and geometry checks, and
+``describe_scientific_setup``. ``pipeline.py`` re-exports the public names.
+At import time this module depends only on ``_pipeline_presets``,
+``_pipeline_types``, and ``_recipe_catalog``; table modules are imported
+inside the functions that query them. ``_pipeline_run`` imports this module.
 """
 
 from __future__ import annotations
@@ -172,8 +173,7 @@ def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
     bundle : _PipelinePreset
         The resolved preset whose ``sorter`` is being checked.
     sis : module
-        ``spikeinterface.sorters`` (passed in so the import stays at the one
-        call site).
+        ``spikeinterface.sorters``, imported lazily by each caller.
     non_si_sorters : Container[str]
         ``SorterParameters._NON_SI_SORTERS`` -- never gated on an SI binary.
     check : Callable[[str, Any, str], bool]
@@ -1019,7 +1019,8 @@ def _assert_concat_motion_stage(
     except ValueError as exc:
         raise PreflightError(f"{caller}: {exc}") from exc
     # The concatenation is built with the preset's preprocessing recipe
-    # (checked to exist by assert_preset_compute_rows above).
+    # (checked to exist by assert_preset_compute_rows, which
+    # assert_concat_preflight runs before this function).
     problem = preprocessing_filter_problem(bundle.preprocessing_params_name)
     if problem is not None:
         raise PreflightError(
