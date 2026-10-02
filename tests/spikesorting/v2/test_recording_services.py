@@ -435,7 +435,6 @@ def test_lazy_regular_path_matches_eager_on_nonzero_start_recording():
     from spyglass.spikesorting.v2._recording_restriction import (
         _consolidate_regular_intervals,
         _lazy_timestamp_override,
-        _recording_has_explicit_time_vector,
         _recording_num_frames,
         _recording_start_time,
     )
@@ -448,7 +447,7 @@ def test_lazy_regular_path_matches_eager_on_nonzero_start_recording():
         t_starts=[t_start],
     )
     # A regular recording must route to the lazy path with the true t_start.
-    assert _recording_has_explicit_time_vector(rec) is False
+    assert rec.has_time_vector(segment_index=0) is False
     assert _recording_start_time(rec) == pytest.approx(t_start)
     assert _recording_num_frames(rec) == n_frames
 
@@ -476,30 +475,6 @@ def test_lazy_regular_path_matches_eager_on_nonzero_start_recording():
     # First/last reads are the truncation-guard accessors.
     assert float(lazy_override[0]) == float(eager_override[0])
     assert float(lazy_override[-1]) == float(eager_override[-1])
-
-
-def test_explicit_time_vector_recording_is_not_linearized():
-    """A recording carrying an explicit (irregular) time vector takes the eager
-    path -- the affine lazy reconstruction would silently overwrite irregular
-    wall-clock timestamps with a regular grid.
-    """
-    from spikeinterface.core import NumpyRecording
-
-    from spyglass.spikesorting.v2._recording_restriction import (
-        _recording_has_explicit_time_vector,
-    )
-
-    fs, n_frames, t_start = 2.0, 12, 10.0
-    rec = NumpyRecording(
-        traces_list=[np.zeros((n_frames, 2), dtype="float32")],
-        sampling_frequency=fs,
-    )
-    # A jittered, strictly-increasing vector that is NOT an affine grid.
-    irregular = t_start + np.cumsum(
-        np.full(n_frames, 1.0 / fs) + np.linspace(0.0, 0.05, n_frames)
-    )
-    rec.set_times(irregular, segment_index=0)
-    assert _recording_has_explicit_time_vector(rec) is True
 
 
 def test_filtering_description_lists_only_steps_that_ran():
@@ -948,19 +923,18 @@ def test_restricted_traces_match_reference_on_explicit_clock():
         apply_temporal_preprocessing,
     )
     from spyglass.spikesorting.v2._recording_restriction import (
-        _recording_has_explicit_time_vector,
         restrict_recording_times,
     )
 
     recording = _explicit_clock_recording(20.0)
     validated = _bandpass_params()
-    assert _recording_has_explicit_time_vector(recording) is True
+    assert recording.has_time_vector(segment_index=0) is True
     assert np.all(np.diff(recording.get_times()) > 0)
 
     filtered, _ = apply_temporal_preprocessing(recording, validated)
     # The clock is the parent's, unchanged, so the restriction arithmetic
     # below reads exactly what it would read on the raw recording.
-    assert _recording_has_explicit_time_vector(filtered) is True
+    assert filtered.has_time_vector(segment_index=0) is True
     np.testing.assert_array_equal(filtered.get_times(), recording.get_times())
 
     # The frames chosen on the filtered recording ARE the frames chosen on the

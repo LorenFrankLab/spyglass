@@ -578,26 +578,6 @@ def _base_intervals_from_timestamps(timestamps, fs):
 # timestamps while avoiding get_times() and HDF5 point-indexing overhead.
 
 
-def _recording_has_explicit_time_vector(recording, *, segment_index=0) -> bool:
-    """Return whether ``recording`` carries explicit per-frame timestamps.
-
-    Uses the public ``get_time_info`` predicate (``time_vector`` is not None),
-    which returns the lazy ``time_vector`` attribute without materializing it,
-    so this stays O(1) and never triggers a ``get_times()`` allocation. An
-    extractor lacking ``get_time_info`` is treated as explicit so callers use
-    the exact per-frame path rather than an affine shortcut.
-    """
-    try:
-        return (
-            recording.get_time_info(segment_index=segment_index).get(
-                "time_vector"
-            )
-            is not None
-        )
-    except AttributeError:
-        return True
-
-
 def _segment_times_at(recording, frames, *, segment_index=0):
     """Absolute times (s) for arbitrary ``frames`` without materializing.
 
@@ -787,9 +767,7 @@ def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
     if n_samples == 0:
         return BaseIntervalsAndGaps([], np.empty(0, dtype=np.int64))
 
-    if not _recording_has_explicit_time_vector(
-        recording, segment_index=segment_index
-    ):
+    if not recording.has_time_vector(segment_index=segment_index):
         # Rate-based recording: uniform timestamps, no wall-clock gaps. Map the
         # two endpoints affinely instead of scanning n_samples frames.
         endpoints = _segment_times_at(

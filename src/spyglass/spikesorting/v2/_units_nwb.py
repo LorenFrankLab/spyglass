@@ -612,12 +612,8 @@ def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
     """Map stored sample frames to absolute times without full-vector allocation."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._signal_math import (
-        _recording_has_explicit_time_vector,
-    )
-
     fs = float(recording.get_sampling_frequency())
-    if not _recording_has_explicit_time_vector(recording):
+    if not recording.has_time_vector(segment_index=0):
         t_start = _affine_recording_start_time(recording)
         return {
             int(uid): np.asarray(frames, dtype=np.int64) / fs + t_start

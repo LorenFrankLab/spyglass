@@ -2169,7 +2169,6 @@ def test_compute_artifact_filters_before_restriction(recording_selection_key):
     )
     from spyglass.spikesorting.v2._recording_restriction import (
         _consolidate_regular_intervals,
-        _recording_has_explicit_time_vector,
         _recording_start_time,
         select_sort_group_channels,
     )
@@ -2253,7 +2252,7 @@ def test_compute_artifact_filters_before_restriction(recording_selection_key):
             .times
         )
         segment = source.select_segments([0])
-        assert not _recording_has_explicit_time_vector(segment)
+        assert not segment.has_time_vector(segment_index=0)
         frames = _consolidate_regular_intervals(
             np.asarray(valid_times, dtype=float),
             n_samples=source.get_num_samples(segment_index=0),

@@ -247,23 +247,6 @@ class _LazyConcatenatedTimestamps(_LazyTimestamps):
         return self.parts[part_idx][idx - int(self.offsets[part_idx])]
 
 
-def _recording_has_explicit_time_vector(recording) -> bool:
-    """Return whether the SI recording carries explicit per-frame timestamps.
-
-    Thin delegator to the canonical predicate in ``_signal_math`` (kept as a
-    module-level name here for the in-module caller and the test import); the
-    lazy import preserves this module's DB-free-at-import discipline. The
-    ``get_time_info`` predicate it uses is equivalent to the public
-    ``has_time_vector`` in SpikeInterface 0.104.3 (both reduce to
-    ``get_times_kwargs()["time_vector"] is not None``).
-    """
-    from spyglass.spikesorting.v2._signal_math import (
-        _recording_has_explicit_time_vector as _impl,
-    )
-
-    return _impl(recording)
-
-
 def _recording_start_time(recording) -> float | None:
     """Best-effort public lookup of a regular recording's first timestamp."""
     get_start_time = getattr(recording, "get_start_time", None)
@@ -432,7 +415,7 @@ def restrict_recording_times(recording, valid_times):
                 "Recording timestamps step backward across segments."
             )
         previous_end = bounds[-1][1]
-        regular = not _recording_has_explicit_time_vector(segment)
+        regular = not segment.has_time_vector(segment_index=0)
         if regular:
             frames = _consolidate_regular_intervals(
                 intervals,

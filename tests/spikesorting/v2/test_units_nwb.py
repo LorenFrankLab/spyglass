@@ -535,6 +535,9 @@ class _FakeRecording:
     def get_time_info(self, segment_index=0):
         return {"time_vector": self.time_vector}
 
+    def has_time_vector(self, segment_index=0):
+        return self.time_vector is not None
+
     def get_start_time(self, segment_index=0):
         return float(self.times[0]) if self.times.size else 0.0
 
