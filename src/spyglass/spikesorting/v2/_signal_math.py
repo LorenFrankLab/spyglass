@@ -180,22 +180,11 @@ def _get_recording_timestamps(
             return override
         return np.asarray(override)
 
-    num_segments = recording.get_num_segments()
-    if num_segments <= 1:
-        return recording.get_times()
+    from spyglass.spikesorting._recording_timestamps import (
+        _get_recording_timestamps as _concatenated_segment_times,
+    )
 
-    frames_per_segment = [0] + [
-        recording.get_num_frames(segment_index=i) for i in range(num_segments)
-    ]
-    cumsum_frames = np.cumsum(frames_per_segment)
-    total_frames = int(cumsum_frames[-1])
-
-    timestamps = np.zeros((total_frames,), dtype=np.float64)
-    for i in range(num_segments):
-        start_index = int(cumsum_frames[i])
-        end_index = int(cumsum_frames[i + 1])
-        timestamps[start_index:end_index] = recording.get_times(segment_index=i)
-    return timestamps
+    return _concatenated_segment_times(recording)
 
 
 def merge_sorted_intervals(intervals) -> list[list]:
