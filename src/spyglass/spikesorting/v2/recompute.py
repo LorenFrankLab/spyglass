@@ -1588,10 +1588,11 @@ def _recompute_analyzer_hashes(inputs: AnalyzerRegenInputs, rounding: int):
 
     from spyglass.settings import temp_dir as spyglass_temp_dir
 
-    tmp = tempfile.mkdtemp(
-        prefix="v2_analyzer_recompute_", dir=spyglass_temp_dir
-    )
-    try:
+    with tempfile.TemporaryDirectory(
+        prefix="v2_analyzer_recompute_",
+        dir=spyglass_temp_dir,
+        ignore_cleanup_errors=True,
+    ) as tmp:
         # Rebuild from the SAME sorting + recording with build_analyzer's exact
         # seed/param logic, to a temp folder, so the comparison is a genuine
         # regeneration rather than the stored folder compared to itself. Build
@@ -1620,8 +1621,6 @@ def _recompute_analyzer_hashes(inputs: AnalyzerRegenInputs, rounding: int):
         )
         fresh = load_analyzer_folder(fresh_folder)
         new_hashes = hash_extension_data(fresh, rounding=rounding)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
     return stored_hashes, new_hashes
 
 

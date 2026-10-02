@@ -58,17 +58,17 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
         captured_um["dir"] == configured
     ), "UnitMatch bundle scratch must be created under the configured temp_dir"
 
-    # --- analyzer-recompute scratch (tempfile.mkdtemp) --------------------- #
+    # --- analyzer-recompute scratch (tempfile.TemporaryDirectory) ---------- #
     from spyglass.spikesorting.v2 import _sorting_analyzer as sa
     from spyglass.spikesorting.v2 import _units_nwb
     from spyglass.spikesorting.v2 import recompute as rc
 
     captured_rc = {}
     monkeypatch.setattr(
-        tempfile, "mkdtemp", _capture_dir_then_stop(captured_rc)
+        tempfile, "TemporaryDirectory", _capture_dir_then_stop(captured_rc)
     )
     # Mock the pre-temp work (stored-analyzer load, hash, recording + sorting
-    # reads) so the function reaches the mkdtemp site cheaply.
+    # reads) so the function reaches the temp-dir site cheaply.
     monkeypatch.setattr(
         sa, "load_analyzer_folder_no_rebuild", lambda *a, **k: object()
     )
