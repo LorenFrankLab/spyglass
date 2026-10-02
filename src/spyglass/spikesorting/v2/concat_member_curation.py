@@ -21,9 +21,10 @@ from spyglass.spikesorting.v2._staged_outputs import (
 )
 from spyglass.spikesorting.v2._units_nwb import (
     _write_curated_units_nwb_body,
-    numpysorting_from_abs_times,
     read_series_timestamps,
-    read_units_abs_times_and_sample_indices,
+    read_units_spike_sample_indices,
+    recording_timestamps,
+    sorting_from_units_nwb,
 )
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.recording import Recording
@@ -450,9 +451,7 @@ class ConcatMemberCuration(
         The staged file is registered only by :meth:`make_insert` and removed
         here if staging fails.
         """
-        _concat_times, sample_indices, _concat_obs = (
-            read_units_abs_times_and_sample_indices(curated_abs_path)
-        )
+        sample_indices = read_units_spike_sample_indices(curated_abs_path)
         if sample_indices is None:
             raise ValueError(
                 "ConcatMemberCuration.make: the curated concatenated Units "
@@ -677,20 +676,20 @@ class ConcatMemberCuration(
 
     @classmethod
     def get_sorting(cls, key: dict) -> "si.BaseSorting":
-        """Return this member's curated units in member-local frames."""
+        """Return this member's curated units in member-local frames.
+
+        Reads the ``spike_sample_index`` frames :meth:`make_compute` stored,
+        through the same readback as ``CurationV2.get_sorting``.
+        """
         row = (cls & key).fetch1()
         snapshot = cls._member_snapshot_row(key)
         recording_row = (
             Recording & {"recording_id": snapshot["recording_id"]}
         ).fetch1()
-        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-        abs_times, _sample_indices, _obs = (
-            read_units_abs_times_and_sample_indices(abs_path)
-        )
-        return numpysorting_from_abs_times(
-            abs_times,
-            recording_row,
+        return sorting_from_units_nwb(
+            AnalysisNwbfile.get_abs_path(row["analysis_file_name"]),
             float(recording_row["sampling_frequency"]),
+            lambda: recording_timestamps(recording_row),
         )
 
     @classmethod

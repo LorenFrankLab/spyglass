@@ -27,39 +27,70 @@ from typing import NamedTuple
 SPIKE_SAMPLE_INDEX_COLUMN = "spike_sample_index"
 
 
-def read_units_abs_spike_times(abs_path) -> dict:
-    """Return ``{unit_id(int): abs_spike_times(np.ndarray seconds)}``.
+def read_units_columns(abs_path, columns, *, unit_ids=None) -> tuple:
+    """Open a units NWB once and read the requested per-unit columns.
 
-    Reads the stored absolute spike times directly from the v2 Units table's
-    indexed ``spike_times`` column, so callers get the persisted wall-clock
-    values exactly -- no affine round-trip and no full DataFrame materialization.
-    Returns ``{}`` for an empty/absent Units table.
+    Only the named ragged columns are read, so a caller that needs one column
+    never materializes the others.
 
     Parameters
     ----------
     abs_path : str or pathlib.Path
         Absolute path to the v2 units NWB file.
+    columns : sequence of str
+        Units columns to read, any of ``"spike_times"`` (float seconds),
+        ``SPIKE_SAMPLE_INDEX_COLUMN`` (int64 frames) and ``"obs_intervals"``
+        (float ``(n, 2)`` seconds).
+    unit_ids : iterable of int, optional
+        Read only these units; an id absent from the table is skipped. Default
+        reads every unit.
 
     Returns
     -------
-    dict
-        ``{unit_id (int): absolute spike times (np.ndarray of seconds)}``;
-        ``{}`` for an empty or absent Units table.
+    tuple
+        One ``{unit_id (int): np.ndarray}`` per entry of ``columns``, in order.
+        Every entry is ``{}`` for an empty or absent Units table. An entry is
+        ``None`` when the table lacks that optional column (an older or
+        hand-written file); ``spike_times`` is required, so its absence raises.
     """
     import numpy as np
     import pynwb
 
+    wanted = None if unit_ids is None else {int(u) for u in unit_ids}
     with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
         nwbf = io.read()
         units = nwbf.units
         if units is None or len(units) == 0:
-            return {}
-        unit_ids = np.asarray(units.id[:], dtype=int)
-        spike_times = units["spike_times"]
-        return {
-            int(uid): np.asarray(spike_times[row_ind], dtype=float)
-            for row_ind, uid in enumerate(unit_ids)
-        }
+            return tuple({} for _ in columns)
+        rows = [
+            (row_ind, int(uid))
+            for row_ind, uid in enumerate(np.asarray(units.id[:], dtype=int))
+            if wanted is None or int(uid) in wanted
+        ]
+        out = []
+        for column in columns:
+            if column != "spike_times" and column not in units.colnames:
+                out.append(None)
+                continue
+            data = units[column]
+            dtype = np.int64 if column == SPIKE_SAMPLE_INDEX_COLUMN else float
+            out.append(
+                {
+                    uid: np.asarray(data[row_ind], dtype=dtype)
+                    for row_ind, uid in rows
+                }
+            )
+        return tuple(out)
+
+
+def read_units_abs_spike_times(abs_path) -> dict:
+    """Return ``{unit_id(int): abs_spike_times(np.ndarray seconds)}``.
+
+    The persisted wall-clock ``spike_times`` exactly -- no affine round-trip
+    and no full DataFrame materialization. ``{}`` for an empty/absent Units
+    table (see :func:`read_units_columns`).
+    """
+    return read_units_columns(abs_path, ("spike_times",))[0]
 
 
 def read_units_spike_sample_indices(abs_path) -> dict | None:
@@ -69,38 +100,18 @@ def read_units_spike_sample_indices(abs_path) -> dict | None:
     Spyglass readback can reconstruct ``NumpySorting`` objects without reading
     the upstream recording's full timestamp vector. ``None`` is the compatibility
     signal for older/manual units NWBs that lack the column; callers then fall
-    back to absolute-time mapping.
+    back to absolute-time mapping. ``{}`` for an empty/absent Units table.
     """
-    import numpy as np
-    import pynwb
-
-    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
-        nwbf = io.read()
-        units = nwbf.units
-        if units is None or len(units) == 0:
-            return {}
-        if SPIKE_SAMPLE_INDEX_COLUMN not in units.colnames:
-            return None
-        unit_ids = np.asarray(units.id[:], dtype=int)
-        sample_indices = units[SPIKE_SAMPLE_INDEX_COLUMN]
-        return {
-            int(uid): np.asarray(sample_indices[row_ind], dtype=np.int64)
-            for row_ind, uid in enumerate(unit_ids)
-        }
+    return read_units_columns(abs_path, (SPIKE_SAMPLE_INDEX_COLUMN,))[0]
 
 
 def read_units_abs_times_and_sample_indices(abs_path, *, unit_ids=None):
     """Open the units NWB ONCE; return ``(abs_times, sample_indices, obs)``.
 
-    Combined reader for callers that need these columns (curated-units write +
-    lazy-merge preview), so a single ``NWBHDF5IO`` open replaces several.
-    ``abs_times`` is ``{unit_id: abs_spike_times}`` (``{}`` for an empty/absent
-    Units table); ``sample_indices`` is ``{unit_id: spike_sample_index}``,
-    ``None`` when the ``spike_sample_index`` column is absent (legacy/manual
-    files), or ``{}`` for an empty Units table; ``obs`` is
-    ``{unit_id: obs_intervals}`` (the per-unit ``(n, 2)`` observation window),
-    ``None`` when the ``obs_intervals`` column is absent (legacy files), or
-    ``{}`` for an empty Units table. The curated writer carries ``obs`` forward
+    :func:`read_units_columns` of ``spike_times``, ``spike_sample_index`` and
+    ``obs_intervals``, for callers that need all three (curated-units write +
+    lazy-merge preview). ``obs`` is ``{unit_id: obs_intervals}`` (the per-unit
+    ``(n, 2)`` observation window); the curated writer carries it forward
     so a curated export keeps the correct observation window; without
     it, NWB-only firing-rate / presence-ratio / duration denominators over a
     curated export silently assume the full session.
@@ -115,44 +126,11 @@ def read_units_abs_times_and_sample_indices(abs_path, *, unit_ids=None):
     source unit surfaces as a downstream KeyError, as it would without the
     filter.
     """
-    import numpy as np
-    import pynwb
-
-    wanted = None if unit_ids is None else {int(u) for u in unit_ids}
-    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
-        nwbf = io.read()
-        units = nwbf.units
-        if units is None or len(units) == 0:
-            return {}, {}, {}
-        rows = [
-            (row_ind, int(uid))
-            for row_ind, uid in enumerate(np.asarray(units.id[:], dtype=int))
-            if wanted is None or int(uid) in wanted
-        ]
-        spike_times = units["spike_times"]
-        abs_times = {
-            uid: np.asarray(spike_times[row_ind], dtype=float)
-            for row_ind, uid in rows
-        }
-        if SPIKE_SAMPLE_INDEX_COLUMN in units.colnames:
-            sample_col = units[SPIKE_SAMPLE_INDEX_COLUMN]
-            sample_indices = {
-                uid: np.asarray(sample_col[row_ind], dtype=np.int64)
-                for row_ind, uid in rows
-            }
-        else:
-            sample_indices = None
-        # ``obs_intervals`` is a built-in (optional) NWB Units column; legacy /
-        # hand-written files may omit it -> ``None``.
-        if "obs_intervals" in units.colnames:
-            obs_col = units["obs_intervals"]
-            obs = {
-                uid: np.asarray(obs_col[row_ind], dtype=float)
-                for row_ind, uid in rows
-            }
-        else:
-            obs = None
-        return abs_times, sample_indices, obs
+    return read_units_columns(
+        abs_path,
+        ("spike_times", SPIKE_SAMPLE_INDEX_COLUMN, "obs_intervals"),
+        unit_ids=unit_ids,
+    )
 
 
 def curation_source_unit_ids(kept_unit_to_contributors, apply_merge):
@@ -300,7 +278,8 @@ def sorting_from_units_nwb(abs_path, sampling_frequency, read_timestamps):
     """Read a units NWB back as a ``NumpySorting`` of source-recording frames.
 
     The one units readback behind ``Sorting.get_sorting``,
-    ``CurationV2.get_sorting`` and :func:`read_stored_units`: the stored
+    ``CurationV2.get_sorting``, ``ConcatMemberCuration.get_sorting`` and
+    :func:`read_stored_units`: the stored
     sample frames when the file has them, otherwise the absolute spike times
     mapped onto the source recording's timestamps with
     :func:`numpysorting_from_timestamps`. Performs no DB access itself.
