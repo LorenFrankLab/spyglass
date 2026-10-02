@@ -650,26 +650,41 @@ _SI_METRIC_ERROR = re.compile(
 )
 
 
+def si_quality_metric_output_columns(si_metric: str) -> tuple[str, ...]:
+    """Ordered output columns SpikeInterface fills for one quality metric.
+
+    Read from SI's own metric metadata: the quality metric class's
+    ``metric_columns`` (``core/analyzer_extension_core.py:838``), found by
+    name through ``BaseMetricExtension.get_metric_by_name`` (1052-1070), in
+    SI's order. Spyglass's ``isi_violation`` fraction is derived from SI's
+    ``isi_violation`` metric, so it leads that metric's columns. A name that
+    is not an SI quality metric maps to no columns.
+    """
+    from spikeinterface.metrics.quality import ComputeQualityMetrics
+
+    if si_metric not in ComputeQualityMetrics.get_available_metric_names():
+        return ()
+    metric = ComputeQualityMetrics.get_metric_by_name(si_metric)
+    columns = tuple(metric.metric_columns)
+    if si_metric == "isi_violation":
+        columns = ("isi_violation", *columns)
+    return columns
+
+
 def si_metric_output_columns(si_metric: str) -> frozenset[str]:
     """Output columns SpikeInterface fills for one SI metric name.
 
-    Read from SI's own metric metadata: each quality or template metric
-    class's ``metric_columns`` (``core/analyzer_extension_core.py:838``),
-    found by name through ``BaseMetricExtension.get_metric_by_name``
-    (1052-1070). Spyglass's ``isi_violation`` fraction is derived from SI's
-    ``isi_violation`` metric, so it is included for that metric. An unknown
-    name maps to no columns.
+    The quality metric's columns (:func:`si_quality_metric_output_columns`,
+    which includes Spyglass's ``isi_violation`` fraction) plus the template
+    metric class's ``metric_columns`` when the name is a template metric. An
+    unknown name maps to no columns.
     """
-    from spikeinterface.metrics.quality import ComputeQualityMetrics
     from spikeinterface.metrics.template import ComputeTemplateMetrics
 
-    columns = set()
-    for extension in (ComputeQualityMetrics, ComputeTemplateMetrics):
-        if si_metric in extension.get_available_metric_names():
-            metric = extension.get_metric_by_name(si_metric)
-            columns.update(metric.metric_columns)
-    if si_metric == "isi_violation":
-        columns.add("isi_violation")
+    columns = set(si_quality_metric_output_columns(si_metric))
+    if si_metric in ComputeTemplateMetrics.get_available_metric_names():
+        metric = ComputeTemplateMetrics.get_metric_by_name(si_metric)
+        columns.update(metric.metric_columns)
     return frozenset(columns)
 
 

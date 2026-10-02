@@ -89,28 +89,6 @@ def test_review_profile_property_vocabulary_expands_builtin_outputs():
     )
 
 
-def test_review_profile_property_vocabulary_matches_pinned_si():
-    """The DB-free column vocabulary tracks every pinned SI quality metric."""
-    from spikeinterface.metrics import ComputeQualityMetrics
-
-    for metric in ComputeQualityMetrics.metric_list:
-        actual = profile_display_property_vocabulary(
-            {
-                "metric_names": [metric.metric_name],
-                "template_metric_columns": [],
-            }
-        )
-        expected = tuple(metric.metric_columns)
-        if metric.metric_name == "isi_violation":
-            expected = ("isi_violation", *expected)
-        assert actual[:3] == (
-            "observed_duration_s",
-            "observed_firing_rate_hz",
-            "observed_presence_ratio",
-        )
-        assert actual[3:] == expected, metric.metric_name
-
-
 def test_review_profile_import_mode_reuses_curation_label_policy():
     """Public overlay maps to the existing expert-layer inherit policy."""
     assert review_profile_label_policy("replace") == "replace"

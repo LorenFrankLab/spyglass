@@ -18,38 +18,9 @@ from spyglass.spikesorting.v2._figpack_curation import (
     default_label_options,
     normalize_displayed_unit_properties,
 )
-
-# Pinned SpikeInterface 0.104 quality-metric output columns. Spyglass replaces
-# the public ``isi_violation`` value with its bounded fraction while retaining
-# SI's two diagnostic columns in the computed frame. Keeping the vocabulary
-# here lets a profile validate concrete display columns without importing SI or
-# constructing an analyzer at profile-insert time.
-_QUALITY_METRIC_OUTPUT_COLUMNS = {
-    "num_spikes": ("num_spikes",),
-    "firing_rate": ("firing_rate",),
-    "presence_ratio": ("presence_ratio",),
-    "snr": ("snr",),
-    "isi_violation": (
-        "isi_violation",
-        "isi_violations_ratio",
-        "isi_violations_count",
-    ),
-    "rp_violation": ("rp_contamination", "rp_violations"),
-    "sliding_rp_violation": ("sliding_rp_violation",),
-    "synchrony": ("sync_spike_2", "sync_spike_4", "sync_spike_8"),
-    "firing_range": ("firing_range",),
-    "amplitude_cv": ("amplitude_cv_median", "amplitude_cv_range"),
-    "amplitude_cutoff": ("amplitude_cutoff",),
-    "noise_cutoff": ("noise_cutoff", "noise_ratio"),
-    "amplitude_median": ("amplitude_median",),
-    "drift": ("drift_ptp", "drift_std", "drift_mad"),
-    "sd_ratio": ("sd_ratio",),
-    "mahalanobis": ("isolation_distance", "l_ratio"),
-    "d_prime": ("d_prime",),
-    "nearest_neighbor": ("nn_hit_rate", "nn_miss_rate"),
-    "silhouette": ("silhouette",),
-    "nn_advanced": ("nn_isolation", "nn_noise_overlap"),
-}
+from spyglass.spikesorting.v2._metric_curation import (
+    si_quality_metric_output_columns,
+)
 
 _PROFILE_FIELDS = frozenset(
     {
@@ -75,7 +46,7 @@ def profile_display_property_vocabulary(
     ]
     for metric_name in metric_row["metric_names"]:
         columns.extend(
-            _QUALITY_METRIC_OUTPUT_COLUMNS.get(metric_name, (metric_name,))
+            si_quality_metric_output_columns(metric_name) or (metric_name,)
         )
     columns.extend(metric_row.get("template_metric_columns") or [])
     # Preserve recipe order while protecting against a future overlap between
