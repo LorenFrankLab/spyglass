@@ -6,10 +6,11 @@ or need to observe exactly what the sorter receives. They get there by
 replacing the one step of ``Sorting``'s compute path that calls into the
 sorter, and keep the rest of the real compute/NWB/insert path.
 
-Every test goes through :func:`plant_sorter` and :func:`active_sorter`
-rather than patching ``Sorting`` itself, so the name of the private dispatch
-method appears only in this module and can change without touching each
-test.
+Every test that substitutes the sorter goes through :func:`plant_sorter` and
+:func:`active_sorter` rather than patching ``Sorting`` itself, so the
+substitution names the private dispatch method only in this module.
+``test_sorting_dispatch.py`` calls that method directly, because it tests the
+dispatch itself.
 
 The stand-in is called exactly as the real sorter step is, with every
 argument passed by keyword::
