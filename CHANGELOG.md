@@ -168,10 +168,22 @@ or `log_export` positionally must pass them by keyword.
     `spikesorting-v2-matching` (UnitMatchPy), `spikesorting-v2-curation`
     (FigPack browser review, ipywidgets), and the test-only
     `spikesorting-v2-curation-test` and `spikesorting-v2-validation` #1609
+- The `spikesorting-v2` extra requires `filelock>=3.15`: earlier releases reset
+    a reused singleton lock's counter, so the v2 analyzer cache's nested
+    acquire deadlocks #1609
 - `Nwbfile.get_abs_path` and `AnalysisNwbfile.create` reject a file name that is
     not a bare file name (a path separator, `..`, or an absolute path) #1609
 - Creating an analysis NWB file no longer fails where `conda` is unavailable;
     the environment record says so instead #1609
+- Orphan checks (`delete_orphans`, `AnalysisNwbfile.get_orphans` and
+    `cleanup`, `IntervalList.cleanup`) no longer raise when a child table shares
+    a secondary attribute with the parent, as v2's `ConcatMemberCuration` does;
+    which rows count as orphans is otherwise unchanged. Add
+    `spyglass.utils.dj_helper_fn.get_child_references` #1609
+- `spyglass.utils.nwb_helper_fn.get_raw_eseries_path` accepts `object_id=`; add
+    `raw_eseries_path_and_timestamp_mode` #1609
+- Add `spyglass.utils.nwb_hash.get_namespace_versions`, shared by v1 and v2
+    recompute and file namespace capture #1609
 - Run spike-sorting tests in separate CI jobs: `pytest-legacy` (SpikeInterface
     0.99, v0/v1) and a sharded `pytest-v2` (SpikeInterface 0.104) #1609
 - Prevent errors during update for dandi standard from propagating to other
