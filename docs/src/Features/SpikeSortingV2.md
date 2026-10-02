@@ -86,9 +86,10 @@ through `get_recording`.
 All v2 tables live in dedicated DataJoint schemas (`spikesorting_v2_recording`,
 `spikesorting_v2_artifact`, `spikesorting_v2_artifact_output`,
 `spikesorting_v2_sorting`, `spikesorting_v2_curation`,
-`spikesorting_v2_metric_curation`, `spikesorting_v2_concat_curation`,
-`spikesorting_v2_figpack_curation`, `spikesorting_v2_session_group`,
-`spikesorting_v2_unit_matching`, `spikesorting_v2_recompute`,
+`spikesorting_v2_metric_curation`, `spikesorting_v2_review_profile`,
+`spikesorting_v2_concat_curation`, `spikesorting_v2_figpack_curation`,
+`spikesorting_v2_session_group`, `spikesorting_v2_unit_matching`,
+`spikesorting_v2_unit_annotation`, `spikesorting_v2_recompute`,
 `spikesorting_v2_motion`), so the v0/v1
 schemas are untouched. `CurationV2` and its session-aligned
 `ConcatMemberCuration` outputs register as parts on the existing

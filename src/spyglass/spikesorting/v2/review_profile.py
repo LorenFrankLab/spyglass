@@ -34,7 +34,7 @@ from spyglass.spikesorting.v2.metric_curation import (
 from spyglass.spikesorting.v2.utils import ImmutableParamsLookup
 from spyglass.utils import SpyglassMixin, logger
 
-schema = dj.schema("spikesorting_v2_metric_curation")
+schema = dj.schema("spikesorting_v2_review_profile")
 
 FRANKLAB_REVIEW_PROFILE = "franklab_hippocampus_2026_09_17"
 

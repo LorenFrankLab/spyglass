@@ -148,6 +148,49 @@ def test_documented_upgrade_widens_single_precision_threshold_columns(
                 restored.update1(row)
 
 
+def test_documented_upgrade_moves_review_profiles_to_their_schema(
+    dj_conn, tmp_path
+):
+    """A custom profile an earlier upgrade stored in the metric-curation
+    schema is copied into ``spikesorting_v2_review_profile`` unchanged, and
+    the old table is dropped."""
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.review_profile import CurationReviewProfile
+
+    initialize_v2_defaults()
+    key = {"review_profile_name": "test_migrated_review_profile"}
+    (CurationReviewProfile & key).delete_quick()
+    CurationReviewProfile.insert1(
+        {
+            **key,
+            "metric_params_name": "minimal",
+            "auto_curation_rules_name": "none",
+            "displayed_unit_properties": ["snr", "isi_violation"],
+            "label_options": ["accept", "noise"],
+            "label_import_mode": "overlay",
+        }
+    )
+    row = (CurationReviewProfile & key).fetch1()
+    old = "`spikesorting_v2_metric_curation`.`#curation_review_profile`"
+    new = CurationReviewProfile.full_table_name
+    dj_conn.query(f"CREATE TABLE {old} LIKE {new}")
+    dj_conn.query(
+        f"INSERT INTO {old} SELECT * FROM {new} WHERE review_profile_name=%s",
+        args=(key["review_profile_name"],),
+    )
+    (CurationReviewProfile & key).delete_quick()
+    script, config_file = _build_documented_upgrade_script(tmp_path)
+    try:
+        result = _run_script(script)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (CurationReviewProfile & key).fetch1() == row
+        assert not dj.FreeTable(dj_conn, old).is_declared
+    finally:
+        config_file.unlink(missing_ok=True)
+        dj_conn.query(f"DROP TABLE IF EXISTS {old}")
+        (CurationReviewProfile & key).delete_quick()
+
+
 @pytest.mark.parametrize("interrupted_uuid_add", [False, True])
 def test_documented_upgrade_preserves_retained_data(
     planted_two_unit_sort, tmp_path, interrupted_uuid_add

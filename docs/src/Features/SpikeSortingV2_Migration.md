@@ -227,7 +227,21 @@ if "artifact_detection_id" in _part.heading.names:
 # Declare and seed the net-new immutable review-profile lookup after its two
 # recipe foreign keys have been upgraded/seeded.
 from spyglass.spikesorting.v2 import initialize_v2_defaults
-from spyglass.spikesorting.v2.review_profile import CurationReviewProfile  # noqa F401
+from spyglass.spikesorting.v2.review_profile import CurationReviewProfile
+
+# CurationReviewProfile moved from spikesorting_v2_metric_curation to its own
+# spikesorting_v2_review_profile schema. Copy any profiles an earlier upgrade
+# stored in the old location (same definition, nothing references it), then
+# drop the old table.
+_old_profiles = dj.FreeTable(
+    dj.conn(), "`spikesorting_v2_metric_curation`.`#curation_review_profile`"
+)
+if _old_profiles.is_declared:
+    dj.conn().query(
+        f"INSERT IGNORE INTO {CurationReviewProfile.full_table_name} "
+        f"SELECT * FROM {_old_profiles.full_table_name}"
+    )
+    _old_profiles.drop_quick()
 
 initialize_v2_defaults()
 
