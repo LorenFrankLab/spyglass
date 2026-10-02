@@ -2642,9 +2642,11 @@ The v2 pipeline requires SpikeInterface 0.104+ and (for MountainSort) the
 pip install "spyglass-neuro[spikesorting-v2]"
 ```
 
-The legacy v0/v1 workflows (`Waveforms`, `MetricCuration`, `BurstPair`, v1
-`ArtifactDetection`) still require the SI 0.99 Spyglass environment; calling
-them under SI 0.104 raises a clear `RuntimeError`.
+Producing new v0/v1 output still requires the SI 0.99 Spyglass environment:
+v0/v1 artifact detection, `Waveforms`, `QualityMetrics`, `MetricCuration`,
+`BurstPair`, and clusterless `UnitMarks` / `UnitWaveformFeatures` for v0/v1
+sorts raise a clear `RuntimeError` under SI 0.104. See
+[Two environments, one database](./SpikeSortingV2_Migration.md#two-environments-one-database).
 
 ## Capabilities at a glance
 
