@@ -13,7 +13,13 @@
   test_build_analyzer_{strips_random_seed,compute_args}`,
   `test_analyzer_waveform_params.py::test_make_fetch_resolves_hippocampus_display_blob`,
   order-dependent `test_sorting.py::test_changed_second_fetch_leaves_no_staged_sort_outputs`.
-- metric_curation, curation: not started.
+- metric_curation done: `metric_curation.py` 2,980 -> 1,877; new
+  `_metric_curation_fetch.py`, `_evaluation_acceptance.py`; compute helpers
+  (behind the patched `_compute_metrics`) -> `_metric_curation`, shipped
+  payloads -> `_recipe_catalog`. `make_compute` (~300 lines: staging + the
+  fast-path/merged-path analyzer acquisition) and the short diagnostics stay;
+  reassess `make_compute` after curation.
+- curation: not started.
 
 **Goal:** Make the four largest v2 table modules readable by moving long method
 bodies and private helpers out of the table classes, with no change to behavior,
