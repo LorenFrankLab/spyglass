@@ -941,6 +941,9 @@ def compute_recording_artifact(
         otherwise write into this existing file in place, which is left in
         place (never unlinked) if the write fails. Every current caller --
         populate, rebuild and recompute -- passes ``None``.
+    provenance_tables : optional
+        Source-lineage scratch table(s) to embed in the file (see
+        :func:`recording_provenance_table`), passed to the writer.
 
     Returns
     -------
@@ -953,25 +956,17 @@ def compute_recording_artifact(
 
     Notes
     -----
-    Cleanup contract: ``_write_nwb_artifact`` either writes a
-    full file or raises before any registration. On a
-    write/hash failure a freshly staged partial file is unlinked before
-    the error propagates; an existing file named by
-    ``existing_analysis_file_name`` is never unlinked.
+    Cleanup contract: ``_write_nwb_artifact`` either writes a full file or
+    raises before any registration. On a write/hash failure a freshly
+    staged partial file is unlinked before the error propagates, so a
+    half-written artifact never outlives a failed compute; an existing file
+    named by ``existing_analysis_file_name`` is never unlinked.
 
-    The populate, rebuild and recompute callers all stage a fresh,
-    unregistered file, so the freshly staged file is removed on a write/hash failure and a half-written artifact
-    never outlives a failed compute. The rebuild caller
-    (``_rebuild_nwb_artifact``) additionally fingerprints the staged file
-    and installs it into the canonical slot via ``os.replace`` ONLY on a
-    verified ``content_hash`` match; a rebuild that COMPLETES but whose
-    content drifted is REJECTED by the caller (it raises
-    ``RecordingContentDriftError``), the staged temp is discarded, and the
-    canonical slot is never written -- drifted bytes are never served. The
-    rebuild is reached only from ``get_recording`` when the cache file is
-    already absent, so there is no valid cache to lose, and the DataJoint
-    row (its ``content_hash``) plus the raw NWB always allow the next
-    ``get_recording`` to regenerate it.
+    A rebuild whose content drifted is rejected by the caller
+    (``RecordingContentDriftError``) and the canonical slot is never
+    written. The rebuild runs only when the cache file is already absent,
+    so no valid cache is lost, and the row's ``content_hash`` plus the raw
+    NWB let the next ``get_recording`` try again.
     """
     from spyglass.spikesorting.v2._recording_geometry import (
         assert_unique_contact_positions,
