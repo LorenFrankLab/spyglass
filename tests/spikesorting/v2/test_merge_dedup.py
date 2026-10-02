@@ -6,7 +6,7 @@ refractory period (~1-2 ms) guarantees a single unit never fires twice
 within the ~0.4 ms window, so any sub-0.4 ms pair from DIFFERENT
 contributors is a double-detection artifact (removed), while a close pair
 from the SAME contributor is a genuine event (kept). ``utils.
-_dedup_merged_spike_times`` mirrors SpikeInterface's
+_dedup_merged_spike_times`` delegates to SpikeInterface's
 ``get_non_duplicated_events`` (the dedup v1's lazy ``get_merged_sorting``
 applied via SI's default ``delta_time_ms=0.4``) so v2's stored
 (apply_merge=True) and previewed (get_merged_sorting) merged trains agree
@@ -59,30 +59,3 @@ def test_dedup_empty():
 
     out = _dedup_merged_spike_times([np.array([]), np.array([])], 0.4e-3)
     assert out.size == 0
-
-
-def test_dedup_matches_spikeinterface_get_non_duplicated_events():
-    """Faithful port: same result as SI on a frame-quantized input.
-
-    Build two contributor trains in FRAME space, run SI's
-    ``get_non_duplicated_events`` (frame delta) and our time-space helper
-    (seconds delta) at the same fs, and assert the kept frame sets match.
-    """
-    from spikeinterface.curation.mergeunitssorting import (
-        get_non_duplicated_events,
-    )
-
-    from spyglass.spikesorting.v2.utils import _dedup_merged_spike_times
-
-    fs = 30000.0
-    rm_dup_delta = int(0.4e-3 * fs)  # SI's frame delta (= 12)
-    rng = np.random.default_rng(0)
-    fa = np.sort(rng.integers(0, 3000, size=40)).astype(np.int64)
-    fb = np.sort(rng.integers(0, 3000, size=40)).astype(np.int64)
-    si_frames = get_non_duplicated_events([fa, fb], rm_dup_delta)
-
-    # Time-space (seconds) on the same events; delta matched to the frame
-    # quantization so the boundary agrees.
-    ta, tb = fa / fs, fb / fs
-    ours = _dedup_merged_spike_times([ta, tb], rm_dup_delta / fs)
-    np.testing.assert_allclose(np.sort(ours), np.sort(si_frames / fs))

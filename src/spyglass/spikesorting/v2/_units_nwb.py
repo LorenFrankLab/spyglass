@@ -1147,8 +1147,10 @@ def _write_curated_units_nwb_body(
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._enums import CurationLabel
-    from spyglass.spikesorting.v2._signal_math import _MERGE_DEDUP_DELTA_MS
-    from spyglass.spikesorting.v2.utils import _dedup_merged_spike_times
+    from spyglass.spikesorting.v2._signal_math import (
+        _MERGE_DEDUP_DELTA_MS,
+        _dedup_merged_spike_times,
+    )
 
     analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
 

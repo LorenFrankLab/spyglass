@@ -472,19 +472,12 @@ _MERGE_DEDUP_DELTA_MS = 0.4
 def _dedup_merged_spike_times(times_list, delta_s):
     """Membership-aware duplicate-spike removal for a merged unit.
 
-    Faithful time-space port of SpikeInterface's
-    ``MergeUnitsSorting`` / ``get_non_duplicated_events``: concatenate the
-    contributor spike trains, sort, and drop a spike ONLY when it is
-    within ``delta_s`` seconds of the previous spike AND came from a
-    DIFFERENT contributor -- i.e. a cross-unit double-detection of one
-    physical event. A neuron's refractory period (~1-2 ms) guarantees a
-    single unit never fires twice within the ~0.4 ms window, so a
-    within-unit close pair is a genuine event and is never touched
-    (``diff(membership) == 0`` keeps it). The first spike is always kept.
-
-    Applied on BOTH the lazy preview path and the ``apply_merge=True`` staged
-    path so the previewed and stored merged trains agree and neither retains
-    the double-detection artifacts.
+    Delegates to SpikeInterface's ``get_non_duplicated_events`` (the dedup
+    behind ``MergeUnitsSorting``): concatenate the contributor spike trains,
+    sort, and drop a spike only when it is within ``delta_s`` seconds of the
+    previous spike AND came from a different contributor. A within-unit close
+    pair is kept, and the first spike is always kept. Inputs are cast to
+    float64 seconds, and an empty ``times_list`` returns an empty float array.
 
     Parameters
     ----------
@@ -499,25 +492,14 @@ def _dedup_merged_spike_times(times_list, delta_s):
         Sorted, deduplicated merged spike times (seconds).
     """
     import numpy as np
+    from spikeinterface.curation.mergeunitssorting import (
+        get_non_duplicated_events,
+    )
 
     arrays = [np.asarray(t, dtype=float) for t in times_list]
-    concat = np.concatenate(arrays) if arrays else np.asarray([], dtype=float)
-    if concat.size == 0:
-        return concat
-    order = concat.argsort(kind="mergesort")
-    times_sorted = concat[order]
-    membership = np.concatenate(
-        [np.full(arr.shape, i) for i, arr in enumerate(arrays)]
-    )[order]
-    # Keep a spike iff it is far enough from the previous one OR shares
-    # the previous one's contributor (mirrors SI's
-    # ``(diff(times) > delta) | (diff(membership) == 0)``); always keep
-    # the first.
-    keep = np.nonzero(
-        (np.diff(times_sorted) > delta_s) | (np.diff(membership) == 0)
-    )[0]
-    keep = np.concatenate([[0], keep + 1])
-    return times_sorted[keep]
+    if not arrays:
+        return np.asarray([], dtype=float)
+    return get_non_duplicated_events(arrays, delta_s)
 
 
 def _base_intervals_from_timestamps(timestamps, fs):
