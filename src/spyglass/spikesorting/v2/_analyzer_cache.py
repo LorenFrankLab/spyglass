@@ -675,18 +675,37 @@ def _install_staged_analyzer(canonical_folder, temp_folder):
     """Rename a completed build into place under ``analyzer_cache_lock``."""
     if not temp_folder.exists():
         return  # Zero-unit sorting: no analyzer was built.
-    if not canonical_folder.exists():
-        os.replace(temp_folder, canonical_folder)
+    install_staged_folder(temp_folder, canonical_folder)
+
+
+def install_staged_folder(staged, target) -> None:
+    """Move a staged folder into ``target``, replacing what is there.
+
+    A directory rename cannot replace a non-empty folder, so an existing
+    ``target`` is first moved aside to a hidden ``trash`` sibling
+    (:func:`_publish_sibling`), restored if the install move fails, and
+    removed only once the new folder is in place. If the restore also fails,
+    the trash sibling is left on disk: it is the surviving copy.
+
+    Parameters
+    ----------
+    staged : path-like
+        The completed folder to install; it must exist.
+    target : path-like
+        The durable folder to install into.
+    """
+    target = Path(target)
+    if not target.exists():
+        os.replace(staged, target)
         return
-    trash_folder = _publish_sibling(canonical_folder, "trash")
-    os.replace(canonical_folder, trash_folder)
+    trash = _publish_sibling(target, "trash")
+    os.replace(target, trash)
     try:
-        os.replace(temp_folder, canonical_folder)
+        os.replace(staged, target)
     except BaseException:
-        # Preserve trash if rollback itself fails: it is the surviving copy.
-        os.replace(trash_folder, canonical_folder)
+        os.replace(trash, target)
         raise
-    shutil.rmtree(trash_folder, ignore_errors=True)
+    shutil.rmtree(trash, ignore_errors=True)
 
 
 def cleanup_analyzer_staging(

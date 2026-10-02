@@ -259,7 +259,7 @@ def test_bundle_install_keeps_old_bundle_when_replace_fails(
     """A failed install restores the previous bundle; a good one replaces it."""
     import os
 
-    import spyglass.spikesorting.v2.figpack_curation as figpack_mod
+    from spyglass.spikesorting.v2._analyzer_cache import install_staged_folder
 
     def _folder(name, text):
         folder = tmp_path / name
@@ -279,15 +279,15 @@ def test_bundle_install_keeps_old_bundle_when_replace_fails(
         return real_replace(src, dst)
 
     with monkeypatch.context() as patch:
-        patch.setattr(figpack_mod.os, "replace", _fail_install)
+        patch.setattr(os, "replace", _fail_install)
         with pytest.raises(OSError, match="simulated rename failure"):
-            figpack_mod._install_bundle(str(staged), str(bundle))
+            install_staged_folder(str(staged), str(bundle))
     assert len(calls) == 3  # move aside, failed install, restore
     assert (bundle / "index.html").read_text() == "old"
     assert (staged / "index.html").read_text() == "new"
     assert not list(tmp_path.glob(".figure.trash-*"))
 
-    figpack_mod._install_bundle(str(staged), str(bundle))
+    install_staged_folder(str(staged), str(bundle))
     assert (bundle / "index.html").read_text() == "new"
     assert sorted(path.name for path in tmp_path.iterdir()) == ["figure"]
 

@@ -24,7 +24,6 @@ curation view is actually built.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import tempfile
 import uuid
@@ -34,6 +33,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import datajoint as dj
 
+from spyglass.spikesorting.v2._analyzer_cache import install_staged_folder
 from spyglass.spikesorting.v2._figpack_curation import (
     FIGPACK_INSTALL_HINT,  # noqa: F401 -- re-exported for callers
     FIGURE_CONFIG_FILENAME,
@@ -685,8 +685,8 @@ def _publish_view(
     (``SpyglassConfig.figpack_api_key``) unless ``ephemeral``; it returns
     ``(url, None)``. ``upload=False`` saves the static bundle into a private
     sibling of its durable folder and returns ``(durable folder, staged
-    folder)``; :func:`_install_bundle` moves it into place once the row that
-    records the URI is inserted.
+    folder)``; ``install_staged_folder`` moves it into place once the row
+    that records the URI is inserted.
     """
     if upload:
         from spyglass.settings import sg_config
@@ -731,31 +731,6 @@ def _publish_view(
         shutil.rmtree(staged, ignore_errors=True)
         raise
     return str(bundle), str(staged)
-
-
-def _install_bundle(staged: str, bundle: str) -> None:
-    """Move a staged bundle into its durable folder, replacing a stale one.
-
-    Called only after the row recording ``bundle`` is inserted, so the
-    durable folder never holds a bundle whose populate was refused. A
-    directory rename cannot replace a non-empty folder, so an existing bundle
-    is first moved aside to a hidden sibling, restored if the install fails,
-    and removed only once the new bundle is in place.
-    """
-    bundle_path = Path(bundle)
-    if not bundle_path.exists():
-        os.replace(staged, bundle_path)
-        return
-    trash = bundle_path.parent / (
-        f".{bundle_path.name}.trash-{uuid.uuid4().hex}"
-    )
-    os.replace(bundle_path, trash)
-    try:
-        os.replace(staged, bundle_path)
-    except BaseException:
-        os.replace(trash, bundle_path)
-        raise
-    shutil.rmtree(trash, ignore_errors=True)
 
 
 class FigPackCurationFetched(NamedTuple):
@@ -1164,7 +1139,7 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         staged_bundle = row.pop("staged_bundle")
         self.insert1({**key, **row})
         if staged_bundle is not None:
-            _install_bundle(staged_bundle, row["figpack_uri"])
+            install_staged_folder(staged_bundle, row["figpack_uri"])
 
     @classmethod
     def build_curation_view(
