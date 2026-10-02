@@ -412,7 +412,14 @@ class IngestionMixin(BaseMixin):
 
         planned.extend(self.entries_for_config(ctx))
 
-        return planned
+        # Applied here rather than on the insert path alone: a table whose key
+        # the file never supplied must plan no row at all. A file with no
+        # institution would otherwise plan an Institution entry with no
+        # institution_name, and that `missing_attribute` blocked Session and
+        # the nine tables under it.
+        return PlannedEntries.from_dict(
+            self._adjust_entries(planned.as_dict()) or {}
+        )
 
     # ------------------------- parse contract --------------------------
 
@@ -730,13 +737,7 @@ class IngestionMixin(BaseMixin):
             base_key=base_entry,
         )
         entries = self._parse(ctx).as_dict()
-
-        # Remove tables with no entries - if all entries 'None', skip table
-        # Motivated by nwb with no Institution, results in nulled fk subj ref
-        debug_backup = entries.copy()
-        _ = debug_backup  # Intentionally kept for debugging
-        entries = self._adjust_entries(entries, nwb_file_name=nwb_file_name)
-        if entries is None or len(entries) == 0:
+        if not entries:
             return dict()
 
         # validate that new entries are consistent with existing entries
@@ -840,16 +841,16 @@ class IngestionMixin(BaseMixin):
         return value is None or value == ""
 
     def _adjust_entries(
-        self, entries: IngestionEntries, nwb_file_name: str = None
+        self, entries: IngestionEntries
     ) -> Optional[IngestionEntries]:
-        """Run _adjust_key for each table in planned entries.
+        """Drop rows the file did not supply a key for, and emptied tables.
 
-        Given a Dict[TableObject, List[dict]], with planned entries values,
-        run each table's _adjust_keys_for_entry function on the list of dicts.
-        Removes invalid/null entries and tables with no valid entries.
+        Each table answers for its own rows through `_adjust_keys_for_entry`;
+        a table generated alongside this one is a plain `SpyglassMixin` with no
+        adjustment of its own, hence the fallback.
         """
 
-        null_keys = dict()  # key as emitted -> instanced, for the log line
+        null_keys = dict()  # key as emitted -> instanced
 
         for table, table_entries in entries.items():
             # ensure instanced
@@ -868,8 +869,7 @@ class IngestionMixin(BaseMixin):
             else:
                 entries[table] = adjusted_entries
 
-        for table, tbl in null_keys.items():
-            self._insert_logline(nwb_file_name, 0, tbl)
+        for table in null_keys:
             _ = entries.pop(table)
 
         return entries if len(entries) > 0 else None

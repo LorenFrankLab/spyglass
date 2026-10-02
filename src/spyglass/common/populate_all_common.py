@@ -40,53 +40,9 @@ from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
 from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import Task, TaskEpoch
-from spyglass.common.common_usage import InsertError
 from spyglass.settings import base_dir
-from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import declare_all_merge_tables
 from spyglass.utils.nwb_helper_fn import get_config
-
-
-def log_insert_error(
-    table: str, err: Exception, error_constants: dict = None
-) -> None:
-    """Log a given error to the InsertError table.
-
-    Used by the direct insert path. The planned path records problems in
-    `IngestionPlanLog` instead, with the entries they blocked.
-
-    Parameters
-    ----------
-    table : str
-        The table name where the error occurred.
-    err : Exception
-        The exception that was raised.
-    error_constants : dict, optional
-        Dictionary with keys for dj_user, connection_id, and nwb_file_name.
-        Defaults to checking dj.conn and using "Unknown" for nwb_file_name.
-    """
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log(
-        name="InsertError, written by populate_all_common",
-        alt="IngestionPlanLog, which stages entries alongside their problems",
-    )
-
-    if error_constants is None:
-        error_constants = dict(
-            dj_user=dj.config["database.user"],
-            connection_id=dj.conn().connection_id,
-            nwb_file_name="Unknown",
-        )
-    InsertError.insert1(
-        dict(
-            **error_constants,
-            table=table.__name__,
-            error_type=type(err).__name__,
-            error_message=str(err)[:255],  # limit to 255 chars
-            error_raw=str(err),
-        )
-    )
 
 
 def _plan_only(nwb_file_name: str):
@@ -97,7 +53,7 @@ def _plan_only(nwb_file_name: str):
     fail, and nothing is half-ingested afterwards. The plan is staged so a
     later attempt can see what this one worked out.
 
-    Shared by `dry_run`, which stops here, and `use_plan`, which hands the
+    Shared by `dry_run`, which stops here, and the real run, which hands the
     result to `insert_plan`. One plan pass serves both, so what a dry run
     reports is what a real run will do.
 
@@ -345,203 +301,57 @@ def merged_config(nwb_file_name: str, config: dict = None) -> dict:
     return {**(config or dict()), **file_config}
 
 
-def single_transaction_make(
-    tables: List[dj.Table],
-    nwb_file_name: str,
-    raise_err: bool = False,
-    error_constants: dict = None,
-    config: dict = None,
-):
-    """Ingest each table from the NWB file, inside one transaction.
-
-    Every table here is a SpyglassIngestion table, so each parses the file
-    once via `insert_from_nwbfile` rather than running `make` per key_source
-    key. Failures are logged per table unless `raise_err` is set.
-    """
-    merged = merged_config(nwb_file_name, config)
-
-    with Nwbfile._safe_context():
-        for table in tables:
-            try:
-                table().insert_from_nwbfile(nwb_file_name, config=merged)
-            except Exception as err:
-                if raise_err:
-                    raise err
-                log_insert_error(
-                    table=table, err=err, error_constants=error_constants
-                )
-
-
 def populate_all_common(
     nwb_file_name,
     rollback_on_fail=False,
     raise_err=False,
     dry_run=False,
-    use_plan=False,
     on_divergence="interactive",
     allow_partial=False,
 ) -> Union[List, None]:
     """Insert all common tables for a given NWB file.
+
+    Checks the whole file, reports every problem, then writes what was
+    checked. Nothing is written unless the plan is clean, so a file does not
+    half-ingest before failing, and a re-attempt skips what is already stored.
 
     Parameters
     ----------
     nwb_file_name : str
         The name of the NWB file to populate.
     rollback_on_fail : bool, optional
-        If True, will delete the Session entry if any errors occur.
-        Defaults to False. Deprecated: planning a file reports every problem
-        before anything is written, so there is nothing to undo. A rollback
-        now belongs only to a `planner_miss`, where a validated plan failed
-        halfway — see `insert_plan(rollback_on_miss=True)`, which is what this
-        maps to when `use_plan` is set.
+        Delete the session if a validated plan fails halfway -- a
+        `planner_miss`, the one case a rollback is still for. Default False.
     raise_err : bool, optional
-        If True, will raise any errors that occur during population.
-        Defaults to False. This will prevent any rollback from occurring.
-        With `use_plan`, nothing raises during the pass — every failure becomes
-        a problem on the plan — so this raises at the end if anything blocked.
+        Raise at the end if anything blocked. Default False, returning the
+        plan for the caller to test. Nothing raises mid-pass either way.
     dry_run : bool, optional
-        If True, plan the file and return the report without inserting
-        anything. Every problem is reported at once rather than one per
-        failed table, and no data table is written — see `IngestionPlan`.
+        Plan the file and return the report without inserting anything.
         Default False.
-    use_plan : bool, optional
-        If True, insert from the plan a dry run would have reported: check the
-        whole file first, then write what was checked, skipping what is already
-        stored. Nothing is written unless the plan is clean, so a file no longer
-        half-ingests before failing. Default False, taking the per-table path
-        that stops at each failure and records it in `InsertError`.
     on_divergence : str, optional
-        With `use_plan`, what to do when the file disagrees with a stored row:
-        `interactive` asks once, `accept` keeps the stored value and inserts the
-        rest, `raise` declines. Default `interactive`. Ignored otherwise, where
-        divergence is still resolved mid-transaction per table.
+        What to do when the file disagrees with a stored row: `interactive`
+        asks once, `accept` keeps the stored value and inserts the rest,
+        `raise` declines. Default `interactive`.
     allow_partial : bool, optional
-        With `use_plan`, insert the tables that planned cleanly even though
-        others did not. Default False: a blocking problem inserts nothing, so a
-        half-ingested file is a choice rather than an accident.
+        Insert the tables that planned cleanly even though others did not.
+        Default False: a blocking problem inserts nothing, so a half-ingested
+        file is a choice rather than an accident.
 
     Returns
     -------
-    IngestionPlan or List or None
-        With `dry_run` or `use_plan`, the plan: falsy when nothing blocks it,
-        iterable over its blocking problems, and printable as the report.
-        Otherwise a list of keys for InsertError entries if any errors occurred.
-
-    Notes
-    -----
-    InsertError rows logged by an earlier attempt at the same file, under the
-    same user and connection, are cleared before population starts, so the
-    returned list only ever describes the current attempt. Neither a dry run
-    nor a planned run reads or writes them.
+    IngestionPlan
+        Falsy when nothing blocks it, iterable over its blocking problems,
+        and printable as the report.
     """
-    from spyglass.lfp.lfp_imported import ImportedLFP
-    from spyglass.position.v1.imported_pose import ImportedPose
-    from spyglass.spikesorting.imported import ImportedSpikeSorting
-
     _ = declare_all_merge_tables()
 
     if dry_run:
         return _plan_only(nwb_file_name)
 
-    if use_plan:
-        return _insert_from_plan(
-            nwb_file_name,
-            raise_err=raise_err,
-            on_divergence=on_divergence,
-            allow_partial=allow_partial,
-            rollback_on_miss=rollback_on_fail,
-        )
-
-    error_constants = dict(
-        dj_user=dj.config["database.user"],
-        connection_id=dj.conn().connection_id,
-        nwb_file_name=nwb_file_name,
+    return _insert_from_plan(
+        nwb_file_name,
+        raise_err=raise_err,
+        on_divergence=on_divergence,
+        allow_partial=allow_partial,
+        rollback_on_miss=rollback_on_fail,
     )
-
-    # Drop errors logged by an earlier attempt at this same file, user, and
-    # connection. Without this, the check below reports stale failures and can
-    # roll back an otherwise clean ingestion. See issue #1497. InsertError has
-    # no dependent tables, so delete_quick is safe here.
-    (InsertError & error_constants).delete_quick()
-
-    table_lists: List[List[dj.Table]] = [
-        # Tables that can be inserted in a single transaction
-        [
-            Institution,  # Parent node
-            Lab,  # Parent node
-            LabMember,  # Parent node
-            LabTeam,  # Parent node
-            Subject,  # Parent node
-            CameraDevice,  # Parent node
-            ProbeType,  # Parent node
-            DataAcquisitionDeviceAmplifier,  # Parent node
-            DataAcquisitionDeviceSystem,  # Parent node
-            DataAcquisitionDevice,  # Depends on DataAcq*Amp, DataAcq*Sys
-            OpticalFiberDevice,  # Parent node
-            Virus,  # Parent node
-        ],
-        [
-            Probe,  # Depends on ProbeType, DataAcquisitionDevice
-            Probe.Shank,  # Depends on Probe
-            Probe.Electrode,  # Depends on Probe
-            Session,  # Depends on Subject, Institution, Lab
-            Session.Experimenter,  # Depends on Session
-            Session.DataAcquisitionDevice,  # Depends on Sess, DataAcq*Device
-            ElectrodeGroup,  # Depends on Session
-            Raw,  # Depends on Session
-            SampleCount,  # Depends on Session
-            DIOEvents,  # Depends on Session
-            ImportedSpikeSorting,  # Depends on Session
-            SensorData,  # Depends on Session
-            IntervalList,  # Depends on Session
-            TaskEpoch,  # Depends on Session, Task, CamearaDevice, IntervalList
-            # NwbfileKachery, # Not used by default
-        ],
-        [  # Tables that depend on above transaction
-            Electrode,  # Depends on ElectrodeGroup
-            PositionSource,  # Depends on Session. Also fills RawPosition
-            RawCompassDirection,  # Depends on Session
-            VideoFile,  # Depends on TaskEpoch
-            StateScriptFile,  # Depends on TaskEpoch
-            ImportedPose,  # Depends on Session
-            ImportedLFP,  # Depends on ElectrodeGroup
-            VirusInjection,  # Depends on Session
-            OpticalFiberImplant,  # Depends on Session and OpticalFiberDevice
-            OptogeneticProtocol,  # Depends on Session and TaskEpoch
-        ],
-    ]
-
-    config = lab_config()
-
-    for tables in table_lists:
-        single_transaction_make(
-            tables=tables,
-            nwb_file_name=nwb_file_name,
-            raise_err=raise_err,
-            error_constants=error_constants,
-            config=config,
-        )
-
-    err_query = InsertError & error_constants
-    nwbfile_query = Nwbfile & {"nwb_file_name": nwb_file_name}
-
-    if err_query and nwbfile_query and rollback_on_fail:
-        from spyglass.common.common_usage import ActivityLog
-
-        ActivityLog().deprecate_log(
-            name="rollback_on_fail, the blanket undo after a failed ingest",
-            alt="plan the file first; insert_plan(rollback_on_miss=True) "
-            + "covers the one case a rollback is still for",
-        )
-        logger.error(f"Rolling back population for {nwb_file_name}...")
-        # Should this be safemode=False to prevent confirmation prompt?
-        nwbfile_query.super_delete(warn=False)
-
-    if err_query:
-        err_tables = err_query.fetch("table")
-        logger.error(
-            f"Errors occurred during population for {nwb_file_name}:\n\t"
-            + f"Failed tables {err_tables}\n\t"
-            + "See common_usage.InsertError for more details"
-        )
-        return err_query.fetch("KEY")

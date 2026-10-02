@@ -1,9 +1,12 @@
 """Inserting from a plan instead of table by table.
 
-The payoff of planning: check the whole file, then write what was checked. The
-tests below are mostly about equivalence -- a planned run must land the same
-rows as the per-table run it replaces -- and about the one thing the per-table
-run could not do, which is decline to half-ingest a file.
+The payoff of planning: check the whole file, then write what was checked, and
+decline to write anything when the file cannot be ingested cleanly -- the one
+thing inserting table by table could not do.
+
+Equivalence with the per-table path is not asserted here, because that path no
+longer exists to compare against. It was established while both ran, by the
+golden-run baseline in `.claude/baselines/`.
 """
 
 import pytest
@@ -83,9 +86,7 @@ def test_planned_run_inserts_what_the_plan_reported(
     tables, key = emptied_leaves
     before = counts()
 
-    result = populate_all_common(
-        mini_copy_name, use_plan=True, on_divergence="accept"
-    )
+    result = populate_all_common(mini_copy_name, on_divergence="accept")
 
     assert not result, f"A good file should insert cleanly: {list(result)}"
     for table in tables:
@@ -94,33 +95,6 @@ def test_planned_run_inserts_what_the_plan_reported(
     after = counts()
     for name in ("SampleCount", "DIOEvents"):
         assert after[name] > before[name], f"{name} gained no rows"
-
-
-def test_planned_run_matches_the_per_table_run(
-    common, mini_copy_name, emptied_leaves, counts
-):
-    """Equivalence with the path it replaces, table for table.
-
-    A different set of rows would make this a rewrite rather than a
-    refactor, however much tidier the new path reads.
-    """
-    from spyglass.common.populate_all_common import populate_all_common
-
-    tables, key = emptied_leaves
-
-    populate_all_common(mini_copy_name, use_plan=True, on_divergence="accept")
-    planned = counts()
-
-    # Empty the same tables again and let the legacy path refill them.
-    for table in tables:
-        (table & key).super_delete(warn=False, safemode=False)
-    populate_all_common(mini_copy_name)
-    legacy = counts()
-
-    assert planned == legacy, (
-        "A planned run and a per-table run must leave the same rows; "
-        + f"planned={planned} legacy={legacy}"
-    )
 
 
 def test_planned_run_is_idempotent(common, mini_copy_name, mini_insert, counts):
@@ -133,9 +107,7 @@ def test_planned_run_is_idempotent(common, mini_copy_name, mini_insert, counts):
 
     before = counts()
 
-    result = populate_all_common(
-        mini_copy_name, use_plan=True, on_divergence="accept"
-    )
+    result = populate_all_common(mini_copy_name, on_divergence="accept")
 
     assert counts() == before, "A finished file should gain no rows"
     assert result.verdict == "no_op", f"Expected no_op, got {result.verdict}"
@@ -166,9 +138,7 @@ def test_planned_run_writes_nothing_when_the_plan_blocks(
 
     monkeypatch.setattr(IngestionMixin, "_parse", _parse)
 
-    result = populate_all_common(
-        mini_copy_name, use_plan=True, on_divergence="accept"
-    )
+    result = populate_all_common(mini_copy_name, on_divergence="accept")
 
     assert result, "A file with a broken table must not report success"
     assert counts() == before, (
@@ -207,7 +177,6 @@ def test_raise_err_raises_after_the_whole_file_is_checked(
     with pytest.raises(ValueError) as err:
         populate_all_common(
             mini_copy_name,
-            use_plan=True,
             raise_err=True,
             on_divergence="accept",
         )
@@ -219,17 +188,20 @@ def test_raise_err_raises_after_the_whole_file_is_checked(
         ), f"The report should name {name}; got:\n{message}"
 
 
-def test_the_default_path_is_unchanged(common, mini_copy_name, mini_insert):
-    """D4: planning is opt-in until a later release flips it.
+def test_the_default_path_inserts_from_a_plan(
+    common, mini_copy_name, mini_insert
+):
+    """D4 is flipped: plan-then-insert is what a caller gets by default.
 
-    Without `use_plan`, the return value is still the old one -- None, or a
-    list of InsertError keys -- not a plan.
+    Pinned because the return type is the visible half of the contract --
+    callers testing the result switch from "None means it worked" to "falsy
+    means nothing blocked it".
     """
     from spyglass.common.populate_all_common import populate_all_common
     from spyglass.utils.ingestion_plan import IngestionPlan
 
     result = populate_all_common(mini_copy_name)
 
-    assert not isinstance(
+    assert isinstance(
         result, IngestionPlan
-    ), "The default path must not start returning a plan"
+    ), f"The default path must return a plan, got {type(result)}"

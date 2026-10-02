@@ -148,8 +148,8 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
         """Hold the caller's config, which `get_nwb_objects` also needs.
 
-        The config is resolved by the caller -- `single_transaction_make`
-        merges the file's own `_spyglass_config.yaml` into it. This table does
+        The config is resolved by the caller -- `merged_config` folds the
+        file's own `_spyglass_config.yaml` into it. This table does
         not reload it. Kept on `self` only because `get_nwb_objects` and
         `_camera_name_map` take no config argument.
         """

@@ -181,23 +181,21 @@ def test_dry_run_reports_every_problem_not_just_the_first(
     assert failed == broken, f"Both failures should be reported, got {failed}"
 
 
-def test_a_real_run_is_unchanged_by_the_flag_existing(
-    common, mini_copy_name, mini_insert
-):
-    """D4: the flag is opt-in, so the default path behaves as before.
+def test_a_real_run_still_writes(common, mini_copy_name, mini_insert):
+    """`dry_run=False` is not a quiet dry run.
 
-    `populate_all_common` on an ingested file still returns the old value --
-    None, or a list of InsertError keys -- rather than a plan.
+    Both paths now return an `IngestionPlan`, so the return value alone no
+    longer distinguishes "reported" from "inserted". The distinction is
+    asserted where it lives: the rows are in the database afterwards.
     """
     from spyglass.common.populate_all_common import populate_all_common
-    from spyglass.utils.ingestion_plan import IngestionPlan
 
     result = populate_all_common(mini_copy_name)
 
-    assert not isinstance(
-        result, IngestionPlan
-    ), "The default path must not start returning a plan"
-    assert result is None or isinstance(result, (list, tuple))
+    assert not result, f"The file should ingest cleanly:\n{result}"
+    assert len(
+        common.Session & {"nwb_file_name": mini_copy_name}
+    ), "A real run must leave the session in the database"
 
 
 def test_insert_sessions_dry_run_copies_nothing_and_registers_nothing(
