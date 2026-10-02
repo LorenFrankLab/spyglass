@@ -95,14 +95,9 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
     reference_electrode_id = (
         None if reference_electrode_id is None else int(reference_electrode_id)
     )
-    # Re-validate the reference fields on the READ side. The
-    # mode-vs-id biconditional is enforced in SortGroupV2.insert1/
-    # insert, but a row written through a path that bypasses those
-    # overrides (e.g. raw update1) could carry a stray
-    # reference_electrode_id under a non-"specific" mode -- which the
-    # downstream dispatch silently ignores. Validate here so such a
-    # row fails loudly at populate instead of silently dropping the
-    # operator's intent.
+    # SortGroupV2.insert enforces this, but a bypassing write (e.g. update1)
+    # could leave a reference_electrode_id that a non-"specific" mode would
+    # silently ignore.
     _validate_reference_fields(
         {
             "reference_mode": reference_mode,
@@ -123,17 +118,12 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
             "interval_list_name": "raw data valid times",
         }
     ).fetch1("valid_times")
-    # The exact NWB object the common ``Raw`` row was ingested from. The
-    # compute step resolves the raw ElectricalSeries by this id (not by
-    # scanning acquisition) so a multi-ElectricalSeries / repacked NWB
-    # cannot silently feed a different source than the selection lineage.
+    # Compute reads the raw ElectricalSeries by this id, not by scanning
+    # acquisition, so a multi-series NWB cannot feed a different source.
     raw_object_id = (Raw & {"nwb_file_name": nwb_file_name}).fetch1(
         "raw_object_id"
     )
-    # Pre-fetch + validate the preprocessing params here so the
-    # compute stage does not need to re-read them. The validated
-    # model is DeepHash-stable across the two ``make_fetch``
-    # calls DataJoint makes (Pydantic ``__dict__`` is primitives).
+    # The validated model is DeepHash-stable (its ``__dict__`` is primitives).
     preprocessing_row = (
         PreprocessingParameters
         & {"preprocessing_params_name": sel["preprocessing_params_name"]}
@@ -141,43 +131,23 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
     preprocessing_params = PreprocessingParamsSchema.model_validate(
         preprocessing_row["params"]
     )
-    # Pull the job_kwargs blob so ``make_compute`` can call
-    # ``_resolved_job_kwargs(preprocessing_job_kwargs)`` -- every v2 compute
-    # stage resolves job_kwargs once so the override channels are
-    # honored consistently.
-    # Currently the Recording write path streams via HDMF's
-    # chunked iterator and does not consume SI-style job_kwargs;
-    # the resolver call is kept so the override channels
-    # (``dj.config['custom']['spikesorting_v2_job_kwargs']`` and
-    # the per-row blob) are testable here and so future
-    # consumers can pick up the resolved dict without retrofitting
-    # the fetch.
+    # Resolved in make_compute (see the comment there).
     preprocessing_job_kwargs = preprocessing_row.get("job_kwargs")
-    # Per-channel ``probe_type`` + ``electrode_group_name`` for the
-    # sort group, used by ``make_compute`` to decide whether the
-    # legacy ``tetrode_12.5`` probe-geometry patch applies. Fetched
-    # here so ``make_compute`` stays DB-I/O free per the tri-part
-    # contract.
+    # Decides whether the legacy ``tetrode_12.5`` geometry repair applies.
     probe_types, electrode_group_names = fetch_sort_group_probe_info(
         nwb_file_name, channel_ids
     )
-    # The sort group's interior curated-bad channels to re-include and fill
-    # on the ``interpolate`` path -- empty for ``remove`` (which re-includes
-    # nothing, so the slice is exactly the members). Sorted
-    # tuple so the fetched value is DeepHash-stable like the others.
+    # Interior curated-bad channels the ``interpolate`` path re-includes and
+    # fills; empty for ``remove``.
     bad_channel_ids: tuple = ()
     if preprocessing_params.bad_channel_handling == "interpolate":
         bad_channel_ids = fetch_interior_bad_channel_ids(
             nwb_file_name, channel_ids
         )
-    # Verify the recording's resolved construction inputs still match the
-    # content-addressed recording_input_hash the recording_id was minted
-    # from. A mismatch means the sort group's membership/reference or the
-    # interpolate bad-channel set changed after insert_selection, so building
-    # here would produce content that no longer matches recording_id. Rows
-    # with a NULL hash (an allow_direct_insert bypass, or a row predating the
-    # column) never recorded a fingerprint, so they opt out -- every
-    # insert_selection row carries one.
+    # A changed membership, reference, or bad-channel set since
+    # insert_selection would build content that does not match recording_id.
+    # A NULL hash (an allow_direct_insert bypass, or a row stored before the
+    # column existed) has nothing to compare.
     stored_input_hash = sel.get("recording_input_hash")
     if stored_input_hash is not None:
         live_input_hash = recording_input_hash(
