@@ -126,8 +126,10 @@ optional-dependencies.spikesorting-v2 = [
   # (_analyzer_cache.analyzer_cache_lock) and the recording, concat and motion
   # cache rebuilds.
   # Pure-Python and tiny; declared explicitly rather than relied on transitively
-  # via torch.
-  "filelock",
+  # via torch. >=3.15: first release whose is_singleton lock reuses the live
+  # instance without re-initializing it (analyzer_cache_lock relies on that for
+  # same-thread reentrancy).
+  "filelock>=3.15",
   # MountainSort4 is deliberately NOT a default v2 dependency: the
   # ``mountainsort4`` package installs only the SI wrapper + isosplit5 (so the
   # sorter LOOKS installed), while its actual algorithm backend ``ml_ms4alg``

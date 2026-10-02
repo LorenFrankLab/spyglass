@@ -47,7 +47,6 @@ import hashlib
 import os
 import re
 import shutil
-import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -180,16 +179,6 @@ def analyzer_cache_folder_identity(
         sorting_id=sorting_id,
         waveform_params_name=payload,
     )
-
-
-# Memoize one ``FileLock`` instance per lock-file path so a same-thread nested
-# acquisition (the read path taking the lock while the compute path already
-# holds it) is reentrant rather than a self-deadlock -- see
-# ``analyzer_cache_lock``. The registry persists for the process lifetime (one
-# small entry per sort touched); ``_ANALYZER_LOCK_REGISTRY_GUARD`` serializes
-# the get-or-create so two threads cannot mint two instances for one path.
-_ANALYZER_LOCK_REGISTRY: dict = {}
-_ANALYZER_LOCK_REGISTRY_GUARD = threading.Lock()
 
 
 def analyzer_cache_root() -> Path:
@@ -482,9 +471,10 @@ def analyzer_cache_lock(sorting_id):
     **Reentrant per process.** The read path acquires this lock while the
     compute path already holds it for the same sort (the fast path loads inside
     its own ``with`` block). A fresh ``FileLock`` per call would self-deadlock
-    there, so the instance is memoized per lock-file path: filelock's instance
-    counter makes a same-thread nested acquisition reentrant (instant), while a
-    DIFFERENT thread or a DIFFERENT process still contends on the OS-level lock.
+    there, so the lock is created with ``is_singleton=True``: filelock returns
+    the one live instance per lock-file path, and its instance counter makes a
+    same-thread nested acquisition reentrant (instant), while a DIFFERENT
+    thread or a DIFFERENT process still contends on the OS-level lock.
     ``populate(processes=N)`` (the standard parallel case) uses separate
     processes, so cross-job serialization is preserved.
 
@@ -498,9 +488,9 @@ def analyzer_cache_lock(sorting_id):
     The lock blocks indefinitely by default (the intended serialize-don't-fail
     behavior); it releases when the holding process exits, so a crashed job
     cannot wedge the next one. A per-call timeout is available via
-    ``analyzer_cache_lock(sorting_id).acquire(timeout=...)`` -- the memoized
-    instance has no constructor-level timeout knob because a second caller would
-    silently inherit the first's value.
+    ``analyzer_cache_lock(sorting_id).acquire(timeout=...)`` -- the singleton
+    instance has no constructor-level timeout knob because filelock refuses a
+    second construction with a different value.
 
     Parameters
     ----------
@@ -510,20 +500,16 @@ def analyzer_cache_lock(sorting_id):
     Returns
     -------
     filelock.FileLock
-        A memoized, reentrant lock; use it as a context manager or call
-        ``.acquire()``.
+        The per-path singleton, reentrant lock; use it as a context manager
+        or call ``.acquire()``.
     """
     from filelock import FileLock
 
     root = analyzer_cache_root()
     root.mkdir(parents=True, exist_ok=True)
-    lock_path = str(root / f"{sorting_id}.analyzer.lock")
-    with _ANALYZER_LOCK_REGISTRY_GUARD:
-        lock = _ANALYZER_LOCK_REGISTRY.get(lock_path)
-        if lock is None:
-            lock = FileLock(lock_path)
-            _ANALYZER_LOCK_REGISTRY[lock_path] = lock
-        return lock
+    return FileLock(
+        str(root / f"{sorting_id}.analyzer.lock"), is_singleton=True
+    )
 
 
 def _publish_sibling(canonical_folder, kind: str) -> Path:
