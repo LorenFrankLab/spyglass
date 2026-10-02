@@ -373,34 +373,66 @@ def _insert_recompute_outcome(
             )
 
 
-def _remove_matched_selections(
-    selection, recompute_table, versions_table, restriction, *, dry_run
-) -> int:
-    """Body of both ``*RecomputeSelection.remove_matched`` classmethods.
+class _RecomputeSelectionMixin:
+    """``remove_matched`` for the ``*RecomputeSelection`` tables.
 
-    ``versions_table`` supplies the artifact primary key a matched
-    ``recompute_table`` row is projected onto. Returns the redundant count.
+    Subclasses set ``_versions_table`` (the ``*Versions`` table whose primary
+    key identifies an artifact) and ``_recompute_table_name`` (the name of the
+    ``*Recompute`` table in this module, declared after the selection).
     """
-    matched = recompute_table & "matched=1"
-    artifact_pk = versions_table.primary_key
-    matched_artifacts = (dj.U(*artifact_pk) & matched).fetch(
-        "KEY", as_dict=True
-    )
-    redundant = (selection & restriction & matched_artifacts) - matched.proj()
-    # Materialize the redundant PKs before deleting: ``redundant`` is built
-    # by antijoining the Recompute table, so a cascading delete on it
-    # directly would reference the child table in its own FROM clause
-    # (MySQL error 1093). Restricting by concrete fetched keys avoids that
-    # while still cascading the failed (matched=0) child rows.
-    redundant_keys = redundant.fetch("KEY")
-    count = len(redundant_keys)
-    if dry_run or count == 0:
-        logger.info(
-            f"remove_matched: {count} redundant rows (dry_run={dry_run})."
+
+    _versions_table: type
+    _recompute_table_name: str
+
+    @classmethod
+    def remove_matched(cls, restriction=True, *, dry_run: bool = True) -> int:
+        """Remove redundant selection rows for already-verified artifacts.
+
+        Mirrors v1 ``remove_matched``: drop selections that target an artifact
+        with a matched recompute (in ANY env) but are NOT themselves the
+        matched attempt. A redundant selection MAY carry a dependent recompute
+        row -- a FAILED (matched=0) attempt in one env while the artifact
+        matched in another -- so this uses cautious ``delete`` (not
+        ``delete_quick``), which cascades that failed child rather than hitting
+        the Recompute->Selection FK. Selections whose own recompute matched are
+        kept; they are the verification record. Returns the redundant count.
+        """
+        matched = globals()[cls._recompute_table_name] & "matched=1"
+        artifact_pk = cls._versions_table.primary_key
+        matched_artifacts = (dj.U(*artifact_pk) & matched).fetch(
+            "KEY", as_dict=True
         )
+        redundant = (cls & restriction & matched_artifacts) - matched.proj()
+        # Materialize the redundant PKs before deleting: ``redundant`` is built
+        # by antijoining the Recompute table, so a cascading delete on it
+        # directly would reference the child table in its own FROM clause
+        # (MySQL error 1093). Restricting by concrete fetched keys avoids that
+        # while still cascading the failed (matched=0) child rows.
+        redundant_keys = redundant.fetch("KEY")
+        count = len(redundant_keys)
+        if dry_run or count == 0:
+            logger.info(
+                f"remove_matched: {count} redundant rows (dry_run={dry_run})."
+            )
+            return count
+        (cls & redundant_keys).delete(safemode=False)
         return count
-    (selection & redundant_keys).delete(safemode=False)
-    return count
+
+
+class _RecomputeMixin:
+    """``recheck`` for the ``*Recompute`` tables."""
+
+    def recheck(self, key) -> bool:
+        """Rerun the comparison for one row (after env/file changes).
+
+        Uses cautious ``delete`` (not ``delete_quick``) so the row's
+        ``Name`` / ``Hash`` diff part rows cascade and the team-permission
+        guard applies; ``safemode=False`` skips the prompt for this
+        programmatic recheck. Then re-populates.
+        """
+        (self & key).delete(safemode=False)
+        self.populate(key, reserve_jobs=False)
+        return bool((self & key & "matched=1"))
 
 
 # =====================================================================
@@ -476,8 +508,13 @@ class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
 
 
 @schema
-class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
+class RecordingArtifactRecomputeSelection(
+    _RecomputeSelectionMixin, SpyglassMixin, dj.Manual
+):
     """Plan a recording recompute attempt under a labeled environment."""
+
+    _versions_table = RecordingArtifactVersions
+    _recompute_table_name = "RecordingArtifactRecompute"
 
     definition = """
     -> RecordingArtifactVersions
@@ -628,30 +665,9 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
 
         return False, None
 
-    @classmethod
-    def remove_matched(cls, restriction=True, *, dry_run: bool = True) -> int:
-        """Remove redundant selection rows for already-verified artifacts.
-
-        Mirrors v1 ``remove_matched``: drop selections that target a recording
-        with a matched recompute (in ANY env) but are NOT themselves the
-        matched attempt. A redundant selection MAY carry a dependent recompute
-        row -- a FAILED (matched=0) attempt in one env while the artifact
-        matched in another -- so this uses cautious ``delete`` (not
-        ``delete_quick``), which cascades that failed child rather than hitting
-        the Recompute->Selection FK. Selections whose own recompute matched are
-        kept; they are the verification record.
-        """
-        return _remove_matched_selections(
-            cls,
-            RecordingArtifactRecompute,
-            RecordingArtifactVersions,
-            restriction,
-            dry_run=dry_run,
-        )
-
 
 @schema
-class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
+class RecordingArtifactRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
     """Regenerate a recording artifact and compare trace content hashes."""
 
     definition = """
@@ -804,18 +820,6 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
     def get_disk_space(self, restriction=True) -> str:
         """Report reclaimable disk for matched, not-yet-deleted artifacts."""
         return _reclaimable_disk(self.with_names & restriction)
-
-    def recheck(self, key) -> bool:
-        """Rerun the comparison for one row (after env/file changes).
-
-        Uses cautious ``delete`` (not ``delete_quick``) so the row's
-        ``Name`` / ``Hash`` diff part rows cascade and the team-permission
-        guard applies; ``safemode=False`` skips the prompt for this
-        programmatic recheck. Then re-populates.
-        """
-        (self & key).delete(safemode=False)
-        self.populate(key, reserve_jobs=False)
-        return bool((self & key & "matched=1"))
 
     def update_secondary(self, restriction=True) -> None:
         """Backfill ``created_at`` from the artifact file mtime."""
@@ -1161,8 +1165,13 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
 
 
 @schema
-class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
+class SortingAnalyzerRecomputeSelection(
+    _RecomputeSelectionMixin, SpyglassMixin, dj.Manual
+):
     """Plan an analyzer recompute attempt under a labeled environment."""
+
+    _versions_table = SortingAnalyzerVersions
+    _recompute_table_name = "SortingAnalyzerRecompute"
 
     definition = """
     -> SortingAnalyzerVersions
@@ -1196,24 +1205,9 @@ class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
         ]
         cls.insert(rows, skip_duplicates=True)
 
-    @classmethod
-    def remove_matched(cls, restriction=True, *, dry_run: bool = True) -> int:
-        """Remove redundant selection rows for already-verified analyzers.
-
-        Same rule as
-        :meth:`RecordingArtifactRecomputeSelection.remove_matched`, per sort.
-        """
-        return _remove_matched_selections(
-            cls,
-            SortingAnalyzerRecompute,
-            SortingAnalyzerVersions,
-            restriction,
-            dry_run=dry_run,
-        )
-
 
 @schema
-class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
+class SortingAnalyzerRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
     """Regenerate an analyzer folder and compare extension content hashes.
 
     Legacy inventories without deterministic ``noise_levels`` provenance are
@@ -1346,9 +1340,6 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
                     f.stat().st_size for f in folder.rglob("*") if f.is_file()
                 )
         return f"Total: {bytes_to_human_readable(total)}"
-
-    # Same delete-then-repopulate rerun as the recording recompute.
-    recheck = RecordingArtifactRecompute.recheck
 
     def update_secondary(self, restriction=True) -> None:
         """Backfill ``created_at`` (analyzer folders use populate time)."""
