@@ -328,10 +328,10 @@ def recording_input_hash(
     change under a fixed ``sort_group_id`` / ``preprocessing_params_name``:
 
     * the sort group's electrode MEMBERSHIP (``SortGroupV2.SortGroupElectrode``
-      is mutable after downstream recordings exist -- the OP-4 hole);
+      is mutable after downstream recordings exist);
     * the reference (``reference_mode`` / ``reference_electrode_id``);
     * on the ``interpolate`` bad-channel path, the resolved interior bad-channel
-      set (the live ``Electrode.bad_channel='True'`` set -- the OP-3 hole).
+      set (the live ``Electrode.bad_channel='True'`` set).
 
     This digest folds those resolved inputs into the ``recording_id`` so a
     changed input mints a NEW recording, and it is snapshotted onto

@@ -373,6 +373,8 @@ def test_no_phase_label_leakage_in_runtime_code():
         a single uppercase letter from the review namespaces followed by a
         number; an earlier version only caught ``Phase/Task N`` and let
         these slip through.
+      - hyphenated codes (``OP-3``): two or more uppercase letters, a hyphen,
+        and a number.
     The scan covers the v2 runtime source, the user-facing v2 guides, tutorial
     scripts, and the CHANGELOG (phase/task only there -- the audit-code regex
     would false-positive on unrelated historical release entries). Tests,
@@ -391,6 +393,16 @@ def test_no_phase_label_leakage_in_runtime_code():
     user_docs = (
         repo_root / "docs" / "src" / "Features" / "SpikeSortingV2.md",
         repo_root / "docs" / "src" / "Features" / "SpikeSortingV2_Migration.md",
+        repo_root
+        / "docs"
+        / "src"
+        / "Features"
+        / "SpikeSortingV2_Quickstart.md",
+        repo_root
+        / "docs"
+        / "src"
+        / "Features"
+        / "SpikeSortingV2StorageManagement.md",
     )
     notebook_scripts = tuple(
         sorted(
@@ -415,6 +427,7 @@ def test_no_phase_label_leakage_in_runtime_code():
     # version tokens (``V1``). If a legitimate token ever trips this,
     # reword it -- a review code in shipped code/docs is the thing we forbid.
     audit_re = re.compile(r"\b[ABCDNQRT]\d{1,2}\b")
+    hyphen_re = re.compile(r"\b[A-Z]{2,}-\d{1,2}\b")
     offenders: list[str] = []
 
     def _scan(path, label, patterns):
@@ -429,15 +442,19 @@ def test_no_phase_label_leakage_in_runtime_code():
         _scan(
             py_path,
             str(py_path.relative_to(repo_root)),
-            (phase_re, audit_re),
+            (phase_re, audit_re, hyphen_re),
         )
     for doc in user_docs:
-        _scan(doc, str(doc.relative_to(repo_root)), (phase_re, audit_re))
+        _scan(
+            doc,
+            str(doc.relative_to(repo_root)),
+            (phase_re, audit_re, hyphen_re),
+        )
     for notebook_script in notebook_scripts:
         _scan(
             notebook_script,
             str(notebook_script.relative_to(repo_root)),
-            (phase_re, audit_re),
+            (phase_re, audit_re, hyphen_re),
         )
     _scan(changelog, "CHANGELOG.md", (phase_re,))
 
