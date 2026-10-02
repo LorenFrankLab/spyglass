@@ -48,7 +48,7 @@ MissingMetricPolicy = Literal["error", "fail", "pass"]
 
 # Auto-merge presets. The first five are SpikeInterface 0.104.3's
 # ``compute_merge_unit_groups`` presets (verified against the installed
-# source -- see tests/spikesorting/v2/resolver/si0104-quality-metrics.md);
+# source);
 # ``"none"`` is the Spyglass-level "skip auto-merge" sentinel, not an SI
 # preset.
 AutoMergePreset = Literal[

@@ -322,16 +322,6 @@ def test_single_low_level_analyzer_builder():
     assert "get_curation_analyzer" not in evaluation_source
 
 
-def test_si_merge_parity_spike_recorded():
-    evidence = (
-        Path(__file__).parent / "resolver" / "si0104-merge-units-parity.md"
-    ).read_text()
-    assert "Decision: retain" in evidence
-    assert "[500, 1499, 1500, 2000]" in evidence
-    assert "[500, 1499, 2000]" in evidence
-    assert "firing rate | 40 Hz | 30 Hz" in evidence
-
-
 @pytest.mark.slow
 def test_concurrent_resolve_builds_once(tmp_path):
     """Two processes serialize; the second sees the complete first publish."""

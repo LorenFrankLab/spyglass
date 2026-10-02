@@ -564,6 +564,11 @@ def build_merged_analyzer(
     recording, _raw_sorting = reconstruct_recording_and_sorting(
         Sorting(), {"sorting_id": row["sorting_id"]}
     )
+    # Rebuild from the committed curation's own merged sorting rather than
+    # SortingAnalyzer.merge_units(censor_ms=...): SI censors duplicates in
+    # sample space, so on a recording with acquisition gaps it drops a real
+    # spike that is adjacent in frames but seconds apart in time (shown on a
+    # gapped fixture: merged spike count 4 -> 3, firing rate 40 -> 30 Hz).
     curated_sorting = CurationV2.get_merged_sorting(key)
     sorter_row = (
         SorterParameters
