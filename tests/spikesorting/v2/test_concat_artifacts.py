@@ -3,6 +3,8 @@
 import numpy as np
 import pytest
 
+from tests.spikesorting.v2._sorter_stub import plant_sorter
+
 
 def test_mask_members_preserves_disjoint_times_and_exact_boundaries():
     from spikeinterface.core import NumpyRecording
@@ -463,7 +465,7 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
             "sorter_params_name": "artifact_concat_test",
         }
     )
-    monkeypatch.setattr(Sorting, "_run_sorter", staticmethod(sort_masked))
+    plant_sorter(monkeypatch, sort_masked)
     Sorting.populate(sorting_key, reserve_jobs=False)
     # The sort reads the concat cache itself, whose member masks are already
     # written in, so no mask is applied again at load.
@@ -637,7 +639,7 @@ def test_member_artifact_failure_retry_and_reuse(
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import SessionGroup
-    from spyglass.spikesorting.v2.sorting import SorterParameters, Sorting
+    from spyglass.spikesorting.v2.sorting import SorterParameters
     from tests.spikesorting.v2._smoke_constants import SMOKE_CLUSTERLESS_PARAMS
 
     fixture = chronic_2_session_minirec
@@ -699,14 +701,11 @@ def test_member_artifact_failure_retry_and_reuse(
         "populate",
         staticmethod(interrupt_second_member),
     )
-    monkeypatch.setattr(
-        Sorting,
-        "_run_sorter",
-        staticmethod(
-            lambda sorter, sorter_params, recording, sorting_id, **kwargs: NumpySorting.from_unit_dict(
-                {0: np.array([100, 1000, 10000])},
-                recording.get_sampling_frequency(),
-            )
+    plant_sorter(
+        monkeypatch,
+        lambda sorter, sorter_params, recording, sorting_id, **kwargs: NumpySorting.from_unit_dict(
+            {0: np.array([100, 1000, 10000])},
+            recording.get_sampling_frequency(),
         ),
     )
     request = {

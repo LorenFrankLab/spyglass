@@ -3,6 +3,8 @@
 import numpy as np
 import pytest
 
+from tests.spikesorting.v2._sorter_stub import plant_sorter
+
 
 @pytest.mark.parametrize("disjoint", [False, True])
 def test_manual_exclusions_mask_exact_samples_and_keep_detected_artifacts(
@@ -124,7 +126,7 @@ def test_pipeline_runner_applies_manual_exclusions(
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import SessionGroup
-    from spyglass.spikesorting.v2.sorting import SorterParameters, Sorting
+    from spyglass.spikesorting.v2.sorting import SorterParameters
 
     fixture = chronic_2_session_minirec
     name = f"manual_runner_{concat}_{automatic}"
@@ -188,7 +190,7 @@ def test_pipeline_runner_applies_manual_exclusions(
             {0: np.array([100, 1000, 10000])}, recording.sampling_frequency
         )
 
-    monkeypatch.setattr(Sorting, "_run_sorter", staticmethod(sort))
+    plant_sorter(monkeypatch, sort)
     if concat:
         SessionGroup.create_group(
             fixture["owner"], name, fixture["same_day_members"]

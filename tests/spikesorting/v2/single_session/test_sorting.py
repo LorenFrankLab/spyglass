@@ -6,6 +6,7 @@ import pytest
 
 from spyglass.spikesorting.v2._recipe_catalog import CORTEX_DISPLAY_WAVEFORMS
 from tests.spikesorting.v2._ingest_helpers import _clean_session_v2
+from tests.spikesorting.v2._sorter_stub import plant_sorter
 from tests.spikesorting.v2.single_session._helpers import _build_synthetic_rec
 
 # These sorts use the 'default' preprocessing recipe, which is not in the
@@ -816,7 +817,7 @@ def test_changed_second_fetch_leaves_no_staged_sort_outputs(
             sampling_frequency=recording.get_sampling_frequency(),
         )
 
-    monkeypatch.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+    plant_sorter(monkeypatch, _plant)
     created = record_created_analysis_files(monkeypatch)
     change_second_fetch(monkeypatch, Sorting)
     try:

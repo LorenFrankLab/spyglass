@@ -33,6 +33,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 
 from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+from tests.spikesorting.v2._sorter_stub import plant_sorter
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _NOTEBOOKS = _REPO_ROOT / "notebooks"
@@ -232,8 +233,6 @@ def test_presets_notebook_runs(dj_conn, subset, monkeypatch):
         import numpy as np
         from spikeinterface.core import NumpySorting
 
-        from spyglass.spikesorting.v2.sorting import Sorting
-
         def plant_units(sorter, sorter_params, recording, sorting_id, **kwargs):
             frames = np.arange(1000, recording.get_num_samples() - 1000, 1000)
             return NumpySorting.from_unit_dict(
@@ -241,7 +240,7 @@ def test_presets_notebook_runs(dj_conn, subset, monkeypatch):
                 recording.get_sampling_frequency(),
             )
 
-        monkeypatch.setattr(Sorting, "_run_sorter", staticmethod(plant_units))
+        plant_sorter(monkeypatch, plant_units)
     parameters = _notebook_params(nwb_file_name, sort_group_id)
     parameters.pop("sort_group_id")  # a whole-session run needs no single ID
     parameters.update(

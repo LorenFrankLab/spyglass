@@ -18,6 +18,7 @@ import pytest
 
 from spyglass.spikesorting.v2._recipe_catalog import CORTEX_DISPLAY_WAVEFORMS
 from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+from tests.spikesorting.v2._sorter_stub import plant_sorter
 
 _FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_smoke.nwb"
@@ -115,7 +116,7 @@ def planted_sort(dj_conn):
 
     mp = pytest.MonkeyPatch()
     try:
-        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+        plant_sorter(mp, _plant)
         Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
         mp.undo()

@@ -33,6 +33,7 @@ from tests.spikesorting.v2._motion_db_helpers import (
     drop_motion_selections,
     session_start_s,
 )
+from tests.spikesorting.v2._sorter_stub import plant_sorter
 
 # These files are scripts and helper modules, not pytest test modules; the
 # leading ``test_`` is part of the component name (the standalone test
@@ -474,8 +475,7 @@ def planted_two_unit_sort(dj_conn):
     tests across modules -- preview-merge warnings and the merged-parent guard
     -- resolve the SAME populated sort without a fragile
     cross-module import. The smoke sort yields only one MEArec unit, so this
-    monkeypatches ``Sorting._run_sorter`` to plant two units on the real
-    recording. Tests clear curations around themselves for isolation.
+    plants two units on the real recording with ``plant_sorter``. Tests clear curations around themselves for isolation.
     """
     from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
@@ -566,7 +566,7 @@ def planted_two_unit_sort(dj_conn):
 
     mp = pytest.MonkeyPatch()
     try:
-        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+        plant_sorter(mp, _plant)
         Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
         mp.undo()
@@ -589,8 +589,8 @@ def planted_three_unit_sort(dj_conn):
     of them and still expose a second unit to merge/label in the child.
 
     Modeled on ``planted_two_unit_sort`` (the smoke sort yields one MEArec
-    unit, so ``Sorting._run_sorter`` is monkeypatched to plant the three
-    units on the real recording). The three units' spikes are spaced ~200
+    unit, so ``plant_sorter`` plants the three units on the real
+    recording). The three units' spikes are spaced ~200
     frames apart so no cross-unit coincidence is removed by the 0.4 ms merge
     dedup -- a manual merge of any two then conserves spikes exactly, keeping
     the conservation assertions clean. Tests clear curations around themselves
@@ -698,7 +698,7 @@ def planted_three_unit_sort(dj_conn):
 
     mp = pytest.MonkeyPatch()
     try:
-        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+        plant_sorter(mp, _plant)
         Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
         mp.undo()
@@ -893,7 +893,7 @@ def daily_concat_match_inputs(chronic_2_session_minirec):
     (``DAILY_CONCAT_INTERVALS``) and concatenated into one daily
     concatenation per day; a third, multi-day concatenation joins ``b``'s
     and ``c``'s first intervals. Every sort is planted (one unit every
-    5000 frames, ``Sorting._run_sorter`` monkeypatched; its unit id is
+    5000 frames, via ``plant_sorter``; its unit id is
     ``DAILY_CONCAT_UNIT_IDS`` or 0) and root-curated:
     single-recording sorts of ``a``, ``b`` and ``a``'s first interval, and
     one sort of each concatenation.
@@ -1032,14 +1032,11 @@ def daily_concat_match_inputs(chronic_2_session_minirec):
     patch = pytest.MonkeyPatch()
     try:
         for name, source in sources.items():
-            patch.setattr(
-                Sorting,
-                "_run_sorter",
-                staticmethod(
-                    functools.partial(
-                        _plant_spread_unit,
-                        unit_id=DAILY_CONCAT_UNIT_IDS.get(name, 0),
-                    )
+            plant_sorter(
+                patch,
+                functools.partial(
+                    _plant_spread_unit,
+                    unit_id=DAILY_CONCAT_UNIT_IDS.get(name, 0),
                 ),
             )
             sort_key = SortingSelection.insert_selection({**source, **sorter})

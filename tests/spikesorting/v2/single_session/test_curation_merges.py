@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from tests.spikesorting.v2._ingest_helpers import _clean_session_v2
+from tests.spikesorting.v2._sorter_stub import plant_sorter
 from tests.spikesorting.v2.single_session._helpers import _clear_curations
 
 
@@ -365,9 +366,7 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
             sampling_frequency=recording.get_sampling_frequency(),
         )
 
-    monkeypatch.setattr(
-        Sorting, "_run_sorter", staticmethod(_planted_two_unit_sorter)
-    )
+    plant_sorter(monkeypatch, _planted_two_unit_sorter)
 
     def _build_sort(interval_name, valid_times):
         IntervalList.insert1(
@@ -805,9 +804,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
             sampling_frequency=recording.get_sampling_frequency(),
         )
 
-    monkeypatch.setattr(
-        Sorting, "_run_sorter", staticmethod(_planted_four_unit_sorter)
-    )
+    plant_sorter(monkeypatch, _planted_four_unit_sorter)
 
     raw_times = (
         IntervalList
@@ -987,9 +984,7 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
             [samples], [labels], recording.get_sampling_frequency()
         )
 
-    monkeypatch.setattr(
-        Sorting, "_run_sorter", staticmethod(_planted_two_unit_sorter)
-    )
+    plant_sorter(monkeypatch, _planted_two_unit_sorter)
 
     rec_pk = RecordingSelection.insert_selection(
         {

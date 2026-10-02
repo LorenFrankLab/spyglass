@@ -14,7 +14,7 @@ These tests populate TWO genuinely distinguishable v2 merge_ids and assert
 each accessor returns the data for the *requested* merge_id and not the
 other. The two sorts are built on two different sort groups (different
 electrode sets) and given deterministic, disjoint planted unit sets via a
-monkeypatched ``Sorting._run_sorter`` (the same plant pattern as
+planted sorter (``plant_sorter``, the same plant pattern as
 ``test_boundary_spike_round_trip_does_not_raise``), so:
 
 * electrode-keyed accessors (``get_recording``, ``get_sort_group_info``)
@@ -42,6 +42,7 @@ import numpy as np
 import pytest
 
 from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+from tests.spikesorting.v2._sorter_stub import plant_sorter
 
 _FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_smoke.nwb"
@@ -64,10 +65,10 @@ _B_UNIT_FRAMES = {
 
 
 def _make_plant(unit_frames: dict[int, list[int]]):
-    """Build a ``_run_sorter`` replacement that returns a fixed NumpySorting.
+    """Build a ``plant_sorter`` stand-in that returns a fixed NumpySorting.
 
-    ``_run_sorter`` is a staticmethod dispatched from ``Sorting.make_compute``
-    for every sorter (clusterless and SI alike), so patching it plants a
+    The stand-in replaces the sorter step of ``Sorting.make_compute``
+    for every sorter (clusterless and SI alike), so it plants a
     deterministic unit set independent of the real sorter and of the smoke
     fixture's stochastic unit yield.
     """
@@ -150,7 +151,7 @@ def _build_sort_on_group(sort_group_id, plant, nwb_file_name):
     (Sorting & sort_pk).super_delete(warn=False)
     mp = pytest.MonkeyPatch()
     try:
-        mp.setattr(Sorting, "_run_sorter", staticmethod(plant))
+        plant_sorter(mp, plant)
         Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
         mp.undo()

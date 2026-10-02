@@ -23,6 +23,7 @@ import numpy as np
 import pytest
 
 from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+from tests.spikesorting.v2._sorter_stub import plant_sorter
 
 _FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_smoke.nwb"
@@ -261,9 +262,7 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
             sampling_frequency=recording.get_sampling_frequency(),
         )
 
-    monkeypatch.setattr(
-        Sorting, "_run_sorter", staticmethod(_capture_run_sorter)
-    )
+    plant_sorter(monkeypatch, _capture_run_sorter)
 
     def _synthetic_sort_input(abs_path, traces, **kwargs):
         # Sorting reads the single recording unmasked and applies the
@@ -279,7 +278,7 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
     Sorting.populate(sort_pk, reserve_jobs=False)
 
     # ---- Assertion (b): the detected window is zeroed in the sorter input --
-    assert "recording" in captured, "Sorting did not invoke _run_sorter"
+    assert "recording" in captured, "Sorting did not invoke the sorter"
     masked = captured["recording"]
     art_traces = masked.get_traces(start_frame=_ART_LO, end_frame=_ART_HI)
     bg_traces = masked.get_traces(
