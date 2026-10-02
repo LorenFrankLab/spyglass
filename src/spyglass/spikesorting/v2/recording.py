@@ -977,12 +977,16 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         Used by ``insert_selection`` for both the pre-insert lookup and
         the post-duplicate-key refetch.
         """
-        from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
+        from spyglass.spikesorting.v2._selection_identity import (
+            existing_selection_pk,
+        )
 
         existing = list((cls & keys_minus_uuid).fetch("recording_id"))
-        bypassed = [rid for rid in existing if rid != deterministic_id]
-        if bypassed:
-            raise DuplicateSelectionError(
+        return existing_selection_pk(
+            existing,
+            deterministic_id,
+            pk_field="recording_id",
+            bypass_message=lambda bypassed: (
                 f"RecordingSelection has {len(existing)} duplicate "
                 f"selection row(s) for logical identity {keys_minus_uuid} "
                 f"whose recording_id is not the deterministic id "
@@ -990,8 +994,8 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 "non-deterministic selection row (a raw insert or a "
                 "legacy non-content-addressed row); drop it and re-insert "
                 "via insert_selection."
-            )
-        return {"recording_id": deterministic_id} if existing else None
+            ),
+        )
 
 
 _ELECTRICAL_SERIES_NAME = "ProcessedElectricalSeries"

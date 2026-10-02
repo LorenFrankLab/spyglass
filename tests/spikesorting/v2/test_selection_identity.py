@@ -31,6 +31,7 @@ from spyglass.spikesorting.v2._selection_identity import (
     assert_supplied_id_matches,
     canonical_identity,
     deterministic_id,
+    existing_selection_pk,
     recording_identity_payload,
     recording_input_hash,
 )
@@ -385,6 +386,52 @@ def test_recording_input_hash_numpy_ints_match_plain_ints():
     assert _rih(
         reference_mode="specific", reference_electrode_id=np.int64(3)
     ) == _rih(reference_mode="specific", reference_electrode_id=3)
+
+
+def _bypass_message(bypassed):
+    return f"bypassed {bypassed}"
+
+
+def test_existing_selection_pk_none_when_no_master_matches():
+    np = pytest.importorskip("numpy")
+    canonical = uuid.UUID(int=1)
+    for empty in ([], set(), np.array([], dtype=object)):
+        assert (
+            existing_selection_pk(
+                empty,
+                canonical,
+                pk_field="x_id",
+                bypass_message=_bypass_message,
+            )
+            is None
+        )
+
+
+def test_existing_selection_pk_returns_canonical_master():
+    np = pytest.importorskip("numpy")
+    canonical = uuid.UUID(int=1)
+    for found in ([canonical], {canonical}, np.array([canonical])):
+        assert existing_selection_pk(
+            found, canonical, pk_field="x_id", bypass_message=_bypass_message
+        ) == {"x_id": canonical}
+
+
+def test_existing_selection_pk_rejects_any_non_deterministic_master():
+    """A bypassed id raises even beside the canonical row; the message gets
+    the bypassed ids in the order the caller collected them."""
+    from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
+
+    canonical, first, second = (uuid.UUID(int=i) for i in (1, 2, 3))
+    for found in ([first], [canonical, first, second]):
+        with pytest.raises(DuplicateSelectionError) as exc_info:
+            existing_selection_pk(
+                found,
+                canonical,
+                pk_field="x_id",
+                bypass_message=_bypass_message,
+            )
+        expected = [mid for mid in found if mid != canonical]
+        assert str(exc_info.value) == f"bypassed {expected}"
 
 
 # --------------------------------------------------------------------------

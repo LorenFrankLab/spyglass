@@ -31,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Callable, Collection
 
 # Fixed namespace for every v2 selection UUIDv5. Derived once as
 #   uuid.uuid5(uuid.NAMESPACE_DNS, "spyglass.spikesorting.v2.selection")
@@ -551,3 +552,53 @@ def assert_supplied_id_matches(supplied, deterministic, *, field: str) -> None:
             f"selection's logical identity. Omit {field}; the id is "
             "content-addressed from the logical fields."
         )
+
+
+def existing_selection_pk(
+    master_ids: Collection,
+    canonical_id: uuid.UUID,
+    *,
+    pk_field: str,
+    bypass_message: Callable[[list], str],
+) -> dict | None:
+    """Return the canonical PK among a selection's matching masters, or None.
+
+    ``master_ids`` are the primary keys of every master row matching one
+    logical selection, as the table's own find-existing query collected them.
+    The row at ``canonical_id`` is the content-addressed selection. Any other
+    id is non-deterministic (a raw ``insert`` bypass or a legacy
+    non-content-addressed row) and violates the one-identity-one-id
+    invariant, so it is rejected rather than returned.
+
+    Parameters
+    ----------
+    master_ids : Collection
+        Primary-key values of the matching master rows, shape
+        ``(n_matches,)``. Iteration order sets the order of the ids passed to
+        ``bypass_message``.
+    canonical_id : uuid.UUID
+        The deterministic id derived from the selection's logical identity.
+    pk_field : str
+        Name of the table's primary-key field.
+    bypass_message : callable
+        Builds the ``DuplicateSelectionError`` message from the list of
+        non-deterministic ids.
+
+    Returns
+    -------
+    dict or None
+        ``{pk_field: canonical_id}`` when a master matches, else ``None``.
+
+    Raises
+    ------
+    DuplicateSelectionError
+        If any matching master's id is not ``canonical_id``.
+    """
+    bypassed = [
+        master_id for master_id in master_ids if master_id != canonical_id
+    ]
+    if bypassed:
+        from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
+
+        raise DuplicateSelectionError(bypass_message(bypassed))
+    return {pk_field: canonical_id} if len(master_ids) else None
