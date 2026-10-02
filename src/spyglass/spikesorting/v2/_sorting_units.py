@@ -177,15 +177,11 @@ def build_unit_rows_from_analyzer(
     peak_amplitudes = template_tools.get_template_extremum_amplitude(
         analyzer, peak_sign=peak_sign, mode="extremum"
     )
-    n_spikes_by_unit = {
-        unit_id: int(len(sorting.get_unit_spike_train(unit_id=unit_id)))
-        for unit_id in sorting.unit_ids
-    }
     return build_sorting_unit_rows(
         unit_ids=sorting.unit_ids,
         peak_channels=peak_channels,
         peak_amplitudes=peak_amplitudes,
-        n_spikes_by_unit=n_spikes_by_unit,
+        n_spikes_by_unit=sorting.count_num_spikes_per_unit(),
         electrode_by_id=electrode_by_id,
         key=key,
         sort_group_id=sort_group_id,
