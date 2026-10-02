@@ -105,7 +105,7 @@ def test_phase_shift_off_by_default():
     """
     schema = PreprocessingParamsSchema()
     assert schema.phase_shift is None
-    assert schema.to_pre_motion_dict()["phase_shift"] is None
+    assert schema.model_dump()["phase_shift"] is None
     # A pre-field blob (no ``phase_shift`` key) validates unchanged.
     legacy = {
         "schema_version": 4,
@@ -117,11 +117,11 @@ def test_phase_shift_off_by_default():
 
 
 def test_phase_shift_enabled_dumps_margin():
-    """Enabling ``phase_shift`` carries ``margin_ms`` into the pre-motion dict."""
+    """Enabling ``phase_shift`` carries ``margin_ms`` into the dumped params."""
     schema = PreprocessingParamsSchema(phase_shift={"margin_ms": 100.0})
     assert schema.phase_shift is not None
     assert schema.phase_shift.margin_ms == 100.0
-    assert schema.to_pre_motion_dict()["phase_shift"] == {"margin_ms": 100.0}
+    assert schema.model_dump()["phase_shift"] == {"margin_ms": 100.0}
     # ``margin_ms`` defaults to 100.0 when omitted.
     assert (
         PreprocessingParamsSchema(phase_shift={}).phase_shift.margin_ms == 100.0
@@ -158,25 +158,22 @@ def test_preprocessing_rejects_recording_stage_whiten():
         PreprocessingParamsSchema(whiten={"dtype": "float32"})
     schema = PreprocessingParamsSchema()
     assert "whiten" not in schema.model_dump()
-    assert "bandpass_filter" in schema.to_pre_motion_dict()
-    assert "common_reference" in schema.to_pre_motion_dict()
 
 
 def test_preprocessing_no_filter_is_none():
     """``bandpass_filter=None`` disables filtering; the default keeps it.
 
     A real "no filter" config is ``bandpass_filter=None`` (the
-    pre-motion dict carries ``None`` so the runtime skips the step),
+    dumped params carry ``None`` so the runtime skips the step),
     not a wide-band filter that silently still filters.
     """
     disabled = PreprocessingParamsSchema(bandpass_filter=None)
     assert disabled.bandpass_filter is None
-    assert disabled.to_pre_motion_dict()["bandpass_filter"] is None
+    assert disabled.model_dump()["bandpass_filter"] is None
     # The default still ships a real bandpass.
     assert PreprocessingParamsSchema().bandpass_filter is not None
     assert (
-        PreprocessingParamsSchema().to_pre_motion_dict()["bandpass_filter"]
-        is not None
+        PreprocessingParamsSchema().model_dump()["bandpass_filter"] is not None
     )
 
 

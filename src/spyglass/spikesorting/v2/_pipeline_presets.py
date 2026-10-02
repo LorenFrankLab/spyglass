@@ -174,26 +174,7 @@ def describe_pipeline_presets() -> "pd.DataFrame":
         "notes",
     ]
     rows = [
-        {
-            "pipeline_preset": name,
-            "recommendation_status": preset.recommendation_status,
-            "probe_type": preset.probe_type,
-            "target_region": preset.target_region,
-            "sampling_rate_hz": preset.sampling_rate_hz,
-            "sorter": preset.sorter,
-            "sorter_family": preset.sorter_family,
-            "adjacency_radius_um": preset.adjacency_radius_um,
-            "preprocessing_params_name": preset.preprocessing_params_name,
-            "artifact_detection_params_name": (
-                preset.artifact_detection_params_name
-            ),
-            "sorter_params_name": preset.sorter_params_name,
-            "metric_params_name": preset.metric_params_name,
-            "auto_curation_rules_name": preset.auto_curation_rules_name,
-            "intended_use": preset.intended_use,
-            "threshold_units": preset.threshold_units,
-            "notes": preset.notes,
-        }
+        {"pipeline_preset": name, **preset.model_dump()}
         for name, preset in sorted(_PIPELINE_PRESETS.items())
     ]
     return pd.DataFrame(rows, columns=columns)

@@ -58,7 +58,14 @@ def test_preprocessing_params_stage_split():
     )
 
     params = PreprocessingParamsSchema()
-    assert params.to_pre_motion_dict() == {
+    assert params.model_dump(
+        include={
+            "phase_shift",
+            "bandpass_filter",
+            "common_reference",
+            "bad_channel_handling",
+        }
+    ) == {
         "phase_shift": None,
         "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
         "common_reference": {"operator": "median"},

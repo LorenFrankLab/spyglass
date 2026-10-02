@@ -136,26 +136,3 @@ class PreprocessingParamsSchema(BaseModel):
     # flagged channels and fills them from good neighbours so geometry-aware
     # sorters see a complete probe. Detection is NOT done here -- the flags come
     # from ``suggest_bad_channels`` or manual curation.
-
-    def to_pre_motion_dict(self) -> dict:
-        """Return the pre-motion preprocessing dict. Cached.
-
-        ``phase_shift`` / ``bandpass_filter`` are ``None`` when the
-        corresponding step is disabled; the runtime skips it in that case.
-        ``bad_channel_handling`` is included because the handling step runs
-        before motion correction (between filter and reference).
-        """
-        return {
-            "phase_shift": (
-                None
-                if self.phase_shift is None
-                else self.phase_shift.model_dump()
-            ),
-            "bandpass_filter": (
-                None
-                if self.bandpass_filter is None
-                else self.bandpass_filter.model_dump()
-            ),
-            "common_reference": self.common_reference.model_dump(),
-            "bad_channel_handling": self.bad_channel_handling,
-        }
