@@ -23,7 +23,11 @@ Tables:
 ``SortingSelection.MotionCorrectionSource`` selects a corrected recording as
 a sort's input. The DB-free computation
 (parameter resolution, the estimation adapter, the ``Motion`` serialization,
-applying a saved estimate) lives in ``_motion``.
+applying a saved estimate) lives in ``_motion``. The selection insert paths
+are in ``_motion_selection_insert``, the pure ``make_compute`` steps in
+``_motion_compute``, the reads behind ``MotionEstimate.report`` in
+``_motion_report_inputs``, and the corrected artifact's rebuild in
+``_recording_nwb``.
 """
 
 from __future__ import annotations
