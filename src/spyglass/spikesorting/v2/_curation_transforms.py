@@ -15,8 +15,8 @@ touching the database, so the merge/label logic is testable without one.
 
 DEPENDENCY-LIGHT BY CONTRACT. This module opens no database connection
 and activates no ``dj.schema`` at import. Its imports are limited to the
-standard library and dependency-light enum / validation helpers, not
-``utils`` (which imports DataJoint / SpikeInterface at load). (The
+standard library and dependency-light enum / validation / merge-group
+helpers, not ``utils`` (which imports DataJoint / SpikeInterface at load). (The
 ``spyglass`` package ``__init__`` still loads DataJoint; these transforms
 add no DB/SpikeInterface dependency of their own.)
 """
@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Mapping, Sequence
 
+from spyglass.spikesorting._merge_groups import _merge_dict_to_list
 from spyglass.spikesorting.v2._enums import CurationLabel
 from spyglass.spikesorting.v2._lookup_validation import lossless_int
 
@@ -179,47 +180,28 @@ def _iter_payload_merge_group(group) -> list[int]:
     return [parse_curation_unit_id(unit_id) for unit_id in group]
 
 
-def _union_intersecting(groups: list[set[int]]) -> list[set[int]]:
-    """Union member sets that share any unit (connected components).
-
-    Matches v1's ``_union_intersecting_lists`` so a transitive association
-    chain ``{1: [2], 2: [3]}`` collapses to one group ``{1, 2, 3}`` instead of
-    overlapping ``{1, 2}`` / ``{2, 3}`` that would later double-assign a unit.
-    """
-    remaining = [set(group) for group in groups]
-    result: list[set[int]] = []
-    while remaining:
-        first, *rest = remaining
-        merged = True
-        while merged:
-            merged = False
-            for idx, other in enumerate(rest):
-                if first & other:
-                    first |= other
-                    del rest[idx]
-                    merged = True
-                    break
-        result.append(first)
-        remaining = rest
-    return result
-
-
 def _normalize_payload_merge_groups(merge_groups) -> list[list[int]]:
     """Normalize transport merge groups to ``list[list[int]]``.
 
     Mapping input is the v1/FigURL per-unit association shape
     ``{unit_id: [other_unit_ids...]}``; it is converted to full groups with
-    INTERSECTING associations unioned (v1 ``_merge_dict_to_list`` parity --
-    ``{1: [2], 2: [3]}`` becomes ``[[1, 2, 3]]``), dropping resulting singletons.
+    INTERSECTING associations unioned by the shared ``_merge_dict_to_list``
+    (``{1: [2], 2: [3]}`` becomes ``[[1, 2, 3]]``), dropping resulting
+    singletons; each group's ids are sorted.
     List input is preserved verbatim except for integer coercion so singleton or
     empty groups still reach ``insert_curation``'s typo guard.
     """
     if merge_groups is None:
         return []
     if isinstance(merge_groups, Mapping):
-        association_sets: list[set[int]] = []
+        # Parse ids first; keys that parse to the same unit share one entry,
+        # which cannot change the connected components (both entries contain
+        # that unit).
+        associations: dict[int, list[int]] = {}
         for unit_id, associated in merge_groups.items():
-            members = {parse_curation_unit_id(unit_id)}
+            members = associations.setdefault(
+                parse_curation_unit_id(unit_id), []
+            )
             if associated is not None and not (
                 isinstance(associated, str) and associated == ""
             ):
@@ -232,13 +214,8 @@ def _normalize_payload_merge_groups(merge_groups) -> list[list[int]]:
                         isinstance(member, str) and member == ""
                     ):
                         continue
-                    members.add(parse_curation_unit_id(member))
-            association_sets.append(members)
-        return [
-            sorted(group)
-            for group in _union_intersecting(association_sets)
-            if len(group) >= 2
-        ]
+                    members.append(parse_curation_unit_id(member))
+        return [sorted(group) for group in _merge_dict_to_list(associations)]
 
     if isinstance(merge_groups, str) or not isinstance(merge_groups, Iterable):
         raise ValueError(
