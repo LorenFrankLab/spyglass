@@ -36,35 +36,6 @@ if TYPE_CHECKING:
     )
 
 
-def _evaluate(
-    table: CurationEvaluation,
-    display_analyzer,
-    metric_analyzer,
-    *,
-    sorting_inputs: EvaluationSortingInputs,
-    metric_inputs: EvaluationMetricInputs,
-    observation_metrics: pd.DataFrame,
-    statistics_spans: list,
-) -> tuple[pd.DataFrame, dict, list]:
-    """Run :func:`._metric_curation.evaluate_analyzers` on one analyzer pair."""
-    return _metric_curation.evaluate_analyzers(
-        table,
-        display_analyzer,
-        metric_analyzer,
-        metric_names=metric_inputs.metric_names,
-        metric_kwargs=metric_inputs.metric_kwargs,
-        skip_pc_metrics=metric_inputs.skip_pc_metrics,
-        metric_job_kwargs=metric_inputs.metric_job_kwargs,
-        template_metric_columns=metric_inputs.template_metric_columns,
-        auto_merge_preset=metric_inputs.auto_merge_preset,
-        auto_merge_kwargs=metric_inputs.auto_merge_kwargs,
-        rule_rows=metric_inputs.rule_rows,
-        expected_unit_ids=sorting_inputs.expected_unit_ids,
-        observation_metrics=observation_metrics,
-        statistics_spans=statistics_spans,
-    )
-
-
 def evaluate_cached_analyzers(
     table: CurationEvaluation,
     recording: si.BaseRecording,
@@ -146,14 +117,16 @@ def evaluate_cached_analyzers(
                 job_kwargs=analyzer_inputs.analyzer_job_kwargs,
                 statistics_spans=statistics_spans,
             )
-        metrics_df, labels_by_unit, merge_groups = _evaluate(
-            table,
-            display_analyzer,
-            metric_analyzer,
-            sorting_inputs=sorting_inputs,
-            metric_inputs=metric_inputs,
-            observation_metrics=observation_metrics,
-            statistics_spans=statistics_spans,
+        metrics_df, labels_by_unit, merge_groups = (
+            _metric_curation.evaluate_analyzers(
+                table,
+                display_analyzer,
+                metric_analyzer,
+                metric_inputs=metric_inputs,
+                expected_unit_ids=sorting_inputs.expected_unit_ids,
+                observation_metrics=observation_metrics,
+                statistics_spans=statistics_spans,
+            )
         )
 
     # The metrics were computed over the canonical raw-sort analyzers --
@@ -255,13 +228,15 @@ def evaluate_temporary_analyzers(
                 statistics_spans=statistics_spans,
             )
             metric_analyzer = load_analyzer_folder(metric_folder)
-        metrics_df, labels_by_unit, merge_groups = _evaluate(
-            table,
-            display_analyzer,
-            metric_analyzer,
-            sorting_inputs=sorting_inputs,
-            metric_inputs=metric_inputs,
-            observation_metrics=observation_metrics,
-            statistics_spans=statistics_spans,
+        metrics_df, labels_by_unit, merge_groups = (
+            _metric_curation.evaluate_analyzers(
+                table,
+                display_analyzer,
+                metric_analyzer,
+                metric_inputs=metric_inputs,
+                expected_unit_ids=sorting_inputs.expected_unit_ids,
+                observation_metrics=observation_metrics,
+                statistics_spans=statistics_spans,
+            )
         )
     return metrics_df, labels_by_unit, merge_groups, None

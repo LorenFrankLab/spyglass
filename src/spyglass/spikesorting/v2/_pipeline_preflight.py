@@ -169,17 +169,6 @@ def _singularity_runtime_available() -> tuple[bool, str]:
     return True, "Singularity + Python `spython` package available"
 
 
-def _container_runtime_available(execution_backend: str) -> tuple[bool, str]:
-    """Return ``(ok, detail)`` for a container execution backend's runtime.
-
-    ``"docker"`` probes :func:`_docker_runtime_available`; any other container
-    backend probes :func:`_singularity_runtime_available`.
-    """
-    if execution_backend == "docker":
-        return _docker_runtime_available()
-    return _singularity_runtime_available()
-
-
 def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
     """Run the LOCAL-execution sorter checks (installed + runtime backend).
 
@@ -717,8 +706,10 @@ def assert_preset_compute_rows(
             bundle, sis, SorterParameters._NON_SI_SORTERS, _raising_check()
         )
     else:
-        runtime_ok, runtime_detail = _container_runtime_available(
-            execution_backend
+        runtime_ok, runtime_detail = (
+            _docker_runtime_available()
+            if execution_backend == "docker"
+            else _singularity_runtime_available()
         )
         if not runtime_ok:
             raise PreflightError(
@@ -2092,11 +2083,6 @@ def _check_sort_group(
     return sort_group_exists
 
 
-def _missing_row_fix(row_description: str) -> str:
-    """The fix for a missing shipped parameter row named by ``row_description``."""
-    return f"{row_description} is missing. Run initialize_v2_defaults()."
-
-
 def _check_source_param_rows(
     check: "Callable[[str, Any, str], bool]", bundle
 ) -> bool:
@@ -2114,9 +2100,8 @@ def _check_source_param_rows(
         "preprocessing_params_exist",
         PreprocessingParameters
         & {"preprocessing_params_name": bundle.preprocessing_params_name},
-        _missing_row_fix(
-            f"PreprocessingParameters row {bundle.preprocessing_params_name!r}"
-        ),
+        f"PreprocessingParameters row {bundle.preprocessing_params_name!r}"
+        " is missing. Run initialize_v2_defaults().",
     )
     # An explicit no-mask preset has no artifact parameter row to require.
     if bundle.artifact_detection_params_name is not None:
@@ -2126,10 +2111,9 @@ def _check_source_param_rows(
             & {
                 "artifact_detection_params_name": bundle.artifact_detection_params_name
             },
-            _missing_row_fix(
-                "ArtifactDetectionParameters row "
-                f"{bundle.artifact_detection_params_name!r}"
-            ),
+            "ArtifactDetectionParameters row "
+            f"{bundle.artifact_detection_params_name!r}"
+            " is missing. Run initialize_v2_defaults().",
         )
     return preprocessing_params_exist
 
@@ -2161,10 +2145,9 @@ def _check_sorter_param_rows(
     sorter_params_exist = sort_checks and check(
         "sorter_params_exist",
         sorter_params_query,
-        _missing_row_fix(
-            f"SorterParameters row (sorter={bundle.sorter!r}, "
-            f"sorter_params_name={bundle.sorter_params_name!r})"
-        ),
+        f"SorterParameters row (sorter={bundle.sorter!r}, "
+        f"sorter_params_name={bundle.sorter_params_name!r})"
+        " is missing. Run initialize_v2_defaults().",
     )
     sorter_row = None
     if sorter_params_exist:
@@ -2209,11 +2192,10 @@ def _check_display_waveform_params(
             "analyzer_waveform_params_exist",
             AnalyzerWaveformParameters
             & {"waveform_params_name": display_waveform_params_name},
-            _missing_row_fix(
-                "AnalyzerWaveformParameters row "
-                f"{display_waveform_params_name!r} (the display analyzer "
-                f"recipe for preprocessing {bundle.preprocessing_params_name!r})"
-            ),
+            "AnalyzerWaveformParameters row "
+            f"{display_waveform_params_name!r} (the display analyzer "
+            f"recipe for preprocessing {bundle.preprocessing_params_name!r})"
+            " is missing. Run initialize_v2_defaults().",
         )
     return display_waveform_params_name
 
@@ -2242,19 +2224,17 @@ def _check_auto_curation_rows(
         "metric_params_exist",
         QualityMetricParameters
         & {"metric_params_name": bundle.metric_params_name},
-        _missing_row_fix(
-            f"QualityMetricParameters row {bundle.metric_params_name!r} (the "
-            "auto-curation metric set)"
-        ),
+        f"QualityMetricParameters row {bundle.metric_params_name!r} (the "
+        "auto-curation metric set)"
+        " is missing. Run initialize_v2_defaults().",
     )
     check(
         "auto_curation_rules_exist",
         AutoCurationRules
         & {"auto_curation_rules_name": bundle.auto_curation_rules_name},
-        _missing_row_fix(
-            f"AutoCurationRules row {bundle.auto_curation_rules_name!r} (the "
-            "auto-curation rule set)"
-        ),
+        f"AutoCurationRules row {bundle.auto_curation_rules_name!r} (the "
+        "auto-curation rule set)"
+        " is missing. Run initialize_v2_defaults().",
     )
     metric_waveform_params_name = waveform_params_for_preprocessing(
         bundle.preprocessing_params_name
@@ -2263,10 +2243,9 @@ def _check_auto_curation_rows(
         "metric_waveform_params_exist",
         AnalyzerWaveformParameters
         & {"waveform_params_name": metric_waveform_params_name},
-        _missing_row_fix(
-            f"AnalyzerWaveformParameters row {metric_waveform_params_name!r} "
-            "(the whitened metric analyzer recipe auto-curation scores on)"
-        ),
+        f"AnalyzerWaveformParameters row {metric_waveform_params_name!r} "
+        "(the whitened metric analyzer recipe auto-curation scores on)"
+        " is missing. Run initialize_v2_defaults().",
     )
 
 
@@ -2371,8 +2350,10 @@ def _check_sorter_execution(
             # missing CONTAINER runtime is an actionable, blocking
             # selected-preset error -- preflight never silently falls back to
             # local execution.
-            runtime_ok, runtime_detail = _container_runtime_available(
-                execution_backend
+            runtime_ok, runtime_detail = (
+                _docker_runtime_available()
+                if execution_backend == "docker"
+                else _singularity_runtime_available()
             )
             check(
                 "container_runtime_available",

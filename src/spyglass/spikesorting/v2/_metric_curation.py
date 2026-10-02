@@ -910,14 +910,7 @@ def evaluate_analyzers(
     display_analyzer,
     metric_analyzer,
     *,
-    metric_names,
-    metric_kwargs,
-    skip_pc_metrics,
-    metric_job_kwargs,
-    template_metric_columns,
-    auto_merge_preset,
-    auto_merge_kwargs,
-    rule_rows,
+    metric_inputs,
     expected_unit_ids,
     observation_metrics=None,
     statistics_spans=None,
@@ -934,7 +927,9 @@ def evaluate_analyzers(
     catches a stale temp analyzer, accidental raw-sort analyzer reuse, or a
     preview row that slipped past selection. ``statistics_spans`` (the
     sort's persisted spans; ``None`` = the whole recording) are forwarded
-    to ``_compute_metrics``.
+    to ``_compute_metrics``. ``metric_inputs`` is the
+    ``CurationEvaluation`` ``EvaluationMetricInputs`` carrier (metric set,
+    auto-merge settings and label rules).
 
     Rule-referenced metrics must be computed wherever SpikeInterface can
     compute them: a metric SpikeInterface failed (``_compute_metrics``'s
@@ -959,16 +954,19 @@ def evaluate_analyzers(
     # evaluation on another thread changes them in between. The merge
     # suggestions stay inside too: SI's auto-merge can compute
     # quality_metrics itself (spikeinterface/curation/auto_merge.py:256).
+    metric_kwargs = metric_inputs.metric_kwargs
+    metric_job_kwargs = metric_inputs.metric_job_kwargs
+    rule_rows = metric_inputs.rule_rows
     with SI_METRIC_STATE_LOCK:
         rule_columns = frozenset(row["metric_name"] for row in rule_rows)
         metrics_df = table._compute_metrics(
             display_analyzer,
             metric_analyzer,
-            metric_names,
+            metric_inputs.metric_names,
             metric_kwargs,
-            skip_pc_metrics,
+            metric_inputs.skip_pc_metrics,
             metric_job_kwargs,
-            template_metric_columns=template_metric_columns,
+            template_metric_columns=metric_inputs.template_metric_columns,
             statistics_spans=statistics_spans,
             rule_columns=rule_columns,
         )
@@ -1004,8 +1002,8 @@ def evaluate_analyzers(
         )
         merge_groups = compute_merge_groups(
             display_analyzer,
-            auto_merge_preset,
-            auto_merge_kwargs,
+            metric_inputs.auto_merge_preset,
+            metric_inputs.auto_merge_kwargs,
             metric_job_kwargs,
         )
         assert_merge_membership(merge_groups, expected_unit_ids)
