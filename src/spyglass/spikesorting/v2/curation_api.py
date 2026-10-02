@@ -18,6 +18,7 @@ from typing import Any, Literal
 import pandas as pd
 
 from spyglass.spikesorting.v2._curation_transforms import (
+    group_contributor_rows,
     inherit_parent_labels,
     is_merge_preview,
     normalize_label_state,
@@ -115,6 +116,31 @@ def _group_curation_parts(rows, field):
             int(row["unit_id"]), []
         ).append(row[field])
     return grouped
+
+
+def _contributor_groups_by_curation(
+    relation, contributor_field: str
+) -> dict[int, dict[int, list[int]]]:
+    """Fetch merge-provenance rows once and group them per curation.
+
+    Returns ``{curation_id: {unit_id: [contributor, ...]}}`` with units and
+    contributors in ascending order, the per-curation grouping
+    ``CurationV2._fetch_contributor_groups`` returns.
+    """
+    rows = relation.fetch(
+        "curation_id",
+        "unit_id",
+        contributor_field,
+        as_dict=True,
+        order_by=("curation_id", "unit_id", contributor_field),
+    )
+    by_curation: dict[int, list[dict]] = {}
+    for row in rows:
+        by_curation.setdefault(int(row["curation_id"]), []).append(row)
+    return {
+        curation_id: group_contributor_rows(curation_rows, contributor_field)
+        for curation_id, curation_rows in by_curation.items()
+    }
 
 
 @dataclass(frozen=True)
@@ -594,12 +620,23 @@ class CurationRef:
         labels = _group_curation_parts(
             (CurationV2.UnitLabel & key).fetch(as_dict=True), "curation_label"
         )
-        groups = {
-            int(row["curation_id"]): CurationV2.get_unit_contributor_groups(
-                {**key, "curation_id": row["curation_id"]}
-            )
+        groups = _contributor_groups_by_curation(
+            CurationV2.ParentMergeGroup & key, "parent_unit_id"
+        )
+        # Match get_unit_contributor_groups: a child (any ParentMergeGroup
+        # rows) uses its parent namespace; a root uses its raw MergeGroup.
+        root_keys = [
+            {"curation_id": row["curation_id"]}
             for row in rows
-        }
+            if int(row["curation_id"]) not in groups
+        ]
+        if root_keys:
+            groups.update(
+                _contributor_groups_by_curation(
+                    CurationV2.MergeGroup & key & root_keys,
+                    "contributor_unit_id",
+                )
+            )
         by_parent: dict[int, list[dict[str, Any]]] = {}
         for row in rows:
             by_parent.setdefault(int(row["parent_curation_id"]), []).append(row)
