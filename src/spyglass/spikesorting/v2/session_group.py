@@ -25,6 +25,7 @@ from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.spikesorting.v2 import (
     _concat_recording_fetch,
+    _recording_nwb,
     _session_group_insert,
 )
 from spyglass.spikesorting.v2._recording_nwb import StoredTraces
@@ -44,7 +45,7 @@ from spyglass.spikesorting.v2.utils import (
     SelectionMasterInsertGuard,
     _validate_params,
 )
-from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
 if TYPE_CHECKING:
     import spikeinterface as si
@@ -983,120 +984,12 @@ class ConcatenatedRecording(
     def _rebuild_nwb_artifact(self, key) -> None:
         """Rebuild a missing concat artifact -- locked, atomic, content-verified.
 
-        The concat analog of ``Recording._rebuild_nwb_artifact``. Acquire
-        ``concat_recording_artifact_lock(concat_recording_id)``, double-check the
-        file is still missing under the lock (a peer may have rebuilt while we
-        waited), then re-run the materialization (``make_fetch`` -> ``make_compute``
-        -- which also re-verifies the frozen member set against the live
-        recordings) to a FRESH temp analysis file, fingerprint it, and only on a
-        ``content_hash`` match ``os.replace`` it into the canonical slot and
-        refresh the DataJoint ``~external`` byte checksum. A rebuild whose
-        fingerprint diverges from the stored ``content_hash`` raises
-        ``RecordingContentDriftError`` and never touches the canonical slot --
-        drifted bytes are never served.
-
-        Cleanup contract (all-or-nothing): the temp is unlinked on any failure;
-        if ``os.replace`` ran but the checksum refresh then failed, the canonical
-        is unlinked to return the slot to the missing state for the next (locked)
-        ``get_recording``. Ordering is load-bearing -- the atomic ``os.replace``
-        precedes ``_resolve_external``.
-
-        An irreproducible rebuild (e.g. a changed SpikeInterface or NWB read
-        path) surfaces loudly as ``RecordingContentDriftError`` rather than
-        silently serving different bytes (the fingerprint's trace rounding
-        absorbs sub-µV noise).
-        Safe to call directly (it takes the lock itself) and from
-        ``get_recording`` (which does not hold the lock).
+        The rebuild is :func:`._recording_nwb.rebuild_concat_nwb_artifact`; it
+        calls ``make_fetch`` and ``make_compute`` on this instance.
+        :func:`._recording_nwb.ensure_artifact_file` calls this method on every
+        trace-artifact table, so it stays on the class.
         """
-        from pathlib import Path
-
-        import numpy as np
-
-        from spyglass.spikesorting.v2._concat_recording import (
-            concat_recording_artifact_lock,
-        )
-        from spyglass.spikesorting.v2._recording_nwb import (
-            install_rebuilt_recording,
-        )
-        from spyglass.spikesorting.v2.exceptions import (
-            RecordingContentDriftError,
-        )
-        from spyglass.spikesorting.v2.recording import (
-            _unlink_staged_analysis_file,
-        )
-
-        row = (self & key).fetch1()
-        concat_recording_id = row["concat_recording_id"]
-        analysis_file_name = row["analysis_file_name"]
-        canonical_abs = AnalysisNwbfile.get_abs_path(analysis_file_name)
-
-        with concat_recording_artifact_lock(concat_recording_id):
-            # Double-checked: a peer rebuilt (or the file was never gone) while
-            # we waited for the lock -- nothing to do.
-            if Path(canonical_abs).exists():
-                return
-
-            logger.info(
-                "ConcatenatedRecording.get_recording: cache miss for "
-                f"{analysis_file_name!r} (reason=missing cache); rebuilding "
-                "the concatenated artifact..."
-            )
-            fetched = self.make_fetch(key)
-            # make_compute writes a FRESH (unregistered) temp analysis file and
-            # returns its readback content fingerprint as ``content_hash``.
-            computed = self.make_compute(key, *fetched)
-            temp_abs = AnalysisNwbfile.get_abs_path(computed.analysis_file_name)
-
-            if computed.content_hash != row["content_hash"]:
-                _unlink_staged_analysis_file(
-                    computed.analysis_file_name,
-                    context="ConcatenatedRecording._rebuild_nwb_artifact",
-                )
-                raise RecordingContentDriftError(
-                    "ConcatenatedRecording._rebuild_nwb_artifact: rebuilt "
-                    f"content_hash {computed.content_hash} does not match the "
-                    f"stored content_hash {row['content_hash']} for "
-                    f"{analysis_file_name!r}. The current environment no longer "
-                    "reproduces this concatenated recording (e.g. a "
-                    "SpikeInterface/BLAS upgrade or a changed member recording). "
-                    "The canonical artifact "
-                    "was NOT modified. Recover by restoring a backup, rerunning "
-                    "under the original environment, or deleting and repopulating "
-                    "the ConcatenatedRecording row (and its downstream)."
-                )
-            # The traces fingerprint does not include the stored spans:
-            # downstream sorts estimate noise from the statistics spans and
-            # motion estimation reads the continuity spans and their first
-            # and last timestamps, so a rebuild must reproduce them exactly.
-            drifted = [
-                name
-                for name, shape in (
-                    ("statistics_spans", (-1, 2)),
-                    ("continuity_spans", (-1, 2)),
-                    ("continuity_start_s", (-1,)),
-                    ("continuity_end_s", (-1,)),
-                )
-                if not np.array_equal(
-                    np.asarray(getattr(computed, name)).reshape(shape),
-                    np.asarray(row[name]).reshape(shape),
-                )
-            ]
-            if drifted:
-                _unlink_staged_analysis_file(
-                    computed.analysis_file_name,
-                    context="ConcatenatedRecording._rebuild_nwb_artifact",
-                )
-                raise RecordingContentDriftError(
-                    "ConcatenatedRecording._rebuild_nwb_artifact: rebuilt "
-                    f"{drifted} do not match the stored values for "
-                    f"{analysis_file_name!r}. The canonical artifact was NOT "
-                    "modified. Delete and repopulate the "
-                    "ConcatenatedRecording row (and its downstream)."
-                )
-
-            install_rebuilt_recording(
-                temp_abs, canonical_abs, analysis_file_name
-            )
+        return _recording_nwb.rebuild_concat_nwb_artifact(self, key)
 
     def split_sorting_by_session(self, sorting, key) -> dict:
         """Back-map a concat-frame sorting into per-member local sortings.
