@@ -779,27 +779,28 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             input_part_structure_errors,
             input_set_hash,
         )
-        from spyglass.spikesorting.v2.exceptions import (
-            DuplicateSelectionError,
-            SchemaBypassError,
+        from spyglass.spikesorting.v2._selection_identity import (
+            existing_selection_pk,
         )
+        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
         master_ids = {
             row["unitmatch_id"]
             for row in (cls & identity).fetch("KEY", as_dict=True)
         }
-        bypassed = [
-            mid for mid in master_ids if mid != deterministic_unitmatch_id
-        ]
-        if bypassed:
-            raise DuplicateSelectionError(
+        existing = existing_selection_pk(
+            master_ids,
+            deterministic_unitmatch_id,
+            pk_field="unitmatch_id",
+            bypass_message=lambda bypassed: (
                 f"UnitMatchSelection has {len(master_ids)} master row(s) for "
                 f"identity {identity} whose unitmatch_id is not the "
                 f"deterministic id {deterministic_unitmatch_id}: {bypassed}. "
                 "This is a non-deterministic selection row (a raw insert); "
                 "drop it and re-insert via insert_inputs."
-            )
-        if not master_ids:
+            ),
+        )
+        if existing is None:
             return None
         restriction = {"unitmatch_id": deterministic_unitmatch_id}
         input_rows = (cls.Input & restriction).fetch(as_dict=True)
@@ -827,7 +828,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 "or forgery). Drop the master and re-insert via "
                 "insert_inputs()."
             )
-        return {"unitmatch_id": deterministic_unitmatch_id}
+        return existing
 
 
 @schema
