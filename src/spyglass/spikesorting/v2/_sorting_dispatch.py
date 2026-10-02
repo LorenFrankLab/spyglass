@@ -37,6 +37,16 @@ MATLAB_SORTERS = ("kilosort2_5", "kilosort3", "ironclust")
 _EXTERNAL_WHITEN_SORTERS = frozenset({"mountainsort4", "mountainsort5"})
 
 
+def without_random_seed(job_kwargs) -> dict:
+    """Return ``job_kwargs`` without the Spyglass-side ``random_seed`` key.
+
+    ``random_seed`` seeds Spyglass's own pins (whitening, noise levels, random
+    spikes); SpikeInterface's job-kwarg handling (``fix_job_kwargs``,
+    ``SortingAnalyzer.compute``) rejects it. ``None`` gives ``{}``.
+    """
+    return {k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"}
+
+
 def _should_external_whiten(sorter: str, sorter_params: dict) -> bool:
     """Whether the dispatcher should route this sort through the runtime's
     external float64 whitening.
@@ -155,8 +165,8 @@ def resolve_sort_config(
         for k, v in dict(sorter_params or {}).items()
         if k != "schema_version"
     }
-    resolved_jobs = dict(job_kwargs or {})
-    random_seed = int(resolved_jobs.pop("random_seed", 0))
+    random_seed = int((job_kwargs or {}).get("random_seed", 0))
+    resolved_jobs = without_random_seed(job_kwargs)
     external_whiten = _should_external_whiten(sorter, scientific)
     si_params = dict(scientific)
     if external_whiten:
@@ -668,11 +678,7 @@ def run_clusterless_thresholder(
         params["noise_levels"] = nl
 
     method = params.pop("method", "locally_exclusive")
-    # ``random_seed`` is a Spyglass-side knob; SI's ``fix_job_kwargs`` raises
-    # on it.
-    detect_job_kwargs = {
-        k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"
-    }
+    detect_job_kwargs = without_random_seed(job_kwargs)
     if threshold_unit == "uv":
         # The stored gain/offset is the NWB ElectricalSeries conversion/offset
         # that se.read_nwb_recording loads onto the recording.

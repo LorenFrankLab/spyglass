@@ -52,8 +52,7 @@ from spyglass.spikesorting.v2._pipeline_presets import (
     _unknown_pipeline_preset_message,
 )
 from spyglass.spikesorting.v2._pipeline_reporting import (
-    _run_metadata,
-    _run_warnings,
+    _session_outcome_counts,
 )
 from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
 from spyglass.spikesorting.v2._pipeline_types import (
@@ -2630,8 +2629,8 @@ def _run_session_group(
             partial_run_summary=getattr(exc, "partial_run_summary", None),
             # This group passed preflight (ran with preflight=False) but
             # failed mid-run; keep its preflight advisories visible. Any
-            # stage warnings live on partial_run_summary, which
-            # _run_warnings reads too.
+            # stage warnings live on partial_run_summary, which the
+            # receipt counts read too.
             warnings=preflight_warnings_by_group.get(sort_group_id, []),
         )
     # Fold this group's preflight advisories (captured by
@@ -2668,27 +2667,13 @@ def _log_session_receipt(results: list) -> None:
     """
     from spyglass.utils import logger
 
-    n_ok = sum(entry["outcome"] == "ok" for entry in results)
-    n_failed = sum(entry["outcome"] == "failed" for entry in results)
-    n_zero = 0
-    n_warn = 0
-    failed_details = []
-    for entry in results:
-        partial = (
-            entry.get("partial_run_summary")
-            if isinstance(entry.get("partial_run_summary"), dict)
-            else {}
-        )
-        n_units = _run_metadata(entry, partial, "n_units")
-        if n_units == 0:
-            n_zero += 1
-        if _run_warnings(entry, partial):
-            n_warn += 1
-        if entry["outcome"] == "failed":
-            error_type = entry.get("error_type") or "Error"
-            failed_details.append(
-                f"sort_group_id={entry['sort_group_id']}: {error_type}"
-            )
+    n_ok, n_failed, n_zero, n_warn = _session_outcome_counts(results)
+    failed_details = [
+        f"sort_group_id={entry['sort_group_id']}: "
+        f"{entry.get('error_type') or 'Error'}"
+        for entry in results
+        if entry["outcome"] == "failed"
+    ]
     failed_suffix = f" ({', '.join(failed_details)})" if failed_details else ""
     logger.info(
         f"run_v2_pipeline_session: {len(results)} group(s): {n_ok} ok, "

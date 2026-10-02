@@ -113,37 +113,21 @@ def split_leading_restrictions(args: tuple) -> tuple[list, tuple]:
     return restrictions, remaining
 
 
-class SelectionMasterInsertGuard:
-    """Reject a direct ``insert`` into a deterministic-id selection master.
+class _IdentityMasterGuard:
+    """Reject a direct ``insert`` / in-place ``update1`` of an identity master.
 
-    The v2 deterministic-id selection masters (``RecordingSelection`` /
-    ``RecordingArtifactSelection`` / ``SharedGroupArtifactSelection`` /
-    ``SortingSelection``) derive their primary key from the selection's FULL
-    logical identity, and ``insert_selection`` is the only entry point that
-    holds that full payload: it computes the deterministic PK, pre-checks the
-    lookup-row FKs, and inserts the row(s). Only ``SortingSelection`` is
-    part-bearing -- its optional ``ArtifactDetectionSource`` pass genuinely
-    CANNOT be verified from the master row alone (it lives in a part table). The
-    two artifact selections carry their source as a REQUIRED FK on the
-    master (structural exactly-one-source), and ``RecordingSelection`` has no
-    source part either; routing all of them through the same boundary keeps one
-    consistent create path.
+    The shared body of :class:`SelectionMasterInsertGuard` and
+    :class:`FactoryOnlyMaster`, which differ only in their rejection text:
+    each subclass defines ``_direct_insert_reason()`` (the rationale plus the
+    create-path sentence) and ``_update1_create_hint()`` (the create path to
+    use instead of an in-place edit).
 
-    This guard is a guard-RAIL, not the integrity boundary: it rejects the
-    easy mistake (calling ``insert`` / ``insert1`` instead of
-    ``insert_selection``) early and loudly. The actual integrity enforcement
-    is downstream -- the deterministic-PK uniqueness + the
-    ``SchemaBypassError`` / ``DuplicateSelectionError`` checks that detect a
-    bypassed or orphaned master. ``allow_direct_insert=True`` is the escape
-    hatch for a deliberate maintenance or test bypass -- the SAME keyword
-    DataJoint uses to override its own auto-populated-table insert guard
-    (note: on a ``dj.Manual`` table that keyword is otherwise inert, so it
-    is repurposed here). ``insert_selection`` itself passes
-    ``allow_direct_insert=True`` for its already-validated master insert.
-
-    The signature mirrors ``dj.Table.insert`` so positional ``replace`` /
-    ``skip_duplicates`` keep working; only ``allow_direct_insert`` is
-    keyword-only (it cannot accidentally bind a positional flag).
+    The ``insert`` signature mirrors ``dj.Table.insert`` so positional
+    ``replace`` / ``skip_duplicates`` keep working; only
+    ``allow_direct_insert`` is keyword-only (it cannot accidentally bind a
+    positional flag). DataJoint forwards ``insert1``'s ``**kwargs`` to
+    ``insert``, so an ``insert1(row, allow_direct_insert=True)`` reaches this
+    override too.
     """
 
     def insert(
@@ -170,7 +154,7 @@ class SelectionMasterInsertGuard:
             Drop row keys not in the table heading. Default ``False``.
         allow_direct_insert : bool, optional
             Escape hatch for a deliberate maintenance or test bypass of
-            the ``insert_selection`` boundary. Default ``False``.
+            the create path. Default ``False``.
         **kwargs
             Additional keyword arguments forwarded to
             ``super().insert``.
@@ -179,17 +163,13 @@ class SelectionMasterInsertGuard:
         ------
         datajoint.errors.DataJointError
             If ``allow_direct_insert`` is ``False`` (the default),
-            directing the caller to ``insert_selection`` instead.
+            directing the caller to the create path instead.
         """
         if not allow_direct_insert:
-            _reject_master_insert(
-                self,
-                reason=(
-                    "the primary key is derived from the selection's full "
-                    "logical identity (and, for the part-bearing masters, the "
-                    "source-part rows are inserted atomically with it). Use "
-                    f"{type(self).__name__}.insert_selection()."
-                ),
+            raise dj.errors.DataJointError(
+                f"Direct insert into {type(self).__name__} is not supported: "
+                f"{self._direct_insert_reason()} Pass allow_direct_insert=True "
+                "only for a deliberate maintenance or test bypass."
             )
         super().insert(
             rows,
@@ -202,13 +182,12 @@ class SelectionMasterInsertGuard:
     def update1(self, row, *, allow_master_mutation=False):
         """Reject an in-place row mutation unless ``allow_master_mutation``.
 
-        A selection master's secondary columns ARE its logical identity (the
-        deterministic PK is content-addressed from them), so editing them in
-        place retargets the id under every live dependent -- the symmetric
-        hazard to a direct insert. ``update1`` is the only standard in-place
-        mutation path, so guard it the same way
-        :class:`ImmutableParamsLookup` guards the param Lookups: insert a NEW
-        selection via ``insert_selection`` instead of editing an existing one.
+        A master's identity-bearing columns feed the deterministic ids (or
+        are the provenance roots) that live dependents reference, so editing
+        them in place retargets those references -- the symmetric hazard to a
+        direct insert. ``update1`` is the only standard in-place mutation
+        path, so guard it the same way :class:`ImmutableParamsLookup` guards
+        the param Lookups.
 
         Parameters
         ----------
@@ -224,49 +203,63 @@ class SelectionMasterInsertGuard:
             If ``allow_master_mutation`` is ``False`` (the default).
         """
         if not allow_master_mutation:
-            _reject_master_update1(
-                self,
-                create_hint=(
-                    f"Insert a new selection via {self.__class__.__name__}."
-                    "insert_selection() instead."
-                ),
+            raise dj.errors.DataJointError(
+                f"In-place update1 of {type(self).__name__} is not supported: "
+                "its identity-bearing columns feed the deterministic ids (or "
+                "are the provenance roots) that live dependents reference, so "
+                "editing them in place silently retargets those references. "
+                f"{self._update1_create_hint()} Pass "
+                "allow_master_mutation=True only for a deliberate maintenance "
+                "edit of a row with no live references."
             )
         super().update1(row)
 
 
-def _reject_master_update1(table, *, create_hint: str) -> None:
-    """Raise the shared "master identity is immutable" ``update1`` rejection.
+class SelectionMasterInsertGuard(_IdentityMasterGuard):
+    """Reject a direct ``insert`` into a deterministic-id selection master.
 
-    Used by both :class:`SelectionMasterInsertGuard` and
-    :class:`FactoryOnlyMaster` so the two in-place-mutation guards share one
-    message; ``create_hint`` names the create path to use instead.
+    The v2 deterministic-id selection masters (``RecordingSelection`` /
+    ``RecordingArtifactSelection`` / ``SharedGroupArtifactSelection`` /
+    ``SortingSelection``) derive their primary key from the selection's FULL
+    logical identity, and ``insert_selection`` is the only entry point that
+    holds that full payload: it computes the deterministic PK, pre-checks the
+    lookup-row FKs, and inserts the row(s). Only ``SortingSelection`` is
+    part-bearing -- its optional ``ArtifactDetectionSource`` pass genuinely
+    CANNOT be verified from the master row alone (it lives in a part table). The
+    two artifact selections carry their source as a REQUIRED FK on the
+    master (structural exactly-one-source), and ``RecordingSelection`` has no
+    source part either; routing all of them through the same boundary keeps one
+    consistent create path.
+
+    This guard is a guard-RAIL, not the integrity boundary: it rejects the
+    easy mistake (calling ``insert`` / ``insert1`` instead of
+    ``insert_selection``) early and loudly. The actual integrity enforcement
+    is downstream -- the deterministic-PK uniqueness + the
+    ``SchemaBypassError`` / ``DuplicateSelectionError`` checks that detect a
+    bypassed or orphaned master. ``allow_direct_insert=True`` is the escape
+    hatch for a deliberate maintenance or test bypass -- the SAME keyword
+    DataJoint uses to override its own auto-populated-table insert guard
+    (note: on a ``dj.Manual`` table that keyword is otherwise inert, so it
+    is repurposed here). ``insert_selection`` itself passes
+    ``allow_direct_insert=True`` for its already-validated master insert.
     """
-    raise dj.errors.DataJointError(
-        f"In-place update1 of {type(table).__name__} is not supported: its "
-        "identity-bearing columns feed the deterministic ids (or are the "
-        "provenance roots) that live dependents reference, so editing them in "
-        f"place silently retargets those references. {create_hint} Pass "
-        "allow_master_mutation=True only for a deliberate maintenance edit of "
-        "a row with no live references."
-    )
+
+    def _direct_insert_reason(self) -> str:
+        return (
+            "the primary key is derived from the selection's full logical "
+            "identity (and, for the part-bearing masters, the source-part "
+            "rows are inserted atomically with it). Use "
+            f"{type(self).__name__}.insert_selection()."
+        )
+
+    def _update1_create_hint(self) -> str:
+        return (
+            f"Insert a new selection via {self.__class__.__name__}."
+            "insert_selection() instead."
+        )
 
 
-def _reject_master_insert(table, *, reason: str) -> None:
-    """Raise the shared "direct insert blocked" rejection for an identity master.
-
-    Used by both :class:`SelectionMasterInsertGuard` and
-    :class:`FactoryOnlyMaster` so the lead-in and the ``allow_direct_insert``
-    escape-hatch note live once; ``reason`` is the per-guard rationale plus the
-    create-path sentence.
-    """
-    raise dj.errors.DataJointError(
-        f"Direct insert into {type(table).__name__} is not supported: {reason} "
-        "Pass allow_direct_insert=True only for a deliberate maintenance or "
-        "test bypass."
-    )
-
-
-class FactoryOnlyMaster:
+class FactoryOnlyMaster(_IdentityMasterGuard):
     """Reject direct ``insert`` / ``update1`` of a factory-constructed master.
 
     ``CurationV2`` (`curation.py`) and ``SessionGroup`` (`session_group.py`)
@@ -280,8 +273,9 @@ class FactoryOnlyMaster:
     ``SessionGroup.create_group``) pass ``allow_direct_insert=True`` for their
     already-validated master insert.
 
-    Mirrors :class:`SelectionMasterInsertGuard` (``allow_direct_insert``) and
-    :class:`ImmutableParamsLookup` (``update1``): the mixin must precede
+    Shares :class:`SelectionMasterInsertGuard`'s ``insert`` /
+    ``update1`` guards (``allow_direct_insert`` / ``allow_master_mutation``),
+    with factory-specific messages: the mixin must precede
     ``SpyglassMixin`` / ``dj.Manual`` in the MRO so its overrides take
     precedence. Subclasses set :attr:`_factory_create_call` to the factory the
     error message points to.
@@ -291,51 +285,15 @@ class FactoryOnlyMaster:
     #: ``"CurationV2.insert_curation()"``). Subclasses override.
     _factory_create_call: str = "its factory classmethod"
 
-    def insert(
-        self,
-        rows,
-        replace=False,
-        skip_duplicates=False,
-        ignore_extra_fields=False,
-        *,
-        allow_direct_insert=False,
-        **kwargs,
-    ):
-        """Reject a direct insert unless ``allow_direct_insert`` is set.
-
-        Signature mirrors ``dj.Table.insert`` so positional ``replace`` /
-        ``skip_duplicates`` keep working; ``allow_direct_insert`` is
-        keyword-only. DataJoint forwards ``insert1``'s ``**kwargs`` to
-        ``insert``, so an ``insert1(row, allow_direct_insert=True)`` reaches
-        this override too.
-        """
-        if not allow_direct_insert:
-            _reject_master_insert(
-                self,
-                reason=(
-                    "it is an identity / provenance root that downstream rows "
-                    f"reference. Write it through {self._factory_create_call}, "
-                    "which constructs the master and its parts atomically."
-                ),
-            )
-        super().insert(
-            rows,
-            replace=replace,
-            skip_duplicates=skip_duplicates,
-            ignore_extra_fields=ignore_extra_fields,
-            **kwargs,
+    def _direct_insert_reason(self) -> str:
+        return (
+            "it is an identity / provenance root that downstream rows "
+            f"reference. Write it through {self._factory_create_call}, "
+            "which constructs the master and its parts atomically."
         )
 
-    def update1(self, row, *, allow_master_mutation=False):
-        """Reject an in-place row mutation unless ``allow_master_mutation``."""
-        if not allow_master_mutation:
-            _reject_master_update1(
-                self,
-                create_hint=(
-                    f"Insert a new row via {self._factory_create_call} instead."
-                ),
-            )
-        super().update1(row)
+    def _update1_create_hint(self) -> str:
+        return f"Insert a new row via {self._factory_create_call} instead."
 
 
 class ImmutableParamsLookup:

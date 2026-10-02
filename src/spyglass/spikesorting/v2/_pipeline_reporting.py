@@ -6,7 +6,7 @@ Holds ``describe_parameter_rows`` (parameter catalog table),
 (receipt table for a run result) with their row builders. ``pipeline.py``
 re-exports the ``describe_*`` functions and the package ``__init__`` re-exports
 ``verify_v2_default_catalog``. ``_pipeline_run`` imports
-``_run_warnings`` / ``_run_metadata`` from here; this module never imports
+``_session_outcome_counts`` from here; this module never imports
 ``_pipeline_run``.
 """
 
@@ -1052,6 +1052,41 @@ def _run_metadata(entry: dict, partial: dict | None, key: str):
     return value
 
 
+def _failed_partial_summary(entry: dict) -> "dict | None":
+    """A failed session entry's partial run summary, or ``None``."""
+    partial = entry.get("partial_run_summary")
+    if entry.get("outcome") == "failed" and isinstance(partial, dict):
+        return partial
+    return None
+
+
+def _session_outcome_counts(results: list) -> tuple[int, int, int, int]:
+    """Count a session result's ok, failed, zero-unit and warned groups.
+
+    ``n_units`` and warnings fall back to a failed group's partial run
+    summary. A ``require_units=True`` zero-unit group raises with no partial
+    summary, so its ``n_units`` is None (not 0) and it counts as failed only;
+    zero-unit counts groups that completed with zero units.
+
+    Returns
+    -------
+    tuple of int
+        ``(n_ok, n_failed, n_zero_unit, n_with_warnings)``.
+    """
+    n_ok = n_failed = n_zero = n_warn = 0
+    for entry in results:
+        partial = _failed_partial_summary(entry)
+        if entry.get("outcome") == "ok":
+            n_ok += 1
+        elif entry.get("outcome") == "failed":
+            n_failed += 1
+        if _run_metadata(entry, partial, "n_units") == 0:
+            n_zero += 1
+        if _run_warnings(entry, partial):
+            n_warn += 1
+    return n_ok, n_failed, n_zero, n_warn
+
+
 def _describe_match_input(match_input) -> str:
     """One line for a unit-match receipt input: kind, sessions, curation, traces.
 
@@ -1275,29 +1310,19 @@ def describe_run(result) -> "pd.DataFrame":
         )
     if isinstance(result, list):
         rows = []
-        n_ok = n_failed = n_zero = n_warn = 0
         total_seconds = 0.0
         have_seconds = False
         for entry in result:
             outcome = entry.get("outcome")
             sort_group_id = entry.get("sort_group_id")
-            partial = (
-                entry.get("partial_run_summary")
-                if outcome == "failed"
-                and isinstance(entry.get("partial_run_summary"), dict)
-                else None
-            )
+            partial = _failed_partial_summary(entry)
             warnings = _run_warnings(entry, partial)
             n_units = _run_metadata(entry, partial, "n_units")
             root_merge_id = _run_metadata(entry, partial, "root_merge_id")
             auto_labeled_merge_id = _run_metadata(
                 entry, partial, "auto_labeled_merge_id"
             )
-            if outcome == "failed":
-                n_failed += 1
-            elif outcome == "ok":
-                n_ok += 1
-            else:
+            if outcome not in ("ok", "failed"):
                 # Don't silently count an unrecognized entry as ok -- that would
                 # inflate the ok tally and give false reassurance (e.g. a raw
                 # run summary mistakenly wrapped in a list has no 'outcome').
@@ -1307,13 +1332,6 @@ def describe_run(result) -> "pd.DataFrame":
                     "or 'failed'. Pass a run_v2_pipeline_session result (list), "
                     "or a single run_v2_pipeline summary as a dict."
                 )
-            # A ``require_units=True`` zero-unit group raises with no partial
-            # summary, so its n_units is None (not 0) and it is tallied under
-            # n_failed only; n_zero counts groups that completed with zero units.
-            if n_units == 0:
-                n_zero += 1
-            if warnings:
-                n_warn += 1
 
             seconds = _run_stage_seconds_total(
                 entry if outcome != "failed" else partial
@@ -1343,6 +1361,7 @@ def describe_run(result) -> "pd.DataFrame":
                 )
                 rows.append(row)
 
+        n_ok, n_failed, n_zero, n_warn = _session_outcome_counts(result)
         header = _run_blank_row()
         header.update(
             row_type="summary",

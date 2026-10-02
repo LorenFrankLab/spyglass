@@ -53,9 +53,9 @@ def ensure_extensions(
 
     Idempotent: an already-present extension is never recomputed (recomputing a
     parent cascade-deletes its children and rewrites template-derived values).
-    ``random_seed`` is stripped from ``job_kwargs`` because it is an extension
-    param, not a ``ChunkRecordingExecutor`` job kwarg (mirrors the detect_peaks
-    / build_analyzer convention).
+    ``random_seed`` is stripped from ``job_kwargs``
+    (:func:`._sorting_dispatch.without_random_seed`) because it is an extension
+    param, not a ``ChunkRecordingExecutor`` job kwarg.
 
     Parameters
     ----------
@@ -78,9 +78,11 @@ def ensure_extensions(
     list of str
         The extensions actually computed (already-present ones are skipped).
     """
-    compute_kwargs = {
-        k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"
-    }
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        without_random_seed,
+    )
+
+    compute_kwargs = without_random_seed(job_kwargs)
     to_add = [name for name in names if not analyzer.has_extension(name)]
     if to_add:
         params = {
@@ -90,6 +92,20 @@ def ensure_extensions(
             to_add, extension_params=params or None, **compute_kwargs
         )
     return to_add
+
+
+def _zero_unit_error(caller: str, sorting_id, *, hint: str = ""):
+    """The ``ZeroUnitAnalyzerError`` for a zero-unit sort's analyzer request.
+
+    ``hint`` is appended verbatim after the shared message.
+    """
+    from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
+
+    return ZeroUnitAnalyzerError(
+        f"{caller}: sorting_id={sorting_id!r} has zero units; no "
+        "SortingAnalyzer exists (SI cannot build one over zero units)."
+        f"{hint}"
+    )
 
 
 def resolve_display_waveform_params_name(sorting_table, sorting_id) -> str:
@@ -290,17 +306,16 @@ def load_or_rebuild_analyzer(
     AnalyzerFolderInvalidError
         If ``rebuild=False`` and the analyzer folder exists but cannot be loaded.
     """
-    from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
-
     # ``key`` may be any single-row restriction, not only a sorting_id.
     sorting_id, n_units = (sorting_table & key).fetch1("sorting_id", "n_units")
     if int(n_units) == 0:
-        raise ZeroUnitAnalyzerError(
-            "Sorting.get_analyzer: sorting_id="
-            f"{sorting_id!r} has zero units; no "
-            "SortingAnalyzer exists (SI cannot build one over zero "
-            "units). Use get_sorting() if you only need the empty "
-            "unit list, or re-sort with a lower detect_threshold."
+        raise _zero_unit_error(
+            "Sorting.get_analyzer",
+            sorting_id,
+            hint=(
+                " Use get_sorting() if you only need the empty unit list, or "
+                "re-sort with a lower detect_threshold."
+            ),
         )
 
     if waveform_params_name is None:
@@ -434,13 +449,9 @@ def load_or_rebuild_analyzer_from_resolved(
     spikeinterface.SortingAnalyzer
         The loaded analyzer.
     """
-    from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
-
     if int(n_units) == 0:
-        raise ZeroUnitAnalyzerError(
-            "load_or_rebuild_analyzer_from_resolved: sorting_id="
-            f"{sorting_id!r} has zero units; no SortingAnalyzer exists (SI "
-            "cannot build one over zero units)."
+        raise _zero_unit_error(
+            "load_or_rebuild_analyzer_from_resolved", sorting_id
         )
     return _load_analyzer_folder_or_rebuild(
         analyzer_folder,
@@ -913,11 +924,11 @@ def build_analyzer(
             return_in_uV=not whiten,
             overwrite=True,
         )
-        # ``random_seed`` is a Spyglass-side knob; ``SortingAnalyzer.compute``
-        # rejects it.
-        analyzer_job_kwargs = {
-            k: v for k, v in job_kwargs.items() if k != "random_seed"
-        }
+        from spyglass.spikesorting.v2._sorting_dispatch import (
+            without_random_seed,
+        )
+
+        analyzer_job_kwargs = without_random_seed(job_kwargs)
         # Window and subsample come from the tracked recipe row. The random
         # extensions (random_spikes, noise_levels) are seed-pinned so a rebuild
         # is identical, which the recompute check
