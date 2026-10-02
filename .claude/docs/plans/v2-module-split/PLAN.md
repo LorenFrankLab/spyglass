@@ -317,7 +317,7 @@ Docker harness):
 | recording | `single_session/test_recording.py` (slow), `test_recording_nwb.py`, `test_recording_services.py`, `test_recompute.py`, `test_sort_group_planning.py`, `single_session/test_sort_group.py` | Recording populate, NWB artifact build/rebuild, recompute and sort-group insertion unchanged |
 | sorting | `single_session/test_sorting.py` (slow), `test_sorting_dispatch.py`, `test_sorting_contracts.py` (incl. the `allow_staging` guard), `test_sorter_parameters.py`, `test_parameter_identity.py`, `test_analyzer_lifecycle.py`, `test_analyzer_publication.py`, `test_selection_identity.py`, `test_motion_consumers.py` | Sorter dispatch; staging-only DB access in `make_compute`; parameter duplicate rejection and identity; analyzer retry cleanup and preservation of referenced folders; selection reuse |
 | metric_curation | `test_curation_evaluation.py` (incl. the `allow_staging` guard), `test_metric_curation_transforms.py`, `test_metric_curation_plots.py`, `test_metric_eligibility.py`, `test_curation_analyzer.py` | Evaluation compute, eligibility, acceptance verbs and diagnostics unchanged |
-| curation | `test_curation_composition.py`, `test_curation_merges.py`, `single_session/test_curation_insert.py`, `test_curation_api.py`, `test_curation_routing.py`, `test_merge_dedup.py` | Insert, reuse, merge and restriction resolution unchanged |
+| curation | `test_curation_composition.py`, `single_session/test_curation_merges.py`, `single_session/test_curation_insert.py`, `test_curation_api.py`, `test_curation_routing.py`, `test_merge_dedup.py` | Insert, reuse, merge and restriction resolution unchanged |
 
 Last PR only: `tests/spikesorting/v2/test_notebook_execution.py` (slow), to
 check the end-to-end pipeline still registers tables and runs.
