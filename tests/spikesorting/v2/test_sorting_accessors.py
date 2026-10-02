@@ -464,8 +464,9 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
     nwb_file_name = (
         RecordingSelection & {"recording_id": recording_id}
     ).fetch1("nwb_file_name")
-    # The transient analyzer folder _populate_unit_part loads (built by the
-    # populate that created populated_sorting; resolved from sorting_id).
+    # The transient analyzer folder build_unit_rows_from_analyzer loads
+    # (built by the populate that created populated_sorting; resolved from
+    # sorting_id).
     analyzer_folder = analyzer_path(populated_sorting["sorting_id"], _DISPLAY)
     sorting = Sorting().get_sorting(populated_sorting)
 
@@ -473,8 +474,9 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
     original_extremum_channel = template_tools.get_template_extremum_channel
 
     def _bad_peak_channels(analyzer, **kwargs):
-        # ``_populate_unit_part`` resolves peak channels with ``outputs="id"``
-        # (and a configured ``peak_sign``); ``get_template_extremum_amplitude``
+        # ``build_unit_rows_from_analyzer`` resolves peak channels with
+        # ``outputs="id"`` (and a configured ``peak_sign``);
+        # ``get_template_extremum_amplitude``
         # calls this internally with ``peak_sign``/``mode`` but NOT
         # ``outputs="id"``. Both carry ``peak_sign``, so discriminate on
         # ``outputs`` -- only the unit-attribution call returns the planted

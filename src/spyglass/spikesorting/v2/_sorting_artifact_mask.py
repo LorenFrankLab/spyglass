@@ -3,9 +3,10 @@
 ``apply_artifact_mask`` zeros the complement of the artifact-removed
 ``valid_times`` on the recording before sorting, so the sorter never sees
 artifact frames. ``sorting_statistics_spans`` masks ``Sorting.make_compute``'s
-input and resolves the artifact-free statistics spans for each source kind. ``make_fetch`` already fetched ``valid_times`` (the tri-part
+input and resolves the artifact-free statistics spans for each source kind.
+``make_fetch`` already fetched ``valid_times`` (the tri-part
 ``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
-compute), so this operates purely on the SpikeInterface recording.
+compute), so these functions operate purely on the SpikeInterface recording.
 
 Why this lives in its own module rather than in ``sorting.py``:
 ``sorting.py`` is a DataJoint *schema* module -- importing it activates

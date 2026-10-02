@@ -208,7 +208,9 @@ def legacy_si_sorter_rows() -> list:
     skipped_matlab = []
     for sorter in sis.available_sorters():
         if sorter in curated:
-            continue  # see docstring: would fail or drop keys
+            # See SorterParameters.insert_default_legacy_si_sorters: a curated
+            # sorter's typed schema would fail or drop SI's default keys.
+            continue
         if sorter.lower() in MATLAB_SORTERS:
             # MATLAB sorters require a container backend; a local 'default'
             # row is rejected by the dispatcher at populate time. The lab
@@ -252,7 +254,7 @@ def legacy_si_sorter_rows() -> list:
             continue
         # The insert hook applies this same guard; run it here so ONE
         # sorter whose wrapper defaults fall outside its own vocabulary
-        # is skipped rather than aborting the whole batch insert below.
+        # is skipped rather than aborting the caller's batch insert.
         try:
             validate_sorter_params_against_wrapper(sorter, validated)
         except Exception as exc:

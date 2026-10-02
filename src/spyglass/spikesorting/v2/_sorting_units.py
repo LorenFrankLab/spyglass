@@ -3,11 +3,11 @@
 ``build_unit_rows_from_analyzer`` loads the analyzer ``Sorting.make_compute``
 just built and resolves each unit's peak channel, peak amplitude and spike
 count; ``build_sorting_unit_rows`` turns that per-unit peak metadata into the
-``Sorting.Unit`` rows;
-``_to_int_unit_id`` coerces a sorter's unit id to the int PK v2 stores (raising
-the typed ``NonIntegerUnitIDError`` when it cannot). Pure (DB-free) row
-construction -- the sort-group/electrode fetches and the
-``Sorting.Unit.insert`` stay with the table class.
+``Sorting.Unit`` rows; ``_to_int_unit_id`` coerces a sorter's unit id to the
+int PK v2 stores (raising the typed ``NonIntegerUnitIDError`` when it cannot).
+Pure (DB-free) row construction -- the sort-group/electrode fetches
+(``_sorting_fetch.fetch_unit_electrode_metadata``) and the
+``Sorting.Unit.insert`` live outside this module.
 
 Why this lives in its own module rather than in ``sorting.py``:
 ``sorting.py`` is a DataJoint *schema* module -- importing it activates
@@ -61,12 +61,13 @@ def build_sorting_unit_rows(
 ) -> list[dict]:
     """Build the ``Sorting.Unit`` rows from per-unit peak metadata.
 
-    Pure (DB-free) row construction for ``Sorting._populate_unit_part``; the analyzer load, ``peak_sign`` /
-    sort-group / electrode fetches, and the ``Sorting.Unit.insert`` stay in the
-    table class. Each unit becomes one row carrying the peak channel's Electrode
-    FK fields (resolved through ``electrode_by_id``), the peak template
-    amplitude in microvolts, and the precomputed spike count, merged onto
-    ``key``.
+    Pure (DB-free) row construction, called by
+    :func:`build_unit_rows_from_analyzer` with the peak metadata it resolved;
+    the sort-group / electrode fetches and the ``Sorting.Unit.insert`` live
+    outside this module. Each unit becomes one row carrying the peak channel's
+    Electrode FK fields (resolved through ``electrode_by_id``), the peak
+    template amplitude in microvolts, and the precomputed spike count, merged
+    onto ``key``.
 
     Parameters
     ----------

@@ -290,7 +290,6 @@ def find_existing_pk(
     Used by ``insert_selection`` for both the pre-insert lookup and
     the post-duplicate-key refetch.
 
-
     ``table_cls`` is the ``SortingSelection`` class.
     """
     from spyglass.spikesorting.v2.exceptions import (
