@@ -681,19 +681,23 @@ def _publish_view(
 ) -> tuple[str, str | None]:
     """Publish a built view; return its URI and any privately staged bundle.
 
-    ``upload=True`` publishes to figpack.org and requires ``FIGPACK_API_KEY``
-    (unless ``ephemeral``); it returns ``(url, None)``. ``upload=False`` saves
-    the static bundle into a private sibling of its durable folder and returns
-    ``(durable folder, staged folder)``; :func:`_install_bundle` moves it into
-    place once the row that records the URI is inserted.
+    ``upload=True`` publishes to figpack.org and requires a FigPack API key
+    (``SpyglassConfig.figpack_api_key``) unless ``ephemeral``; it returns
+    ``(url, None)``. ``upload=False`` saves the static bundle into a private
+    sibling of its durable folder and returns ``(durable folder, staged
+    folder)``; :func:`_install_bundle` moves it into place once the row that
+    records the URI is inserted.
     """
     if upload:
-        api_key = os.environ.get("FIGPACK_API_KEY")
+        from spyglass.settings import sg_config
+
+        api_key = sg_config.figpack_api_key
         if not ephemeral and not api_key:
             raise FigPackUploadError(
-                "FigPack upload=True requires the FIGPACK_API_KEY environment "
-                "variable (or ephemeral=True for a temporary figure). Set it "
-                "to publish to figpack.org, or use upload=False to save a local "
+                "FigPack upload=True requires an API key: set "
+                "dj.config['custom']['figpack_api_key'] (or the "
+                "FIGPACK_API_KEY environment variable), use ephemeral=True "
+                "for a temporary figure, or use upload=False to save a local "
                 "bundle."
             )
         # Build the exact bundle first. FigPack's recursive uploader includes
@@ -872,8 +876,8 @@ class FigPackCurationSelection(
             requests no property columns. Names are validated when the view is
             built so explicit requests cannot be silently dropped.
         upload : bool, optional
-            Publish a hosted figpack.org figure (requires ``FIGPACK_API_KEY``
-            unless ``ephemeral``). Default ``False`` (save a local bundle).
+            Publish a hosted figpack.org figure (requires a FigPack API
+            key unless ``ephemeral``). Default ``False`` (save a local bundle).
         ephemeral : bool, optional
             For ``upload=True``, publish a temporary figure (no API key needed).
             Default ``False``.

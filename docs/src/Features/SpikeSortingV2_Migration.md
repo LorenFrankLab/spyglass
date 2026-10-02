@@ -711,7 +711,7 @@ surface that stays v1-only is the stored per-pair burst metrics
     merge is automatically re-evaluated and `continue_review()` opens its actual
     merged analyzer for an explicit verification commit. Local delivery is the
     default; `upload=True` publishes the identical seeded bundle
-    (`FIGPACK_API_KEY`, or `ephemeral=True`). Connected local reviews offer
+    (a FigPack API key, or `ephemeral=True`). Connected local reviews offer
     **Preview and commit** and open merged-child verification in the browser;
     hosted reviews use `review.commit_panel()` in the notebook. All local review
     and inspection URLs in one Python process share a port. Needs the

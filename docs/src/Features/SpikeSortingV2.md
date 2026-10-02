@@ -868,10 +868,11 @@ and refuses a figure changed after preview. A zero-diff review is refused unless
 `confirm_no_changes=True`, and conflicting contributor labels require explicit
 `conflict_resolutions`—no contributor wins by precedence.
 
-Local delivery is the default. A persistent hosted review requires
-`FIGPACK_API_KEY`; `ephemeral=True` creates a temporary hosted figure. Both
-paths publish the same prebuilt bundle, including seeded annotations and the
-Spyglass identity sidecar. The FigPack packages remain optional through the
+Local delivery is the default. A persistent hosted review requires a FigPack
+API key, set as `dj.config["custom"]["figpack_api_key"]` (or the
+`FIGPACK_API_KEY` environment variable); `ephemeral=True` creates a temporary
+hosted figure. Both paths publish the same prebuilt bundle, including seeded
+annotations and the Spyglass identity sidecar. The FigPack packages remain optional through the
 `spikesorting-v2-curation` extra.
 
 ### Custom unit annotations
@@ -2672,7 +2673,7 @@ calls remain available for scripts. Merged and label-only curations render
 in their own unit namespace; evaluation metrics, suggestions and already-applied
 merge provenance are columns of the selectable unit table (context about the
 committed curation, not editable). Hosted delivery publishes the identical
-seeded/identity-bearing bundle and requires `FIGPACK_API_KEY` unless
+seeded/identity-bearing bundle and requires a FigPack API key unless
 `ephemeral=True`. The lower-level `FigPackCurationSelection` / `FigPackCuration`
 methods remain available for expert composition, not as the normal notebook
 workflow. FigPack needs the `spikesorting-v2-curation` extra

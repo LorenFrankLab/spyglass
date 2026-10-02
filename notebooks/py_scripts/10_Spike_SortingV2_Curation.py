@@ -266,7 +266,7 @@ if run_custom_annotation_example:
 # open the same `localhost` URL on your machine -- the frontend enables local
 # editing only for a `localhost` origin; a generic Jupyter proxy URL is not
 # equivalent. `upload=True` publishes the identical seeded bundle to
-# figpack.org instead (needs `FIGPACK_API_KEY` unless `ephemeral=True`). The
+# figpack.org instead (needs a FigPack API key unless `ephemeral=True`). The
 # optional `spikesorting-v2-curation` extra is required for this path.
 
 import importlib.util

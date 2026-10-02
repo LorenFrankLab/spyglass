@@ -881,7 +881,7 @@ def start_review(
         properties. A ``ReviewProfileRef`` must still match its persisted
         row.
     upload : bool, optional
-        Publish a hosted figpack.org figure (requires ``FIGPACK_API_KEY``
+        Publish a hosted figpack.org figure (requires a FigPack API key
         unless ``ephemeral``). Default ``False`` saves a local bundle.
     ephemeral : bool, optional
         For ``upload=True``, publish a temporary figure that needs no API
@@ -932,7 +932,7 @@ def start_review(
         populated.
     FigPackUploadError
         If the view must be built with ``upload=True`` and
-        ``ephemeral=False`` while ``FIGPACK_API_KEY`` is not set (an existing
+        ``ephemeral=False`` while no FigPack API key is configured (an existing
         hosted view is reused without uploading).
     """
     resolved_display = ReviewDisplayOptions.from_mapping(display_options)

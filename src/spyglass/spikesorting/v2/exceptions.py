@@ -263,7 +263,7 @@ class FigPackUploadError(RuntimeError):
     """Raise when a FigPack hosted upload is requested without credentials.
 
     ``FigPackCuration`` was asked to publish a hosted figpack.org figure
-    (``upload=True``) but ``FIGPACK_API_KEY`` is unset and the figure is not
+    (``upload=True``) but no FigPack API key is configured and the figure is not
     ``ephemeral``. Message points the caller at setting the API key, using
     ``ephemeral=True`` for a temporary figure, or ``upload=False`` to save a
     seeded local bundle.
