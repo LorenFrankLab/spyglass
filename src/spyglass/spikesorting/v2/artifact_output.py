@@ -125,7 +125,14 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
             cls()._merge_insert(
                 [detection_key], skip_duplicates=skip_duplicates
             )
-        except ValueError as exc:  # no source table holds the id
+        except ValueError as exc:
+            # Only _merge_insert's "no source table holds the id" error means
+            # not populated; any other ValueError (e.g. an ambiguous entry)
+            # propagates unchanged.
+            if not str(exc).startswith(
+                "Non-existing entry in any of the parent tables"
+            ):
+                raise
             raise KeyError(
                 f"{detection_key} is not a populated RecordingArtifactDetection "
                 "or SharedGroupArtifactDetection; populate the detection "

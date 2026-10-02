@@ -784,6 +784,42 @@ def test_held_lock_blocks_insert_and_delete(ingested_recording, monkeypatch):
         (RecordingArtifactSelection & art).super_delete(warn=False)
 
 
+def test_insert_detection_maps_only_missing_parent_to_key_error(
+    dj_conn, monkeypatch
+):
+    """Only ``_merge_insert``'s missing-parent ``ValueError`` becomes the
+    "not populated" ``KeyError``; any other ``ValueError`` propagates.
+    """
+    from spyglass.spikesorting.v2.artifact_output import (
+        ArtifactDetectionOutput,
+    )
+
+    def merge_insert_raising(message):
+        def _merge_insert(self, rows, **kwargs):
+            raise ValueError(message)
+
+        return _merge_insert
+
+    key = {"artifact_detection_id": "not-a-detection"}
+    monkeypatch.setattr(
+        ArtifactDetectionOutput,
+        "_merge_insert",
+        merge_insert_raising(
+            f"Non-existing entry in any of the parent tables - Entry: {key}"
+        ),
+    )
+    with pytest.raises(KeyError, match="not a populated"):
+        ArtifactDetectionOutput.insert_detection(key)
+
+    monkeypatch.setattr(
+        ArtifactDetectionOutput,
+        "_merge_insert",
+        merge_insert_raising("Ambiguous entry. Data has mult rows"),
+    )
+    with pytest.raises(ValueError, match="Ambiguous entry"):
+        ArtifactDetectionOutput.insert_detection(key)
+
+
 def test_get_merge_id_distinguishes_unregistered_from_corrupt(dj_conn):
     """``get_merge_id`` raises ``KeyError`` for an unregistered id but
     ``SchemaBypassError`` for a corrupt >1-row registration.
