@@ -70,6 +70,7 @@ from spyglass.spikesorting.v2.exceptions import (
     UnsupportedDirectInsertError,
     ZeroUnitAnalyzerError,
 )
+from spyglass.spikesorting.v2.recording import _unlink_staged_analysis_file
 from spyglass.spikesorting.v2.sorting import (
     AnalyzerWaveformParameters,
     Sorting,
@@ -1011,7 +1012,9 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 source_analyzer_hashes,
             )
         except Exception:
-            self._cleanup_staged_file(analysis_file_name)
+            _unlink_staged_analysis_file(
+                analysis_file_name, context="CurationEvaluation.make_compute"
+            )
             raise
 
     def make_insert(
@@ -1405,20 +1408,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             unit_ids=[],
             provenance_tables=provenance_tables,
         )
-
-    @staticmethod
-    def _cleanup_staged_file(analysis_file_name) -> None:
-        """Best-effort removal of a staged analysis file on failure."""
-        from pathlib import Path
-
-        try:
-            abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-            Path(abs_path).unlink(missing_ok=True)
-        except Exception as err:  # noqa: BLE001 - cleanup must not mask cause
-            logger.error(
-                f"CurationEvaluation: failed to clean staged file "
-                f"{analysis_file_name}: {err}"
-            )
 
     # ---- visualization (notebook-facing) ---------------------------------
 

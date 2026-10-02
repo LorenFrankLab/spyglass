@@ -38,6 +38,7 @@ from spyglass.spikesorting.v2._curation_transforms import (
     validate_curation_label_rows,
 )
 from spyglass.spikesorting.v2._units_nwb import write_curated_units_nwb
+from spyglass.spikesorting.v2.recording import _unlink_staged_analysis_file
 from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 from spyglass.spikesorting.v2.utils import (
     CurationLabel,
@@ -785,7 +786,9 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 # The transaction rolled back the AnalysisNwbfile row and the
                 # CurationV2 rows together; only the file on disk is left to
                 # clean up.
-                cls._cleanup_staged_curation_file(analysis_file_name)
+                _unlink_staged_analysis_file(
+                    analysis_file_name, context="CurationV2.insert_curation"
+                )
                 # A concurrent insert claimed this curation_id between our
                 # allocation and the transaction: recompute and retry. Children
                 # only -- a root's id is 0 and root idempotency is handled
@@ -1108,28 +1111,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 logger.warning(
                     CONCAT_MERGE_GATE_MESSAGE.format(sorting_id=sorting_id)
                 )
-
-    @classmethod
-    def _cleanup_staged_curation_file(cls, analysis_file_name: str) -> None:
-        """Delete a staged curated-units NWB after a failed insert.
-
-        The DB transaction already rolled back the ``AnalysisNwbfile`` row
-        and the ``CurationV2`` rows together; only the file on disk is
-        left to clean up (DataJoint cannot roll back filesystem side
-        effects). A failure to unlink is logged, not raised -- the
-        original insert error is what the caller re-raises.
-        """
-        import pathlib
-
-        try:
-            abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-            pathlib.Path(abs_path).unlink(missing_ok=True)
-        except Exception as cleanup_exc:  # pragma: no cover -- defensive
-            logger.error(
-                "CurationV2.insert_curation: failed to clean up "
-                f"staged analysis file {analysis_file_name!r}: "
-                f"{cleanup_exc!r}"
-            )
 
     # ---- Friendly wrappers (intent-first sugar over insert_curation) -----
 
