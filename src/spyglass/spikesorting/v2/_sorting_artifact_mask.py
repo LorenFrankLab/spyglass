@@ -432,13 +432,12 @@ def complement_frame_ranges(
         Sorted, disjoint, half-open valid frame ranges. ``[(0, n_samples)]``
         when ``excluded_ranges`` is empty.
     """
+    from spyglass.spikesorting.v2._signal_math import merge_sorted_intervals
+
     n_samples = int(n_samples)
-    merged: list[tuple[int, int]] = []
-    for start, end in sorted((int(a), int(b)) for a, b in excluded_ranges):
-        if merged and start <= merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
-        else:
-            merged.append((start, end))
+    merged = merge_sorted_intervals(
+        sorted((int(a), int(b)) for a, b in excluded_ranges)
+    )
 
     valid: list[tuple[int, int]] = []
     cursor = 0

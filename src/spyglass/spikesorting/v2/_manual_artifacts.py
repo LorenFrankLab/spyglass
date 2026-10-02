@@ -38,6 +38,8 @@ def normalize_manual_exclusions(intervals):
     """Sorted union of finite [start, stop) intervals in session seconds."""
     import numpy as np
 
+    from spyglass.spikesorting.v2._signal_math import merge_sorted_intervals
+
     if intervals is None:
         return []
     values = np.asarray(intervals, dtype=float)
@@ -53,13 +55,7 @@ def normalize_manual_exclusions(intervals):
             "manual_excluded_times must contain finite [start, stop) pairs "
             "with start < stop, in original session seconds."
         )
-    merged = []
-    for start, stop in sorted(values.tolist()):
-        if merged and start <= merged[-1][1]:
-            merged[-1][1] = max(stop, merged[-1][1])
-        else:
-            merged.append([start, stop])
-    return merged
+    return merge_sorted_intervals(sorted(values.tolist()))
 
 
 def apply_manual_exclusions(valid_times, excluded_times, min_length_s):

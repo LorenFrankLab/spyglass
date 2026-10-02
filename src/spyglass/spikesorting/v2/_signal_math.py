@@ -198,6 +198,34 @@ def _get_recording_timestamps(
     return timestamps
 
 
+def merge_sorted_intervals(intervals) -> list[list]:
+    """Merge start-sorted ``(start, stop)`` rows that overlap or touch.
+
+    A row whose start is at or before the running stop extends it, so
+    touching rows (``start == previous stop``) merge too. Rows are taken as
+    given -- nothing is sorted, validated, or dropped, so a caller that must
+    discard empty rows filters them first -- and the values are not
+    converted, so integer frames stay ints and Python floats stay floats.
+
+    Parameters
+    ----------
+    intervals : iterable of (start, stop)
+        Rows sorted by start, in seconds or frames.
+
+    Returns
+    -------
+    list[list]
+        ``[[start, stop], ...]`` merged rows; ``[]`` for no input rows.
+    """
+    merged: list[list] = []
+    for start, stop in intervals:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], stop)
+        else:
+            merged.append([start, stop])
+    return merged
+
+
 def _normalize(intervals):
     """Sort by start, merge overlapping/adjacent/duplicate rows, drop
     zero-length rows.
@@ -215,13 +243,9 @@ def _normalize(intervals):
     if len(intervals) == 0:
         return intervals
     intervals = intervals[np.argsort(intervals[:, 0], kind="stable")]
-    merged = [intervals[0].tolist()]
-    for start, stop in intervals[1:]:
-        if start <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], stop)
-        else:
-            merged.append([start, stop])
-    return np.asarray(merged, dtype=float).reshape(-1, 2)
+    return np.asarray(
+        merge_sorted_intervals(intervals.tolist()), dtype=float
+    ).reshape(-1, 2)
 
 
 def intersect_intervals(left, right):

@@ -269,6 +269,8 @@ def _consolidate_regular_intervals(
     """
     import numpy as np
 
+    from spyglass.spikesorting.v2._signal_math import merge_sorted_intervals
+
     intervals = np.asarray(intervals)
     if intervals.ndim == 1:
         intervals = intervals.reshape(-1, 2)
@@ -299,19 +301,10 @@ def _consolidate_regular_intervals(
     start_indices = np.clip(start_indices, 0, int(n_samples))
     stop_indices = np.clip(stop_indices, 0, int(n_samples))
 
-    consolidated = []
-    start, stop = int(start_indices[0]), int(stop_indices[0])
-    for next_start, next_stop in zip(start_indices, stop_indices):
-        next_start = int(next_start)
-        next_stop = int(next_stop)
-        if next_start <= stop:
-            stop = max(stop, next_stop)
-        else:
-            consolidated.append((start, stop))
-            start, stop = next_start, next_stop
-
-    consolidated.append((start, stop))
-    return np.asarray(consolidated, dtype=np.int64)
+    consolidated = merge_sorted_intervals(
+        zip(start_indices.tolist(), stop_indices.tolist())
+    )
+    return np.asarray(consolidated, dtype=np.int64).reshape(-1, 2)
 
 
 def _lazy_timestamp_override(
@@ -397,6 +390,7 @@ def restrict_recording_times(recording, valid_times):
     from spyglass.spikesorting.v2._signal_math import (
         base_intervals_and_gaps,
         frames_for_times,
+        merge_sorted_intervals,
     )
 
     intervals = np.asarray(valid_times, dtype=float).reshape(-1, 2)
@@ -424,14 +418,11 @@ def restrict_recording_times(recording, valid_times):
         else:
             starts = frames_for_times(segment, intervals[:, 0])
             stops = frames_for_times(segment, intervals[:, 1], side="right")
-            frames = []
-            for start, stop in zip(starts, stops):
-                if start >= stop:
-                    continue
-                if frames and start <= frames[-1][1]:
-                    frames[-1][1] = max(frames[-1][1], int(stop))
-                else:
-                    frames.append([int(start), int(stop)])
+            frames = merge_sorted_intervals(
+                (start, stop)
+                for start, stop in zip(starts.tolist(), stops.tolist())
+                if start < stop
+            )
         # SI's frame_slice eagerly slices an explicit HDF5 time vector. Slice
         # traces on a lightweight relative clock; the lazy override above is
         # the authoritative original clock passed to the streaming NWB writer.
