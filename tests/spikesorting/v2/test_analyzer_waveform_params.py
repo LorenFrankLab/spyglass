@@ -538,7 +538,7 @@ def test_rebuild_reads_stored_window_never_re_resolves(
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2 import sorting as sorting_module
+    from spyglass.spikesorting.v2 import _sorting_fetch
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting
 
@@ -555,7 +555,7 @@ def test_rebuild_reads_stored_window_never_re_resolves(
         )
 
     monkeypatch.setattr(
-        sorting_module,
+        _sorting_fetch,
         "waveform_params_for_preprocessing",
         _must_not_re_resolve,
     )

@@ -451,6 +451,9 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
         SortingSelection,
     )
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._sorting_fetch import (
+        fetch_unit_electrode_metadata,
+    )
     from spyglass.spikesorting.v2._sorting_units import (
         build_unit_rows_from_analyzer,
     )
@@ -487,8 +490,8 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
     # The per-unit row construction (peak attribution + channel-mismatch guard)
     # is ``_sorting_units.build_unit_rows_from_analyzer`` (run once in
     # make_compute); the Electrode FK / sort group are resolved at fetch time.
-    sort_group_id, electrode_by_id, _region = (
-        Sorting._fetch_unit_electrode_metadata(recording_id, nwb_file_name)
+    sort_group_id, electrode_by_id, _region = fetch_unit_electrode_metadata(
+        recording_id, nwb_file_name
     )
     sorter_row = (
         SortingSelection * SorterParameters & populated_sorting

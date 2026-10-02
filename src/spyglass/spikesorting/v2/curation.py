@@ -2987,7 +2987,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             RecordingSelection,
             SortGroupV2,
         )
-        from spyglass.spikesorting.v2.sorting import Sorting
+        from spyglass.spikesorting.v2 import _sorting_fetch
 
         sorting_id = (cls & key).fetch1("sorting_id")
         source = SortingSelection.resolve_source({"sorting_id": sorting_id})
@@ -2995,7 +2995,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             recording_key = source.key
         else:  # concatenated_recording -> anchor member's sort group
             anchor_recording_id, _nwb, _preproc = (
-                Sorting._resolve_concat_anchor(source.key)
+                _sorting_fetch.resolve_concat_anchor(source.key)
             )
             recording_key = {"recording_id": anchor_recording_id}
         # ``RecordingSelection.fetch1("KEY")`` returns only the UUID PK;
