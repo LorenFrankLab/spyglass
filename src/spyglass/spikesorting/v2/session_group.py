@@ -768,19 +768,15 @@ class ConcatenatedRecording(
             member sample counts (which would misalign the ``MemberBoundary``
             back-mapping).
         """
-        import numpy as np
-
         from spyglass.spikesorting.v2._concat_recording import (
             build_concatenated_recording,
-            concat_continuity,
+            concat_provenance_tables,
+            concat_span_arrays,
             cumulative_member_boundaries,
             mask_member_recordings,
             observation_intervals,
         )
         from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
-        from spyglass.spikesorting.v2._sorting_artifact_mask import (
-            statistics_spans,
-        )
         from spyglass.spikesorting.v2._units_nwb import (
             _base_intervals_from_recording,
         )
@@ -805,18 +801,11 @@ class ConcatenatedRecording(
         # loaded, whose persisted timestamps still carry each member's own
         # gaps; the concatenation below replaces them with one synthetic
         # continuous timeline.
-        continuity = concat_continuity(recordings, member_sample_counts)
-        continuity_spans = np.asarray(continuity.spans, dtype=np.int64).reshape(
-            -1, 2
+        continuity_spans, continuity_start_s, continuity_end_s, statistics = (
+            concat_span_arrays(
+                recordings, member_sample_counts, artifact_ranges
+            )
         )
-        continuity_start_s = np.asarray(continuity.start_s, dtype=np.float64)
-        continuity_end_s = np.asarray(continuity.end_s, dtype=np.float64)
-        statistics = np.asarray(
-            statistics_spans(
-                sum(member_sample_counts), artifact_ranges, continuity.spans
-            ),
-            dtype=np.int64,
-        ).reshape(-1, 2)
         recordings = masked_recordings
 
         concatenated = build_concatenated_recording(recordings)
@@ -847,53 +836,16 @@ class ConcatenatedRecording(
         # Anchor the analysis NWB to the FIRST member's session (deterministic
         # parent, resolved in make_fetch); full multi-session provenance stays
         # queryable through ConcatenatedRecordingSelection -> SessionGroup.Member.
-        # Self-describing provenance: a header and the ordered member map with
-        # per-member frame boundaries, so split_sorting_by_session is
-        # reconstructable from the file alone.
-        from spyglass.spikesorting.v2._nwb_provenance import (
-            CONCAT_MEMBER_COLUMNS,
-            CONCAT_MEMBERS,
-            CONCAT_PROVENANCE,
-            build_long_provenance_table,
-            build_provenance_table,
+        provenance_tables = concat_provenance_tables(
+            concat_recording_id=key["concat_recording_id"],
+            preprocessing_params_name=preprocessing_params_name,
+            anchor_nwb_file_name=anchor_nwb_file_name,
+            member_plan=member_plan,
+            member_sample_counts=member_sample_counts,
+            boundaries=boundaries,
+            artifact_ranges=artifact_ranges,
+            obs_intervals=obs_intervals,
         )
-
-        member_rows = []
-        concat_start = 0
-        for plan, n_samples, cum_end in zip(
-            member_plan, member_sample_counts, boundaries
-        ):
-            member_rows.append(
-                {
-                    "member_index": int(plan["member_index"]),
-                    "recording_id": str(plan["recording_pk"]["recording_id"]),
-                    "nwb_file_name": plan["nwb_file_name"],
-                    "interval_list_name": plan["interval_list_name"],
-                    "artifact_detection_id": plan["artifact_detection_id"]
-                    or "none",
-                    "start_sample": 0,
-                    "end_sample": int(n_samples),
-                    "concat_start_sample": int(concat_start),
-                    "concat_end_sample": int(cum_end),
-                }
-            )
-            concat_start = int(cum_end)
-        provenance_tables = [
-            build_provenance_table(
-                CONCAT_PROVENANCE,
-                {
-                    "concat_recording_id": str(key["concat_recording_id"]),
-                    "preprocessing_params_name": preprocessing_params_name,
-                    "anchor_nwb_file_name": anchor_nwb_file_name,
-                    "n_members": len(member_plan),
-                    "artifact_frame_ranges": artifact_ranges,
-                    "obs_intervals": obs_intervals.tolist(),
-                },
-            ),
-            build_long_provenance_table(
-                CONCAT_MEMBERS, member_rows, CONCAT_MEMBER_COLUMNS
-            ),
-        ]
         analysis_file_name, object_id, content_hash = write_nwb_artifact(
             concatenated,
             anchor_nwb_file_name,

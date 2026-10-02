@@ -726,6 +726,62 @@ def concat_continuity(member_recordings, member_sample_counts):
     return Continuity(spans=spans, start_s=start_s, end_s=end_s)
 
 
+def concat_span_arrays(
+    member_recordings, member_sample_counts, artifact_ranges
+):
+    """Continuity and statistics spans of a concatenation, as stored arrays.
+
+    The continuity spans come from :func:`concat_continuity`, so
+    ``member_recordings`` must be the members as loaded: their persisted
+    timestamps still carry each member's own gaps, which the concatenation
+    replaces with one synthetic timeline. The statistics spans are the
+    artifact-free parts of the continuity spans
+    (:func:`~spyglass.spikesorting.v2._sorting_artifact_mask.statistics_spans`).
+
+    Parameters
+    ----------
+    member_recordings : list[si.BaseRecording]
+        Per-member recordings carrying their real timestamps, ordered by
+        ``member_index``.
+    member_sample_counts : list[int]
+        Per-member sample counts, same order.
+    artifact_ranges : list[tuple[int, int]]
+        Half-open concat frame ranges masked as artifact (from
+        :func:`mask_member_recordings`).
+
+    Returns
+    -------
+    continuity_spans : np.ndarray
+        ``(n, 2)`` int64 half-open concat frame ranges of uninterrupted
+        acquisition, split at every member join and member-internal gap.
+    continuity_start_s, continuity_end_s : np.ndarray
+        ``(n,)`` float64 first / last timestamp of each continuity span on its
+        member's own clock.
+    statistics_spans : np.ndarray
+        ``(m, 2)`` int64 half-open concat frame ranges that are artifact-free
+        and lie inside a single continuity span.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        statistics_spans,
+    )
+
+    continuity = concat_continuity(member_recordings, member_sample_counts)
+    continuity_spans = np.asarray(continuity.spans, dtype=np.int64).reshape(
+        -1, 2
+    )
+    continuity_start_s = np.asarray(continuity.start_s, dtype=np.float64)
+    continuity_end_s = np.asarray(continuity.end_s, dtype=np.float64)
+    statistics = np.asarray(
+        statistics_spans(
+            sum(member_sample_counts), artifact_ranges, continuity.spans
+        ),
+        dtype=np.int64,
+    ).reshape(-1, 2)
+    return continuity_spans, continuity_start_s, continuity_end_s, statistics
+
+
 def observation_intervals(n_samples, sampling_frequency, artifact_ranges):
     """Return kept concat intervals in seconds from ordered half-open ranges."""
     import numpy as np
@@ -741,6 +797,95 @@ def observation_intervals(n_samples, sampling_frequency, artifact_ranges):
     return (
         np.asarray(intervals, dtype=float).reshape(-1, 2) / sampling_frequency
     )
+
+
+def concat_provenance_tables(
+    *,
+    concat_recording_id,
+    preprocessing_params_name: str,
+    anchor_nwb_file_name: str,
+    member_plan: list[dict],
+    member_sample_counts: list[int],
+    boundaries: list[int],
+    artifact_ranges,
+    obs_intervals,
+) -> list:
+    """Provenance tables embedded in the concatenated recording's NWB file.
+
+    Self-describing provenance: a header and the ordered member map with
+    per-member frame boundaries, so ``split_sorting_by_session`` is
+    reconstructable from the file alone.
+
+    Parameters
+    ----------
+    concat_recording_id : uuid.UUID or str
+        The concat being written.
+    preprocessing_params_name : str
+        The members' shared preprocessing recipe.
+    anchor_nwb_file_name : str
+        The first member's NWB file, which parents the analysis file.
+    member_plan : list[dict]
+        Per-member plan dicts from ``make_fetch`` (``member_index``,
+        ``recording_pk``, ``nwb_file_name``, ``interval_list_name``,
+        ``artifact_detection_id``), ordered by ``member_index``.
+    member_sample_counts : list[int]
+        Per-member sample counts, same order.
+    boundaries : list[int]
+        Cumulative member end samples (:func:`cumulative_member_boundaries`).
+    artifact_ranges : list[tuple[int, int]]
+        Half-open concat frame ranges masked as artifact.
+    obs_intervals : np.ndarray
+        ``(n, 2)`` kept intervals on the concat timeline, in seconds.
+
+    Returns
+    -------
+    list
+        The header table and the long member table, in write order.
+    """
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        CONCAT_MEMBER_COLUMNS,
+        CONCAT_MEMBERS,
+        CONCAT_PROVENANCE,
+        build_long_provenance_table,
+        build_provenance_table,
+    )
+
+    member_rows = []
+    concat_start = 0
+    for plan, n_samples, cum_end in zip(
+        member_plan, member_sample_counts, boundaries
+    ):
+        member_rows.append(
+            {
+                "member_index": int(plan["member_index"]),
+                "recording_id": str(plan["recording_pk"]["recording_id"]),
+                "nwb_file_name": plan["nwb_file_name"],
+                "interval_list_name": plan["interval_list_name"],
+                "artifact_detection_id": plan["artifact_detection_id"]
+                or "none",
+                "start_sample": 0,
+                "end_sample": int(n_samples),
+                "concat_start_sample": int(concat_start),
+                "concat_end_sample": int(cum_end),
+            }
+        )
+        concat_start = int(cum_end)
+    return [
+        build_provenance_table(
+            CONCAT_PROVENANCE,
+            {
+                "concat_recording_id": str(concat_recording_id),
+                "preprocessing_params_name": preprocessing_params_name,
+                "anchor_nwb_file_name": anchor_nwb_file_name,
+                "n_members": len(member_plan),
+                "artifact_frame_ranges": artifact_ranges,
+                "obs_intervals": obs_intervals.tolist(),
+            },
+        ),
+        build_long_provenance_table(
+            CONCAT_MEMBERS, member_rows, CONCAT_MEMBER_COLUMNS
+        ),
+    ]
 
 
 def build_concatenated_recording(recordings: list):
