@@ -52,7 +52,8 @@ from spyglass.spikesorting.v2._artifact_compute import (  # noqa: F401
 )
 
 # Artifact-removed interval construction + IntervalList persistence live in a
-# DB-free service module so ``ArtifactDetection`` stays a thin orchestrator.
+# DB-free service module so the artifact-detection tables stay thin
+# orchestrators.
 # The class keeps thin delegators where tests pin the surface
 # (``_detect_artifacts`` / ``_scan_artifact_frames`` are called directly on the
 # class, and ``get_artifact_removed_intervals`` is called on instances).
@@ -88,7 +89,7 @@ schema = dj.schema("spikesorting_v2_artifact")
 
 
 class ArtifactComputed(NamedTuple):
-    """Outputs of :meth:`ArtifactDetection.make_compute`.
+    """Outputs of the artifact-detection tables' ``make_compute``.
 
     ``per_member_nwb_files`` is a tuple of distinct
     ``nwb_file_name`` strings the ``make_insert`` step must write
@@ -121,7 +122,7 @@ class ArtifactDetectionParameters(
 
     ``job_kwargs`` is the optional per-row SpikeInterface job-kwargs blob that
     governs the chunked detection scan
-    (``ArtifactDetection._scan_artifact_frames``). It is merged over the
+    (``_ArtifactDetectionMixin._scan_artifact_frames``). It is merged over the
     SI-global and ``dj.config['custom']
     ['spikesorting_v2_job_kwargs']`` defaults by ``_resolved_job_kwargs``. The
     memory-relevant key is the chunk size -- ``chunk_duration`` (e.g. ``"1s"``,
@@ -219,7 +220,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         A ``SharedArtifactGroup`` is a named bundle of populated
         ``Recording`` rows whose artifact-detection pass should run
         ONCE over the union of channels. The matching
-        ``ArtifactDetection.make_compute`` branch unions the channels
+        ``SharedGroupArtifactDetection.make_compute`` unions the channels
         across all members, runs the same threshold scan as the
         single-recording path, and ``make_insert`` writes one
         ``IntervalList`` row per member ``nwb_file_name`` so each
@@ -591,11 +592,11 @@ class SharedGroupArtifactSelection(
 
     Source-specific split of the former
     ``ArtifactDetectionSelection.SharedGroupSource``. ``member_set_hash``
-    snapshots the group's ordered member ``recording_id`` set at selection
-    time; ``SharedGroupArtifactDetection.make_fetch`` re-derives it from the
-    current members and rejects a drift (the identity is ``{params, group}``
-    only, so a live member edit could otherwise change the scanned set under a
-    fixed ``artifact_detection_id``).
+    snapshots the group's sorted (order-independent) member ``recording_id``
+    set at selection time; ``SharedGroupArtifactDetection.make_fetch``
+    re-derives it from the current members and rejects a drift (the identity
+    is ``{params, group}`` only, so a live member edit could otherwise change
+    the scanned set under a fixed ``artifact_detection_id``).
     """
 
     definition = """
@@ -603,7 +604,7 @@ class SharedGroupArtifactSelection(
     ---
     -> ArtifactDetectionParameters
     -> SharedArtifactGroup
-    member_set_hash: char(64)   # frozen sha256 of the ordered member recording_id set
+    member_set_hash: char(64)   # frozen sha256 of the sorted (order-independent) member recording_id set
     manual_excluded_times=null: longblob # immutable [start, stop) session seconds
     """
 

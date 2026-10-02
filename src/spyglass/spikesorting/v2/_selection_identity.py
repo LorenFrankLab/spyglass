@@ -288,10 +288,10 @@ def shared_group_member_set_hash(recording_ids) -> str:
 
     The sha256 hex digest over the SORTED member ``recording_id`` strings. The
     shared-group artifact identity is ``{params, group_name}`` only, but
-    ``ArtifactDetection.make`` scans the LIVE ``SharedArtifactGroup.Member`` set,
-    so that set could change under a fixed ``artifact_detection_id``. This hash
-    is snapshotted onto ``SharedGroupArtifactSelection`` at
-    selection time; ``make_fetch`` re-derives it from the live members and
+    ``SharedGroupArtifactDetection`` scans the LIVE ``SharedArtifactGroup.Member``
+    set, so that set could change under a fixed ``artifact_detection_id``. This
+    hash is snapshotted onto ``SharedGroupArtifactSelection`` at selection
+    time; ``make_fetch`` re-derives it from the live members and
     rejects a drift. Membership is a SET (order-independent), so the ids are
     sorted before hashing -- a member added or removed changes the digest, a
     re-query in a different row order does not.

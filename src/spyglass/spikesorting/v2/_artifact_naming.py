@@ -1,6 +1,6 @@
 """Artifact-detection ``IntervalList`` naming convention (DB-free).
 
-The artifact-removed ``valid_times`` row an ``ArtifactDetection`` run writes to
+The artifact-removed ``valid_times`` row an artifact-detection run writes to
 ``IntervalList`` is named ``f"artifact_detection_{artifact_detection_id}"``.
 :func:`artifact_detection_interval_list_name` builds that name and
 :func:`parse_artifact_detection_interval_list_name` is its inverse; the

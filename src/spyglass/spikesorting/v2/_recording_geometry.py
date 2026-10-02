@@ -134,7 +134,7 @@ def fetch_sort_group_probe_info(
     the tri-part DeepHash integrity check inside the populate
     transaction can spuriously raise on reorder. This matches the
     ordered-fetch pattern used by the other tri-part ``make_fetch``
-    paths in this package (e.g. ``ArtifactDetection.make_fetch`` in
+    paths in this package (e.g. ``SharedGroupArtifactDetection.make_fetch`` in
     artifact.py, which orders its member fetch by ``recording_id``).
 
     Parameters

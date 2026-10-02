@@ -2993,9 +2993,9 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         The analyzer cache folder is regeneratable scratch resolved from
         ``sorting_id`` (not a DataJoint-tracked column), so a plain
         ``.delete()`` would leave the 5-50 GB folder on disk per row.
-        Mirrors ``ArtifactDetection.delete``'s IntervalList cleanup pattern:
-        snapshot every ``sorting_id`` BEFORE the cascade delete (it can no
-        longer be fetched once the row is gone), call ``super().delete()``,
+        Mirrors the artifact-detection tables' ``delete`` IntervalList cleanup
+        pattern: snapshot every ``sorting_id`` BEFORE the cascade delete (it
+        can no longer be fetched once the row is gone), call ``super().delete()``,
         then ``remove_analyzer_cache`` each (which resolves the path from
         ``sorting_id``, no-ops a missing folder, and surfaces a permission
         error loudly rather than swallowing it).
@@ -3014,7 +3014,7 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ``force_permission`` (``cautious_delete(self, force_permission=False,
         ...)``) and cascade-delete EVERY row of the unrestricted instance --
         destroying each row's 5-50 GB analyzer folder. Mirrors
-        ``ArtifactDetection.delete``'s guard.
+        the artifact-detection tables' ``delete`` guard.
 
         Parameters
         ----------

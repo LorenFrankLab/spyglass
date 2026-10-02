@@ -68,11 +68,11 @@ def assert_shared_group_recordings_aggregatable(
 ) -> None:
     """Re-assert at compute that shared-group members can be channel-aggregated.
 
-    ``ArtifactDetection.make_compute`` unions the member recordings with
-    ``si.aggregate_channels``, which stacks by frame index and so requires every
-    member to share one session, sampling frequency, sample count, dtype, and
+    ``SharedGroupArtifactDetection.make_compute`` unions the member recordings
+    with ``si.aggregate_channels``, which stacks by frame index and so requires
+    every member to share one session, sampling frequency, sample count, dtype, and
     exact timestamp vector. ``SharedArtifactGroup.insert_group`` enforces this at
-    insert, but a direct insert of a ``SharedGroupSource`` part can bypass that
+    insert, but a direct ``SharedGroupArtifactSelection`` insert can bypass that
     check and leave make_compute aggregating an incompatible member set into a
     silently-wrong union. This re-runs the invariants over the already-loaded
     recordings and raises ``SchemaBypassError`` so a bypass fails loudly.
@@ -100,7 +100,8 @@ def assert_shared_group_recordings_aggregatable(
     sessions = set(nwb_file_names)
     if len(sessions) > 1:
         raise SchemaBypassError(
-            "ArtifactDetection.make_compute: shared-group members span "
+            "SharedGroupArtifactDetection.make_compute: shared-group members "
+            "span "
             f"sessions {sorted(sessions)}; a shared artifact pass aggregates "
             "channels within ONE session. The member set was inserted without "
             "SharedArtifactGroup.insert_group (schema bypass)."
@@ -117,7 +118,8 @@ def assert_shared_group_recordings_aggregatable(
 
     def _bypass(rid, detail):
         raise SchemaBypassError(
-            "ArtifactDetection.make_compute: shared-group members are not "
+            "SharedGroupArtifactDetection.make_compute: shared-group members "
+            "are not "
             f"channel-aggregatable -- recording_id={rid!r} {detail} differs "
             f"from anchor recording_id={reference_id!r}. The member set was "
             "inserted without SharedArtifactGroup.insert_group (schema bypass); "

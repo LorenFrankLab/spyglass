@@ -1,13 +1,13 @@
 """DB-free worker kernels for the chunked artifact scan.
 
-These two functions are the pure-compute core of ``ArtifactDetection`` --
+These two functions are the pure-compute core of artifact detection --
 ``_init_artifact_worker`` (per-worker initializer) and
 ``_compute_artifact_chunk`` (per-chunk detector). They depend ONLY on
 ``numpy`` and ``spikeinterface``; they touch no DataJoint schema, table, or
 ``spyglass.common`` import.
 
 Why this lives in its own module rather than in ``artifact.py``:
-``ArtifactDetection._scan_artifact_frames`` runs these via SpikeInterface's
+``_ArtifactDetectionMixin._scan_artifact_frames`` runs these via SpikeInterface's
 ``ChunkRecordingExecutor``, which on a multi-process pool (``n_jobs>1``) spawns
 worker processes. On macOS the start method is ``spawn``, so each worker is a
 fresh interpreter that re-imports the module DEFINING the worker function.

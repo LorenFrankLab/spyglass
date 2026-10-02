@@ -61,8 +61,8 @@ class EmptyArtifactValidTimesError(RuntimeError):
     Masking would zero the entire recording and the sort would run over
     all-zeros, emitting a misleading "zero units" result. Message names the
     ``artifact_detection_id`` and ``recording_id`` and points the caller at
-    re-running ``ArtifactDetection`` with looser thresholds or overriding
-    the artifact selection.
+    re-running ``RecordingArtifactDetection`` with looser thresholds or
+    overriding the artifact selection.
     """
 
 
@@ -89,7 +89,7 @@ class ArtifactFractionExceededError(RuntimeError):
 class InsufficientZScoreChannelsError(ValueError):
     """Raise when z-score artifact detection has too few channels to be useful.
 
-    ``ArtifactDetection``'s z-score detector standardizes ACROSS channels
+    The artifact-detection z-score detector standardizes ACROSS channels
     within each frame, so it is amplitude-sensitive only with >= 3 channels:
     on 1 channel it is identically zero, and on 2 channels it is a constant
     +/-1 for any two distinct values (independent of amplitude). Raised when
@@ -427,9 +427,9 @@ class SharedArtifactGroupMemberDriftError(RuntimeError):
     """Raise when a shared artifact group's member set changed under a fixed id.
 
     The shared-group ``artifact_detection_id`` identity is ``{params,
-    group_name}`` only, but ``ArtifactDetection.make`` scans the LIVE
-    ``SharedArtifactGroup.Member`` set. ``insert_selection`` snapshots the ordered
-    member ``recording_id`` set as
+    group_name}`` only, but ``SharedGroupArtifactDetection`` scans the LIVE
+    ``SharedArtifactGroup.Member`` set. ``insert_selection`` snapshots the sorted
+    (order-independent) member ``recording_id`` set as
     ``SharedGroupArtifactSelection.member_set_hash``; ``make_fetch`` re-derives
     it from the current members and raises this when they disagree -- a member
     was added or removed after the selection was created, so the scanned set no

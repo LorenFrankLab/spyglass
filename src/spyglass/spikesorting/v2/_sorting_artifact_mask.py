@@ -111,7 +111,7 @@ def artifact_frame_ranges(
             f"recording_id={recording_id!r}: the artifact-detection pass kept "
             "zero seconds of the recording. Masking would zero the "
             "entire recording and the sort would run over all-zeros. "
-            "Re-run ArtifactDetection with looser thresholds or "
+            "Re-run RecordingArtifactDetection with looser thresholds or "
             "override the artifact-detection selection."
         )
     if valid_times.ndim != 2 or valid_times.shape[1] != 2:

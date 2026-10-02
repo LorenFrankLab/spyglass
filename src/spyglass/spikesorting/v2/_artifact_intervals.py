@@ -1,6 +1,6 @@
 """Artifact-removed interval construction + IntervalList persistence.
 
-These functions are the interval core behind ``ArtifactDetection``:
+These functions are the interval core behind the artifact-detection tables:
 building the artifact-removed ``valid_times`` from a preprocessed
 recording (``scan_artifact_frames`` -> ``detect_artifacts``), building the
 ``IntervalList`` row contents (``build_artifact_interval_rows``), building
@@ -17,8 +17,8 @@ stays a thin orchestrator (fetch -> compute -> write/delete).
 Why this lives in its own module rather than in ``artifact.py``:
 ``artifact.py`` is a DataJoint *schema* module -- importing it activates
 ``dj.schema(...)`` and the source-part dependencies. The interval
-construction needs none of that at import, so ``ArtifactDetection``
-becomes a thin orchestrator. Same "thin DataJoint shell over pure/IO
+construction needs none of that at import, so the artifact-detection tables
+become thin orchestrators. Same "thin DataJoint shell over pure/IO
 services" direction as ``_artifact_compute`` / ``_selection_identity`` /
 ``_analyzer_cache`` / ``_curation_transforms`` / ``_units_nwb`` /
 ``_sorting_dispatch`` / ``_recording_restriction`` / ``_recording_geometry`` /
@@ -155,7 +155,7 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
     assert_artifact_frame_fraction(
         total_flagged,
         recording.get_num_samples(segment_index=0),
-        context="ArtifactDetection scan: ",
+        context="Artifact-detection scan: ",
     )
     return runs
 
@@ -267,7 +267,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     base_intervals, gap_after = base_intervals_and_gaps(recording, fs)
     if not validated.detect:
         logger.info(
-            "ArtifactDetection: detect=False; returning the recorded "
+            "Artifact detection: detect=False; returning the recorded "
             "window(s) as valid intervals."
         )
         return np.asarray(base_intervals)
@@ -275,7 +275,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # Log the threshold configuration so a population report can
     # audit which detection mode actually fired per row.
     logger.info(
-        "ArtifactDetection: scanning with "
+        "Artifact detection: scanning with "
         f"amplitude_threshold_uv={validated.amplitude_threshold_uv}, "
         f"zscore_threshold={validated.zscore_threshold}, "
         f"proportion_above_threshold={validated.proportion_above_threshold}, "
@@ -298,7 +298,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
             )
 
             raise InsufficientZScoreChannelsError(
-                "ArtifactDetection: zscore_threshold is the only detector on a "
+                "Artifact detection: zscore_threshold is the only detector on a "
                 f"{n_channels}-channel recording{context}, but the cross-channel "
                 "z-score is amplitude-sensitive only with >= 3 channels (on 1 "
                 "channel it is identically zero; on 2 it is a constant +/-1 for "
@@ -307,7 +307,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
                 "groups."
             )
         logger.warning(
-            "ArtifactDetection: zscore_threshold is inert on a "
+            "Artifact detection: zscore_threshold is inert on a "
             f"{n_channels}-channel recording{context} (the cross-channel "
             "z-score is amplitude-insensitive with < 3 channels); only "
             "amplitude_threshold_uv will fire."
@@ -319,7 +319,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     n_required = int(np.ceil(validated.proportion_above_threshold * n_channels))
     if validated.proportion_above_threshold < 1.0 and n_required >= n_channels:
         logger.warning(
-            "ArtifactDetection: proportion_above_threshold="
+            "Artifact detection: proportion_above_threshold="
             f"{validated.proportion_above_threshold} on a {n_channels}-channel "
             f"group rounds up (ceil) to requiring ALL {n_channels} channels"
             f"{context}; the effective threshold is stricter than the nominal "
@@ -346,7 +346,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         # Warn so a downstream consumer noticing "all valid times" can
         # see whether detection was attempted-and-empty vs skipped.
         logger.warning(
-            "ArtifactDetection: scan found zero artifact frames"
+            "Artifact detection: scan found zero artifact frames"
             f"{context} (amplitude_threshold_uv="
             f"{validated.amplitude_threshold_uv}, zscore_threshold="
             f"{validated.zscore_threshold}, proportion_above_threshold="
@@ -504,7 +504,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         # so the operator sees the cause at detection time rather than three
         # stages later as an EmptyArtifactValidTimesError at sort time.
         logger.warning(
-            "ArtifactDetection: after removing artifacts and dropping "
+            "Artifact detection: after removing artifacts and dropping "
             f"intervals shorter than min_length_s={validated.min_length_s}, "
             f"NO valid time remains{context}. The sorter will reject this "
             "recording (EmptyArtifactValidTimesError). Loosen the thresholds "
@@ -616,7 +616,8 @@ def read_artifact_removed_intervals(key, as_dict=False):
     Parameters
     ----------
     key : dict
-        Restriction selecting a single ``ArtifactDetection`` row;
+        Restriction selecting a single artifact-detection row (either
+        ``RecordingArtifactDetection`` or ``SharedGroupArtifactDetection``);
         must include ``artifact_detection_id``.
     as_dict : bool, optional
         If ``False`` (default), the return type depends on the
@@ -709,7 +710,7 @@ def read_recording_artifact_valid_times(
             f"{caller}: artifact-removed intervals for "
             f"nwb_file_name={nwb_file_name!r} not found among "
             f"{sorted(intervals_by_nwb)} for artifact_detection_id="
-            f"{artifact_detection_id!r}; the ArtifactDetection may be "
+            f"{artifact_detection_id!r}; the artifact-detection row may be "
             "partially deleted."
         )
     return intervals_by_nwb[nwb_file_name]
@@ -821,7 +822,7 @@ def remove_artifact_interval_rows(restrictions):
     """Delete the artifact-removed ``IntervalList`` rows for ``restrictions``.
 
     Companion to ``collect_artifact_interval_rows_to_remove``: removes the
-    matching IntervalList rows AFTER the ``ArtifactDetection`` master delete
+    matching IntervalList rows AFTER the artifact-detection master delete
     committed. Skips any restriction that matches nothing.
 
     Parameters
@@ -836,7 +837,7 @@ def remove_artifact_interval_rows(restrictions):
     # ``.delete(safemode=False)`` (IntervalList is a SpyglassMixin, so its
     # ``.delete`` IS the cautious path; safemode=False only suppresses the
     # re-prompt -- the user already passed the same team-permission check on the
-    # parent ArtifactDetection rows above keyed by the same nwb_file_name, so the
+    # parent artifact-detection rows above keyed by the same nwb_file_name, so the
     # IntervalList check is a re-verification, not a bypass). super_delete here
     # would silently delete other users' rows under shared lab sessions.
     for restriction in restrictions:

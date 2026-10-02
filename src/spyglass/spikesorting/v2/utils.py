@@ -701,14 +701,14 @@ def unit_brain_region_df(unit_relation, resolution: str):
 
 @dataclass(frozen=True)
 class SourceResolution:
-    """Result of ``<MasterTable>.resolve_source(key)`` on a source-part master.
+    """Result of ``SortingSelection.resolve_source(key)``.
 
-    Used at the top of ``Sorting.make()`` and ``ArtifactDetection.make()``
-    to dispatch on which source-part row backs the master. ``kind`` is
-    the source enum; ``key`` is the source-row PK fields (e.g.
-    ``{"recording_id": ...}`` or ``{"shared_artifact_group_name": ...}``)
-    so the caller can pass it straight into the upstream table's
-    ``get_*`` / fetch helpers.
+    Used by ``Sorting.make_fetch`` and the sorting / curation / unit-matching
+    readers to dispatch on which source-part row backs a ``SortingSelection``.
+    ``kind`` is the source enum; ``key`` is the source-row PK fields
+    (``{"recording_id": ...}`` or ``{"concat_recording_id": ...}``) so the
+    caller can pass it straight into the upstream table's ``get_*`` / fetch
+    helpers.
     """
 
     kind: Literal[
