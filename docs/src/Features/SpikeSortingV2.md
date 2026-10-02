@@ -130,8 +130,9 @@ coexist under one merge surface.
 - **`DriftEstimate`** -- per-`Recording` probe-motion QC estimate
     (`compute_motion`), populated **on demand**. Stores the displacement field
     plus a `max_abs_displacement_um` summary so high-drift sessions can be
-    flagged. It is **never applied** to the traces or the sort -- drift
-    correction stays deferred to the sorter. See
+    flagged. It is **QC only, never applied** to the traces or the sort; to
+    correct motion, use the
+    [optional motion stage](#optional-motion-correction). See
     [Drift QC](#drift-qc-motion-estimate-never-applied) below.
 - **`RecordingArtifactSelection` / `RecordingArtifactDetection`** and
     **`SharedGroupArtifactSelection` / `SharedGroupArtifactDetection`** --
@@ -1457,9 +1458,9 @@ before.
 
 `DriftEstimate` estimates probe motion (drift) on a materialized `Recording` and
 stores it as a queryable QC artifact. It is **computed, never applied** —
-nothing in the pipeline corrects the traces or the sort with it (drift
-correction stays deferred to the sorter, exactly as without this table). The
-point is to *flag* high-drift sessions, not to change any sort output.
+nothing in the pipeline corrects the traces or the sort with it. The point is
+to *flag* high-drift sessions, not to change any sort output; to correct
+motion, use the [optional motion stage](#optional-motion-correction) below.
 
 It is a `dj.Computed` table populated **on demand** — the expensive estimation
 runs only when you call `.populate()`, never eagerly alongside `Recording`:
@@ -1488,7 +1489,7 @@ cached `Recording` carries probe geometry).
 
 To be explicit: populating `DriftEstimate` leaves the upstream `Recording`
 untouched — its `content_hash` and the traces from `get_recording` are
-unchanged. Applying motion correction is out of scope by design.
+unchanged. `DriftEstimate` itself never applies a correction.
 
 `DriftEstimate` applies **no artifact mask** (it estimates across masked
 samples and acquisition gaps on the recording's real clock) and always uses
@@ -2357,7 +2358,12 @@ Key behaviors and caveats:
     acquisition gap or an artifact exclusion) are split in temporal order into
     two cross-validation halves (UnitMatch's split-half templates), so a unit
     present in only part of a session, or in only one member of a concatenation,
-    is still matchable. A unit with fewer than two such spikes is excluded from
+    is still matchable. Spyglass builds these halves itself, mirroring
+    UnitMatchPy's temporal half-split (first half of a unit's spikes vs the
+    rest), but does not reproduce every upstream UnitMatchPy extraction step:
+    it draws a random rather than evenly spaced spike sample, averages with
+    the mean rather than the median, and applies no Gaussian smoothing.
+    A unit with fewer than two such spikes is excluded from
     the bundle, logged, and left unmatched (it stays in the matchable universe).
     The bundle hands the matcher self-contained directories — never a recording,
     a `SortingAnalyzer`, or a table key. A new backend implements

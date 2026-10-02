@@ -22,8 +22,10 @@
 # 1. **Concatenate same-day recordings and sort them as one** (Part A). When an
 #    animal was recorded in several blocks on the *same day* on the same probe,
 #    sorting the concatenation (rather than each block separately) keeps a unit's
-#    identity consistent across the blocks. Concatenation only makes sense within
-#    a day — there is no shared drift to align across days.
+#    identity consistent across the blocks. Concatenation is intended for
+#    same-day recordings (multi-day concatenation is supported but experimental,
+#    via `allow_multi_day`) and never corrects motion; to follow units across
+#    days, sort each day independently and match them with UnitMatch (Parts B/C).
 # 2. **Match units across sessions via a `SessionGroup`** (Part B). Sort each
 #    session independently, then link the same biological unit across
 #    sessions — typically **across days** — into a *tracked unit*, the basis
@@ -79,7 +81,7 @@ session_group_owner = team_name
 
 # Part A — same-day blocks to concatenate and sort as ONE. Each member is a
 # (session, sort group/shank, interval) tuple, recorded the same day on the same
-# probe. Concatenation requires a single day (allow_multi_day stays False).
+# probe. Same-day is the default (allow_multi_day stays False).
 same_day_members = [
     {
         "nwb_file_name": "day1_block1.nwb",
@@ -133,7 +135,7 @@ LabTeam.insert1(
 #
 # `SessionGroup.create_group` records the members in order and validates them: it
 # rejects a member whose session is not ingested or whose sort group / interval
-# does not exist, and — because concatenation only makes sense within a day —
+# does not exist, and — because concatenation is intended for same-day blocks —
 # leaves `allow_multi_day=False`, so it raises if these members span dates.
 # (Recording dates are derived from each session, never supplied.)
 #
@@ -209,8 +211,9 @@ if run_concat:
 # ## Part B — Match units across sessions
 #
 # The alternative to concatenation is to sort each session **independently** and
-# then match units across them — the right path when sessions are days apart (no
-# shared drift to correct), or when you want each session's units kept distinct
+# then match units across them — the right path when sessions are days apart
+# (multi-day concatenation is supported but experimental, and concatenation
+# never corrects motion), or when you want each session's units kept distinct
 # and simply *linked*. The match group is created with `allow_multi_day=True`.
 
 # ### Group the sessions and sort each one
@@ -401,6 +404,9 @@ if run_daily_match:
     if not daily_plan.ok:
         for problem in daily_plan.errors:
             print("UNRESOLVED:", problem)
+        raise RuntimeError(
+            "Part C plan is not runnable; fix the UNRESOLVED problems above."
+        )
 
     daily_summary = run_v2_unit_match(daily_plan)
     # One input_<i> row per matching input, in chronological order, with its

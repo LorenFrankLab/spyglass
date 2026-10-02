@@ -2412,10 +2412,11 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
     Estimates drift on the cached preprocessed recording with
     SpikeInterface's ``compute_motion`` and stores the displacement field
     plus a one-number severity summary. **Nothing in the pipeline consumes
-    this for correction** -- drift correction stays deferred to the sorter,
-    exactly as without this table. It exists so high-drift sessions can be
+    this for correction.** It exists so high-drift sessions can be
     flagged/queried (``max_abs_displacement_um``) without changing any sort
-    output.
+    output. To correct motion, use the optional motion stage instead
+    (``motion_mode`` on ``run_v2_pipeline``; ``MotionEstimate`` /
+    ``MotionCorrectedRecording`` in :mod:`.motion`).
 
     Populated **on demand**: a ``dj.Computed`` table fills only when the user
     calls ``DriftEstimate.populate(recording_key)``, so the expensive

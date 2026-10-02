@@ -1784,6 +1784,9 @@ def estimate_motion(
     ``run_v2_pipeline`` run in ``"estimate"`` / ``"apply"`` mode on the same
     source and recipe, reuses it.
 
+    Experimental: no motion recipe is validated for a probe. Inspect the
+    saved estimate rather than trusting a corrected sort's improvement.
+
     Parameters
     ----------
     nwb_file_name, sort_group_id, interval_list_name, team_name

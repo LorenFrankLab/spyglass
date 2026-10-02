@@ -453,8 +453,10 @@ receipt.group_key
 #   for you).
 # - Supported workload differences: tetrodes use the
 #   `franklab_tetrode_hippocampus_30khz_ms5_2026_06` preset (same rows as the
-#   probe preset; `probe_type` is informational); polymer probes with drift use
-#   the concat presets in the Cross-Session notebook; clusterless decoding
+#   probe preset; `probe_type` is informational); probes with drift can add the
+#   optional, experimental motion stage (`motion_mode`; see "Optional motion
+#   correction" in `docs/src/Features/SpikeSortingV2.md`), and same-day blocks
+#   can be concatenated in the Cross-Session notebook; clusterless decoding
 #   features run the `clusterless_thresholder` preset (see Presets) and hand
 #   the root curation's `merge_id` to `UnitWaveformFeatures` -- there is no
 #   unit selection step because the thresholder yields one "unit" per channel
