@@ -7,7 +7,7 @@ Covers:
   ``from m import X`` or ``import m; m.X`` -- while a bare
   ``import m`` (no attribute access) still succeeds, and dunder probes
   by the import machinery do NOT leak into the error message.
-- ``CHANGELOG.md`` carries the v1->v2 breaking-changes section.
+- The v1->v2 migration guide covers each migration category.
 
 These tests need no DataJoint server: importing a v2 submodule triggers
 the package ``__init__`` (SpikeInterface import only) but never opens a
@@ -114,16 +114,20 @@ def test_stub_module_from_import_does_not_leak_dunder_in_message(module_path):
 
 
 def _repo_root() -> Path:
-    # tests/spikesorting/v2/test_migration_phase7.py -> repo root
+    # tests/spikesorting/v2/test_legacy_stub_imports.py -> repo root
     return Path(__file__).resolve().parents[3]
 
 
-def test_changelog_contains_v2_breaking_section():
-    """CHANGELOG carries the v2 breaking section with each category."""
-    changelog = (_repo_root() / "CHANGELOG.md").read_text()
-    lower = changelog.lower()
-    # The section exists and is anchored under a v2 breaking-changes heading.
-    assert "breaking changes" in lower
+def test_migration_guide_covers_v1_to_v2_categories():
+    """The v1->v2 migration guide names each migration category."""
+    guide = (
+        _repo_root()
+        / "docs"
+        / "src"
+        / "Features"
+        / "SpikeSortingV2_Migration.md"
+    ).read_text()
+    lower = guide.lower()
     # One loose marker per migration category (substring, not exact text).
     for marker in (
         "sorter_param_name",  # API renames
@@ -136,4 +140,4 @@ def test_changelog_contains_v2_breaking_section():
         "metriccuration",  # removed v1 features
         "spikesorting_artifact_detection_v2",  # tags
     ):
-        assert marker in lower, f"missing CHANGELOG marker: {marker!r}"
+        assert marker in lower, f"missing migration-guide marker: {marker!r}"

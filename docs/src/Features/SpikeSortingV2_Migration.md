@@ -1,10 +1,9 @@
 # Spike Sorting v1 → v2 Migration Guide
 
 A short, task-oriented guide for notebook users porting a v1 spike-sorting
-workflow to `spyglass.spikesorting.v2`. For the exhaustive, source-linked list
-of every breaking change, see the [CHANGELOG](../CHANGELOG.md) "Spike Sorting v2
-— v1→v2 migration reference" subsection; this page covers the deltas you
-actually touch in a notebook. For the pipeline overview, see
+workflow to `spyglass.spikesorting.v2`. It covers the deltas you actually
+touch in a notebook; for changes to existing v0/v1 behavior, see the
+[CHANGELOG](../CHANGELOG.md). For the pipeline overview, see
 [Spike Sorting v2](./SpikeSortingV2.md).
 
 ## Choosing v1 or v2
@@ -16,10 +15,13 @@ v2 also adds same-day concatenate-and-sort, cross-session unit matching,
 content-addressed identity, and hash-verifiable recompute.
 
 Keep using **v1** for **existing v1 sorts**: they stay queryable through the v1
-tables, and active v1 *runtime* workflows (populating `Waveforms` /
-`MetricCuration` / `BurstPair`, v1 `ArtifactDetection`) require the legacy
-SpikeInterface 0.99 Spyglass environment — calling them under SI 0.104 raises a
-clear `RuntimeError`. v2 does not auto-migrate v1 rows, and there is no one-shot
+tables. Producing new v0/v1 output requires the legacy SpikeInterface 0.99
+Spyglass environment. These entry points raise a clear `RuntimeError` under SI
+0.104: v0 `ArtifactDetection` / `Waveforms` / `QualityMetrics` / `BurstPair`
+populate; v1 `ArtifactDetection` / `MetricCuration` / `BurstPair` populate and
+`MetricCuration.get_waveforms` when it must extract waveforms; clusterless
+`UnitMarks` and `UnitWaveformFeatures` for v0/v1 sorts; and loading a
+Zarr-format waveform folder. v2 does not auto-migrate v1 rows, and there is no one-shot
 "convert a `CurationV1` row to `CurationV2`" tool, so a v1 sort you want under
 v2 is re-run through `run_v2_pipeline` from its selection.
 
@@ -105,13 +107,17 @@ The schema changes covered here are:
   targets `ArtifactDetectionOutput`; the script remaps the old references.
 - New review-profile, typed annotation, and `SortedSpikesGroup.UnitSelection`
   tables/parts are declared on import.
-- `ConcatenatedRecording.statistics_spans`: `NOT NULL`, no default. Adding it
-  to a table that still has rows raises a MySQL "doesn't have a default
-  value" error (1364), so the recreation sequence below deletes
-  `ConcatenatedRecordingSelection` (which cascades to `ConcatenatedRecording`)
-  **before** altering this table, not after — see "Finally, recreate every
-  v2 `Recording` row and artifact" below. Noise, whitening, and the
-  nn-noise cluster now read this column for every concat-backed sort.
+- The concatenation tables are redeclared. Concatenation no longer applies
+  motion correction, so `ConcatenatedRecording` loses its `motion_preset`
+  column and its foreign key to the removed `MotionCorrectionParameters` table
+  in `spikesorting_v2_session_group`, and `concat_recording_id` values change.
+  It gains `statistics_spans` (`NOT NULL`, no default; noise, whitening, and the
+  nn-noise cluster read it for every concat-backed sort) and the
+  `continuity_spans` / `continuity_start_s` / `continuity_end_s` columns.
+  `alter()` cannot remove a foreign key and `drop()` refuses to drop a part
+  table alone, so the recreation sequence below deletes the concat selections
+  and drops the emptied tables for redeclaration — see "Finally, recreate
+  every v2 `Recording` row and artifact" below.
 
 Run the following in order in the development environment, reviewing DataJoint's
 proposed DDL. In particular, assign distinct UUIDs **before** the final curation
@@ -170,9 +176,8 @@ for table in (
     CurationEvaluationSelection,  # old evaluations retain observation_version=0
     RecordingArtifactSelection,  # nullable manual_excluded_times
     SharedGroupArtifactSelection,  # nullable manual_excluded_times
-    # ConcatenatedRecording.statistics_spans is NOT NULL with no default, so
-    # it cannot go in this loop while rows still exist; it is altered below,
-    # after ConcatenatedRecordingSelection().delete() empties the table --
+    # The concat tables are not altered here: they are dropped and redeclared
+    # below, after ConcatenatedRecordingSelection().delete() empties them --
     # see "Finally, recreate every v2 Recording row and artifact".
 ):
     table().alter(context=table.declaration_context)
@@ -258,8 +263,8 @@ This same recreation is also what gives every sort correct, artifact-aware
 noise and whitening: a fresh `Sorting.populate()` computes and persists the
 sort's **statistics spans** (the artifact-free frame ranges its noise,
 whitening, and nn-noise-cluster estimates now read from), and a fresh
-`ConcatenatedRecordingSelection.insert_selection(...)` (after the delete and
-alter below) computes and persists the analogous concat-frame spans. In
+`ConcatenatedRecordingSelection.insert_selection(...)` (after the drop and
+redeclaration below) computes and persists the analogous concat-frame spans. In
 dependency order: `Recording` rows, then `ConcatenatedRecording` rows (for
 any concatenated session group), then the sort/curation pipeline, then
 evaluations. A sort or an evaluation selection you do **not** recreate is
@@ -270,21 +275,52 @@ evaluation selection stamped with the prior `observation_version` raises,
 asking you to recreate it via `insert_selection`.
 
 ```python
+import datajoint as dj
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+from spyglass.spikesorting.v2.curation import CurationV2
+from spyglass.spikesorting.v2.motion import MotionEstimateSelection
 from spyglass.spikesorting.v2.recording import Recording
 from spyglass.spikesorting.v2.session_group import (
     ConcatenatedRecording,
     ConcatenatedRecordingSelection,
 )
+from spyglass.spikesorting.v2.sorting import SortingSelection
+
+# Trial deployments registered concat-backed CurationV2 rows in
+# SpikeSortingOutput on a synthetic timeline. Inspect, then remove them.
+for row in CurationV2.audit_concat_merge_rows():
+    (SpikeSortingOutput & {"merge_id": row["merge_id"]}).super_delete(
+        warn=False
+    )
 
 # Both deletes cascade; inspect the preview before confirming each one. The
 # concat selections go too, because a frozen member set cannot be
-# re-snapshotted in place.
+# re-snapshotted in place. The cascade includes any MotionEstimate /
+# MotionCorrectedRecording rows (and files) on those concats.
 ConcatenatedRecordingSelection().delete()
-# statistics_spans is NOT NULL with no default: alter() only succeeds once
-# the table has no rows to violate that constraint, which the delete above
-# just guaranteed.
-ConcatenatedRecording().alter(context=ConcatenatedRecording.declaration_context)
 Recording().delete()
+# Drop the emptied concat tables leaves-first. A table that was never
+# declared on this database is skipped.
+for name in (
+    # Declared with the motion schema, which importing
+    # spyglass.spikesorting.v2.sorting declares; it references
+    # ConcatenatedRecording, so it must go first.
+    MotionEstimateSelection.ConcatenatedRecordingSource.full_table_name,
+    SortingSelection.ConcatenatedRecordingSource.full_table_name,
+    ConcatenatedRecording.MemberBoundary.full_table_name,
+    ConcatenatedRecording.full_table_name,
+    ConcatenatedRecordingSelection.MemberSnapshot.full_table_name,
+    ConcatenatedRecordingSelection.full_table_name,
+    "`spikesorting_v2_session_group`.`#motion_correction_parameters`",
+):
+    dj.FreeTable(dj.conn(), name).drop_quick()
+```
+
+Then, in a new Python session, which redeclares the concat tables on import:
+
+```python
+import spyglass.spikesorting.v2.sorting  # noqa F401
+from spyglass.spikesorting.v2.recording import Recording
 
 Recording.populate()  # recompute every remaining selection's artifact
 # Then re-run the sort/curation pipeline, and re-run
@@ -417,6 +453,15 @@ TrackedUnit = unit_matching_module.TrackedUnit
     the selection policy either.
 
 ## 1. What you call differently
+
+- **Renamed fields and tags.** `SpikeSorterParameters.sorter_param_name` is
+    `SorterParameters.sorter_params_name` in v2, so a v1 restriction
+    `{"sorter_param_name": ...}` matches nothing on v2 tables. Artifact
+    `IntervalList` rows are tagged `pipeline="spikesorting_artifact_detection_v2"`
+    (v1: `spikesorting_artifact_v1`). The artifact amplitude threshold is
+    `amplitude_threshold_uv` (default 500), compared against gain- and
+    offset-scaled microvolt traces; v1's `amplitude_thresh_uV` defaulted to
+    3000.
 
 - **Parameter rows are named differently — no back-compat aliases.** The June
     2026 catalog correction renames every Frank-lab row to a dated,
@@ -674,8 +719,7 @@ surface that stays v1-only is the stored per-pair burst metrics
 ## 5. What v1↔v2 comparisons WILL show
 
 If you compare v1 and v2 outputs on the same input, expect these **intentional,
-correct** differences (each is documented in the [CHANGELOG](../CHANGELOG.md) v2
-breaking-changes subsection):
+correct** differences:
 
 - **v2 bandpass-filters BEFORE referencing** (v1 referenced first). The
     *reasoning*: the spatial common reference should be estimated from the
@@ -732,11 +776,8 @@ that can layer on top of either a single-session `Recording` or a
 `ConcatenatedRecording`; if you apply it to a concat, its estimate/correction
 reads the same masks. Old concat materializations cannot satisfy the new
 selection; follow the
-[preproduction database sequence](#upgrading-a-preproduction-v2-database) and
-rerun them, then, if the database still has a pre-motion-removal
-`ConcatenatedRecording` heading (a `motion_preset` column), follow the
-CHANGELOG's separate "Spike Sorting v2: optional motion correction" recreation
-sequence to drop and redeclare the concat tables. Raw SI duration metrics
+[preproduction database sequence](#upgrading-a-preproduction-v2-database),
+which drops and redeclares the concat tables, and rerun them. Raw SI duration metrics
 retain SI definitions. V2 `observed_*` metrics and
 sorted-spikes decoding through populations with observation snapshots honor
 usable time; legacy populations without snapshots report unknown coverage.

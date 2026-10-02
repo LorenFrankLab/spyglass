@@ -1884,7 +1884,8 @@ def assert_concat_schema_current(*heading_names) -> None:
             "motion correction moved out of concatenation, so a cached concat "
             "artifact may already be motion corrected and must not be "
             "estimated or corrected again. Recreate the v2 concat tables as "
-            "the CHANGELOG describes, then re-populate them."
+            "the 'Upgrading a preproduction v2 database' section of the Spike "
+            "Sorting v2 migration guide describes, then re-populate them."
         )
 
 

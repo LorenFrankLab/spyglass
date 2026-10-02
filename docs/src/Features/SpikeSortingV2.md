@@ -1899,6 +1899,40 @@ experimental. `dredge_v1` and
 (insert a `MotionEstimationParameters` row naming it explicitly) so it can
 still be compared, but ships with no default row.
 
+#### Reproducing the old concat `rigid_fast` correction
+
+Concatenation used to apply SpikeInterface's `rigid_fast` preset with
+`remove_channels` interpolation automatically. It no longer corrects motion. To
+reproduce that correction anyway, insert a `rigid_fast` estimation row, combine
+it with the shipped `kriging_remove_channels_v1` interpolation row in a new
+`MotionCorrectionParameters` row, and run the motion stage with
+`motion_mode="apply"`:
+
+```python
+from spyglass.spikesorting.v2.motion import (
+    MotionCorrectionParameters,
+    MotionEstimationParameters,
+    MotionInterpolationParameters,
+)
+
+MotionInterpolationParameters.insert_default()  # ships kriging_remove_channels_v1
+MotionEstimationParameters.insert1(
+    {
+        "motion_estimation_params_name": "rigid_fast_v1",
+        "params": {"preset": "rigid_fast", "max_gap_s": 30.0},
+    }
+)
+MotionCorrectionParameters.insert1(
+    {
+        "motion_correction_params_name": "rigid_fast_v1",
+        "motion_estimation_params_name": "rigid_fast_v1",
+        "motion_interpolation_params_name": "kriging_remove_channels_v1",
+    }
+)
+# run_v2_pipeline(..., motion_mode="apply",
+#                 motion_correction_params_name="rigid_fast_v1")
+```
+
 ### Chronic same-day recordings
 
 When a chronic implant is recorded across several files on the **same day**
@@ -2659,8 +2693,7 @@ use:
     Recording, the artifact-detection tables, and Sorting; v1's pattern applied
     only on the sorter call).
 
-v2 also matches v1 behavior on a long list of points; see the v0.5.6 CHANGELOG
-for the full list. Key user-visible items:
+v2 also matches v1 behavior on many points. Key user-visible items:
 
 - The `CurationV2.MergeGroup` part table records every merge group's
     `(kept_unit_id, contributor_unit_id)` rows (contributor ids are validated

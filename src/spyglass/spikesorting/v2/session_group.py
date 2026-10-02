@@ -531,8 +531,9 @@ class ConcatenatedRecordingSelection(
                 "takes motion_correction_params_name: concatenation never "
                 "corrects motion. Select the concat without it, then run the "
                 "motion stage on the resulting concat (run_v2_pipeline(..., "
-                'motion_mode="apply", motion_correction_params_name=...)); the '
-                "CHANGELOG describes how to reproduce the old rigid_fast "
+                'motion_mode="apply", motion_correction_params_name=...)). '
+                'The "Reproducing the old concat rigid_fast correction" section '
+                "of the Spike Sorting v2 docs shows how to reproduce the old "
                 "correction."
             )
         extra = sorted(
