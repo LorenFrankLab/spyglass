@@ -647,8 +647,8 @@ class Merge(ExportMixin, dj.Manual):
         if not parent_attrs:
             # Pure master-column (merge_id / source) or un-introspectable
             # (True / str) restriction: the per-source ``merge_restrict_class``
-            # fetch reproduces the single-source path every merge master uses
-            # today. (Source discovery here applies the full master-column
+            # fetch reproduces the single-source path every merge master
+            # uses. (Source discovery here applies the full master-column
             # ``restriction`` rather than only its ``merge_id`` component, so a
             # ``{"source": X}`` restriction resolves to that one source instead
             # of all of them.)

@@ -114,8 +114,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
     class UnitSelection(SpyglassMixinPart):
         """Frozen membership, including an explicitly empty selection.
 
-        Groups without these rows continue to evaluate UnitSelectionParams
-        against their NWB columns. A snapshot records the decision made at
+        Groups without these rows evaluate UnitSelectionParams against their
+        NWB columns each time spikes are fetched. A snapshot records the decision made at
         group creation, so later recipe edits cannot change a population.
         """
 
@@ -454,8 +454,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 # those labels, so running the filter under pytest would empty
                 # the group and break ``test_fetch_data`` / sorted-spikes
                 # decoding (np.concatenate on []). Filtering is exercised
-                # directly via ``test_filter_units`` instead. Removing this
-                # guard reproduces the PR #1209 regression it was added to fix.
+                # directly via ``test_filter_units`` instead. The guard was
+                # added for this reason in PR #1209.
                 if group_col is not None:
                     if not test_mode:
                         include_unit &= SortedSpikesGroup.filter_units(
@@ -532,8 +532,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
     def get_observation_intervals(cls, key, *, unit_ids=None):
         """Common usable time for the frozen population, in session seconds.
 
-        Only selected units contribute restrictions. Legacy members without an
-        observation snapshot retain their behavior and are listed as unknown.
+        Only selected units contribute restrictions. Members without an
+        observation snapshot contribute no restriction and are listed as
+        unknown.
         Pass identities from ``fetch_spike_data(return_unit_ids=True)`` when
         already loaded, to avoid reading legacy spike data a second time.
         """

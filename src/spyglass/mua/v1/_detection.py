@@ -5,9 +5,10 @@ is contiguous evidence. A group whose units were not observed for the whole
 time axis carries NaN in those bins, and handing that straight to the
 detector corrupts the result twice over: `gaussian_smooth` (truncate=8)
 spreads each NaN bin over +/- 8 sigma of the smoothed rate, and the
-z-score's `nan_policy="omit"` then renormalizes over whatever survived. In
-a reproduction, a 380 ms unobserved interval erased both bursts beside it
-and two background fluctuations were reported as events in their place.
+z-score's `nan_policy="omit"` then renormalizes over whatever survived. On
+synthetic data with two bursts straddling a 380 ms unobserved interval, the
+detector erased both bursts and reported two background fluctuations as
+events in their place.
 
 The functions here run the detector's own steps over each contiguous
 observed run instead, sharing one normalization across all observed

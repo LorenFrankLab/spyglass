@@ -376,8 +376,8 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         )
 
         # Single DB query for every (merge_id, unit_id) selection up
-        # front, then group in memory. Per-merge-id ``self.fetch`` in
-        # the loop was an N+1 against ``UnitAnnotation``.
+        # front, then group in memory, rather than one ``self.fetch`` per
+        # merge id inside the loop.
         annotation_rows = (self).fetch(
             "spikesorting_merge_id", "unit_id", as_dict=True
         )

@@ -139,8 +139,8 @@ if ConcatMemberCuration is not None:
     source_class_dict["ConcatMemberCuration"] = ConcatMemberCuration
 
 # Sources whose curated NWB stores the per-unit spans its units were observed
-# over. Every other source predates that snapshot: its coverage is unknown, so
-# no NWB is opened for it and it is reported rather than silently restricting.
+# over. Other sources do not store it: their coverage is unknown, so no NWB
+# is opened for them and they are reported rather than silently restricting.
 OBSERVED_INTERVAL_SOURCES = frozenset({"CurationV2", "ConcatMemberCuration"})
 
 
@@ -531,9 +531,8 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         session; validate it at group creation so wall-clock spikes from one
         member cannot be inserted into another member's group.
 
-        Other source generations retain their existing behavior because their
-        source tables do not expose one uniform session FK through this merge
-        table.
+        Other sources are not checked because their source tables do not
+        expose one uniform session FK through this merge table.
         """
         if ConcatMemberCuration is None:
             return
@@ -643,8 +642,8 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         into ``multi_source=True`` and cannot rely on ``fetch_nwb``'s raise.
         Without this the opt-in would make a restriction that accidentally
         spans v0/v1/v2 -- different pipelines producing different units --
-        concatenate with no signal at all, where before the raise landed such a
-        fetch merely warned. Warns over exactly the merges consumed.
+        concatenate with no signal at all. Warns over exactly the merges
+        consumed.
         """
         if len(merge_ids) < 2:
             return
@@ -741,9 +740,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         Each contributing merge restricts the population: the result is the
         intersection of the spans its selected units were observed over. Only
         sources that store those spans (``OBSERVED_INTERVAL_SOURCES``)
-        contribute a restriction; every other source keeps its historic
-        behavior of restricting nothing and is named in ``unknown_sources``,
-        rather than being silently treated as observed throughout.
+        contribute a restriction; every other source restricts nothing and
+        is named in ``unknown_sources``, rather than being silently treated as
+        observed throughout.
 
         Parameters
         ----------

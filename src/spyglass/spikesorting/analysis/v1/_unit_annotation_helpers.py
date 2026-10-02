@@ -18,9 +18,9 @@ def spikes_for_requested_units(
     non-contiguous id sets that v2 and merge-applied v0/v1 curations produce (a
     v1 merge assigns ``max(ids)+1`` and drops constituents). This looks each
     requested id up in the true-id -> spike-times map and raises an actionable
-    error -- naming the valid ids and the positional->true-id change -- instead
-    of a bare ``KeyError`` when a row written under the older positional contract
-    misses on such a curation.
+    error -- naming the valid ids and explaining that ``unit_id`` is a true id,
+    not a position -- instead of a bare ``KeyError`` when a row written under
+    the older positional contract misses on such a curation.
 
     Parameters
     ----------

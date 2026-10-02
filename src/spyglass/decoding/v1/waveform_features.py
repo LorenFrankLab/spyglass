@@ -57,8 +57,8 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
     sources, which expose a ``spike_locations`` extension. Legacy v0/v1
     ``WaveformExtractor`` sources support only ``amplitude`` / ``full_waveform``;
     requesting ``spike_location`` for one raises a clear ``NotImplementedError``
-    (the SI <0.101 ``compute_spike_locations(WaveformExtractor)`` call it used is
-    gone under SI 0.104). Use the ``"amplitude"`` row for legacy sources.
+    (SpikeInterface 0.104 computes spike locations only from a
+    ``SortingAnalyzer``). Use the ``"amplitude"`` row for legacy sources.
     """
 
     definition = """
@@ -363,8 +363,8 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         max_spikes_per_unit = params.pop("max_spikes_per_unit", None)
         # Clusterless decoding needs EVERY spike's waveform aligned 1:1 with
         # spike_times. A finite max_spikes_per_unit would subsample, breaking
-        # that alignment -- and previously did all the analyzer work only to
-        # fail at the write-time 1:1 check. Fail fast with an actionable error.
+        # that alignment. Reject it here with an actionable error rather than
+        # after the full analyzer build, at the write-time 1:1 check.
         if max_spikes_per_unit is not None:
             raise ValueError(
                 "WaveformFeaturesParams['waveform_extraction_params']"
@@ -454,7 +454,7 @@ def _build_clusterless_waveform_accessor(
     ``waveforms.npy`` through a memmap (``mode="memmap", copy=False``). The
     zarr format is disk-backed only at rest -- ``ComputeWaveforms._run``
     extracts into shared memory and then copies the whole array into RAM
-    before writing -- so it bounded nothing. The accessor holds the
+    before writing -- so it would not bound memory. The accessor holds the
     TemporaryDirectory so it survives feature extraction and is removed when
     the accessor is collected.
     """
@@ -630,13 +630,10 @@ def _get_spike_locations(
     """Returns per-spike locations in 2D or 3D space, shape (n_spikes, 2 or 3).
 
     For v2 sources this reads the SortingAnalyzer's ``spike_locations``
-    extension via the accessor's ``get_spike_locations``. The legacy v0/v1
-    ``WaveformExtractor`` path (SI < 0.101) has no such accessor and is no
-    longer supported under SI 0.104 -- the old
-    ``si.postprocessing.compute_spike_locations(waveform_extractor)`` call was
-    doubly broken (``si.postprocessing`` is not bound on a plain ``import
-    spikeinterface as si``, and 0.104 takes a ``SortingAnalyzer``, not a
-    ``WaveformExtractor``).
+    extension via the accessor's ``get_spike_locations``. A legacy v0/v1
+    ``WaveformExtractor`` has no such accessor and is not supported:
+    SpikeInterface 0.104's ``compute_spike_locations`` takes a
+    ``SortingAnalyzer``, not a ``WaveformExtractor``.
 
     Parameters
     ----------
@@ -700,8 +697,8 @@ def _write_waveform_features_to_nwb(
     # independent reads of the same sort. Clusterless decoding requires them
     # 1:1 per unit; a mismatch (a border spike dropped during frame
     # conversion, or ``max_spikes_per_unit`` subsampling) would silently write
-    # misaligned marks. Fail loud here. Scoped to the v2 adapter so the
-    # legacy v0/v1 WaveformExtractor path keeps its exact prior behavior.
+    # misaligned marks. Fail loud here. Scoped to the v2 adapter; the
+    # legacy v0/v1 WaveformExtractor path does not run this check.
     if (
         isinstance(waveforms, _AnalyzerWaveformAccessor)
         and waveform_features is not None

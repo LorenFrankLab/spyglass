@@ -489,12 +489,11 @@ class AbstractGraph(ABC):
             # ``contributor_unit_id``) -- cannot be projected onto the bridged
             # table without renaming onto an already-present attribute, in
             # either ``attr_map`` orientation (the reverse above only swaps when
-            # the sources are absent, which they are not here). Before #1610
-            # such an edge was skipped once its node had been visited; #1610
-            # removed that skip, so the edge is now re-bridged and the rename
-            # clash aborts the whole cascade. Restore the prior behavior for
-            # this irreconcilable case only: skip just this edge (other paths to
-            # the node still restrict it) instead of failing the export.
+            # the sources are absent, which they are not here). Edges are
+            # re-bridged even when their node was already visited (#1610), so
+            # the rename clash would abort the whole cascade. For this
+            # irreconcilable case only, skip just this edge (other paths to the
+            # node still restrict it) instead of failing the export.
             if "already exists" not in str(err):
                 raise
             self._log_truncate(

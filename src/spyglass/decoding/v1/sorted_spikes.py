@@ -173,8 +173,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         effective_decoding = observation.restrict(decoding_interval)
         decoding_interval = effective_decoding.copy()
         if observation.intervals is not None:
-            # The decoder's existing interval interface is closed. Convert
-            # half-open exposure stops without changing the original timeline.
+            # The decoder treats intervals as closed. Convert half-open
+            # observation stops without changing the original timeline.
             decoding_interval[:, 1] = np.nextafter(
                 decoding_interval[:, 1], -np.inf
             )

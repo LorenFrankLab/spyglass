@@ -14,7 +14,8 @@ The guard is intentionally narrow:
 
 - Read-only / query paths that do not invoke removed APIs continue to work and
   are not guarded. Renamed loading and ``NumpySorting`` APIs are routed through
-  ``spyglass.spikesorting._si_compat`` so those paths work under both pins.
+  ``spyglass.spikesorting._si_compat`` so those paths work under both
+  SpikeInterface 0.99 and 0.101+.
 - v0/v1 schemas are unchanged; ``SpikeSortingOutput`` merge queries on existing
   rows keep functioning.
 - Modern (v2) spike-sorting code is unaffected.
@@ -32,11 +33,12 @@ _LEGACY_BOUNDARY = Version("0.101")
 
 
 def _legacy_runtime_message(component: str) -> str:
-    """Compose the prescribed legacy-environment error message."""
+    """Compose the error message raised by the legacy-environment guard."""
     return (
         f"{component} requires the legacy SpikeInterface 0.99 environment. "
         "Existing v0/v1 rows, and their saved recordings, sortings, and "
-        "binary-folder waveforms, remain readable under the new pin; "
+        "binary-folder waveforms, remain readable under SpikeInterface "
+        "0.101 and later; "
         "computing new v0/v1 waveforms, quality metrics, artifact detection, "
         "burst curation, and clusterless features is not. "
         "To continue this workflow: "
