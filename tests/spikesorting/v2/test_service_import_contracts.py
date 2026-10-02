@@ -28,6 +28,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_curation_routing",
     "_curation_transforms",
     "_enums",
+    "_evaluation_acceptance",
     "_figpack_curation",
     "_lookup_validation",
     "_metric_curation",

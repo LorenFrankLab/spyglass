@@ -34,7 +34,11 @@ from typing import NamedTuple
 import datajoint as dj
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.spikesorting.v2 import _metric_curation, _metric_curation_fetch
+from spyglass.spikesorting.v2 import (
+    _evaluation_acceptance,
+    _metric_curation,
+    _metric_curation_fetch,
+)
 from spyglass.spikesorting.v2._metric_curation import (
     _requested_pc_metrics,
     rules_payloads_match,
@@ -1241,63 +1245,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
     # ---- acceptance helpers (evaluation outputs -> committed curation) ----
 
-    def _evaluated_curation_key(self, key) -> dict:
-        """Resolve a CurationEvaluation key to its evaluated curation key.
-
-        Requires the ``CurationEvaluation`` row to be POPULATED, not merely
-        selected. Acceptance writes ``curation_source='curation_evaluation'``
-        children, so the workflow contract is "evaluate, THEN accept": minting
-        an evaluation-sourced child from a bare selection (no computed
-        metrics/proposals) would be a provenance lie. The check holds even when
-        labels / merge groups are supplied explicitly -- the provenance tag
-        claims an evaluation backs the child regardless of how the merges/labels
-        were chosen.
-        """
-        if not (CurationEvaluation & key):
-            raise ValueError(
-                "CurationEvaluation acceptance requires a POPULATED evaluation "
-                f"(curation_source='curation_evaluation'); no CurationEvaluation "
-                f"row for {dict(key)}. Call CurationEvaluation.populate(key) "
-                "before accepting (accept_evaluation_outputs / accept_merges / "
-                "preview_merges / use_evaluation_labels / ...)."
-            )
-        sel = (CurationEvaluationSelection & key).fetch1()
-        return {
-            "sorting_id": sel["sorting_id"],
-            "curation_id": int(sel["curation_id"]),
-        }
-
-    def _resolve_accepted_merges(
-        self, key, merge_groups, use_all_suggested_merges
-    ) -> list[list[int]]:
-        """Resolve the merge groups to accept (explicit, all-suggested, none).
-
-        Never applies all suggested merges implicitly: the caller must pass an
-        explicit ``merge_groups`` OR ``use_all_suggested_merges=True``.
-
-        CALLER-SUPPLIED ``merge_groups`` are returned VERBATIM (only coerced to
-        ints) -- they are NOT silently filtered, so a singleton/empty group
-        reaches ``CurationV2.insert_curation``'s >=2-member typo guard and
-        raises instead of degrading into a labels-only child. Only the PERSISTED
-        suggestions (``use_all_suggested_merges``) are filtered to the real
-        (>=2-member) groups, since the stored suggestion set is not a caller
-        typo. All ids are in the evaluated curation's own unit namespace.
-        """
-        if merge_groups is not None and use_all_suggested_merges:
-            raise ValueError(
-                "CurationEvaluation acceptance: pass either merge_groups or "
-                "use_all_suggested_merges=True, not both."
-            )
-        if use_all_suggested_merges:
-            return [
-                [int(u) for u in group]
-                for group in self.get_suggested_merge_groups(key)
-                if len(group) >= 2
-            ]
-        if merge_groups is not None:
-            return [[int(u) for u in group] for group in merge_groups]
-        return []
-
     def accept_evaluation_outputs(
         self,
         key,
@@ -1373,50 +1320,18 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         dict
             ``{"sorting_id", "curation_id"}`` of the committed child curation.
         """
-        curation_key = self._evaluated_curation_key(key)
-        accepted = self._resolve_accepted_merges(
-            key, merge_groups, use_all_suggested_merges
-        )
-        effective_labels = self.get_labels(key) if labels is None else labels
-        return CurationV2.insert_curation(
-            {"sorting_id": curation_key["sorting_id"]},
-            labels=effective_labels or None,
-            merge_groups=accepted or None,
-            apply_merge=bool(accepted),
-            parent_curation_id=curation_key["curation_id"],
-            description=description,
-            curation_source="curation_evaluation",
+
+        return _evaluation_acceptance.accept_evaluation_outputs(
+            self,
+            key,
+            merge_groups=merge_groups,
+            use_all_suggested_merges=use_all_suggested_merges,
+            labels=labels,
             label_policy=label_policy,
+            description=description,
             allow_custom_labels=allow_custom_labels,
             reuse_existing=reuse_existing,
         )
-
-    def _require_merge_acceptance(
-        self,
-        key,
-        merge_groups,
-        use_all_suggested_merges: bool,
-        *,
-        action_name: str,
-    ) -> list[list[int]]:
-        """Resolve merge groups for an action method and require a real merge.
-
-        Enforces the populated-evaluation contract BEFORE resolving suggestions:
-        the ``use_all_suggested_merges`` path reads the evaluation NWB via
-        ``get_suggested_merge_groups``, which on an unpopulated selection would fail with
-        an opaque fetch error instead of the friendly "populate first" message.
-        """
-        self._evaluated_curation_key(key)  # populated-evaluation guard
-        accepted = self._resolve_accepted_merges(
-            key, merge_groups, use_all_suggested_merges
-        )
-        if not accepted:
-            raise ValueError(
-                f"CurationEvaluation.{action_name} needs at least one merge "
-                "group. Pass merge_groups=[[...]] or use a selection with "
-                "persisted merge suggestions."
-            )
-        return accepted
 
     def preview_merges(
         self,
@@ -1435,11 +1350,11 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         it drafts only merges and inherits the evaluated curation's labels; it
         does not apply pre-merge evaluation labels to the draft.
         """
-        # _create_preview_curation (whose only caller is this method) resolves
-        # the merge groups and enforces the populated-evaluation + non-empty
-        # contracts itself, so pass the request through rather than resolving
-        # the same suggestions twice.
-        return self._create_preview_curation(
+        # create_preview_curation resolves the merge groups and enforces the
+        # populated-evaluation + non-empty contracts itself, so pass the
+        # request through rather than resolving the same suggestions twice.
+        return _evaluation_acceptance.create_preview_curation(
+            self,
             key,
             merge_groups=merge_groups,
             use_all_suggested_merges=use_all_suggested_merges,
@@ -1468,7 +1383,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ``allow_custom_labels`` is forwarded so an inherited custom (non-canonical)
         parent label does not fail the child insert.
         """
-        accepted = self._require_merge_acceptance(
+        accepted = _evaluation_acceptance.require_merge_acceptance(
+            self,
             key,
             merge_groups,
             False,
@@ -1497,7 +1413,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         Inherits existing labels (``allow_custom_labels`` forwarded so an
         inherited custom parent label does not fail the child insert).
         """
-        accepted = self._require_merge_acceptance(
+        accepted = _evaluation_acceptance.require_merge_acceptance(
+            self,
             key,
             None,
             True,
@@ -1573,64 +1490,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             labels=labels,
             label_policy="inherit",
             description=description,
-            allow_custom_labels=allow_custom_labels,
-            reuse_existing=reuse_existing,
-        )
-
-    def _create_preview_curation(
-        self,
-        key,
-        *,
-        merge_groups=None,
-        use_all_suggested_merges: bool = False,
-        labels: dict | None = None,
-        label_policy: str = "replace",
-        description: str = "draft from curation evaluation",
-        allow_custom_labels: bool = False,
-        reuse_existing: bool = True,
-    ) -> dict:
-        """Create a DRAFT (preview) child from the evaluation's outputs.
-
-        The explicit opt-in for drafting a merge for review before committing:
-        the proposed merges are recorded in ``CurationV2.MergeGroup`` WITHOUT
-        being applied (``apply_merge=False``), so the child is a preview --
-        ``has_unapplied_proposed_merges`` is True and downstream consumers
-        reject it until it is committed. Distinct from
-        :meth:`accept_evaluation_outputs`, which only ever produces committed
-        children. A preview is, by
-        definition, an UNAPPLIED merge for review, so it must actually draft a
-        merge: pass ``merge_groups`` or ``use_all_suggested_merges=True`` (and
-        the latter must resolve at least one merge). With no merge this would
-        otherwise produce a normal committed labels-only child, contradicting
-        the "preview/draft" contract -- so it raises instead. For a committed
-        labels-only child use :meth:`use_evaluation_labels` /
-        :meth:`overlay_evaluation_labels`.
-
-        Returns the child's ``{"sorting_id", "curation_id"}``.
-        """
-        curation_key = self._evaluated_curation_key(key)
-        accepted = self._resolve_accepted_merges(
-            key, merge_groups, use_all_suggested_merges
-        )
-        if not accepted:
-            raise ValueError(
-                "preview_merges drafts an UNAPPLIED merge for "
-                "review, so it needs at least one merge: pass "
-                "merge_groups=[[...]] or use_all_suggested_merges=True (with "
-                "proposed merges present). For a committed labels-only child, "
-                "call use_evaluation_labels() or overlay_evaluation_labels() "
-                "instead."
-            )
-        effective_labels = self.get_labels(key) if labels is None else labels
-        return CurationV2.insert_curation(
-            {"sorting_id": curation_key["sorting_id"]},
-            labels=effective_labels or None,
-            merge_groups=accepted or None,
-            apply_merge=False,
-            parent_curation_id=curation_key["curation_id"],
-            description=description,
-            curation_source="curation_evaluation",
-            label_policy=label_policy,
             allow_custom_labels=allow_custom_labels,
             reuse_existing=reuse_existing,
         )
