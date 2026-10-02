@@ -1080,14 +1080,10 @@ def run_v2_pipeline(
        ``set_group_by_electrode_table_column``) -- sort-group structure is
        session-specific user input the orchestrator does not auto-create.
 
-    So a single-session sort is ~4 user touchpoints (the three setup steps
-    above plus this call), not 2: this orchestrator collapses the per-stage
-    ``insert_selection`` / ``populate`` boilerplate, not the upstream
-    session/team/sort-group setup. With ``preflight=True`` (the default)
-    this call verifies those prerequisites in ~1 s before any populate and
-    raises ``PreflightError`` with the exact fix if one is missing; call
-    ``preflight_v2_pipeline(...)`` directly to inspect the report without
-    running.
+    With ``preflight=True`` (the default) this call verifies those
+    prerequisites in ~1 s before any populate and raises ``PreflightError``
+    with the exact fix if one is missing; call ``preflight_v2_pipeline(...)``
+    directly to inspect the report without running.
 
     Parameters
     ----------
@@ -1095,12 +1091,8 @@ def run_v2_pipeline(
         Session whose data will be sorted. The session must already be
         ingested via ``insert_sessions``.
     sort_group_id
-        ID of an existing ``SortGroupV2`` row for this session.
-        Callers create sort groups via
-        ``SortGroupV2.set_group_by_shank`` (or
-        ``set_group_by_electrode_table_column``) before calling this
-        helper; the orchestrator does not auto-create them because
-        sort-group structure is session-specific user input.
+        ID of an existing ``SortGroupV2`` row for this session (see
+        Prerequisites; the orchestrator does not create sort groups).
     interval_list_name
         Name of the IntervalList row to sort. Typically ``"raw data
         valid times"`` for a full-session sort.
@@ -1113,9 +1105,9 @@ def run_v2_pipeline(
         of an existing ``SessionGroup``. The orchestrator populates each
         member's ``Recording``, concatenates them via ``ConcatenatedRecording``
         (concatenation itself never corrects motion; see ``motion_mode``), and
-        sorts the result. Any preset
-        runs in either mode; the mode is set by which inputs are given. The
-        artifact recipe is applied independently to each member.
+        sorts the result. Any preset runs in either mode; the mode is set by
+        which inputs are given. The artifact recipe is applied independently
+        to each member.
     pipeline_preset
         Pipeline-preset name from ``_PIPELINE_PRESETS``. The default is
         ``franklab_probe_hippocampus_30khz_ms5_2026_06`` (MountainSort5),
@@ -1156,8 +1148,9 @@ def run_v2_pipeline(
         and the always-present ``auto_labeled_curation_id`` /
         ``auto_labeled_curation_uuid`` name the materialized child;
         ``auto_labeled_merge_id`` is also set for a single-session run and
-        remains ``None`` for concat. All stay ``None`` on a root-only run. Automatic labels are suggestions written as labels,
-        not approval, and the child still holds EVERY unit -- select the
+        remains ``None`` for concat. All stay ``None`` on a root-only run.
+        Automatic labels are suggestions written as labels, not approval,
+        and the child still holds EVERY unit -- select the
         analysis population explicitly with ``select_units_for_analysis``.
         ``CurationEvaluation`` builds a whitened PCA analyzer, so this adds
         the heaviest populate of the run.
@@ -1236,9 +1229,8 @@ def run_v2_pipeline(
         a mismatch names the estimate's value and the run's, and fails
         preflight (``PreflightError``) or, with ``preflight=False``, the
         ``motion_estimate`` stage (``PipelineStageError``), before any
-        sort. Given with another
-        mode, or not a UUID, it raises ``PipelineInputError`` before any
-        database access.
+        sort. Given with another mode, or not a UUID, it raises
+        ``PipelineInputError`` before any database access.
 
     Returns
     -------
@@ -1310,9 +1302,11 @@ def run_v2_pipeline(
         (or the root / a manually curated child), which builds the
         ``SortedSpikesGroup`` downstream reads and reports the included /
         excluded unit ids. For concat sorts that helper uses the per-member
-        session-timeline rows. There is deliberately no bare ``merge_id``. A zero-unit single-session sort yields an empty (but real)
-        root curation/merge row. A concat run leaves only its unsafe synthetic-
-        timeline merge IDs ``None``; its member IDs are session-safe.
+        session-timeline rows. There is deliberately no bare ``merge_id``.
+        A zero-unit single-session sort yields an empty (but real) root
+        curation/merge row. A concat run leaves only its unsafe
+        synthetic-timeline merge IDs ``None``; its member IDs are
+        session-safe.
 
         Plus per-stage observability keys (additive; the keys above are
         unchanged):
@@ -1350,8 +1344,7 @@ def run_v2_pipeline(
         If a compute stage's ``populate`` / ``insert_curation`` fails. Names
         the failing stage and carries the partial run summary of the stages
         that completed before it (the original error is chained). Only the
-        compute
-        stages are wrapped; an error from the cheap ``insert_selection``
+        compute stages are wrapped; an error from the cheap ``insert_selection``
         prelude surfaces as its own native exception (e.g.
         ``DuplicateSelectionError``).
     ZeroUnitSortError
@@ -1553,12 +1546,6 @@ def run_v2_pipeline(
     run_summary["auto_labeled_merge_id"] = None
     run_summary["auto_labeled_curation_uuid"] = None
 
-    # Optional auto-curation: only when the caller opts in. Score the root
-    # curation with the preset's metric + auto-curation rule rows, then
-    # materialize a committed child curation whose labels ARE the evaluation's
-    # verdict and point the canonical auto-labeled keys (initialized to None
-    # above) at it. The evaluation id and stage status are added only when
-    # opted in (NotRequired keys).
     if auto_curate:
         _run_auto_curation_stage(
             sorting_key,
@@ -1580,13 +1567,9 @@ def run_v2_pipeline(
             sorting_key, source.concat_key, run_summary, stage_seconds
         )
 
-    # Optional FigPack manual-curation view: only when the caller opts in.
-    # Publish an OFFLINE FigPack bundle of the ROOT curation (FigPack publishes
-    # raw-namespace curations only -- an auto-curated child lives in the
-    # curation_evaluation namespace) and surface its local URI. A zero-unit sort
-    # has no analyzer to summarize, so the FigPack view is skipped with a warning rather
-    # than failing an otherwise-successful empty sort. These keys are added only
-    # when opted in (NotRequired), so a default run's summary is unchanged.
+    # The FigPack view is of the ROOT curation: FigPack publishes raw-namespace
+    # curations only (an auto-curated child is in the curation_evaluation
+    # namespace).
     if build_figpack_view:
         _run_figpack_stage(
             sorting_key,
