@@ -141,7 +141,6 @@ two reference classes without importing the annotation tables.
 | `suggest_bad_channels`                                          | `spyglass.spikesorting.v2.bad_channels`     | Suggest a session's bad channels for review, and optionally persist the reviewed report.              |
 | `detect_bad_channels`                                           | `spyglass.spikesorting.v2.bad_channels`     | Lower-level detection on a filtered SpikeInterface recording: bad channel ids and per-channel labels. |
 | Exception classes (e.g. `PipelineStageError`, `PreflightError`) | `spyglass.spikesorting.v2.exceptions`       | Catch specific v2 failures.                                                                           |
-| `MatcherProtocol`, `register_matcher`                           | `spyglass.spikesorting.v2.matcher_protocol` | Implement and register a new cross-session matcher backend.                                           |
 
 ## Tables
 
