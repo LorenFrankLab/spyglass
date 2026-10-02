@@ -1,11 +1,19 @@
 # Spike Sorting v2 Module Split Implementation Plan
 
-**Status:** Recording done on branch `v2-split-recording` (2026-10-02,
-unpushed): `recording.py` 2,564 -> 1,869 lines; new `_recording_fetch.py`,
-`_sort_group_insert.py`; artifact pipeline + rebuild moved into
-`_recording_nwb.py`. `make_insert`, `_insert_sort_group_rows` and
-`_write_nwb_artifact` stayed on their classes (transaction/staging
-orchestration, or already a thin delegate). Sorting not started.
+**Status (2026-10-02, local `spikesorting-v2`, unpushed):**
+- Recording done: `recording.py` 2,564 -> 1,869; new `_recording_fetch.py`,
+  `_sort_group_insert.py`; artifact pipeline + rebuild in `_recording_nwb.py`.
+  `make_insert`, `_insert_sort_group_rows`, `_write_nwb_artifact` stayed
+  (transaction/staging orchestration, or already a thin delegate).
+- Sorting done: `sorting.py` 3,564 -> 2,483; new `_sorting_fetch.py`,
+  `_sorting_selection_insert.py`, `_sorter_parameters.py`; unit rows ->
+  `_sorting_units`, statistics spans -> `_sorting_artifact_mask`, orphan audit
+  -> `_analyzer_cache`. The dispatch statics were already thin delegates.
+  Pre-existing failures on origin (unrelated): `test_sorting.py::
+  test_build_analyzer_{strips_random_seed,compute_args}`,
+  `test_analyzer_waveform_params.py::test_make_fetch_resolves_hippocampus_display_blob`,
+  order-dependent `test_sorting.py::test_changed_second_fetch_leaves_no_staged_sort_outputs`.
+- metric_curation, curation: not started.
 
 **Goal:** Make the four largest v2 table modules readable by moving long method
 bodies and private helpers out of the table classes, with no change to behavior,
