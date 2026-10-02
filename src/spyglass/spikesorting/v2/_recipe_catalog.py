@@ -6,7 +6,10 @@ tables derive their ``_DEFAULT_CONTENTS`` from the builders here
 (:func:`preprocessing_default_contents` / :func:`artifact_default_contents`
 / :func:`sorter_default_contents`), and ``_pipeline_presets`` builds
 ``_PIPELINE_PRESETS`` from :func:`pipeline_preset_specs` -- so a recipe is
-defined in exactly one place.
+defined in exactly one place. The metric-curation defaults
+(:func:`quality_metric_default_rows` / :func:`auto_curation_default_payloads`)
+are returned by ``QualityMetricParameters._default_rows`` and
+``AutoCurationRules._default_payloads``.
 
 No DB connection or ``dj.schema`` activation at import: it builds the
 blobs from the ``_params`` Pydantic schemas only, so it imports without a

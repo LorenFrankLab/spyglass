@@ -918,8 +918,10 @@ def evaluate_analyzers(
 ):
     """Compute metrics / labels / merge suggestions and enforce namespace.
 
-    Reuses ``_compute_metrics`` / ``_compute_merge_groups`` and
-    ``apply_label_rules`` over the curation's analyzers, then enforces
+    Reuses ``table._compute_metrics`` (the ``CurationEvaluation``
+    staticmethod, called on the table so a patched one takes effect) /
+    :func:`compute_merge_groups` and ``apply_label_rules`` over the
+    curation's analyzers, then enforces
     the unit-namespace invariant BEFORE labels/merges are returned (and
     before the NWB write): the metric index must equal the curation's unit
     set, and every suggested merge member must be a unit in that set. This

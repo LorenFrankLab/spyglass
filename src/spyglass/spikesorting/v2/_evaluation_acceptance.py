@@ -167,15 +167,15 @@ def create_preview_curation(
     being applied (``apply_merge=False``), so the child is a preview --
     ``has_unapplied_proposed_merges`` is True and downstream consumers
     reject it until it is committed. Distinct from
-    :meth:`accept_evaluation_outputs`, which only ever produces committed
-    children. A preview is, by
+    ``CurationEvaluation.accept_evaluation_outputs``, which only ever
+    produces committed children. A preview is, by
     definition, an UNAPPLIED merge for review, so it must actually draft a
     merge: pass ``merge_groups`` or ``use_all_suggested_merges=True`` (and
     the latter must resolve at least one merge). With no merge this would
     otherwise produce a normal committed labels-only child, contradicting
     the "preview/draft" contract -- so it raises instead. For a committed
-    labels-only child use :meth:`use_evaluation_labels` /
-    :meth:`overlay_evaluation_labels`.
+    labels-only child use ``CurationEvaluation.use_evaluation_labels`` /
+    ``CurationEvaluation.overlay_evaluation_labels``.
 
     Returns the child's ``{"sorting_id", "curation_id"}``.
     """

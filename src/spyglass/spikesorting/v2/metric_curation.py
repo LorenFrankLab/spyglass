@@ -1216,8 +1216,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         return _metric_curation_fetch.detect_stale_source(cls, key)
 
-    # ---- compute helpers (DB-free; SI work) ------------------------------
-
     # ---- fetch helpers (read the persisted scratch tables) ---------------
 
     @classmethod
@@ -1511,7 +1509,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """Compute quality metrics, routing PC/NN metrics to the whitened one.
 
         See :func:`._metric_curation.compute_metrics`. Tests patch it, so it
-        stays on the class and the evaluation calls it through the class.
+        stays on the class and the evaluation calls it through the table.
         """
         return _metric_curation.compute_metrics(
             display_analyzer,
