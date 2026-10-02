@@ -163,9 +163,9 @@ def _singularity_runtime_available() -> tuple[bool, str]:
 def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
     """Run the LOCAL-execution sorter checks (installed + runtime backend).
 
-    Extracted from ``preflight_v2_pipeline`` so its execution-backend dispatch
-    reads as a flat three-arm choice (MATLAB-local error / local checks /
-    container runtime) instead of a deeply nested branch.
+    Shared by :func:`_check_sorter_execution`, whose execution-backend
+    dispatch is a flat three-arm choice (MATLAB-local error / local checks /
+    container runtime), and by :func:`assert_preset_compute_rows`.
 
     Parameters
     ----------
