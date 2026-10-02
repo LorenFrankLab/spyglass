@@ -502,6 +502,27 @@ def normalize_spans(spans) -> list[tuple[int, int]]:
     ]
 
 
+def span_containing(starts, values) -> np.ndarray:
+    """Index of the span each value falls in, given the spans' sorted starts.
+
+    The last span whose start is at or before the value; a value before the
+    first start maps to span 0. ``starts`` may be frame or time starts.
+
+    Parameters
+    ----------
+    starts : numpy.ndarray
+        ``(n_spans,)`` sorted span starts.
+    values : int, float or array_like
+        Frames or times to place.
+
+    Returns
+    -------
+    numpy.ndarray
+        int span indices in ``[0, n_spans)``, the shape of ``values``.
+    """
+    return np.clip(np.searchsorted(starts, values, side="right") - 1, 0, None)
+
+
 def _check_estimation_spans(
     n_samples: int,
     clock: EstimationClock,
@@ -533,7 +554,7 @@ def _check_estimation_spans(
             )
         previous_end = end
     starts = [a for a, _ in statistics_spans]
-    span = np.searchsorted(clock.spans[:, 0], starts, side="right") - 1
+    span = span_containing(clock.spans[:, 0], starts)
     ends = np.array([b for _, b in statistics_spans])
     crossing = np.flatnonzero(ends > clock.spans[span, 1])
     if crossing.size:
@@ -618,7 +639,7 @@ def peaks_clear_of_joins(
     """
     sample_index = np.asarray(sample_index, dtype=np.int64)
     spans = np.asarray(continuity_spans, dtype=np.int64)
-    span = np.searchsorted(spans[:, 0], sample_index, side="right") - 1
+    span = span_containing(spans[:, 0], sample_index)
     return ((span == 0) | (sample_index - margin >= spans[span, 0])) & (
         (span == len(spans) - 1) | (sample_index + margin < spans[span, 1])
     )
@@ -727,6 +748,7 @@ def check_estimation_eligibility(recording, resolved_params: dict) -> None:
     import warnings
 
     from spyglass.spikesorting.v2._recording_geometry import (
+        _all_rows_distinct,
         flatten_planar_geometry,
     )
 
@@ -750,7 +772,7 @@ def check_estimation_eligibility(recording, resolved_params: dict) -> None:
             "Motion estimation: contact positions must be finite; got "
             f"{positions.tolist()}."
         )
-    if len(np.unique(np.round(positions, 6), axis=0)) != len(positions):
+    if not _all_rows_distinct(positions):
         raise ValueError(
             "Motion estimation: two or more contacts share a position "
             f"({positions.tolist()}); motion cannot be estimated on "
@@ -1105,9 +1127,7 @@ def estimation_times(clock: EstimationClock, sample_index):
     """
     sample_index = np.asarray(sample_index)
     starts = clock.spans[:, 0]
-    span = np.clip(
-        np.searchsorted(starts, sample_index, side="right") - 1, 0, None
-    )
+    span = span_containing(starts, sample_index)
     return (sample_index - starts[span]) / clock.sampling_frequency + (
         clock.estimation_start_s[span]
     )
@@ -1172,7 +1192,7 @@ def displacement_on_source_clock(
     centers = np.asarray(motion.temporal_bins_s[0], dtype=np.float64)
     starts = clock.estimation_start_s
     ends = starts + span_nominal_durations(clock)
-    span = np.clip(np.searchsorted(starts, centers, side="right") - 1, 0, None)
+    span = span_containing(starts, centers)
     in_gap = (centers >= ends[span]) & (span < len(starts) - 1)
     source = clock.source_start_s[span] + (centers - starts[span]) * (
         span_scales(clock)[span]
@@ -1217,11 +1237,7 @@ class EstimationClockRecordingSegment(BaseRecordingSegment):
         """
         time_s = np.asarray(time_s, dtype=np.float64)
         clock = self._clock
-        span = np.clip(
-            np.searchsorted(clock.estimation_start_s, time_s, side="right") - 1,
-            0,
-            None,
-        )
+        span = span_containing(clock.estimation_start_s, time_s)
         frame = clock.spans[span, 0] + np.round(
             (time_s - clock.estimation_start_s[span]) * clock.sampling_frequency
         ).astype(np.int64)
@@ -1490,10 +1506,7 @@ def estimate_motion_in_spans(
         )
     kept_peaks = peaks[keep]
     per_span = np.bincount(
-        np.searchsorted(
-            clock.spans[:, 0], kept_peaks["sample_index"], side="right"
-        )
-        - 1,
+        span_containing(clock.spans[:, 0], kept_peaks["sample_index"]),
         minlength=len(clock.spans),
     ).astype(np.int64)
     empty = np.flatnonzero(per_span == 0)
@@ -1708,6 +1721,7 @@ def apply_motion_on_estimation_clock(
     from spikeinterface.sortingcomponents.motion import interpolate_motion
 
     from spyglass.spikesorting.v2._recording_geometry import (
+        _all_rows_distinct,
         flatten_planar_geometry,
     )
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
@@ -1756,9 +1770,7 @@ def apply_motion_on_estimation_clock(
             "'force_extrapolate' or inspect the estimate."
         )
     positions = np.asarray(corrected.get_channel_locations(), dtype=float)
-    if not np.isfinite(positions).all() or len(
-        np.unique(np.round(positions, 6), axis=0)
-    ) != len(positions):
+    if not np.isfinite(positions).all() or not _all_rows_distinct(positions):
         raise ValueError(
             "Motion correction: the corrected recording's contact positions "
             f"must be finite and distinct; got {positions.tolist()}."

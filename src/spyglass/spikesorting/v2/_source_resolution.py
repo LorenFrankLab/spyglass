@@ -320,6 +320,10 @@ def check_corrected_channel_map(
     """
     import numpy as np
 
+    from spyglass.spikesorting.v2._recording_geometry import (
+        _all_rows_distinct,
+    )
+
     row = traces.row
     loaded_ids = [str(c) for c in recording.channel_ids]
     stored_ids = [str(c) for c in np.asarray(row["channel_ids"]).tolist()]
@@ -334,7 +338,7 @@ def check_corrected_channel_map(
             f"{traces.kind} {traces.key}: contact positions must be finite; "
             f"got {positions.tolist()}."
         )
-    if len(np.unique(np.round(positions, 6), axis=0)) != len(positions):
+    if not _all_rows_distinct(positions):
         raise ValueError(
             f"{traces.kind} {traces.key}: two or more contacts share a "
             f"position ({positions.tolist()})."

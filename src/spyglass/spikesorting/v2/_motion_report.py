@@ -33,6 +33,7 @@ from spyglass.spikesorting.v2._motion import (
     motion_max_abs_displacement_um,
     span_nominal_durations,
     span_scales,
+    span_containing,
     spans_without_evidence,
 )
 from spyglass.spikesorting.v2._sorting_artifact_mask import (
@@ -123,15 +124,6 @@ class TraceWindow(NamedTuple):
     corrected_uv: np.ndarray
 
 
-def _span_of_frames(clock: EstimationClock, frames) -> np.ndarray:
-    """Continuity span holding each frame (clipped to the first / last)."""
-    return np.clip(
-        np.searchsorted(clock.spans[:, 0], frames, side="right") - 1,
-        0,
-        len(clock.spans) - 1,
-    )
-
-
 def source_time_of_frames(clock: EstimationClock, frames) -> np.ndarray:
     """Source-clock times (s) of frames, by each span's affine map.
 
@@ -148,7 +140,7 @@ def source_time_of_frames(clock: EstimationClock, frames) -> np.ndarray:
         ``s``, the shape of ``frames``.
     """
     frames = np.asarray(frames)
-    span = _span_of_frames(clock, frames)
+    span = span_containing(clock.spans[:, 0], frames)
     return (
         clock.source_start_s[span]
         + (frames - clock.spans[span, 0])
@@ -175,11 +167,7 @@ def frame_of_source_time(clock: EstimationClock, time_s) -> np.ndarray:
         int64 frames in ``[0, n_samples]``, the shape of ``time_s``.
     """
     time_s = np.asarray(time_s, dtype=np.float64)
-    span = np.clip(
-        np.searchsorted(clock.source_start_s, time_s, side="right") - 1,
-        0,
-        len(clock.spans) - 1,
-    )
+    span = span_containing(clock.source_start_s, time_s)
     offset = np.round(
         (time_s - clock.source_start_s[span])
         * clock.sampling_frequency
