@@ -316,11 +316,21 @@ def test_single_low_level_analyzer_builder():
     ).read_text()
     start = metric_source.index("    def make_compute(")
     end = metric_source.index("    def make_insert(", start)
-    evaluation_source = metric_source[start:end] + inspect.getsource(
+    make_compute_source = metric_source[start:end]
+    merged_path_source = inspect.getsource(
+        _evaluation_analyzers.evaluate_temporary_analyzers
+    )
+    evaluation_source = make_compute_source + inspect.getsource(
         _evaluation_analyzers
     )
     assert "build_analyzer(" in resolver_source
-    assert "build_analyzer(" in evaluation_source
+    # make_compute's merged path builds its temporary analyzers with the same
+    # low-level builder.
+    assert (
+        "_evaluation_analyzers.evaluate_temporary_analyzers"
+        in make_compute_source
+    )
+    assert "build_analyzer(" in merged_path_source
     assert "_resolve_curation_analyzer" not in evaluation_source
     assert "get_curation_analyzer" not in evaluation_source
 

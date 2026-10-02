@@ -12,9 +12,9 @@ directory is removed. Both evaluate through
 the table.
 
 These functions read and write analyzer folders on disk, so they are kept out
-of the pure :mod:`._metric_curation`. Imports without the DB layer: the
-analyzer-cache, analyzer-build and settings names are imported inside the
-functions, at call time.
+of the pure :mod:`._metric_curation`. The module imports without the DB
+layer. The analyzer-cache, analyzer-build and settings names are imported
+inside the functions so that patches applied to those modules take effect.
 """
 
 from __future__ import annotations
