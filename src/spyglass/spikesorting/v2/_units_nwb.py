@@ -942,7 +942,7 @@ def _write_sorting_units_nwb_body(
 
     # The AnalysisNwbfile DB-row registration (.add) is deliberately
     # NOT done here -- ``Sorting.make`` registers it inside its
-    # ``transaction_or_noop`` block so the row rolls back atomically
+    # ``_safe_context()`` block so the row rolls back atomically
     # if any of the master / Unit-part inserts fail.
     return analysis_file_name, units_object_id
 
