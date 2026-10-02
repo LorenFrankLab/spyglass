@@ -797,15 +797,63 @@ def assert_concat_preflight(
     explicitly disabled artifact masking) for symmetry with
     :func:`preflight_v2_pipeline`.
     """
-    from spyglass.common import IntervalList, Raw
-    from spyglass.spikesorting.v2.exceptions import PreflightError
-    from spyglass.spikesorting.v2.recording import SortGroupV2
-    from spyglass.spikesorting.v2.session_group import SessionGroup
-
     group_key = {
         "session_group_owner": concat_session_group_owner,
         "session_group_name": concat_session_group_name,
     }
+    members = _assert_session_group_members(group_key, caller)
+
+    # Each member is sorted through the same single-session Recording build, so
+    # mirror preflight_v2_pipeline's per-session prerequisites for EVERY member;
+    # SessionGroup.Member's FK set validates only that the master rows exist, not
+    # Raw / 'raw data valid times' / a non-empty sort group / a matching rate, so
+    # a partially-ingested or empty-sort-group member would otherwise fail deep
+    # in the member populate with an opaque error.
+    for member in members:
+        _assert_concat_member_inputs(
+            member, bundle, caller=caller, sort_checks=sort_checks
+        )
+
+    # Auto-curation prerequisites (preset-level, same rows as single-session),
+    # only when the caller opts into auto_curate -- so a concat auto-curate run
+    # fails fast on a missing metric / rule / metric-waveform recipe rather than
+    # after the member + concat + sort compute.
+    if auto_curate:
+        _assert_auto_curation_rows(bundle, caller)
+
+    assert_preset_compute_rows(bundle, caller=caller, sort_checks=sort_checks)
+    if motion_mode != "off":
+        _assert_concat_motion_stage(
+            bundle,
+            members,
+            group_key,
+            motion_mode=motion_mode,
+            motion_correction_params_name=motion_correction_params_name,
+            motion_estimate_id=motion_estimate_id,
+            manual_excluded_times=manual_excluded_times,
+            caller=caller,
+        )
+    if (
+        bundle.artifact_detection_params_name in (None, "none")
+        and not manual_excluded_times
+    ):
+        return ["No artifact masking selected for the concatenated members."]
+    return []
+
+
+def _assert_session_group_members(group_key: dict, caller: str) -> list[dict]:
+    """Raise ``PreflightError`` unless the session group has members.
+
+    Returns
+    -------
+    list[dict]
+        The ``SessionGroup.Member`` rows' ``member_index``,
+        ``nwb_file_name``, ``sort_group_id``, ``interval_list_name`` and
+        ``team_name``.
+    """
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+
     if not (SessionGroup & group_key):
         raise PreflightError(
             f"{caller}: SessionGroup {group_key} does not exist. "
@@ -815,14 +863,7 @@ def assert_concat_preflight(
         raise PreflightError(
             f"{caller}: SessionGroup {group_key} has no members."
         )
-
-    # Each member is sorted through the same single-session Recording build, so
-    # mirror preflight_v2_pipeline's per-session prerequisites for EVERY member;
-    # SessionGroup.Member's FK set validates only that the master rows exist, not
-    # Raw / 'raw data valid times' / a non-empty sort group / a matching rate, so
-    # a partially-ingested or empty-sort-group member would otherwise fail deep
-    # in the member populate with an opaque error.
-    members = (SessionGroup.Member & group_key).fetch(
+    return (SessionGroup.Member & group_key).fetch(
         "member_index",
         "nwb_file_name",
         "sort_group_id",
@@ -830,189 +871,247 @@ def assert_concat_preflight(
         "team_name",
         as_dict=True,
     )
+
+
+def _assert_concat_member_inputs(
+    member: dict, bundle, *, caller: str, sort_checks: bool
+) -> None:
+    """Raise ``PreflightError`` if a member cannot be built as a recording.
+
+    Checks the member's ``Raw`` row, its ``'raw data valid times'`` interval,
+    its sort-group electrodes and, with ``sort_checks``, that it samples at
+    the preset's rate.
+    """
+    from spyglass.common import IntervalList, Raw
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb = member["nwb_file_name"]
+    sort_group_id = int(member["sort_group_id"])
+    tag = (
+        f"concat member {member['member_index']} "
+        f"({nwb!r}, sort_group_id={sort_group_id})"
+    )
+    if not (Raw & {"nwb_file_name": nwb}):
+        raise PreflightError(
+            f"{caller}: {tag} has no Raw electrical-series row (the "
+            "session is ingested but its Raw data is not). Re-run ingestion "
+            "(populate_all_common / insert_sessions)."
+        )
+    if not (
+        IntervalList
+        & {
+            "nwb_file_name": nwb,
+            "interval_list_name": "raw data valid times",
+        }
+    ):
+        raise PreflightError(
+            f"{caller}: {tag} is missing IntervalList 'raw data "
+            "valid times', which the recording build reads for the raw "
+            "sample bounds. Re-run ingestion."
+        )
+    if not (
+        SortGroupV2.SortGroupElectrode
+        & {"nwb_file_name": nwb, "sort_group_id": sort_group_id}
+    ):
+        raise PreflightError(
+            f"{caller}: {tag} SortGroupV2 has zero electrode "
+            "members; Recording.populate would raise 'has zero electrodes'. "
+            "Recreate it with SortGroupV2.set_group_by_shank(nwb_file_name="
+            "...)."
+        )
+    if sort_checks and bundle.sampling_rate_hz is not None:
+        actual_rate = float(
+            (Raw & {"nwb_file_name": nwb}).fetch1("sampling_rate")
+        )
+        if (
+            abs(actual_rate - bundle.sampling_rate_hz)
+            > 0.005 * bundle.sampling_rate_hz
+        ):
+            raise PreflightError(
+                f"{caller}: {tag} samples at {actual_rate:g} Hz but "
+                f"the concat preset is tuned for {bundle.sampling_rate_hz} "
+                "Hz (the rate-keyed sorter row "
+                f"{bundle.sorter_params_name!r} holds its clip_size / "
+                "detect_interval snippet window at that rate). Every member "
+                "must share the preset's acquisition rate."
+            )
+
+
+def _assert_auto_curation_rows(bundle, caller: str) -> None:
+    """Raise ``PreflightError`` if a row ``auto_curate=True`` needs is missing.
+
+    The preset's ``QualityMetricParameters`` and ``AutoCurationRules`` rows
+    and its whitened metric ``AnalyzerWaveformParameters`` row.
+    """
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        waveform_params_for_preprocessing,
+    )
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
+    )
+
+    if not (
+        QualityMetricParameters
+        & {"metric_params_name": bundle.metric_params_name}
+    ):
+        raise PreflightError(
+            f"{caller}: QualityMetricParameters row "
+            f"{bundle.metric_params_name!r} (the auto-curation metric set) "
+            "is missing. Run initialize_v2_defaults()."
+        )
+    if not (
+        AutoCurationRules
+        & {"auto_curation_rules_name": bundle.auto_curation_rules_name}
+    ):
+        raise PreflightError(
+            f"{caller}: AutoCurationRules row "
+            f"{bundle.auto_curation_rules_name!r} (the auto-curation rule "
+            "set) is missing. Run initialize_v2_defaults()."
+        )
+    metric_waveform_params_name = waveform_params_for_preprocessing(
+        bundle.preprocessing_params_name
+    )[1]
+    if not (
+        AnalyzerWaveformParameters
+        & {"waveform_params_name": metric_waveform_params_name}
+    ):
+        raise PreflightError(
+            f"{caller}: AnalyzerWaveformParameters row "
+            f"{metric_waveform_params_name!r} (the whitened metric analyzer "
+            "recipe auto-curation scores on) is missing. Run "
+            "initialize_v2_defaults()."
+        )
+
+
+def _assert_concat_motion_stage(
+    bundle,
+    members: list[dict],
+    group_key: dict,
+    *,
+    motion_mode,
+    motion_correction_params_name: str,
+    motion_estimate_id,
+    manual_excluded_times,
+    caller: str,
+) -> None:
+    """Raise ``PreflightError`` if a concat run's motion stage cannot run.
+
+    The recipe must resolve, the preset's preprocessing recipe must filter,
+    every member's geometry must support the estimation recipe, an
+    ``"apply"`` sort must not run the sorter's own motion correction, and a
+    supplied ``motion_estimate_id`` must match the concatenation the run
+    would build.
+    """
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.spikesorting.v2.motion import (
+        preprocessing_filter_problem,
+    )
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    try:
+        motion_recipe = resolve_motion_recipe(motion_correction_params_name)
+    except ValueError as exc:
+        raise PreflightError(f"{caller}: {exc}") from exc
+    # The concatenation is built with the preset's preprocessing recipe
+    # (checked to exist by assert_preset_compute_rows above).
+    problem = preprocessing_filter_problem(bundle.preprocessing_params_name)
+    if problem is not None:
+        raise PreflightError(
+            f"{caller}: motion_mode={motion_mode!r}: {problem}"
+        )
     for member in members:
-        nwb = member["nwb_file_name"]
-        sort_group_id = int(member["sort_group_id"])
-        tag = (
-            f"concat member {member['member_index']} "
-            f"({nwb!r}, sort_group_id={sort_group_id})"
+        problem = motion_geometry_problem(
+            member["nwb_file_name"],
+            int(member["sort_group_id"]),
+            motion_recipe.resolved_estimation,
         )
-        if not (Raw & {"nwb_file_name": nwb}):
-            raise PreflightError(
-                f"{caller}: {tag} has no Raw electrical-series row (the "
-                "session is ingested but its Raw data is not). Re-run ingestion "
-                "(populate_all_common / insert_sessions)."
-            )
-        if not (
-            IntervalList
-            & {
-                "nwb_file_name": nwb,
-                "interval_list_name": "raw data valid times",
-            }
-        ):
-            raise PreflightError(
-                f"{caller}: {tag} is missing IntervalList 'raw data "
-                "valid times', which the recording build reads for the raw "
-                "sample bounds. Re-run ingestion."
-            )
-        if not (
-            SortGroupV2.SortGroupElectrode
-            & {"nwb_file_name": nwb, "sort_group_id": sort_group_id}
-        ):
-            raise PreflightError(
-                f"{caller}: {tag} SortGroupV2 has zero electrode "
-                "members; Recording.populate would raise 'has zero electrodes'. "
-                "Recreate it with SortGroupV2.set_group_by_shank(nwb_file_name="
-                "...)."
-            )
-        if sort_checks and bundle.sampling_rate_hz is not None:
-            actual_rate = float(
-                (Raw & {"nwb_file_name": nwb}).fetch1("sampling_rate")
-            )
-            if (
-                abs(actual_rate - bundle.sampling_rate_hz)
-                > 0.005 * bundle.sampling_rate_hz
-            ):
-                raise PreflightError(
-                    f"{caller}: {tag} samples at {actual_rate:g} Hz but "
-                    f"the concat preset is tuned for {bundle.sampling_rate_hz} "
-                    "Hz (the rate-keyed sorter row "
-                    f"{bundle.sorter_params_name!r} holds its clip_size / "
-                    "detect_interval snippet window at that rate). Every member "
-                    "must share the preset's acquisition rate."
-                )
-
-    # Auto-curation prerequisites (preset-level, same rows as single-session),
-    # only when the caller opts into auto_curate -- so a concat auto-curate run
-    # fails fast on a missing metric / rule / metric-waveform recipe rather than
-    # after the member + concat + sort compute.
-    if auto_curate:
-        from spyglass.spikesorting.v2._recipe_catalog import (
-            waveform_params_for_preprocessing,
-        )
-        from spyglass.spikesorting.v2.metric_curation import (
-            AutoCurationRules,
-            QualityMetricParameters,
-        )
-        from spyglass.spikesorting.v2.sorting import (
-            AnalyzerWaveformParameters,
-        )
-
-        if not (
-            QualityMetricParameters
-            & {"metric_params_name": bundle.metric_params_name}
-        ):
-            raise PreflightError(
-                f"{caller}: QualityMetricParameters row "
-                f"{bundle.metric_params_name!r} (the auto-curation metric set) "
-                "is missing. Run initialize_v2_defaults()."
-            )
-        if not (
-            AutoCurationRules
-            & {"auto_curation_rules_name": bundle.auto_curation_rules_name}
-        ):
-            raise PreflightError(
-                f"{caller}: AutoCurationRules row "
-                f"{bundle.auto_curation_rules_name!r} (the auto-curation rule "
-                "set) is missing. Run initialize_v2_defaults()."
-            )
-        metric_waveform_params_name = waveform_params_for_preprocessing(
-            bundle.preprocessing_params_name
-        )[1]
-        if not (
-            AnalyzerWaveformParameters
-            & {"waveform_params_name": metric_waveform_params_name}
-        ):
-            raise PreflightError(
-                f"{caller}: AnalyzerWaveformParameters row "
-                f"{metric_waveform_params_name!r} (the whitened metric analyzer "
-                "recipe auto-curation scores on) is missing. Run "
-                "initialize_v2_defaults()."
-            )
-
-    assert_preset_compute_rows(bundle, caller=caller, sort_checks=sort_checks)
-    if motion_mode != "off":
-        from spyglass.spikesorting.v2.motion import (
-            preprocessing_filter_problem,
-        )
-        from spyglass.spikesorting.v2.sorting import SorterParameters
-
-        try:
-            motion_recipe = resolve_motion_recipe(motion_correction_params_name)
-        except ValueError as exc:
-            raise PreflightError(f"{caller}: {exc}") from exc
-        # The concatenation is built with the preset's preprocessing recipe
-        # (checked to exist by assert_preset_compute_rows above).
-        problem = preprocessing_filter_problem(bundle.preprocessing_params_name)
         if problem is not None:
             raise PreflightError(
-                f"{caller}: motion_mode={motion_mode!r}: {problem}"
+                f"{caller}: concat member {member['member_index']} "
+                f"{problem}"
             )
-        for member in members:
-            problem = motion_geometry_problem(
-                member["nwb_file_name"],
-                int(member["sort_group_id"]),
-                motion_recipe.resolved_estimation,
-            )
-            if problem is not None:
-                raise PreflightError(
-                    f"{caller}: concat member {member['member_index']} "
-                    f"{problem}"
-                )
-        if motion_mode == "apply":
-            sorter_params = (
-                SorterParameters
-                & {
-                    "sorter": bundle.sorter,
-                    "sorter_params_name": bundle.sorter_params_name,
-                }
-            ).fetch1("params")
-            problem = sorter_motion_correction_problem(
-                bundle.sorter, sorter_params, bundle.sorter_params_name
-            )
-            if problem is not None:
-                raise PreflightError(f"{caller}: {problem}")
-        if motion_estimate_id is not None:
-            # The member recordings and masks the run would select, derived
-            # like the single-session preview (manual exclusions per member).
-            concat_members = []
-            for member in members:
-                recording_id, artifact_detection_id = expected_source_ids(
-                    bundle,
-                    nwb_file_name=member["nwb_file_name"],
-                    sort_group_id=int(member["sort_group_id"]),
-                    interval_list_name=member["interval_list_name"],
-                    team_name=member["team_name"],
-                    manual_excluded_times=(manual_excluded_times or {}).get(
-                        int(member["member_index"]), []
-                    ),
-                )
-                concat_members.append(
-                    {
-                        "member_index": int(member["member_index"]),
-                        "recording_id": recording_id,
-                        "artifact_detection_id": artifact_detection_id,
-                    }
-                )
-            problem = supplied_motion_estimate_problem(
-                motion_estimate_id,
-                motion_recipe,
-                concat_source={
-                    **group_key,
-                    "preprocessing_params_name": (
-                        bundle.preprocessing_params_name
-                    ),
-                },
-                concat_members=concat_members,
-            )
-            if problem is not None:
-                raise PreflightError(f"{caller}: {problem}")
-    if (
-        bundle.artifact_detection_params_name in (None, "none")
-        and not manual_excluded_times
-    ):
-        return ["No artifact masking selected for the concatenated members."]
-    return []
+    if motion_mode == "apply":
+        sorter_params = (
+            SorterParameters
+            & {
+                "sorter": bundle.sorter,
+                "sorter_params_name": bundle.sorter_params_name,
+            }
+        ).fetch1("params")
+        problem = sorter_motion_correction_problem(
+            bundle.sorter, sorter_params, bundle.sorter_params_name
+        )
+        if problem is not None:
+            raise PreflightError(f"{caller}: {problem}")
+    if motion_estimate_id is not None:
+        _assert_supplied_concat_estimate(
+            motion_estimate_id,
+            motion_recipe,
+            bundle,
+            members,
+            group_key,
+            manual_excluded_times=manual_excluded_times,
+            caller=caller,
+        )
+
+
+def _assert_supplied_concat_estimate(
+    motion_estimate_id,
+    motion_recipe: "MotionRecipe",
+    bundle,
+    members: list[dict],
+    group_key: dict,
+    *,
+    manual_excluded_times,
+    caller: str,
+) -> None:
+    """Raise ``PreflightError`` unless the estimate matches this concat run.
+
+    It must be a populated estimate, made with the recipe's estimation row,
+    of a concatenation of this session group under the preset's
+    preprocessing recipe whose frozen members are the member recordings and
+    artifact detections this run would select.
+    """
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+
+    # The member recordings and masks the run would select, derived
+    # like the single-session preview (manual exclusions per member).
+    concat_members = []
+    for member in members:
+        recording_id, artifact_detection_id = expected_source_ids(
+            bundle,
+            nwb_file_name=member["nwb_file_name"],
+            sort_group_id=int(member["sort_group_id"]),
+            interval_list_name=member["interval_list_name"],
+            team_name=member["team_name"],
+            manual_excluded_times=(manual_excluded_times or {}).get(
+                int(member["member_index"]), []
+            ),
+        )
+        concat_members.append(
+            {
+                "member_index": int(member["member_index"]),
+                "recording_id": recording_id,
+                "artifact_detection_id": artifact_detection_id,
+            }
+        )
+    problem = supplied_motion_estimate_problem(
+        motion_estimate_id,
+        motion_recipe,
+        concat_source={
+            **group_key,
+            "preprocessing_params_name": (bundle.preprocessing_params_name),
+        },
+        concat_members=concat_members,
+    )
+    if problem is not None:
+        raise PreflightError(f"{caller}: {problem}")
 
 
 # A preflight message is read in a terminal, so it names enough contacts to
