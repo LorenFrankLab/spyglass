@@ -1,7 +1,7 @@
-"""Regression tests for v1-parity spike-time -> frame readback.
+"""Tests for v1-parity spike-time -> frame readback.
 
-v2 originally read sorted units back with
-``NwbSortingExtractor(file_path, fs, t_start)``, which inverts the
+Reading sorted units back with
+``NwbSortingExtractor(file_path, fs, t_start)`` would invert the
 stored absolute spike times *affinely*
 (``frame = round((t - t_start) * fs)``). That is correct only when the
 recording's timeline is a uniform ``t_start + i/fs`` grid. For DISJOINT
@@ -117,7 +117,7 @@ def test_spike_times_to_frames_clamps_out_of_bounds():
     last sample, not dropped.
 
     Floating-point round-trip at the final sample can land searchsorted at
-    ``n_samples``. Dropping it (the prior behavior, and v1's) desyncs the v2
+    ``n_samples``. Dropping it (as v1 does) desyncs the v2
     analyzer's per-spike features from the persisted ``spike_times`` and trips
     ``UnitWaveformFeatures``'s ``n_feat == n_spikes`` guard. Clamping to the
     last valid sample keeps the count aligned (the spike is at ~the final

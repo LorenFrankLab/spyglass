@@ -1125,8 +1125,8 @@ def test_outer_version_backfilled_for_all_lookups(module_name, schema_name):
     / Artifact / Sorter / Waveform / Matcher), not just the DataJoint
     column default. A row that omits the column and carries an explicit inner
     ``schema_version`` lands tagged with the blob's version, never a default that
-    silently disagrees. Fails before the change: the shared validator did not
-    backfill, so the omitted column stayed absent from the returned row.
+    silently disagrees. A validator that does not backfill leaves the
+    omitted column absent from the returned row, and this test fails.
     """
     import importlib
 

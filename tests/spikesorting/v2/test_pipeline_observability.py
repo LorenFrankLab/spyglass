@@ -474,8 +474,8 @@ def test_advisory_key_lock_acquire_error_is_non_fatal():
 def test_advisory_key_lock_excludes_other_session(dj_conn):
     """A second DB session cannot take the lock while the first holds it.
 
-    This is the property the fix actually relies on and that the single-
-    connection round-trip test CANNOT prove: MySQL named locks are reentrant
+    This is the property the pipeline's per-key lock relies on and that the
+    single-connection round-trip test CANNOT prove: MySQL named locks are reentrant
     within a session, so ``IS_FREE_LOCK == 0`` on the holding session is equally
     consistent with a working lock and a no-op. Here an independent second
     connection must BLOCK (time out) while the first holds the lock, then

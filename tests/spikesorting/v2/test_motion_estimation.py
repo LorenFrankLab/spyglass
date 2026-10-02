@@ -307,30 +307,30 @@ def test_default_rows_resolve():
 
 # ---- estimation -------------------------------------------------------------
 #
-# Tolerances come from the development benchmark on this exact fixture family
-# (one 32-contact polymer shank, 30 units, 90 s, rigid +/-25 um zigzag,
-# 600-6000 Hz, seeds 0-2, dredge_fast). Its common-frame error after removing
-# one global offset was RMS 0.307 / 0.273 / 0.319 um and max |error|
-# 0.985 / 0.991 / 1.175 um; on the static twin every dredge-family estimate
-# stayed within 0.197 um of zero (dredge_fast: exactly 0). The absolute bounds
-# below are those development maxima; the masked-versus-clean comparison allows
-# the development seed-to-seed spread of the same errors (RMS 0.319 - 0.273,
-# max |error| 1.175 - 0.985).
-DEV_RIGID_RMS_UM = 0.319
-DEV_RIGID_MAX_ABS_UM = 1.175
+# Tolerances come from the motion benchmark run on this exact fixture family
+# (``motion_acceptance_development.json``: one 32-contact polymer shank, 30
+# units, 90 s, rigid +/-25 um zigzag, 600-6000 Hz, seeds 0-2, dredge_fast). Its
+# common-frame error after removing one global offset was RMS 0.307 / 0.273 /
+# 0.319 um and max |error| 0.985 / 0.991 / 1.175 um; on the static twin every
+# dredge-family estimate stayed within 0.197 um of zero (dredge_fast: exactly
+# 0). The absolute bounds below are those measured maxima; the
+# masked-versus-clean comparison allows the measured seed-to-seed spread of the
+# same errors (RMS 0.319 - 0.273, max |error| 1.175 - 0.985).
+MEASURED_RIGID_RMS_UM = 0.319
+MEASURED_RIGID_MAX_ABS_UM = 1.175
 # Physical bounds on the same common-frame error, from the probe rather than
 # from a benchmark: the correction is useful only if the residual stays a
 # small fraction of one contact spacing (26 um pitch). A residual near one
 # pitch would put a unit on its neighbour's contact; leaving the +/-25 um
 # zigzag uncorrected has an RMS error of 25 / sqrt(3) ~ 14 um. One tenth of
 # the pitch (RMS) and one quarter of it (worst bin) are several times below
-# that failure level and several times above the development errors, so they
+# that failure level and several times above the measured errors, so they
 # fail only on a real estimation failure, not on platform numerics.
 PHYSICAL_RIGID_RMS_UM = 26.0 / 10
 PHYSICAL_RIGID_MAX_ABS_UM = 26.0 / 4
-DEV_STATIC_MAX_ABS_UM = 0.197
-DEV_RIGID_RMS_SPREAD_UM = 0.319 - 0.273
-DEV_RIGID_MAX_ABS_SPREAD_UM = 1.175 - 0.985
+MEASURED_STATIC_MAX_ABS_UM = 0.197
+MEASURED_RIGID_RMS_SPREAD_UM = 0.319 - 0.273
+MEASURED_RIGID_MAX_ABS_SPREAD_UM = 1.175 - 0.985
 KNOWN_ANSWER_DURATION_S = 90.0
 
 
@@ -674,11 +674,11 @@ def test_known_rigid_drift_is_recovered_in_a_common_frame(rigid_drift_90s):
     assert PITCH_UM == 26.0  # the physical bounds are fractions of it
     assert rms <= PHYSICAL_RIGID_RMS_UM
     assert max_abs <= PHYSICAL_RIGID_MAX_ABS_UM
-    # Regression pin, not an accuracy requirement: the development maxima on
+    # Change detector, not an accuracy requirement: the measured maxima on
     # this fixture. A failure here with the physical bounds met means the
     # estimate changed (e.g. a SpikeInterface upgrade), not that it is wrong.
-    assert rms <= DEV_RIGID_RMS_UM
-    assert max_abs <= DEV_RIGID_MAX_ABS_UM
+    assert rms <= MEASURED_RIGID_RMS_UM
+    assert max_abs <= MEASURED_RIGID_MAX_ABS_UM
     assert diagnostics.peaks_per_temporal_bin.shape == (
         rigid_drift_90s["motion"].displacement[0].shape[0],
     )
@@ -693,7 +693,7 @@ def test_static_twin_estimates_no_motion():
     )
     motion, _ = _estimate(static)
 
-    assert np.max(np.abs(motion.displacement[0])) <= DEV_STATIC_MAX_ABS_UM
+    assert np.max(np.abs(motion.displacement[0])) <= MEASURED_STATIC_MAX_ABS_UM
 
 
 def _bin_error(motion, displacement, depths, bins):
@@ -783,48 +783,48 @@ def test_masked_artifacts_do_not_reach_the_estimate(rigid_drift_90s):
     evidence = ~touched
 
     # On every bin with evidence, the masked estimate is as accurate as the
-    # clean twin's (same bins, same offset removal) within the development
+    # clean twin's (same bins, same offset removal) within the measured
     # seed-to-seed spread.
     masked_rms, masked_max = _bin_error(masked, displacement, depths, evidence)
     clean_bin_rms, clean_bin_max = _bin_error(
         rigid_drift_90s["motion"], displacement, depths, evidence
     )
-    assert masked_rms <= clean_bin_rms + DEV_RIGID_RMS_SPREAD_UM
-    assert masked_max <= clean_bin_max + DEV_RIGID_MAX_ABS_SPREAD_UM
+    assert masked_rms <= clean_bin_rms + MEASURED_RIGID_RMS_SPREAD_UM
+    assert masked_max <= clean_bin_max + MEASURED_RIGID_MAX_ABS_SPREAD_UM
 
     # The fixture discriminates: unmasked, the bursts pull the estimate far
-    # outside the development envelope.
+    # outside the measured envelope.
     unmasked_rms, _ = common_frame_error(unmasked, displacement, depths)
     clean_rms, _ = common_frame_error(
         rigid_drift_90s["motion"], displacement, depths
     )
-    assert unmasked_rms > 5 * DEV_RIGID_RMS_UM
-    assert clean_rms <= DEV_RIGID_RMS_UM
+    assert unmasked_rms > 5 * MEASURED_RIGID_RMS_UM
+    assert clean_rms <= MEASURED_RIGID_RMS_UM
 
 
 # ---- estimation clock and discontinuous inputs ------------------------------
 #
-# Gap tolerances: development measurement on this fixture family (two 30 s
+# Gap tolerances: measured on this fixture family (two 30 s
 # spans of one 32-contact polymer shank recording, 30 units, a 30 um rigid step
 # in the middle of a 600 s removed gap, dredge_fast, 30 s gap cap, seeds 0-2).
 # The common-frame error on bins holding data, after one global offset, was
 # RMS 0.010 / 0.111 / 0.070 um and max |error| 0.067 / 0.337 / 0.335 um; the
 # bounds are those maxima rounded up. The static twin across the same gap
 # estimated exactly 0 for every seed; its bound is the dredge-family static
-# maximum above (DEV_STATIC_MAX_ABS_UM).
-DEV_GAP_JUMP_RMS_UM = 0.111
-DEV_GAP_JUMP_MAX_ABS_UM = 0.338
+# maximum above (MEASURED_STATIC_MAX_ABS_UM).
+MEASURED_GAP_JUMP_RMS_UM = 0.111
+MEASURED_GAP_JUMP_MAX_ABS_UM = 0.338
 GAP_SPAN_S = 30.0
 GAP_REAL_S = 600.0
 # Two concatenation members: [0, 20) s, then [30, 40) s and [45, 60) s of one
 # recording, with rigid steps -15 -> +15 um at 25 s (between the members) and
-# +15 -> 0 um at 42.5 s (inside the second member's gap). Same development
-# measurement (dredge_fast, 30 s cap, seeds 0-2), common-frame error on bins
+# +15 -> 0 um at 42.5 s (inside the second member's gap). Measured the same
+# way (dredge_fast, 30 s cap, seeds 0-2), common-frame error on bins
 # holding data: RMS 0.047 / 0.344 / 0.363 um and max |error| 0.315 / 0.679 /
 # 0.594 um; the bounds are the maxima rounded up.
 MEMBER_WINDOWS_S = [(0.0, 20.0), (30.0, 40.0), (45.0, 60.0)]
-DEV_MEMBERS_RMS_UM = 0.363
-DEV_MEMBERS_MAX_ABS_UM = 0.679
+MEASURED_MEMBERS_RMS_UM = 0.363
+MEASURED_MEMBERS_MAX_ABS_UM = 0.679
 
 
 def test_estimation_clock_caps_only_long_gaps():
@@ -1254,8 +1254,8 @@ def test_jump_inside_a_gap_is_recovered_in_one_reference_frame(
     rms, max_abs = common_frame_error_on_source_clock(
         motion, clock, case["displacement"], case["depths"]
     )
-    assert rms <= DEV_GAP_JUMP_RMS_UM
-    assert max_abs <= DEV_GAP_JUMP_MAX_ABS_UM
+    assert rms <= MEASURED_GAP_JUMP_RMS_UM
+    assert max_abs <= MEASURED_GAP_JUMP_MAX_ABS_UM
     assert (diagnostics.peaks_per_continuity_span > 0).all()
     assert diagnostics.peaks_per_continuity_span.sum() == (
         diagnostics.n_peaks_kept
@@ -1277,8 +1277,8 @@ def test_jump_inside_a_gap_is_recovered_in_one_reference_frame(
             )
         )
     separate_rms, separate_max = common_frame_summary(np.vstack(errors))
-    assert separate_rms > DEV_GAP_JUMP_RMS_UM
-    assert separate_max > DEV_GAP_JUMP_MAX_ABS_UM
+    assert separate_rms > MEASURED_GAP_JUMP_RMS_UM
+    assert separate_max > MEASURED_GAP_JUMP_MAX_ABS_UM
 
 
 def test_no_motion_across_a_gap_estimates_no_jump(jump_across_gap):
@@ -1287,7 +1287,7 @@ def test_no_motion_across_a_gap_estimates_no_jump(jump_across_gap):
         case["static"], spans=case["spans"], clock=case["clock"]
     )
 
-    assert np.max(np.abs(motion.displacement[0])) <= DEV_STATIC_MAX_ABS_UM
+    assert np.max(np.abs(motion.displacement[0])) <= MEASURED_STATIC_MAX_ABS_UM
 
 
 def test_unequal_members_with_a_join_and_an_internal_gap():
@@ -1346,8 +1346,8 @@ def test_unequal_members_with_a_join_and_an_internal_gap():
     )
 
     assert (diagnostics.peaks_per_continuity_span > 0).all()
-    assert rms <= DEV_MEMBERS_RMS_UM
-    assert max_abs <= DEV_MEMBERS_MAX_ABS_UM
+    assert rms <= MEASURED_MEMBERS_RMS_UM
+    assert max_abs <= MEASURED_MEMBERS_MAX_ABS_UM
 
 
 def test_span_without_peaks_is_reported_not_fatal(caplog):

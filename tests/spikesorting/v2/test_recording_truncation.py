@@ -104,8 +104,8 @@ def test_sub_min_segment_length_sliver_is_not_false_truncation(
         }
     )
 
-    # Before the fix this raised RecordingTruncatedError (counted the dropped
-    # sliver as missing); it must now populate cleanly.
+    # The sliver min_segment_length drops is not counted as missing samples,
+    # so populate succeeds without RecordingTruncatedError.
     Recording.populate(rec_pk, reserve_jobs=False)
     assert Recording & rec_pk, "Recording.populate did not create a row"
 
@@ -126,9 +126,9 @@ def test_truncation_tolerance_scales_with_interval_count():
 
     Each kept interval's ``[start, end]`` snaps to the raw sample grid
     INDEPENDENTLY, so the per-boundary quantization error (up to ~1 sample
-    each) accumulates across disjoint epochs. The pre-fix guard used a
-    fixed ``1.5 / fs`` slack, which false-positived on legitimate
-    multi-epoch sorts and then deleted the just-written file. The scaled
+    each) accumulates across disjoint epochs. A fixed ``1.5 / fs`` slack
+    would false-positive on legitimate multi-epoch sorts and then delete the
+    just-written file. The scaled
     tolerance must accept that legitimate slop while still flagging a
     genuine packet drop. Deterministic (no populate) guard for the policy.
     """
@@ -136,7 +136,7 @@ def test_truncation_tolerance_scales_with_interval_count():
 
     fs = 30000.0
     T = 1.0 / fs
-    fixed_old_slack = 1.5 * T  # the removed, interval-count-blind tolerance
+    fixed_slack = 1.5 * T  # an interval-count-blind tolerance, for contrast
 
     for n in (1, 2, 3, 5, 10, 20):
         tol = Recording._truncation_tolerance(n, fs)
@@ -153,10 +153,10 @@ def test_truncation_tolerance_scales_with_interval_count():
             f"scaled tolerance {tol:.3e}s -- a valid multi-epoch sort would "
             "falsely raise RecordingTruncatedError"
         )
-        # The OLD fixed slack would have raised on that same legitimate
-        # slop -- exactly the false positive the fix removes.
-        assert worst_legit_missing > fixed_old_slack, (
-            f"n={n}: expected the legitimate slop to exceed the old fixed "
+        # A fixed 1.5-sample slack would raise on that same legitimate
+        # slop -- the false positive the scaled tolerance avoids.
+        assert worst_legit_missing > fixed_slack, (
+            f"n={n}: expected the legitimate slop to exceed a fixed "
             "1.5-sample tolerance (otherwise this test proves nothing)"
         )
         # A genuine packet drop (far more than n+1.5 samples) still raises.

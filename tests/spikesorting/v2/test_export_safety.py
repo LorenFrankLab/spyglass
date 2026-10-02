@@ -14,8 +14,8 @@ nothing). These tests pin that the standard supported path
 
 Each test asserts a two-sided invariant -- the recording cache is ABSENT
 from the selection-stage ``ExportSelection.File`` but PRESENT in the
-post-populate ``Export.File`` -- so the test exercises (and would fail on
-a regression of) the cascade that actually does the capture, rather than
+post-populate ``Export.File`` -- so the test exercises (and would fail if
+it broke) the cascade that actually does the capture, rather than
 trivially passing.
 
 All tests are ``slow``: each runs a full sort plus an ``Export``
@@ -168,8 +168,8 @@ def test_v2_export_captures_curation_and_recording_files(export_smoke_session):
         )
         assert recording_nwb in final, (
             f"recording cache {recording_nwb!r} missing from Export.File "
-            f"{sorted(final)} -- the populate_paper FK cascade no longer "
-            "reaches the v2 Recording table (v1-parity regression)."
+            f"{sorted(final)} -- the populate_paper FK cascade does not "
+            "reach the v2 Recording table (v1 parity broken)."
         )
 
         # Two-sided invariant: the recording cache is captured by the

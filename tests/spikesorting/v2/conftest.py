@@ -126,13 +126,14 @@ _SMOKE_FIXTURE = "mearec_polymer_smoke"
 def _eager_fetch_names():
     """Fixture stems to download at *session start*, before collection.
 
-    Only fixtures the honest-green gate will require (so they are present when
-    the gate checks below) -- plus every fixture when ``SPYGLASS_V2_FETCH_FULL=1``,
-    an explicit developer opt-in. The per-PR smoke fixture is deliberately NOT in
-    this set: a run that collects no database test (a pure-helper unit run) needs
-    no fixture, so fetching one unconditionally here starts a spurious download.
-    The smoke fixture is fetched lazily at collection time for runs that do need
-    the DB (see ``pytest_collection_modifyitems``).
+    Only fixtures the required-fixture check will require (so they are present
+    when that check runs below) -- plus every fixture when
+    ``SPYGLASS_V2_FETCH_FULL=1``, an explicit developer opt-in. The per-PR smoke
+    fixture is deliberately NOT in this set: a run that collects no database
+    test (a pure-helper unit run) needs no fixture, so fetching one
+    unconditionally here starts a spurious download. The smoke fixture is
+    fetched lazily at collection time for runs that do need the DB (see
+    ``pytest_collection_modifyitems``).
     """
     import os
 
@@ -190,13 +191,13 @@ def _missing_required_fixtures(required):
     ``tests/spikesorting/v2/fixtures/<name>.nwb`` -- the file it downloads and
     sha256-verifies. The shared raw data directory must not count for those:
     ``copy_and_insert_nwb`` copies every ingested fixture into it under its
-    own stem, so a leftover copy from a previous run would satisfy a gate
+    own stem, so a leftover copy from a previous run would satisfy a check
     whose whole purpose is to prove THIS run's download happened.
 
     A name ``_fetch.py`` does not know has no home in ``fixtures/``. That is
     the real recorded session (``minirec20230622``) the workflow curls
     straight into the raw data directory, so for those -- and only those --
-    the raw data directory is where the gate looks.
+    the raw data directory is where the check looks.
 
     Parameters
     ----------
@@ -248,15 +249,19 @@ def _missing_fixtures_message(missing: list[str]) -> str:
     lines = []
     if unhosted:
         lines.append(
-            "Required v2 fixtures are absent, so their gates would silently "
-            "skip: " + ", ".join(unhosted) + ". No download URL is configured "
+            "Required v2 fixtures are absent, so the tests that need them "
+            "would silently skip: "
+            + ", ".join(unhosted)
+            + ". No download URL is configured "
             "-- the fixture is not hosted; see "
             "tests/spikesorting/v2/fixtures/README.md."
         )
     if failed:
         lines.append(
-            "Required v2 fixtures are absent, so their gates would silently "
-            "skip: " + ", ".join(failed) + ". The download step failed or a "
+            "Required v2 fixtures are absent, so the tests that need them "
+            "would silently skip: "
+            + ", ".join(failed)
+            + ". The download step failed or a "
             "Box link is stale -- see tests/spikesorting/v2/fixtures/_fetch.py."
         )
     return "\n".join(lines)
@@ -265,8 +270,8 @@ def _missing_fixtures_message(missing: list[str]) -> str:
 def pytest_sessionstart(session):
     """Pre-fetch only the fixtures this session is configured to require.
 
-    Downloads the honest-green-gated set (``SPYGLASS_V2_REQUIRE_FIXTURES``, or
-    every fixture under ``SPYGLASS_V2_FETCH_FULL=1``) and verifies the gate. The
+    Downloads the required set (``SPYGLASS_V2_REQUIRE_FIXTURES``, or every
+    fixture under ``SPYGLASS_V2_FETCH_FULL=1``) and checks it is present. The
     per-PR smoke fixture is fetched lazily at collection time instead (see
     ``pytest_collection_modifyitems``), so a pure-helper run -- which collects no
     DB test -- starts no download. ``ensure_fixture`` is a no-op when the file is
@@ -288,9 +293,9 @@ def pytest_sessionstart(session):
             # tests skip via their own ``_PATH.exists()`` guard. Surface it.
             warnings.warn(f"[v2 fixtures] could not fetch {name}: {exc}")
 
-    # Honest-green gate: any fixture named in SPYGLASS_V2_REQUIRE_FIXTURES MUST
-    # be present, or its test would silently skip and the run would look green
-    # without exercising the gate. The CI workflow sets a job-wide list per
+    # Required-fixture check: any fixture named in SPYGLASS_V2_REQUIRE_FIXTURES
+    # MUST be present, or its test would silently skip and the run would look
+    # green without exercising it. The CI workflow sets a job-wide list per
     # trigger (its "Select required fixtures for this run" step), and steps
     # that need other fixtures (the acceptance probes, the two-session matcher
     # gate, the motion benchmark) set their own list on their pytest command
@@ -740,7 +745,7 @@ def chronic_2_session_minirec(dj_conn, tmp_path_factory):
     one-tetrode sort group per session, and populates the per-member
     ``Recording`` cache for the two SAME-DAY members under the ``"default"``
     preprocessing recipe. The third session shares neither a Recording nor a
-    date with the first two; it exists so the multi-day ``SessionGroup`` gate
+    date with the first two; it exists so the ``SessionGroup`` same-day check
     has a second date to reject.
 
     Package-scoped read substrate: tests build their OWN ``SessionGroup`` /

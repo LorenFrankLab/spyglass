@@ -4,11 +4,11 @@ The rest of the v2 suite proves insert-side integrity (duplicate detection,
 distinct-identity minting) thoroughly, but every *consumer* accessor on
 ``SpikeSortingOutput`` -- ``get_recording``, ``get_sort_group_info``,
 ``get_spike_times``, ``get_spike_indicator``, ``get_firing_rate``,
-``get_unit_brain_regions``, and ``get_restricted_merge_ids`` -- was only
-ever exercised with a SINGLE merge_id in the merge table. With one row a
-broken restriction is indistinguishable from a correct one: a dispatch that
-forgot its ``& merge_get_part(key)`` filter would return "the only row" and
-pass anyway.
+``get_unit_brain_regions``, and ``get_restricted_merge_ids`` -- is
+otherwise exercised only with a SINGLE merge_id in the merge table. With one row
+a broken restriction is indistinguishable from a correct one: a dispatch that
+forgot its ``& merge_get_part(key)`` filter would return "the only row" and pass
+anyway.
 
 These tests populate TWO genuinely distinguishable v2 merge_ids and assert
 each accessor returns the data for the *requested* merge_id and not the

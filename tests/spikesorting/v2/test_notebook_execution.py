@@ -14,8 +14,8 @@ The notebooks gate their optional-extra cells on import checks, and neither
 optional extra is in the default v2 test env. 10_'s browser-curation cells need
 the ``spikesorting-v2-curation`` extra (figpack), so they self-skip in the
 default job and run in the separate curation CI lane. UnitMatch's bundle
-extraction needs the ``spikesorting-v2-matching`` extra (UnitMatchPy), so 14_'s
-match (Part B) runs only in the matching lane -- the cross-session test below
+extraction needs the ``spikesorting-v2-matching`` extra (UnitMatchPy), so the
+cross-session notebook's match (Part B) runs only in the matching lane -- the cross-session test below
 stands in a lightweight fixture matcher there and exercises Part A (concat)
 everywhere.
 

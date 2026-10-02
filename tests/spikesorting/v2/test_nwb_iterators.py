@@ -1,11 +1,11 @@
 """Direct coverage for the chunked NWB-write iterators.
 
 ``Recording._write_nwb_artifact`` streams the preprocessed traces and the
-timestamps vector into the AnalysisNwbfile via these iterators; before this
-file they were exercised only transitively through the full write path, so a
-chunk/buffer-sizing or ``np.squeeze`` regression could silently corrupt
-persisted timestamps (the spine of disjoint-recording readback). Audit
-test-hardening #15. Hermetic -- no DataJoint / DB.
+timestamps vector into the AnalysisNwbfile via these iterators. Exercised only
+transitively through the full write path, a chunk/buffer-sizing or
+``np.squeeze`` regression could silently corrupt persisted timestamps (the
+spine of disjoint-recording readback), so they are tested directly here.
+Hermetic -- no DataJoint / DB.
 """
 
 from __future__ import annotations

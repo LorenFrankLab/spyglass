@@ -4,8 +4,8 @@ Asserts the contract that lets v2 ship under SpikeInterface 0.104 without
 breaking existing v0/v1 query paths:
 
 - the project is pinned to SI 0.104,
-- the v0/v1 spike-sorting modules and the non-spike-sorting consumers in
-  the audit all import under SI 0.104,
+- the v0/v1 spike-sorting modules and the shared modules that reference
+  SpikeInterface all import under SI 0.104,
 - each guarded v0/v1 entry point raises the legacy-environment error at
   call time,
 - existing v0/v1 `SpikeSortingOutput` merge queries remain functional,
@@ -162,7 +162,7 @@ def test_default_merge_sources_skip_v2_when_unavailable(dj_conn, monkeypatch):
 
     A literal ``sources=["v0","v1","v2"]`` default made the no-argument
     path raise wherever the optional v2 layer is unavailable even when the
-    caller never requested v2. The default now resolves to only the
+    caller never requested v2. The default resolves to only the
     available sources; an explicit list is still honored verbatim.
     (``dj_conn`` only because importing the merge module declares its
     DataJoint schema; the assertions touch no table.)
@@ -195,10 +195,10 @@ def test_v2_artifact_restriction_warns_when_unresolved(dj_conn, monkeypatch):
     assert any("artifact-restricted" in msg for msg in captured), captured
 
 
-# ---------- Audit-listed imports load under SI 0.104 -----------------------
+# ---------- v0/v1 and shared SpikeInterface-using modules load under SI 0.104
 
-_AUDIT_IMPORTS_TO_VERIFY = [
-    # query-compatible files the audit lists for explicit smoke
+_SI_DEPENDENT_IMPORTS_TO_VERIFY = [
+    # query-compatible modules that reference SpikeInterface, smoke-imported
     "spyglass.common.common_nwbfile",
     "spyglass.utils.waveforms",
     "spyglass.utils.mixins.analysis",
@@ -211,9 +211,9 @@ _AUDIT_IMPORTS_TO_VERIFY = [
 ]
 
 
-@pytest.mark.parametrize("module_name", _AUDIT_IMPORTS_TO_VERIFY)
+@pytest.mark.parametrize("module_name", _SI_DEPENDENT_IMPORTS_TO_VERIFY)
 def test_legacy_import_smoke(module_name, dj_conn):
-    """Audit-listed v0/v1 + shared modules import under SI 0.104.
+    """v0/v1 + shared SpikeInterface-using modules import under SI 0.104.
 
     Module-level imports must not crash; runtime guards only fire at call
     time, so a module can be imported without invoking a removed API. The
@@ -229,7 +229,7 @@ def test_legacy_import_smoke(module_name, dj_conn):
 def _assert_legacy_guard(
     component: str, callable_: Callable[[], object]
 ) -> None:
-    """Assert ``callable_()`` raises the prescribed legacy-environment error.
+    """Assert ``callable_()`` raises the legacy-environment guard's error.
 
     Captures the raised exception once so a guard that fails to raise on the
     second invocation cannot silently pass the component-name assertion.

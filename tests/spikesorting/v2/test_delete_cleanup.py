@@ -1,10 +1,10 @@
 """A cancelled Sorting.delete must NOT destroy the analyzer folder.
 
-Sorting.delete cleaned up the 5-50 GB analyzer scratch folder after
+Sorting.delete cleans up the 5-50 GB analyzer scratch folder after
 super().delete(). But DataJoint's delete returns normally when the user
-answers "no" to the safemode prompt (the cascade is cancelled, rows stay) --
-the old code then rmtree'd the folder anyway, destroying data for a row the
-user chose to keep. The fix only removes a folder whose DB row was actually
+answers "no" to the safemode prompt (the cascade is cancelled, rows stay), so
+removing the folder unconditionally would destroy data for a row the user
+chose to keep. Sorting.delete only removes a folder whose DB row was actually
 deleted. The commit path (folder removed) is covered by
 test_sorting_delete_removes_analyzer_folder.
 """
@@ -232,10 +232,10 @@ def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
     """``RecordingArtifactDetection().delete(restr)`` cleans only
     actually-deleted rows.
 
-    Regression for the cleanup bypass where ``delete`` checked ``len(self)``
-    after the cascade. When ``self`` is the unrestricted table instance, that
-    length includes unrelated artifact rows, so the old code returned early and
-    left the deleted row's artifact-removed IntervalList behind.
+    Cleanup must not decide from ``len(self)`` after the cascade: when ``self``
+    is the unrestricted table instance, that length includes unrelated
+    artifact rows, so a ``len(self)`` check would return early and leave the
+    deleted row's artifact-removed IntervalList behind.
     """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (

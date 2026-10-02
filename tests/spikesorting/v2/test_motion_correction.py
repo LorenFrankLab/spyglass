@@ -860,7 +860,7 @@ def test_orphan_and_bypassed_source_parts_are_refused(
 def test_artifact_part_changed_around_insert_is_refused(drift_recording):
     """``motion_estimate_id`` folds in the artifact detection, so an
     ``ArtifactDetectionSource`` part deleted from a masked selection, or
-    inserted on an unmasked one, no longer gives the stored id: the source
+    inserted on an unmasked one, does not give the stored id: the source
     resolution (and so ``MotionEstimate.populate``) raises instead of
     estimating on another mask than the one selected."""
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError

@@ -16,8 +16,8 @@ estimates with ``_motion.estimate_motion_in_spans`` on the estimation clock
 (``build_estimation_clock``), applies with
 ``_motion.apply_motion_on_estimation_clock``, sorts with the sorting stage's
 ``run_si_sorter`` + ``remove_excess_spikes`` and compares with the ground
-truth. Metrics (motion error M1, corrected-signal fidelity M2, sorting M3,
-border M4, cost M5) are defined in :func:`plain_motion_error`,
+truth. The metrics (motion error, corrected-signal fidelity, sorting accuracy,
+border channels, cost) are defined in :func:`plain_motion_error`,
 :func:`source_clock_motion_error`, :func:`fidelity_sums`,
 :func:`sorting_metrics`, :func:`predicted_removed_channels` and
 :func:`run_case`.
@@ -46,16 +46,16 @@ import numpy as np
 
 
 def peak_rss_bytes() -> int:
-    """This process's peak resident set size (bytes), for cost metric M5.
+    """This process's peak resident set size (bytes), for the cost metric.
 
     ``getrusage(RUSAGE_SELF).ru_maxrss`` counts this process only. It equals
     the maximum resident set size ``/usr/bin/time -l`` reports for the case
     process because everything runs in it: SpikeInterface jobs use the
     manifest's job kwargs (``n_jobs=1``, no worker processes) and
     MountainSort5 runs in-process through ``run_sorter`` (local backend).
-    On the 108 development cases the two agreed to the byte. With
-    ``n_jobs > 1`` or a container sorter, worker or container memory would be
-    missing from it.
+    On the 108 cases of the development manifest the two agreed to the byte.
+    With ``n_jobs > 1`` or a container sorter, worker or container memory would
+    be missing from it.
     """
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     # ``ru_maxrss`` is bytes on macOS and KiB on Linux.
@@ -336,7 +336,8 @@ def _correlation(a, b):
 
 
 def plain_motion_error(motion, displacement, factor_fn, channel_depths, dfs):
-    """M1 on an unwindowed, unmasked recording (estimation clock = source).
+    """Motion error on an unwindowed, unmasked recording (estimation clock =
+    source).
 
     The estimate is evaluated at its own temporal-bin centers at every
     channel depth. The truth of bin ``i`` is the mean of the ground-truth
@@ -382,7 +383,7 @@ def plain_motion_error(motion, displacement, factor_fn, channel_depths, dfs):
 
 
 def source_clock_motion_error(motion, clock, displacement, channel_depths, dfs):
-    """M1 on the source clock (windowed, joined or masked scenarios).
+    """Motion error on the source clock (windowed, joined or masked scenarios).
 
     Temporal bins are mapped to source time with the stage's accessor
     (``_motion.displacement_on_source_clock``); bins in a capped gap are
@@ -492,7 +493,7 @@ def fidelity_sums(test, reference, channel_ids, starts, window) -> dict:
 
 
 def paired_fidelity(corrected, uncorrected, static, starts, window) -> dict:
-    """M2 of one twin: the corrected and the uncorrected recording against
+    """Fidelity of one twin: the corrected and the uncorrected recording against
     the static twin, both over the corrected recording's channels.
 
     A ``remove_channels`` correction drops the end contacts, which carry the
@@ -512,7 +513,8 @@ def paired_fidelity(corrected, uncorrected, static, starts, window) -> dict:
 
 
 def sorting_metrics(gt_sorting, sorting, comparison) -> dict:
-    """M3: ground-truth comparison of one sort (manifest scores)."""
+    """Sorting accuracy: ground-truth comparison of one sort (manifest
+    scores)."""
     from spikeinterface.comparison import compare_sorter_to_ground_truth
 
     cmp = compare_sorter_to_ground_truth(

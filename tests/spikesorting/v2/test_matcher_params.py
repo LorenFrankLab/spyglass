@@ -45,8 +45,8 @@ def test_unitmatch_schema_has_bundle_params():
     """The waveform-bundle params are identity-bearing fields on the schema, so
     they enter the named, content-addressed params blob (and therefore the
     matcher_params_name -> unitmatch_id identity) rather than being silent
-    extract_unitmatch_bundle function defaults. Defaults match the prior
-    literals so the shipped default row is unchanged."""
+    extract_unitmatch_bundle function defaults. The schema defaults below are
+    the shipped default row's values."""
     from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
 
     dumped = UnitMatchParamsSchema().model_dump()

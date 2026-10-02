@@ -1,10 +1,10 @@
 """Curated-units NWBs carry per-unit ``obs_intervals``.
 
-The sort-time writer wrote a per-unit observation window, but the curated
-writer dropped it and the combined reader never read it back -- so any NWB-only
-firing-rate / presence-ratio / duration denominator over a curated export
-silently assumed the full session. The reader now returns ``obs`` and the
-curated writer carries it forward (intersection for merged contributors).
+The sort-time writer writes a per-unit observation window; the curated writer
+carries it forward (intersection for merged contributors) and the combined
+reader returns it as ``obs``. Without it, any NWB-only firing-rate /
+presence-ratio / duration denominator over a curated export would silently
+assume the full session.
 
 Hermetic NWB-IO tests + one DB integration round-trip.
 """

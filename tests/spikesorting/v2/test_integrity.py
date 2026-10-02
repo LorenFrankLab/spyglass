@@ -1,8 +1,8 @@
-"""Cross-table integrity gate for v2 spike-sorting tables.
+"""Cross-table integrity tests for v2 spike-sorting tables.
 
 Tests verify cross-table invariants and transactional atomicity that
 the per-table tests in the ``single_session/`` suite do not
-exercise as a focused gate:
+exercise directly:
 
 - **Tri-part dispatch active**: every v2 ``AutoPopulate`` table (discovered
   from the package, minus a short documented exclusion set) uses DataJoint's
@@ -12,8 +12,8 @@ exercise as a focused gate:
 - **Selection FK consistency**: every ``SortingSelection`` master row has
   EXACTLY one source-part row (recording XOR concatenated), and an
   artifact-backed sort's ``artifact_detection_id`` maps back to exactly one
-  ``RecordingArtifactSelection`` master. (The split artifact selection is
-  structural single-source -- the recording source is a required master FK on
+  ``RecordingArtifactSelection`` master. (The artifact selection is
+  structurally single-source -- the recording source is a required master FK on
   ``RecordingArtifactSelection``, not an XOR source part.)
 - **Merge-table v2 parts are correctly wired**:
   ``SpikeSortingOutput.CurationV2`` and
@@ -61,7 +61,7 @@ def _autopopulate_tables_in(package) -> dict[str, type]:
 
     Discovery imports every module in the package, subpackages included,
     instead of trusting a hand-written list, so a new ``dj.Computed`` /
-    ``dj.Imported`` table cannot escape the gate. Only classes defined in the
+    ``dj.Imported`` table cannot escape the check. Only classes defined in the
     module being scanned count (re-exports are skipped). Tables are keyed by
     ``f"{obj.__module__}.{obj.__qualname__}"`` so two same-named classes in
     different modules stay apart; two distinct classes with one key (for
@@ -435,7 +435,7 @@ def test_no_orphan_part_rows_in_v2_tables(populated_sorting):
 
     # Sorting.Unit -> Sorting master. This relation is guaranteed
     # non-empty by the populated_sorting fixture; the assertion
-    # protects against vacuous pass if a regression empties it.
+    # protects against a vacuous pass if it is ever empty.
     sorting_unit_keys = (Sorting.Unit).fetch("KEY", as_dict=True)
     assert len(sorting_unit_keys) >= 1, (
         "Sorting.Unit is empty; orphan check would pass vacuously. "

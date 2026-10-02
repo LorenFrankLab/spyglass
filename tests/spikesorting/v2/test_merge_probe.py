@@ -4,8 +4,8 @@
 ``except Exception`` boundaries so v0/v1-only environments can still load the
 merge table when either optional module fails to import.
 
-The fix for silent failures is visibility, not narrowing: the probe logs the
-captured cause via ``logger.warning`` while still tolerating it. These tests
+Failures are made visible rather than narrowed: the probe logs the captured
+cause via ``logger.warning`` while still tolerating it. These tests
 exercise the probe helper directly (no schema reload, no DB) by forcing the v2
 ``curation`` import to raise.
 """

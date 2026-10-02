@@ -1,14 +1,14 @@
 """``Sorting.Unit.peak_amplitude_uv`` is the template extremum on the
 attributed electrode.
 
-Regression guard for the two coupled defects in sort-time unit attribution:
+Guards two coupled failure modes of sort-time unit attribution:
 
-* Value: ``get_template_extremum_amplitude`` defaulted to ``mode="at_index"``
-  (the value at the alignment sample), under-reporting the true peak.
+* Value: ``get_template_extremum_amplitude`` defaults to ``mode="at_index"``
+  (the value at the alignment sample), which under-reports the true peak.
 * Channel: ``at_index`` re-picks its own best channel, which could differ from
   the electrode FK (``get_template_extremum_channel``, ``mode="extremum"``).
 
-The fix passes ``mode="extremum"`` (and the configured ``peak_sign``) to the
+v2 passes ``mode="extremum"`` (and the configured ``peak_sign``) to the
 amplitude call, so the stored amplitude is the template PEAK on the SAME
 channel as the attributed electrode. This test recomputes the extremum
 directly from the analyzer's template array (an independent code path, not
@@ -16,12 +16,12 @@ directly from the analyzer's template array (an independent code path, not
 
 Scope note: this runs on the MountainSort5 ``populated_sorting`` fixture,
 whose templates are aligned to the trough -- so ``at_index`` coincides with
-``extremum`` and the fix is a no-op here (verified: the test passes with and
-without ``mode="extremum"``). It is therefore an *invariant* guard
+``extremum`` and ``mode="extremum"`` makes no difference here (the test
+passes with and without it). It is therefore an *invariant* guard
 (``peak_amplitude_uv`` is the extremum on the attributed electrode), not a
-behavioral repro. The fix's behavioral effect is on sorters whose detection
-alignment differs from the template peak; a discriminating clusterless repro
-is not yet wired up.
+discriminating test: ``mode="extremum"`` changes the result only for sorters
+whose detection alignment differs from the template peak, and no
+clusterless fixture here exercises that case.
 """
 
 from __future__ import annotations
@@ -42,8 +42,8 @@ def test_peak_amplitude_is_extremum_on_attributed_electrode(populated_sorting):
     )
     from spyglass.spikesorting.v2.utils import resolve_peak_sign
 
-    # The analyzer folder is no longer a column; load via the accessor,
-    # which resolves the path from sorting_id and rebuilds on miss.
+    # The analyzer folder is not a column; load via the accessor, which
+    # resolves the path from sorting_id and rebuilds on miss.
     analyzer = Sorting().get_analyzer(populated_sorting)
     templates = analyzer.get_extension("templates").get_data()
     analyzer_unit_ids = [int(u) for u in analyzer.unit_ids]

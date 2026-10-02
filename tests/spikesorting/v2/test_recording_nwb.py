@@ -715,7 +715,7 @@ def test_recording_semantic_round_trip(xz_roundtrip_session, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 3. Tracked follow-up: specific reference drops the per-channel calibration
+# 3. Known limitation: specific reference drops the per-channel calibration
 # ---------------------------------------------------------------------------
 
 
@@ -724,7 +724,7 @@ def test_recording_semantic_round_trip(xz_roundtrip_session, monkeypatch):
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "tracked follow-up: a 'specific' reference subtracts RAW counts and "
+        "known limitation: a 'specific' reference subtracts RAW counts and "
         "then zeroes the channel offsets, so with unequal per-channel offsets "
         "and no bandpass to remove the DC the per-channel calibration "
         "(offset_i - offset_ref) is lost before the writer's uniform-offset "

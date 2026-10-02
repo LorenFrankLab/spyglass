@@ -387,7 +387,7 @@ def test_curation_v2_auto_registers_in_merge_table(populated_sorting):
         (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
 
     pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
-    # The merge part now has exactly one row for this curation.
+    # The merge part has exactly one row for this curation.
     merge_rows = (SpikeSortingOutput.CurationV2 & pk).fetch(as_dict=True)
     assert len(merge_rows) == 1
     merge_id = merge_rows[0]["merge_id"]
@@ -886,7 +886,7 @@ def test_insert_curation_rejects_scalar_string_label(populated_sorting):
     ``labels={unit_id: "custom_tag"}`` (a bare string instead of a list
     of labels) must raise -- NOT be coerced to
     ``["c","u","s","t","o","m",...]`` and written as per-character labels.
-    The bug bites hardest with ``allow_custom_labels=True``, which skips
+    Coercion would bite hardest with ``allow_custom_labels=True``, which skips
     the per-value canonical check, so the test pins both the default and
     the escape-hatch paths.
     """

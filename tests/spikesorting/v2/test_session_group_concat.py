@@ -1753,7 +1753,7 @@ def test_concat_materialization_memory_runtime_is_measured(same_day_group):
 
 @pytest.mark.slow
 def test_concat_chronic_real_dataset_memory_runtime(request, dj_conn):
-    """Opt-in real-chronic memory/runtime gate (``pytest --run-chronic``).
+    """Opt-in real-chronic memory/runtime check (``pytest --run-chronic``).
 
     Skipped by default. Given a real 1-hour, 30 kHz chronic NWB via
     ``SPIKESORTING_V2_CHRONIC_TEST_PATH``, ingests it, builds a same-day
@@ -1767,7 +1767,7 @@ def test_concat_chronic_real_dataset_memory_runtime(request, dj_conn):
 
     if not request.config.getoption("--run-chronic"):
         pytest.skip(
-            "pass --run-chronic to run the real-chronic memory/runtime gate"
+            "pass --run-chronic to run the real-chronic memory/runtime check"
         )
     chronic_path = os.environ.get("SPIKESORTING_V2_CHRONIC_TEST_PATH")
     if not chronic_path:

@@ -441,10 +441,9 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
     3. Asserts traces are zero inside the gap and unchanged outside.
 
     Also pins the off-by-one boundary: the LAST artifact frame must
-    be zeroed (the original code dropped it because the IntervalList
-    stored ``[start, end]`` closed where ``end = timestamps[end_f]``;
-    the fix stores ``[start, end+1)`` so the complement subtraction
-    captures end_f).
+    be zeroed (storing the IntervalList as ``[start, end]`` closed with
+    ``end = timestamps[end_f]`` drops it; v2 stores ``[start, end+1)``
+    so the complement subtraction captures end_f).
     """
     import numpy as np
     import uuid
@@ -536,8 +535,8 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
         )
 
         # And the last artifact frame (artifact_end_f - 1) MUST be
-        # zero. This is the exact frame the original off-by-one bug
-        # left unmasked.
+        # zero. This is the exact frame a closed-interval off-by-one
+        # leaves unmasked.
         last_artifact = masked.get_traces(
             start_frame=artifact_end_f - 1, end_frame=artifact_end_f
         )
@@ -1067,8 +1066,9 @@ def test_artifact_detection_delete_requires_interval_ownership_part_rows(
     """A row without ownership parts is invalid and must fail loudly.
 
     We intentionally do not reconstruct missing ownership from
-    ``artifact_detection_id``-derived interval names. That would reintroduce
-    the generic ``IntervalList.cleanup`` orphan problem this part table fixes.
+    ``artifact_detection_id``-derived interval names. That would expose the
+    rows to the generic ``IntervalList.cleanup`` orphan problem this part
+    table prevents.
     """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (

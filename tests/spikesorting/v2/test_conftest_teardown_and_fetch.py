@@ -1,4 +1,4 @@
-"""Regression tests for pytest-harness friction in the shared test config.
+"""Tests for the shared pytest harness: teardown, fixture fetching, warnings.
 
 These exercise the *harness itself* (``tests/conftest.py`` teardown, the shared
 ``DataDownloader``), not any Spyglass pipeline, so they run DB-free. Run with
@@ -19,12 +19,12 @@ def test_unconfigure_tolerates_unbound_server():
     ``pytest_configure`` sets ``TEARDOWN`` before it binds ``SERVER`` (the latter
     only after building the Docker MySQL manager). If configure raises in between
     -- e.g. Docker is unavailable -- pytest still runs ``pytest_unconfigure`` from
-    ``wrap_session``'s ``finally``. Pre-guard, teardown's ``SERVER.stop()`` then
-    raised a second traceback (``NameError`` in production, where the name was
-    never bound; ``AttributeError`` here, where we bind the module default
-    ``None``) that buried the real configuration error. The module-level
-    ``SERVER = None`` default plus the ``SERVER is not None`` teardown guard make
-    the real error surface instead.
+    ``wrap_session``'s ``finally``. An unguarded ``SERVER.stop()`` would then
+    raise a second traceback (``NameError`` where the name was never bound;
+    ``AttributeError`` here, where we bind the module default ``None``) that
+    buries the real configuration error. The module-level ``SERVER = None``
+    default plus the ``SERVER is not None`` teardown guard make the real error
+    surface instead.
     """
     import tests.conftest as root_conftest
 
@@ -39,8 +39,8 @@ def test_unconfigure_tolerates_unbound_server():
         root_conftest.SERVER = None
         root_conftest.TMP_BASE_DIR = None
 
-        # Must not raise. Pre-fix this raised AttributeError on ``None.stop()``;
-        # in production the unbound name raised NameError.
+        # Must not raise. Unguarded, this would raise AttributeError on
+        # ``None.stop()`` (NameError where the name is unbound).
         root_conftest.pytest_unconfigure(_DummyConfig())
     finally:
         for name, value in saved.items():
@@ -73,9 +73,9 @@ def test_data_downloader_no_download_on_construction(tmp_path, monkeypatch):
 
     The root ``pytest_configure`` builds a ``DataDownloader`` against a fresh,
     empty temp ``base_dir`` on every session -- including pure-helper runs that
-    touch no DB and no sample data. Eagerly resolving ``file_downloads`` in
-    ``__init__`` spawned a ``curl`` per absent file (minirec + videos) for tests
-    that never consume them. The download must instead fire lazily, on the first
+    touch no DB and no sample data. Resolving ``file_downloads`` eagerly in
+    ``__init__`` would spawn a ``curl`` per absent file (minirec + videos) for
+    tests that never consume them, so the download fires lazily, on the first
     ``wait_for`` / ``move_dlc_items`` call.
     """
     import tests.data_downloader as dd
@@ -97,7 +97,7 @@ def test_data_downloader_no_download_on_construction(tmp_path, monkeypatch):
 def test_data_downloader_downloads_lazily_on_wait_for(tmp_path, monkeypatch):
     """The deferred download still fires when a consumer calls ``wait_for``.
 
-    Guards against the fix over-correcting into a silent no-download: tests that
+    Deferring the download must not turn into never downloading: tests that
     genuinely need minirec/video must still get them.
     """
     import tests.data_downloader as dd
@@ -120,8 +120,8 @@ def test_data_downloader_downloads_lazily_on_wait_for(tmp_path, monkeypatch):
 
 # --------------------------------------------------------------------------
 # The v2 smoke fixture is fetched only when a collected test needs the DB, not
-# unconditionally at session start (which downloaded a 57MB fixture even for
-# pure-helper unit runs that consume nothing).
+# unconditionally at session start, so pure-helper unit runs that consume
+# nothing do not download the 57MB fixture.
 # --------------------------------------------------------------------------
 
 
@@ -136,8 +136,8 @@ class _FakeItem:
 def test_eager_fetch_names_empty_for_pure_helper_run(monkeypatch):
     """With neither env var set, session start downloads nothing eagerly.
 
-    This is the fix: a pure-helper run that requires no fixture and opts into no
-    full fetch triggers no download at session start.
+    A pure-helper run that requires no fixture and opts into no full fetch
+    triggers no download at session start.
     """
     from tests.spikesorting.v2.conftest import _eager_fetch_names
 
@@ -148,7 +148,8 @@ def test_eager_fetch_names_empty_for_pure_helper_run(monkeypatch):
 
 
 def test_eager_fetch_names_fetches_required_set(monkeypatch):
-    """The honest-green-gated fixtures are pre-fetched so the gate finds them."""
+    """Required fixtures are pre-fetched so the required-fixture check finds
+    them."""
     from tests.spikesorting.v2.conftest import _eager_fetch_names
 
     monkeypatch.setenv("SPYGLASS_V2_REQUIRE_FIXTURES", "mearec_polymer_smoke")
@@ -168,7 +169,7 @@ def test_eager_fetch_names_full_opt_in(monkeypatch):
 
 
 def test_eager_fetch_names_ignores_unknown_required(monkeypatch):
-    """A required fixture with no download URL is gate-checked, not fetched."""
+    """A required fixture with no download URL is checked for, not fetched."""
     from tests.spikesorting.v2.conftest import _eager_fetch_names
 
     monkeypatch.setenv("SPYGLASS_V2_REQUIRE_FIXTURES", "no_such_fixture_xyz")
@@ -209,18 +210,18 @@ def test_item_consumes_smoke_fixture_only_for_real_consumers(tmp_path):
 def test_require_fixtures_gate_ignores_stale_ingested_copies(
     tmp_path, monkeypatch
 ):
-    """A leftover ingest copy must not satisfy a downloaded fixture's gate.
+    """A leftover ingest copy must not satisfy a downloaded fixture's check.
 
     ``copy_and_insert_nwb`` copies every ingested fixture into the shared raw
     data directory under its own stem, so that directory accumulates files
-    named exactly like the v2 fixtures. The gate exists to prove THIS run
+    named exactly like the v2 fixtures. The check exists to prove THIS run
     downloaded and verified the fixture, so only
     ``tests/spikesorting/v2/fixtures/<name>.nwb`` counts for a name
     ``_fetch.py`` knows.
 
     The real recorded session (``minirec20230622``) has no entry there -- CI
     curls it straight into the raw data directory -- so for that name, and
-    only that name, the raw directory is where the gate looks.
+    only that name, the raw directory is where the check looks.
     """
     import tests.spikesorting.v2.conftest as v2_conftest
     from tests.spikesorting.v2.conftest import _missing_required_fixtures
@@ -249,7 +250,7 @@ def test_require_fixtures_gate_ignores_stale_ingested_copies(
     (raw_dir / "minirec20230622.nwb").write_bytes(b"curled by CI")
     assert _missing_required_fixtures(required) == ["mearec_polymer_smoke"], (
         "a leftover copy in the raw data directory satisfied a downloaded "
-        "fixture's gate, so a failed download would look green"
+        "fixture's check, so a failed download would look green"
     )
 
     # The verified download itself is what clears it.
@@ -264,7 +265,7 @@ def test_require_fixtures_gate_ignores_stale_ingested_copies(
 
 
 def test_missing_fixture_message_separates_unhosted_from_failed(monkeypatch):
-    """The gate's exit message says WHY each required fixture is absent.
+    """The check's exit message says WHY each required fixture is absent.
 
     A fixture with no download URL is not hosted, so no re-run can fix it and
     the message must point at the hosting instructions. A fixture that has a
@@ -302,18 +303,20 @@ def test_missing_fixture_message_separates_unhosted_from_failed(monkeypatch):
 
 
 def test_require_fixtures_gate_still_exits_nonzero():
-    """The honest-green gate must fail loudly when a required fixture is absent.
+    """The required-fixture check fails loudly when a required fixture is
+    absent.
 
-    The lazy-fetch change must not weaken this into a silent skip: CI relies on
-    it to catch a fixture whose download failed. Run a child pytest that requires a
-    genuinely-absent fixture and assert it exits non-zero with a pointed message.
+    Fetching fixtures lazily must not weaken this into a silent skip: CI relies
+    on it to catch a fixture whose download failed. Run a child pytest that
+    requires a genuinely-absent fixture and assert it exits non-zero with a
+    pointed message.
     """
     # Target this very module by its absolute path (``__file__``) so the
-    # reference can never rot when the file is renamed. The gate fires in the
+    # reference can never rot when the file is renamed. The check fires in the
     # package ``pytest_sessionstart`` regardless of which path is collected;
     # using a real, collectable module guarantees the ONLY reason for a
-    # non-zero exit is the gate -- a bogus path would exit non-zero on its own
-    # and mask a weakened gate (false green).
+    # non-zero exit is the check -- a bogus path would exit non-zero on its own
+    # and mask a weakened check (false green).
     proc = subprocess.run(
         [
             sys.executable,
@@ -343,12 +346,13 @@ def test_require_fixtures_gate_still_exits_nonzero():
 
     out = proc.stdout + proc.stderr
     assert proc.returncode != 0, (
-        "gate did not fail on a missing required fixture:\n" + out
+        "check did not fail on a missing required fixture:\n" + out
     )
-    # The non-zero exit must come from the gate, not a file-not-found / collection
-    # error -- otherwise this test would stay green even if the gate regressed.
+    # The non-zero exit must come from the check, not a file-not-found /
+    # collection error -- otherwise this test would stay green even if the check
+    # stopped firing.
     assert "Required v2 fixtures are absent" in out, (
-        "exit was not the honest-green fixture gate:\n" + out
+        "exit was not the required-fixture check:\n" + out
     )
     assert "no_such_fixture_xyz" in out
 
@@ -375,8 +379,8 @@ def test_filterwarnings_categories_are_resolvable():
     """Each ``filterwarnings`` category resolves the way pytest resolves it.
 
     A bare name must be a builtin warning; anything else must be fully qualified
-    (``module.path.Category``) and importable. A bare custom category -- the bug
-    this guards -- crashes collection once the warnings plugin is active.
+    (``module.path.Category``) and importable. A bare custom category crashes
+    collection once the warnings plugin is active.
     """
     import builtins
     import importlib

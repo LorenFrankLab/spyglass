@@ -969,7 +969,7 @@ def test_run_v2_pipeline_requires_exactly_one_input_mode():
 
 
 def test_run_v2_pipeline_concat_fields_are_keyword_only():
-    """Concat fields are keyword-only, preserving the old positional order.
+    """Concat fields are keyword-only, preserving the positional order.
 
     An existing positional call ``run_v2_pipeline(nwb, sort_group_id,
     interval_list_name, team_name, pipeline_preset)`` must still bind the 5th

@@ -770,7 +770,7 @@ def test_fetch_waveform_v2_is_disk_backed_and_cleaned(wave_session):
     uid = acc.sorting.get_unit_ids()[0]
     assert acc.get_waveforms(uid).shape[0] > 0
     # Dropping the accessor cleans the scratch folder (TemporaryDirectory
-    # finalizer) -- the lifetime contract the perf fix depends on.
+    # finalizer) -- the lifetime contract a disk-backed analyzer relies on.
     del acc
     gc.collect()
     assert not Path(

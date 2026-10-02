@@ -10,7 +10,7 @@ an artifact detection through the ``ArtifactDetectionOutput`` merge:
   part;
 * concurrency -- the delete-vs-select advisory lock is fail-closed;
 * merge integrity -- ``get_merge_id`` fails closed on a corrupt registration;
-* the artifact-free ``sorting_id`` fold is unchanged.
+* an artifact-free ``sorting_id`` is the id of the recording-only payload.
 
 Fast: no sorter and no analyzer are run -- only selections + registrations.
 """
@@ -216,9 +216,9 @@ def test_artifact_free_sorting_id_matches_recording_only_payload(
     """Artifact-free: an artifact-free sort's ``sorting_id`` is the
     deterministic id of the recording-only payload with ``artifact_detection_id=None``.
 
-    ``_selection_identity`` is byte-stable, so this pins that the
-    artifact-free fold is unchanged (no ArtifactDetectionSource row participates,
-    and the id is not aliased by the merge seam).
+    ``_selection_identity`` is byte-stable, so this pins the artifact-free
+    fold: no ArtifactDetectionSource row participates, and the id is not
+    aliased by the merge seam.
     """
     from spyglass.spikesorting.v2._selection_identity import (
         deterministic_id,

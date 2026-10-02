@@ -3,7 +3,8 @@
 ``UnitAnnotation`` stores true NWB unit ids. Rows written under the older
 positional contract mean something different, so a merge still carrying them
 must not accept a new annotation until it is migrated, and a merge whose
-first-ever annotation is written today must be recorded as needing nothing.
+first-ever annotation is written under the true-id contract must be recorded
+as needing nothing.
 """
 
 from contextlib import contextmanager
@@ -218,7 +219,7 @@ def _migrated_sparse_accepts_writes(case):
 
 
 def _fresh_merge_needs_no_migration(case):
-    """A merge first annotated today is left alone by a later migration."""
+    """A merge first annotated under true ids is left alone by migration."""
     table = case["table"]
     fresh = {"spikesorting_merge_id": case["fresh_id"]}
 

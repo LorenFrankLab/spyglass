@@ -1,11 +1,11 @@
 """Per-unit brain-region attribution coverage for CurationV2.
 
 Two behavioral surfaces of ``CurationV2.get_unit_brain_regions`` that
-the pipeline suite left untested:
+the pipeline suite does not cover:
 
 - **Multi-region attribution**: a sort group whose electrodes span more
   than one ``BrainRegion`` must report the correct region *per unit_id*
-  (the load-bearing claim of the v1 multi-region under-reporting fix).
+  (v1 under-reports the regions of a multi-region sort group).
   The existing merge-table registration test would pass even if every
   region were wrong, because it checks row counts, not the region a unit
   actually maps to.
@@ -84,8 +84,8 @@ def test_multi_region_unit_attribution(populated_sorting):
     so the sort group's channels span two regions (each unit's peak
     electrode in one, the remaining channels in another), then asserts
     ``get_unit_brain_regions`` returns each unit's TRUE region rather
-    than an arbitrary region of the multi-region sort group (the v1
-    under-reporting bug). Restores the original ``region_id`` values in
+    than an arbitrary region of the multi-region sort group (as v1
+    under-reports). Restores the original ``region_id`` values in
     teardown (the fixture is shared package-scoped state). No recording
     numerics change.
     """

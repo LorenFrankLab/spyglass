@@ -19,8 +19,8 @@ def test_observed_intervals_end_from_timestamps():
     import spikeinterface.core as si
 
     # A recording declared at 1000 Hz whose clock actually runs at 990 Hz.
-    # Under the old ``t + n/fs`` (declared-fs) arithmetic the computed end
-    # falls short of the recording's own last timestamp, excluding samples
+    # Under ``t + n/fs`` (declared-fs) arithmetic the computed end
+    # would fall short of the recording's own last timestamp, excluding samples
     # that were genuinely recorded.
     n = 1000
     actual_fs = 990.0
@@ -37,8 +37,8 @@ def test_observed_intervals_end_from_timestamps():
     contained = contains_times(intervals, times)
     assert contained.all(), f"{int((~contained).sum())} of {n} samples excluded"
 
-    # Regular-clock case: the new data-derived end equals the old
-    # nominal-rate ``t + n/fs`` exactly when the clock is regular.
+    # Regular-clock case: the data-derived end equals the nominal-rate
+    # ``t + n/fs`` exactly when the clock is regular.
     fs = 1000.0
     recording_regular = si.NumpyRecording(np.zeros((n, 1)), fs)
     regular_times = np.arange(n) / fs

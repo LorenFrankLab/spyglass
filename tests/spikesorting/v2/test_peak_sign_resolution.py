@@ -3,8 +3,8 @@
 Per-unit attribution (``Sorting.Unit`` peak channel + amplitude) must honor
 the sorter's configured detection polarity instead of hardcoding ``"neg"``
 (v1 makes ``peak_sign`` configurable via the ``peak_channel`` metric params;
-v2's sort-time attribution previously fell back to SpikeInterface's ``"neg"``
-default, mis-attributing units for positive-going detections).
+falling back to SpikeInterface's ``"neg"`` default would mis-attribute units
+for positive-going detections).
 
 Sorters express polarity differently: ``clusterless_thresholder`` carries
 ``peak_sign`` directly ("neg"/"pos"/"both"); MountainSort 4/5 carry
@@ -98,8 +98,9 @@ def test_peak_sign_pos_attributes_positive_going_channel():
 
     v2 threads the sorter's configured ``peak_sign`` into
     ``get_template_extremum_channel`` (via ``resolve_peak_sign``) so a
-    positive-going detection lands on its true peak channel; a revert to SI
-    defaults would silently mis-attribute it to the most-negative channel.
+    positive-going detection lands on its true peak channel; using SI's
+    defaults instead would silently mis-attribute it to the most-negative
+    channel.
     The existing peak-amplitude test runs on a
     trough-aligned fixture where ``pos == neg``, so this is the only case
     that exercises the configured sign actually changing the answer. Hermetic

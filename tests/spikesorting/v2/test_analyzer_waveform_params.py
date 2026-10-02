@@ -577,8 +577,8 @@ def test_rebuild_reads_stored_window_never_re_resolves(
 def test_sparsity_params_default_matches_si_and_validates_methods():
     """``sparsity`` defaults to SI's radius/100 um; method fields are checked.
 
-    The default must reproduce what ``create_sorting_analyzer(sparse=True)``
-    did before the field existed (numerical baseline unchanged), and every
+    The default must reproduce ``create_sorting_analyzer(sparse=True)``'s own
+    sparsity (so the numerical baseline matches SI's), and every
     effective value -- including SI's own defaults -- is recorded in the row.
     """
     import pydantic

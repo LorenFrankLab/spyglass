@@ -65,7 +65,8 @@ def test_patched_nn_noise_overlap_is_finite_on_sparse_many_channel(
 
 
 def test_patch_is_idempotent_and_installs_the_fix():
-    """patch_nn_noise_overlap_sparsity swaps in the fix and is a no-op twice."""
+    """patch_nn_noise_overlap_sparsity swaps in the patched function and is a
+    no-op when applied twice."""
     import spikeinterface.metrics.quality.pca_metrics as pm
 
     from spyglass.spikesorting.v2._si_metric_patches import (

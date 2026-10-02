@@ -167,9 +167,10 @@ def test_canonical_sorter_clusterless_noise_levels_none_equals_absent():
     """``noise_levels=None`` means "auto-estimate"; absent means the same.
 
     The Pydantic-schema default for ``noise_levels`` is ``None``
-    (auto-estimate), which closed the 1,400x divergence bug; the v1 row
+    (auto-estimate, so a MAD-multiplier threshold is not read as raw uV,
+    which inflates the smoke fixture's detection count ~1,400x); the v1 row
     omits the field entirely. Canonical form treats them as
-    equivalent so the fingerprint check does not regress that fix.
+    equivalent so the fingerprint check matches the two rows.
     """
     with_none = {**SMOKE_CLUSTERLESS_PARAMS, "noise_levels": None}
     without = dict(SMOKE_CLUSTERLESS_PARAMS)

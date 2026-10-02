@@ -818,8 +818,7 @@ def test_preflight_empty_sort_group(preflight_inputs):
 
     Checking only the master is a false-green: the master exists, but
     ``Recording.populate`` raises 'has zero electrodes' minutes into the run.
-    The ``sort_group_has_electrodes`` check catches it up front. Audit
-    finding #2."""
+    The ``sort_group_has_electrodes`` check catches it up front."""
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     nwb_file_name = preflight_inputs["nwb_file_name"]
@@ -1103,7 +1102,7 @@ def test_preflight_sorter_misspelled(preflight_inputs, monkeypatch):
     """A sorter that is not even a known SI sorter fails with a spelling hint.
 
     Distinct from the 'known but binary not installed' branch
-    (test_preflight_sorter_not_installed): the fix message points at the
+    (test_preflight_sorter_not_installed): the error's hint points at the
     spelling / pipeline preset, not at installing a binary -- so it must NOT
     mention ``installed_sorters()``.
     """

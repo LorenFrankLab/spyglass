@@ -1,23 +1,21 @@
-"""Regression tests for two consumer-boundary bugs in ``_Merge``.
+"""Tests for ``_Merge.fetch_nwb`` across multiple merge source types.
 
-Both bugs live in the generic merge-table layer
-(``spyglass.utils.dj_merge_tables``) and are therefore exercised here, on a
+The behavior lives in the generic merge-table layer
+(``spyglass.utils.dj_merge_tables``) and is therefore exercised here, on a
 hermetic two-source merge table, rather than against any one pipeline's
-merge master:
-
-``Merge.fetch_nwb`` advertised a ``multi_source`` argument that the
-implementation never used: a restriction spanning >=2 source part types
-raised a cryptic "Found N potential parents" from ``merge_get_parent``, and
-``return_merge_ids`` resolved each file's merge_id against the *cumulative*
-``nwb_list`` instead of the current source's files. The fix makes the
-advertised API true:
+merge master. Two failure modes are guarded: a restriction spanning >=2
+source part types must not fail with a cryptic "Found N potential parents"
+from ``merge_get_parent``, and ``return_merge_ids`` must resolve each file's
+merge_id against the current source's files, not a cumulative ``nwb_list``.
+The contract:
 
   - ``multi_source=False`` (default) + a restriction spanning >1 source
     raises before fetching unrelated parent tables.
   - ``multi_source=True`` iterates source-by-source, scoping the parent
     resolution to one source per loop, and returns ``len(merge_ids) ==
     len(nwb_list)`` with each id the owner of its paired file.
-  - the single-source path (used by every merge master today) is unchanged.
+  - the single-source path (used by every real merge master) returns
+    aligned ``(nwb_list, merge_ids)``.
 """
 
 from __future__ import annotations
@@ -38,8 +36,7 @@ def two_source_merge(dj_conn, mini_dict):
     pointing at the same already-ingested sample raw NWB file (so
     ``fetch_nwb`` finds a real file on disk without building analysis
     files). One row is inserted into each source, giving the merge master
-    the >=2-source-type condition the multi-source ``fetch_nwb`` bug
-    requires.
+    the >=2 source types that the multi-source ``fetch_nwb`` path needs.
 
     Yields a dict with the activated classes and the two merge_ids
     (``merge_id_a`` owns the ``LeafA`` file, ``merge_id_b`` the ``LeafB``).
@@ -373,11 +370,10 @@ def test_fetch_nwb_or_restriction_across_sources(two_source_merge):
 def test_fetch_nwb_return_merge_ids_single_source_unchanged(two_source_merge):
     """A single-source restriction returns aligned ``(nwb_list, merge_ids)``.
 
-    Guards the shared-method change: scoping merge_id resolution to the
-    current source must not perturb the single-source path (which is what
-    every real merge master uses today). Reverting the multi-source fix leaves
-    this green -- it asserts the behavior the fix preserves, not the bug it
-    removes.
+    Scoping merge_id resolution to the current source must leave the
+    single-source path (the one every real merge master uses) returning
+    aligned results. This checks that preserved behavior; the multi-source
+    tests above check the per-source scoping itself.
     """
     Merge = two_source_merge["Merge"]
     merge_id_a = two_source_merge["merge_id_a"]

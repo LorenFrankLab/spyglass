@@ -212,8 +212,7 @@ def test_kilosort4_algorithm_defaults_unchanged():
     bump changes sort outputs. Subset assertion (not full-dict equality) so an
     unrelated kilosort patch-version difference does not false-fail; a change
     to ONE of these knobs surfaces loudly. Note: because this is skipped in the
-    KS4-less CI lane, continuous protection requires a KS4-enabled CI job
-    (infra follow-up).
+    KS4-less CI lane, continuous protection requires a KS4-enabled CI job.
     """
     import spikeinterface.sorters as sis
 

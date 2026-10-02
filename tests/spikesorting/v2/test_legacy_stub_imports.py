@@ -2,11 +2,12 @@
 
 Covers:
 
-- The remaining stub module (``figpack_curation``) must raise an informative
-  ``ImportError`` on public-name access -- whether the caller wrote
-  ``from m import X`` or ``import m; m.X`` -- while a bare
-  ``import m`` (no attribute access) still succeeds, and dunder probes
-  by the import machinery do NOT leak into the error message.
+- A stub module listed in ``STUB_MODULES_WITH_V1_FALLBACK`` /
+  ``STUB_MODULES_NO_V1_FALLBACK`` (both lists are currently empty) must raise
+  an informative ``ImportError`` on public-name access -- whether the caller
+  wrote ``from m import X`` or ``import m; m.X`` -- while a bare ``import m``
+  (no attribute access) still succeeds, and dunder probes by the import
+  machinery do NOT leak into the error message.
 - The v1->v2 migration guide covers each migration category.
 
 These tests need no DataJoint server: importing a v2 submodule triggers
@@ -23,15 +24,15 @@ import pytest
 
 # (module path, a representative public symbol, v1 fallback submodule hint)
 # ``metric_curation`` and ``figpack_curation`` are intentionally absent: both are
-# now real v2 table modules -- ``CurationEvaluation`` replaces v1 MetricCuration +
+# real v2 table modules -- ``CurationEvaluation`` replaces v1 MetricCuration +
 # BurstPair, and ``FigPackCuration`` / ``FigPackCurationSelection`` replace the v1
-# FigURL chain -- so neither is a stub any longer.
+# FigURL chain -- so neither is a stub.
 STUB_MODULES_WITH_V1_FALLBACK: list[tuple[str, str, str]] = []
 
 # (module path, a representative public symbol) -- no v1 fallback exists.
 # ``matcher_protocol`` and ``unit_matching`` are intentionally absent: both are
-# now real modules (the cross-session matcher protocol + registry, and the
-# UnitMatch / TrackedUnit DataJoint tables), no longer stubs.
+# real modules (the cross-session matcher protocol + registry, and the
+# UnitMatch / TrackedUnit DataJoint tables), not stubs.
 STUB_MODULES_NO_V1_FALLBACK: list[tuple[str, str]] = []
 
 ALL_STUB_MODULES = [m[0] for m in STUB_MODULES_WITH_V1_FALLBACK] + [
@@ -134,7 +135,7 @@ def test_migration_guide_covers_v1_to_v2_categories():
         "recording_id",  # dropped/relocated data
         "noise_levels",  # schema-default flips
         "off-by-one",  # boundary semantics
-        "multi-channel",  # multi-channel clusterless fix
+        "multi-channel",  # multi-channel clusterless differences
         "seed",  # determinism
         "amplitude_thresh_uv",  # default thresholds
         "metriccuration",  # removed v1 features

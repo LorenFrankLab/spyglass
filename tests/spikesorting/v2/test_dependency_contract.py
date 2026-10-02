@@ -102,7 +102,7 @@ def test_base_numpy_floor_allows_numpy_1x():
 
 def test_v2_extras_pin_numpy_2():
     """The v2 extras carry the numpy-2 baseline the SI 0.104 + torch stack
-    resolves on, now that the base requirement no longer does."""
+    resolves on; the base requirement only floors at 1.26."""
     for extra in ("spikesorting-v2", "spikesorting-v2-matching"):
         reqs = _extra_requirements(extra)
         assert "numpy" in reqs, f"the {extra} extra does not declare numpy"
@@ -161,7 +161,7 @@ def test_legacy_sed_targets_present():
 
     for source, legacy in LEGACY_SED_REWRITES:
         assert source in pyproject, (
-            f"pyproject no longer declares {source}, so the legacy sed "
+            f"pyproject does not declare {source}, so the legacy sed "
             "source pattern silently no-ops and the env resolves the v2 line."
         )
         fragment = f"'s/{source}/{legacy}/'"

@@ -158,8 +158,9 @@ def test_ms5_schema_covers_wrapper():
     """Every pinned-wrapper MS5 key is a schema field or a managed key.
 
     A wrapper key that is neither would be a scientific knob users cannot
-    set (the pre-launch state for ``scheme2_training_duration_sec`` /
-    ``scheme3_block_duration_sec`` / the PCA and mask-radius fields); a
+    set (e.g. ``scheme2_training_duration_sec`` /
+    ``scheme3_block_duration_sec`` / the PCA and mask-radius fields, were
+    the schema to omit them); a
     schema field the wrapper does not accept would fail at sort time.
     """
     from spyglass.spikesorting.v2._params.sorter import (

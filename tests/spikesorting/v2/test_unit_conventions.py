@@ -89,7 +89,7 @@ def test_clusterless_missing_threshold_unit_defaults_to_uv(
     row, or a v1-parity default-shaped row carrying only ``noise_levels=[1.0]``)
     falls back to 'uv' -- matching the schema default -- so the detector input
     is scaled to microvolts, NOT thresholded in raw counts. Guards the runtime
-    fallback against silently disagreeing with the schema default: with the old
+    fallback against silently disagreeing with the schema default: with a
     'mad' fallback the detector would see 200 raw counts instead of 100 uV on
     this 0.5 uV/count rig.
     """
@@ -346,9 +346,8 @@ def test_clusterless_default_row_ships_noise_levels_one():
     """The shipped ``clusterless_thresholder/default`` row carries
     ``noise_levels=[1.0]``.
 
-    Regression guard for the 1,400x divergence bug: v1 read detect_threshold
-    in raw uV (noise_levels=[1.0]); a drift to None would reinterpret it as a
-    MAD multiplier.
+    v1 reads detect_threshold in raw uV (noise_levels=[1.0]); a drift to None
+    would silently reinterpret it as a MAD multiplier.
     """
     from spyglass.spikesorting.v2.sorting import SorterParameters
 

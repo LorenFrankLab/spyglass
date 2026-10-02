@@ -96,7 +96,7 @@ def test_run_si_sorter_does_not_leak_numpy_inf(monkeypatch):
             sorter="mountainsort4",
             sorter_params={},
             recording=rec,
-            sorting_id="audit-a8-leak-check",
+            sorting_id="dispatch-leak-check",
             job_kwargs=None,
         )
     except Exception:
@@ -151,7 +151,7 @@ def test_sorter_tempdir_cleanup_does_not_mask_sort_exception(
                 sorter="tridesclous2",
                 sorter_params={},
                 recording=rec,
-                sorting_id="audit-a9-cleanup",
+                sorting_id="dispatch-cleanup",
                 job_kwargs=None,
             )
 
@@ -232,8 +232,8 @@ def test_matlab_sorters_require_explicit_container_backend(monkeypatch):
 
     ``kilosort2_5`` / ``kilosort3`` / ``ironclust`` ship only as container
     images, so a default/local execution row raises a clear
-    tracked-container-backend message BEFORE ``run_sorter`` is reached -- the old
-    name-based ``singularity_image=True`` auto-fallback is gone.
+    tracked-container-backend message BEFORE ``run_sorter`` is reached --
+    there is no name-based ``singularity_image=True`` auto-fallback.
     """
     import uuid
 

@@ -157,8 +157,8 @@ def test_split_conserves_every_spike_per_unit():
 
 
 def test_split_raises_when_a_spike_is_past_the_final_boundary():
-    """A frame at/after the final boundary would be silently dropped by the old
-    slice; conservation now raises ``ConcatSplitError``."""
+    """A frame at/after the final boundary belongs to no member; rather than
+    silently dropping it, the split raises ``ConcatSplitError``."""
     trains = {7: np.array([0, 50, 200])}  # 200 == final boundary, out of range
     with pytest.raises(ConcatSplitError, match="outside"):
         split_unit_spike_trains(trains, [100, 200])
@@ -368,8 +368,8 @@ def test_assert_concat_compatible_rejects_mismatched_fs():
     with pytest.raises(ValueError, match="sampling frequency"):
         assert_concat_compatible([a, b])
 
-    # The regression case: a sub-Hz drift NumPy's default np.isclose (rtol=1e-5)
-    # would silently accept must still be rejected (it mis-times every spike).
+    # A sub-Hz drift that NumPy's default np.isclose (rtol=1e-5) would
+    # silently accept must still be rejected (it mis-times every spike).
     near = _rec_with_locations(50, [1, 2], locs, fs=30_000.3)
     with pytest.raises(ValueError, match="sampling frequency"):
         assert_concat_compatible([a, near])

@@ -269,14 +269,12 @@ def test_merge_dispatch_get_sort_group_info_works_for_v2(populated_sorting):
     """``SpikeSortingOutput.get_sort_group_info`` returns the full
     electrode set for a v2 merge_id.
 
-    Before ``CurationV2.get_sort_group_info`` was promoted to a
-    classmethod, the merge dispatcher at
-    ``spikesorting_merge.py:346`` called it as
-    ``source_table.get_sort_group_info(merge_key)`` where
-    ``source_table`` is the bound class, not an instance --
-    raising ``TypeError: missing self``. With the classmethod
-    conversion, the call resolves. This test confirms it
-    actually returns a non-empty multi-row relation.
+    The merge dispatcher calls
+    ``source_table.get_sort_group_info(merge_key)`` on the source
+    CLASS, not an instance, so ``CurationV2.get_sort_group_info``
+    must be a classmethod (an instance method raises
+    ``TypeError: missing self``). This test confirms the call
+    returns a non-empty multi-row relation.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -288,14 +286,13 @@ def test_merge_dispatch_get_sort_group_info_works_for_v2(populated_sorting):
     info = SpikeSortingOutput.get_sort_group_info({"merge_id": merge_id})
     rows = info.fetch(as_dict=True)
     assert len(rows) > 0, (
-        "get_sort_group_info returned zero rows; the v1 "
-        "fetch(limit=1) multi-region under-reporting bug has "
-        "regressed."
+        "get_sort_group_info returned zero rows; expected one row "
+        "per electrode (a fetch(limit=1) would under-report "
+        "multi-region groups)."
     )
-    # The result must include the electrode-level columns the
-    # plan documents (rows for every electrode in the sort
-    # group, joined to BrainRegion). Spot-check a couple of
-    # canonical column names.
+    # The result must include the electrode-level columns (rows
+    # for every electrode in the sort group, joined to
+    # BrainRegion). Spot-check a couple of canonical column names.
     for required in ("electrode_id", "region_name"):
         assert required in rows[0], (
             f"get_sort_group_info row missing {required!r}; check "

@@ -117,14 +117,14 @@ def imported_merge_id(common, mini_dict, mini_insert, synthetic_spike_window):
     ``SpikeSortingOutput._merge_insert``, so the merge_id is available from the
     merge part table.
 
-    The checksum landmine (resolved via the in-place + refresh fallback,
-    option 2): ``ImportedSpikeSorting.fetch_nwb`` resolves the raw file through
-    the external store (``download_filepath``), which checks the stored
-    ``size``/``contents_hash`` against the on-disk file. Appending units changes
-    both, so we update the external row to match. ``Nwbfile.get_abs_path``
-    (used by the position reads) builds the path from ``raw_dir + name`` and
-    never touches the external store, which is why position was unaffected and
-    writing units BEFORE registration (option 1) was unnecessary.
+    External-store checksum: ``ImportedSpikeSorting.fetch_nwb`` resolves the
+    raw file through the external store (``download_filepath``), which checks
+    the stored ``size``/``contents_hash`` against the on-disk file. Appending
+    units changes both, so the fixture edits the file in place and then
+    updates the external row to match. ``Nwbfile.get_abs_path`` (used by the
+    position reads) builds the path from ``raw_dir + name`` and never touches
+    the external store, so position reads are unaffected and the units need not
+    be written before the file is registered.
     """
     import os
     import shutil

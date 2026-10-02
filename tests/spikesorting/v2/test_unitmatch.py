@@ -95,8 +95,8 @@ def test_unitmatch_bundle_rejects_asymmetric_window_before_io():
 
 
 # --------------------------------------------------------------------------- #
-# Pure graph logic: pair canonicalization (goal 7, no DB) and strict-clique     #
-# tracked-unit derivation (goals 8/9/10, no DB).                                #
+# Pure graph logic (no DB): pair canonicalization and strict-clique            #
+# tracked-unit derivation.                                                      #
 # --------------------------------------------------------------------------- #
 
 
@@ -551,13 +551,9 @@ def test_external_matcher_satisfies_protocol_and_runs():
 
 @pytest.mark.slow
 def test_driftout_units_recovered_pooled(tmp_path):
-    """Regression check of the production ``per_unit`` bundle construction
-    (:func:`extract_unitmatch_bundle`) on its preregistered acceptance seeds.
-
-    Seeds 10..19 were the preregistered 10-seed acceptance run: they were
-    evaluated once against the gates below and passed. They are now spent,
-    so this test re-runs them as a regression check, not a new acceptance
-    evaluation.
+    """The production ``per_unit`` bundle construction
+    (:func:`extract_unitmatch_bundle`) recovers drift-out units without
+    degrading healthy units, on seeds 10..19.
 
     Builds the synthetic control / driftout_A / driftout_AB scenarios (see
     ``tests/spikesorting/v2/scripts/unitmatch_half_split_experiment.py`` for
@@ -566,56 +562,55 @@ def test_driftout_units_recovered_pooled(tmp_path):
     only, and asserts the pooled acceptance gates for each drift-out
     scenario:
 
-    - G1 drift-out recall >= 0.80.
-    - G3a-exact: every non-S unit's saved cross-validation-half templates are
-      bit-identical to the same seed's control run, pooled over seeds. PASS
-      iff identical == total.
-    - G3a-prob: for each non-S unit, its true cross-session pair's two
-      directed UnitMatch probabilities give ``q_u = min(p(A_u -> B_u),
-      p(B_u -> A_u))``; the drop is the pooled mean ``q_u`` in the control
-      run minus the pooled mean ``q_u`` in the scenario run, over the same
-      paired non-S units, pooled over all seeds. PASS iff drop <= 0.04.
-    - G4 paired healthy false-positive rate increase vs control <= 0.005.
+    - Drift-out recall >= 0.80.
+    - Healthy template bit-identity: every non-S unit's saved
+      cross-validation-half templates are bit-identical to the same seed's
+      control run, pooled over seeds. PASS iff identical == total.
+    - Healthy true-pair probability drop: for each non-S unit, its true
+      cross-session pair's two directed UnitMatch probabilities give ``q_u =
+      min(p(A_u -> B_u), p(B_u -> A_u))``; the drop is the pooled mean
+      ``q_u`` in the control run minus the pooled mean ``q_u`` in the
+      scenario run, over the same paired non-S units, pooled over all seeds.
+      PASS iff drop <= 0.04.
+    - Healthy false-pair rate increase vs control <= 0.005.
 
-    G2 (S x S false-pair rate among drift-out units) is computed and printed
+    The S x S false-pair rate among drift-out units is computed and printed
     but not asserted. UnitMatch derives its match threshold, prior and score
     distributions from the units present in each run (UnitMatchPy
     ``metric_functions.get_threshold``); with about 20 units per session that
     per-run fit is unstable, and a near-tie in the threshold search can flip
     on a single redrawn template and admit a burst of false pairs -- observed
-    on one of the ten seeds in this run, independent of how the
-    cross-validation halves are built. Gating on it would fail the
-    construction under test for a limitation of UnitMatch's own calibration,
-    not a defect this test can localize, so it is reported as a diagnostic
-    instead (see ``evaluate_gates`` for the detailed rationale).
+    on one of these ten seeds, independent of how the cross-validation
+    halves are built. Gating on it would fail the construction under test
+    for a limitation of UnitMatch's own calibration, not a defect this test
+    can localize, so it is reported as a diagnostic instead (see
+    ``evaluate_gates`` for the detailed rationale).
 
-    (G3b-prob, the same drop measured against the old ``time_half``
-    construction, is not evaluated here because ``time_half`` does not run in
-    this test; it is not part of the CI acceptance surface. The script also
-    still prints a count-based paired-healthy-recall-drop gate as a
-    diagnostic, labelled "G3a-count"/"G3b-count" -- it is not asserted here
-    because a few healthy pairs near probability 0.5 can flip between the
-    scenario and control runs by chance: UnitMatch refits its
-    match-probability kernels, candidate threshold and prior on the whole
-    population on every call, so a pair's pass/fail label is not robust to
-    that refit even when its two cross-validation-half templates are
-    bit-identical to the no-drift control. G3a-exact isolates the template
-    side of that comparison directly, and G3a-prob replaces the pass/fail
-    count with an average of the underlying probabilities, so neither is
-    sensitive to threshold flips the same way -- this is why healthy units
-    are checked by template identity and mean probability rather than a
-    probability-threshold pass/fail count.)
+    (The excess probability drop over the recording-half ``time_half``
+    construction is not evaluated here because ``time_half`` does not run in
+    this test. The script also prints a count-based paired healthy recall
+    drop as a diagnostic -- it is not asserted here because a few healthy
+    pairs near probability 0.5 can flip between the scenario and control
+    runs by chance: UnitMatch refits its match-probability kernels,
+    candidate threshold and prior on the whole population on every call, so
+    a pair's pass/fail label is not robust to that refit even when its two
+    cross-validation-half templates are bit-identical to the no-drift
+    control. The template bit-identity gate isolates the template side of
+    that comparison directly, and the probability-drop gate replaces the
+    pass/fail count with an average of the underlying probabilities, so
+    neither is sensitive to threshold flips the same way -- this is why
+    healthy units are checked by template identity and mean probability
+    rather than a probability-threshold pass/fail count.)
 
-    This is the preregistered acceptance configuration (same seeds,
-    scenarios and thresholds as the acceptance script's default run). Do not
-    change the thresholds, seeds, scenarios or scoring to make it pass, and
-    do not xfail/skip it: a failure here is a reported result about the
-    current per-unit construction, not a test bug. The checked gates are
-    selected by a positive allowlist of (gate id, scenario) pairs --
-    G1/G3a-exact/G3a-prob/G4 x driftout_A/driftout_AB (G2 is excluded: it is
-    a printed diagnostic, not an acceptance gate) -- and their
-    presence is asserted before their pass/fail, so a construction that
-    silently drops a scenario (``pooled_counts``, ``pooled_paired_counts`` or
+    Seeds, scenarios and thresholds match the script's default run. A
+    failure here is a result about the current per-unit construction, not
+    a test bug: do not loosen the thresholds, seeds, scenarios or scoring,
+    or xfail/skip it, to make it pass. The checked gates are selected by a
+    positive allowlist of (gate name, scenario) pairs -- the four gates
+    above x driftout_A/driftout_AB (the S x S rate is excluded: it is a
+    printed diagnostic, not an acceptance gate) -- and their presence is
+    asserted before their pass/fail, so a construction that silently drops
+    a scenario (``pooled_counts``, ``pooled_paired_counts`` or
     ``pooled_true_pair_prob_drop`` returning ``None``) fails loudly instead
     of passing vacuously on an empty or incomplete selection. The assertion
     message lists every scenario's gates so a regression elsewhere stays
@@ -670,16 +665,19 @@ def test_driftout_units_recovered_pooled(tmp_path):
     # Positive allowlist: a name-based exclusion would pass vacuously if
     # evaluate_gates silently dropped a scenario (e.g. pooled_counts,
     # pooled_paired_counts or pooled_true_pair_prob_drop returning None),
-    # leaving `checked` empty or short. Gate.name always starts with its
-    # short id ("G1 drift-out recall", "G3a-exact non-S template
-    # bit-identity", "G3a-prob healthy true-pair mean probability drop",
-    # ...); Gate.scenario is a dataclass field, not parsed.
+    # leaving `checked` empty or short. Diagnostics carry a
+    # " (diagnostic, not gated)" suffix, so they never match these names.
     expected = {
-        (gate_id, scenario)
-        for gate_id in ("G1", "G3a-exact", "G3a-prob", "G4")
+        (gate_name, scenario)
+        for gate_name in (
+            "drift-out recall",
+            "healthy template bit-identity",
+            "healthy true-pair probability drop",
+            "healthy false-pair rate increase",
+        )
         for scenario in DRIFT_OUT_SCENARIOS
     }
-    by_pair = {(g.name.split()[0], g.scenario): g for g in gates}
+    by_pair = {(g.name, g.scenario): g for g in gates}
     missing = expected - by_pair.keys()
     assert not missing, f"missing gates {sorted(missing)}\n{table}"
     checked = [by_pair[pair] for pair in expected]
@@ -687,11 +685,10 @@ def test_driftout_units_recovered_pooled(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# Table-wiring goals (database): registry-validating insert (goal 1), the       #
-# explicit per-member selection (goals 4/5), the make() provenance recheck      #
-# (goal 6), the degenerate single-session make (goal 2), and Pair FK integrity  #
-# (goal 7). Built over two synthetic single-session sorts on the chronic        #
-# minirec substrate.                                                            #
+# Table wiring (database): registry-validating insert, the explicit            #
+# per-member selection, the make() provenance recheck, the degenerate           #
+# single-session make, and Pair FK integrity. Built over two synthetic          #
+# single-session sorts on the chronic minirec substrate.                        #
 # --------------------------------------------------------------------------- #
 
 _GROUP_NAME = "unitmatch_two_session"
@@ -851,7 +848,7 @@ def two_session_curated_group(chronic_2_session_minirec):
 
 @pytest.mark.slow
 def test_matcher_parameters_rejects_unknown_matcher(dj_conn):
-    """Goal 1: an unregistered matcher name raises at insert, before commit."""
+    """An unregistered matcher name raises at insert, before commit."""
     from spyglass.spikesorting.v2.exceptions import UnknownMatcherError
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
 
@@ -868,7 +865,7 @@ def test_matcher_parameters_rejects_unknown_matcher(dj_conn):
 
 @pytest.mark.slow
 def test_matcher_parameters_validates_params_per_matcher(dj_conn):
-    """Goal 1: per-matcher Pydantic dispatch rejects an out-of-range param."""
+    """Per-matcher Pydantic dispatch rejects an out-of-range param."""
     from pydantic import ValidationError
 
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
@@ -886,7 +883,7 @@ def test_matcher_parameters_validates_params_per_matcher(dj_conn):
 
 @pytest.mark.slow
 def test_matcher_parameters_bulk_insert_is_validated(dj_conn):
-    """Goal 1: the bulk insert() path (not just insert1) rejects a typo'd
+    """The bulk insert() path (not just insert1) rejects a typo'd
     matcher -- it must not be a validation bypass."""
     from spyglass.spikesorting.v2.exceptions import UnknownMatcherError
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
@@ -971,7 +968,7 @@ def test_matcher_parameters_duplicate_content_is_matcher_scoped(dj_conn):
 def test_insert_selection_idempotent_and_hash_sensitive(
     two_session_curated_group,
 ):
-    """Goal 4: identical inputs return the same id; a changed curation differs."""
+    """Identical inputs return the same id; a changed curation differs."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
 
@@ -1455,7 +1452,7 @@ def test_insert_selection_rejects_orphan_recording_parts_with_matching_hash(
 def test_insert_selection_rejects_wrong_member_curation(
     two_session_curated_group,
 ):
-    """Goal 5: a curation from another member is rejected, atomically."""
+    """A curation from another member is rejected, atomically."""
     from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
 
     grp = two_session_curated_group
@@ -1474,7 +1471,7 @@ def test_insert_selection_rejects_wrong_member_curation(
 def test_insert_selection_rejects_incomplete_coverage(
     two_session_curated_group,
 ):
-    """Goal 5: missing a member's choice is rejected before any insert."""
+    """Missing a member's choice is rejected before any insert."""
     from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
 
     grp = two_session_curated_group
@@ -3555,7 +3552,6 @@ def test_describe_unit_match_choices_excludes_other_team(
     """A curation under a different team (same nwb/sort-group/interval) is not
     offered as a choice.
 
-    Regression for the describe/validator consistency fix:
     ``describe_unit_match_choices`` filters on the FULL member identity including
     ``team_name``, matching ``UnitMatchSelection``'s ownership validator. A sort
     of the same session/sort-group/interval under a different team tag must NOT

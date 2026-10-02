@@ -159,8 +159,8 @@ def test_classify_normalizes_artifact_id_and_warning():
 def test_classify_emits_warning_before_contradiction_raise(caplog):
     """On the doubly-degenerate input (a concat key + an unresolved interval
     name under restrict_by_artifact), the unresolved-name warning is emitted
-    before the contradiction ValueError -- matching the original inline order
-    (this path raises before reaching the table-boundary emission)."""
+    before the contradiction ValueError (this path raises before reaching the
+    table-boundary emission)."""
     with caplog.at_level("WARNING", logger="spyglass"):
         with pytest.raises(ValueError, match="cannot combine concat-source"):
             _classify(

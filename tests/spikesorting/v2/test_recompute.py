@@ -393,9 +393,9 @@ def test_recompute_attempt_all_rejects_negative_rounding(dj_conn):
     rounding before touching the DB.
 
     ``rounding`` is an ``np.round`` precision; a negative value would silently
-    produce a misleading extension-data comparison. (The recording recompute no
-    longer carries a ``rounding`` knob -- its identity is the fixed-precision
-    content fingerprint -- so only the analyzer selection is checked here.)
+    produce a misleading extension-data comparison. (The recording recompute
+    has no ``rounding`` knob -- its identity is the fixed-precision content
+    fingerprint -- so only the analyzer selection is checked here.)
     """
     from spyglass.spikesorting.v2 import recompute as rc
 

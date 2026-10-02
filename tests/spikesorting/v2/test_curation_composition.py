@@ -5,8 +5,8 @@ spike trains, labels, and merge namespace all come from the parent
 ``CurationV2`` row rather than the raw ``Sorting.Unit`` rows. These tests pin
 that contract against a parent that already applied a merge (so its unit set
 contains a fresh ``max+1`` merged id that is NOT in ``Sorting.Unit``) -- the
-case where the old raw-sourced path silently resurrected the absorbed
-contributors.
+case where sourcing the child from the raw ``Sorting.Unit`` rows would silently
+resurrect the absorbed contributors.
 """
 
 from __future__ import annotations

@@ -74,7 +74,7 @@ def test_normalize_curation_payload_accepts_python_spellings_and_kwargs():
 
 
 def test_normalize_curation_payload_accepts_association_merge_map():
-    """The old per-unit association map deduplicates to full merge groups."""
+    """The v1/FigURL per-unit association map deduplicates to merge groups."""
     _labels, merge_groups = normalize_curation_payload(
         {"mergeGroups": {"1": ["2"], "2": ["1"], "3": []}}
     )

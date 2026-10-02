@@ -26,11 +26,10 @@ UnitMatchPy backend and tracked-unit graph), a rigid offset between the days
 of 3 / 6 / 12 um recovered 22 / 12 / 1 of 24 neurons, and one drift period
 per session (the drift fixture's default, leaving the corrected days about
 12 um apart) recovered 6 of 24. The unit count, spacing, distractor
-clearance and drift period were fixed after those trials, on these seeds and
-templates; the tests' recovery floor was fixed before them. So these days
-are co-registered by construction: they exercise the workflow on days whose
-corrected positions agree, not recovery across days that moved relative to
-each other.
+clearance and drift period were chosen from those trials, on these seeds and
+templates, so these days are co-registered by construction: they exercise the
+workflow on days whose corrected positions agree, not recovery across days that
+moved relative to each other.
 
 No spike is planted within ``GUARD_S`` of a member edge or an exclusion
 edge, so which member a spike belongs to and whether it is excluded are

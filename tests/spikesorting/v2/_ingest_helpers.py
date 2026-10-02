@@ -100,9 +100,8 @@ def clear_curations_for(sorting_key) -> None:
 
     DataJoint refuses to drop a part row whose master is still present, so
     walk from the ``SpikeSortingOutput`` merge master down before dropping
-    the ``CurationV2`` rows. Shared single implementation for conftest's
-    curation fixture and the v2 test modules (previously copied -- and
-    drifted -- across several of them).
+    the ``CurationV2`` rows. The single implementation shared by conftest's
+    curation fixture and the v2 test modules.
 
     Parameters
     ----------
@@ -258,7 +257,7 @@ def _clean_session_v2(session_key):
             # delete the orphan RecordingSource part and fails.
             (SortingSelection & sorting_keys).super_delete(warn=False)
 
-        # Step 3: the split RecordingArtifactSelection/Detection + the
+        # Step 3: RecordingArtifactSelection/Detection + the
         # ArtifactDetectionOutput merge. Drop the merge MASTER first
         # (force_masters) so the later Recording cascade never hits the merge's
         # RecordingSource part before its master; SortingSelection's
@@ -472,7 +471,7 @@ def synthesize_minirec_nwb(
         Destination NWB path.
     session_start : datetime.datetime
         Timezone-aware session start time (the recording DATE the
-        ``SessionGroup`` multi-day gate derives from ``Session``).
+        ``SessionGroup`` same-day check derives from ``Session``).
     fixture_name : str
         Recorded as the NWB ``session_id`` / identifier.
     seed : int

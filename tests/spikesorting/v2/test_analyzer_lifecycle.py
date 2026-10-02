@@ -1,10 +1,10 @@
 """SortingAnalyzer cache-folder lifecycle.
 
 Covers the zero-unit ``get_analyzer`` guard firing before any path lookup,
-partial-folder cleanup on build failure, rebuild-on-missing, the concat-source
-rebuild stub, analyzer-folder removal on ``Sorting.delete``, make_compute
-Mode-A cleanup on a write failure, and cache-miss-plus-rebuild after relocating
-the analyzer root.
+partial-folder cleanup on build failure, rebuild-on-missing (the concat-source
+rebuild is covered in ``test_session_group_concat.py``), analyzer-folder removal
+on ``Sorting.delete``, make_compute discarding its private analyzer on a write
+failure, and cache-miss-plus-rebuild after relocating the analyzer root.
 """
 
 from __future__ import annotations
@@ -27,10 +27,10 @@ def _fresh_unit_producing_selection(populated_sorting):
     """Build a fresh MS5 ``SortingSelection`` on the fixture's
     recording+artifact (NOT yet populated); return its ``{"sorting_id"}``.
 
-    The destructive delete / Mode-A tests need a sort that actually yields
-    units so ``_build_analyzer`` writes an analyzer folder on disk -- the
-    clusterless ``default`` row finds zero peaks on the MEArec smoke fixture
-    (no folder, vacuous assertions). MS5 produces units.
+    The destructive delete / make_compute-failure tests need a sort that
+    actually yields units so ``_build_analyzer`` writes an analyzer folder on
+    disk -- the clusterless ``default`` row finds zero peaks on the MEArec smoke
+    fixture (no folder, vacuous assertions). MS5 produces units.
 
     The selection is ARTIFACT-FREE (no ``artifact_detection_id``) so it is a DISTINCT
     row from the package fixture's artifact-backed MS5 sort -- otherwise
@@ -496,7 +496,7 @@ def test_rebuild_analyzer_folder_recreates_on_missing(populated_sorting):
                 pass
 
 
-# ``_rebuild_analyzer_folder`` now supports a concat source (it loads the
+# ``_rebuild_analyzer_folder`` also supports a concat source (it loads the
 # materialized ConcatenatedRecording cache); the concat rebuild path is exercised
 # end-to-end by the chronic smoke's get_analyzer call in
 # ``tests/spikesorting/v2/test_session_group_concat.py``.
@@ -615,8 +615,8 @@ def test_changed_analyzer_root_causes_miss_and_rebuild(
 ):
     """Relocating the analyzer root (``spikesorting_v2_analyzer_dir``) makes
     the previously-built folder a cache MISS, and ``get_analyzer`` rebuilds
-    into the NEW root -- never a stale-row inconsistency. The two halves
-    (config override + rebuild-on-miss) were only covered separately before.
+    into the NEW root -- never a stale-row inconsistency. Covers the config
+    override and the rebuild-on-miss together, in one flow.
     """
     import shutil
 
@@ -1130,7 +1130,7 @@ def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
         assert str(sid) not in db_ids, (
             "a zero-unit row whose folder is (legitimately) absent must NOT "
             "be reported as a DB-side orphan -- the n_units==0 carve-out "
-            "regressed"
+            "was not applied"
         )
     finally:
         (SortingSelection & {"sorting_id": sid}).delete(safemode=False)

@@ -5,11 +5,12 @@ intervals onto half-open ``[start_frame, end_frame_exclusive)`` index pairs
 suitable for ``recording.frame_slice``. v1's helper computed
 ``stop = searchsorted(side="right") - 1`` (an INCLUSIVE end) and fed it to
 ``frame_slice(end_frame=...)`` whose ``end_frame`` is EXCLUSIVE, silently
-dropping the last sample of every interval; the v2 port drops the ``- 1`` so
-the end is the true exclusive bound. These tests pin the exact integer pairs
-(off-by-one fix, adjacency-merge, defensive reorder, single-sample interval),
-replacing the integration-only ±5%/±1500-sample check in
-``single_session/test_disjoint_intervals.py::test_disjoint_sort_intervals_concatenated``.
+dropping the last sample of every interval; v2 omits the ``- 1`` so the end
+is the true exclusive bound. These tests pin the exact integer pairs
+(exclusive end, adjacency-merge, defensive reorder, single-sample interval),
+which the integration-level ±5%/±1500-sample check in
+``single_session/test_disjoint_intervals.py::test_disjoint_sort_intervals_concatenated``
+cannot resolve.
 
 Pure / synthetic -- no database. A simple ``timestamps = arange(10)`` grid is
 used so the frame index equals the integer time, making every expected
@@ -27,7 +28,7 @@ def _ts():
 
 
 def test_consolidate_exclusive_end_includes_final_sample():
-    """``[2 s, 5 s]`` -> ``[2, 6)`` -- the v1 off-by-one is fixed.
+    """``[2 s, 5 s]`` -> ``[2, 6)`` -- the final sample is kept (v1 dropped it).
 
     ``side="right"`` returns the count of timestamps <= 5 (== 6), the true
     half-open end. v1 subtracted 1 here and lost the sample at t = 5 s

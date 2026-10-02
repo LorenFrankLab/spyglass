@@ -44,7 +44,7 @@ def _rule(rule_index, metric_name, operator, threshold, label, name=None):
     }
 
 
-# ---------- #1513 invariant 1: loop completion (Bug A) ----------------------
+# ---------- #1513 invariant 1: loop completion -----------------------------
 
 
 def test_apply_label_rules_processes_every_rule():
@@ -64,7 +64,7 @@ def test_apply_label_rules_processes_every_rule():
     assert labels[7] == ["noise", "mua", "reject"]
 
 
-# ---------- #1513 invariant 2: per-unit list isolation (Bug B) --------------
+# ---------- #1513 invariant 2: per-unit list isolation ---------------------
 
 
 def test_apply_label_rules_per_unit_lists_are_independent():
@@ -87,7 +87,7 @@ def test_apply_label_rules_per_unit_lists_are_independent():
     assert labels[2] == ["noise"]
 
 
-# ---------- #1513 invariant 3: per-rule membership dedupe (Bug C) -----------
+# ---------- #1513 invariant 3: per-rule membership dedupe ------------------
 
 
 def test_apply_label_rules_dedupes_repeated_label():
@@ -401,8 +401,8 @@ def test_snr_peak_sign_follows_sorter_polarity():
     deflection on channel 1, so peak_sign decides which channel SNR is measured
     on. Driving SI's ``compute_quality_metrics`` with the kwargs
     ``apply_snr_peak_sign`` produces for a ``peak_sign='pos'`` sorter must give
-    the smaller (positive-peak) SNR and differ from the ``'neg'`` default --
-    which stays the regression-pinned value.
+    the smaller (positive-peak) SNR and differ from the ``'neg'`` default,
+    while a sort with no sign keeps the ``'neg'`` SNR.
     """
     from spikeinterface.metrics.quality import compute_quality_metrics
 
@@ -431,7 +431,7 @@ def test_snr_peak_sign_follows_sorter_polarity():
     # The positive peak (+50) is smaller than the negative deflection (-100),
     # so measuring on the positive channel yields a smaller SNR.
     assert snr_pos < snr_neg
-    # The negative-default path is the regression pin: same as explicit 'neg'.
+    # A sort with no sign falls back to the same SNR as an explicit 'neg'.
     assert snr_default == pytest.approx(snr_neg)
 
 
@@ -453,8 +453,8 @@ def test_apply_label_rules_pass_is_silent_for_partial_missing(caplog):
 def test_apply_label_rules_pass_warns_when_rule_is_wholly_inert(caplog):
     """An all-missing metric under ``pass`` disables the rule -- say so.
 
-    This is the regression class where ``nn_noise_overlap`` was NaN for every
-    unit and default auto-curation became silently inert. ``pass`` still must
+    For example, if ``nn_noise_overlap`` were NaN for every unit, default
+    auto-curation would become silently inert. ``pass`` still must
     not raise, but a rule that labelled nothing because its metric was missing
     everywhere is a computation failure, not a low-spike skip.
     """

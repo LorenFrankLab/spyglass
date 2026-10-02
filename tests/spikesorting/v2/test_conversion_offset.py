@@ -2,10 +2,11 @@
 
 v2 writes traces unscaled, so the persisted ElectricalSeries must carry both
 ``conversion`` (gain) and ``offset`` to recover physical volts on readback
-(``volts = raw*conversion + offset``). The prior code wrote only ``conversion``
-and dropped the offset -- silently biasing every channel by the DC offset on
-readback (real for Intan / Open Ephys) -- and used ``gains[0]`` without a
-positivity check (gain==0 -> all-zero recording; negative -> sign flip).
+(``volts = raw*conversion + offset``). Writing only ``conversion`` would drop
+the offset -- silently biasing every channel by the DC offset on readback
+(real for Intan / Open Ephys) -- and using ``gains[0]`` without a positivity
+check would accept gain==0 (all-zero recording) or a negative gain (sign
+flip).
 
 Hermetic -- in-memory NumpyRecording, no DB.
 """
@@ -119,8 +120,8 @@ def test_no_filter_reference_zeroes_channel_offset(
 
 def test_no_filter_no_reference_preserves_offset():
     """Guard against over-zeroing: with ``reference_mode='none'`` no
-    referencing runs, so a genuine DC offset must be carried through (the fix
-    zeroes ONLY after a ``common_reference`` branch)."""
+    referencing runs, so a genuine DC offset must be carried through (offsets
+    are zeroed ONLY after a ``common_reference`` branch)."""
     from spyglass.spikesorting.v2._recording_preprocessing import (
         apply_spatial_preprocessing,
     )

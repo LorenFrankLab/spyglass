@@ -11,9 +11,10 @@ normalized Gaussian. Two properties matter scientifically and are pinned here:
   ``fs`` and would track the bin width instead of staying invariant to it.
 * **Zero-unit handling.** v2 supports zero-unit curations
   (``require_units=False``); they flow into ``SpikeSortingOutput.get_firing_rate``
-  / ``SortedSpikesGroup.get_firing_rate`` through this function, which did
-  ``np.stack([], axis=1)`` -> ``ValueError`` on an empty (0-column) indicator. A
-  zero-unit group should return an empty-but-shaped rate, not crash.
+  / ``SortedSpikesGroup.get_firing_rate`` through this function, where
+  ``np.stack([], axis=1)`` on an empty (0-column) indicator would raise
+  ``ValueError``. A zero-unit group should return an empty-but-shaped rate, not
+  crash.
 
 Hermetic -- pure function, no DB.
 """

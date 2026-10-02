@@ -466,33 +466,41 @@ def test_passing_table_passes_every_gate():
     ]
 
 
-R0 = ("rigid", 0, "dredge_fast")
-N0 = ("none", 0, "dredge_fast")
+# ``(scenario, seed, recipe)`` keys of the seed-0 dredge_fast rows in
+# ``_table``: the rigid-drift scenario and the no-drift ("none") scenario.
+RIGID_SEED0_DREDGE_FAST = ("rigid", 0, "dredge_fast")
+NO_DRIFT_SEED0_DREDGE_FAST = ("none", 0, "dredge_fast")
 
 
 @pytest.mark.parametrize(
     "changes, failed",
     [
-        ({R0: dict(motion_rms_um=1.6)}, {"motion_rms_um"}),
-        ({R0: dict(motion_p95_um=2.6)}, {"motion_p95_um"}),
-        ({R0: dict(sign_corr=-0.8)}, {"sign_corr"}),
-        ({R0: dict(estimation_s=12.5)}, {"estimation_s"}),
-        ({R0: dict(peak_rss_gib=3.7)}, {"peak_rss_gib"}),
+        ({RIGID_SEED0_DREDGE_FAST: dict(motion_rms_um=1.6)}, {"motion_rms_um"}),
+        ({RIGID_SEED0_DREDGE_FAST: dict(motion_p95_um=2.6)}, {"motion_p95_um"}),
+        ({RIGID_SEED0_DREDGE_FAST: dict(sign_corr=-0.8)}, {"sign_corr"}),
+        ({RIGID_SEED0_DREDGE_FAST: dict(estimation_s=12.5)}, {"estimation_s"}),
+        ({RIGID_SEED0_DREDGE_FAST: dict(peak_rss_gib=3.7)}, {"peak_rss_gib"}),
         (
-            {R0: dict(peak_rss_before_sort_gib=1.6)},
+            {RIGID_SEED0_DREDGE_FAST: dict(peak_rss_before_sort_gib=1.6)},
             {"peak_rss_before_sort_gib"},
         ),
-        ({R0: dict(n_out_channels=2)}, {"border_keeps_all_channels"}),
+        (
+            {RIGID_SEED0_DREDGE_FAST: dict(n_out_channels=2)},
+            {"border_keeps_all_channels"},
+        ),
         # pooled residual 0.1 + 0.011 over an oracle at sqrt(0.009) = 0.0949.
         (
-            {R0: dict(fidelity_num=(0.0113,) * 3)},
+            {RIGID_SEED0_DREDGE_FAST: dict(fidelity_num=(0.0113,) * 3)},
             {"fidelity_excess_over_oracle"},
         ),
         # Static twin residual 0.01 over the 0.005 bound.
-        ({N0: dict(fidelity_num=(1e-4,) * 3)}, {"fidelity_residual"}),
+        (
+            {NO_DRIFT_SEED0_DREDGE_FAST: dict(fidelity_num=(1e-4,) * 3)},
+            {"fidelity_residual"},
+        ),
         # Residual 0.1 over an uncorrected 0.15: ratio 0.67 > 0.6.
         (
-            {R0: dict(uncorrected_residual=0.15)},
+            {RIGID_SEED0_DREDGE_FAST: dict(uncorrected_residual=0.15)},
             {"fidelity_ratio_to_uncorrected"},
         ),
         # remove_channels keeps two of three contacts; its residual is pooled
@@ -501,7 +509,7 @@ N0 = ("none", 0, "dredge_fast")
         # oracle matches it on the same channels, so only the ratio fails.
         (
             {
-                R0: dict(
+                RIGID_SEED0_DREDGE_FAST: dict(
                     border_mode="remove_channels",
                     n_out_channels=2,
                     removed_channel_ids=("0",),
@@ -517,16 +525,19 @@ N0 = ("none", 0, "dredge_fast")
             {"fidelity_ratio_to_uncorrected"},
         ),
         (
-            {N0: dict(mean_accuracy=0.56)},
+            {NO_DRIFT_SEED0_DREDGE_FAST: dict(mean_accuracy=0.56)},
             {"no_motion_accuracy_drop"},
         ),
-        ({N0: dict(n_well_detected=8)}, {"no_motion_well_detected_drop"}),
         (
-            {N0: dict(n_false_positive=5)},
+            {NO_DRIFT_SEED0_DREDGE_FAST: dict(n_well_detected=8)},
+            {"no_motion_well_detected_drop"},
+        ),
+        (
+            {NO_DRIFT_SEED0_DREDGE_FAST: dict(n_false_positive=5)},
             {"no_motion_false_positive_increase"},
         ),
-        ({N0: dict(n_overmerged=1)}, {"overmerged"}),
-        ({R0: dict(n_overmerged=2)}, {"overmerged"}),
+        ({NO_DRIFT_SEED0_DREDGE_FAST: dict(n_overmerged=1)}, {"overmerged"}),
+        ({RIGID_SEED0_DREDGE_FAST: dict(n_overmerged=2)}, {"overmerged"}),
         # Seed 0 slightly below off; seed 1's large gain keeps the mean up.
         (
             {
@@ -543,22 +554,31 @@ N0 = ("none", 0, "dredge_fast")
             },
             {"mean_accuracy_gain"},
         ),
-        ({R0: dict(n_well_detected=9)}, {"well_detected_not_below_off"}),
+        (
+            {RIGID_SEED0_DREDGE_FAST: dict(n_well_detected=9)},
+            {"well_detected_not_below_off"},
+        ),
         # Gap 0.21 on one seed: per-seed gate fails, mean 0.13 fails too.
         (
-            {R0: dict(mean_accuracy=0.44)},
+            {RIGID_SEED0_DREDGE_FAST: dict(mean_accuracy=0.44)},
             {"oracle_accuracy_gap", "mean_oracle_accuracy_gap"},
         ),
         # Both seeds at gap 0.12: only the mean gate fails.
         (
             {
-                R0: dict(mean_accuracy=0.53),
+                RIGID_SEED0_DREDGE_FAST: dict(mean_accuracy=0.53),
                 ("rigid", 1, "dredge_fast"): dict(mean_accuracy=0.53),
             },
             {"mean_oracle_accuracy_gap"},
         ),
-        ({R0: dict(n_gt_oversplit=4)}, {"oversplit_not_above_off"}),
-        ({R0: dict(n_false_positive=8)}, {"false_positive_excess"}),
+        (
+            {RIGID_SEED0_DREDGE_FAST: dict(n_gt_oversplit=4)},
+            {"oversplit_not_above_off"},
+        ),
+        (
+            {RIGID_SEED0_DREDGE_FAST: dict(n_false_positive=8)},
+            {"false_positive_excess"},
+        ),
     ],
 )
 def test_each_gate_fails_on_its_own_violation(changes, failed):
@@ -570,7 +590,7 @@ def test_each_gate_fails_on_its_own_violation(changes, failed):
 def test_remove_channels_border_must_match_the_prediction():
     rows = _table(
         {
-            R0: dict(
+            RIGID_SEED0_DREDGE_FAST: dict(
                 border_mode="remove_channels",
                 n_out_channels=2,
                 removed_channel_ids=("0",),
@@ -583,7 +603,9 @@ def test_remove_channels_border_must_match_the_prediction():
     )
     assert all(r.passed for r in _check(rows))
 
-    index = next(i for i, r in enumerate(rows) if r[:3] == R0)
+    index = next(
+        i for i, r in enumerate(rows) if r[:3] == RIGID_SEED0_DREDGE_FAST
+    )
     rows[index] = rows[index]._replace(predicted_removed_channel_ids=("0", "2"))
     wrong = _check(rows)
     assert {r.check for r in wrong if not r.passed} == {
@@ -645,9 +667,9 @@ def test_missing_or_duplicate_cases_raise():
     with pytest.raises(ValueError, match="rigid seed 1 oracle"):
         _check(rows)
     with pytest.raises(ValueError, match="appears twice"):
-        _check(_table() + [_row(*R0)])
+        _check(_table() + [_row(*RIGID_SEED0_DREDGE_FAST)])
     with pytest.raises(ValueError, match="no motion RMS"):
-        _check(_table({R0: dict(motion_rms_um=None)}))
+        _check(_table({RIGID_SEED0_DREDGE_FAST: dict(motion_rms_um=None)}))
 
 
 def test_manifest_gates_need_gates():

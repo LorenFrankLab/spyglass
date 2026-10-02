@@ -469,7 +469,8 @@ def _held_out_gates(scenario, tmp_path):
 
 @pytest.mark.slow
 def test_daily_concat_matches_planted_units(tmp_path):
-    """Regression check of the two-day gates on held-out seeds 100..139.
+    """Two-day daily concatenations meet every two-day gate on held-out
+    seeds 100..139.
 
     Each day is a same-day concatenation of two independently simulated
     members, and every neuron's day units are sorted into sparse, unrelated
@@ -486,13 +487,11 @@ def test_daily_concat_matches_planted_units(tmp_path):
     The full summary is printed (run with ``-s``, or set
     ``SPYGLASS_UNITMATCH_BENCHMARK_OUT`` to keep it with the records). The
     gates were derived from development seeds 0..39 only, on macOS arm64,
-    with the margin rule in the benchmark module's docstring, and have not
-    yet been evaluated on another platform. The held-out seeds were
-    evaluated once against these gates (2026-09-29, macOS arm64: every gate
-    passed) and are now spent, so every later run of this test is a
-    regression check, not a new held-out evaluation. Do not change the
-    thresholds, seeds, dataset or scoring to make this pass, and do not
-    xfail or skip it: a failure is still a reported result. DB-free.
+    with the margin rule in the benchmark module's docstring; they have
+    been checked on the held-out seeds on macOS arm64 only. Do not change
+    the thresholds, seeds, dataset or scoring to make this pass, and do not
+    xfail or skip it: a failure is a result about the matching path, not a
+    test bug. DB-free.
     """
     pytest.importorskip("UnitMatchPy")
     gates, table = _held_out_gates("two_day", tmp_path)
@@ -501,7 +500,8 @@ def test_daily_concat_matches_planted_units(tmp_path):
 
 @pytest.mark.slow
 def test_three_day_concat_matches_planted_units(tmp_path):
-    """Regression check of the three-day gates on held-out seeds 100..139.
+    """Three-day daily concatenations meet every three-day gate on
+    held-out seeds 100..139.
 
     Three concatenated days with stable neurons, neurons absent on day 2,
     neurons whose templates change gradually, conflicting pairs of
@@ -516,13 +516,11 @@ def test_three_day_concat_matches_planted_units(tmp_path):
     ``SPYGLASS_UNITMATCH_BENCHMARK_OUT`` to keep the summary and records),
     not asserted: on the development seeds their derived bounds fell below
     the 0.50 cut-off (``UNGATED_DIAGNOSTICS``). The gates were derived
-    from development seeds 0..39 only, on macOS arm64, and have not yet
-    been evaluated on another platform. The held-out seeds were evaluated
-    once against these gates (2026-09-29, macOS arm64: every gate passed)
-    and are now spent, so every later run of this test is a regression
-    check, not a new held-out evaluation. Do not change the thresholds,
-    seeds, dataset or scoring to make this pass, and do not xfail or skip
-    it: a failure is still a reported result. DB-free.
+    from development seeds 0..39 only, on macOS arm64; they have been
+    checked on the held-out seeds on macOS arm64 only. Do not change the
+    thresholds, seeds, dataset or scoring to make this pass, and do not
+    xfail or skip it: a failure is a result about the matching path, not a
+    test bug. DB-free.
     """
     pytest.importorskip("UnitMatchPy")
     gates, table = _held_out_gates("three_day", tmp_path)

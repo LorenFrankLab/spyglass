@@ -650,12 +650,12 @@ def test_bundle_control_matches_previous_construction(tmp_path, saved_bundles):
     """On a stationary session, per-unit temporal halves reproduce the
     recording-half templates (Pearson r > 0.99 for every unit and half).
 
-    The previous construction is the local copy kept by the half-split
-    experiment script; both constructions run on that script's control
-    session A (60 s, 16 channels, 20 units that fire throughout). The spike
-    cap is at least every unit's spike count, so neither construction
-    subsamples: the new one averages all of a unit's interior spikes, the old
-    one all of its spikes in each recording half. For a stationary unit the
+    The recording-half (``time_half``) construction is the local copy kept by
+    the half-split experiment script; both constructions run on that script's
+    control session A (60 s, 16 channels, 20 units that fire throughout). The
+    spike cap is at least every unit's spike count, so neither construction
+    subsamples: the per-unit one averages all of a unit's interior spikes,
+    the recording-half one all of its spikes in each recording half. For a stationary unit the
     first/second half of its spikes and the recording halves then hold nearly
     the same spikes, so the correlation measures the construction rather than
     random-subset noise.
@@ -668,7 +668,7 @@ def test_bundle_control_matches_previous_construction(tmp_path, saved_bundles):
 
     recording, sorting = experiment.make_dataset(0)
     (rec_a, sort_a), _ = experiment.split_sessions(recording, sorting)
-    new_dir, old_dir = tmp_path / "per_unit", tmp_path / "time_half"
+    per_unit_dir, time_half_dir = tmp_path / "per_unit", tmp_path / "time_half"
     all_spikes = max(
         sort_a.get_unit_spike_train(uid).size for uid in sort_a.get_unit_ids()
     )
@@ -680,28 +680,31 @@ def test_bundle_control_matches_previous_construction(tmp_path, saved_bundles):
         job_kwargs=experiment.JOB_KWARGS,
     )
     excluded = backend.extract_unitmatch_bundle(
-        new_dir, rec_a, sort_a, **kwargs
+        per_unit_dir, rec_a, sort_a, **kwargs
     )
-    experiment.extract_time_half_bundle(old_dir, rec_a, sort_a, **kwargs)
+    experiment.extract_time_half_bundle(time_half_dir, rec_a, sort_a, **kwargs)
 
     assert excluded == []
-    new, old = saved_bundles[new_dir], saved_bundles[old_dir]
-    assert new["unit_ids"] == old["unit_ids"]
-    assert new["waveforms"].shape == old["waveforms"].shape
-    n_units = len(new["unit_ids"])
+    per_unit, time_half = (
+        saved_bundles[per_unit_dir],
+        saved_bundles[time_half_dir],
+    )
+    assert per_unit["unit_ids"] == time_half["unit_ids"]
+    assert per_unit["waveforms"].shape == time_half["waveforms"].shape
+    n_units = len(per_unit["unit_ids"])
     corr = np.array(
         [
             [
                 np.corrcoef(
-                    new["waveforms"][i, ..., k].ravel(),
-                    old["waveforms"][i, ..., k].ravel(),
+                    per_unit["waveforms"][i, ..., k].ravel(),
+                    time_half["waveforms"][i, ..., k].ravel(),
                 )[0, 1]
                 for k in (0, 1)
             ]
             for i in range(n_units)
         ]
     )
-    assert np.all(corr > 0.99), dict(zip(new["unit_ids"], corr.round(4)))
+    assert np.all(corr > 0.99), dict(zip(per_unit["unit_ids"], corr.round(4)))
 
 
 # ---- waveform windows inside one statistics span ---------------------------
@@ -1208,10 +1211,11 @@ def _gate_test_record(
     ``matched`` is the set of ``(i, j)`` pairs that pass matching; every other
     ``(i, j)`` pair over ``unit_ids`` counts as a miss. ``true_pair_probs`` is
     an optional ``{unit_id: (p_ab, p_ba)}`` map, stored the way
-    :func:`run_one` stores it (string keys, list values), for the G3a-prob
-    gate; omitted units are simply not paired. ``condition`` defaults to
-    ``"per_unit"`` (the gated condition); pass ``"time_half"`` to build the
-    baseline side of a G3b-prob comparison. No UnitMatchPy or DB access
+    :func:`run_one` stores it (string keys, list values), for the healthy
+    true-pair probability drop gate; omitted units are simply not paired.
+    ``condition`` defaults to ``"per_unit"`` (the gated condition); pass
+    ``"time_half"`` to build the baseline side of an excess-drop
+    comparison. No UnitMatchPy or DB access
     happens here -- ``score_pairs`` is pure counting.
     """
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
@@ -1240,14 +1244,15 @@ def _gate(gates, name, scenario):
     return next(g for g in gates if g.name == name and g.scenario == scenario)
 
 
-def test_evaluate_gates_g1_is_exact_at_its_boundary_and_g2_is_diagnostic():
-    """G1 (>=) passes exactly on the threshold, fails one count over.
+def test_evaluate_gates_drift_out_recall_is_exact_and_sxs_rate_is_diagnostic():
+    """Drift-out recall (>=) passes exactly on the threshold, fails one
+    count under it.
 
-    G2 (S x S false-pair rate) is a printed diagnostic, not an acceptance
+    The S x S false-pair rate is a printed diagnostic, not an acceptance
     gate -- UnitMatch's per-run match threshold is unstable when a session
     has few units, so a burst of false pairs is not attributable to the
     cross-validation-half construction under test. Its exact-fraction value
-    is still checked at the same boundary as G1.
+    is still checked at its reported limit.
 
     |S| = 25 makes both the diagonal denominator (25) and the off-diagonal
     denominator (25 * 24 = 600) exact multiples of the thresholds' reduced
@@ -1264,61 +1269,57 @@ def test_evaluate_gates_g1_is_exact_at_its_boundary_and_g2_is_diagnostic():
     def matched(n_diag, n_off_diag):
         return {(i, i) for i in s_units[:n_diag]} | set(off_diag[:n_off_diag])
 
-    # G1 20/25 == 0.80 exactly; G2 9/600 == 0.015 exactly.
+    # Recall 20/25 == 0.80 exactly; S x S rate 9/600 == 0.015 exactly.
     at_boundary = _gate_test_record(
         0, "driftout_A", s_units, s_units, matched(20, 9)
     )
     gates = evaluate_gates([at_boundary], "per_unit")
-    g1, g2 = (
-        _gate(gates, "G1 drift-out recall", "driftout_A"),
+    recall, sxs_rate = (
+        _gate(gates, "drift-out recall", "driftout_A"),
         _gate(
             gates,
-            "G2 SxS false-pair rate (diagnostic, not gated)",
+            "S x S false-pair rate (diagnostic, not gated)",
             "driftout_A",
         ),
     )
-    assert g1.passed is True, g1
-    assert g2.passed is None, g2
-    assert g2.value == pytest.approx(0.015), g2
+    assert recall.passed is True, recall
+    assert sxs_rate.passed is None, sxs_rate
+    assert sxs_rate.value == pytest.approx(0.015), sxs_rate
 
-    # One fewer drift-out true pair (19/25 == 0.76) moves G1 past its
-    # boundary; one more S x S false pair (10/600 == 0.01667) moves G2's
-    # diagnostic value past where its old threshold sat, but it still has
-    # no pass/fail verdict.
+    # One fewer drift-out true pair (19/25 == 0.76) moves the recall past
+    # its boundary; one more S x S false pair (10/600 == 0.01667) moves the
+    # diagnostic S x S rate past its reported limit, but it still has no
+    # pass/fail verdict.
     past_boundary = _gate_test_record(
         0, "driftout_A", s_units, s_units, matched(19, 10)
     )
     gates = evaluate_gates([past_boundary], "per_unit")
-    g1, g2 = (
-        _gate(gates, "G1 drift-out recall", "driftout_A"),
+    recall, sxs_rate = (
+        _gate(gates, "drift-out recall", "driftout_A"),
         _gate(
             gates,
-            "G2 SxS false-pair rate (diagnostic, not gated)",
+            "S x S false-pair rate (diagnostic, not gated)",
             "driftout_A",
         ),
     )
-    assert g1.passed is False, g1
-    assert g2.passed is None, g2
-    assert g2.value == pytest.approx(10 / 600), g2
+    assert recall.passed is False, recall
+    assert sxs_rate.passed is None, sxs_rate
+    assert sxs_rate.value == pytest.approx(10 / 600), sxs_rate
 
 
-def test_evaluate_gates_g4_is_exact_at_its_boundary():
-    """G4 (paired healthy FP increase against control) passes exactly on the
-    threshold.
+def test_evaluate_gates_healthy_fp_increase_is_exact_at_its_boundary():
+    """The healthy false-pair rate increase (paired against control) passes
+    exactly on the threshold and fails one false pair over it.
 
     25 non-S units make the paired false-positive denominator 600, an exact
     multiple of 0.005's reduced denominator (200): 3/600 == 0.005 lands on an
-    exact fraction. (The former G3a boundary check on this same fixture --
-    the count-based paired healthy recall drop -- moved to
-    ``test_evaluate_gates_g3a_prob_is_exact_at_its_boundary`` /
-    ``test_evaluate_gates_g3a_exact_fails_on_one_differing_half``: G3a-count
-    is a printed diagnostic now, not an asserted gate.)
+    exact fraction.
     """
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
         evaluate_gates,
     )
 
-    s_units = [999]  # a single drift-out unit; irrelevant to G4
+    s_units = [999]  # a single drift-out unit; irrelevant to this gate
     non_s = list(range(1000, 1025))
     unit_ids = s_units + non_s
     off_diag = [(a, b) for a in non_s for b in non_s if a != b]
@@ -1333,26 +1334,27 @@ def test_evaluate_gates_g4_is_exact_at_its_boundary():
         1, "driftout_A", unit_ids, s_units, healthy(24, 3)
     )
     gates = evaluate_gates([control, passing], "per_unit")
-    g4 = _gate(gates, "G4 paired healthy FP increase", "driftout_A")
-    assert g4.passed is True, g4
+    fp_increase = _gate(gates, "healthy false-pair rate increase", "driftout_A")
+    assert fp_increase.passed is True, fp_increase
 
     # One more false positive (4/600) pushes the increase to 4/600 == 0.00667.
-    failing_g4 = _gate_test_record(
+    failing_fp = _gate_test_record(
         1, "driftout_A", unit_ids, s_units, healthy(24, 4)
     )
-    gates = evaluate_gates([control, failing_g4], "per_unit")
+    gates = evaluate_gates([control, failing_fp], "per_unit")
     assert (
-        _gate(gates, "G4 paired healthy FP increase", "driftout_A").passed
+        _gate(gates, "healthy false-pair rate increase", "driftout_A").passed
         is False
     ), gates
 
 
-def test_evaluate_gates_g3a_count_is_a_diagnostic_not_a_gate():
-    """The old count-based G3a is still printed but never gates acceptance.
+def test_evaluate_gates_healthy_recall_drop_is_a_diagnostic_not_a_gate():
+    """The count-based healthy recall drop is printed but never gates
+    acceptance.
 
-    Same fixture as the G4 boundary test, with a recall drop that would have
-    failed the old count-based threshold (2/25 == 0.08 > 0.04): G3a-count
-    reports that value but ``passed`` is always ``None``.
+    Same fixture as the healthy false-pair boundary test, with a recall drop
+    above the reported 0.04 limit (2/25 == 0.08): the diagnostic reports
+    that value but ``passed`` is always ``None``.
     """
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
         evaluate_gates,
@@ -1369,16 +1371,16 @@ def test_evaluate_gates_g3a_count_is_a_diagnostic_not_a_gate():
         1, "driftout_A", unit_ids, s_units, {(u, u) for u in non_s[:23]}
     )
     gates = evaluate_gates([control, scenario], "per_unit")
-    g3a_count = _gate(
+    recall_drop = _gate(
         gates,
-        "G3a-count paired healthy recall drop (diagnostic, not gated)",
+        "healthy recall drop (diagnostic, not gated)",
         "driftout_A",
     )
-    assert g3a_count.passed is None, g3a_count
-    assert g3a_count.value == pytest.approx(2 / 25)
+    assert recall_drop.passed is None, recall_drop
+    assert recall_drop.value == pytest.approx(2 / 25)
 
 
-def _g3a_prob_gate(records):
+def _healthy_prob_drop_gate(records):
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
         evaluate_gates,
     )
@@ -1386,13 +1388,14 @@ def _g3a_prob_gate(records):
     gates = evaluate_gates(records, "per_unit")
     return _gate(
         gates,
-        "G3a-prob healthy true-pair mean probability drop",
+        "healthy true-pair probability drop",
         "driftout_A",
     )
 
 
-def test_evaluate_gates_g3a_prob_is_exact_at_its_boundary():
-    """G3a-prob passes on dyadic drops at/below 0.04, fails clearly above it.
+def test_evaluate_gates_healthy_prob_drop_is_exact_at_its_boundary():
+    """The healthy true-pair probability drop passes on dyadic drops at or
+    below 0.04 and fails clearly above it.
 
     Every ``q`` here is a dyadic fraction (a binary fraction like ``1/32``),
     so every value AND every subtraction is bit-exact in IEEE 754 double
@@ -1423,7 +1426,7 @@ def test_evaluate_gates_g3a_prob_is_exact_at_its_boundary():
             set(),
             {1: (scenario_q, scenario_q)},
         )
-        return _g3a_prob_gate([control, scenario])
+        return _healthy_prob_drop_gate([control, scenario])
 
     comfortably_passing = gate_for(0.46875)
     assert comfortably_passing.passed is True, comfortably_passing
@@ -1438,9 +1441,10 @@ def test_evaluate_gates_g3a_prob_is_exact_at_its_boundary():
     assert clearly_failing.value == pytest.approx(0.046875, abs=0)
 
 
-def test_evaluate_gates_g3a_prob_uses_min_of_directed_probabilities():
-    """G3a-prob's ``q_u = min(p_ab, p_ba)`` -- not ``max`` or a mean -- is
-    what decides the drop. Every other G3a-prob fixture in this module uses
+def test_evaluate_gates_healthy_prob_drop_uses_min_of_directed_probabilities():
+    """The probability drop's ``q_u = min(p_ab, p_ba)`` -- not ``max`` or a
+    mean -- is what decides the drop. Every other probability-drop fixture
+    in this module uses
     ``p_ab == p_ba``, so a change from ``min`` to ``max`` or to a mean would
     pass every one of them unnoticed; this fixture uses asymmetric directed
     probabilities so the three choices disagree.
@@ -1469,12 +1473,12 @@ def test_evaluate_gates_g3a_prob_uses_min_of_directed_probabilities():
     scenario = _gate_test_record(
         1, "driftout_A", unit_ids, s_units, set(), {1: (0.4375, 0.9375)}
     )
-    gate = _g3a_prob_gate([control, scenario])
+    gate = _healthy_prob_drop_gate([control, scenario])
     assert gate.value == pytest.approx(0.0625, abs=0), gate
     assert gate.passed is False, gate
 
 
-def test_evaluate_gates_g3a_prob_pools_units_not_per_seed_means():
+def test_evaluate_gates_healthy_prob_drop_pools_units_not_per_seed_means():
     """The pooled mean is ONE mean over every paired unit, not a mean of
     per-seed means -- the two differ whenever seeds contribute unequal
     paired counts.
@@ -1484,7 +1488,7 @@ def test_evaluate_gates_g3a_prob_pools_units_not_per_seed_means():
     mean-of-per-seed-means would average 1.0 and 0.0 to 0.5; the correct
     pooled mean over all four units is ``1.0 / 4 = 0.25``.
     """
-    seed1_units = [901, 1]  # 901 is S (irrelevant to G3a-prob)
+    seed1_units = [901, 1]  # 901 is S (irrelevant to the healthy drop)
     seed2_units = [902, 11, 12, 13]  # 902 is S
 
     seed1_control = _gate_test_record(
@@ -1510,7 +1514,7 @@ def test_evaluate_gates_g3a_prob_pools_units_not_per_seed_means():
         {u: (0.0, 0.0) for u in (11, 12, 13)},
     )
 
-    gate = _g3a_prob_gate(
+    gate = _healthy_prob_drop_gate(
         [seed1_control, seed1_scenario, seed2_control, seed2_scenario]
     )
     assert "n_paired=4" in gate.detail, gate
@@ -1558,8 +1562,8 @@ def test_paired_true_pair_probs_drops_unit_missing_on_either_side():
     )  # unit 2 (missing control), unit 3 (missing scenario)
 
 
-def test_evaluate_gates_g3a_prob_reports_unpaired_and_capture_missing():
-    """G3a-prob's detail reports n_paired, n_unpaired and
+def test_evaluate_gates_healthy_prob_drop_reports_unpaired_and_capture_missing():
+    """The probability-drop gate's detail reports n_paired, n_unpaired and
     n_capture_missing_runs, not just the paired count.
 
     Seed 1's non-S units are 1 (paired) and 2 (missing from the scenario
@@ -1588,7 +1592,7 @@ def test_evaluate_gates_g3a_prob_reports_unpaired_and_capture_missing():
         2, "driftout_A", seed2_units, [950], set(), {}
     )
 
-    gate = _g3a_prob_gate(
+    gate = _healthy_prob_drop_gate(
         [seed1_control, seed1_scenario, seed2_control, seed2_scenario]
     )
     assert "n_paired=1" in gate.detail, gate
@@ -1596,7 +1600,7 @@ def test_evaluate_gates_g3a_prob_reports_unpaired_and_capture_missing():
     assert "n_capture_missing_runs=1" in gate.detail, gate
 
 
-def _g3b_prob_gate(records):
+def _excess_prob_drop_gate(records):
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
         evaluate_gates,
     )
@@ -1604,14 +1608,15 @@ def _g3b_prob_gate(records):
     gates = evaluate_gates(records, "per_unit")
     return _gate(
         gates,
-        "G3b-prob per_unit vs time_half G3a-prob drop excess",
+        "excess healthy true-pair probability drop vs time_half",
         "driftout_A",
     )
 
 
-def test_evaluate_gates_g3b_prob_pass_fail_and_not_evaluated():
-    """G3b-prob is the per_unit G3a-prob drop minus the same drop measured
-    on ``time_half`` (the baseline construction) for the same seed, and is
+def test_evaluate_gates_excess_prob_drop_pass_fail_and_not_evaluated():
+    """The excess drop is the per_unit healthy true-pair probability drop
+    minus the same drop measured on ``time_half`` (the baseline
+    construction) for the same seed, and is
     not evaluated at all when no ``time_half`` run exists for that seed.
 
     - PASS: per_unit drop (``0.5 -> 0.5``, drop ``0.0``) is no worse than the
@@ -1666,7 +1671,7 @@ def test_evaluate_gates_g3b_prob_pass_fail_and_not_evaluated():
     baseline_control, baseline_scenario = time_half_pair(0.5)
 
     per_unit_control, per_unit_scenario = per_unit_pair(0.5)
-    passing = _g3b_prob_gate(
+    passing = _excess_prob_drop_gate(
         [
             per_unit_control,
             per_unit_scenario,
@@ -1678,7 +1683,7 @@ def test_evaluate_gates_g3b_prob_pass_fail_and_not_evaluated():
     assert passing.value == pytest.approx(0.0, abs=0), passing
 
     per_unit_control, per_unit_scenario = per_unit_pair(0.375)
-    failing = _g3b_prob_gate(
+    failing = _excess_prob_drop_gate(
         [
             per_unit_control,
             per_unit_scenario,
@@ -1689,10 +1694,12 @@ def test_evaluate_gates_g3b_prob_pass_fail_and_not_evaluated():
     assert failing.passed is False, failing
     assert failing.value == pytest.approx(0.125, abs=0), failing
 
-    not_evaluated = _g3b_prob_gate([per_unit_control, per_unit_scenario])
+    not_evaluated = _excess_prob_drop_gate(
+        [per_unit_control, per_unit_scenario]
+    )
     assert not_evaluated.passed is None, not_evaluated
     assert (
-        "time_half paired G3a-prob run not available" in not_evaluated.detail
+        "time_half paired probability run not available" in not_evaluated.detail
     ), not_evaluated
 
 
@@ -1705,13 +1712,14 @@ def _write_raw_waveform(session_dir, unit_id, half0, half1):
     np.save(session_dir / "RawWaveforms" / f"Unit{unit_id}_RawSpikes.npy", wave)
 
 
-def test_evaluate_gates_g3a_exact_fails_on_one_differing_half(tmp_path):
-    """G3a-exact fails as soon as one non-S template half differs from control.
+def test_evaluate_gates_template_identity_fails_on_one_differing_half(tmp_path):
+    """Healthy template bit-identity fails as soon as one non-S template
+    half differs from control.
 
     Two non-S units (3 and 5) with identical A/B bundles between the control
     and scenario run except unit 5's session-B half 1, which differs by one
     value: 7/8 halves (2 units x 2 sessions x 2 halves) are bit-identical, so
-    G3a-exact must fail (identical != total). A companion bundle pair with
+    the gate must fail (identical != total). A companion bundle pair with
     every half identical passes.
     """
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
@@ -1745,22 +1753,18 @@ def test_evaluate_gates_g3a_exact_fails_on_one_differing_half(tmp_path):
     control = record("control", control_dirs)
     failing = record("driftout_A", failing_dirs)
     gates = evaluate_gates([control, failing], "per_unit")
-    g3a_exact = _gate(
-        gates, "G3a-exact non-S template bit-identity", "driftout_A"
-    )
-    assert g3a_exact.passed is False, g3a_exact
-    assert g3a_exact.detail == "7/8", g3a_exact
+    identity = _gate(gates, "healthy template bit-identity", "driftout_A")
+    assert identity.passed is False, identity
+    assert identity.detail == "7/8", identity
 
     passing = record("driftout_A", passing_dirs)
     gates = evaluate_gates([control, passing], "per_unit")
-    g3a_exact = _gate(
-        gates, "G3a-exact non-S template bit-identity", "driftout_A"
-    )
-    assert g3a_exact.passed is True, g3a_exact
-    assert g3a_exact.detail == "8/8", g3a_exact
+    identity = _gate(gates, "healthy template bit-identity", "driftout_A")
+    assert identity.passed is True, identity
+    assert identity.detail == "8/8", identity
 
 
-def test_evaluate_gates_g3a_exact_counts_missing_unit_as_not_identical(
+def test_evaluate_gates_template_identity_counts_missing_unit_as_not_identical(
     tmp_path,
 ):
     """A non-S unit present in control but excluded from the scenario bundle
@@ -1818,11 +1822,9 @@ def test_evaluate_gates_g3a_exact_counts_missing_unit_as_not_identical(
     control = record("control", control_dirs)
     scenario = record("driftout_A", scenario_dirs)
     gates = evaluate_gates([control, scenario], "per_unit")
-    g3a_exact = _gate(
-        gates, "G3a-exact non-S template bit-identity", "driftout_A"
-    )
-    assert g3a_exact.passed is False, g3a_exact
-    assert g3a_exact.detail == "4/8", g3a_exact
+    identity = _gate(gates, "healthy template bit-identity", "driftout_A")
+    assert identity.passed is False, identity
+    assert identity.detail == "4/8", identity
 
 
 def test_true_pair_probability_lookup_sparse_reordered_ids():

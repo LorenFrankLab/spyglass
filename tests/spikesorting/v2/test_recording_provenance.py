@@ -46,9 +46,9 @@ def _fresh_unit_producing_selection(populated_sorting):
 
 def test_filtering_description_reflects_actual_steps():
     """The persisted ``ElectricalSeries.filtering`` provenance is built from
-    the preprocessing steps that ACTUALLY ran, not the old hardcoded
-    "Bandpass filter + common reference" that misdescribed the no_filter /
-    reference_mode='none' artifact.
+    the preprocessing steps that ACTUALLY ran, not a fixed
+    "Bandpass filter + common reference" string that would misdescribe the
+    no_filter / reference_mode='none' artifact.
     """
     from spyglass.spikesorting.v2._params.preprocessing import (
         BandpassFilterParams,

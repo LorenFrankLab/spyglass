@@ -557,16 +557,16 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     matches the v1 baseline BEFORE comparing spike outputs, so an
     input skew is never mistaken for an output regression.)
 
-    Sidecar history: the smoke parity row (``smoke_clusterless_5uv``)
+    The smoke parity row (``smoke_clusterless_5uv``)
     must NOT carry ``noise_levels`` -- that lets SI compute its own
     per-channel MAD and the threshold is interpreted as a MAD
     multiplier, matching how ``baseline_capture._ensure_smoke_sorter_param_row``
     inserts the v1 row. If ``noise_levels=[1.0]`` is forwarded
     (the production default for the 100 uV ``default_clusterless``
     row), the smoke threshold becomes raw uV and produces ~1,400x
-    more detections than v1. The schema v3 + tolerance-aware
-    matcher closes that divergence; the
-    canonical-sorter fingerprint check guarantees it stays closed.
+    more detections than v1. The schema v3 ``threshold_unit`` field and
+    the tolerance-aware matcher keep the two rows equivalent; the
+    canonical-sorter fingerprint check asserts that equivalence.
 
     Env vars:
       ``SPIKESORTING_V2_BASELINE_ROOT`` -> directory tree
@@ -1019,8 +1019,9 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     # cover both verified mechanisms.
     threshold_samples = 1.5
     # v2 extras allowed up to 50% + 5 (PR #4341 v1-wrong adjacent
-    # peaks). A 1,400x explosion (the historical noise_levels=[1.0]
-    # regression) is still well outside this budget and fails loud.
+    # peaks). A 1,400x explosion (what forwarding noise_levels=[1.0]
+    # into the smoke row produces) is far outside this budget and fails
+    # loud.
     extra_spike_ratio = 0.50
     tol_s = threshold_samples * one_sample_s
     diagnostic_rows: list[tuple[int, int, int, int, int, int]] = []
@@ -1101,9 +1102,9 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
                 f"{float(v1_to_v2_diff[~v1_matched].max() * fs):.2f} samples."
             )
 
-        # Cap v2's excess detections; a 1,400x explosion (the pre-fix
-        # state when ``noise_levels=[1.0]`` was injected into the
-        # smoke row) fails this assertion loud and clear.
+        # Cap v2's excess detections; a 1,400x explosion (what
+        # injecting ``noise_levels=[1.0]`` into the smoke row
+        # produces) fails this assertion loud and clear.
         max_v2 = int(v1_arr.size * (1.0 + extra_spike_ratio)) + 5
         if v2_arr.size > max_v2:
             failures.append(
@@ -1379,8 +1380,8 @@ def test_v2_real_data_v1_parity_mountainsort4(
     if missing_fp:
         msg = (
             f"v1 MS4 baseline meta at {meta_json} lacks fingerprint "
-            f"field(s) {missing_fp}; baseline was captured before the "
-            "invariant-fingerprint schema landed."
+            f"field(s) {missing_fp}; re-capture the baseline with the "
+            "current baseline_capture to record the fingerprint fields."
         )
         if baseline_root_env:
             pytest.fail(msg)
@@ -1466,9 +1467,9 @@ def test_v2_real_data_v1_parity_mountainsort4(
     }
 
     # Use ``artifact_valid_times`` duration (the interval the SORTER
-    # actually saw) as the firing-rate denominator. The pre-fix code
-    # used ``approx_last_spike_s`` from the v1 meta which is the
-    # last v1 spike time -- making both v1 and v2 firing rates
+    # actually saw) as the firing-rate denominator, not
+    # ``approx_last_spike_s`` from the v1 meta, which is the last v1
+    # spike time and would make both v1 and v2 firing rates
     # NORMALIZED BY v1's OUTPUT (not the fixed input window). The
     # fingerprint check above has already asserted v1's and v2's
     # ``artifact_valid_times`` match, so using v1's stored array is
@@ -2044,9 +2045,9 @@ def test_clusterless_thresholder_ground_truth(
     # the planted population must not pass this gate by virtue of high
     # recall alone. Bounds are set with ~2x headroom over empirical
     # observation so SI minor-version drift does not cause flake, but
-    # tight enough to flag real false-positive regressions (the
-    # previous loose 10x bound would only catch the historical 1,400x
-    # ``noise_levels=[1.0]`` explosion, missing smaller regressions).
+    # tight enough to flag real false-positive regressions (a loose
+    # 10x bound would only catch a 1,400x ``noise_levels=[1.0]``
+    # explosion, missing smaller regressions).
     #
     # Observed v2_peaks/planted_spike ratios (full GT gate runs):
     #   * polymer_60s  -- ~1.5x (4 shanks aggregated)

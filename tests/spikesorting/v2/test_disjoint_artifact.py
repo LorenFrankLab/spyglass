@@ -1,11 +1,11 @@
-"""Disjoint-recording artifact-detection regression tests.
+"""Artifact detection on disjoint recordings.
 
-Artifact detection ran its complement over a single envelope
-``timestamps[0]..timestamps[-1]``; for DISJOINT sort intervals that
-envelope includes the wall-clock gaps ``Recording.make`` excluded, so
+Taking the artifact complement over a single envelope
+``timestamps[0]..timestamps[-1]`` would be wrong for DISJOINT sort intervals:
+that envelope includes the wall-clock gaps ``Recording.make`` excluded, so
 the artifact-removed ``valid_times`` could span a gap. That inflates the
 obs_intervals duration/firing-rate metadata and can let a sub-
-``min_length_s`` sliver survive by borrowing gap time. The fix splits the
+``min_length_s`` sliver survive by borrowing gap time. v2 instead splits the
 persisted timestamp vector at discontinuities into base chunks and
 subtracts artifacts per chunk (v1 subtracts from the explicit
 ``sort_interval_valid_times``).
@@ -174,7 +174,7 @@ def test_detect_artifacts_valid_times_never_cross_gap():
     A transient in chunk 1 plus the (artifact-free) chunk 2 must yield
     valid intervals that each lie within a single chunk -- never one
     interval spanning the inter-chunk wall-clock gap. Subtracting from a
-    single envelope (the old behavior) would merge the post-transient
+    single envelope would merge the post-transient
     chunk-1 tail with chunk 2 across the gap.
     """
     from spyglass.spikesorting.v2._params.artifact_detection import (

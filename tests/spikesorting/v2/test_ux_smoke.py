@@ -1,6 +1,6 @@
 """End-to-end UX smoke test: a scientist's first hour on spike sorting v2.
 
-The release gate for the single-session user path. It runs the exact first-hour
+The end-to-end check of the single-session user path. It runs the exact first-hour
 sequence -- ``initialize_v2_defaults`` -> sort group -> ``preflight_v2_pipeline``
 -> ``run_v2_pipeline`` -> ``summarize_curation`` -> downstream spike-time fetch
 -- programmatically against the ``mearec_polymer_smoke`` fixture, and also
@@ -329,7 +329,7 @@ def test_user_notebook_executes(first_hour):
         "nwb_file_name": inputs["nwb_file_name"],
         "team_name": inputs["team_name"],
         "interval_list_name": inputs["interval_list_name"],
-        # The fixture has multiple sort groups; the notebook now requires an
+        # The fixture has multiple sort groups; the notebook requires an
         # explicit sort_group_id when there is more than one (no positional
         # default). Inject the same group first_hour sorted so the reused-row
         # merge_id assertion below holds.
@@ -540,7 +540,7 @@ def test_plot_sort_group_geometry_multi_probe_offset(monkeypatch):
         for collection in group_collections
     )
     # Disjoint x-intervals despite identical raw rel_x -> the per-probe offset
-    # was applied (probes no longer overlap).
+    # was applied (probes do not overlap).
     assert xranges[0][1] < xranges[1][0]
     assert "offset per probe" in ax.get_xlabel()
     plt.close(fig)
@@ -726,11 +726,12 @@ def test_plot_sort_group_geometry_auto_label_threshold(
 def test_sort_group_geometry_specific_reference_star_row(ux_session):
     """A 'specific'-reference group yields an is_reference=True geometry row.
 
-    The reference electrode is excluded from sort-group membership, so before
-    the fix the ``is_reference`` flag (which the star overlay is gated on) was
-    structurally always False and the star could never render. Assert the
-    (non-member) reference electrode now gets its own row with is_reference=True
-    and plot coordinates, and that the members are NOT flagged.
+    The reference electrode is excluded from sort-group membership, so a
+    geometry built from members alone would leave the ``is_reference`` flag
+    (which the star overlay is gated on) structurally always False and the
+    star could never render. Assert the (non-member) reference electrode gets
+    its own row with is_reference=True and plot coordinates, and that the
+    members are NOT flagged.
     """
     from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v2._pipeline_geometry import (

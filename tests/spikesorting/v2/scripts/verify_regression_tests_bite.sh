@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Test the tests: confirm that four regression tests actually catch the bugs
-# they were written for.
+# Test the tests: confirm that four regression tests fail when the behavior
+# they guard is undone.
 #
 # For each row below, this script (a) refuses to start if the target
 # production file already has uncommitted changes, (b) runs the named test
 # node against the unmodified tree and requires it to PASS -- a test that
 # already fails, errors or skips proves nothing about the revert, so that row
 # is INVALID ("baseline did not pass") and its revert is never applied, (c)
-# applies a one-line revert of the fix straight to that file with a Python
-# in-place edit that asserts its pattern matched exactly once (never a silent
-# no-op), (d) runs the same test node again in its own pytest session, (e)
+# applies a one-line revert of the guarded behavior (listed below) straight
+# to that file with a Python in-place edit that asserts its pattern matched
+# exactly once (never a silent no-op), (d) runs the same test node again in its own pytest session, (e)
 # restores the file with ``git checkout --`` (also from a trap, so an
 # interrupted run always restores and then stops), and (f) classifies the
 # reverted run from its ``--junitxml`` report, not from pytest's exit code:
@@ -511,7 +511,8 @@ fi
 echo
 if [ "$ANY_BAD" -eq 0 ]; then
   echo "all four regression tests bite: each passed on the unmodified tree" \
-    "and failed an assertion in its call phase when its fix was reverted," \
+    "and failed an assertion in its call phase when its guarded behavior" \
+    "was reverted," \
     "and all target files are clean."
   exit 0
 else

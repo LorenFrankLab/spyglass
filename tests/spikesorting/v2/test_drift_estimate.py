@@ -212,8 +212,8 @@ def test_drift_estimate_survives_peaks_sharing_a_frame(
     dj_conn, tmp_path, monkeypatch
 ):
     """Two peaks on one frame over an HDF5-backed time vector (as the v2 NWB
-    reader returns it) used to fail inside DREDge's fancy-indexed time lookup
-    (``dredge.py:227``). The estimate now completes and stays on the
+    reader returns it) can fail inside DREDge's fancy-indexed time lookup
+    (``dredge.py:227``). The estimate must complete and stay on the
     recording's real clock: its bins span the 30 s acquisition gap uncapped.
     """
     from spikeinterface.preprocessing.motion import motion_options_preset

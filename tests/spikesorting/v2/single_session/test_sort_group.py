@@ -85,7 +85,7 @@ def test_set_group_by_shank_can_include_bad_channels(polymer_smoke_session):
 
 @pytest.mark.slow
 def test_set_group_by_shank_refuses_overlapping_rerun(polymer_smoke_session):
-    """Rerun without an override raises (fixes v1 silent-overwrite bug)."""
+    """Rerun without an override raises (v1 silently overwrites)."""
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
@@ -179,10 +179,10 @@ def test_electrode_group_sort_key_tolerates_non_numeric(dj_conn):
     """``set_group_by_shank``'s group ordering must not assume numeric
     ``electrode_group_name`` values.
 
-    A plain ``int(name)`` raised ``ValueError`` on free-form NWB group
-    names (e.g. ``"probeA"``). The sort key now sorts numeric names
+    A plain ``int(name)`` raises ``ValueError`` on free-form NWB group
+    names (e.g. ``"probeA"``). The sort key sorts numeric names
     numerically (and ahead of non-numeric) and non-numeric names
-    lexically, so valid datasets no longer crash while purely numeric
+    lexically, so valid datasets do not crash while purely numeric
     names keep their natural order. (``dj_conn`` only because importing
     the module declares its schema.)
     """
@@ -205,9 +205,7 @@ def test_handle_existing_rejects_duplicate_sort_group_ids(dj_conn):
     front instead of failing late on a DataJoint duplicate-key error
     when the master rows are inserted. Auto-allocated ranges
     (``explicit_sort_group_ids=False``) are always unique, so the check
-    is gated on the explicit path. (Found by generalizing from the
-    merge-curation ``len(list)`` vs ``len(set)`` bug -- the same pattern
-    lived here.)
+    is gated on the explicit path.
     """
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -389,14 +387,14 @@ def test_sort_group_update1_validates_merged_reference(polymer_smoke_session):
 # ===========================================================================
 # Edge-case coverage for SortGroupV2 reference handling and group construction.
 #
-# reference_mode validation (the integer sentinel was replaced by a
-# ``reference_mode`` varchar validated against the ReferenceMode Literal),
+# reference_mode validation (a ``reference_mode`` varchar validated against
+# the ReferenceMode Literal, in place of v1's integer sentinel),
 # the all-shanks-filtered guard, the omit_ref no-op under the default mode,
 # additive inserts, length-mismatch, and the empty-match guard on the
 # electrode-table-column constructor. The RecordingSelection duplicate guard
 # (test_recording_selection_raises_on_duplicate_logical_identity, len==2) and
 # _electrode_group_sort_key (test_electrode_group_sort_key_tolerates_non_numeric)
-# are already covered, so they are not re-added here.
+# are covered elsewhere (test_recording.py and above in this module).
 # ===========================================================================
 
 
@@ -404,8 +402,8 @@ def test_sort_group_update1_validates_merged_reference(polymer_smoke_session):
 def test_sort_group_rejects_invalid_reference_mode():
     """``SortGroupV2.insert1`` rejects an unknown ``reference_mode``.
 
-    The integer ``sort_reference_electrode_id`` sentinel was replaced by
-    a ``reference_mode`` varchar validated against the ``ReferenceMode``
+    In place of v1's integer ``sort_reference_electrode_id`` sentinel,
+    ``reference_mode`` is a varchar validated against the ``ReferenceMode``
     Literal at the insert boundary. An invalid mode (here ``"banana"``)
     raises before any DB write -- the varchar's typo guard standing in for a
     MySQL enum. The message names the valid modes.

@@ -7,7 +7,7 @@ the spikes. The displacement is the planted ground truth, so these tests cover
 the application alone; the estimator's accuracy is tested in
 ``test_motion_estimation.py``.
 
-Tolerances come from development seeds 0-2 of the same fixtures (the tests
+Tolerances come from measurements on seeds 0-2 of the same fixtures (the tests
 use seed 0), measured on the interior channels (the two contacts at each end
 extrapolate): with the planted motion applied, the RMS difference from the
 static twin was at most 0.065 uV for whole-pitch rigid steps (single span and
@@ -39,10 +39,10 @@ FORCE_EXTRAPOLATE = {
 REMOVE_CHANNELS = {**FORCE_EXTRAPOLATE, "border_mode": "remove_channels"}
 INTERIOR = slice(2, -2)
 #: Interior-channel RMS bound (uV) against the static twin for whole-pitch
-#: steps; development maximum 0.065 uV.
+#: steps; measured maximum 0.065 uV (seeds 0-2).
 PITCH_STEP_RMS_UV = 0.1
 #: Bound on corrected / uncorrected RMS difference from the static twin for
-#: the zigzag; development maximum 0.30.
+#: the zigzag; measured maximum 0.30 (seeds 0-2).
 ZIGZAG_RATIO = 0.5
 
 

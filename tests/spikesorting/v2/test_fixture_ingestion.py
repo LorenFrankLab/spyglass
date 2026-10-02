@@ -110,7 +110,7 @@ def test_mearec_fixture_writes_sidecar_ground_truth_units(
         nwb = io.read()
         assert nwb.units is None, (
             "MEArec smoke fixture leaked planted ground-truth units "
-            "into nwbfile.units; sidecar migration regression."
+            "into nwbfile.units; they belong in the ground-truth sidecar."
         )
         gt_table = get_ground_truth_units_table(nwb)
         assert gt_table is not None, (

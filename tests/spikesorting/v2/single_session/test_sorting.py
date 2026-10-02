@@ -85,7 +85,7 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
 
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    # The analyzer folder is no longer a column; resolve it from
+    # The analyzer folder is not a column; resolve it from
     # (sorting_id, display recipe name).
     analyzer_folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
     assert isinstance(analyzer_folder, Path)
@@ -553,9 +553,8 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
     # detection; gain conversion happens only at NWB-write time via
     # ``ElectricalSeries.conversion``). The "detect_threshold stays
     # in microvolts" docstring inherits a v1-era assumption that
-    # only holds if the recording was pre-scaled to uV. The unit-confusion
-    # is pre-existing and out of scope here; document it so a future
-    # maintainer doesn't reinstate the over-specified assertion. The
+    # only holds if the recording was pre-scaled to uV, so this test makes
+    # no amplitude-vs-threshold assertion. The
     # template peak (post-gain-applied via channel_gains in
     # _build_analyzer) being ~0.6 uV is consistent with a 5-count
     # detection threshold on a ~0.2 uV/count probe.
@@ -1170,18 +1169,18 @@ def test_analyzer_rebuild_is_seeded_reproducible(
     templates; the SI 0.104 default is ``seed=None`` (verified against
     ``ComputeRandomSpikes._set_params``), so without a pinned seed two
     builds of the same sort pick different subsets and the persisted
-    peak amplitude / peak channel drift. ``_build_analyzer`` now passes
+    peak amplitude / peak channel drift. ``_build_analyzer`` passes
     ``seed=0``.
 
     CRITICAL: the seed only changes anything for units with MORE than
     500 spikes -- at or below 500 every spike is selected and the build
     is deterministic regardless of the seed. The MEArec smoke fixture is
-    4 s (~tens of spikes/unit), so it would pass this test even with the
-    seed reverted (false confidence). This test therefore uses a
+    4 s (~tens of spikes/unit), so it would pass this test even without
+    the pinned seed (false confidence). This test therefore uses a
     synthetic 40 s, 20 Hz recording whose every unit fires >500 spikes,
     and asserts subsampling actually fired. It drives the real
-    ``Sorting._build_analyzer`` (not SI directly) so reverting the seed
-    line makes it fail.
+    ``Sorting._build_analyzer`` (not SI directly) so removing the pinned
+    seed makes it fail.
     """
     import numpy as np
 
@@ -1485,9 +1484,8 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
     ``test_curation_v2_stages_empty_units_nwb_on_zero_kept_units``.
     Without this test, a regression in the zero-unit handling at
     the Sorting layer (e.g., a refactor that adds ``add_unit_column``
-    before the guard, exactly the bug recently fixed in
-    CurationV2) would crash on real datasets where the sorter
-    finds no units.
+    before the guard, the same failure the CurationV2 test guards)
+    would crash on real datasets where the sorter finds no units.
     """
     import numpy as np
     import pynwb
@@ -1599,8 +1597,8 @@ def test_sorting_nwb_writes_obs_intervals_and_curation_label_placeholder(
 def test_sorting_delete_removes_analyzer_folder(populated_sorting):
     """``Sorting.delete()`` cleans up the analyzer folder on disk.
 
-    v2 introduced ``analyzer_folder`` as a 5-50 GB scratch path
-    not tracked by DataJoint. Without ``Sorting``'s delete
+    v2's ``analyzer_folder`` is a 5-50 GB scratch path not
+    tracked by DataJoint. Without ``Sorting``'s delete
     override, the folder leaks every time a Sorting row is
     dropped. Test populates a sort, asserts the folder exists,
     deletes the row with ``safemode=False``, then asserts the

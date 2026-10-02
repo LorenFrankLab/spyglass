@@ -1,9 +1,9 @@
 """Real-merge-master test for multi_source SpikeSortingOutput.fetch_nwb.
 
 The hermetic two-source tests in ``tests/utils/test_merge_consumer_boundary.py``
-exercise the generic ``_Merge.fetch_nwb`` rewrite on a synthetic merge table
-with single-int-PK leaves. This module is the pre-merge gate the code review
-called for: it builds a REAL ``SpikeSortingOutput`` with rows from two
+exercise the generic ``_Merge.fetch_nwb`` on a synthetic merge table with
+single-int-PK leaves. This module covers what those cannot: it builds a REAL
+``SpikeSortingOutput`` with rows from two
 DISTINCT source part types and exercises:
 
 - the multi_source MASTER path on real parts -- a ``merge_id``-spanning
@@ -12,7 +12,7 @@ DISTINCT source part types and exercises:
   by ``CurationV2``'s ``(sorting_id, curation_id)`` PK routes through
   ``self * part * parent`` and the ``parent.primary_key`` / merge_id-by-PK
   mapping (``..._parent_key_join_branch``);
-- the migrated ``SortedSpikesGroup`` consumer over a 2-source group.
+- the ``SortedSpikesGroup`` consumer over a 2-source group.
 
 Under SI 0.104 the only two source types whose ``fetch_nwb`` works are
 ``CurationV2`` (the v2 pipeline) and ``ImportedSpikeSorting`` (reads

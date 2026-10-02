@@ -1,6 +1,6 @@
 """Canonicalization helpers for v1↔v2 parity invariant fingerprints.
 
-The v1↔v2 parity gate at
+The v1↔v2 parity test
 :func:`tests.spikesorting.v2.single_session.test_ground_truth_parity.test_v2_real_data_v1_parity`
 fingerprints the inputs to the sort (NWB hash, sort-group electrodes,
 preprocessing params, artifact params, sorter params, valid-times

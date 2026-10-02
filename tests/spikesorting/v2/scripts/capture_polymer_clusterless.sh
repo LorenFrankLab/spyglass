@@ -1,28 +1,25 @@
 #!/usr/bin/env bash
 # Capture v1 clusterless_thresholder baselines for the polymer fixtures.
 #
-# Launches 8 parallel tmux sessions (2 fixtures × 4 shanks) under the
-# spyglass-v1-parity conda env. Each session writes its baseline
+# Runs 8 captures (2 fixtures × 4 shanks) sequentially in one tmux
+# session under the spyglass-v1-parity conda env. Each session writes its baseline
 # artifacts to $SPIKESORTING_V2_BASELINE_ROOT/<fixture_stem>/clusterless/shank<N>/
 # for the v2 parity test to consume.
 #
-# Worktree pin: the plan's "cd /tmp/spyglass-master" recipe assumes the
-# v1 worktree carries the v2 testing tree. In this repo the master
-# branch does not (the v2 tree is spikesorting-v2-only), so the script
-# cd's to the v2 checkout's repo root instead. The spyglass-v1-parity
-# env is dev-installed against the same repo and pins SI 0.99, so the
-# v1 imports inside baseline_capture.py still resolve to v1 tables;
-# only the cwd differs from the plan.
+# Working directory: the script cd's to this checkout's repo root, which
+# carries the v2 testing tree (a v1-only worktree would not). The
+# spyglass-v1-parity env is dev-installed against the same repo and pins
+# SI 0.99, so the v1 imports inside baseline_capture.py still resolve to
+# v1 tables.
 #
-# Concurrency note: the plan calls for 8 parallel tmux sessions with
-# per-case --database-prefix isolation. Empirically that does NOT work
-# on this codebase: v1 schemas declare ``dj.schema("spikesorting_v1_*")``
-# with a hardcoded name (NO ``database.prefix`` prepended), so all
-# parallel sessions race on the SAME MySQL schema and the smoke-row
-# delete↔insert + fetch1 chain blow up. The script runs the eight
-# captures sequentially inside ONE long-lived tmux session; total wall
-# time ~14 min (4 × 30 s smoke + 4 × 3 min for 60 s polymer) instead of
-# the plan's ~25-min parallel estimate. Acceptable for Phase A.
+# Concurrency note: parallel tmux sessions with per-case
+# --database-prefix isolation do NOT work on this codebase: v1 schemas
+# declare ``dj.schema("spikesorting_v1_*")`` with a hardcoded name (NO
+# ``database.prefix`` prepended), so parallel sessions race on the SAME
+# MySQL schema and the smoke-row delete↔insert + fetch1 chain blow up.
+# The script runs the eight captures sequentially inside ONE long-lived
+# tmux session; total wall time ~14 min (4 × 30 s smoke + 4 × 3 min for
+# 60 s polymer).
 #
 # Usage:
 #     export SPIKESORTING_V2_BASELINE_ROOT=/path/to/baseline/root

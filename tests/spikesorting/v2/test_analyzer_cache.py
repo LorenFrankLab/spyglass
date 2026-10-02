@@ -201,8 +201,8 @@ class TestAnalyzerCacheLock:
         ``CurationEvaluation`` fast path) already holds it for the same sort. A
         per-call ``FileLock`` instance would self-deadlock here; the memoized,
         reentrant lock returns instantly. The inner acquire uses a finite
-        timeout so a regression (reverting to non-memoized locks) fails as a
-        ``Timeout`` instead of hanging the suite.
+        timeout so a non-memoized (non-reentrant) lock fails as a ``Timeout``
+        instead of hanging the suite.
         """
         import datajoint as dj
 
@@ -521,8 +521,8 @@ class TestPublishAnalyzerAtomically:
         folder, so the temp build folder MUST be a sibling of the canonical slot
         -- otherwise the move silently detaches the recording and a later
         recording-dependent extension (``spike_amplitudes``) cannot compute.
-        This is the regression guard for that detachment (a marker-file
-        ``build_into`` cannot catch it).
+        A marker-file ``build_into`` cannot detect that detachment, so this
+        builds and publishes a real analyzer.
         """
         self._configure_root(tmp_path)
         recording, sorting = si.generate_ground_truth_recording(
@@ -550,7 +550,8 @@ class TestPublishAnalyzerAtomically:
         assert (
             reloaded.has_recording()
         ), "the published analyzer lost its recording after the move"
-        # The recording-dependent extension the detachment bug broke.
+        # A recording-dependent extension: it cannot compute on a detached
+        # recording.
         reloaded.compute(["noise_levels", "spike_amplitudes"])
         assert self._staging_is_empty(canonical)
 
@@ -562,10 +563,11 @@ class TestPublishAnalyzerAtomically:
 # SortingAnalyzer ``unit_locations`` extension and the spikeinterface-gui probe
 # view assume 2D contact positions and raise
 # ``could not broadcast input array from shape (3,) into shape (2,)`` on a 3D
-# probe. ``build_analyzer`` projects the probe to 2D so both work; this is the
-# regression guard. It is a fast, DB-free unit test: it drives ``build_analyzer``
-# directly with a synthetic recording carrying a 3D probe, passing ``sorter_row``
-# / ``job_kwargs`` / ``analyzer_folder`` so no database read happens.
+# probe. ``build_analyzer`` projects the probe to 2D so both work; these tests
+# check that projection. They are fast, DB-free unit tests: they drive
+# ``build_analyzer`` directly with a synthetic recording carrying a 3D probe,
+# passing ``sorter_row`` / ``job_kwargs`` / ``analyzer_folder`` so no database
+# read happens.
 # --------------------------------------------------------------------------- #
 
 
@@ -625,7 +627,7 @@ class TestBuildAnalyzerProbeProjection:
 class TestBuildAnalyzerWaveformParams:
     """``build_analyzer`` reads window / subsample from the resolved params.
 
-    The window + subsample are no longer hardcoded -- they come from the
+    The window + subsample are not hardcoded -- they come from the
     resolved ``AnalyzerWaveformParameters`` blob the caller threads in. These
     drive ``build_analyzer`` directly with each region's resolved dict (no name
     lookup, no DB read), then read the window / cap back off the built

@@ -9,12 +9,12 @@ parameter payload here keeps all four call sites
 ``test_run_v2_pipeline_clusterless_preset``,
 ``test_clusterless_thresholder_end_to_end``,
 ``test_v2_real_data_v1_parity``) in lockstep -- a future param tweak
-lands in one place and the v1↔v2 parity gate stays meaningful.
+lands in one place and the v1↔v2 parity test stays meaningful.
 
 The ``V1_TO_V2_*_NAMES`` dicts encode the v1-vs-v2 row-name asymmetry
 that the v1↔v2 parity test crosses: v1 ships ``sorter_param_name=
 "default_clusterless"`` while v2 ships ``sorter_params_name="default"``.
-Both pipelines now ship the same preproc row name (``"default"``), so the
+Both pipelines ship the same preproc row name (``"default"``), so the
 preproc map is an identity passthrough. Captures done with v1's shipping
 default names get mapped to v2's equivalents at parity-test time.
 """
@@ -76,12 +76,12 @@ MS4_60S_POLYMER_PARAMS: dict = {
     "detect_interval": 10,
 }
 
-#: Initial broad MS4 parity bands (n_units ± 50%, median FR ± 30%).
-#: MS4 is stochastic (no seed control) AND its SI wrapper rewrote
-#: between 0.99 → 0.104 (the C++ MS4 1.0.7 binary itself is byte-
-#: identical across envs; differences come from SI-side wrapping).
-#: Superseded by :data:`MS4_CALIBRATED` once the within-version
-#: variance was measured; kept for reference.
+#: Broad MS4 parity bands (n_units ± 50%, median FR ± 30%), set before
+#: the within-version variance was measured and kept for reference;
+#: :data:`MS4_CALIBRATED` is the active set. MS4 is stochastic (no seed
+#: control) AND its SI wrapper differs between 0.99 and 0.104 (the C++
+#: MS4 1.0.7 binary itself is byte-identical across envs; differences
+#: come from SI-side wrapping).
 MS4_BROAD_TRIAGE: dict = {
     "n_units_rel_band": 0.50,
     "n_units_abs_band": 2,
@@ -131,8 +131,8 @@ MS4_VARIANCE_TABLE: dict[tuple[str, str, int], dict] = {
 #:     headroom. (Shank 2's drift is smaller at
 #:     ``d_median_fr_hz=0.2667``.)
 #:
-#: Substantially tighter than :data:`MS4_BROAD_TRIAGE` (was 50% / 30%);
-#: replaces it as the active MS4 contract.
+#: Substantially tighter than :data:`MS4_BROAD_TRIAGE` (50% / 30%); this
+#: is the active MS4 band set (:data:`MS4_BANDS`).
 MS4_CALIBRATED: dict = {
     "n_units_rel_band": 0.10,
     "n_units_abs_band": 2,
@@ -162,7 +162,7 @@ V1_TO_V2_SORTER_PARAM_NAMES: dict = {
 
 
 #: ``(fixture_stem, sorter, sort_group_id)`` triples that legitimately
-#: skip the v1↔v2 parity gate because the v1 capture cannot produce
+#: skip the v1↔v2 parity test because the v1 capture cannot produce
 #: a non-degenerate baseline on that shank (MEArec planted no
 #: detectable units on the shank, MS4 produced ``< 2`` units, etc.).
 #:
@@ -171,10 +171,9 @@ V1_TO_V2_SORTER_PARAM_NAMES: dict = {
 #: capture-side output (``v1 sort produced 0/1 unit on this shank``).
 #: A degenerate-case label without that evidence is not acceptable.
 #:
-#: Populated during capture-side triage.
 #: An unlisted case with missing baseline artifacts under an active
 #: ``SPIKESORTING_V2_BASELINE_ROOT`` is a FAIL, not a SKIP, because a
-#: broken tmux capture must not pass silently.
+#: broken capture must not pass silently.
 EXPECTED_DEGENERATE_CASES: dict[tuple[str, str, int], str] = {
     # smoke shank 3 on mearec_polymer_smoke: v1 baseline writes n_units=1
     # with exactly ONE spike across the whole 4s recording (approx_last_

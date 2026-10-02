@@ -351,13 +351,13 @@ def pytest_addoption(parser):
         dest="container_port",
         help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
     )
-    parser.addoption(  # opt-in for the slow real-chronic memory/runtime gate
+    parser.addoption(  # opt-in for the slow real-chronic memory/runtime test
         "--run-chronic",
         action="store_true",
         dest="run_chronic",
         default=False,
         help=(
-            "Run the slow real-chronic-dataset memory/runtime gate for "
+            "Run the slow real-chronic-dataset memory/runtime test for "
             "spike-sorting v2 concatenation. Requires a real dataset via the "
             "SPIKESORTING_V2_CHRONIC_TEST_PATH env var; skipped by default."
         ),

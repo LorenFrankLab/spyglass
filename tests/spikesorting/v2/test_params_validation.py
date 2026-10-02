@@ -193,12 +193,11 @@ def test_artifact_default_field_values():
     """Defaults use the v2 field names and ship the expected values.
 
     Shipping v2 default values:
-    * ``amplitude_threshold_uv == 500.0`` -- v2's bug-fix value
-      (matches v1's effective Intan-probe behavior; v1's
-      nominal 3000 was a unit-conversion bug, see the
-      CHANGELOG entry).
-    * ``proportion_above_threshold == 1.0`` -- v1 parity revert
-      from an earlier silently-changed 0.5.
+    * ``amplitude_threshold_uv == 500.0`` -- matches v1's effective
+      Intan-probe behavior (v1's nominal 3000 is in raw counts, not uV;
+      see the CHANGELOG entry).
+    * ``proportion_above_threshold == 1.0`` -- v1 parity (every
+      channel must exceed the threshold), not 0.5.
     """
     blob = ArtifactDetectionParamsSchema().model_dump()
     assert blob["detect"] is True
@@ -552,8 +551,7 @@ def test_clusterless_default_row_ships_noise_levels_one(dj_conn):
     """The shipped ``clusterless_thresholder`` / ``default`` row has
     ``noise_levels=[1.0]`` baked into ``params``.
 
-    Regression guard for the 1,400x noise_levels divergence: a
-    future refactor that silently drops ``{"noise_levels": [1.0]}``
+    Guards the noise_levels unit semantics: a refactor that silently drops ``{"noise_levels": [1.0]}``
     from ``SorterParameters._DEFAULT_CONTENTS`` would let the v2
     production default fall back to MAD-multiplier semantics, so
     a user setting ``detect_threshold=100`` would silently get

@@ -29,7 +29,7 @@ def _serializable_recording(n_channels=4, duration=1.0, fs=30_000.0):
     """A JSON-serializable, non-zero base recording (parametric noise).
 
     Unlike ``_recording`` (an in-memory ``NumpyRecording``, which is not
-    JSON-serializable), this is needed by the serialization regression test so
+    JSON-serializable), this is needed by the run_sorter serialization test so
     the masked recording's own json flag -- not the base's -- decides the dump
     format.
     """
@@ -156,7 +156,7 @@ def test_masked_recording_survives_run_sorter_serialization(tmp_path):
     ``spikeinterface_recording.json`` and the reload raises
     ``ValueError: periods must be a np.array with dtype ...`` -- the sort fails
     only when artifact detection actually flags intervals (Sorting.populate on
-    real data). Regression for that failure.
+    real data). This test checks the masked recording survives that reload.
     """
     from spikeinterface.preprocessing.silence_periods import (
         SilencedPeriodsRecording,

@@ -52,10 +52,10 @@ matching extra installed)::
         [--conditions time_half per_unit] [--out-dir DIR]
 
 ``--seeds N`` runs ``N`` seeds starting at ``--first-seed`` (default 10, so
-the default run is seeds 10..19 -- the preregistered acceptance
-configuration). Per-run JSON, ``results.json`` and ``summary.md`` are written
-to ``--out-dir`` (default: a new temporary directory) and the summary is
-printed.
+the default run is seeds 10..19, the same seeds
+``test_driftout_units_recovered_pooled`` checks the gates on). Per-run JSON,
+``results.json`` and ``summary.md`` are written to ``--out-dir`` (default: a
+new temporary directory) and the summary is printed.
 """
 
 from __future__ import annotations
@@ -91,17 +91,19 @@ GATED_CONDITION = "per_unit"
 BASELINE_CONDITION = "time_half"
 SESSIONS = ("A", "B")
 
-G1_MIN_DRIFT_OUT_RECALL = 0.80
-G2_MAX_SXS_FALSE_RATE = 0.015  # diagnostic only, not gated (see evaluate_gates)
-G3A_MAX_HEALTHY_RECALL_DROP = 0.04  # count-based; diagnostic only, not gated
-G3B_MAX_EXCESS_RECALL_DROP = 0.04  # count-based; diagnostic only, not gated
-G3A_PROB_MAX_DROP = 0.04
-G3B_PROB_MAX_EXCESS_DROP = 0.04
-G4_MAX_HEALTHY_FP_INCREASE = 0.005
+MIN_DRIFT_OUT_RECALL = 0.80
+MAX_SXS_FALSE_PAIR_RATE = (
+    0.015  # diagnostic only, not gated (see evaluate_gates)
+)
+MAX_HEALTHY_RECALL_DROP = 0.04  # count-based; diagnostic only, not gated
+MAX_EXCESS_HEALTHY_RECALL_DROP = 0.04  # count-based; diagnostic only, not gated
+MAX_HEALTHY_PROB_DROP = 0.04
+MAX_EXCESS_HEALTHY_PROB_DROP = 0.04
+MAX_HEALTHY_FALSE_PAIR_RATE_INCREASE = 0.005
 
-#: Preregistered acceptance seeds: ``DEFAULT_FIRST_SEED ..
-#: DEFAULT_FIRST_SEED + DEFAULT_SEEDS - 1`` (the CLI's and
-#: ``test_driftout_units_recovered_pooled``'s shared default).
+#: Default seeds: ``DEFAULT_FIRST_SEED .. DEFAULT_FIRST_SEED +
+#: DEFAULT_SEEDS - 1`` (the CLI's and ``test_driftout_units_recovered_pooled``'s
+#: shared default).
 DEFAULT_FIRST_SEED = 10
 DEFAULT_SEEDS = 10
 
@@ -847,7 +849,7 @@ def _capture_missing(record) -> bool:
 
 
 def pooled_true_pair_prob_drop(records, scenario, condition) -> dict | None:
-    """G3a-prob's pooled quantities: the two means, their drop, and coverage.
+    """Healthy true-pair probability drop: the two means, the drop, coverage.
 
     Pools every non-S unit paired (present in both the scenario run and that
     seed's control run) over every seed of ``scenario`` x ``condition`` that
@@ -955,12 +957,15 @@ def _gate_float(name, scenario, value, threshold, comparison, detail) -> Gate:
 def _as_diagnostic(gate: Gate) -> Gate:
     """Relabel a computed count-based :class:`Gate` as a printed diagnostic.
 
-    Used by G2 (S x S false-pair rate, unstable under UnitMatch's per-run
-    calibration), G3a-count and G3b-count (the former G3a/G3b acceptance
-    gates, superseded by G3a-exact, G3a-prob and G3b-prob) and the S x non-S
-    false-pair rate increase (no preregistered limit). Each keeps its
-    computed value/detail for display, but :attr:`Gate.passed` is forced to
-    ``None`` -- none of them are part of acceptance.
+    Used by the S x S false-pair rate (unstable under UnitMatch's per-run
+    calibration), the count-based healthy recall drop and its excess over
+    ``time_half`` (sensitive to threshold flips; the template bit-identity and
+    mean-probability gates measure the same effect robustly -- see
+    :func:`evaluate_gates`) and the S x non-S false-pair rate increase (no
+    fixed limit; reported against the healthy false-pair limit for scale).
+    Each keeps its computed value/detail for display, but
+    :attr:`Gate.passed` is forced to ``None`` -- none of them are part of
+    acceptance.
     """
     return Gate(
         f"{gate.name} (diagnostic, not gated)",
@@ -978,43 +983,47 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
 
     Pooled over every seed present.
 
-    - G1 drift-out recall >= 0.80.
-    - G3a-exact: every non-S unit's saved cross-validation-half templates
-      (:func:`non_s_bit_identical_halves`) are bit-identical to the same
-      seed's control run, pooled over seeds. PASS iff identical == total.
-    - G3a-prob: for each non-S unit, ``q_u = min(p(A_u -> B_u), p(B_u ->
-      A_u))`` of its true cross-session pair (:func:`paired_true_pair_probs`);
-      the drop is the pooled mean ``q_u`` in the control run minus the
-      pooled mean ``q_u`` in the scenario run, over the same paired non-S
-      units, pooled over all seeds (:func:`pooled_true_pair_prob_drop`).
-      PASS iff drop <= 0.04.
-    - G3b-prob: the G3a-prob drop for ``condition`` minus the G3a-prob drop
-      for ``time_half`` on the same seeds <= 0.04 (only when ``time_half``
-      ran on exactly the same seeds).
-    - G4 paired healthy false-positive rate increase <= 0.005.
+    - Drift-out recall >= 0.80.
+    - Healthy template bit-identity: every non-S unit's saved
+      cross-validation-half templates (:func:`non_s_bit_identical_halves`)
+      are bit-identical to the same seed's control run, pooled over seeds.
+      PASS iff identical == total.
+    - Healthy true-pair probability drop: for each non-S unit, ``q_u =
+      min(p(A_u -> B_u), p(B_u -> A_u))`` of its true cross-session pair
+      (:func:`paired_true_pair_probs`); the drop is the pooled mean ``q_u``
+      in the control run minus the pooled mean ``q_u`` in the scenario run,
+      over the same paired non-S units, pooled over all seeds
+      (:func:`pooled_true_pair_prob_drop`). PASS iff drop <= 0.04.
+    - Excess healthy true-pair probability drop vs ``time_half``: the drop
+      above for ``condition`` minus the same drop for ``time_half`` on the
+      same seeds <= 0.04 (only when ``time_half`` ran on exactly the same
+      seeds).
+    - Healthy false-pair rate increase (paired against control) <= 0.005.
 
-    G2 (S x S false-pair rate among drift-out units), G3a-count and
-    G3b-count (the former G3a/G3b acceptance gates, a paired count of
-    healthy recall before/after) are still computed and returned, labelled
-    "(diagnostic, not gated)" -- :attr:`Gate.passed` is always ``None`` for
-    them; they are printed for context only. G2 is a diagnostic because
-    UnitMatch's per-run, data-driven match threshold is unstable when a
-    session has few units: a near-tie in the threshold search can flip on a
-    single redrawn template and admit a burst of false pairs, independent of
-    how the cross-validation halves are constructed.
+    The S x S false-pair rate among drift-out units, the count-based
+    healthy recall drop (a paired count of healthy true pairs passing
+    before/after) and its excess over ``time_half`` are still computed and
+    returned, labelled "(diagnostic, not gated)" -- :attr:`Gate.passed` is
+    always ``None`` for them; they are printed for context only. The S x S
+    rate is a diagnostic because UnitMatch's per-run, data-driven match
+    threshold is unstable when a session has few units: a near-tie in the
+    threshold search can flip on a single redrawn template and admit a burst
+    of false pairs, independent of how the cross-validation halves are
+    constructed.
 
     "S x non-S false-pair rate increase" is also computed and returned as a
-    diagnostic, never gated: the paired healthy false-positive rate increase
-    (G4) only counts non-S x non-S pairs, so it is blind to a false pair
-    between a drift-out unit and a healthy one. This diagnostic covers that
-    gap the same way G4 does -- paired against the same seed's control, over
-    both (S, non-S) orders.
+    diagnostic, never gated: the healthy false-pair rate increase only
+    counts non-S x non-S pairs, so it is blind to a false pair between a
+    drift-out unit and a healthy one. This diagnostic covers that gap the
+    same way -- paired against the same seed's control, over both (S, non-S)
+    orders.
 
-    G1, G2, G3a-count, G3b-count, G4 and the S x non-S diagnostic are
+    The drift-out recall, S x S rate, both count-based recall drops, the
+    healthy false-pair rate increase and the S x non-S diagnostic are
     evaluated exactly from the underlying integer counts with
-    :mod:`fractions`; only the printed/stored ``value`` is a float. G3a-prob
-    and G3b-prob average continuous probabilities, so they are plain float
-    comparisons.
+    :mod:`fractions`; only the printed/stored ``value`` is a float. The two
+    true-pair probability drops average continuous probabilities, so they
+    are plain float comparisons.
     """
     gates = []
     bit_identical = non_s_bit_identical_halves(records, condition)
@@ -1026,10 +1035,10 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
         s_false = pooled["drift_out_false"]
         gates.append(
             _gate(
-                "G1 drift-out recall",
+                "drift-out recall",
                 scenario,
                 _rate_exact(s_true),
-                G1_MIN_DRIFT_OUT_RECALL,
+                MIN_DRIFT_OUT_RECALL,
                 ">=",
                 f"{s_true[0]}/{s_true[1]}",
             )
@@ -1037,10 +1046,10 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
         gates.append(
             _as_diagnostic(
                 _gate(
-                    "G2 SxS false-pair rate",
+                    "S x S false-pair rate",
                     scenario,
                     _rate_exact(s_false),
-                    G2_MAX_SXS_FALSE_RATE,
+                    MAX_SXS_FALSE_PAIR_RATE,
                     "<=",
                     f"{s_false[0]}/{s_false[1]}",
                 )
@@ -1050,7 +1059,7 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
         bi_counts = bit_identical.get(scenario)
         gates.append(
             _gate(
-                "G3a-exact non-S template bit-identity",
+                "healthy template bit-identity",
                 scenario,
                 _rate_exact(bi_counts) if bi_counts else None,
                 1.0,
@@ -1079,10 +1088,10 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
             )
         gates.append(
             _gate_float(
-                "G3a-prob healthy true-pair mean probability drop",
+                "healthy true-pair probability drop",
                 scenario,
                 prob_value,
-                G3A_PROB_MAX_DROP,
+                MAX_HEALTHY_PROB_DROP,
                 "<=",
                 prob_detail,
             )
@@ -1095,7 +1104,9 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
         )
         if prob_pooled is None or prob_baseline is None:
             excess_prob_value = None
-            excess_prob_detail = "time_half paired G3a-prob run not available"
+            excess_prob_detail = (
+                "time_half paired probability run not available"
+            )
         elif prob_baseline["seeds"] != prob_pooled["seeds"]:
             excess_prob_value = None
             excess_prob_detail = "time_half ran on different seeds"
@@ -1107,10 +1118,10 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
             )
         gates.append(
             _gate_float(
-                "G3b-prob per_unit vs time_half G3a-prob drop excess",
+                "excess healthy true-pair probability drop vs time_half",
                 scenario,
                 excess_prob_value,
-                G3B_PROB_MAX_EXCESS_DROP,
+                MAX_EXCESS_HEALTHY_PROB_DROP,
                 "<=",
                 excess_prob_detail,
             )
@@ -1144,10 +1155,10 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
         gates.append(
             _as_diagnostic(
                 _gate(
-                    "G3a-count paired healthy recall drop",
+                    "healthy recall drop",
                     scenario,
                     exact_drop,
-                    G3A_MAX_HEALTHY_RECALL_DROP,
+                    MAX_HEALTHY_RECALL_DROP,
                     "<=",
                     drop_detail,
                 )
@@ -1178,10 +1189,10 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
         gates.append(
             _as_diagnostic(
                 _gate(
-                    "G3b-count excess recall drop vs time_half",
+                    "excess healthy recall drop vs time_half",
                     scenario,
                     exact_excess,
-                    G3B_MAX_EXCESS_RECALL_DROP,
+                    MAX_EXCESS_HEALTHY_RECALL_DROP,
                     "<=",
                     excess_detail,
                 )
@@ -1189,10 +1200,10 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
         )
         gates.append(
             _gate(
-                "G4 paired healthy FP increase",
+                "healthy false-pair rate increase",
                 scenario,
                 exact_fp_inc,
-                G4_MAX_HEALTHY_FP_INCREASE,
+                MAX_HEALTHY_FALSE_PAIR_RATE_INCREASE,
                 "<=",
                 fp_detail,
             )
@@ -1203,7 +1214,7 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
                     "S x non-S false-pair rate increase",
                     scenario,
                     exact_mixed_fp_inc,
-                    G4_MAX_HEALTHY_FP_INCREASE,
+                    MAX_HEALTHY_FALSE_PAIR_RATE_INCREASE,
                     "<=",
                     mixed_fp_detail,
                 )
@@ -1282,8 +1293,9 @@ def non_s_bit_identical_halves(records, condition) -> dict[str, list[int]]:
     identical for both of that session's halves -- it is not skipped: a
     unit's bundle presence itself changing between the scenario and control
     run is exactly the kind of drift-out-induced difference this check (and
-    the G3a-exact gate built on it) exists to catch. This quantifies how much
-    of the paired healthy comparison (G3a-count, G3a-prob, G4) reflects an
+    the healthy template bit-identity gate built on it) exists to catch. This
+    quantifies how much of the paired healthy comparison (recall drop,
+    true-pair probability drop, false-pair rate increase) reflects an
     S-unit effect versus resampling noise from SpikeInterface's shared
     per-analyzer RNG, which can perturb a non-S unit's randomly chosen spike
     subset merely because another unit's available spike count changed.

@@ -1,9 +1,9 @@
 """Downstream-consumer smoke tests for v2 spike-sorting outputs.
 
-This module is the canonical target for the suite-runner contract
-``pytest tests/spikesorting/v2/test_downstream_consumers.py -q``.
-It exercises the downstream consumer surfaces that a Frank-lab
-decoding / ripple-detection workflow would hit on a v2 ``merge_id``:
+It runs on its own with
+``pytest tests/spikesorting/v2/test_downstream_consumers.py -q`` and exercises
+the downstream consumer surfaces that a Frank-lab decoding / ripple-detection
+workflow would hit on a v2 ``merge_id``:
 
 - ``SpikeSortingOutput.get_recording`` / ``get_sorting`` /
   ``get_sort_group_info`` (the merge-dispatch entrypoints).
@@ -14,8 +14,8 @@ decoding / ripple-detection workflow would hit on a v2 ``merge_id``:
 - ``SortedSpikesGroup`` (analysis-side group surface that decoding
   and ripple-detection construct from a v2 merge_id).
 
-A sparse-unit_id regression in any of these surfaces silently
-breaks clusterless decoding; this module is the focused gate. All
+Mishandling sparse unit_ids in any of these surfaces silently
+breaks clusterless decoding; this module tests them together. All
 tests are integration-tier (require ``populated_sorting`` from
 conftest.py) and marked ``slow + integration``.
 
@@ -105,8 +105,8 @@ def test_get_sort_group_info_returns_multi_electrode_relation(
     info = SpikeSortingOutput.get_sort_group_info({"merge_id": merge_id})
     rows = info.fetch(as_dict=True)
     assert len(rows) > 0
-    # Spot-check that the relation joined to BrainRegion (the v1
-    # multi-region-underreporting fix verification).
+    # Spot-check that the relation joined to BrainRegion, so every
+    # electrode's region is reported (v1 under-reports multi-region groups).
     assert "electrode_id" in rows[0]
     assert "region_name" in rows[0]
 
@@ -142,7 +142,7 @@ def test_consumer_api_shape_contract(populated_sorting, method_name):
     observed, and ``np.nan`` in the bins they were not.
 
     Parametrized so the same shape contract is verified on both
-    with identical setup; any v2-merge-dispatch regression in
+    with identical setup; a v2 merge-dispatch error in
     ``get_spike_times`` (which both call under the hood) trips here.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
@@ -209,7 +209,7 @@ def test_consumer_spike_indicator_count_alignment(populated_sorting):
             f"unit {j}: indicator column sum {int(column_sums[j])} != "
             f"in-window observed spike count {in_window}; the per-unit "
             "indicator is misaligned with get_spike_times "
-            "(sparse-unit_id bug)."
+            "(sparse unit_ids mishandled)."
         )
     # Total spikes in-window across all units must also agree (catches a
     # misalignment that happens to permute counts between equal-count
@@ -226,7 +226,7 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
     """A ``SortedSpikesDecodingSelection`` row keyed on a v2 ``merge_id``
     can be INSERTED -- the FK chain resolves end-to-end.
 
-    Without this gate, a broken FK (e.g. ``SpikeSortingOutput.
+    Without this test, a broken FK (e.g. ``SpikeSortingOutput.
     CurationV2`` missing or ``SortedSpikesGroup.Units.
     spikesorting_merge_id`` not resolving to v2) would surface only
     when a downstream user tried to populate a decoder on a v2
@@ -247,7 +247,7 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
     """
     pytest.importorskip(
         "non_local_detector",
-        reason="decoding extras not installed; FK gate is decoding-side.",
+        reason="decoding extras not installed; the FK check is decoding-side.",
     )
     pytest.importorskip("track_linearization")
     from spyglass.decoding.v1.core import DecodingParameters, PositionGroup
@@ -500,8 +500,9 @@ def test_all_unlabeled_curation_include_label_filters(populated_sorting):
     omits the label column (every unit unlabeled).
 
     An all-unlabeled curated export drops the ``curation_label`` column, so the
-    column-present filter path is skipped and an include-only selection used to
-    return ALL units. The consumer now synthesizes empty per-unit label lists:
+    column-present filter path is skipped; without labels an include-only
+    selection would return ALL units. The consumer synthesizes empty per-unit
+    label lists:
     ``include_labels=["accept"]`` returns NO units; ``exclude_labels=["noise"]``
     returns ALL units.
     """

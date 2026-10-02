@@ -183,15 +183,14 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
     ``Sorting.get_sorting`` and ``CurationV2.get_sorting`` must read the
     planted FRAME indices back exactly.
 
-    Regression for the v1-parity readback bug: the old
-    ``NwbSortingExtractor`` readback inverts the stored absolute spike
-    times affinely (``round((t - t_start) * fs)``), which shifts every
-    frame after the gap by ``gap * fs`` (here landing past the
-    gap-excluded sample count). v1 -- and now v2 -- map back with
+    An affine readback of the stored absolute spike times (as
+    ``NwbSortingExtractor`` does: ``round((t - t_start) * fs)``) shifts
+    every frame after the gap by ``gap * fs`` (here landing past the
+    gap-excluded sample count). v1 and v2 map back with
     ``np.searchsorted`` against the actual recording timestamps, which
     recovers the original frame. The spike-TIME surfaces round-trip
-    correctly either way; only the FRAME indices expose the bug, so this
-    test asserts on frames.
+    correctly either way; only the FRAME indices expose an affine
+    readback, so this test asserts on frames.
     """
     import uuid
 
@@ -297,7 +296,8 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
         planted["samples"] = samples
         # The affine inverse of the post-gap frame's absolute time; if
         # this still equals the original frame the gap is too small to
-        # expose the bug, so the assertion below would be vacuous.
+        # expose an affine readback, so the assertion below would be
+        # vacuous.
         planted["affine_post_gap"] = int(
             round(
                 (rec_times[samples[1]] - rec_times[0])
@@ -648,7 +648,7 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
     last frame and chunk 2's first frame are frame-ADJACENT but ~0.5 s apart
     in real time. A frame-space 0.4 ms dedup (SI's MergeUnitsSorting) would
     wrongly drop one; the abs-time dedup keeps both (and matches the
-    apply_merge=True stored train). Regression for the lazy-merge fix.
+    apply_merge=True stored train).
     """
     import uuid
 
@@ -919,7 +919,7 @@ def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
     (detect=False), and asserts the persisted artifact ``IntervalList``
     valid_times split at the gap rather than returning one envelope
     spanning it. Subtracting/returning over a single
-    ``[timestamps[0], timestamps[-1]]`` envelope (the old behavior) would
+    ``[timestamps[0], timestamps[-1]]`` envelope instead would
     reintroduce the gap -- inflating obs_intervals duration and letting
     sub-min_length slivers survive. The artifact-detected (detect=True)
     per-chunk subtraction is pinned by the synthetic ``_detect_artifacts``

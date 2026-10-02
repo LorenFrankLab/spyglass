@@ -766,7 +766,7 @@ def test_restricted_traces_match_continuously_filtered_reference():
     """Filter-then-restrict reproduces the continuously filtered signal.
 
     The target is the SAME filter applied to the whole recording and sampled
-    at the selected frame ranges -- never the old restrict-then-filter output,
+    at the selected frame ranges -- never the restrict-then-filter output,
     which differs at every interval edge by construction. The tolerance is
     loose on purpose: SpikeInterface's lazy filter takes a finite margin per
     ``get_traces`` request, so two requests with different boundaries differ
@@ -786,17 +786,17 @@ def test_restricted_traces_match_continuously_filtered_reference():
     validated = _bandpass_params()
     frames = _selected_frames(recording, _INTERVALS)
 
-    # New order: filter the continuous recording, then restrict.
+    # Production order: filter the continuous recording, then restrict.
     filtered, _ = apply_temporal_preprocessing(recording, validated)
-    new_order, _times, n_intervals = restrict_recording_times(
+    filter_first, _times, n_intervals = restrict_recording_times(
         filtered, _INTERVALS
     )
     assert n_intervals == len(frames)
 
-    # Old order, built from the primitives: restrict, then filter the
+    # Reverse order, built from the primitives: restrict, then filter the
     # concatenation.
     restricted, _t, _n = restrict_recording_times(recording, _INTERVALS)
-    old_order, _ = apply_temporal_preprocessing(restricted, validated)
+    restrict_first, _ = apply_temporal_preprocessing(restricted, validated)
 
     reference = sip.bandpass_filter(
         recording,
@@ -838,16 +838,16 @@ def test_restricted_traces_match_continuously_filtered_reference():
             ),
             dtype=np.float64,
         )
-        new = np.asarray(
-            new_order.get_traces(
+        filter_first_traces = np.asarray(
+            filter_first.get_traces(
                 start_frame=offset,
                 end_frame=offset + count,
                 return_in_uV=True,
             ),
             dtype=np.float64,
         )
-        old = np.asarray(
-            old_order.get_traces(
+        restrict_first_traces = np.asarray(
+            restrict_first.get_traces(
                 start_frame=offset,
                 end_frame=offset + count,
                 return_in_uV=True,
@@ -858,19 +858,20 @@ def test_restricted_traces_match_continuously_filtered_reference():
 
         rms_ref = _rms(ref)
         bound = 1e-3 * rms_ref
-        new_max = float(np.max(np.abs(new - ref)))
-        old_max = float(np.max(np.abs(old - ref)))
-        assert new_max <= bound, (
-            f"interval {index} ({count} samples): max abs error {new_max:.4g} "
+        filter_first_max = float(np.max(np.abs(filter_first_traces - ref)))
+        restrict_first_max = float(np.max(np.abs(restrict_first_traces - ref)))
+        assert filter_first_max <= bound, (
+            f"interval {index} ({count} samples): max abs error {filter_first_max:.4g} "
             f"uV exceeds {bound:.4g} uV"
         )
-        assert abs(_rms(new) - rms_ref) / rms_ref <= 1e-3
+        assert abs(_rms(filter_first_traces) - rms_ref) / rms_ref <= 1e-3
         # The edges are where the join transient lives; assert them by name so
         # a future slice that trims them cannot pass quietly.
-        assert np.max(np.abs(new[0] - ref[0])) <= bound
-        assert np.max(np.abs(new[-1] - ref[-1])) <= bound
-        assert old_max > 100 * bound, (
-            f"interval {index}: the old order's max abs error {old_max:.4g} "
+        assert np.max(np.abs(filter_first_traces[0] - ref[0])) <= bound
+        assert np.max(np.abs(filter_first_traces[-1] - ref[-1])) <= bound
+        assert restrict_first_max > 100 * bound, (
+            f"interval {index}: restrict-then-filter's max abs error "
+            f"{restrict_first_max:.4g} "
             f"uV should dwarf {bound:.4g} uV -- the test no longer "
             "discriminates the two orders"
         )
@@ -878,7 +879,7 @@ def test_restricted_traces_match_continuously_filtered_reference():
         # Same bound against the independent scipy pass.
         scipy_ref = scipy_reference[start:stop]
         scipy_bound = 1e-3 * _rms(scipy_ref)
-        scipy_max = float(np.max(np.abs(new - scipy_ref)))
+        scipy_max = float(np.max(np.abs(filter_first_traces - scipy_ref)))
         assert scipy_max <= scipy_bound, (
             f"interval {index}: max abs error {scipy_max:.4g} uV against the "
             f"scipy whole-trace reference exceeds {scipy_bound:.4g} uV"
@@ -930,7 +931,7 @@ def test_restricted_traces_match_reference_on_explicit_clock():
     """The same reference agreement, on the explicit-timestamp clock.
 
     ``test_restricted_traces_match_continuously_filtered_reference`` pins the
-    new order on a rate-based recording, which takes
+    filter-then-restrict order on a rate-based recording, which takes
     ``restrict_recording_times``' regular-grid branch. Production raw files
     carry per-frame timestamps and take the other branch, whose frames come
     from a binary search over the clock -- so the clock has to survive the
@@ -970,17 +971,17 @@ def test_restricted_traces_match_reference_on_explicit_clock():
     # Not the regular-grid answer: this is a genuinely irregular clock.
     assert frames != _selected_frames(recording, _INTERVALS)
 
-    new_order, _times, n_intervals = restrict_recording_times(
+    filter_first, _times, n_intervals = restrict_recording_times(
         filtered, _INTERVALS
     )
     assert n_intervals == len(frames)
-    assert new_order.get_num_samples() == sum(
+    assert filter_first.get_num_samples() == sum(
         stop - start for start, stop in frames
     )
     restricted, _t, n_raw = restrict_recording_times(recording, _INTERVALS)
     assert n_raw == n_intervals
-    assert restricted.get_num_samples() == new_order.get_num_samples()
-    old_order, _ = apply_temporal_preprocessing(restricted, validated)
+    assert restricted.get_num_samples() == filter_first.get_num_samples()
+    restrict_first, _ = apply_temporal_preprocessing(restricted, validated)
 
     reference = sip.bandpass_filter(
         recording,
@@ -1017,16 +1018,16 @@ def test_restricted_traces_match_reference_on_explicit_clock():
             ),
             dtype=np.float64,
         )
-        new = np.asarray(
-            new_order.get_traces(
+        filter_first_traces = np.asarray(
+            filter_first.get_traces(
                 start_frame=offset,
                 end_frame=offset + count,
                 return_in_uV=True,
             ),
             dtype=np.float64,
         )
-        old = np.asarray(
-            old_order.get_traces(
+        restrict_first_traces = np.asarray(
+            restrict_first.get_traces(
                 start_frame=offset,
                 end_frame=offset + count,
                 return_in_uV=True,
@@ -1037,22 +1038,24 @@ def test_restricted_traces_match_reference_on_explicit_clock():
 
         rms_ref = _rms(ref)
         bound = 1e-3 * rms_ref
-        new_max = float(np.max(np.abs(new - ref)))
-        assert new_max <= bound, (
-            f"interval {index} ({count} samples): max abs error {new_max:.4g} "
+        filter_first_max = float(np.max(np.abs(filter_first_traces - ref)))
+        assert filter_first_max <= bound, (
+            f"interval {index} ({count} samples): max abs error {filter_first_max:.4g} "
             f"uV exceeds {bound:.4g} uV"
         )
-        assert abs(_rms(new) - rms_ref) / rms_ref <= 1e-3
-        assert np.max(np.abs(new[0] - ref[0])) <= bound
-        assert np.max(np.abs(new[-1] - ref[-1])) <= bound
-        assert float(np.max(np.abs(old - ref))) > 100 * bound, (
-            f"interval {index}: the old order no longer discriminates the "
-            "two orders on an explicit clock"
+        assert abs(_rms(filter_first_traces) - rms_ref) / rms_ref <= 1e-3
+        assert np.max(np.abs(filter_first_traces[0] - ref[0])) <= bound
+        assert np.max(np.abs(filter_first_traces[-1] - ref[-1])) <= bound
+        assert (
+            float(np.max(np.abs(restrict_first_traces - ref))) > 100 * bound
+        ), (
+            f"interval {index}: restrict-then-filter is too close to the "
+            "reference to discriminate the two orders on an explicit clock"
         )
 
         scipy_ref = scipy_reference[start:stop]
         scipy_bound = 1e-3 * _rms(scipy_ref)
-        scipy_max = float(np.max(np.abs(new - scipy_ref)))
+        scipy_max = float(np.max(np.abs(filter_first_traces - scipy_ref)))
         assert scipy_max <= scipy_bound, (
             f"interval {index}: max abs error {scipy_max:.4g} uV against the "
             f"scipy whole-trace reference exceeds {scipy_bound:.4g} uV"
@@ -1061,7 +1064,8 @@ def test_restricted_traces_match_reference_on_explicit_clock():
 
 @pytest.mark.unit
 def test_sliver_after_highpass_matches_continuous_filter():
-    """A 1.5 ms interval is entirely filter transient under the old order.
+    """A 1.5 ms sliver is pure filter transient under restrict-then-filter;
+    filter-then-restrict recovers the continuously filtered signal.
 
     With ``min_segment_length`` at its 1.5 ms floor a selected sliver is
     shorter than the 600 Hz high-pass settling time, so restrict-then-filter
@@ -1085,9 +1089,9 @@ def test_sliver_after_highpass_matches_continuous_filter():
     offset = frames[0][1] - frames[0][0]
 
     filtered, _ = apply_temporal_preprocessing(recording, validated)
-    new_order, _times, _n = restrict_recording_times(filtered, intervals)
+    filter_first, _times, _n = restrict_recording_times(filtered, intervals)
     restricted, _t, _n2 = restrict_recording_times(recording, intervals)
-    old_order, _ = apply_temporal_preprocessing(restricted, validated)
+    restrict_first, _ = apply_temporal_preprocessing(restricted, validated)
     reference = sip.bandpass_filter(
         recording,
         freq_min=validated.bandpass_filter.freq_min,
@@ -1103,20 +1107,20 @@ def test_sliver_after_highpass_matches_continuous_filter():
         ),
         dtype=np.float64,
     )
-    new = np.asarray(
-        new_order.get_traces(
+    filter_first_traces = np.asarray(
+        filter_first.get_traces(
             start_frame=offset, end_frame=offset + count, return_in_uV=True
         ),
         dtype=np.float64,
     )
-    old = np.asarray(
-        old_order.get_traces(
+    restrict_first_traces = np.asarray(
+        restrict_first.get_traces(
             start_frame=offset, end_frame=offset + count, return_in_uV=True
         ),
         dtype=np.float64,
     )
 
     rms_ref = _rms(ref)
-    assert abs(_rms(new) - rms_ref) / rms_ref <= 0.01
-    assert float(np.max(np.abs(new - ref))) < 1.0
-    assert float(np.max(np.abs(old - ref))) > 10.0
+    assert abs(_rms(filter_first_traces) - rms_ref) / rms_ref <= 0.01
+    assert float(np.max(np.abs(filter_first_traces - ref))) < 1.0
+    assert float(np.max(np.abs(restrict_first_traces - ref))) > 10.0

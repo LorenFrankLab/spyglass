@@ -26,7 +26,7 @@ _spec.loader.exec_module(_test_env)
 
 
 def test_assert_safe_base_dir_rejects_shared_storage():
-    """A base_dir containing 'stelmo' is refused (post-incident guardrail)."""
+    """A base_dir containing 'stelmo' is refused (shared lab storage)."""
     with pytest.raises(RuntimeError, match="stelmo"):
         _test_env._assert_safe_base_dir("/stelmo/nwb")
 

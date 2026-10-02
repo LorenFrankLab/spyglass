@@ -60,9 +60,9 @@ def test_deterministic_id_returns_uuid():
 def test_deterministic_id_stable_across_uuid_vs_str():
     """A ``str`` and a ``uuid.UUID`` of the same value hash identically.
 
-    This is the exact bug behind
-    ``test_insert_selection_dedup_accepts_str_artifact_detection_id`` -- a str
-    ``artifact_detection_id`` once forked a duplicate sort.
+    Otherwise a str ``artifact_detection_id`` would fork a duplicate sort
+    (the DB-level case is
+    ``test_insert_selection_dedup_accepts_str_artifact_detection_id``).
     """
     u = uuid.uuid4()
     assert deterministic_id(
@@ -610,7 +610,7 @@ def test_recording_selection_rejects_single_nondeterministic_row(
     identity is rejected, not returned.
 
     The invariant is that the logical identity maps to ONE
-    content-addressed id. A pre-determinism / raw-insert row with a
+    content-addressed id. A raw-insert (non-content-addressed) row with a
     different (random) recording_id violates that, so insert_selection
     raises instead of silently adopting it as canonical.
     """

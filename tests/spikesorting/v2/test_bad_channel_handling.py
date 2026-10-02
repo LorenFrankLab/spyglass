@@ -745,12 +745,14 @@ def test_stale_group_post_flag_stays_member(handling_session):
 def test_remove_field_does_not_change_default_recording(
     handling_session, request
 ):
-    """A pre-field params blob (no ``bad_channel_handling`` key) materializes to
-    the SAME traces as ``default`` (which now carries
-    ``bad_channel_handling='remove'``) -- the default-unchanged regression guard.
+    """A params blob with no ``bad_channel_handling`` key materializes to the
+    SAME traces as ``default`` (which carries
+    ``bad_channel_handling='remove'``), so a blob that omits the field yields
+    the default recording.
 
-    Compared by trace equality (the most direct check), mirroring the
-    phase-shift precedent.
+    Compared by trace equality (the most direct check), as
+    ``single_session/test_recording.py``'s
+    ``test_phase_shift_field_does_not_change_default_recording`` does.
     """
     import numpy as np
 
@@ -785,9 +787,7 @@ def test_remove_field_does_not_change_default_recording(
         traces_fl = Recording().get_recording(fl_pk).get_traces()
 
         legacy_blob = PreprocessingParamsSchema().model_dump()
-        legacy_blob.pop(
-            "bad_channel_handling"
-        )  # a row written before the field
+        legacy_blob.pop("bad_channel_handling")  # a blob without the field
         # After validation this re-fills the default, so the blob is content-
         # identical to the shipped ``default`` row (the point of the test).
         # Opt out of the duplicate-content guard.

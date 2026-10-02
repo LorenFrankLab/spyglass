@@ -52,9 +52,8 @@ def polymer_smoke_session(dj_conn):
     Session-scoped because NWB ingestion is the heaviest setup step
     (and intentionally not destroyed by ``_clean_session_v2``: the
     Session/Nwbfile rows live above the v2 tables and are reused across
-    every test). Module scope previously implied per-module ingestion;
-    promoting to session scope avoids that work without affecting test
-    isolation -- the v2 tables that ARE mutated by tests use
+    every test). Session scope avoids per-module re-ingestion without
+    affecting test isolation -- the v2 tables that ARE mutated by tests use
     function-scoped fixtures below with idempotent ensure-exists setup.
     """
     if not _FIXTURE_PATH.exists():

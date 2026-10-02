@@ -292,8 +292,8 @@ def test_final_metrics_recomputed_for_merged_unit(
 
     The merged unit appears with metrics computed over its merged spike train;
     the absorbed contributors are absent, and ``num_spikes`` equals the merged
-    train length (== ``CurationV2.Unit.n_spikes``). This fails on the old
-    raw-sort analyzer path, which would score the original contributor units.
+    train length (== ``CurationV2.Unit.n_spikes``). Scoring through the raw
+    sort's analyzer would instead score the original contributor units.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -553,7 +553,7 @@ def test_nn_noise_overlap_is_finite_not_silently_all_nan(
     the shipped auto-curation noise/reject rules (which threshold
     ``nn_noise_overlap``) silently fire on nothing. Assert, independent of any
     persisted/derived value, that at least one unit has a finite
-    ``nn_noise_overlap`` so an all-NaN regression fails loudly rather than
+    ``nn_noise_overlap`` so an all-NaN result fails loudly rather than
     passing as "no units flagged".
     """
     from spyglass.spikesorting.v2.metric_curation import (
@@ -1574,9 +1574,9 @@ def test_final_snr_peak_sign_uses_sorter_polarity(
 ):
     """make_fetch injects the sorter's resolved peak_sign into snr kwargs.
 
-    Same sorter-polarity SNR fix as CurationEvaluation: the planted MS5 sort
-    carries ``detect_sign=-1`` -> ``'neg'`` (the regression-pinned value),
-    confirming the helper is wired into CurationEvaluation's DB-fetch stage.
+    Same sorter-polarity SNR handling as CurationEvaluation: the planted MS5
+    sort carries ``detect_sign=-1`` -> ``'neg'``, confirming the helper is
+    wired into CurationEvaluation's DB-fetch stage.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -2128,10 +2128,11 @@ def test_evaluation_preview_merges_is_a_rejected_draft(
 
 
 def test_analyzer_curation_table_removed():
-    """AnalyzerCuration / AnalyzerCurationSelection are deleted (no shim).
+    """``metric_curation`` exposes no AnalyzerCuration /
+    AnalyzerCurationSelection.
 
-    CurationEvaluation fully replaces the legacy raw-sort auto-curation table;
-    importing the old names must fail so no caller can keep using them.
+    CurationEvaluation is v2's only auto-curation table; those raw-sort
+    auto-curation names must not import, so no caller can depend on them.
     """
     import spyglass.spikesorting.v2.metric_curation as mc
 
@@ -2143,7 +2144,7 @@ def test_analyzer_curation_table_removed():
         )
 
 
-# ---------- review round 2: routing / label-state / namespace guards --------
+# ---------- routing / label-state / namespace guards -----------------------
 
 
 @pytest.mark.slow

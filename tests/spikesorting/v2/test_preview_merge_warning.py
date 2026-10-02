@@ -3,8 +3,8 @@
 A curation created with apply_merge=False records PROPOSED merges in MergeGroup
 but does not apply them. Consumers (SortedSpikesGroup / decoding) read units
 through CurationV2.get_sorting, which returns the UNMERGED units for such a
-curation -- silently using oversplit units. get_sorting now warns (and the
-docstring documents the preview semantics). get_merged_sorting still applies
+curation -- silently using oversplit units unless warned. get_sorting warns
+(and its docstring documents the preview semantics). get_merged_sorting still applies
 the proposal. A plain root curation (no real merge, only 1-element self-entries)
 must NOT warn.
 """

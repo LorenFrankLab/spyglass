@@ -73,7 +73,8 @@ def test_get_raw_eseries_path_selects_acquisition(tmp_path, with_lfp):
 
     This is the path threaded to ``read_nwb_recording`` so spike sorting reads
     the wideband recording. SpikeInterface >= 0.100 raises on a multi-series
-    file unless the series is named, so the LFP case is the regression guard.
+    file unless the series is named, so the LFP case is the one that checks
+    the series is selected by name.
     """
     path = tmp_path / "rec.nwb"
     with pynwb.NWBHDF5IO(str(path), "w") as io:

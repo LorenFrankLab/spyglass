@@ -259,8 +259,7 @@ def test_get_recording_rebuilds_on_missing_cache(populated_recording):
     the ``~external`` checksum and returns a valid, content-identical recording
     -- no checksum ``DataJointError``.
 
-    The flip of the former ``..._raises_checksum...`` test. The content
-    fingerprint makes the rebuild's identity reproducible, so the rebuild
+    The content fingerprint makes the rebuild's identity reproducible, so the rebuild
     matches the stored ``content_hash``, installs atomically, and refreshes the
     byte checksum; the subsequent checksum-validated read then succeeds.
     """
@@ -293,9 +292,9 @@ def test_rebuild_reconciles_external_checksum(populated_recording):
     returns -- a subsequent checksum-validated ``get_abs_path`` read succeeds
     (no ``DataJointError``).
 
-    The flip of the former ``..._reaches_hash_then_raises_checksum`` test: the
-    rebuild now writes to a temp, fingerprints it, installs on a ``content_hash``
-    match, and calls ``_resolve_external`` -- so the canonical file validates.
+    The rebuild writes to a temp, fingerprints it, installs on a
+    ``content_hash`` match, and calls ``_resolve_external`` -- so the canonical
+    file validates.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2.recording import Recording
@@ -776,10 +775,10 @@ def test_recording_timestamps_reads_persisted_vector(tmp_path, dj_conn):
     hardcoded/affine grid from 0.0.
 
     ``get_sorting`` maps absolute spike times back to frames via
-    ``np.searchsorted`` against this vector, so a wrong t_start (the
-    old v1-era 0.0 hardcode) or an affine reconstruction would
-    mis-map every frame. The smoke and 60s polymer fixtures both start
-    at t=0, which hid the bug; this writes a synthetic NWB with
+    ``np.searchsorted`` against this vector, so a wrong t_start (a
+    hardcoded 0.0) or an affine reconstruction would mis-map every
+    frame. The smoke and 60s polymer fixtures both start at t=0, which
+    would hide that; this writes a synthetic NWB with
     ``timestamps[0] = 12345.6`` and pins that the full vector comes
     back via the ``electrical_series_path`` indirection. Stays out of
     the DB by monkeypatching ``AnalysisNwbfile.get_abs_path``.
@@ -1015,7 +1014,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
     3. The runtime order is filter-then-reference: because the
        global-median CMR runs LAST (after bandpass), the recording's
        per-sample median ACROSS channels is ~0 (the median is
-       translation-equivariant). The old reference-then-filter order
+       translation-equivariant). v1's reference-then-filter order
        (per-channel bandpass AFTER CMR) does not preserve that, so a
        ~0 per-sample median pins the intentional v1-divergent order.
     """
@@ -1060,7 +1059,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
     # Switch the sort group to global-median reference. reference_mode is folded
     # into recording_id (via recording_input_hash), so this defines a DISTINCT
     # recording: insert_selection below mints a new recording_id for the
-    # global-median reference, and re-populating the old (unref) id would raise
+    # global-median reference, and re-populating the unreferenced id would raise
     # RecordingInputDriftError -- so a bare in-place update1 is safe (no guard).
     SortGroupV2().update1(
         {
@@ -1083,7 +1082,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
         }
     )
     # The reference change folds into the identity, so this is a NEW recording,
-    # not rec_pk_unref -- a changed resolved input never reuses the old id.
+    # not rec_pk_unref -- a changed resolved input never reuses an earlier id.
     assert rec_pk_ref != rec_pk_unref
     Recording.populate(rec_pk_ref, reserve_jobs=False)
     traces_ref = Recording().get_recording(rec_pk_ref).get_traces()
@@ -1106,7 +1105,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
 
     # Pin (3): filter-then-reference order. The global-median CMR is the
     # LAST step, so subtracting the per-sample cross-channel median leaves
-    # that median at ~0 (median is translation-equivariant). The old
+    # that median at ~0 (median is translation-equivariant). v1's
     # reference-then-filter order (per-channel bandpass AFTER CMR) does not
     # preserve this, so a ~0 per-sample median is the numeric signature of
     # the intentional v1-divergent order. (Requires the default
@@ -1541,7 +1540,7 @@ def test_recording_specific_reference_drops_ref_channel(polymer_smoke_session):
     ``common_reference`` can subtract it, then removed -- the cached
     recording must NOT carry it, while the sort group's own electrodes
     remain. Uses a cross-shank reference electrode that is NOT a member of
-    any created sort group (the helper now fails early if a ``"specific"``
+    any created sort group (the helper fails early if a ``"specific"``
     reference is a member of the group it references), so only the target
     shank is grouped and the reference electrode's own shank is left out.
     """
@@ -2435,7 +2434,7 @@ def test_compute_artifact_normalizes_on_the_retained_contacts(
 # The real Frank-lab tetrode session the general test suite already uses. It
 # is NOT a v2 fixture (it lives in the shared raw data directory, not
 # ``tests/spikesorting/v2/fixtures``), so it is skipped when absent unless the
-# run declares it required -- the same honest-green contract the downloaded v2
+# run declares it required -- the same required-fixture check the downloaded v2
 # fixtures follow.
 _MINIREC_NAME = "minirec20230622"
 _MINIREC_PATH = (

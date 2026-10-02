@@ -91,19 +91,18 @@ denominator]``:
   the number of days among its own members -- a consistency check of the
   production count, not a comparison with the planted truth).
 
-Manifest (fixed before any held-out seed was run):
+Benchmark configuration (the gates are derived from the development seeds
+only and checked on a disjoint set of held-out seeds):
 
 - Development seeds: 0..39 per scenario (``DEVELOPMENT_*``), the only seeds
-  run to derive the gates. A 20-seed pilot (seeds 0..19) came first; its
-  standard errors for the classes with four pairs per seed were too wide to
-  derive gates from, so the development and held-out counts were both set to
-  40 seeds, and the gates below come from seeds 0..39.
+  used to derive the gates. 40 seeds per scenario are needed because with
+  20 the standard errors for the classes with four pairs per seed are too
+  wide to derive gates from.
 - Held-out seeds: 100..139 per scenario (``HELD_OUT_*``), disjoint from the
-  development seeds. They were evaluated once against these gates
-  (2026-09-29, macOS arm64: every gate passed) and are now spent;
+  development seeds; every gate passes on them (macOS arm64).
   ``test_daily_concat_matches_planted_units`` and
-  ``test_three_day_concat_matches_planted_units`` re-run them as regression
-  checks, not as new held-out evaluations.
+  ``test_three_day_concat_matches_planted_units`` assert the gates on these
+  seeds.
 - Dataset: every module constant above (probe, noise, firing rate, template
   window, location draw, day layouts, class counts, change magnitudes, unit
   id pool).
@@ -224,8 +223,8 @@ JOB_KWARGS = {"n_jobs": 1, "progress_bar": False}
 SCENARIOS = ("two_day", "three_day")
 _SCENARIO_CODE = {"two_day": 2, "three_day": 3}
 
-#: Development seeds (run to derive the gates) and held-out seeds (a
-#: disjoint range, evaluated once against the committed gates).
+#: Development seeds (used to derive the gates) and held-out seeds (a
+#: disjoint range the committed gates are checked on).
 DEVELOPMENT_FIRST_SEED = 0
 DEVELOPMENT_SEEDS = 40
 HELD_OUT_FIRST_SEED = 100

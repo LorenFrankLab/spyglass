@@ -248,8 +248,8 @@ def test_peak_amplitudes_sampled_at_waveform_peak(synthetic_analyzer):
 
     The asymmetric (1.0 ms before, 2.0 ms after) window puts the trough at
     ``nbefore``, not the array center, so sampling the center reads ~0.5 ms off
-    the peak. The fix samples ``nbefore`` and keeps the per-channel shape the
-    burst plots consume.
+    the peak. Sampling at ``nbefore`` reads the peak, and the per-channel shape
+    is kept for the burst plots.
     """
     from spyglass.spikesorting.v2._metric_curation_plots import (
         peak_amplitudes_from_analyzer,

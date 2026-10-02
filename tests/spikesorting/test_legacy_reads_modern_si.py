@@ -2,7 +2,7 @@
 
 The default install pins SpikeInterface 0.104. Waveform *extraction* still
 needs the 0.99 runtime and stays gated, but a waveform folder written earlier
-is readable under the new pin through
+is readable under SpikeInterface 0.104 through
 ``spyglass.spikesorting._si_compat.load_waveforms``. This module pins that
 split: the read paths return usable waveforms, and only the extraction branch
 raises the legacy-environment error.

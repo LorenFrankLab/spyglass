@@ -723,11 +723,11 @@ def test_artifact_compute_kernels_import_without_db():
     ``spawn`` re-imports the kernel's DEFINING module) never opens a DB
     connection just to run the DB-free chunk computation.
 
-    Regression guard for the ``BrokenProcessPool`` failure: when the kernels
-    lived inline in the DataJoint *schema* module (``artifact.py``), every
-    spawned worker activated ``dj.schema`` / ``from spyglass.common import ...``
-    at import, so a config/port mismatch -- or a DB-isolated compute node --
-    killed the worker before any computation ran. Cold-import the kernel module
+    Guards against a ``BrokenProcessPool``: if the kernels lived in the
+    DataJoint *schema* module (``artifact.py``), every spawned worker would
+    activate ``dj.schema`` / ``from spyglass.common import ...`` at import, so
+    a config/port mismatch -- or a DB-isolated compute node -- would kill the
+    worker before any computation ran. Cold-import the kernel module
     in a fresh subprocess (the spawn worker's view) and assert it pulled in
     neither ``spyglass.common`` nor the ``artifact`` schema module. Hermetic --
     no DB, no container.
@@ -885,8 +885,9 @@ def test_make_fetch_routes_through_ownership_helper(artifact_e2e_session):
         # Simulate a partially-deleted artifact: drop ONLY the ownership part
         # row (delete_quick -> no cascade, so the RecordingArtifactDetection
         # master, the SortingSelection, and the IntervalList row all survive --
-        # the old by-name fetch would still "succeed"). The helper-routed
-        # make_fetch must now raise on the missing ownership parts.
+        # a fetch of the IntervalList row by name alone would still
+        # "succeed"). make_fetch resolves through the ownership parts, so it
+        # must raise on the missing one.
         (RecordingArtifactDetection.RemovedInterval & art_pk).delete_quick()
         with pytest.raises(ValueError, match="RemovedInterval"):
             Sorting().make_fetch(sort_pk)

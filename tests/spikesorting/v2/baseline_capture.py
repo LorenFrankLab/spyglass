@@ -206,9 +206,8 @@ def _populate_artifact_detection(
         no-detect on both pipelines; v1's ``"default"`` and v2's
         ``"default"`` rows ship different amplitude thresholds
         (v1 ``amplitude_thresh_uV=3000`` vs v2
-        ``amplitude_threshold_uv=500`` after the v1 unit-conversion bug
-        fix), which would otherwise FAIL the ``canonical_artifact_params``
-        fingerprint check.
+        ``amplitude_threshold_uv=500``), which would otherwise FAIL the
+        ``canonical_artifact_params`` fingerprint check.
     """
     from spyglass.spikesorting.v1 import (
         ArtifactDetection,
@@ -470,7 +469,7 @@ def _compute_invariant_fingerprints(
     preproc / artifact / sorter kwargs, same artifact-removed
     valid times). The v2 parity test reconstructs its own state and
     asserts each fingerprint matches before comparing spike times; a
-    mismatch on any fingerprint fails the parity gate up front rather
+    mismatch on any fingerprint fails the parity test up front rather
     than letting a divergent input masquerade as a spike-time mismatch.
     """
     import numpy as np

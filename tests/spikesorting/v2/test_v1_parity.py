@@ -1,14 +1,14 @@
-"""v1-parity validation slice.
+"""v1-parity validation.
 
 Tests in this module verify that v2 behavior matches v1's documented
-contract on points where the earlier v2 work silently diverged. Each
+contract on points where a v2 implementation could silently diverge. Each
 test is short, focused, and either pure-Python or DB-tier without
 populate -- the heavier integration / regression tests live in
 the ``single_session/`` suite.
 
-Where a test pins down the fix for a specific v1↔v2 divergence the
-docstring cites the v1 source line so a future reviewer can confirm
-we did not drift away from v1's intent without justification.
+Where a test pins down a specific v1↔v2 parity point, the docstring
+cites the v1 source line so a reader can confirm v2 does not drift away
+from v1's intent without justification.
 """
 
 from __future__ import annotations
@@ -39,13 +39,12 @@ pytestmark = pytest.mark.usefixtures("dj_conn")
 # ---------- schema defaults ------------------------------------------------
 
 
-def test_artifact_defaults_match_b1_revised():
+def test_artifact_defaults_match_v1_effective_threshold():
     """``amplitude_threshold_uv=500.0`` µV; ``proportion_above_threshold=1.0``.
 
     The amplitude default is the v1-effective Frank-lab Intan
-    threshold post-unit-conversion-fix (v1's 3000 nominal == ~585 µV
-    on 0.195 µV/count Intan probes). proportion=1.0 reverts an
-    earlier silent flip from v1's "all channels must exceed".
+    threshold in µV (v1's 3000 nominal == ~585 µV on 0.195 µV/count Intan
+    probes). proportion=1.0 keeps v1's "all channels must exceed" rule.
     """
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
@@ -70,7 +69,7 @@ def test_default_has_no_recording_stage_whiten():
     """``default`` preset carries no ``whiten`` key.
 
     Whitening is owned by the sorter / analyzer rows; the recording stage
-    no longer accepts an inert ``whiten`` field.
+    does not accept an inert ``whiten`` field.
     """
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -371,23 +370,22 @@ def test_no_phase_label_leakage_in_runtime_code():
       - plan-phase / plan-task labels (``Phase N``, ``phase-N``, ``Task N``)
       - review/audit codes (``A4``, ``R5``, ``C3``, ``N19``, ``B3`` ...) --
         a single uppercase letter from the review namespaces followed by a
-        number; an earlier version only caught ``Phase/Task N`` and let
-        these slip through.
+        number.
       - hyphenated codes (``OP-3``): two or more uppercase letters, a hyphen,
         and a number.
     The scan covers the v2 runtime source, the user-facing v2 guides, tutorial
     scripts, and the CHANGELOG (phase/task only there -- the audit-code regex
-    would false-positive on unrelated historical release entries). Tests,
-    resolver notes, and baseline-fixture machinery may still reference these
-    labels because they describe historical review evidence, so only shipped
-    runtime/user-facing surfaces are scanned.
+    would false-positive on unrelated historical release entries). Tests and
+    fixture machinery are not scanned: test-local labels such as unit names
+    (``A1``, ``B2``) would false-positive, so only shipped runtime and
+    user-facing surfaces are scanned.
     """
     import re
 
     # parents[3] = repo root (parents[2] is ``tests/``, NOT ``tests/src/``).
-    # The earlier ``parents[2]`` form resolved to a nonexistent
-    # ``tests/src/...`` path so ``rglob`` walked zero files and the test
-    # silently passed; verify the resolved roots exist before scanning.
+    # A wrong index resolves to a nonexistent ``tests/src/...`` path, so
+    # ``rglob`` would walk zero files and the test would pass silently;
+    # verify the resolved roots exist before scanning.
     repo_root = Path(__file__).resolve().parents[3]
     v2_src = repo_root / "src" / "spyglass" / "spikesorting" / "v2"
     user_docs = (
@@ -482,7 +480,7 @@ def test_merge_dispatch_lenient_on_non_v2_keys_in_default_path(dj_conn):
     """The v2 resolver is lenient in the multi-source DEFAULT path: a key it
     doesn't recognize yields no v2 rows instead of raising. So when
     ``get_restricted_merge_ids`` auto-defaults its sources, a key handled by
-    v1 (which the dispatcher runs first) no longer trips the v2 branch's
+    v1 (which the dispatcher runs first) does not trip the v2 branch's
     'unknown key' ValueError. The strict raise is preserved for a deliberate
     v2 query (sources=['v2'] / a direct strict resolve).
     """

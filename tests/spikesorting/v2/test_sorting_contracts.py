@@ -1,7 +1,7 @@
 """Sorting wire-contracts and table-shape invariants.
 
 Covers the typed ``NonIntegerUnitIDError`` on a non-integer unit_id, the
-``Sorting`` master no longer declaring an ``analyzer_folder`` column, and the
+``Sorting`` master not declaring an ``analyzer_folder`` column, and the
 positional NamedTuple-to-signature contracts (``SortingComputed`` vs
 ``make_insert``; ``RecordingArtifactResult`` vs ``RecordingComputed``).
 """
@@ -35,7 +35,7 @@ def test_to_int_unit_id_raises_typed_error_on_non_integer():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_sorting_master_has_no_analyzer_folder_column():
-    """The ``Sorting`` master no longer declares an ``analyzer_folder``
+    """The ``Sorting`` master does not declare an ``analyzer_folder``
     column (the analyzer cache path is computed from ``sorting_id``, not
     persisted); ``n_units`` is still a column."""
     from spyglass.spikesorting.v2.sorting import Sorting

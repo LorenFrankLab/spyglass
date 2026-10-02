@@ -83,9 +83,9 @@ def test_sorting_key_source_includes_concat_rows():
     """Concat-source selections ARE part of ``Sorting.key_source``.
 
     The concat populate path is wired (``ConcatenatedRecording.make`` +
-    ``Sorting.make`` concat dispatch), so the antijoin that previously dropped
-    ``ConcatenatedRecordingSource`` rows from ``key_source`` is gone -- a concat
-    selection is handed to ``populate()`` like any other. A planted concat
+    ``Sorting.make`` concat dispatch), so ``key_source`` does not antijoin out
+    ``ConcatenatedRecordingSource`` rows -- a concat selection is handed to
+    ``populate()`` like any other. A planted concat
     selection suffices to pin that it is NOT antijoined out; the full concat
     sort populate is covered by the chronic smoke in
     ``tests/spikesorting/v2/test_session_group_concat.py``.
@@ -237,9 +237,9 @@ def test_sorting_selection_missing_sorter_params_diagnostic():
 def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
     """A sort cannot link an artifact detected on another recording.
 
-    Both recordings are in the same session, so the old interval lookup by
-    ``nwb_file_name`` + artifact interval name could succeed and apply the
-    wrong artifact mask. ``insert_selection`` must reject the mismatch before
+    Both recordings are in the same session, so an interval lookup by
+    ``nwb_file_name`` + artifact interval name alone could succeed and apply
+    the wrong artifact mask. ``insert_selection`` must reject the mismatch before
     writing ``SortingSelection.ArtifactDetectionSource``.
     """
     import uuid
@@ -293,7 +293,7 @@ def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
             )
         # insert_selection rejected before eager-registering the artifact into
         # the ArtifactDetectionOutput merge, so no ArtifactDetectionSource row
-        # (which now carries the merge id) can reference it.
+        # (which carries the merge id) can reference it.
         from spyglass.spikesorting.v2.artifact_output import (
             ArtifactDetectionOutput,
         )

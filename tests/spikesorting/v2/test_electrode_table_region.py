@@ -1,11 +1,11 @@
 """``electrode_table_region`` maps electrode ids to ROW INDICES.
 
 ``pynwb``'s ``create_electrode_table_region(region=...)`` interprets ``region``
-as row indices into the electrodes table, not electrode ids. The recording
-writer previously passed ``region=[electrode_ids]`` directly, which is correct
-only when ``electrode.id == row position``. For an electrodes table whose ids
-are non-contiguous / reordered (allowed by NWB; common for external/DANDI
-files) that silently points the ElectricalSeries at the WRONG electrodes ->
+as row indices into the electrodes table, not electrode ids. Passing
+``region=[electrode_ids]`` directly is correct only when
+``electrode.id == row position``. For an electrodes table whose ids are
+non-contiguous / reordered (allowed by NWB; common for external/DANDI files)
+it silently points the ElectricalSeries at the WRONG electrodes ->
 wrong channel locations and brain-region attribution on readback.
 
 Hermetic -- builds an in-memory NWBFile, no DB.
@@ -55,8 +55,8 @@ def test_region_maps_ids_to_row_indices_not_raw_ids():
 
 
 def test_contiguous_ids_unchanged():
-    """When id == row index, the mapping is the identity (no regression on
-    the common Frank-lab case)."""
+    """When id == row index, the mapping is the identity (the common
+    Frank-lab case is unchanged)."""
     from spyglass.spikesorting.v2.utils import electrode_table_region
 
     nwbfile = _nwb_with_electrode_ids([0, 1, 2, 3])

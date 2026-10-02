@@ -1,13 +1,13 @@
-"""Regression tests for v2 merge-id resolution by artifact detection.
+"""Tests for v2 merge-id resolution by artifact detection.
 
 ``SpikeSortingOutput._get_restricted_merge_ids_v2`` (and its public wrapper
 ``get_spike_sorting_v2_merge_ids``) advertises ``artifact_detection_id`` as a
 restriction key, but ``artifact_detection_id`` is NOT on ``SortingSelection`` -- it
 lives on the optional ``SortingSelection.ArtifactDetectionSource`` part. Restricting
-the recording/sorter join (``sort_master``) by ``artifact_detection_id`` silently
-dropped the key (verified: the compiled SQL is identical with and without
-it), so two sorts differing only by artifact resolved to BOTH merge_ids.
-The fix resolves ``artifact_detection_id`` through the part and intersects on
+the recording/sorter join (``sort_master``) by ``artifact_detection_id`` would
+silently drop the key (the compiled SQL is identical with and without it), so
+two sorts differing only by artifact would resolve to BOTH merge_ids.
+Resolution therefore goes through the part and intersects on
 ``sorting_id`` when a UUID is requested. An absent ``artifact_detection_id`` key is a
 wildcard (no filter); an explicit ``artifact_detection_id=None`` means
 "no artifact-detection pass" and anti-joins to sorts with no
@@ -15,8 +15,8 @@ wildcard (no filter); an explicit ``artifact_detection_id=None`` means
 artifact-detection identity, so None is not a wildcard).
 
 It also normalizes a str/UUID ``artifact_detection_id`` to ``uuid.UUID`` (the column
-is a uuid); the same str-vs-UUID class is fixed in
-``SortingSelection.insert_selection``'s idempotency dedup.
+is a uuid); ``SortingSelection.insert_selection``'s idempotency dedup
+normalizes the same way.
 
 These tests build a second sort on the same recording as the package-scoped
 ``populated_sorting`` (which is artifact-detection-backed) so the two differ
@@ -138,14 +138,15 @@ def test_merge_ids_distinguish_two_artifact_backed_sorts(
     """Two artifact-backed sorts on one recording with DIFFERENT artifact ids:
     restricting by one ``artifact_detection_id`` returns ONLY that sort.
 
-    Regression for the ``CurationV2.resolve_restriction`` bug where the
-    ``ArtifactDetectionSource`` part was restricted by ``artifact_detection_id``
-    -- a key dropped after the merge-FK rename to ``artifact_detection_merge_id``
-    -- collapsing the filter to "any artifact-backed sort". The base
-    ``two_sorts_one_recording`` fixture (one artifact + one no-artifact sort)
-    masks the bug because "all artifact-backed" then coincides with "the one
-    artifact"; this test adds a SECOND, differently-detected artifact sort so a
-    dropped-key restriction returns two merge ids where one is required.
+    ``CurationV2.resolve_restriction`` must translate the id to the part's
+    ``artifact_detection_merge_id`` key: restricting the
+    ``ArtifactDetectionSource`` part by ``artifact_detection_id`` (not a column
+    of that part) silently drops the key and collapses the filter to "any
+    artifact-backed sort". The base ``two_sorts_one_recording`` fixture (one
+    artifact + one no-artifact sort) would mask that because "all
+    artifact-backed" then coincides with "the one artifact"; this test adds a
+    SECOND, differently-detected artifact sort so a dropped-key restriction
+    returns two merge ids where one is required.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
@@ -197,8 +198,8 @@ def test_merge_ids_distinguish_two_artifact_backed_sorts(
             "merge_id"
         )
 
-        # Restricting by the "none" artifact must return ONLY its sort -- the
-        # dropped-key bug would also return the "default" sort.
+        # Restricting by the "none" artifact must return ONLY its sort -- a
+        # dropped restriction key would also return the "default" sort.
         by_none = set(
             get_spike_sorting_v2_merge_ids(
                 {
@@ -310,7 +311,7 @@ def test_insert_selection_dedup_accepts_str_artifact_detection_id(
     The find-existing dedup compares ``resolve_artifact_detection`` (a ``uuid.UUID``)
     against the supplied ``artifact_detection_id``; a str would never equal the stored
     UUID, so the second insert would miss its match and create a duplicate
-    sort. The fix normalizes the supplied id to a UUID first.
+    sort. The supplied id is therefore normalized to a UUID first.
     """
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
