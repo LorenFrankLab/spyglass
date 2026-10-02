@@ -112,49 +112,42 @@ _NOISE_CHUNK_DURATION = f"{STATISTICS_SAMPLE_CHUNK_MS}ms"
 def motion_to_storage_dict(motion) -> dict:
     """Flatten a SpikeInterface ``Motion`` to a DataJoint-blob-safe dict.
 
-    The stored blob keeps every field the ``Motion`` constructor needs so
-    :func:`motion_from_storage_dict` reconstructs the object exactly:
-
-    - ``displacement``: list (one entry per recording segment) of 2-D
-      ``float`` arrays, each shape ``(n_temporal_bins, n_spatial_bins)`` (um).
-    - ``temporal_bins_s``: list (per segment) of 1-D bin-center arrays (s).
-    - ``spatial_bins_um``: a single 1-D array of window centers (um),
-      ``shape == (n_spatial_bins,)`` -- shared across segments.
-    - ``direction``: the motion axis (``"x"`` / ``"y"`` / ``"z"``).
-    - ``interpolation_method``: how displacement interpolates between bins.
-
-    Arrays stay as NumPy arrays (DataJoint's blob codec round-trips them);
-    only the container shape is normalized so the rehydrate side is
-    deterministic regardless of how the codec returns nested lists.
+    ``Motion.to_dict()`` with the per-segment containers normalized to lists
+    of NumPy arrays, so the rehydrate side is deterministic regardless of how
+    the codec returns nested lists. Keys: ``displacement`` (per segment,
+    ``(n_temporal_bins, n_spatial_bins)`` um), ``temporal_bins_s`` (per
+    segment, 1-D bin centers in s), ``spatial_bins_um`` (``(n_spatial_bins,)``
+    window centers shared across segments), ``direction``,
+    ``interpolation_method``, and SpikeInterface's ``object`` tag.
     """
+    stored = motion.to_dict()
     return {
-        "displacement": [np.asarray(d) for d in motion.displacement],
-        "temporal_bins_s": [np.asarray(t) for t in motion.temporal_bins_s],
-        "spatial_bins_um": np.asarray(motion.spatial_bins_um),
-        "direction": str(motion.direction),
-        "interpolation_method": str(motion.interpolation_method),
+        **stored,
+        "displacement": [np.asarray(d) for d in stored["displacement"]],
+        "temporal_bins_s": [np.asarray(t) for t in stored["temporal_bins_s"]],
+        "spatial_bins_um": np.asarray(stored["spatial_bins_um"]),
     }
 
 
 def motion_from_storage_dict(blob: dict):
     """Rebuild a SpikeInterface ``Motion`` from a stored blob.
 
-    Inverse of :func:`motion_to_storage_dict`. Coerces each entry back to a
-    clean NumPy array before constructing ``Motion`` so a blob codec that
-    returns the per-segment lists as object arrays (rather than Python lists)
-    still rehydrates to the 2-D / 1-D shapes ``Motion`` asserts on. Every key
-    is read directly (no defaulting): :func:`motion_to_storage_dict` always
-    writes all five, so a missing key means a corrupt blob and should raise
-    rather than silently rehydrate a wrong motion axis.
+    Inverse of :func:`motion_to_storage_dict` via ``Motion.from_dict``, which
+    ignores the ``object`` tag (blobs written without it read the same).
+    Coerces each array entry back to a clean NumPy array first so a blob codec
+    that returns the per-segment lists as object arrays still rehydrates to
+    the 2-D / 1-D shapes ``Motion`` asserts on. A missing key raises: it
+    means a corrupt blob, not a default motion axis.
     """
     from spikeinterface.core.motion import Motion
 
-    return Motion(
-        [np.asarray(d) for d in blob["displacement"]],
-        [np.asarray(t) for t in blob["temporal_bins_s"]],
-        np.asarray(blob["spatial_bins_um"]),
-        direction=str(blob["direction"]),
-        interpolation_method=str(blob["interpolation_method"]),
+    return Motion.from_dict(
+        {
+            **blob,
+            "displacement": [np.asarray(d) for d in blob["displacement"]],
+            "temporal_bins_s": [np.asarray(t) for t in blob["temporal_bins_s"]],
+            "spatial_bins_um": np.asarray(blob["spatial_bins_um"]),
+        }
     )
 
 
