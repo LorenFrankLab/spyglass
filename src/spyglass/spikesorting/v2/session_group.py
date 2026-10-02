@@ -405,6 +405,11 @@ class ConcatenatedRecordingSelection(
         identity over the same frozen member set returns the existing
         ``concat_recording_id`` rather than minting a second one.
 
+        Duplicate-key recovery has no savepoint: it relies on the deterministic
+        primary key colliding on the master insert, the transaction's first
+        statement, before any part row is written. Keep the master insert first,
+        or the recovery would leave part rows inside a caller's transaction.
+
         Parameters
         ----------
         key : dict
@@ -457,7 +462,6 @@ class ConcatenatedRecordingSelection(
         from spyglass.spikesorting.v2.artifact_output import (
             ArtifactDetectionOutput,
         )
-        from spyglass.spikesorting.v2.utils import transaction_or_noop
 
         detection_ids = sorted(
             {value for value in artifacts.values() if value is not None}
@@ -481,7 +485,7 @@ class ConcatenatedRecordingSelection(
                             {"artifact_detection_id": detection_id},
                         )
                     )
-                with transaction_or_noop(cls.connection):
+                with cls._safe_context():
                     cls.insert1(
                         {
                             **identity,
@@ -910,14 +914,13 @@ class ConcatenatedRecording(
         """Atomically register the staged concat artifact + boundary rows.
 
         DataJoint's tri-part dispatch already opens the master transaction
-        around this method, so ``transaction_or_noop`` is a no-op here; it is
+        around this method, so ``_safe_context()`` is a no-op here; it is
         kept so a direct (non-populate) call still commits atomically.
         Removing a failed attempt's staged ``ElectricalSeries`` is
         ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
         call leaves that to its caller.
         """
         from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_PATH
-        from spyglass.spikesorting.v2.utils import transaction_or_noop
 
         boundary_rows = [
             {
@@ -928,7 +931,7 @@ class ConcatenatedRecording(
             }
             for boundary in member_boundaries
         ]
-        with transaction_or_noop(self.connection):
+        with self._safe_context():
             AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
             self.insert1(
                 {

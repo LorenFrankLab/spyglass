@@ -81,7 +81,6 @@ from spyglass.spikesorting.v2.utils import (
     _validate_reference_fields,
     assert_reference_not_member,
     reject_duplicate_parameter_content,
-    transaction_or_noop,
     validate_lookup_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
@@ -692,12 +691,12 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 
         Wrap master + part inserts in one transaction so a part-insert
         failure (e.g., FK violation on a stale Electrode row) rolls back
-        the master rows too. ``transaction_or_noop`` is a no-op when the
+        the master rows too. ``_safe_context()`` is a no-op when the
         caller is already inside a transaction (populate cascade,
         post-cautious_delete state), avoiding the nested-transaction error
         DataJoint would otherwise raise.
         """
-        with transaction_or_noop(cls.connection):
+        with cls._safe_context():
             cls.insert(master_rows)
             cls.SortGroupElectrode.insert(part_rows)
 
@@ -943,7 +942,6 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         except dj.errors.DuplicateError:
             # Lost a concurrent race: another caller inserted the same
             # deterministic recording_id first. Refetch and return it.
-            # (Top-level recovery only -- see transaction_or_noop.)
             logger.debug(
                 "RecordingSelection.insert_selection: lost deterministic-id "
                 "race on %s; returning the existing row.",
@@ -1392,7 +1390,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         snapping of each consolidated interval, which otherwise accumulates
         across disjoint epochs and spuriously trips a fixed 1.5-sample slack.
 
-        The ``transaction_or_noop`` wrap is a no-op inside ``populate()``'s
+        The ``_safe_context()`` wrap is a no-op inside ``populate()``'s
         transaction and keeps the ``AnalysisNwbfile`` registration and the
         row insert atomic on a direct call. Removing a failed attempt's
         staged file (a truncation refusal included) is
@@ -1447,7 +1445,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2.exceptions import (
             RecordingTruncatedError,
         )
-        from spyglass.spikesorting.v2.utils import transaction_or_noop
 
         nwb_file_name = sel["nwb_file_name"]
         interval_list_name = sel["interval_list_name"]
@@ -1472,7 +1469,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 "packets or interval misalignment."
             )
 
-        with transaction_or_noop(self.connection):
+        with self._safe_context():
             AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
             self.insert1(
                 {

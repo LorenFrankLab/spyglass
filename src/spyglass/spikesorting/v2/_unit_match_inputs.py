@@ -62,6 +62,11 @@ def insert_inputs(
     the inputs, ordering and errors). ``table_cls`` is the
     ``UnitMatchSelection`` class; ``_find_existing_pk`` and the electrode and
     geometry preflights are called on it.
+
+    Duplicate-key recovery has no savepoint: it relies on the deterministic
+    primary key colliding on the master insert, the transaction's first
+    statement, before any part row is written. Keep the master insert first,
+    or the recovery would leave part rows inside a caller's transaction.
     """
     import datajoint as dj
 
@@ -74,7 +79,6 @@ def insert_inputs(
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.session_group import SessionGroup
-    from spyglass.spikesorting.v2.utils import transaction_or_noop
 
     requested = _normalize_input_curations(curations)
     _check_input_count_and_sortings(requested, ValueError)
@@ -161,7 +165,7 @@ def insert_inputs(
     if group_key is not None:
         master_row.update(group_key)
     try:
-        with transaction_or_noop(table_cls.connection):
+        with table_cls._safe_context():
             # allow_direct_insert: this helper IS the validation boundary
             # (it has validated the inputs and minted the deterministic
             # id), so it bypasses the master insert guard.

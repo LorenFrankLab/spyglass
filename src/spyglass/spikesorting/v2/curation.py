@@ -43,7 +43,6 @@ from spyglass.spikesorting.v2.utils import (
     CurationLabel,
     CurationSource,
     FactoryOnlyMaster,
-    transaction_or_noop,
     unit_brain_region_df,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
@@ -992,7 +991,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     ) -> None:
         """Insert the master/Unit/UnitLabel/MergeGroup rows atomically.
 
-        Runs the ``transaction_or_noop`` block: registers the already
+        Runs the ``_safe_context()`` block: registers the already
         staged AnalysisNwbfile row, inserts the CurationV2 master + part
         rows (including raw ``MergeGroup`` and, for a child,
         ``ParentMergeGroup``), and registers the
@@ -1071,7 +1070,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         # not a merge target, so ``Unit * MergeGroup`` on unit_id preserves every
         # unit; a child's rows are raw-expanded and the immediate parent
         # operation is in ``parent_merge_group_rows``.
-        with transaction_or_noop(cls.connection):
+        with cls._safe_context():
             # Register the analysis file row FIRST inside the
             # transaction so it rolls back atomically with the
             # CurationV2 rows on any later failure.

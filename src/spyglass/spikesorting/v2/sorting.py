@@ -105,7 +105,6 @@ from spyglass.spikesorting.v2.utils import (
     reject_duplicate_parameter_content,
     resolve_effective_seed,
     split_leading_restrictions,
-    transaction_or_noop,
     unit_brain_region_df,
     validate_lookup_rows,
 )
@@ -1485,7 +1484,7 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """Atomic registration of the AnalysisNwbfile + master + Unit rows.
 
         DataJoint's tri-part dispatch wraps this method in the
-        framework transaction; the inner ``transaction_or_noop`` is
+        framework transaction; the inner ``_safe_context()`` is
         a no-op there (kept defensively). ``_populate_unit_part``
         runs INSIDE the transaction so its unit-part rows commit
         atomically with the master row; splitting it across stages
@@ -1528,7 +1527,7 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         None
         """
         try:
-            with transaction_or_noop(self.connection):
+            with self._safe_context():
                 self._insert_sorting_rows_transaction(
                     key=key,
                     sorting_obj=sorting_obj,
@@ -1591,17 +1590,17 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ):
         """Register the AnalysisNwbfile + master + Unit rows atomically.
 
-        Runs the ``transaction_or_noop`` block: registers the staged
+        Runs the ``_safe_context()`` block: registers the staged
         AnalysisNwbfile, inserts the Sorting master, and populates the Unit
         part rows (built once in ``make_compute``) INSIDE the transaction so
         they commit atomically with the master (splitting them across stages is
-        forbidden). ``transaction_or_noop`` is a no-op when the framework
+        forbidden). ``_safe_context()`` is a no-op when the framework
         transaction is already active (the tri-part dispatch path); it is kept
         so an out-of-populate caller still gets atomic registration.
         """
         import datetime as dt
 
-        with transaction_or_noop(self.connection):
+        with self._safe_context():
             AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
             self.insert1(
                 {

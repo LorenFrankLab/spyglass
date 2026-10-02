@@ -78,7 +78,6 @@ from spyglass.spikesorting.v2.utils import (
     _validate_params,
     reject_duplicate_parameter_content,
     split_leading_restrictions,
-    transaction_or_noop,
     validate_lookup_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
@@ -421,7 +420,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             for rid in member_recording_ids
         ]
 
-        with transaction_or_noop(cls.connection):
+        with cls._safe_context():
             cls.insert1(master_row)
             cls.Member.insert(member_rows)
 
@@ -516,7 +515,7 @@ def _insert_artifact_selection(
         **extra_row,
     }
     try:
-        with transaction_or_noop(selection_cls.connection):
+        with selection_cls._safe_context():
             # allow_direct_insert: insert_selection IS the validation boundary.
             selection_cls.insert1(row, allow_direct_insert=True)
     except dj.errors.DuplicateError:
@@ -827,7 +826,7 @@ class _ArtifactDetectionMixin:
         the master row, and records ownership through
         ``RemovedInterval`` so generic ``IntervalList`` cleanup treats
         the generated intervals as live children. The inner
-        ``transaction_or_noop`` is a no-op under the framework transaction the
+        ``_safe_context()`` is a no-op under the framework transaction the
         tri-part dispatch already opened; kept so an out-of-populate caller
         still gets atomic registration.
 
@@ -852,7 +851,7 @@ class _ArtifactDetectionMixin:
         )
         part_rows = build_artifact_interval_part_rows(key, interval_rows)
         detection_key = {"artifact_detection_id": key["artifact_detection_id"]}
-        with transaction_or_noop(self.connection):
+        with self._safe_context():
             IntervalList.insert(interval_rows)
             self.insert1(key)
             self.RemovedInterval.insert(part_rows)

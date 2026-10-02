@@ -5,7 +5,6 @@ from __future__ import annotations
 import functools
 import numbers
 from collections.abc import Mapping
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -74,45 +73,6 @@ from spyglass.spikesorting.v2._artifact_naming import (  # noqa: F401
     artifact_detection_interval_list_name,
     parse_artifact_detection_interval_list_name,
 )
-
-
-@contextmanager
-def transaction_or_noop(connection):
-    """Open a DataJoint transaction unless one is already active.
-
-    Parameters
-    ----------
-    connection : datajoint.connection.Connection
-        The active DataJoint connection. A transaction is opened on it
-        only when one is not already in progress.
-
-    Source-part inserts and curation inserts both want to wrap their
-    master + part rows in one transaction; but the same helpers may be
-    called from inside an existing populate cascade where DataJoint
-    refuses nested transactions. This context manager makes the
-    transaction wrap a no-op when the connection is already in one.
-
-    NOTE on duplicate-key recovery: the ``insert_selection`` helpers catch
-    a duplicate-PK error raised inside this block and refetch the winner's
-    row. That recovery assumes a TOP-LEVEL call. There is no savepoint, so
-    in the no-op (already-in-transaction) branch a recovered duplicate
-    would rely on the caller's outer transaction for cleanup -- but it is
-    safe in practice because (a) the selection helpers are only invoked at
-    top level (``run_v2_pipeline``), and (b) the deterministic PK makes the
-    duplicate collide on the FIRST statement (the master insert), so no
-    part row is ever written and there is nothing to roll back. (The artifact
-    merge registration is NOT done here: a detection registers itself into
-    ``ArtifactDetectionOutput`` at materialization, and any lazy fallback in
-    ``insert_selection`` runs OUTSIDE this transaction, so no merge insert ever
-    executes inside the selection block -- the "collide on the master first"
-    invariant holds.) Do not call ``insert_selection`` from inside an outer
-    transaction without revisiting this.
-    """
-    if connection.in_transaction:
-        yield
-    else:
-        with connection.transaction:
-            yield
 
 
 def split_leading_restrictions(args: tuple) -> tuple[list, tuple]:

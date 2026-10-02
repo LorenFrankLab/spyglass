@@ -782,7 +782,7 @@ def test_curation_v2_nwb_write_outside_transaction():
     """CurationV2 stages the curated-units NWB OUTSIDE / BEFORE the txn.
 
     Manual-table insert_curation has no framework transaction; the heavy
-    NWB write must happen OUTSIDE the explicit ``transaction_or_noop``
+    NWB write must happen OUTSIDE the explicit ``_safe_context()``
     block to keep the inner transaction short. ``insert_curation`` is a
     thin orchestrator that delegates staging to
     ``_stage_curation_artifact`` and the atomic inserts to
@@ -790,7 +790,7 @@ def test_curation_v2_nwb_write_outside_transaction():
     across those helpers:
 
       * ``_insert_curation_rows_transaction`` opens the
-        ``transaction_or_noop`` block and performs NO NWB-write /
+        ``_safe_context()`` block and performs NO NWB-write /
         ``AnalysisNwbfile().create`` / ``NWBHDF5IO`` call inside it.
       * ``_stage_curation_artifact`` performs the NWB staging call.
       * ``insert_curation`` calls staging BEFORE the transaction helper.
@@ -853,7 +853,7 @@ def test_curation_v2_nwb_write_outside_transaction():
     txn_src = inspect.getsource(CurationV2._insert_curation_rows_transaction)
     txn_tree = ast.parse(inspect.cleandoc(txn_src))
     # Find every ``with`` block whose context manager is a
-    # ``transaction_or_noop(...)`` call (or attribute thereof).
+    # ``cls._safe_context()`` call.
     txn_blocks = []
     for node in ast.walk(txn_tree):
         if not isinstance(node, ast.With):
@@ -871,12 +871,12 @@ def test_curation_v2_nwb_write_outside_transaction():
                         else None
                     )
                 )
-                if cm_name == "transaction_or_noop":
+                if cm_name == "_safe_context":
                     txn_blocks.append(node)
                     break
 
     assert len(txn_blocks) >= 1, (
-        "_insert_curation_rows_transaction must use transaction_or_noop "
+        "_insert_curation_rows_transaction must use _safe_context() "
         "for atomic master+part inserts; no such ``with`` block "
         "was found."
     )
@@ -889,7 +889,7 @@ def test_curation_v2_nwb_write_outside_transaction():
                 if forbidden is not None:
                     pytest.fail(
                         f"_insert_curation_rows_transaction calls "
-                        f"{forbidden!r} INSIDE a transaction_or_noop "
+                        f"{forbidden!r} INSIDE a _safe_context() "
                         "block; the heavy NWB write must happen "
                         "OUTSIDE the transaction to keep it short."
                     )

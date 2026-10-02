@@ -76,7 +76,6 @@ from spyglass.spikesorting.v2.utils import (
     SelectionMasterInsertGuard,
     find_orphaned_masters,
     reject_duplicate_parameter_content,
-    transaction_or_noop,
     validate_lookup_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
@@ -1599,7 +1598,7 @@ class MotionCorrectedRecording(
 
         row = MotionCorrectedComputed(*computed)._asdict()
         nwb_file_name = row.pop("nwb_file_name")
-        with transaction_or_noop(self.connection):
+        with self._safe_context():
             AnalysisNwbfile().add(nwb_file_name, row["analysis_file_name"])
             self.insert1(
                 {

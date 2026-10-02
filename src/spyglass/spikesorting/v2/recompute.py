@@ -353,12 +353,11 @@ def _insert_recompute_outcome(
     ``compare`` routes through :func:`_insert_comparison` (master + Name/Hash
     diff rows); ``xfail`` / ``unverifiable`` / ``error`` insert a single
     ``matched=0`` master row.
-    ``transaction_or_noop`` no-ops inside the framework transaction but keeps a
+    ``_safe_context()`` no-ops inside the framework transaction but keeps a
     direct (non-populate) call atomic.
     """
-    from spyglass.spikesorting.v2.utils import transaction_or_noop
 
-    with transaction_or_noop(table.connection):
+    with table._safe_context():
         if outcome == "compare":
             _insert_comparison(
                 table, key, stored_hashes, new_hashes, created_at
@@ -926,11 +925,10 @@ def _insert_recording_comparison(
     (non-determinism / current-file drift), so an operator can localize a
     problem even on a matched row.
     """
-    from spyglass.spikesorting.v2.utils import transaction_or_noop
 
     matched = combined_hash(fresh) == content_hash
     _, missing_old, missing_new, differing = compare_hash_dicts(current, fresh)
-    with transaction_or_noop(table.connection):
+    with table._safe_context():
         table.insert1({**key, "matched": matched, "created_at": created_at})
         name_rows = [
             {**key, "name": n, "missing_from": "old"} for n in missing_old

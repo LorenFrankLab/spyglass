@@ -961,7 +961,7 @@ def test_recording_make_rollback_cleans_analysis_nwb(
 
     # Force a failure AFTER the NWB is written and registered
     # (Recording.make wraps AnalysisNwbfile().add + self.insert1 in
-    # transaction_or_noop; patching self.insert1 makes the
+    # _safe_context(); patching self.insert1 makes the
     # transaction roll back with the file already on disk).
     original_insert1 = Recording.insert1
 

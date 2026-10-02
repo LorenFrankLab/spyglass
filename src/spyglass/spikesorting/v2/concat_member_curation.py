@@ -32,7 +32,6 @@ from spyglass.spikesorting.v2.session_group import (
     ConcatenatedRecordingSelection,
 )
 from spyglass.spikesorting.v2.sorting import SortingSelection
-from spyglass.spikesorting.v2.utils import transaction_or_noop
 from spyglass.utils import SpyglassMixin, logger
 
 if TYPE_CHECKING:
@@ -546,7 +545,7 @@ class ConcatMemberCuration(
         row = ConcatMemberComputed(*computed)._asdict()
         curation_key = self._curation_key(key)
         member_key = {**curation_key, "member_index": int(key["member_index"])}
-        with transaction_or_noop(self.connection):
+        with self._safe_context():
             AnalysisNwbfile().add(
                 row["nwb_file_name"], row["analysis_file_name"]
             )

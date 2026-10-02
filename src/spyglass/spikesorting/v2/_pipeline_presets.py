@@ -816,10 +816,7 @@ def clone_pipeline_preset(
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.sorting import SorterParameters
-    from spyglass.spikesorting.v2.utils import (
-        _jsonable_blob,
-        transaction_or_noop,
-    )
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
 
     # One descriptor per stage. ``sorter`` is the per-sorter dispatch key (and
     # the extra ``SorterParameters`` primary-key column / ``execution_params``
@@ -961,7 +958,7 @@ def clone_pipeline_preset(
     # name collision and refused. The duplicate-content guard inside the table
     # ``insert`` separately refuses a derived row whose content matches a
     # DIFFERENT existing name (unless ``allow_duplicate_params``).
-    with transaction_or_noop(PreprocessingParameters.connection):
+    with PreprocessingParameters._safe_context():
         for name in touched:
             stage = stages[name]
             exec_params = stage.get("base_execution_params")

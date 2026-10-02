@@ -17,7 +17,6 @@ from spyglass.spikesorting.v2._source_resolution import (
     SourceLineage,
     correction_lineage_mismatch,
 )
-from spyglass.spikesorting.v2.utils import transaction_or_noop
 
 
 def insert_selection(table_cls, key: dict) -> dict:
@@ -26,6 +25,11 @@ def insert_selection(table_cls, key: dict) -> dict:
     The body of ``SortingSelection.insert_selection`` (see its docstring for
     the request fields and errors). ``table_cls`` is the ``SortingSelection``
     class; ``_find_existing_pk`` is called on it.
+
+    Duplicate-key recovery has no savepoint: it relies on the deterministic
+    primary key colliding on the master insert, the transaction's first
+    statement, before any part row is written. Keep the master insert first,
+    or the recovery would leave part rows inside a caller's transaction.
     """
     import datajoint as dj
 
@@ -178,7 +182,7 @@ def insert_selection(table_cls, key: dict) -> dict:
     #
     # This is sound because insert_selection OWNS the transaction for an
     # artifact-bound sort: the fail-fast check above REFUSES an artifact-bound
-    # call inside a caller's open transaction, so ``transaction_or_noop`` here
+    # call inside a caller's open transaction, so ``_safe_context()`` here
     # always opens AND commits the rows before this method returns and
     # releases the lock. The lock therefore always covers the commit window
     # (see test_insert_selection_rejects_artifact_link_in_ambient_transaction
@@ -196,7 +200,7 @@ def insert_selection(table_cls, key: dict) -> dict:
                 )
             )
         try:
-            with transaction_or_noop(table_cls.connection):
+            with table_cls._safe_context():
                 # allow_direct_insert: this helper IS the validation
                 # boundary.
                 table_cls.insert1(plan.master_row, allow_direct_insert=True)

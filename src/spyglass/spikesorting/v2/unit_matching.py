@@ -81,7 +81,6 @@ from spyglass.spikesorting.v2.session_group import SessionGroup  # noqa: F401
 from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
-    transaction_or_noop,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
@@ -1066,10 +1065,10 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 f"{len(pairs)} pairs but the computed n_pairs is {n_pairs}; "
                 "the pairs table is inconsistent."
             )
-        # transaction_or_noop keeps the registration + master + Pair inserts
+        # _safe_context() keeps the registration + master + Pair inserts
         # atomic even on a direct (non-populate) call; under tri-part populate
         # the framework transaction is already open and this is a no-op.
-        with transaction_or_noop(self.connection):
+        with self._safe_context():
             AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
             self.insert1(
                 {
@@ -1231,7 +1230,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         """
         master_rows, member_rows = _unit_match_readers.tracked_unit_rows(key)
 
-        with transaction_or_noop(self.connection):
+        with self._safe_context():
             self.insert(master_rows)
             self.Member.insert(member_rows)
 

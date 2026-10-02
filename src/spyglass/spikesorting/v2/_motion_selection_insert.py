@@ -163,6 +163,11 @@ def insert_estimate_selection_rows(
     this returns), the artifact's merge id is resolved before the
     transaction, and a duplicate-key race refetches the winner.
     ``table_cls`` is the ``MotionEstimateSelection`` class.
+
+    Duplicate-key recovery has no savepoint: it relies on the deterministic
+    primary key colliding on the master insert, the transaction's first
+    statement, before any part row is written. Keep the master insert first,
+    or the recovery would leave part rows inside a caller's transaction.
     """
     from contextlib import ExitStack
 
@@ -171,7 +176,6 @@ def insert_estimate_selection_rows(
     from spyglass.spikesorting.v2._db_locking import required_advisory_lock
     from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-    from spyglass.spikesorting.v2.utils import transaction_or_noop
 
     art_merge_id = None
     if artifact_detection_id is not None:
@@ -199,7 +203,7 @@ def insert_estimate_selection_rows(
                 )
             )
         try:
-            with transaction_or_noop(table_cls.connection):
+            with table_cls._safe_context():
                 table_cls.insert1(master_row, allow_direct_insert=True)
                 source_part.insert1(source_row)
                 if art_merge_id is not None:
