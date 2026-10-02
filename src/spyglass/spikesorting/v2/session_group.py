@@ -732,8 +732,8 @@ class ConcatenatedRecordingSelection(
         rejected rather than silently returned. Used by ``insert_selection`` for
         both the pre-insert lookup and the post-duplicate-key refetch.
         """
-        from spyglass.spikesorting.v2.exceptions import (
-            DuplicateSelectionError,
+        from spyglass.spikesorting.v2._selection_identity import (
+            existing_selection_pk,
         )
 
         lookup = {**identity, "member_set_hash": member_set_hash}
@@ -741,13 +741,11 @@ class ConcatenatedRecordingSelection(
             row["concat_recording_id"]
             for row in (cls & lookup).fetch("KEY", as_dict=True)
         }
-        bypassed = [
-            cid
-            for cid in master_ids
-            if cid != deterministic_concat_recording_id
-        ]
-        if bypassed:
-            raise DuplicateSelectionError(
+        return existing_selection_pk(
+            master_ids,
+            deterministic_concat_recording_id,
+            pk_field="concat_recording_id",
+            bypass_message=lambda bypassed: (
                 f"ConcatenatedRecordingSelection has {len(master_ids)} master "
                 f"row(s) for identity {identity} (member_set_hash "
                 f"{member_set_hash}) whose concat_recording_id is not the "
@@ -755,11 +753,7 @@ class ConcatenatedRecordingSelection(
                 f"{bypassed}. This is a non-deterministic selection row (a raw "
                 "insert or legacy non-content-addressed row); drop it and "
                 "re-insert via insert_selection."
-            )
-        return (
-            {"concat_recording_id": deterministic_concat_recording_id}
-            if master_ids
-            else None
+            ),
         )
 
 
