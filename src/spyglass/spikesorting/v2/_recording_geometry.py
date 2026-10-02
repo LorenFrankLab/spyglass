@@ -441,32 +441,6 @@ def classify_missing_geometry(locations) -> str:
     return "none"
 
 
-def _project(locations, axes):
-    """Take the two columns of ``locations`` the axis pair ``axes`` names.
-
-    One place decides what ``"xz"`` means, so the plane
-    :func:`select_distinct_plane` chose from the retained contacts and the
-    projection :func:`normalize_channel_locations` writes back for every
-    channel cannot drift apart.
-
-    Parameters
-    ----------
-    locations : array_like
-        ``(n_contacts, 3)`` contact positions.
-    axes : str
-        Two of ``"x"``, ``"y"``, ``"z"``, e.g. ``"xz"``.
-
-    Returns
-    -------
-    numpy.ndarray
-        ``(n_contacts, 2)`` positions in the order ``axes`` gives.
-    """
-    import numpy as np
-
-    loc = np.asarray(locations, dtype=float)
-    return loc[:, ["xyz".index(axis) for axis in axes]]
-
-
 def _all_rows_distinct(positions) -> bool:
     """True when no two rows of ``positions`` coincide (to 6 decimals)."""
     import numpy as np
@@ -537,6 +511,7 @@ def select_distinct_plane(locations):
         non-finite.
     """
     import numpy as np
+    from probeinterface import select_axes
 
     loc = np.asarray(locations, dtype=float)
     if loc.ndim != 2 or loc.shape[1] != 3:
@@ -546,7 +521,7 @@ def select_distinct_plane(locations):
         )
     assert_finite_contact_positions(loc)
     for axes in _CANDIDATE_PLANES:
-        positions = _project(loc, axes)
+        positions = select_axes(loc, axes)
         if _all_rows_distinct(positions):
             return axes, positions
     return None
@@ -662,6 +637,7 @@ def normalize_channel_locations(recording, *, channel_ids=None):
         ``rel_*`` column) -- on any sliced channel, not just a retained one.
     """
     import numpy as np
+    from probeinterface import select_axes
 
     from spyglass.utils import logger
 
@@ -717,7 +693,7 @@ def normalize_channel_locations(recording, *, channel_ids=None):
             axes,
         )
     # The projection the retained contacts chose, applied to every channel.
-    recording.set_channel_locations(_project(positions_3d, axes))
+    recording.set_channel_locations(select_axes(positions_3d, axes))
     return recording
 
 
