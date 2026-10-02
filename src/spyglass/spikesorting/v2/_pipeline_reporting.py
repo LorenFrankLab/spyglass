@@ -76,16 +76,36 @@ def describe_parameter_rows() -> "pd.DataFrame":
     """
     import pandas as pd
 
-    from spyglass.spikesorting.v2._parameter_identity import (
-        parameter_fingerprint,
-        short_fingerprint,
-    )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
-    from spyglass.spikesorting.v2.recording import PreprocessingParameters
-    from spyglass.spikesorting.v2.sorting import SorterParameters
-    from spyglass.spikesorting.v2.utils import _jsonable_blob
+    preproc_use, artifact_use, sorter_use = _preset_parameter_use()
+    records: list[dict] = [
+        *_preprocessing_parameter_records(preproc_use),
+        *_artifact_parameter_records(artifact_use),
+        *_sorter_parameter_records(sorter_use),
+        *_downstream_parameter_records(),
+    ]
+    _annotate_duplicate_parameter_records(records)
 
-    # Which presets reference each parameter row, per stage.
+    frame = pd.DataFrame(
+        [{c: rec.get(c) for c in _PARAMETER_ROW_COLUMNS} for rec in records],
+        columns=_PARAMETER_ROW_COLUMNS,
+    )
+    return frame.sort_values(["table", "sorter", "parameter_name"]).reset_index(
+        drop=True
+    )
+
+
+def _preset_parameter_use() -> tuple[dict, dict, dict]:
+    """Which presets reference each parameter row, per stage.
+
+    Returns
+    -------
+    preproc_use : dict[str, list[str]]
+        Preprocessing params name to preset names.
+    artifact_use : dict[str, list[str]]
+        Artifact-detection params name to preset names.
+    sorter_use : dict[tuple[str, str], list[str]]
+        ``(sorter, sorter_params_name)`` to preset names.
+    """
     preproc_use: dict[str, list[str]] = {}
     artifact_use: dict[str, list[str]] = {}
     sorter_use: dict[tuple[str, str], list[str]] = {}
@@ -99,75 +119,92 @@ def describe_parameter_rows() -> "pd.DataFrame":
         sorter_use.setdefault(
             (preset.sorter, preset.sorter_params_name), []
         ).append(preset_name)
+    return preproc_use, artifact_use, sorter_use
+
+
+def _str_axis(used_by: list[str], attr: str) -> str:
+    """Distinct non-blank preset values for ``attr``, comma-joined."""
+    vals = {getattr(_PIPELINE_PRESETS[u], attr) for u in used_by}
+    vals.discard("")
+    vals.discard(None)
+    return ", ".join(sorted(vals))
+
+
+def _num_axis(used_by: list[str], attr: str):
+    """Return the single agreed preset value for a numeric ``attr``, else None."""
+    vals = {getattr(_PIPELINE_PRESETS[u], attr) for u in used_by}
+    vals.discard(None)
+    return next(iter(vals)) if len(vals) == 1 else None
+
+
+def _num(value) -> str:
+    """Format a parameter value compactly for a row summary."""
+    # describe reads extra="allow" blobs, so a knob can legitimately be a
+    # string / list / dict. Format numerics compactly, but fall back to
+    # str() instead of letting one odd user row raise and take down the
+    # whole catalog.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value)
+    return f"{value:g}"
+
+
+def _preproc_summary(params: dict) -> str:
+    """One-line summary of a ``PreprocessingParameters`` row."""
+    band = params.get("bandpass_filter")
+    seg = params.get("min_segment_length")
+    seg_str = f", min_segment {_num(seg)} s" if seg is not None else ""
+    if band:
+        return (
+            f"bandpass {_num(band['freq_min'])}-"
+            f"{_num(band['freq_max'])} Hz" + seg_str
+        )
+    return "no bandpass" + seg_str
+
+
+def _artifact_summary(params: dict) -> str:
+    """One-line summary of an ``ArtifactDetectionParameters`` row."""
+    if not params.get("detect", True):
+        return "artifact detection off"
+    amp = params.get("amplitude_threshold_uv")
+    zscore = params.get("zscore_threshold")
+    prop = params.get("proportion_above_threshold")
+    thresholds = []
+    if amp is not None:
+        thresholds.append(f"{_num(amp)} uV")
+    if zscore is not None:
+        thresholds.append(f"{_num(zscore)} z-score")
+    threshold = " + ".join(thresholds) if thresholds else "no threshold"
+    prop_str = (
+        f" @ {_num(prop)} proportion-above-threshold"
+        if prop is not None
+        else ""
+    )
+    return threshold + prop_str
+
+
+def _sorter_summary(sorter: str, params: dict) -> str:
+    """One-line summary of a ``SorterParameters`` row."""
+    bits = [sorter]
+    threshold = params.get("detect_threshold")
+    if threshold is not None:
+        bits.append(f"detect_threshold {_num(threshold)}")
+    radius = params.get("adjacency_radius")
+    if radius is not None:
+        bits.append(f"adjacency_radius {_num(radius)} um")
+    return ", ".join(bits)
+
+
+def _preprocessing_parameter_records(
+    preproc_use: dict[str, list[str]],
+) -> list[dict]:
+    """Catalog records for every ``PreprocessingParameters`` row."""
+    from spyglass.spikesorting.v2._parameter_identity import (
+        parameter_fingerprint,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
 
     shipped_preproc = {r[0] for r in PreprocessingParameters._DEFAULT_CONTENTS}
-    shipped_artifact = {
-        r[0] for r in ArtifactDetectionParameters._DEFAULT_CONTENTS
-    }
-    shipped_sorter = {(r[0], r[1]) for r in SorterParameters._DEFAULT_CONTENTS}
-
-    def _str_axis(used_by: list[str], attr: str) -> str:
-        """Distinct non-blank preset values for ``attr``, comma-joined."""
-        vals = {getattr(_PIPELINE_PRESETS[u], attr) for u in used_by}
-        vals.discard("")
-        vals.discard(None)
-        return ", ".join(sorted(vals))
-
-    def _num_axis(used_by: list[str], attr: str):
-        """Return the single agreed preset value for a numeric ``attr``, else None."""
-        vals = {getattr(_PIPELINE_PRESETS[u], attr) for u in used_by}
-        vals.discard(None)
-        return next(iter(vals)) if len(vals) == 1 else None
-
-    def _num(value) -> str:
-        # describe reads extra="allow" blobs, so a knob can legitimately be a
-        # string / list / dict. Format numerics compactly, but fall back to
-        # str() instead of letting one odd user row raise and take down the
-        # whole catalog.
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            return str(value)
-        return f"{value:g}"
-
-    def _preproc_summary(params: dict) -> str:
-        band = params.get("bandpass_filter")
-        seg = params.get("min_segment_length")
-        seg_str = f", min_segment {_num(seg)} s" if seg is not None else ""
-        if band:
-            return (
-                f"bandpass {_num(band['freq_min'])}-"
-                f"{_num(band['freq_max'])} Hz" + seg_str
-            )
-        return "no bandpass" + seg_str
-
-    def _artifact_summary(params: dict) -> str:
-        if not params.get("detect", True):
-            return "artifact detection off"
-        amp = params.get("amplitude_threshold_uv")
-        zscore = params.get("zscore_threshold")
-        prop = params.get("proportion_above_threshold")
-        thresholds = []
-        if amp is not None:
-            thresholds.append(f"{_num(amp)} uV")
-        if zscore is not None:
-            thresholds.append(f"{_num(zscore)} z-score")
-        threshold = " + ".join(thresholds) if thresholds else "no threshold"
-        prop_str = (
-            f" @ {_num(prop)} proportion-above-threshold"
-            if prop is not None
-            else ""
-        )
-        return threshold + prop_str
-
-    def _sorter_summary(sorter: str, params: dict) -> str:
-        bits = [sorter]
-        threshold = params.get("detect_threshold")
-        if threshold is not None:
-            bits.append(f"detect_threshold {_num(threshold)}")
-        radius = params.get("adjacency_radius")
-        if radius is not None:
-            bits.append(f"adjacency_radius {_num(radius)} um")
-        return ", ".join(bits)
-
     records: list[dict] = []
     for row in PreprocessingParameters.fetch(as_dict=True):
         params = _jsonable_blob(row["params"])
@@ -197,6 +234,23 @@ def describe_parameter_rows() -> "pd.DataFrame":
                 "summary": _preproc_summary(params),
             }
         )
+    return records
+
+
+def _artifact_parameter_records(
+    artifact_use: dict[str, list[str]],
+) -> list[dict]:
+    """Catalog records for every ``ArtifactDetectionParameters`` row."""
+    from spyglass.spikesorting.v2._parameter_identity import (
+        parameter_fingerprint,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
+
+    shipped_artifact = {
+        r[0] for r in ArtifactDetectionParameters._DEFAULT_CONTENTS
+    }
+    records: list[dict] = []
     for row in ArtifactDetectionParameters.fetch(as_dict=True):
         params = _jsonable_blob(row["params"])
         used = sorted(
@@ -227,6 +281,21 @@ def describe_parameter_rows() -> "pd.DataFrame":
                 "summary": _artifact_summary(params),
             }
         )
+    return records
+
+
+def _sorter_parameter_records(
+    sorter_use: dict[tuple[str, str], list[str]],
+) -> list[dict]:
+    """Catalog records for every ``SorterParameters`` row."""
+    from spyglass.spikesorting.v2._parameter_identity import (
+        parameter_fingerprint,
+    )
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
+
+    shipped_sorter = {(r[0], r[1]) for r in SorterParameters._DEFAULT_CONTENTS}
+    records: list[dict] = []
     for row in SorterParameters.fetch(as_dict=True):
         params = _jsonable_blob(row["params"])
         key = (row["sorter"], row["sorter_params_name"])
@@ -265,15 +334,21 @@ def describe_parameter_rows() -> "pd.DataFrame":
                 "summary": _sorter_summary(row["sorter"], params),
             }
         )
+    return records
 
-    # The remaining parameter Lookups are not referenced by the pipeline
-    # PRESETS (they are resolved downstream of preset selection, used only by
-    # cross-session matching, or chosen per run as a motion recipe), so the
-    # preset-fold columns (probe_type / sampling_rate_hz / adjacency_radius_um /
-    # used_by_pipeline_presets / recommendation_status) stay blank. They ARE
-    # content-addressed by name and user-populatable, so listing them keeps this
-    # report aligned with the full ``initialize_v2_defaults`` surface (ten
-    # Lookups, not three).
+
+def _downstream_parameter_records() -> list[dict]:
+    """Catalog records for the parameter Lookups no preset references.
+
+    The remaining parameter Lookups are not referenced by the pipeline
+    PRESETS (they are resolved downstream of preset selection, used only by
+    cross-session matching, or chosen per run as a motion recipe), so the
+    preset-fold columns (probe_type / sampling_rate_hz / adjacency_radius_um /
+    used_by_pipeline_presets / recommendation_status) stay blank. They ARE
+    content-addressed by name and user-populatable, so listing them keeps this
+    report aligned with the full ``initialize_v2_defaults`` surface (ten
+    Lookups, not three).
+    """
     from spyglass.spikesorting.v2.metric_curation import (
         AutoCurationRules,
         QualityMetricParameters,
@@ -285,57 +360,17 @@ def describe_parameter_rows() -> "pd.DataFrame":
     )
     from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
 
-    def _append_simple_param_records(
-        table, table_name, name_attr, shipped, summarize, extra_content=None
-    ):
-        """List a name-keyed param Lookup with preset-fold columns blank.
-
-        ``shipped`` is the set of names the table's default catalog ships
-        (each caller knows its table's catalog). ``extra_content(row)`` folds
-        part-table content (e.g. ``AutoCurationRules.Rule`` rows) into the
-        fingerprint so a name-keyed master with identical scalar columns but
-        different part rows is not falsely flagged as a content duplicate.
-        """
-        for simple_row in table.fetch(as_dict=True):
-            version = int(simple_row.get("params_schema_version", 0) or 0)
-            content = {
-                column: _jsonable_blob(value)
-                for column, value in simple_row.items()
-                if column != name_attr
-            }
-            if extra_content is not None:
-                content["__part_content__"] = extra_content(simple_row)
-            records.append(
-                {
-                    "table": table_name,
-                    "parameter_name": simple_row[name_attr],
-                    "sorter": "",
-                    "probe_type": None,
-                    "sampling_rate_hz": None,
-                    "adjacency_radius_um": None,
-                    "params_schema_version": version,
-                    "_fp": parameter_fingerprint(
-                        table_name,
-                        params=content,
-                        params_schema_version=version,
-                        job_kwargs=None,
-                    ),
-                    "is_shipped_default": simple_row[name_attr] in shipped,
-                    "recommendation_status": None,
-                    "used_by_pipeline_presets": [],
-                    "summary": summarize(simple_row),
-                }
-            )
-
-    _append_simple_param_records(
+    records: list[dict] = []
+    records += _simple_parameter_records(
         AnalyzerWaveformParameters,
         "AnalyzerWaveformParameters",
         "waveform_params_name",
         {r[0] for r in AnalyzerWaveformParameters._DEFAULT_CONTENTS},
         lambda r: "",
     )
-    _append_simple_param_records(
+    records += _simple_parameter_records(
         QualityMetricParameters,
         "QualityMetricParameters",
         "metric_params_name",
@@ -345,31 +380,7 @@ def describe_parameter_rows() -> "pd.DataFrame":
         },
         lambda r: f"{len(_jsonable_blob(r.get('metric_names')) or [])} metrics",
     )
-
-    def _autocuration_rule_content(rules_row):
-        # The Rule part rows define the named ruleset's content, so fold them
-        # (ordered by rule_index) into the fingerprint -- two rulesets with the
-        # same master columns but different Rule rows are NOT duplicates.
-        # Exclude the auto_curation_rules_name FK (it IS the name being
-        # abstracted away) so two IDENTICAL rule sets under different names share
-        # a fingerprint and surface as duplicate_of.
-        return [
-            {
-                k: _jsonable_blob(v)
-                for k, v in rule.items()
-                if k != "auto_curation_rules_name"
-            }
-            for rule in (
-                AutoCurationRules.Rule
-                & {
-                    "auto_curation_rules_name": rules_row[
-                        "auto_curation_rules_name"
-                    ]
-                }
-            ).fetch(as_dict=True, order_by="rule_index")
-        ]
-
-    _append_simple_param_records(
+    records += _simple_parameter_records(
         AutoCurationRules,
         "AutoCurationRules",
         "auto_curation_rules_name",
@@ -380,43 +391,28 @@ def describe_parameter_rows() -> "pd.DataFrame":
         lambda r: f"merge preset {r.get('auto_merge_preset', '')!r}",
         extra_content=_autocuration_rule_content,
     )
-    _append_simple_param_records(
+    records += _simple_parameter_records(
         MatcherParameters,
         "MatcherParameters",
         "matcher_params_name",
         {r["matcher_params_name"] for r in MatcherParameters._default_rows()},
         lambda r: f"matcher {r.get('matcher', '')!r}",
     )
-
-    def _motion_estimation_summary(row) -> str:
-        params = _jsonable_blob(row["params"])
-        return (
-            f"preset {params.get('preset')!r}, max_gap_s "
-            f"{_num(params.get('max_gap_s'))}"
-        )
-
-    def _motion_interpolation_summary(row) -> str:
-        params = _jsonable_blob(row["params"])
-        return (
-            f"{params.get('spatial_interpolation_method')}, border_mode "
-            f"{params.get('border_mode')!r}"
-        )
-
-    _append_simple_param_records(
+    records += _simple_parameter_records(
         MotionEstimationParameters,
         "MotionEstimationParameters",
         "motion_estimation_params_name",
         {r[0] for r in MotionEstimationParameters._DEFAULT_CONTENTS},
         _motion_estimation_summary,
     )
-    _append_simple_param_records(
+    records += _simple_parameter_records(
         MotionInterpolationParameters,
         "MotionInterpolationParameters",
         "motion_interpolation_params_name",
         {r[0] for r in MotionInterpolationParameters._DEFAULT_CONTENTS},
         _motion_interpolation_summary,
     )
-    _append_simple_param_records(
+    records += _simple_parameter_records(
         MotionCorrectionParameters,
         "MotionCorrectionParameters",
         "motion_correction_params_name",
@@ -426,9 +422,117 @@ def describe_parameter_rows() -> "pd.DataFrame":
             f"{r['motion_interpolation_params_name']}"
         ),
     )
+    return records
 
-    # Duplicate-content detection: rows sharing a fingerprint within the same
-    # (table, sorter) scope are content duplicates under different names.
+
+def _simple_parameter_records(
+    table, table_name, name_attr, shipped, summarize, extra_content=None
+) -> list[dict]:
+    """List a name-keyed param Lookup with preset-fold columns blank.
+
+    ``shipped`` is the set of names the table's default catalog ships
+    (each caller knows its table's catalog). ``extra_content(row)`` folds
+    part-table content (e.g. ``AutoCurationRules.Rule`` rows) into the
+    fingerprint so a name-keyed master with identical scalar columns but
+    different part rows is not falsely flagged as a content duplicate.
+    """
+    from spyglass.spikesorting.v2._parameter_identity import (
+        parameter_fingerprint,
+    )
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
+
+    records: list[dict] = []
+    for simple_row in table.fetch(as_dict=True):
+        version = int(simple_row.get("params_schema_version", 0) or 0)
+        content = {
+            column: _jsonable_blob(value)
+            for column, value in simple_row.items()
+            if column != name_attr
+        }
+        if extra_content is not None:
+            content["__part_content__"] = extra_content(simple_row)
+        records.append(
+            {
+                "table": table_name,
+                "parameter_name": simple_row[name_attr],
+                "sorter": "",
+                "probe_type": None,
+                "sampling_rate_hz": None,
+                "adjacency_radius_um": None,
+                "params_schema_version": version,
+                "_fp": parameter_fingerprint(
+                    table_name,
+                    params=content,
+                    params_schema_version=version,
+                    job_kwargs=None,
+                ),
+                "is_shipped_default": simple_row[name_attr] in shipped,
+                "recommendation_status": None,
+                "used_by_pipeline_presets": [],
+                "summary": summarize(simple_row),
+            }
+        )
+    return records
+
+
+def _autocuration_rule_content(rules_row) -> list[dict]:
+    """The ruleset's ``AutoCurationRules.Rule`` rows, for its fingerprint."""
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
+
+    # The Rule part rows define the named ruleset's content, so fold them
+    # (ordered by rule_index) into the fingerprint -- two rulesets with the
+    # same master columns but different Rule rows are NOT duplicates.
+    # Exclude the auto_curation_rules_name FK (it IS the name being
+    # abstracted away) so two IDENTICAL rule sets under different names share
+    # a fingerprint and surface as duplicate_of.
+    return [
+        {
+            k: _jsonable_blob(v)
+            for k, v in rule.items()
+            if k != "auto_curation_rules_name"
+        }
+        for rule in (
+            AutoCurationRules.Rule
+            & {
+                "auto_curation_rules_name": rules_row[
+                    "auto_curation_rules_name"
+                ]
+            }
+        ).fetch(as_dict=True, order_by="rule_index")
+    ]
+
+
+def _motion_estimation_summary(row) -> str:
+    """One-line summary of a ``MotionEstimationParameters`` row."""
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
+
+    params = _jsonable_blob(row["params"])
+    return (
+        f"preset {params.get('preset')!r}, max_gap_s "
+        f"{_num(params.get('max_gap_s'))}"
+    )
+
+
+def _motion_interpolation_summary(row) -> str:
+    """One-line summary of a ``MotionInterpolationParameters`` row."""
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
+
+    params = _jsonable_blob(row["params"])
+    return (
+        f"{params.get('spatial_interpolation_method')}, border_mode "
+        f"{params.get('border_mode')!r}"
+    )
+
+
+def _annotate_duplicate_parameter_records(records: list[dict]) -> None:
+    """Fill each record's ``duplicate_of``, ``fingerprint``, ``name_warnings``.
+
+    Rows sharing a fingerprint within the same ``(table, sorter)`` scope are
+    content duplicates under different names.
+    """
+    from spyglass.spikesorting.v2._parameter_identity import short_fingerprint
+
     names_by_fp: dict[tuple[str, str, str], list[str]] = {}
     for rec in records:
         names_by_fp.setdefault(
@@ -449,14 +553,6 @@ def describe_parameter_rows() -> "pd.DataFrame":
         ):
             warnings.append("non-catalog row using the 'franklab' name")
         rec["name_warnings"] = "; ".join(warnings)
-
-    frame = pd.DataFrame(
-        [{c: rec.get(c) for c in _PARAMETER_ROW_COLUMNS} for rec in records],
-        columns=_PARAMETER_ROW_COLUMNS,
-    )
-    return frame.sort_values(["table", "sorter", "parameter_name"]).reset_index(
-        drop=True
-    )
 
 
 def _content_equal(left, right) -> bool:

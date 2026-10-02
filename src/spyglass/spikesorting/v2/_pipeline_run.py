@@ -459,78 +459,119 @@ def _build_run_source(
     PipelineInputError
         If concat manual exclusions name an absent member.
     """
+    if not is_concat:
+        return _build_single_session_source(
+            source_inputs=source_inputs,
+            bundle=bundle,
+            manual_excluded_times=manual_excluded_times,
+            run_summary=run_summary,
+            stage_seconds=stage_seconds,
+        )
+    return _build_concat_source(
+        source_inputs=source_inputs,
+        bundle=bundle,
+        manual_excluded_times=manual_excluded_times,
+        run_summary=run_summary,
+        stage_seconds=stage_seconds,
+    )
+
+
+def _build_single_session_source(
+    *,
+    source_inputs: dict,
+    bundle,
+    manual_excluded_times,
+    run_summary: dict,
+    stage_seconds: dict,
+) -> _RunSource:
+    """Select and populate the ``Recording`` and its artifact detection.
+
+    The artifact-detection stage is ``"skipped"`` when the preset runs none.
+    Parameters and return as in :func:`_build_run_source`.
+    """
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
     )
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,
     )
 
-    if not is_concat:
-        nwb_file_name = source_inputs["nwb_file_name"]
-        sort_group_id = source_inputs["sort_group_id"]
-        # Single-session: recording (+ optional artifact detection).
-        run_summary["source_mode"] = "single_session"
-        recording_key = RecordingSelection.insert_selection(
+    nwb_file_name = source_inputs["nwb_file_name"]
+    sort_group_id = source_inputs["sort_group_id"]
+    # Single-session: recording (+ optional artifact detection).
+    run_summary["source_mode"] = "single_session"
+    recording_key = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": int(sort_group_id),
+            "interval_list_name": source_inputs["interval_list_name"],
+            "preprocessing_params_name": bundle.preprocessing_params_name,
+            "team_name": source_inputs["team_name"],
+        }
+    )
+    (
+        _,
+        run_summary["recording_status"],
+        stage_seconds["recording"],
+    ) = _run_stage(
+        "recording",
+        bool(Recording & recording_key),
+        lambda: _populate_once(Recording, recording_key),
+        run_summary,
+    )
+    run_summary["recording_id"] = recording_key["recording_id"]
+
+    # A None artifact name means the preset runs no artifact detection: skip
+    # the RecordingArtifactSelection/populate stage and sort straight off the
+    # recording (no ArtifactDetectionSource row), the form concat also uses.
+    if bundle.artifact_detection_params_name is None:
+        artifact_detection_id = None
+        run_summary["artifact_detection_status"] = "skipped"
+        stage_seconds["artifact_detection"] = 0.0
+    else:
+        artifact_detection_key = RecordingArtifactSelection.insert_selection(
             {
-                "nwb_file_name": nwb_file_name,
-                "sort_group_id": int(sort_group_id),
-                "interval_list_name": source_inputs["interval_list_name"],
-                "preprocessing_params_name": bundle.preprocessing_params_name,
-                "team_name": source_inputs["team_name"],
+                "recording_id": recording_key["recording_id"],
+                "artifact_detection_params_name": bundle.artifact_detection_params_name,
+                "manual_excluded_times": manual_excluded_times,
             }
         )
         (
             _,
-            run_summary["recording_status"],
-            stage_seconds["recording"],
+            run_summary["artifact_detection_status"],
+            stage_seconds["artifact_detection"],
         ) = _run_stage(
-            "recording",
-            bool(Recording & recording_key),
-            lambda: _populate_once(Recording, recording_key),
+            "artifact_detection",
+            bool(RecordingArtifactDetection & artifact_detection_key),
+            lambda: _populate_once(
+                RecordingArtifactDetection, artifact_detection_key
+            ),
             run_summary,
         )
-        run_summary["recording_id"] = recording_key["recording_id"]
+        artifact_detection_id = artifact_detection_key["artifact_detection_id"]
+    run_summary["artifact_detection_id"] = artifact_detection_id
+    source = {
+        "recording_id": recording_key["recording_id"],
+        "artifact_detection_id": artifact_detection_id,
+    }
+    return _RunSource(source, None)
 
-        # A None artifact name means the preset runs no artifact detection: skip
-        # the RecordingArtifactSelection/populate stage and sort straight off the
-        # recording (no ArtifactDetectionSource row), the form concat also uses.
-        if bundle.artifact_detection_params_name is None:
-            artifact_detection_id = None
-            run_summary["artifact_detection_status"] = "skipped"
-            stage_seconds["artifact_detection"] = 0.0
-        else:
-            artifact_detection_key = RecordingArtifactSelection.insert_selection(
-                {
-                    "recording_id": recording_key["recording_id"],
-                    "artifact_detection_params_name": bundle.artifact_detection_params_name,
-                    "manual_excluded_times": manual_excluded_times,
-                }
-            )
-            (
-                _,
-                run_summary["artifact_detection_status"],
-                stage_seconds["artifact_detection"],
-            ) = _run_stage(
-                "artifact_detection",
-                bool(RecordingArtifactDetection & artifact_detection_key),
-                lambda: _populate_once(
-                    RecordingArtifactDetection, artifact_detection_key
-                ),
-                run_summary,
-            )
-            artifact_detection_id = artifact_detection_key[
-                "artifact_detection_id"
-            ]
-        run_summary["artifact_detection_id"] = artifact_detection_id
-        source = {
-            "recording_id": recording_key["recording_id"],
-            "artifact_detection_id": artifact_detection_id,
-        }
-        return _RunSource(source, None)
+
+def _build_concat_source(
+    *,
+    source_inputs: dict,
+    bundle,
+    manual_excluded_times,
+    run_summary: dict,
+    stage_seconds: dict,
+) -> _RunSource:
+    """Build each member's recording and artifact mask, then the concat.
+
+    Parameters, return and errors as in :func:`_build_run_source`.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
     # Member detections are inputs to the masked concat.
     run_summary["source_mode"] = "concat"
@@ -564,6 +605,75 @@ def _build_run_source(
         raise PipelineInputError(
             f"Manual exclusions name absent concat members: {sorted(unknown_members)}"
         )
+    member_recording_keys = _build_member_recordings(
+        members, bundle, run_summary, stage_seconds
+    )
+    artifact_ids = _build_member_artifacts(
+        members,
+        member_recording_keys,
+        bundle,
+        manual_excluded_times,
+        run_summary,
+        stage_seconds,
+    )
+
+    concat_key = ConcatenatedRecordingSelection.insert_selection(
+        {
+            "session_group_owner": concat_session_group_owner,
+            "session_group_name": concat_session_group_name,
+            "preprocessing_params_name": bundle.preprocessing_params_name,
+        },
+        artifact_detection_ids=artifact_ids,
+    )
+    (
+        _,
+        run_summary["concat_recording_status"],
+        stage_seconds["concat_recording"],
+    ) = _run_stage(
+        "concat_recording",
+        bool(ConcatenatedRecording & concat_key),
+        lambda: _populate_once(ConcatenatedRecording, concat_key),
+        run_summary,
+    )
+    run_summary["concat_recording_id"] = concat_key["concat_recording_id"]
+    concat_row = (ConcatenatedRecording & concat_key).fetch1()
+    valid_duration = sum(
+        end - start for start, end in concat_row["obs_intervals"]
+    )
+    run_summary["artifact_masked_duration_s"] = float(
+        concat_row["total_duration_s"] - valid_duration
+    )
+    source = {"concat_recording_id": concat_key["concat_recording_id"]}
+    return _RunSource(source, dict(concat_key))
+
+
+def _build_member_recordings(
+    members: list[dict],
+    bundle,
+    run_summary: dict,
+    stage_seconds: dict,
+) -> list[dict]:
+    """Select and populate every concat member's ``Recording`` as one stage.
+
+    Parameters
+    ----------
+    members : list[dict]
+        The ``SessionGroup.Member`` rows, in ``member_index`` order.
+    bundle : _PipelinePreset
+        The validated preset.
+    run_summary, stage_seconds : dict
+        The run's accumulating summary and per-stage seconds (mutated).
+
+    Returns
+    -------
+    list[dict]
+        The members' ``RecordingSelection`` keys, in member order.
+    """
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+
     member_recording_keys = [
         RecordingSelection.insert_selection(
             {
@@ -595,6 +705,46 @@ def _build_run_source(
     run_summary["member_recording_ids"] = [
         key["recording_id"] for key in member_recording_keys
     ]
+    return member_recording_keys
+
+
+def _build_member_artifacts(
+    members: list[dict],
+    member_recording_keys: list[dict],
+    bundle,
+    manual_excluded_times,
+    run_summary: dict,
+    stage_seconds: dict,
+) -> dict:
+    """Select and populate every member's artifact detection as one stage.
+
+    Records each member's detection id, status and masked duration in
+    ``run_summary["member_artifacts"]``. The stage is ``"skipped"`` when the
+    preset runs no artifact detection.
+
+    Parameters
+    ----------
+    members : list[dict]
+        The ``SessionGroup.Member`` rows, in ``member_index`` order.
+    member_recording_keys : list[dict]
+        The members' ``RecordingSelection`` keys, in the same order.
+    bundle, manual_excluded_times
+        As validated by :func:`_validate_run_request` (exclusions keyed by
+        ``member_index``).
+    run_summary, stage_seconds : dict
+        The run's accumulating summary and per-stage seconds (mutated).
+
+    Returns
+    -------
+    dict
+        ``member_index`` to ``artifact_detection_id`` (``None`` without
+        artifact detection), the concat selection's member masks.
+    """
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
 
     artifact_ids = {int(member["member_index"]): None for member in members}
     run_summary["member_artifacts"] = []
@@ -667,35 +817,7 @@ def _build_run_source(
             _populate_member_artifacts,
             run_summary,
         )
-
-    concat_key = ConcatenatedRecordingSelection.insert_selection(
-        {
-            "session_group_owner": concat_session_group_owner,
-            "session_group_name": concat_session_group_name,
-            "preprocessing_params_name": bundle.preprocessing_params_name,
-        },
-        artifact_detection_ids=artifact_ids,
-    )
-    (
-        _,
-        run_summary["concat_recording_status"],
-        stage_seconds["concat_recording"],
-    ) = _run_stage(
-        "concat_recording",
-        bool(ConcatenatedRecording & concat_key),
-        lambda: _populate_once(ConcatenatedRecording, concat_key),
-        run_summary,
-    )
-    run_summary["concat_recording_id"] = concat_key["concat_recording_id"]
-    concat_row = (ConcatenatedRecording & concat_key).fetch1()
-    valid_duration = sum(
-        end - start for start, end in concat_row["obs_intervals"]
-    )
-    run_summary["artifact_masked_duration_s"] = float(
-        concat_row["total_duration_s"] - valid_duration
-    )
-    source = {"concat_recording_id": concat_key["concat_recording_id"]}
-    return _RunSource(source, dict(concat_key))
+    return artifact_ids
 
 
 def _run_motion_estimate(
@@ -1251,8 +1373,6 @@ def run_v2_pipeline(
     # preset, an incomplete input mode or a contradictory motion request then
     # fails fast with PipelineInputError even when the database is offline,
     # rather than an opaque connection error.
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
-
     is_concat, bundle, manual_excluded_times, source_inputs = (
         _validate_run_request(
             "run_v2_pipeline",
@@ -1274,21 +1394,12 @@ def run_v2_pipeline(
     # requested without the optional packages installed -- otherwise the missing
     # install would surface only as an opaque import error after a full sort.
     if build_figpack_view:
-        import importlib.util
+        _assert_figpack_installed()
 
-        from spyglass.spikesorting.v2._figpack_curation import (
-            FIGPACK_INSTALL_HINT,
-        )
-
-        if (
-            importlib.util.find_spec("figpack") is None
-            or importlib.util.find_spec("figpack_spike_sorting") is None
-        ):
-            raise PipelineInputError(
-                "run_v2_pipeline: build_figpack_view=True but the FigPack "
-                f"packages are not installed. {FIGPACK_INSTALL_HINT}"
-            )
-
+    # Activate the table schemas every run stage uses here, after the DB-free
+    # checks and before preflight or any populate, so a module that cannot
+    # import fails the run before any compute. The stage helpers below import
+    # the names they use.
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import (
         CONCAT_MERGE_GATE_MESSAGE,
@@ -1360,66 +1471,21 @@ def run_v2_pipeline(
     run_summary["stage_seconds"] = stage_seconds
     warnings_list: list[str] = list(preflight_warnings)
 
-    def _curation_merge_id(curation_key):
-        """Return one merge id, or the intentional concat ``None``."""
-        merge_ids = (SpikeSortingOutput.CurationV2 & curation_key).fetch(
-            "merge_id"
-        )
-        if len(merge_ids) == 1:
-            return merge_ids[0]
-        if len(merge_ids) > 1:
-            raise ValueError(
-                "run_v2_pipeline: CurationV2 has multiple "
-                f"SpikeSortingOutput rows for {curation_key}."
-            )
-        if not is_concat:
-            raise ValueError(
-                "run_v2_pipeline: single-session CurationV2 is missing its "
-                f"SpikeSortingOutput registration for {curation_key}."
-            )
-        warning = CONCAT_MERGE_GATE_MESSAGE.format(
-            sorting_id=curation_key["sorting_id"]
-        )
-        if warning not in warnings_list:
-            warnings_list.append(warning)
-        return None
-
-    def _concat_member_merge_ids(curation_key) -> dict[int, Any]:
-        """Return the complete frozen-member-index to merge-id mapping."""
-        rows = (
-            SpikeSortingOutput.ConcatMemberCuration * ConcatMemberCuration
-            & curation_key
-        ).fetch("merge_id", "member_index", as_dict=True)
-        return {int(row["member_index"]): row["merge_id"] for row in rows}
-
     # The scientific setup states the rows the run's stages execute for every
     # sort group its sort reads (a concat's members, in member order).
     from spyglass.spikesorting.v2._pipeline_preflight import (
         describe_scientific_setup,
     )
 
-    if is_concat:
-        from spyglass.spikesorting.v2.session_group import SessionGroup
-
-        group_keys = (
-            SessionGroup.Member
-            & {
-                "session_group_owner": concat_session_group_owner,
-                "session_group_name": concat_session_group_name,
-            }
-        ).fetch(
-            "nwb_file_name",
-            "sort_group_id",
-            as_dict=True,
-            order_by="member_index",
-        )
-    else:
-        group_keys = [
-            {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
-        ]
     run_summary["scientific_config"] = describe_scientific_setup(
         bundle,
-        group_keys,
+        _run_sort_group_keys(
+            is_concat,
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            concat_session_group_owner=concat_session_group_owner,
+            concat_session_group_name=concat_session_group_name,
+        ),
         run_summary["sorter_config"],
         manual_excluded_times=manual_excluded_times,
         concat=is_concat,
@@ -1452,9 +1518,240 @@ def run_v2_pipeline(
             corrected = _run_motion_correction(
                 estimate_key, motion_recipe, run_summary, stage_seconds
             )
+    sorting_key, n_units = _run_sorting_stage(
+        source.selection_fields,
+        corrected,
+        bundle,
+        require_units=require_units,
+        run_summary=run_summary,
+        stage_seconds=stage_seconds,
+        warnings_list=warnings_list,
+    )
+
+    # Record the now-known stable ``n_units`` and the ``warnings`` before the
+    # curation stage runs, so a curation-stage failure's partial run summary
+    # carries them (not just the pre-sorting keys).
+    run_summary["n_units"] = n_units
+    run_summary["warnings"] = warnings_list
+
+    curation_key = _run_root_curation_stage(
+        sorting_key,
+        curation_description=curation_description,
+        pipeline_preset=pipeline_preset,
+        is_concat=is_concat,
+        run_summary=run_summary,
+        stage_seconds=stage_seconds,
+        warnings_list=warnings_list,
+    )
+    # Auto-labeled pointer: None until something curates the root. A default
+    # (root-only) run leaves these None on purpose, so downstream code can't
+    # silently decode the uncurated root. ``auto_curate=True`` fills them below.
+    run_summary["auto_labeled_curation_id"] = None
+    run_summary["auto_labeled_merge_id"] = None
+    run_summary["auto_labeled_curation_uuid"] = None
+
+    # Optional auto-curation: only when the caller opts in. Score the root
+    # curation with the preset's metric + auto-curation rule rows, then
+    # materialize a committed child curation whose labels ARE the evaluation's
+    # verdict and point the canonical auto-labeled keys (initialized to None
+    # above) at it. The evaluation id and stage status are added only when
+    # opted in (NotRequired keys).
+    if auto_curate:
+        _run_auto_curation_stage(
+            sorting_key,
+            curation_key,
+            bundle,
+            pipeline_preset=pipeline_preset,
+            is_concat=is_concat,
+            run_summary=run_summary,
+            stage_seconds=stage_seconds,
+            warnings_list=warnings_list,
+        )
+
+    # A concat curation's own synthetic-timeline row remains gated, but its
+    # final curation for this run (the auto-curated child when present,
+    # otherwise the root) is materialized into one session-safe merge row per
+    # frozen member.
+    if is_concat:
+        _run_member_curation_stage(
+            sorting_key, source.concat_key, run_summary, stage_seconds
+        )
+
+    # Optional FigPack manual-curation view: only when the caller opts in.
+    # Publish an OFFLINE FigPack bundle of the ROOT curation (FigPack publishes
+    # raw-namespace curations only -- an auto-curated child lives in the
+    # curation_evaluation namespace) and surface its local URI. A zero-unit sort
+    # has no analyzer to summarize, so the FigPack view is skipped with a warning rather
+    # than failing an otherwise-successful empty sort. These keys are added only
+    # when opted in (NotRequired), so a default run's summary is unchanged.
+    if build_figpack_view:
+        _run_figpack_stage(
+            sorting_key,
+            curation_key,
+            n_units=n_units,
+            figpack_label_options=figpack_label_options,
+            run_summary=run_summary,
+            stage_seconds=stage_seconds,
+            warnings_list=warnings_list,
+        )
+
+    run_summary["stage_seconds"] = stage_seconds
+    return RunResult(run_summary)
+
+
+def _assert_figpack_installed() -> None:
+    """Raise ``PipelineInputError`` unless the FigPack packages are installed.
+
+    DB-free, so a run that asks for a FigPack view fails before any table
+    import.
+    """
+    import importlib.util
+
+    from spyglass.spikesorting.v2._figpack_curation import (
+        FIGPACK_INSTALL_HINT,
+    )
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+
+    if (
+        importlib.util.find_spec("figpack") is None
+        or importlib.util.find_spec("figpack_spike_sorting") is None
+    ):
+        raise PipelineInputError(
+            "run_v2_pipeline: build_figpack_view=True but the FigPack "
+            f"packages are not installed. {FIGPACK_INSTALL_HINT}"
+        )
+
+
+def _run_sort_group_keys(
+    is_concat: bool,
+    *,
+    nwb_file_name,
+    sort_group_id,
+    concat_session_group_owner,
+    concat_session_group_name,
+) -> list[dict]:
+    """The ``(nwb_file_name, sort_group_id)`` keys a run's sort reads.
+
+    One key for a single-session run; a concat's members, in member order.
+    """
+    if is_concat:
+        from spyglass.spikesorting.v2.session_group import SessionGroup
+
+        group_keys = (
+            SessionGroup.Member
+            & {
+                "session_group_owner": concat_session_group_owner,
+                "session_group_name": concat_session_group_name,
+            }
+        ).fetch(
+            "nwb_file_name",
+            "sort_group_id",
+            as_dict=True,
+            order_by="member_index",
+        )
+    else:
+        group_keys = [
+            {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
+        ]
+    return group_keys
+
+
+def _curation_merge_id(curation_key, *, is_concat: bool, warnings_list: list):
+    """Return one merge id, or the intentional concat ``None``.
+
+    A concat curation has no merge row by design; its gate advisory is
+    appended to ``warnings_list`` once.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CONCAT_MERGE_GATE_MESSAGE
+
+    merge_ids = (SpikeSortingOutput.CurationV2 & curation_key).fetch("merge_id")
+    if len(merge_ids) == 1:
+        return merge_ids[0]
+    if len(merge_ids) > 1:
+        raise ValueError(
+            "run_v2_pipeline: CurationV2 has multiple "
+            f"SpikeSortingOutput rows for {curation_key}."
+        )
+    if not is_concat:
+        raise ValueError(
+            "run_v2_pipeline: single-session CurationV2 is missing its "
+            f"SpikeSortingOutput registration for {curation_key}."
+        )
+    warning = CONCAT_MERGE_GATE_MESSAGE.format(
+        sorting_id=curation_key["sorting_id"]
+    )
+    if warning not in warnings_list:
+        warnings_list.append(warning)
+    return None
+
+
+def _concat_member_merge_ids(curation_key) -> dict[int, Any]:
+    """Return the complete frozen-member-index to merge-id mapping."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+
+    rows = (
+        SpikeSortingOutput.ConcatMemberCuration * ConcatMemberCuration
+        & curation_key
+    ).fetch("merge_id", "member_index", as_dict=True)
+    return {int(row["member_index"]): row["merge_id"] for row in rows}
+
+
+def _run_sorting_stage(
+    source_fields: dict,
+    corrected: dict,
+    bundle,
+    *,
+    require_units: bool,
+    run_summary: dict,
+    stage_seconds: dict,
+    warnings_list: list,
+) -> tuple[dict, int]:
+    """Select and populate the sort; return its key and unit count.
+
+    Parameters
+    ----------
+    source_fields : dict
+        The sort's source (``_RunSource.selection_fields``).
+    corrected : dict
+        ``{"motion_corrected_recording_id": ...}`` for an ``"apply"`` run,
+        else empty.
+    bundle : _PipelinePreset
+        The validated preset.
+    require_units : bool
+        Raise on a zero-unit sort instead of warning.
+    run_summary, stage_seconds : dict
+        The run's accumulating summary and per-stage seconds (mutated).
+    warnings_list : list
+        The run's warnings (appended to on a zero-unit sort).
+
+    Returns
+    -------
+    sorting_key : dict
+        The ``SortingSelection`` key.
+    n_units : int
+        The sort's unit count.
+
+    Raises
+    ------
+    PipelineStageError
+        If the sort's populate fails.
+    ZeroUnitSortError
+        If the sort finds zero units and ``require_units`` is True.
+    """
+    from spyglass.spikesorting.v2.exceptions import ZeroUnitSortError
+    from spyglass.spikesorting.v2.sorting import (
+        Sorting,
+        SortingSelection,
+    )
+    from spyglass.utils import logger
+
     sorting_key = SortingSelection.insert_selection(
         {
-            **source.selection_fields,
+            **source_fields,
             "sorter": bundle.sorter,
             "sorter_params_name": bundle.sorter_params_name,
             **corrected,
@@ -1494,12 +1791,35 @@ def run_v2_pipeline(
         )
         logger.warning(zero_unit_warning)
         warnings_list.append(zero_unit_warning)
+    return sorting_key, n_units
 
-    # Record the now-known stable ``n_units`` and the ``warnings`` before the
-    # curation stage runs, so a curation-stage failure's partial run summary
-    # carries them (not just the pre-sorting keys).
-    run_summary["n_units"] = n_units
-    run_summary["warnings"] = warnings_list
+
+def _run_root_curation_stage(
+    sorting_key: dict,
+    *,
+    curation_description: str,
+    pipeline_preset: str,
+    is_concat: bool,
+    run_summary: dict,
+    stage_seconds: dict,
+    warnings_list: list,
+) -> dict:
+    """Insert (or reuse) the sort's root curation and register its merge row.
+
+    Records the root curation id, merge id (``None`` for concat) and
+    generation UUID in ``run_summary``.
+
+    Returns
+    -------
+    dict
+        The root ``CurationV2`` key.
+
+    Raises
+    ------
+    PipelineStageError
+        If the curation insert or its merge registration fails.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
 
     # Idempotent curation: ``insert_curation`` owns the root-reuse logic.
     # With ``reuse_existing=True`` it returns the canonical (lowest
@@ -1532,7 +1852,9 @@ def run_v2_pipeline(
         # session-scoped merge consumer, so its merge id is None and the gate
         # advisory is recorded in the run summary. Any missing single-session
         # registration remains a stage-aware failure.
-        merge_id = _curation_merge_id(curation_key)
+        merge_id = _curation_merge_id(
+            curation_key, is_concat=is_concat, warnings_list=warnings_list
+        )
         return curation_key, merge_id
 
     (curation_key, merge_id), curation_status, curation_seconds = _run_stage(
@@ -1547,204 +1869,245 @@ def run_v2_pipeline(
     run_summary["root_curation_uuid"] = (CurationV2 & curation_key).fetch1(
         "curation_uuid"
     )
-    # Auto-labeled pointer: None until something curates the root. A default
-    # (root-only) run leaves these None on purpose, so downstream code can't
-    # silently decode the uncurated root. ``auto_curate=True`` fills them below.
-    run_summary["auto_labeled_curation_id"] = None
-    run_summary["auto_labeled_merge_id"] = None
-    run_summary["auto_labeled_curation_uuid"] = None
+    return curation_key
 
-    # Optional auto-curation: only when the caller opts in. Score the root
-    # curation with the preset's metric + auto-curation rule rows, then
-    # materialize a committed child curation whose labels ARE the evaluation's
-    # verdict and point the canonical auto-labeled keys (initialized to None
-    # above) at it. The evaluation id and stage status are added only when
-    # opted in (NotRequired keys).
-    if auto_curate:
-        from spyglass.spikesorting.v2.exceptions import PipelineStageError
-        from spyglass.spikesorting.v2.metric_curation import (
-            CurationEvaluation,
-            CurationEvaluationSelection,
+
+def _run_auto_curation_stage(
+    sorting_key: dict,
+    curation_key: dict,
+    bundle,
+    *,
+    pipeline_preset: str,
+    is_concat: bool,
+    run_summary: dict,
+    stage_seconds: dict,
+    warnings_list: list,
+) -> None:
+    """Evaluate the root curation and accept its labels into a child.
+
+    Records ``auto_curation_status``, ``curation_evaluation_id`` and the
+    ``auto_labeled_*`` keys of the accepted child in ``run_summary``.
+
+    Raises
+    ------
+    PipelineStageError
+        If the evaluation, the label acceptance or the child's merge
+        registration fails (stage ``"auto_curation"``).
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import PipelineStageError
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+
+    eval_key = CurationEvaluationSelection.insert_selection(
+        {
+            "sorting_id": sorting_key["sorting_id"],
+            "curation_id": curation_key["curation_id"],
+            "metric_params_name": bundle.metric_params_name,
+            "auto_curation_rules_name": bundle.auto_curation_rules_name,
+        }
+    )
+    # The stage does two things: populate the evaluation AND accept its
+    # labels into a committed child curation. Classify it honestly --
+    # "reused" only when BOTH were already done (the evaluation was
+    # populated and the accepted child already existed), else "computed" --
+    # so a run that (re)created the child is never mislabeled "reused" just
+    # because the evaluation pre-existed. ``_run_stage``'s exists-before-work
+    # model cannot express that (the child id is only known after
+    # acceptance), so time + wrap the stage here, preserving the same
+    # stage-aware ``PipelineStageError``.
+    eval_was_populated = bool(CurationEvaluation & eval_key)
+    sorting_restriction = {"sorting_id": sorting_key["sorting_id"]}
+    auto_start = time.perf_counter()
+    try:
+        _populate_once(CurationEvaluation, eval_key)
+        children_before = set(
+            (CurationV2 & sorting_restriction).fetch("curation_id")
+        )
+        child = CurationEvaluation().use_evaluation_labels(
+            eval_key,
+            description=(
+                "run_v2_pipeline auto-curation "
+                f"(pipeline_preset={pipeline_preset})"
+            ),
+            reuse_existing=True,
+        )
+        auto_merge_id = _curation_merge_id(
+            child, is_concat=is_concat, warnings_list=warnings_list
+        )
+    except Exception as exc:  # noqa: BLE001 - re-raised as typed + chained
+        raise PipelineStageError(
+            "auto_curation",
+            dict(run_summary),
+            str(exc),
+            original_type=type(exc).__name__,
+        ) from exc
+    stage_seconds["auto_curation"] = time.perf_counter() - auto_start
+    child_created = child["curation_id"] not in children_before
+    run_summary["auto_curation_status"] = (
+        "reused" if eval_was_populated and not child_created else "computed"
+    )
+    run_summary["curation_evaluation_id"] = eval_key["curation_evaluation_id"]
+    # The auto-curated child is the run's auto-labeled curation: labels
+    # only, every unit still present, no unit selection applied.
+    run_summary["auto_labeled_curation_id"] = child["curation_id"]
+    run_summary["auto_labeled_merge_id"] = auto_merge_id
+    run_summary["auto_labeled_curation_uuid"] = (CurationV2 & child).fetch1(
+        "curation_uuid"
+    )
+
+
+def _run_member_curation_stage(
+    sorting_key: dict,
+    concat_key: dict,
+    run_summary: dict,
+    stage_seconds: dict,
+) -> None:
+    """Register a concat run's final curation once per frozen member.
+
+    The final curation is the auto-curated child when present, otherwise the
+    root. Records ``member_curation_status`` and ``member_merge_ids`` in
+    ``run_summary``.
+
+    Raises
+    ------
+    PipelineStageError
+        If a member populate fails or a member merge row is missing (stage
+        ``"member_curation"``).
+    """
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+
+    member_curation_key = {
+        "sorting_id": sorting_key["sorting_id"],
+        "curation_id": (
+            run_summary["auto_labeled_curation_id"]
+            if run_summary["auto_labeled_curation_id"] is not None
+            else run_summary["root_curation_id"]
+        ),
+    }
+    member_indices = [
+        int(index)
+        for index in (
+            ConcatenatedRecordingSelection.MemberSnapshot & concat_key
+        ).fetch("member_index", order_by="member_index")
+    ]
+    member_keys = [
+        {**member_curation_key, "member_index": member_index}
+        for member_index in member_indices
+    ]
+
+    # Populate each full member PK separately so the advisory lock and
+    # benign-duplicate recovery retain their single-key guarantee.
+    def _populate_member_curations():
+        for member_key in member_keys:
+            _populate_once(ConcatMemberCuration, member_key)
+        member_merge_ids = _concat_member_merge_ids(member_curation_key)
+        if len(member_merge_ids) != len(member_keys):
+            raise ValueError(
+                "run_v2_pipeline: ConcatMemberCuration registration is "
+                f"incomplete for {member_curation_key}: expected "
+                f"{len(member_keys)} member merge rows, found "
+                f"{len(member_merge_ids)}."
+            )
+        return member_merge_ids
+
+    (
+        member_merge_ids,
+        run_summary["member_curation_status"],
+        stage_seconds["member_curation"],
+    ) = _run_stage(
+        "member_curation",
+        all(bool(ConcatMemberCuration & key) for key in member_keys),
+        _populate_member_curations,
+        run_summary,
+    )
+    run_summary["member_merge_ids"] = member_merge_ids
+
+
+def _run_figpack_stage(
+    sorting_key: dict,
+    curation_key: dict,
+    *,
+    n_units: int,
+    figpack_label_options,
+    run_summary: dict,
+    stage_seconds: dict,
+    warnings_list: list,
+) -> None:
+    """Publish an offline FigPack view of the root curation.
+
+    A zero-unit sort skips the stage with a logged warning. Otherwise
+    records ``figpack_status`` and ``figpack_uri`` in ``run_summary``.
+
+    Raises
+    ------
+    PipelineStageError
+        If the FigPack populate fails (stage ``"figpack"``).
+    """
+    from spyglass.utils import logger
+
+    if n_units == 0:
+        figpack_skip_warning = (
+            "run_v2_pipeline: build_figpack_view=True but the sort found "
+            f"zero units (sorting_id={sorting_key['sorting_id']}); "
+            "skipping the FigPack view -- there is no analyzer to summarize."
+        )
+        logger.warning(figpack_skip_warning)
+        warnings_list.append(figpack_skip_warning)
+        run_summary["figpack_status"] = "skipped"
+        stage_seconds["figpack"] = 0.0
+    else:
+        from pathlib import Path
+
+        from spyglass.spikesorting.v2.figpack_curation import (
+            FigPackCuration,
+            FigPackCurationSelection,
         )
 
-        eval_key = CurationEvaluationSelection.insert_selection(
+        figpack_selection = FigPackCurationSelection.insert_selection(
             {
                 "sorting_id": sorting_key["sorting_id"],
                 "curation_id": curation_key["curation_id"],
-                "metric_params_name": bundle.metric_params_name,
-                "auto_curation_rules_name": bundle.auto_curation_rules_name,
-            }
+            },
+            label_options=figpack_label_options,
+            upload=False,
         )
-        # The stage does two things: populate the evaluation AND accept its
-        # labels into a committed child curation. Classify it honestly --
-        # "reused" only when BOTH were already done (the evaluation was
-        # populated and the accepted child already existed), else "computed" --
-        # so a run that (re)created the child is never mislabeled "reused" just
-        # because the evaluation pre-existed. ``_run_stage``'s exists-before-work
-        # model cannot express that (the child id is only known after
-        # acceptance), so time + wrap the stage here, preserving the same
-        # stage-aware ``PipelineStageError``.
-        eval_was_populated = bool(CurationEvaluation & eval_key)
-        sorting_restriction = {"sorting_id": sorting_key["sorting_id"]}
-        auto_start = time.perf_counter()
-        try:
-            _populate_once(CurationEvaluation, eval_key)
-            children_before = set(
-                (CurationV2 & sorting_restriction).fetch("curation_id")
-            )
-            child = CurationEvaluation().use_evaluation_labels(
-                eval_key,
-                description=(
-                    "run_v2_pipeline auto-curation "
-                    f"(pipeline_preset={pipeline_preset})"
-                ),
-                reuse_existing=True,
-            )
-            auto_merge_id = _curation_merge_id(child)
-        except Exception as exc:  # noqa: BLE001 - re-raised as typed + chained
-            raise PipelineStageError(
-                "auto_curation",
-                dict(run_summary),
-                str(exc),
-                original_type=type(exc).__name__,
-            ) from exc
-        stage_seconds["auto_curation"] = time.perf_counter() - auto_start
-        child_created = child["curation_id"] not in children_before
-        run_summary["auto_curation_status"] = (
-            "reused" if eval_was_populated and not child_created else "computed"
+        # Reuse only when the FigPackCuration row AND its offline bundle are
+        # both present. The run returns figpack_uri as an output, so a row
+        # whose local bundle was cleaned out (e.g. the figpack / temp dir was
+        # purged) must be rebuilt rather than reported "reused" with a dead
+        # path: drop the stale row so populate rebuilds the bundle.
+        built = FigPackCuration & figpack_selection
+        bundle_present = (
+            bool(built) and Path(built.fetch1("figpack_uri")).exists()
         )
-        run_summary["curation_evaluation_id"] = eval_key[
-            "curation_evaluation_id"
-        ]
-        # The auto-curated child is the run's auto-labeled curation: labels
-        # only, every unit still present, no unit selection applied.
-        run_summary["auto_labeled_curation_id"] = child["curation_id"]
-        run_summary["auto_labeled_merge_id"] = auto_merge_id
-        run_summary["auto_labeled_curation_uuid"] = (CurationV2 & child).fetch1(
-            "curation_uuid"
-        )
-
-    # A concat curation's own synthetic-timeline row remains gated, but its
-    # final curation for this run (the auto-curated child when present,
-    # otherwise the root) is materialized into one session-safe merge row per
-    # frozen member. Populate each full member PK separately so the advisory
-    # lock and benign-duplicate recovery retain their single-key guarantee.
-    if is_concat:
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecordingSelection,
-        )
-
-        member_curation_key = {
-            "sorting_id": sorting_key["sorting_id"],
-            "curation_id": (
-                run_summary["auto_labeled_curation_id"]
-                if run_summary["auto_labeled_curation_id"] is not None
-                else run_summary["root_curation_id"]
-            ),
-        }
-        member_indices = [
-            int(index)
-            for index in (
-                ConcatenatedRecordingSelection.MemberSnapshot
-                & source.concat_key
-            ).fetch("member_index", order_by="member_index")
-        ]
-        member_keys = [
-            {**member_curation_key, "member_index": member_index}
-            for member_index in member_indices
-        ]
-
-        def _populate_member_curations():
-            for member_key in member_keys:
-                _populate_once(ConcatMemberCuration, member_key)
-            member_merge_ids = _concat_member_merge_ids(member_curation_key)
-            if len(member_merge_ids) != len(member_keys):
-                raise ValueError(
-                    "run_v2_pipeline: ConcatMemberCuration registration is "
-                    f"incomplete for {member_curation_key}: expected "
-                    f"{len(member_keys)} member merge rows, found "
-                    f"{len(member_merge_ids)}."
-                )
-            return member_merge_ids
-
+        if bool(built) and not bundle_present:
+            built.delete(safemode=False)
         (
-            member_merge_ids,
-            run_summary["member_curation_status"],
-            stage_seconds["member_curation"],
+            _,
+            run_summary["figpack_status"],
+            stage_seconds["figpack"],
         ) = _run_stage(
-            "member_curation",
-            all(bool(ConcatMemberCuration & key) for key in member_keys),
-            _populate_member_curations,
+            "figpack",
+            bundle_present,
+            # Same concurrency handling as every other stage: serialize the
+            # populate on the content-addressed selection and tolerate a
+            # benign duplicate. (The stale-bundle delete above runs outside
+            # the lock -- it only fires when the bundle is already gone, so
+            # it cannot race a live build.)
+            lambda: _populate_once(FigPackCuration, figpack_selection),
             run_summary,
         )
-        run_summary["member_merge_ids"] = member_merge_ids
-
-    # Optional FigPack manual-curation view: only when the caller opts in.
-    # Publish an OFFLINE FigPack bundle of the ROOT curation (FigPack publishes
-    # raw-namespace curations only -- an auto-curated child lives in the
-    # curation_evaluation namespace) and surface its local URI. A zero-unit sort
-    # has no analyzer to summarize, so the FigPack view is skipped with a warning rather
-    # than failing an otherwise-successful empty sort. These keys are added only
-    # when opted in (NotRequired), so a default run's summary is unchanged.
-    if build_figpack_view:
-        if n_units == 0:
-            figpack_skip_warning = (
-                "run_v2_pipeline: build_figpack_view=True but the sort found "
-                f"zero units (sorting_id={sorting_key['sorting_id']}); "
-                "skipping the FigPack view -- there is no analyzer to summarize."
-            )
-            logger.warning(figpack_skip_warning)
-            warnings_list.append(figpack_skip_warning)
-            run_summary["figpack_status"] = "skipped"
-            stage_seconds["figpack"] = 0.0
-        else:
-            from pathlib import Path
-
-            from spyglass.spikesorting.v2.figpack_curation import (
-                FigPackCuration,
-                FigPackCurationSelection,
-            )
-
-            figpack_selection = FigPackCurationSelection.insert_selection(
-                {
-                    "sorting_id": sorting_key["sorting_id"],
-                    "curation_id": curation_key["curation_id"],
-                },
-                label_options=figpack_label_options,
-                upload=False,
-            )
-            # Reuse only when the FigPackCuration row AND its offline bundle are
-            # both present. The run returns figpack_uri as an output, so a row
-            # whose local bundle was cleaned out (e.g. the figpack / temp dir was
-            # purged) must be rebuilt rather than reported "reused" with a dead
-            # path: drop the stale row so populate rebuilds the bundle.
-            built = FigPackCuration & figpack_selection
-            bundle_present = (
-                bool(built) and Path(built.fetch1("figpack_uri")).exists()
-            )
-            if bool(built) and not bundle_present:
-                built.delete(safemode=False)
-            (
-                _,
-                run_summary["figpack_status"],
-                stage_seconds["figpack"],
-            ) = _run_stage(
-                "figpack",
-                bundle_present,
-                # Same concurrency handling as every other stage: serialize the
-                # populate on the content-addressed selection and tolerate a
-                # benign duplicate. (The stale-bundle delete above runs outside
-                # the lock -- it only fires when the bundle is already gone, so
-                # it cannot race a live build.)
-                lambda: _populate_once(FigPackCuration, figpack_selection),
-                run_summary,
-            )
-            run_summary["figpack_uri"] = (
-                FigPackCuration & figpack_selection
-            ).fetch1("figpack_uri")
-
-    run_summary["stage_seconds"] = stage_seconds
-    return RunResult(run_summary)
+        run_summary["figpack_uri"] = (
+            FigPackCuration & figpack_selection
+        ).fetch1("figpack_uri")
 
 
 def estimate_motion(
@@ -2032,13 +2395,7 @@ def run_v2_pipeline_session(
         Propagated from a per-group :func:`run_v2_pipeline` when
         ``continue_on_error=False``.
     """
-    from spyglass.spikesorting.v2.exceptions import (
-        PipelineInputError,
-        PipelineStageError,
-        PreflightError,
-        ZeroUnitSortError,
-    )
-    from spyglass.utils import logger
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
     motion_problem = motion_request_problem(
         motion_mode, motion_correction_params_name
@@ -2058,57 +2415,21 @@ def run_v2_pipeline_session(
 
     # Up-front, read-only whole-session preflight (when requested).
     if preflight:
-        session_report = preflight_v2_pipeline_session(
+        _run_session_preflight(
             nwb_file_name=nwb_file_name,
             interval_list_name=interval_list_name,
             team_name=team_name,
             pipeline_preset=pipeline_preset,
-            sort_group_ids=targets,
+            targets=targets,
             auto_curate=auto_curate,
             manual_excluded_times=manual_excluded_times,
             motion_mode=motion_mode,
             motion_correction_params_name=motion_correction_params_name,
+            continue_on_error=continue_on_error,
+            results=results,
+            failed_preflight_ids=failed_preflight_ids,
+            preflight_warnings_by_group=preflight_warnings_by_group,
         )
-        # Capture each group's non-blocking advisories. OK groups run below with
-        # preflight=False (the DB checks are not repeated), so without this their
-        # preflight warnings would never reach the run summary and the batch
-        # warning count would under-report.
-        for row in session_report.group_reports:
-            if row.get("warnings"):
-                preflight_warnings_by_group[row["sort_group_id"]] = list(
-                    row["warnings"]
-                )
-        if not session_report.ok:
-            if not continue_on_error:
-                raise PreflightError("\n".join(session_report.errors))
-            # continue_on_error: record the failed groups, run only the rest.
-            for row in session_report.group_reports:
-                if row["ok"]:
-                    continue
-                sort_group_id = row["sort_group_id"]
-                failed_preflight_ids.add(sort_group_id)
-                logger.warning(
-                    "run_v2_pipeline_session: sort_group_id="
-                    f"{sort_group_id} failed preflight; skipping. "
-                    f"{row['errors']}"
-                )
-                results.append(
-                    RunV2PipelineSessionFailed(
-                        sort_group_id=sort_group_id,
-                        pipeline_preset=pipeline_preset,
-                        outcome="failed",
-                        error_type="PreflightError",
-                        error="\n".join(row["errors"]),
-                        # A preflight failure is not a stage failure -- keep the
-                        # structured fields present (shape-consistent) but None.
-                        stage=None,
-                        original_error_type=None,
-                        partial_run_summary=None,
-                        # Carry this group's advisories too, so describe_run /
-                        # the batch warning count do not under-report failures.
-                        warnings=list(row.get("warnings", [])),
-                    )
-                )
 
     # Per-group compute. Groups covered by the session preflight (or skipped via
     # preflight=False) run with preflight=False so the DB-only checks are not
@@ -2117,87 +2438,242 @@ def run_v2_pipeline_session(
     for sort_group_id in targets:
         if sort_group_id in failed_preflight_ids:
             continue
-        try:
-            summary = run_v2_pipeline(
+        results.append(
+            _run_session_group(
+                sort_group_id,
                 nwb_file_name=nwb_file_name,
-                sort_group_id=sort_group_id,
                 interval_list_name=interval_list_name,
                 team_name=team_name,
                 pipeline_preset=pipeline_preset,
                 curation_description=curation_description,
                 require_units=require_units,
                 auto_curate=auto_curate,
-                preflight=False,
                 manual_excluded_times=manual_excluded_times,
                 motion_mode=motion_mode,
                 motion_correction_params_name=motion_correction_params_name,
+                continue_on_error=continue_on_error,
+                preflight_warnings_by_group=preflight_warnings_by_group,
             )
-        except (
-            PipelineStageError,
-            PreflightError,
-            ZeroUnitSortError,
-        ) as exc:
-            if not continue_on_error:
-                raise
+        )
+
+    # Stable, group-ordered result (preflight-failed entries were appended
+    # first; restore ascending sort_group_id order).
+    results.sort(key=lambda entry: entry["sort_group_id"])
+
+    _log_session_receipt(results)
+    return results
+
+
+def _run_session_preflight(
+    *,
+    nwb_file_name: str,
+    interval_list_name: str,
+    team_name: str,
+    pipeline_preset: str,
+    targets: list[int],
+    auto_curate: bool,
+    manual_excluded_times,
+    motion_mode,
+    motion_correction_params_name: "str | None",
+    continue_on_error: bool,
+    results: list,
+    failed_preflight_ids: set[int],
+    preflight_warnings_by_group: dict[int, list[str]],
+) -> None:
+    """Run the whole-session preflight once and record its outcome.
+
+    Parameters
+    ----------
+    nwb_file_name, interval_list_name, team_name, pipeline_preset, auto_curate
+        As in :func:`run_v2_pipeline_session`.
+    manual_excluded_times, motion_mode, motion_correction_params_name
+        As in :func:`run_v2_pipeline_session`.
+    targets : list[int]
+        The sort groups to check.
+    continue_on_error : bool
+        If False, any failed group raises; if True, each failed group gets a
+        ``outcome="failed"`` entry.
+    results : list
+        The batch's entries (failed-preflight entries appended).
+    failed_preflight_ids : set[int]
+        The groups that failed preflight (added to).
+    preflight_warnings_by_group : dict[int, list[str]]
+        Each group's non-blocking advisories (filled in).
+
+    Raises
+    ------
+    PreflightError
+        If a group fails preflight and ``continue_on_error`` is False.
+    """
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.utils import logger
+
+    session_report = preflight_v2_pipeline_session(
+        nwb_file_name=nwb_file_name,
+        interval_list_name=interval_list_name,
+        team_name=team_name,
+        pipeline_preset=pipeline_preset,
+        sort_group_ids=targets,
+        auto_curate=auto_curate,
+        manual_excluded_times=manual_excluded_times,
+        motion_mode=motion_mode,
+        motion_correction_params_name=motion_correction_params_name,
+    )
+    # Capture each group's non-blocking advisories. OK groups run below with
+    # preflight=False (the DB checks are not repeated), so without this their
+    # preflight warnings would never reach the run summary and the batch
+    # warning count would under-report.
+    for row in session_report.group_reports:
+        if row.get("warnings"):
+            preflight_warnings_by_group[row["sort_group_id"]] = list(
+                row["warnings"]
+            )
+    if not session_report.ok:
+        if not continue_on_error:
+            raise PreflightError("\n".join(session_report.errors))
+        # continue_on_error: record the failed groups, run only the rest.
+        for row in session_report.group_reports:
+            if row["ok"]:
+                continue
+            sort_group_id = row["sort_group_id"]
+            failed_preflight_ids.add(sort_group_id)
             logger.warning(
                 "run_v2_pipeline_session: sort_group_id="
-                f"{sort_group_id} failed: {exc!r}"
+                f"{sort_group_id} failed preflight; skipping. "
+                f"{row['errors']}"
             )
             results.append(
                 RunV2PipelineSessionFailed(
                     sort_group_id=sort_group_id,
                     pipeline_preset=pipeline_preset,
                     outcome="failed",
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                    # Surface the failing STAGE and the underlying error type (a
-                    # PipelineStageError wraps e.g. an IndexError) so a batch
-                    # caller can triage without re-parsing the message. Both are
-                    # None for non-stage failures (preflight / zero-unit).
-                    stage=getattr(exc, "stage", None),
-                    original_error_type=getattr(exc, "original_type", None),
-                    partial_run_summary=getattr(
-                        exc, "partial_run_summary", None
-                    ),
-                    # This group passed preflight (ran with preflight=False) but
-                    # failed mid-run; keep its preflight advisories visible. Any
-                    # stage warnings live on partial_run_summary, which
-                    # _run_warnings reads too.
-                    warnings=preflight_warnings_by_group.get(sort_group_id, []),
+                    error_type="PreflightError",
+                    error="\n".join(row["errors"]),
+                    # A preflight failure is not a stage failure -- keep the
+                    # structured fields present (shape-consistent) but None.
+                    stage=None,
+                    original_error_type=None,
+                    partial_run_summary=None,
+                    # Carry this group's advisories too, so describe_run /
+                    # the batch warning count do not under-report failures.
+                    warnings=list(row.get("warnings", [])),
                 )
             )
-        else:
-            # Fold this group's preflight advisories (captured above) into its
-            # run summary; the per-group run did no preflight, so there is no
-            # overlap with the stage warnings it already carries.
-            group_preflight_warnings = preflight_warnings_by_group.get(
-                sort_group_id, []
-            )
-            for warning in group_preflight_warnings:
-                logger.warning(
-                    "run_v2_pipeline_session: sort_group_id="
-                    f"{sort_group_id} preflight: {warning}"
-                )
-            # The successful entry is the RunResult itself (keeps the
-            # curation accessors); its keys are RunV2PipelineSessionOk.
-            ok_entry = RunResult(
-                {
-                    **summary,
-                    "sort_group_id": sort_group_id,
-                    "outcome": "ok",
-                    "warnings": list(summary.get("warnings", []))
-                    + group_preflight_warnings,
-                }
-            )
-            results.append(cast(RunV2PipelineSessionOk, ok_entry))
 
-    # Stable, group-ordered result (preflight-failed entries were appended
-    # first; restore ascending sort_group_id order).
-    results.sort(key=lambda entry: entry["sort_group_id"])
 
-    # End-of-batch receipt in the log. Surfaces the outcomes that are easy to
-    # miss when scrolling a long run -- not just failures but zero-unit sorts
-    # and warnings too. ``describe_run(results)`` is the richer table form.
+def _run_session_group(
+    sort_group_id: int,
+    *,
+    nwb_file_name: str,
+    interval_list_name: str,
+    team_name: str,
+    pipeline_preset: str,
+    curation_description: str,
+    require_units: bool,
+    auto_curate: bool,
+    manual_excluded_times,
+    motion_mode,
+    motion_correction_params_name: "str | None",
+    continue_on_error: bool,
+    preflight_warnings_by_group: dict[int, list[str]],
+) -> RunV2PipelineSessionResult:
+    """Run one sort group of a session batch; return its result entry.
+
+    The group runs :func:`run_v2_pipeline` with ``preflight=False``; its
+    preflight advisories are folded into the entry either way.
+
+    Raises
+    ------
+    PipelineStageError, PreflightError, ZeroUnitSortError
+        From the group's run when ``continue_on_error`` is False; with it
+        True they become an ``outcome="failed"`` entry.
+    """
+    from spyglass.spikesorting.v2.exceptions import (
+        PipelineStageError,
+        PreflightError,
+        ZeroUnitSortError,
+    )
+    from spyglass.utils import logger
+
+    try:
+        summary = run_v2_pipeline(
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            interval_list_name=interval_list_name,
+            team_name=team_name,
+            pipeline_preset=pipeline_preset,
+            curation_description=curation_description,
+            require_units=require_units,
+            auto_curate=auto_curate,
+            preflight=False,
+            manual_excluded_times=manual_excluded_times,
+            motion_mode=motion_mode,
+            motion_correction_params_name=motion_correction_params_name,
+        )
+    except (
+        PipelineStageError,
+        PreflightError,
+        ZeroUnitSortError,
+    ) as exc:
+        if not continue_on_error:
+            raise
+        logger.warning(
+            "run_v2_pipeline_session: sort_group_id="
+            f"{sort_group_id} failed: {exc!r}"
+        )
+        return RunV2PipelineSessionFailed(
+            sort_group_id=sort_group_id,
+            pipeline_preset=pipeline_preset,
+            outcome="failed",
+            error_type=type(exc).__name__,
+            error=str(exc),
+            # Surface the failing STAGE and the underlying error type (a
+            # PipelineStageError wraps e.g. an IndexError) so a batch
+            # caller can triage without re-parsing the message. Both are
+            # None for non-stage failures (preflight / zero-unit).
+            stage=getattr(exc, "stage", None),
+            original_error_type=getattr(exc, "original_type", None),
+            partial_run_summary=getattr(exc, "partial_run_summary", None),
+            # This group passed preflight (ran with preflight=False) but
+            # failed mid-run; keep its preflight advisories visible. Any
+            # stage warnings live on partial_run_summary, which
+            # _run_warnings reads too.
+            warnings=preflight_warnings_by_group.get(sort_group_id, []),
+        )
+    # Fold this group's preflight advisories (captured above) into its
+    # run summary; the per-group run did no preflight, so there is no
+    # overlap with the stage warnings it already carries.
+    group_preflight_warnings = preflight_warnings_by_group.get(
+        sort_group_id, []
+    )
+    for warning in group_preflight_warnings:
+        logger.warning(
+            "run_v2_pipeline_session: sort_group_id="
+            f"{sort_group_id} preflight: {warning}"
+        )
+    # The successful entry is the RunResult itself (keeps the
+    # curation accessors); its keys are RunV2PipelineSessionOk.
+    ok_entry = RunResult(
+        {
+            **summary,
+            "sort_group_id": sort_group_id,
+            "outcome": "ok",
+            "warnings": list(summary.get("warnings", []))
+            + group_preflight_warnings,
+        }
+    )
+    return cast(RunV2PipelineSessionOk, ok_entry)
+
+
+def _log_session_receipt(results: list) -> None:
+    """Log a session batch's end-of-run outcome counts.
+
+    Surfaces the outcomes that are easy to miss when scrolling a long run --
+    not just failures but zero-unit sorts and warnings too.
+    ``describe_run(results)`` is the richer table form.
+    """
+    from spyglass.utils import logger
+
     n_ok = sum(entry["outcome"] == "ok" for entry in results)
     n_failed = sum(entry["outcome"] == "failed" for entry in results)
     n_zero = 0
@@ -2226,7 +2702,6 @@ def run_v2_pipeline_session(
         f"{n_warn} with warnings. "
         "Call describe_run(results) for the per-group receipt."
     )
-    return results
 
 
 def run_v2_unit_match(
