@@ -207,13 +207,15 @@ def test_handle_existing_rejects_duplicate_sort_group_ids(dj_conn):
     (``explicit_sort_group_ids=False``) are always unique, so the check
     is gated on the explicit path.
     """
+    from spyglass.spikesorting.v2._sort_group_insert import handle_existing
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     # Duplicates surface on a fresh session (no existing rows): the
     # check runs BEFORE the ``len(existing) == 0`` early return so it
     # fires either way.
     with pytest.raises(ValueError, match="duplicate"):
-        SortGroupV2._handle_existing(
+        handle_existing(
+            SortGroupV2,
             nwb_file_name="nonexistent.nwb",
             new_sort_group_ids=[3, 3, 4],
             explicit_sort_group_ids=True,
@@ -222,7 +224,8 @@ def test_handle_existing_rejects_duplicate_sort_group_ids(dj_conn):
         )
     # The auto-allocated path is exempt (range() is unique by
     # construction); a same-shape list with no duplicate must NOT raise.
-    SortGroupV2._handle_existing(
+    handle_existing(
+        SortGroupV2,
         nwb_file_name="nonexistent.nwb",
         new_sort_group_ids=[3, 4, 5],
         explicit_sort_group_ids=True,
