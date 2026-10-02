@@ -182,8 +182,6 @@ def upstream_recording_row(table_cls, key, *, sorting_id=None) -> dict:
     ``Sorting.get_sorting`` round-trip convention). For a concat-backed
     sort this is the ``ConcatenatedRecording`` row (the timeline the curated
     spike times were written against), NOT a per-member ``Recording``.
-    ``@classmethod`` so it can be invoked from the other classmethod
-    accessors.
 
     ``key`` may be a single dict or the list-of-dict form the
     merge dispatcher passes; the restriction-based fetch

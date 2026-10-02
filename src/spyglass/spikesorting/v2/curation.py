@@ -55,8 +55,6 @@ if TYPE_CHECKING:
     import pandas as pd
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._curation_plan import CurationInsertPlan
-
 schema = dj.schema("spikesorting_v2_curation")
 
 #: How many times ``insert_curation`` recomputes a child ``curation_id`` and

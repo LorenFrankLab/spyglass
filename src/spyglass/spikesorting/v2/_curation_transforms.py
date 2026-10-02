@@ -4,8 +4,10 @@ These functions are the dependency-light core of v2 curation --
 label-value validation, ``UnitLabel``-row validation, manual/FigURL payload
 normalization (the v1/v2 spelling shim feeding ``save_manual_curation``),
 parent/supplied label composition (inherit vs. replace; union on a committed
-merge), and the post-merge ``CurationV2.Unit`` row construction (merge-group
-validation, ``kept_unit_to_contributors`` mapping, and the per-unit row build).
+merge), the post-merge ``CurationV2.Unit`` row construction (merge-group
+validation, ``kept_unit_to_contributors`` mapping, and the per-unit row build),
+and the raw ``MergeGroup`` / ``ParentMergeGroup`` provenance rows
+(``build_merge_provenance_rows``).
 They are pure Python: given the already-fetched source ``Unit`` rows (raw
 ``Sorting.Unit`` for a root, the parent ``CurationV2.Unit`` for a child) and
 the caller's label / merge-group payloads, they decide WHAT to insert without

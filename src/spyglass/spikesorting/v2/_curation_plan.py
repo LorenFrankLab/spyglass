@@ -4,9 +4,10 @@
 and a DB half (the table method). :func:`build_curation_insert_plan`
 resolves the post-merge curated ``Unit`` rows (via
 :func:`._curation_transforms.build_curated_unit_rows`) and validates the
-supplied labels against the source/written unit sets. The table method
-resolves the auto-increment ``curation_id`` (a DB query), stages the
-curated-units NWB, and runs the atomic insert transaction on the plan.
+supplied labels against the source/written unit sets.
+:func:`._curation_insert.plan_curation_insert` resolves the auto-increment
+``curation_id`` (a DB query) before calling it, and the table method stages
+the curated-units NWB and runs the atomic insert transaction on the plan.
 
 ``CurationV2.summarize_curation`` is split the same way:
 :func:`build_curation_summary` assembles its return dict (including the

@@ -3,14 +3,15 @@
 ``CurationV2.resolve_restriction`` interprets a cross-table restriction over
 the v2 part-table convention keys and resolves it to the ``CurationV2`` rows it
 selects. Its work splits cleanly into two halves: a PURE classification +
-normalization half (here) and a DataJoint join-assembly half (the table
-method). :func:`classify_and_normalize_restriction` validates the restriction
-keys, maps the ``artifact_detection_{uuid}`` ``interval_list_name`` convention
-back to ``artifact_detection_id``, normalizes that id to a ``uuid.UUID``, and
-splits the remaining keys into the per-source restriction dicts the join
-assembly consumes -- without touching the database. The table method emits the
+normalization half (here) and a DataJoint join-assembly half
+(:func:`._curation_restriction.resolve_restriction`).
+:func:`classify_and_normalize_restriction` validates the restriction keys, maps
+the ``artifact_detection_{uuid}`` ``interval_list_name`` convention back to
+``artifact_detection_id``, normalizes that id to a ``uuid.UUID``, and splits
+the remaining keys into the per-source restriction dicts the join assembly
+consumes -- without touching the database. The join-assembly half emits the
 captured unresolved-name warning, then assembles the joins from the returned
-dicts exactly as before.
+dicts.
 
 DEPENDENCY-LIGHT BY CONTRACT. This module opens no database connection and
 activates no ``dj.schema`` at import: it imports only the standard library and
@@ -96,21 +97,21 @@ class RestrictionPlan(NamedTuple):
     Each ``*_restriction`` dict is the subset of the (normalized) restriction
     routing to that source / sort / curation table; any may be ``{}``.
     ``shared_restriction`` carries cross-source keys (the preprocessing recipe)
-    present on both source selections: the join assembly applies it to whichever
-    family routes, or matches both families when no source-specific key is
-    given. ``artifact_detection_id`` restricts standalone or frozen concat-member
-    detections: a ``uuid.UUID`` matches either dependency, ``None`` excludes both,
-    and the :data:`NO_ARTIFACT_RESTRICTION` sentinel
+    present on both source selections: the join assembly applies it to
+    whichever family routes, or matches both families when no source-specific
+    key is given. ``artifact_detection_id`` restricts standalone or frozen
+    concat-member detections: a ``uuid.UUID`` matches either dependency,
+    ``None`` excludes both, and the :data:`NO_ARTIFACT_RESTRICTION` sentinel
     means the restriction named no artifact id at all (a wildcard -- no
     artifact restriction). ``motion_corrected_recording_id`` restricts the
     sort's motion correction the same way: a ``uuid.UUID`` matches sorts of
     that corrected recording, ``None`` matches sorts that read their source's
     own traces, and :data:`NO_MOTION_CORRECTION_RESTRICTION` matches both.
-    ``restrict_by_artifact`` is the caller's flag,
-    threaded through unchanged. ``unresolved_name_warning`` is the message the
-    table method emits via ``logger.warning`` when ``restrict_by_artifact`` was
-    requested but the interval name carried no artifact id (``None`` when there
-    is nothing to warn about).
+    ``restrict_by_artifact`` is the caller's flag, threaded through unchanged.
+    ``unresolved_name_warning`` is the message
+    ``_curation_restriction.resolve_restriction`` emits via ``logger.warning``
+    when ``restrict_by_artifact`` was requested but the interval name carried
+    no artifact id (``None`` when there is nothing to warn about).
     """
 
     rec_restriction: dict

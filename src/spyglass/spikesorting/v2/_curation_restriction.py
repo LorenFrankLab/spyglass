@@ -40,7 +40,7 @@ def resolve_restriction(
 
     # Pure key-classification / normalization (unknown-key handling,
     # artifact-interval-name -> id mapping, uuid normalization, per-source
-    # split) lives in the DB-free ``_curation_routing`` module; this method
+    # split) lives in the DB-free ``_curation_routing`` module; this function
     # owns only the DataJoint join assembly.
     plan = classify_and_normalize_restriction(
         key, restrict_by_artifact=restrict_by_artifact, strict=strict

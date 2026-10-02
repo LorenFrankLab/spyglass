@@ -8,8 +8,10 @@ concurrent ``curation_id`` collision. The steps before staging live here:
 root to reuse), :func:`resolve_curation_source` reads what the new curation
 composes from, :func:`plan_curation_insert` allocates the ``curation_id`` and
 builds the unit rows, and :func:`find_matching_child_curation` finds an
-existing child with the same content. ``table_cls`` is ``CurationV2``; its
-``_next_curation_id`` and ``_find_matching_child_curation`` are called on it.
+existing child with the same content (the body behind the patched
+``CurationV2._find_matching_child_curation``, which ``insert_curation`` calls
+through the class). ``table_cls`` is ``CurationV2``; ``plan_curation_insert``
+calls its ``_next_curation_id`` through it.
 
 Imports without the DB layer: the DataJoint tables are imported inside the
 functions.
