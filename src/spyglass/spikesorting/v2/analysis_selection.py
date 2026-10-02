@@ -37,14 +37,13 @@ so the handoff builds one group per member and the receipt lists them.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from spyglass.spikesorting.v2._selection_identity import sha256_json
 from spyglass.spikesorting.v2.curation_api import CurationRef, EvaluationResult
 
 #: A read-only label policy: ``include_labels`` / ``exclude_labels`` tuples
@@ -457,9 +456,7 @@ def select_units_for_analysis(
     from spyglass.spikesorting.v2._lookup_validation import _jsonable_blob
 
     provenance = _jsonable_blob(provenance)
-    selection_hash = hashlib.sha256(
-        json.dumps(provenance, sort_keys=True).encode()
-    ).hexdigest()[:12]
+    selection_hash = sha256_json(provenance, separators=(", ", ": "))[:12]
     unlabeled = tuple(u for u in unit_ids if not labels_by_unit.get(u))
 
     if group_name is None:

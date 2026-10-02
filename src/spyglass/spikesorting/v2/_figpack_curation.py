@@ -13,11 +13,11 @@ opens no database connection at import (mirrors ``_selection_identity``).
 
 from __future__ import annotations
 
-import hashlib
 import json
 
 from spyglass.spikesorting.v2._curation_transforms import parse_curation_unit_id
 from spyglass.spikesorting.v2._enums import CurationLabel
+from spyglass.spikesorting.v2._selection_identity import sha256_json
 
 #: Install hint surfaced when the optional FigPack packages are missing.
 FIGPACK_INSTALL_HINT = (
@@ -104,11 +104,7 @@ def figpack_config_hash(
         "ephemeral": bool(ephemeral),
         "review_config": _json_native(review_config),
     }
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
-    ).hexdigest()
+    return sha256_json(payload)
 
 
 def _json_native(value):
@@ -159,12 +155,7 @@ def unpack_display_config(stored) -> tuple[list[str] | None, dict | None]:
 
 def annotations_payload_hash(annotations: dict | None) -> str:
     """Hash the complete logical annotations payload independent of spacing."""
-    payload = _json_native(annotations or {})
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
-    ).hexdigest()
+    return sha256_json(_json_native(annotations or {}))
 
 
 def normalize_displayed_unit_properties(

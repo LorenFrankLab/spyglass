@@ -130,6 +130,46 @@ def canonical_identity(payload: dict) -> str:
     return json.dumps(normalized, sort_keys=True, separators=(",", ":"))
 
 
+def sha256_json(
+    payload, *, separators=(",", ":"), allow_nan: bool = True
+) -> str:
+    """Return the sha256 hex digest of ``payload``'s sorted-key JSON encoding.
+
+    The digest is ``sha256(json.dumps(payload, sort_keys=True,
+    separators=separators, allow_nan=allow_nan).encode("utf-8"))``. Callers
+    normalize ``payload`` to JSON-native values first; this function only fixes
+    the encoding. Stored digests depend on the exact bytes, so a caller keeps
+    its ``separators`` / ``allow_nan`` for as long as its digests are stored.
+
+    Parameters
+    ----------
+    payload
+        A JSON-serializable value.
+    separators : tuple of str, optional
+        ``json.dumps`` separators. Default compact ``(",", ":")``;
+        ``(", ", ": ")`` reproduces ``json.dumps``'s default spacing.
+    allow_nan : bool, optional
+        If False, a NaN or infinite float raises ``ValueError`` instead of
+        encoding as ``NaN`` / ``Infinity``. Default True.
+
+    Returns
+    -------
+    str
+        The 64-character lowercase sha256 hex digest.
+
+    Raises
+    ------
+    TypeError
+        If ``payload`` holds a value ``json.dumps`` cannot encode.
+    ValueError
+        If ``allow_nan`` is False and ``payload`` holds a NaN or infinity.
+    """
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=separators, allow_nan=allow_nan
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def deterministic_id(kind: str, payload: dict) -> uuid.UUID:
     """Derive a selection's primary-key UUID from its logical identity.
 
@@ -262,9 +302,9 @@ def artifact_detection_identity_payload(
     exclusions = normalize_manual_exclusions(manual_excluded_times)
     manual = (
         {
-            "manual_exclusions_hash": hashlib.sha256(
-                json.dumps(exclusions).encode()
-            ).hexdigest()
+            "manual_exclusions_hash": sha256_json(
+                exclusions, separators=(", ", ": ")
+            )
         }
         if exclusions
         else {}
@@ -309,9 +349,7 @@ def shared_group_member_set_hash(recording_ids) -> str:
         The 64-char sha256 hex digest.
     """
     ordered = sorted(str(recording_id) for recording_id in recording_ids)
-    return hashlib.sha256(
-        json.dumps(ordered, sort_keys=True).encode("utf-8")
-    ).hexdigest()
+    return sha256_json(ordered, separators=(", ", ": "))
 
 
 def recording_input_hash(
@@ -374,11 +412,7 @@ def recording_input_hash(
             int(c) for c in interpolated_bad_channel_ids
         ),
     }
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
-    ).hexdigest()
+    return sha256_json(payload)
 
 
 def sorting_identity_payload(

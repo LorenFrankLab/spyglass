@@ -8,10 +8,10 @@ empty text, booleans, integers, and floating-point values unambiguous.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from collections.abc import Mapping, Sequence
+
+from spyglass.spikesorting.v2._selection_identity import sha256_json
 
 ANNOTATION_VALUE_TYPES = frozenset({"float", "int", "bool", "text"})
 _BIGINT_MIN = -(2**63)
@@ -130,21 +130,11 @@ def _encoded_annotation_value(value_type: str, value) -> dict:
     return {"kind": value_type, "value": value}
 
 
-def canonical_json_bytes(value) -> bytes:
-    """Serialize normalized content with stable separators and key order."""
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-
-
 def producer_parameters_hash(parameters) -> str:
     """Hash normalized, self-describing producer parameters."""
-    return hashlib.sha256(
-        canonical_json_bytes(normalize_producer_parameters(parameters))
-    ).hexdigest()
+    return sha256_json(
+        normalize_producer_parameters(parameters), allow_nan=False
+    )
 
 
 def annotation_set_hash(
@@ -179,13 +169,12 @@ def annotation_set_hash(
         ),
         "values": normalized_values,
     }
-    return hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+    return sha256_json(payload, allow_nan=False)
 
 
 __all__ = [
     "ANNOTATION_VALUE_TYPES",
     "annotation_set_hash",
-    "canonical_json_bytes",
     "normalize_annotation_value",
     "normalize_producer_parameters",
     "producer_parameters_hash",

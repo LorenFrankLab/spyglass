@@ -32,15 +32,14 @@ imported inside the functions that need it.
 from __future__ import annotations
 
 import copy
-import hashlib
 import inspect
-import json
 import uuid
 from typing import NamedTuple
 
 import numpy as np
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
+from spyglass.spikesorting.v2._selection_identity import sha256_json
 from spyglass.spikesorting.v2._sorting_dispatch import (
     STATISTICS_SAMPLE_CHUNK_MS,
     STATISTICS_SAMPLE_NUM_CHUNKS,
@@ -398,10 +397,7 @@ def resolve_estimation_params(params: dict) -> dict:
 
 def resolved_params_hash(resolved: dict) -> str:
     """SHA-256 of a resolved configuration's canonical JSON encoding."""
-    encoded = json.dumps(
-        _canonical(resolved), sort_keys=True, separators=(",", ":")
-    )
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return sha256_json(_canonical(resolved))
 
 
 def spikeinterface_step_kwargs(resolved: dict) -> tuple[dict, dict, dict]:
@@ -2171,5 +2167,4 @@ def motion_input_fingerprint(
         ).tolist(),
         "resolved_params_hash": str(resolved_params_hash),
     }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return sha256_json(payload)

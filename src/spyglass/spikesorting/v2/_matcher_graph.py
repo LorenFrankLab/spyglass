@@ -24,8 +24,6 @@ database connection.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import datetime, timezone
 from itertools import combinations
 from statistics import median
@@ -33,6 +31,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from spyglass.spikesorting.v2._selection_identity import sha256_json
 from spyglass.spikesorting.v2.exceptions import (
     TrackedUnitBudgetExceededError,
 )
@@ -121,9 +120,7 @@ def input_set_hash(input_rows, recording_rows) -> str:
                 "recordings": sorted(recordings_by_input.get(index, [])),
             }
         )
-    return hashlib.sha256(
-        json.dumps(canonical, sort_keys=True).encode("utf-8")
-    ).hexdigest()
+    return sha256_json(canonical, separators=(", ", ": "))
 
 
 def input_part_structure_errors(input_rows, recording_rows) -> list[str]:

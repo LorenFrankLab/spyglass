@@ -16,14 +16,14 @@ hashes the name. They are intentionally separate concerns.
 
 DB-FREE BY CONTRACT. Like :mod:`_selection_identity`, this module imports
 neither DataJoint nor SpikeInterface and opens no database connection at
-import. Keep it to the standard library so a spawned HPC worker that
-re-imports it never triggers a connection.
+import. Keep it to the standard library (plus the stdlib-only
+:mod:`_selection_identity`) so a spawned HPC worker that re-imports it never
+triggers a connection.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
+from spyglass.spikesorting.v2._selection_identity import sha256_json
 
 _SHORT_FINGERPRINT_LENGTH = 12
 
@@ -50,29 +50,6 @@ def _normalize_numbers(value):
     if isinstance(value, (list, tuple)):
         return [_normalize_numbers(item) for item in value]
     return value
-
-
-def _canonical_content(payload: dict) -> str:
-    """Return a byte-stable JSON string for a parameter row's content.
-
-    Keys are sorted recursively and separators are fixed, so the output
-    does not depend on dict insertion order or JSON spacing defaults. The
-    ``params`` blob is assumed already schema-validated (plain JSON-native
-    scalars, lists, and nested dicts). Numbers are normalized
-    (:func:`_normalize_numbers`) so an int and an int-valued float fingerprint
-    identically -- otherwise two semantically-identical ``extra="allow"`` blobs
-    (``60000`` vs ``60000.0``) would fork provenance. ``allow_nan=False`` makes
-    a NaN/Inf value raise ``ValueError`` at fingerprint time rather than
-    emitting the invalid-JSON tokens ``NaN``/``Infinity`` that no strict JSON
-    reader accepts; a non-JSON-serializable value still raises ``TypeError``,
-    surfacing an unexpected blob shape rather than being silently coerced.
-    """
-    return json.dumps(
-        _normalize_numbers(payload),
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
 
 
 def parameter_fingerprint(
@@ -157,9 +134,14 @@ def parameter_fingerprint(
         payload["execution_params_schema_version"] = int(
             execution_params_schema_version
         )
-    return hashlib.sha256(
-        _canonical_content(payload).encode("utf-8")
-    ).hexdigest()
+    # The ``params`` blob is assumed already schema-validated (JSON-native
+    # scalars, lists, and nested dicts). Numbers are normalized so ``60000``
+    # and ``60000.0`` in two ``extra="allow"`` blobs fingerprint alike.
+    # ``allow_nan=False`` makes a NaN/Inf value raise ``ValueError`` rather
+    # than emit the invalid-JSON tokens ``NaN``/``Infinity``; a value
+    # ``json.dumps`` cannot encode raises ``TypeError`` rather than being
+    # silently coerced.
+    return sha256_json(_normalize_numbers(payload), allow_nan=False)
 
 
 def short_fingerprint(

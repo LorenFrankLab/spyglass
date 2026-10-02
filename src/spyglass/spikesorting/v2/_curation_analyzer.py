@@ -40,6 +40,7 @@ from spyglass.spikesorting.v2._analyzer_cache import (
     publish_analyzer_atomically,
     waveform_recipe_hash,
 )
+from spyglass.spikesorting.v2._selection_identity import sha256_json
 from spyglass.spikesorting.v2._sorting_analyzer import (
     BASE_ANALYZER_EXTENSIONS,
     STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
@@ -76,20 +77,11 @@ class CurationAnalyzerManifest:
         return row
 
 
-def _canonical_json(value) -> str:
-    """Serialize a JSON-like value deterministically, including numpy blobs."""
+def _content_hash(value) -> str:
+    """Hash a JSON-like value deterministically, including numpy blobs."""
     from spyglass.spikesorting.v2._lookup_validation import _jsonable_blob
 
-    return json.dumps(
-        _jsonable_blob(value),
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-
-
-def _content_hash(value) -> str:
-    return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+    return sha256_json(_jsonable_blob(value), allow_nan=False)
 
 
 def _folder_storage_fingerprint(folder: Path) -> str:

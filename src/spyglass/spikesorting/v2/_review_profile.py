@@ -8,8 +8,6 @@ helpers so profile and figure configuration cannot drift on list semantics.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
@@ -21,6 +19,7 @@ from spyglass.spikesorting.v2._figpack_curation import (
 from spyglass.spikesorting.v2._metric_curation import (
     si_quality_metric_output_columns,
 )
+from spyglass.spikesorting.v2._selection_identity import sha256_json
 
 _PROFILE_FIELDS = frozenset(
     {
@@ -174,14 +173,7 @@ def normalize_review_profile(
         "label_options": label_options,
         "label_import_mode": label_import_mode,
     }
-    profile_hash = hashlib.sha256(
-        json.dumps(
-            semantic,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
+    profile_hash = sha256_json(semantic, allow_nan=False)
     supplied_hash = row.get("profile_hash")
     if supplied_hash is not None and str(supplied_hash) != profile_hash:
         raise ValueError(
