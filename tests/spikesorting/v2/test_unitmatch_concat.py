@@ -32,6 +32,7 @@ from tests.spikesorting.v2._unitmatch_helpers import (
     reforge_selection,
     restore_matcher_registry,
 )
+from tests.spikesorting.v2._sorter_stub import plant_sorter
 
 pytestmark = pytest.mark.slow
 
@@ -1152,10 +1153,8 @@ def test_insert_inputs_rejects_concat_and_single_with_different_geometry(
                 "sorter_params_name": "franklab_30khz_ms5_2026_06",
             }
         )
-        monkeypatch.setattr(
-            Sorting,
-            "_run_sorter",
-            staticmethod(functools.partial(_plant_spread_unit, unit_id=0)),
+        plant_sorter(
+            monkeypatch, functools.partial(_plant_spread_unit, unit_id=0)
         )
         Sorting.populate(sort_key, reserve_jobs=False)
         subset = CurationV2.insert_curation(sorting_key=sort_key)
@@ -1958,9 +1957,7 @@ def span_edge_sorts(daily_concat_match_inputs):
     curations = {}
     patch = pytest.MonkeyPatch()
     try:
-        patch.setattr(
-            Sorting, "_run_sorter", staticmethod(_plant_around_span_edge)
-        )
+        plant_sorter(patch, _plant_around_span_edge)
         for name, sort_key in sort_keys.items():
             if not (Sorting & sort_key):
                 Sorting.populate(sort_key, reserve_jobs=False)
@@ -2480,7 +2477,7 @@ def member_time_sorts(daily_concat_match_inputs):
     curations = {}
     patch = pytest.MonkeyPatch()
     try:
-        patch.setattr(Sorting, "_run_sorter", staticmethod(_plant_by_member))
+        plant_sorter(patch, _plant_by_member)
         for name, sort_key in sort_keys.items():
             if not (Sorting & sort_key):
                 Sorting.populate(sort_key, reserve_jobs=False)
@@ -3094,7 +3091,7 @@ def _sorter_trains(spec, layout) -> dict:
 
 
 def _planted_daily_sorter(trains_by_n_samples):
-    """A ``Sorting._run_sorter`` stand-in returning the planted units.
+    """A ``plant_sorter`` stand-in returning the planted units.
 
     Picks the day by the length of the recording it is handed (the two
     days' concatenations differ in length) and returns every planted unit
@@ -3169,15 +3166,10 @@ def _sort_both_days(fixture, trains_by_n_samples, monkeypatch, receipts=None):
     mode with exactly those estimates; otherwise ``motion_mode="off"``.
     """
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
-    from spyglass.spikesorting.v2.sorting import Sorting
 
     summaries = {}
     with monkeypatch.context() as patch:
-        patch.setattr(
-            Sorting,
-            "_run_sorter",
-            staticmethod(_planted_daily_sorter(trains_by_n_samples)),
-        )
+        plant_sorter(patch, _planted_daily_sorter(trains_by_n_samples))
         for label, day in fixture["days"].items():
             kwargs = {
                 "concat_session_group_owner": fixture["team"],

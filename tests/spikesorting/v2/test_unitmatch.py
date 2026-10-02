@@ -30,6 +30,7 @@ from tests.spikesorting.v2._unitmatch_helpers import (
 from tests.spikesorting.v2._unitmatch_helpers import (
     restore_matcher_registry as _restore_matcher_registry,
 )
+from tests.spikesorting.v2._sorter_stub import plant_sorter
 
 
 @pytest.mark.parametrize(("spike_width", "n_baseline"), [(18, 4), (90, 22)])
@@ -718,7 +719,7 @@ def _ensure_minirec_clusterless_params():
 
 
 #: mountainsort5 params name for the planted minirec sorts. The sorts are
-#: PLANTED (``_run_sorter`` monkeypatched), so this row only exists for the
+#: PLANTED (``plant_sorter``), so this row only exists for the
 #: selection FK + identity; the params are never run. A real sorter name gives
 #: the sort ``sorted_units`` semantics -- the right substrate for cross-session
 #: matching, which tracks sorted neurons, not clusterless threshold crossings.
@@ -746,8 +747,8 @@ def _plant_single_unit(
     """Plant one deterministic sorted unit spread across the recording.
 
     Enough spikes (and span) for the split-half UnitMatch bundle extraction and
-    the display-analyzer template. Replaces a real sorter run via a
-    ``Sorting._run_sorter`` monkeypatch -- fast and deterministic.
+    the display-analyzer template. Replaces a real sorter run via
+    ``plant_sorter`` -- fast and deterministic.
     """
     import numpy as np
     import spikeinterface as si
@@ -769,7 +770,7 @@ def two_session_curated_group(chronic_2_session_minirec):
     Builds on the package-scoped chronic minirec substrate: creates a two-member
     SessionGroup (and a one-member solo group for the degenerate case), and
     root-curates each same-day member with a PLANTED single-unit mountainsort5
-    sort (``_run_sorter`` monkeypatched -- fast, deterministic, and
+    sort (``plant_sorter`` -- fast, deterministic, and
     ``sorted_units`` semantics, the right substrate for cross-session matching).
     Yields the group identities plus the per-member curation choices; tears down
     its own UnitMatch lineage, groups, sorts, and curations afterward.
@@ -804,7 +805,7 @@ def two_session_curated_group(chronic_2_session_minirec):
     choices = {}
     mp = pytest.MonkeyPatch()
     try:
-        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant_single_unit))
+        plant_sorter(mp, _plant_single_unit)
         for index, rec_pk in enumerate(recording_pks):
             sort_pk = SortingSelection.insert_selection(
                 {
@@ -1097,8 +1098,8 @@ def _plant_sort_on_first_member(grp, sorter_params_name, samples_by_unit):
     Unit ``i`` fires at ``samples_by_unit[i]`` (frame indices). A distinct
     params name gives a distinct content-addressed sort on the SAME recording,
     so the planted sort shares member 0's identity without colliding with the
-    fixture's single-unit sort. The sort is PLANTED (``_run_sorter``
-    monkeypatched), so the params are never run; a real sorter name keeps the
+    fixture's single-unit sort. The sort is PLANTED (``plant_sorter``),
+    so the params are never run; a real sorter name keeps the
     units ``sorted_units``. Returns ``(sort_key, sorted_unit_ids)``; the caller
     owns teardown (clear_curations_for + dropping the sort/params).
     """
@@ -1162,7 +1163,7 @@ def _plant_sort_on_first_member(grp, sorter_params_name, samples_by_unit):
     )
     mp = pytest.MonkeyPatch()
     try:
-        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+        plant_sorter(mp, _plant)
         if not (Sorting & sort_key):
             Sorting.populate(sort_key, reserve_jobs=False)
     finally:
@@ -3596,9 +3597,7 @@ def test_describe_unit_match_choices_excludes_other_team(
     try:
         if not (Recording & other_rec):
             Recording.populate(other_rec, reserve_jobs=False)
-        monkeypatch.setattr(
-            Sorting, "_run_sorter", staticmethod(_plant_single_unit)
-        )
+        plant_sorter(monkeypatch, _plant_single_unit)
         other_sort = SortingSelection.insert_selection(
             {
                 "recording_id": other_rec["recording_id"],
@@ -3698,9 +3697,7 @@ def test_describe_unit_match_choices_unsorted_member_and_multiple_recordings(
     try:
         if not (Recording & second_rec):
             Recording.populate(second_rec, reserve_jobs=False)
-        monkeypatch.setattr(
-            Sorting, "_run_sorter", staticmethod(_plant_single_unit)
-        )
+        plant_sorter(monkeypatch, _plant_single_unit)
         second_sort = SortingSelection.insert_selection(
             {
                 "recording_id": second_rec["recording_id"],

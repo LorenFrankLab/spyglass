@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from tests.spikesorting.v2._concat_helpers import select_unmasked_concat
+from tests.spikesorting.v2._sorter_stub import plant_sorter
 
 logger = logging.getLogger(__name__)
 
@@ -1922,7 +1923,7 @@ def test_concat_applied_merge_through_curation_and_evaluation(
 
     mp = pytest.MonkeyPatch()
     try:
-        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+        plant_sorter(mp, _plant)
         if not (Sorting & sort_pk):
             Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
@@ -2066,7 +2067,7 @@ def test_concat_analyzer_receives_statistics_spans_after_reload(
     )
     mp = pytest.MonkeyPatch()
     try:
-        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+        plant_sorter(mp, _plant)
         (Sorting & sort_pk).super_delete(warn=False)
         Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
