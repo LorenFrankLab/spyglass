@@ -298,11 +298,9 @@ def current_env_namespaces() -> dict:
     """
     import pynwb
 
-    name_cat = pynwb.get_manager().type_map.namespace_catalog
-    deps = {
-        ns: name_cat.get_namespace(ns).get("version", None)
-        for ns in name_cat.namespaces
-    }
+    from spyglass.utils.nwb_hash import get_namespace_versions
+
+    deps = get_namespace_versions(pynwb.get_manager().type_map)
     deps.pop("version", None)
     return deps
 
