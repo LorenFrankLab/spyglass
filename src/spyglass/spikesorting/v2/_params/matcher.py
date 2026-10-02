@@ -62,7 +62,7 @@ class UnitMatchParamsSchema(BaseModel):
 
     @model_validator(mode="after")
     def _waveform_window_is_symmetric(self):
-        """Keep UnitMatch's trough and baseline in their assumed locations."""
+        """Keep UnitMatch's trough at the window midpoint it assumes."""
         if not math.isclose(
             self.ms_before, self.ms_after, rel_tol=0.0, abs_tol=1e-12
         ):

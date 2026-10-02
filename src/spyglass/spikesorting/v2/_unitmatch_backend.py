@@ -312,8 +312,7 @@ def extract_unitmatch_bundle(
         multi-segment recording or sorting.
     """
     # Keep this public service boundary as strict as MatcherParameters.insert:
-    # UnitMatch locates the trough at the geometric midpoint, and the baseline
-    # subtraction assumes the first quarter is wholly pre-spike.
+    # UnitMatch locates the trough at the geometric midpoint.
     validated = UnitMatchParamsSchema(
         ms_before=ms_before,
         ms_after=ms_after,
@@ -469,19 +468,6 @@ def extract_unitmatch_bundle(
     return excluded
 
 
-def _zero_center(waveform: np.ndarray) -> np.ndarray:
-    """Subtract each template's pre-spike baseline (SI templates carry a DC offset).
-
-    The bundle is written with ``ms_before == ms_after`` so the peak sits at
-    ``spike_width // 2``; the first quarter of the window is guaranteed
-    pre-spike for any user ``ms_before``. ``waveform`` is
-    ``(n_units, spike_width, n_channels, 2)``.
-    """
-    n_baseline = max(1, waveform.shape[1] // 4)
-    baseline = waveform[:, :n_baseline, :, :].mean(axis=1)
-    return waveform - baseline[:, np.newaxis, :, :]
-
-
 def assert_consistent_channel_geometry(named_positions) -> None:
     """Reject sessions that do not share one probe geometry.
 
@@ -618,7 +604,6 @@ class UnitMatchBackend:
         # MatcherProtocol implementation and must not assume that precondition.
         if param["n_units"] == 0:
             return []
-        waveform = _zero_center(waveform)
         clus_info = {
             "good_units": good_units,
             "session_switch": session_switch,
