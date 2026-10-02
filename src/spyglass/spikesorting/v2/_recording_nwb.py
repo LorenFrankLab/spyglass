@@ -940,7 +940,9 @@ def compute_recording_artifact(
         path; defaults to ``()`` (empty, the ``remove`` path).
     existing_analysis_file_name : str or None, optional
         When ``None`` (default), stage a fresh ``AnalysisNwbfile``;
-        otherwise overwrite this existing file (the rebuild path).
+        otherwise write into this existing file in place, which is left in
+        place (never unlinked) if the write fails. Every current caller --
+        populate, rebuild and recompute -- passes ``None``.
 
     Returns
     -------
@@ -955,11 +957,12 @@ def compute_recording_artifact(
     -----
     Cleanup contract: ``_write_nwb_artifact`` either writes a
     full file or raises before any registration. On a
-    write/hash failure it unlinks the partial file before
-    propagating, on BOTH the fresh-write and the rebuild path:
+    write/hash failure a freshly staged partial file is unlinked before
+    the error propagates; an existing file named by
+    ``existing_analysis_file_name`` is never unlinked.
 
-    Both callers stage a fresh, unregistered file, so the freshly staged
-    file is removed on a write/hash failure and a half-written artifact
+    The populate, rebuild and recompute callers all stage a fresh,
+    unregistered file, so the freshly staged file is removed on a write/hash failure and a half-written artifact
     never outlives a failed compute. The rebuild caller
     (``_rebuild_nwb_artifact``) additionally fingerprints the staged file
     and installs it into the canonical slot via ``os.replace`` ONLY on a
@@ -1125,9 +1128,10 @@ def compute_recording_artifact(
         n_channels = int(recording.get_num_channels())
         duration_s = float(saved_end - saved_start)
     except Exception:
-        # Only unlink on fresh-write failures; on rebuild the
-        # file IS the cache and partial-write damage is surfaced
-        # via the caller's hash-mismatch warning.
+        # Unlink only a file this call staged fresh. A file named by
+        # ``existing_analysis_file_name`` is an existing artifact written in
+        # place; it is never unlinked here (``write_nwb_artifact`` leaves it
+        # in place too).
         if (
             existing_analysis_file_name is None
             and analysis_file_name is not None
