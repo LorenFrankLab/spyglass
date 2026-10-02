@@ -262,8 +262,10 @@ def _consolidate_regular_intervals(
 ):
     """Convert intervals to frame bounds without materializing timestamps.
 
-    Equivalent to ``_consolidate_intervals(intervals, t_start + arange(n)/fs)``
-    for a regular one-segment recording.
+    For a regular one-segment recording with timestamps
+    ``t = t_start + arange(n)/fs``, each interval maps to
+    ``[searchsorted(t, start, "left"), searchsorted(t, stop, "right"))``;
+    overlapping or frame-adjacent results are merged.
     """
     import numpy as np
 
@@ -284,7 +286,7 @@ def _consolidate_regular_intervals(
         only absorbs the round-off in ``(time - t_start) * fs`` for a boundary
         that sits exactly on a sample line. Without it, ``ceil``/``floor``
         drop the edge sample and disagree with the searchsorted
-        ``_consolidate_intervals`` path used for explicit timestamps.
+        ``frames_for_times`` path used for explicit timestamps.
         """
         rounded = np.round(frames)
         return np.where(np.abs(frames - rounded) <= atol, rounded, frames)
@@ -536,8 +538,8 @@ def restrict_recording(
         # After the min_segment_length filter the intersection may
         # be empty -- e.g. a noisy session where every chunk is
         # shorter than the threshold. Raise here instead of
-        # crashing downstream on ``_consolidate_intervals`` index
-        # access.
+        # crashing downstream on ``_consolidate_regular_intervals``
+        # index access.
         raise ValueError(
             f"Recording.make: interval list {interval_list_name!r} "
             f"for {nwb_file_name!r} has zero intersection with raw "

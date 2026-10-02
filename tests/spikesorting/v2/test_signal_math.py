@@ -2,9 +2,9 @@
 
 Covers the boundary invariant guards (positive sampling frequency,
 monotonic timestamps) wired into the frame-mapping functions
-(``_consolidate_intervals`` / ``_spike_times_to_frames`` /
-``_base_intervals_from_timestamps``) and the absolute-time merge dedup
-(``_dedup_merged_spike_times``) that the lazy units-NWB merge is built on.
+(``_spike_times_to_frames`` / ``base_intervals_and_gaps``) and the
+absolute-time merge dedup (``_dedup_merged_spike_times``) that the lazy
+units-NWB merge is built on.
 All pure numpy -- no DB, no NWB IO.
 """
 
@@ -80,19 +80,6 @@ def test_assert_artifact_frame_fraction_guards_pathological_overmasking():
     assert assert_artifact_frame_fraction(0, 0) is None
 
 
-def test_consolidate_intervals_rejects_nonmonotonic_timestamps():
-    """The frame mapping is ``searchsorted``-based, so a backward step in the
-    timestamp vector would silently mis-slice; reject it at the boundary."""
-    import numpy as np
-
-    from spyglass.spikesorting.v2._signal_math import _consolidate_intervals
-
-    with pytest.raises(ValueError, match="monotonic"):
-        _consolidate_intervals(
-            np.array([[0.0, 1.0]]), np.array([0.0, 2.0, 1.0])
-        )
-
-
 def test_spike_times_to_frames_rejects_nonmonotonic_recording_times():
     """``_spike_times_to_frames`` searchsorts spike times into the recording
     timeline; a backward step there mis-maps every spike frame."""
@@ -104,19 +91,6 @@ def test_spike_times_to_frames_rejects_nonmonotonic_recording_times():
         _spike_times_to_frames(
             np.array([0.0, 2.0, 1.0]), np.array([0.5]), 3, unit_id=0
         )
-
-
-def test_base_intervals_from_timestamps_rejects_nonpositive_fs():
-    """A zero/negative sampling frequency makes the gap threshold ``1.5/fs``
-    infinite/negative, silently collapsing or exploding the chunk split."""
-    import numpy as np
-
-    from spyglass.spikesorting.v2._signal_math import (
-        _base_intervals_from_timestamps,
-    )
-
-    with pytest.raises(ValueError, match="finite positive"):
-        _base_intervals_from_timestamps(np.array([0.0, 1.0, 2.0]), 0.0)
 
 
 def test_dedup_merged_spike_times_drops_cross_unit_coincidences():
@@ -259,15 +233,15 @@ def test_base_intervals_and_gaps_matches_full_vector(kind):
     the ``np.diff`` gap frame indices, without materializing ``get_times()``."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._signal_math import (
-        _base_intervals_from_timestamps,
-        base_intervals_and_gaps,
+    from spyglass.spikesorting.v2._signal_math import base_intervals_and_gaps
+    from tests.spikesorting.v2._interval_references import (
+        base_intervals_from_timestamps,
     )
 
     n = 200_000
     rec = _recording_for_kind(kind, n)
     full = rec.get_times()
-    base_ref = np.asarray(_base_intervals_from_timestamps(full, FS))
+    base_ref = np.asarray(base_intervals_from_timestamps(full, FS))
     gap_ref = np.flatnonzero(np.diff(full) > 1.5 / FS)
 
     base, gap = base_intervals_and_gaps(rec, FS)
@@ -287,9 +261,9 @@ def test_base_intervals_and_gaps_gap_at_scan_chunk_boundary():
     interior gap so both gap branches run in one recording."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._signal_math import (
-        _base_intervals_from_timestamps,
-        base_intervals_and_gaps,
+    from spyglass.spikesorting.v2._signal_math import base_intervals_and_gaps
+    from tests.spikesorting.v2._interval_references import (
+        base_intervals_from_timestamps,
     )
 
     chunk_size = max(1, int(round(FS)))  # the scan's per-chunk frame count
@@ -302,13 +276,25 @@ def test_base_intervals_and_gaps_gap_at_scan_chunk_boundary():
     ts[interior_gap:] += 11.0
     rec = _explicit_recording(ts)
 
-    base_ref = np.asarray(_base_intervals_from_timestamps(ts, FS))
+    base_ref = np.asarray(base_intervals_from_timestamps(ts, FS))
     gap_ref = np.flatnonzero(np.diff(ts) > 1.5 / FS)
     assert gap_ref.tolist() == [seam_gap - 1, interior_gap - 1]  # sanity
 
     base, gap = base_intervals_and_gaps(rec, FS)
     np.testing.assert_array_equal(np.asarray(base), base_ref)
     np.testing.assert_array_equal(gap, gap_ref)
+
+
+def test_base_intervals_and_gaps_rejects_nonpositive_fs():
+    """A zero/negative sampling frequency makes the gap threshold ``1.5/fs``
+    infinite/negative, silently collapsing or exploding the chunk split."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._signal_math import base_intervals_and_gaps
+
+    rec = _explicit_recording(np.array([0.0, 1.0, 2.0]))
+    with pytest.raises(ValueError, match="finite positive"):
+        base_intervals_and_gaps(rec, 0.0)
 
 
 def test_timestamp_fingerprint_matches_array_equal_semantics():

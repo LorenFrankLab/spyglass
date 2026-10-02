@@ -772,9 +772,10 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
 def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
     """``Recording.make`` honors disjoint sort intervals.
 
-    Without the ``_consolidate_intervals`` + ``concatenate_recordings``
-    pattern, ``Recording.make`` took ``(times[0][0], times[-1][-1])``
-    -- the outer envelope, silently including inter-interval gaps.
+    Without the per-interval ``frame_slice`` + ``concatenate_recordings``
+    pattern (``restrict_recording_times``), ``Recording.make`` took
+    ``(times[0][0], times[-1][-1])`` -- the outer envelope, silently
+    including inter-interval gaps.
     This test writes a synthetic IntervalList row whose
     ``valid_times`` has two disjoint chunks with a deliberate gap,
     populates Recording, then re-reads the written
@@ -894,8 +895,8 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
     assert not np.any(in_gap), (
         f"Found {int(in_gap.sum())} written timestamps inside the "
         f"disjoint gap ({chunk1_end}, {gap_end}); the "
-        "_consolidate_intervals + concatenate_recordings split was "
-        "bypassed."
+        "restrict_recording_times frame_slice + concatenate_recordings "
+        "split was bypassed."
     )
 
 
@@ -1012,7 +1013,7 @@ def test_disjoint_multi_gap_readback_and_artifact(
     gaps (3 chunks, 2 gaps), not just the first.
 
     Every other disjoint DB test is single-gap (two chunks). This builds a
-    three-chunk recording and asserts: ``_base_intervals_from_timestamps``
+    three-chunk recording and asserts: ``base_intervals_and_gaps``
     (exercised via the populated timeline) yields one valid interval per
     chunk -- none spanning either gap -- and ``get_sorting`` recovers a
     spike planted in EACH chunk exactly (the per-chunk ``searchsorted``
@@ -1104,7 +1105,7 @@ def test_disjoint_multi_gap_readback_and_artifact(
     ).fetch1("valid_times")
     assert saved.shape == (3, 2), (
         f"expected one valid interval per chunk (3, 2); got {saved.shape}. "
-        "_base_intervals_from_timestamps mis-split a multi-gap timeline."
+        "base_intervals_and_gaps mis-split a multi-gap timeline."
     )
     gap1_mid = 0.5 * (c1[1] + c2[0])
     gap2_mid = 0.5 * (c2[1] + c3[0])

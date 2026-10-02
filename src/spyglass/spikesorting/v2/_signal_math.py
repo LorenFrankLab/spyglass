@@ -57,8 +57,8 @@ def assert_positive_sampling_frequency(
 def assert_monotonic_timestamps(timestamps, *, context: str = "") -> None:
     """Raise if ``timestamps`` is empty or steps backward.
 
-    ``searchsorted``-based frame mapping (``_consolidate_intervals`` /
-    ``_spike_times_to_frames``) and the first/last-sample reads assume a
+    ``searchsorted``-based frame mapping (``_spike_times_to_frames``) and
+    the first/last-sample reads assume a
     non-empty, monotonically non-decreasing wall-clock vector; an out-of-order
     or empty vector silently mis-slices the recording rather than failing.
     Equal consecutive timestamps are allowed (``searchsorted`` handles
@@ -275,68 +275,6 @@ def intersect_interval_sets(interval_sets):
     return acc
 
 
-def _consolidate_intervals(intervals, timestamps):
-    """Convert ``(start_time, stop_time)`` second intervals to frame indices.
-
-    Sorts and merges overlapping/adjacent intervals, then maps each onto a
-    half-open ``[start_frame, end_frame_exclusive)`` pair. The end uses
-    ``searchsorted(side="right")`` -- the count of timestamps ``<= stop_time``
-    -- which is exactly the exclusive end ``frame_slice`` expects, so the
-    final sample of each interval is retained.
-
-    Parameters
-    ----------
-    intervals : array-like
-        Iterable of ``(start_seconds, stop_seconds)`` tuples. The
-        helper sorts and consolidates overlapping/adjacent
-        intervals before returning.
-    timestamps : numpy.ndarray
-        Monotonically non-decreasing wall-clock timestamps for the recording
-        (validated by ``assert_monotonic_timestamps`` before the searchsorted
-        frame mapping).
-
-    Returns
-    -------
-    numpy.ndarray
-        ``(n_consolidated, 2)`` array of ``(start_frame,
-        end_frame_exclusive)`` integer pairs suitable for
-        ``recording.frame_slice(start_frame=..., end_frame=...)``.
-    """
-    import numpy as np
-
-    intervals = np.asarray(intervals)
-    if intervals.ndim == 1:
-        intervals = intervals.reshape(-1, 2)
-    if intervals.shape[1] != 2:
-        raise ValueError("Input array must have shape (N_Intervals, 2).")
-
-    # Sort defensively; stable ordering by start.
-    if not np.all(intervals[:-1] <= intervals[1:]):
-        intervals = intervals[np.argsort(intervals[:, 0])]
-
-    assert_monotonic_timestamps(timestamps, context="_consolidate_intervals: ")
-    start_indices = np.searchsorted(timestamps, intervals[:, 0], side="left")
-    # Exclusive end: ``side="right"`` returns the count of timestamps <= value,
-    # which is exactly the half-open end ``frame_slice`` expects.
-    stop_indices = np.searchsorted(timestamps, intervals[:, 1], side="right")
-
-    consolidated = []
-    start, stop = int(start_indices[0]), int(stop_indices[0])
-    for next_start, next_stop in zip(start_indices, stop_indices):
-        next_start = int(next_start)
-        next_stop = int(next_stop)
-        # Overlap / adjacency in exclusive-end form: next_start <= stop
-        # (== means strictly adjacent).
-        if next_start <= stop:
-            stop = max(stop, next_stop)
-        else:
-            consolidated.append((start, stop))
-            start, stop = next_start, next_stop
-
-    consolidated.append((start, stop))
-    return np.asarray(consolidated, dtype=np.int64)
-
-
 def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
     """Map absolute spike times (seconds) to recording frame indices.
 
@@ -500,55 +438,6 @@ def _dedup_merged_spike_times(times_list, delta_s):
     if not arrays:
         return np.asarray([], dtype=float)
     return get_non_duplicated_events(arrays, delta_s)
-
-
-def _base_intervals_from_timestamps(timestamps, fs):
-    """Split a (possibly gap-preserving) timestamp vector into recorded chunks.
-
-    A disjoint v2 recording persists the concatenated per-sort-interval
-    timestamp slices (``Recording._restrict_recording``'s
-    ``timestamps_override``), so consecutive samples WITHIN a chunk differ
-    by ~1 sample period while an inter-chunk wall-clock gap shows up as a
-    diff > 1.5 sample periods (a missing sample). Returns one
-    ``[start, end]`` (inclusive first/last sample times, seconds) per
-    chunk so an artifact complement built per chunk never spans a gap. A
-    contiguous recording yields a single ``[t0, t_end]`` interval, so this is
-    a no-op
-    for the common single-interval case.
-
-    The ``1.5 / fs`` threshold is robust against sub-sample timestamp
-    jitter (within-chunk diffs are ~1 sample period); any genuine
-    disjoint gap is orders of magnitude larger.
-
-    Parameters
-    ----------
-    timestamps : array-like, shape (n_samples,)
-        Recording timestamps in seconds, monotonically increasing.
-    fs : float
-        Sampling frequency in Hz.
-
-    Returns
-    -------
-    list[list[float]]
-        ``[[start, end], ...]`` inclusive per-chunk bounds; ``[]`` for an
-        empty input.
-    """
-    import numpy as np
-
-    ts = np.asarray(timestamps, dtype=float)
-    if ts.size == 0:
-        return []
-    assert_monotonic_timestamps(ts, context="_base_intervals_from_timestamps: ")
-    fs = assert_positive_sampling_frequency(
-        fs, context="_base_intervals_from_timestamps: "
-    )
-    sample_period = 1.0 / float(fs)
-    # Index i marks a gap when ts[i+1] - ts[i] exceeds 1.5 sample periods
-    # (i.e. at least one sample of wall-clock time is missing).
-    gap_after = np.flatnonzero(np.diff(ts) > 1.5 * sample_period)
-    starts = [0, *(int(i) + 1 for i in gap_after)]
-    ends = [*(int(i) for i in gap_after), ts.size - 1]
-    return [[float(ts[s]), float(ts[e])] for s, e in zip(starts, ends)]
 
 
 # --------------------------------------------------------------------------- #
@@ -731,9 +620,9 @@ def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
     emit the gap frame indices. Returns:
 
     * ``base_intervals`` -- one ``[start, end]`` (inclusive first/last sample
-      times, seconds) per recorded chunk; identical to
-      ``_base_intervals_from_timestamps(recording.get_times(), fs)``. A
-      contiguous recording yields a single ``[t0, t_end]``.
+      times, seconds) per recorded chunk, split wherever consecutive
+      ``get_times()`` differ by more than ``1.5 / fs``. A contiguous
+      recording yields a single ``[t0, t_end]``.
     * ``gap_after`` -- int64 frame indices ``i`` where
       ``get_times()[i + 1] - get_times()[i] > 1.5 / fs`` (a wall-clock
       discontinuity from disjoint sort intervals); identical to

@@ -22,11 +22,9 @@ from spyglass.spikesorting.v2._enums import (  # noqa: F401
 )
 
 # Pure signal/frame/interval math lives in _signal_math.py; re-exported
-# here so existing ``from .utils import _consolidate_intervals`` (etc.)
+# here so existing ``from .utils import _spike_times_to_frames`` (etc.)
 # keep working unchanged.
 from spyglass.spikesorting.v2._signal_math import (  # noqa: F401
-    _base_intervals_from_timestamps,
-    _consolidate_intervals,
     _dedup_merged_spike_times,
     _get_recording_timestamps,
     _spike_times_to_frames,

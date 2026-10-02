@@ -234,12 +234,14 @@ def test_regular_interval_consolidation_matches_timestamp_search():
     from spyglass.spikesorting.v2._recording_restriction import (
         _consolidate_regular_intervals,
     )
-    from spyglass.spikesorting.v2.utils import _consolidate_intervals
+    from tests.spikesorting.v2._interval_references import (
+        consolidate_intervals,
+    )
 
     timestamps = 10.0 + np.arange(12, dtype=float) / 2.0
     intervals = np.array([[11.0, 12.0], [13.0, 13.5], [12.5, 12.5]])
 
-    expected = _consolidate_intervals(intervals, timestamps)
+    expected = consolidate_intervals(intervals, timestamps)
     out = _consolidate_regular_intervals(
         intervals,
         n_samples=len(timestamps),
@@ -259,12 +261,15 @@ def test_regular_interval_consolidation_snaps_grid_boundaries():
     ``8.999999999979``). Without snapping, ``ceil`` pushes the start sample
     forward and ``floor`` pulls the stop sample back, dropping the first and
     last samples relative to the searchsorted timestamp path. The snapped
-    rate-based path must agree with ``_consolidate_intervals`` exactly.
+    rate-based path must agree with the full-vector searchsorted reference
+    exactly.
     """
     from spyglass.spikesorting.v2._recording_restriction import (
         _consolidate_regular_intervals,
     )
-    from spyglass.spikesorting.v2.utils import _consolidate_intervals
+    from tests.spikesorting.v2._interval_references import (
+        consolidate_intervals,
+    )
 
     fs = 30000.0
     t_start = 17.0
@@ -273,7 +278,7 @@ def test_regular_interval_consolidation_snaps_grid_boundaries():
     # Sample-aligned boundaries whose float products land just off the integer.
     intervals = np.array([[t_start + 4 / fs, t_start + 9 / fs]])
 
-    expected = _consolidate_intervals(intervals, timestamps)
+    expected = consolidate_intervals(intervals, timestamps)
     out = _consolidate_regular_intervals(
         intervals,
         n_samples=n_samples,
@@ -438,7 +443,9 @@ def test_lazy_regular_path_matches_eager_on_nonzero_start_recording():
         _recording_num_frames,
         _recording_start_time,
     )
-    from spyglass.spikesorting.v2.utils import _consolidate_intervals
+    from tests.spikesorting.v2._interval_references import (
+        consolidate_intervals,
+    )
 
     fs, n_frames, t_start = 2.0, 12, 10.0
     rec = NumpyRecording(
@@ -454,7 +461,7 @@ def test_lazy_regular_path_matches_eager_on_nonzero_start_recording():
     valid_times = np.array([[10.5, 11.5], [13.0, 14.5]])
     eager_times = rec.get_times(segment_index=0)
 
-    eager_frames = _consolidate_intervals(valid_times, eager_times)
+    eager_frames = consolidate_intervals(valid_times, eager_times)
     lazy_frames = _consolidate_regular_intervals(
         valid_times,
         n_samples=_recording_num_frames(rec),

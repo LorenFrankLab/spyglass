@@ -22,28 +22,43 @@ import numpy as np
 import pytest
 
 
-def test_base_intervals_from_timestamps_contiguous():
-    """A contiguous (uniform) timeline yields exactly one base interval."""
-    from spyglass.spikesorting.v2.utils import _base_intervals_from_timestamps
+def _base_intervals(timestamps, fs):
+    """``base_intervals_and_gaps`` chunks for an explicit timestamp vector."""
+    import warnings
 
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._signal_math import base_intervals_and_gaps
+
+    timestamps = np.asarray(timestamps, dtype=np.float64)
+    rec = si.NumpyRecording(
+        traces_list=[np.zeros((timestamps.size, 1), dtype="float32")],
+        sampling_frequency=fs,
+    )
+    with warnings.catch_warnings():  # set_times warns "not recommended"
+        warnings.simplefilter("ignore")
+        rec.set_times(timestamps, segment_index=0)
+    return base_intervals_and_gaps(rec, fs).base_intervals
+
+
+def test_base_intervals_and_gaps_contiguous():
+    """A contiguous (uniform) timeline yields exactly one base interval."""
     fs = 30000.0
     t0 = 12.5
     ts = t0 + np.arange(300) / fs
-    intervals = _base_intervals_from_timestamps(ts, fs)
+    intervals = _base_intervals(ts, fs)
     assert len(intervals) == 1
     assert intervals[0][0] == pytest.approx(ts[0])
     assert intervals[0][1] == pytest.approx(ts[-1])
 
 
-def test_base_intervals_from_timestamps_splits_at_gap():
+def test_base_intervals_and_gaps_splits_at_gap():
     """A wall-clock gap (diff > 1.5/fs) splits the vector into two chunks.
 
     The chunk bounds are the first/last sample of each chunk -- the
     inter-chunk gap is NOT part of any base interval, so an artifact
     complement built per-chunk can never span it.
     """
-    from spyglass.spikesorting.v2.utils import _base_intervals_from_timestamps
-
     fs = 30000.0
     dt = 1.0 / fs
     chunk = np.arange(100) * dt
@@ -52,7 +67,7 @@ def test_base_intervals_from_timestamps_splits_at_gap():
     chunk2_start = t0 + chunk[-1] + gap + dt
     ts = np.concatenate([t0 + chunk, chunk2_start + chunk])
 
-    intervals = _base_intervals_from_timestamps(ts, fs)
+    intervals = _base_intervals(ts, fs)
     assert len(intervals) == 2
     assert intervals[0][0] == pytest.approx(ts[0])
     assert intervals[0][1] == pytest.approx(ts[99])
@@ -65,14 +80,12 @@ def test_base_intervals_from_timestamps_splits_at_gap():
         ), "a base interval must not span the inter-chunk gap"
 
 
-def test_base_intervals_from_timestamps_empty():
+def test_base_intervals_and_gaps_empty():
     """An empty timestamp vector yields no base intervals."""
-    from spyglass.spikesorting.v2.utils import _base_intervals_from_timestamps
-
-    assert _base_intervals_from_timestamps(np.asarray([]), 30000.0) == []
+    assert _base_intervals(np.asarray([]), 30000.0) == []
 
 
-def test_base_intervals_from_timestamps_three_chunks_two_gaps():
+def test_base_intervals_and_gaps_three_chunks_two_gaps():
     """Three chunks separated by TWO gaps yield three correct intervals.
 
     Every existing disjoint fixture is a single gap (two chunks); this
@@ -80,8 +93,6 @@ def test_base_intervals_from_timestamps_three_chunks_two_gaps():
     chunk lengths 80 / 120 / 100 the per-chunk bounds must come from the
     correct sample offsets, not a hard-coded 2-chunk assumption.
     """
-    from spyglass.spikesorting.v2.utils import _base_intervals_from_timestamps
-
     fs = 30000.0
     dt = 1.0 / fs
     n1, n2, n3 = 80, 120, 100
@@ -93,7 +104,7 @@ def test_base_intervals_from_timestamps_three_chunks_two_gaps():
     c3 = c3_start + np.arange(n3) * dt
     ts = np.concatenate([c1, c2, c3])
 
-    intervals = _base_intervals_from_timestamps(ts, fs)
+    intervals = _base_intervals(ts, fs)
     assert len(intervals) == 3
     # Per-chunk inclusive [first, last] sample times, by absolute index.
     expected = [
@@ -121,8 +132,6 @@ def test_base_intervals_gap_threshold_robust_to_subsample_jitter():
     threshold) MUST split. Pins both sides of the boundary so a future
     threshold change (e.g. to ``1.0 / fs``) is caught.
     """
-    from spyglass.spikesorting.v2.utils import _base_intervals_from_timestamps
-
     fs = 30000.0
     dt = 1.0 / fs
 
@@ -132,14 +141,14 @@ def test_base_intervals_gap_threshold_robust_to_subsample_jitter():
     diffs_no_split[25] = 1.4 * dt
     ts_no_split = 3.0 + np.concatenate([[0.0], np.cumsum(diffs_no_split)])
     assert (
-        len(_base_intervals_from_timestamps(ts_no_split, fs)) == 1
+        len(_base_intervals(ts_no_split, fs)) == 1
     ), "a 1.4/fs sub-threshold jitter must not split a chunk"
 
     # Gap just ABOVE the boundary: one diff is 1.6/fs -> split into two.
     diffs_split = np.full(50, dt)
     diffs_split[25] = 1.6 * dt
     ts_split = 3.0 + np.concatenate([[0.0], np.cumsum(diffs_split)])
-    intervals = _base_intervals_from_timestamps(ts_split, fs)
+    intervals = _base_intervals(ts_split, fs)
     assert (
         len(intervals) == 2
     ), "a 1.6/fs supra-threshold gap must split the chunk"
