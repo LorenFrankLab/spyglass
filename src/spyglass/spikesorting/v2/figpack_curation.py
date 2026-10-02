@@ -55,6 +55,7 @@ from spyglass.spikesorting.v2._review_view import (
 from spyglass.spikesorting.v2._selection_identity import (
     assert_supplied_id_matches,
     deterministic_id,
+    existing_selection_pk,
 )
 from spyglass.spikesorting.v2._staged_outputs import (
     StagedOutputCleanupMixin,
@@ -62,7 +63,6 @@ from spyglass.spikesorting.v2._staged_outputs import (
 )
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.exceptions import (
-    DuplicateSelectionError,
     FigPackDisplayedUnitPropertyError,
     FigPackIdentityError,
     FigPackRetrievalError,
@@ -969,22 +969,18 @@ class FigPackCurationSelection(
     def _find_existing_pk(cls, identity, deterministic_figpack_id):
         """Return the PK-only dict for ``identity`` or None; guard bad ids."""
         existing_ids = (cls & identity).fetch("figpack_curation_id")
-        bypassed = [
-            cid
-            for cid in existing_ids
-            if uuid.UUID(str(cid)) != deterministic_figpack_id
-        ]
-        if bypassed:
-            raise DuplicateSelectionError(
+        return existing_selection_pk(
+            [uuid.UUID(str(cid)) for cid in existing_ids],
+            deterministic_figpack_id,
+            pk_field="figpack_curation_id",
+            bypass_message=lambda bypassed: (
                 "FigPackCurationSelection has duplicate selection rows for "
                 f"{identity} with non-deterministic id(s) "
                 f"{sorted(map(str, bypassed))} (expected the content-addressed "
                 f"{deterministic_figpack_id}). This is an integrity bug -- a "
                 "row was inserted bypassing insert_selection."
-            )
-        if len(existing_ids):
-            return {"figpack_curation_id": deterministic_figpack_id}
-        return None
+            ),
+        )
 
 
 @schema
