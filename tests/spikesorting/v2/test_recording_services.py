@@ -346,7 +346,7 @@ def test_raw_eseries_timestamp_mode_detects_rate_vs_explicit(tmp_path):
     timestamp series cannot."""
     import h5py
 
-    from spyglass.spikesorting.v2._recording_nwb import (
+    from spyglass.utils.nwb_helper_fn import (
         raw_eseries_path_and_timestamp_mode,
     )
 
@@ -392,7 +392,7 @@ def test_raw_eseries_path_resolves_by_object_id(tmp_path):
     matched series' OWN path and timestamp mode are returned: the rate-based
     first series vs. the explicit-timestamp second series.
     """
-    from spyglass.spikesorting.v2._recording_nwb import (
+    from spyglass.utils.nwb_helper_fn import (
         raw_eseries_path_and_timestamp_mode,
     )
     from tests.spikesorting.v2._ingest_helpers import write_two_eseries_nwb

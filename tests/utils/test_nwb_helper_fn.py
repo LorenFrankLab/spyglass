@@ -8,6 +8,7 @@ from spyglass.utils.nwb_helper_fn import (
     _get_epoch_groups,
     _get_pos_dict,
     get_raw_eseries_path,
+    raw_eseries_path_and_timestamp_mode,
 )
 
 
@@ -285,3 +286,26 @@ def test_get_pos_dict_with_timestamps():
         np.array([[-1e-7, 3.3 + 1e-7]]),
         atol=1e-9,
     )
+
+
+def test_get_raw_eseries_path_selects_by_object_id(tmp_path):
+    """An object id selects that acquisition series whatever its name."""
+    nwbfile = _nwbfile_with_optional_lfp(
+        with_lfp=True, acquisition_names=("e-series", "wideband")
+    )
+    object_id = nwbfile.acquisition["wideband"].object_id
+    path = tmp_path / "by_object_id.nwb"
+    with pynwb.NWBHDF5IO(str(path), "w") as io:
+        io.write(nwbfile)
+
+    assert (
+        get_raw_eseries_path(str(path), object_id=object_id)
+        == "acquisition/wideband"
+    )
+    assert raw_eseries_path_and_timestamp_mode(
+        str(path), object_id=object_id
+    ) == ("acquisition/wideband", True)
+    # Without an object id, name-based selection is unchanged.
+    assert get_raw_eseries_path(str(path)) == "acquisition/e-series"
+    with pytest.raises(ValueError, match="object_id"):
+        get_raw_eseries_path(str(path), object_id="no-such-object-id")

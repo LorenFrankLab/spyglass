@@ -372,7 +372,7 @@ def get_raw_eseries(nwbfile):
     return ret
 
 
-def get_raw_eseries_path(nwb_file_path):
+def get_raw_eseries_path(nwb_file_path, object_id=None):
     """Return the in-file path of the raw acquisition ElectricalSeries.
 
     The returned path (e.g. ``"acquisition/e-series"``) names the wideband
@@ -386,6 +386,11 @@ def get_raw_eseries_path(nwb_file_path):
     ----------
     nwb_file_path : str
         Absolute path to the NWB file.
+    object_id : str, optional
+        NWB object id of the series to select (e.g. ``Raw.raw_object_id``).
+        When given, the acquisition ElectricalSeries with this object id is
+        returned whatever its name. When ``None`` (default), the series is
+        selected by name from ``RAW_ELECTRICAL_SERIES_NAMES``.
 
     Returns
     -------
@@ -395,8 +400,41 @@ def get_raw_eseries_path(nwb_file_path):
     Raises
     ------
     ValueError
-        If the acquisition group does not contain exactly one named raw
-        ElectricalSeries candidate.
+        If ``object_id`` is given and no acquisition ElectricalSeries has it,
+        or if ``object_id`` is ``None`` and the acquisition group does not
+        contain exactly one named raw ElectricalSeries candidate.
+    """
+    return raw_eseries_path_and_timestamp_mode(nwb_file_path, object_id)[0]
+
+
+def raw_eseries_path_and_timestamp_mode(
+    nwb_file_path, object_id=None
+) -> tuple[str, bool]:
+    """Return the raw ElectricalSeries' in-file path and timestamp mode.
+
+    Selects the series exactly as :func:`get_raw_eseries_path` does and also
+    reports whether it stores an explicit ``timestamps`` dataset. A rate-based
+    series stores ``starting_time`` + ``rate`` instead, so a reader does not
+    need to load a full time vector for it.
+
+    Parameters
+    ----------
+    nwb_file_path : str
+        Absolute path to the NWB file.
+    object_id : str, optional
+        NWB object id of the series to select; see
+        :func:`get_raw_eseries_path`.
+
+    Returns
+    -------
+    (path, uses_explicit_timestamps) : tuple of (str, bool)
+        In-file path (e.g. ``"acquisition/e-series"``) of the selected series
+        and whether it stores an explicit ``timestamps`` vector.
+
+    Raises
+    ------
+    ValueError
+        As :func:`get_raw_eseries_path`.
     """
     # Read the file layout directly with h5py rather than ``get_nwb_file``: this
     # stays a pure file inspection (no database, no pynwb namespace load), and
@@ -404,31 +442,45 @@ def get_raw_eseries_path(nwb_file_path):
     # matches ``electrical_series_path`` against.
     import h5py
 
-    names = []
+    def _attr(obj, key):
+        value = obj.attrs.get(key, b"")
+        return value.decode() if isinstance(value, bytes) else value
+
+    series = []  # (name, object_id, has explicit timestamps)
     with h5py.File(nwb_file_path, "r") as f:
         acquisition = f.get("acquisition")
         if acquisition is not None:
             for name, obj in acquisition.items():
-                neurodata_type = obj.attrs.get("neurodata_type", b"")
-                if isinstance(neurodata_type, bytes):
-                    neurodata_type = neurodata_type.decode()
-                if neurodata_type == "ElectricalSeries":
-                    names.append(name)
-    wanted = {
-        sanitize_nwb_object_name(name) for name in RAW_ELECTRICAL_SERIES_NAMES
-    }
-    matches = [
-        name for name in names if sanitize_nwb_object_name(name) in wanted
-    ]
-    if len(matches) != 1:
-        raise ValueError(
-            "Expected exactly one raw acquisition ElectricalSeries named one "
-            f"of {list(RAW_ELECTRICAL_SERIES_NAMES)} in {nwb_file_path}; "
-            f"found {matches or 'none'} among acquisition ElectricalSeries "
-            f"{names}. Pass electrical_series_path='acquisition/<name>' "
-            "explicitly to select one."
-        )
-    return f"acquisition/{matches[0]}"
+                if _attr(obj, "neurodata_type") == "ElectricalSeries":
+                    series.append(
+                        (name, _attr(obj, "object_id"), "timestamps" in obj)
+                    )
+    if object_id is not None:
+        matches = [s for s in series if s[1] == object_id]
+        if not matches:
+            raise ValueError(
+                "No acquisition ElectricalSeries with "
+                f"object_id={object_id!r} found in {nwb_file_path}."
+            )
+    else:
+        wanted = {
+            sanitize_nwb_object_name(name)
+            for name in RAW_ELECTRICAL_SERIES_NAMES
+        }
+        matches = [
+            s for s in series if sanitize_nwb_object_name(s[0]) in wanted
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "Expected exactly one raw acquisition ElectricalSeries named "
+                f"one of {list(RAW_ELECTRICAL_SERIES_NAMES)} in "
+                f"{nwb_file_path}; found {[s[0] for s in matches] or 'none'} "
+                f"among acquisition ElectricalSeries {[s[0] for s in series]}. "
+                "Pass electrical_series_path='acquisition/<name>' explicitly "
+                "to select one."
+            )
+    name, _, uses_explicit_timestamps = matches[0]
+    return f"acquisition/{name}", uses_explicit_timestamps
 
 
 def estimate_sampling_rate(

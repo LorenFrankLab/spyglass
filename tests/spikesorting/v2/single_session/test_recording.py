@@ -2163,10 +2163,7 @@ def test_compute_artifact_filters_before_restriction(recording_selection_key):
 
     from spyglass.common.common_interval import Interval
     from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-    from spyglass.spikesorting.v2._recording_nwb import (
-        raw_eseries_path_and_timestamp_mode,
-        read_recording_nwb,
-    )
+    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
     from spyglass.spikesorting.v2._recording_restriction import (
         _consolidate_regular_intervals,
         _recording_start_time,
@@ -2175,6 +2172,9 @@ def test_compute_artifact_filters_before_restriction(recording_selection_key):
     from spyglass.spikesorting.v2.recording import (
         _ELECTRICAL_SERIES_PATH,
         Recording,
+    )
+    from spyglass.utils.nwb_helper_fn import (
+        raw_eseries_path_and_timestamp_mode,
     )
 
     fetched = Recording().make_fetch(recording_selection_key)

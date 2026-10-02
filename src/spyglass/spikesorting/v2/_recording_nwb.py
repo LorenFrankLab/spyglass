@@ -276,66 +276,6 @@ def read_stored_traces(traces: StoredTraces):
     return open_persisted_traces(traces.abs_path, traces.electrical_series_path)
 
 
-def raw_eseries_path_and_timestamp_mode(
-    nwb_file_abs_path: str, raw_object_id: str
-) -> tuple[str, bool]:
-    """Return the raw ElectricalSeries' in-file path + timestamp mode.
-
-    Resolves the acquisition ``ElectricalSeries`` whose NWB ``object_id``
-    equals ``raw_object_id`` -- the exact object the common ``Raw`` row was
-    ingested from. A file can hold more than one acquisition
-    ``ElectricalSeries`` (and repacking/copying can reorder acquisition
-    iteration), so selecting by object id reads the intended raw signal rather
-    than whichever series comes first.
-
-    Rate-based ElectricalSeries store ``starting_time`` + ``rate`` and do not
-    need SpikeInterface to load a full time vector. Timestamp-based series carry
-    a ``timestamps`` dataset and must preserve that explicit vector to avoid
-    treating irregular/dropped-sample timing as affine.
-
-    Parameters
-    ----------
-    nwb_file_abs_path : str
-        Absolute path to the raw NWB file.
-    raw_object_id : str
-        NWB object id of the raw acquisition ElectricalSeries (the
-        ``Raw.raw_object_id`` recorded at ingest).
-
-    Returns
-    -------
-    (path, uses_explicit_timestamps) : tuple of (str, bool)
-        In-file path (e.g. ``"acquisition/e-series"``) of the matched series
-        and whether it stores an explicit ``timestamps`` vector.
-
-    Raises
-    ------
-    ValueError
-        If no acquisition ElectricalSeries with ``object_id == raw_object_id``
-        is present in the file (fail closed rather than read a different
-        series).
-    """
-    import h5py
-
-    with h5py.File(nwb_file_abs_path, "r") as nwb_file:
-        acquisition = nwb_file.get("acquisition")
-        if acquisition is not None:
-            for name, obj in acquisition.items():
-                neurodata_type = obj.attrs.get("neurodata_type", b"")
-                if isinstance(neurodata_type, bytes):
-                    neurodata_type = neurodata_type.decode()
-                if neurodata_type != "ElectricalSeries":
-                    continue
-                object_id = obj.attrs.get("object_id", b"")
-                if isinstance(object_id, bytes):
-                    object_id = object_id.decode()
-                if object_id == raw_object_id:
-                    return f"acquisition/{name}", "timestamps" in obj
-    raise ValueError(
-        f"No acquisition ElectricalSeries with object_id={raw_object_id!r} "
-        f"found in {nwb_file_abs_path}."
-    )
-
-
 def _remove_partial_artifact(
     analysis_file_name: str, existing_analysis_file_name: str | None
 ) -> None:
@@ -991,13 +931,14 @@ def compute_recording_artifact(
         _unlink_staged_analysis_file,
     )
     from spyglass.spikesorting.v2.utils import _get_recording_timestamps
+    from spyglass.utils.nwb_helper_fn import raw_eseries_path_and_timestamp_mode
 
     # Name the exact raw acquisition, including when the file also has LFP.
     # Rate-based raw ElectricalSeries can reconstruct selected timestamps
     # lazily from (t_start, sampling_frequency, frame index). Explicit
     # timestamp series may be irregular, so retain their explicit vector.
     raw_series_path, load_time_vector = raw_eseries_path_and_timestamp_mode(
-        raw_path, raw_object_id
+        raw_path, object_id=raw_object_id
     )
     recording = read_recording_nwb(
         raw_path,

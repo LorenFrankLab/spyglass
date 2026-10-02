@@ -284,7 +284,7 @@ def suggest_bad_channels(
     import spikeinterface.preprocessing as sip
     from spikeinterface.core.channelslice import ChannelSliceRecording
 
-    from spyglass.common.common_ephys import Electrode
+    from spyglass.common.common_ephys import Electrode, Raw
     from spyglass.common.common_nwbfile import Nwbfile
     from spyglass.spikesorting.v2._recording_geometry import (
         spikeinterface_channel_ids,
@@ -320,10 +320,18 @@ def suggest_bad_channels(
     #    ``coherence+psd`` (which asserts ``has_scaleable_traces``) is satisfied.
     #    Resolve every electrode_id -> SI channel id in a single NWB read (not
     #    once per shank).
+    #    Read the series Recording reads: the one ``Raw.raw_object_id`` names,
+    #    falling back to name-based selection for a session without a Raw row.
     raw_path = Nwbfile.get_abs_path(nwb_file_name)
+    raw_object_ids = (Raw & {"nwb_file_name": nwb_file_name}).fetch(
+        "raw_object_id"
+    )
     rec = read_recording_nwb(
         raw_path,
-        electrical_series_path=get_raw_eseries_path(raw_path),
+        electrical_series_path=get_raw_eseries_path(
+            raw_path,
+            object_id=raw_object_ids[0] if len(raw_object_ids) else None,
+        ),
         load_time_vector=False,
     )
     # freq_max must be below the recording's Nyquist (fs/2); a value at/above
