@@ -81,6 +81,42 @@ _PIPELINE_PRESETS: dict[str, _PipelinePreset] = {
 }
 
 
+def _unknown_pipeline_preset_message(
+    name,
+    *,
+    caller: "str | None" = None,
+    hint: str = "Call describe_pipeline_presets() to see what each one does.",
+) -> str:
+    """The message for a ``pipeline_preset`` name not in the registry.
+
+    Names the bad value and every registered preset, then ``hint``;
+    prefixed with ``"{caller}: "`` when ``caller`` is given.
+    """
+    message = (
+        f"unknown pipeline_preset {name!r}. Available pipeline presets: "
+        f"{sorted(_PIPELINE_PRESETS)}. {hint}"
+    )
+    return message if caller is None else f"{caller}: {message}"
+
+
+def _require_preset_row(table, restriction: dict, *, caller, row, preset_name):
+    """Return ``table & restriction``; raise ``ValueError`` if it is empty.
+
+    For a parameter row a registered preset references: the message names
+    ``caller``, the table, ``row`` (as given, ``repr``-formatted) and the
+    preset, and points at ``initialize_v2_defaults()``.
+    """
+    rel = table & restriction
+    if not rel:
+        raise ValueError(
+            f"{caller}: {table.__name__} row {row!r} referenced by preset "
+            f"{preset_name!r} is not in the database. Run "
+            "initialize_v2_defaults() to install the shipped parameter "
+            "catalog."
+        )
+    return rel
+
+
 # The three-value ``recommendation_status`` taxonomy, defined in ONE place so
 # ``describe_pipeline_presets``, ``describe_recommendation_status`` and the docs
 # agree on what each label means.
@@ -274,11 +310,7 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
     # triggers DataJoint ``@schema`` decoration (a DB connection), so an unknown
     # name must reject first to keep that path database-free.
     if name not in _PIPELINE_PRESETS:
-        raise ValueError(
-            f"unknown pipeline_preset {name!r}. Available pipeline presets: "
-            f"{sorted(_PIPELINE_PRESETS)}. Call describe_pipeline_presets() to "
-            "see what each one does."
-        )
+        raise ValueError(_unknown_pipeline_preset_message(name))
     preset = _PIPELINE_PRESETS[name]
 
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
@@ -298,15 +330,14 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
         else:
             yield prefix, value
 
-    def _fetch_params(table, restriction, label):
-        rel = table & restriction
-        if not rel:
-            raise ValueError(
-                f"describe_pipeline_preset: {label} row {restriction!r} "
-                f"referenced by preset {name!r} is not in the database. Run "
-                "initialize_v2_defaults() to install the shipped parameter "
-                "catalog."
-            )
+    def _fetch_params(table, restriction):
+        rel = _require_preset_row(
+            table,
+            restriction,
+            caller="describe_pipeline_preset",
+            row=restriction,
+            preset_name=name,
+        )
         params, params_schema_version, job_kwargs = rel.fetch1(
             "params", "params_schema_version", "job_kwargs"
         )
@@ -362,7 +393,6 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
             _fetch_params(
                 PreprocessingParameters,
                 {"preprocessing_params_name": preset.preprocessing_params_name},
-                "PreprocessingParameters",
             ),
         ),
     ]
@@ -378,7 +408,6 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
                             preset.artifact_detection_params_name
                         )
                     },
-                    "ArtifactDetectionParameters",
                 ),
             )
         )
@@ -392,7 +421,6 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
                     "sorter": preset.sorter,
                     "sorter_params_name": preset.sorter_params_name,
                 },
-                "SorterParameters",
             ),
         )
     )
@@ -434,16 +462,13 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
 
     # Curation recipe values. QualityMetricParameters stores named columns (not a
     # single params blob), so unpack them into a params-shaped dict and flatten.
-    metric_rel = QualityMetricParameters & {
-        "metric_params_name": preset.metric_params_name
-    }
-    if not metric_rel:
-        raise ValueError(
-            "describe_pipeline_preset: QualityMetricParameters row "
-            f"{preset.metric_params_name!r} referenced by preset {name!r} is "
-            "not in the database. Run initialize_v2_defaults() to install the "
-            "shipped parameter catalog."
-        )
+    metric_rel = _require_preset_row(
+        QualityMetricParameters,
+        {"metric_params_name": preset.metric_params_name},
+        caller="describe_pipeline_preset",
+        row=preset.metric_params_name,
+        preset_name=name,
+    )
     (
         metric_names,
         metric_kwargs,
@@ -485,16 +510,13 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
     # Auto-curation: the master row (merge preset + kwargs) plus one row per
     # ordered label rule from the Rule part, so the actual thresholds are visible
     # rather than hidden behind the row name.
-    auto_rel = AutoCurationRules & {
-        "auto_curation_rules_name": preset.auto_curation_rules_name
-    }
-    if not auto_rel:
-        raise ValueError(
-            "describe_pipeline_preset: AutoCurationRules row "
-            f"{preset.auto_curation_rules_name!r} referenced by preset "
-            f"{name!r} is not in the database. Run initialize_v2_defaults() to "
-            "install the shipped parameter catalog."
-        )
+    auto_rel = _require_preset_row(
+        AutoCurationRules,
+        {"auto_curation_rules_name": preset.auto_curation_rules_name},
+        caller="describe_pipeline_preset",
+        row=preset.auto_curation_rules_name,
+        preset_name=name,
+    )
     (
         auto_merge_preset,
         auto_merge_kwargs,
@@ -761,11 +783,7 @@ def clone_pipeline_preset(
     # DataJoint ``@schema`` decoration (a DB connection), so these checks stay
     # database-free and fail fast before any row is touched.
     if base_name not in _PIPELINE_PRESETS:
-        raise ValueError(
-            f"unknown pipeline_preset {base_name!r}. Available pipeline "
-            f"presets: {sorted(_PIPELINE_PRESETS)}. Call "
-            "describe_pipeline_presets() to see what each one does."
-        )
+        raise ValueError(_unknown_pipeline_preset_message(base_name))
     if not isinstance(new_name, str) or not new_name.strip():
         raise ValueError(
             f"clone_pipeline_preset: new_name must be a non-empty string, got "
@@ -843,15 +861,13 @@ def clone_pipeline_preset(
     # routing step needs all three blobs to disambiguate an override, and a
     # missing row must fail with an actionable message, not an opaque fetch1.
     for stage in stages.values():
-        rel = stage["table"] & _base_restriction(stage)
-        if not rel:
-            raise ValueError(
-                f"clone_pipeline_preset: {stage['table_name']} row "
-                f"{stage['base_row_name']!r} referenced by preset "
-                f"{base_name!r} is not in the database. Run "
-                "initialize_v2_defaults() to install the shipped parameter "
-                "catalog."
-            )
+        rel = _require_preset_row(
+            stage["table"],
+            _base_restriction(stage),
+            caller="clone_pipeline_preset",
+            row=stage["base_row_name"],
+            preset_name=base_name,
+        )
         if stage["sorter"] is not None:
             params, psv, job_kwargs, exec_params, exec_psv = rel.fetch1(
                 "params",

@@ -17,7 +17,10 @@ from dataclasses import dataclass, field
 from pprint import pformat
 from typing import TYPE_CHECKING, Any, NamedTuple, get_args
 
-from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+from spyglass.spikesorting.v2._pipeline_presets import (
+    _PIPELINE_PRESETS,
+    _unknown_pipeline_preset_message,
+)
 from spyglass.spikesorting.v2._pipeline_types import MotionMode
 from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
 
@@ -1818,9 +1821,7 @@ def preflight_v2_pipeline(
         _check(
             "pipeline_preset_known",
             False,
-            f"unknown pipeline_preset {pipeline_preset!r}. Available pipeline presets: "
-            f"{sorted(_PIPELINE_PRESETS)}. Call describe_pipeline_presets() to see what each "
-            "one does.",
+            _unknown_pipeline_preset_message(pipeline_preset),
         )
         return _blocked_preflight_report(pipeline_preset, checks, warnings)
     _check("pipeline_preset_known", True, "")
@@ -2091,6 +2092,11 @@ def _check_sort_group(
     return sort_group_exists
 
 
+def _missing_row_fix(row_description: str) -> str:
+    """The fix for a missing shipped parameter row named by ``row_description``."""
+    return f"{row_description} is missing. Run initialize_v2_defaults()."
+
+
 def _check_source_param_rows(
     check: "Callable[[str, Any, str], bool]", bundle
 ) -> bool:
@@ -2108,8 +2114,9 @@ def _check_source_param_rows(
         "preprocessing_params_exist",
         PreprocessingParameters
         & {"preprocessing_params_name": bundle.preprocessing_params_name},
-        f"PreprocessingParameters row {bundle.preprocessing_params_name!r} is "
-        "missing. Run initialize_v2_defaults().",
+        _missing_row_fix(
+            f"PreprocessingParameters row {bundle.preprocessing_params_name!r}"
+        ),
     )
     # An explicit no-mask preset has no artifact parameter row to require.
     if bundle.artifact_detection_params_name is not None:
@@ -2119,8 +2126,10 @@ def _check_source_param_rows(
             & {
                 "artifact_detection_params_name": bundle.artifact_detection_params_name
             },
-            f"ArtifactDetectionParameters row {bundle.artifact_detection_params_name!r} "
-            "is missing. Run initialize_v2_defaults().",
+            _missing_row_fix(
+                "ArtifactDetectionParameters row "
+                f"{bundle.artifact_detection_params_name!r}"
+            ),
         )
     return preprocessing_params_exist
 
@@ -2152,9 +2161,10 @@ def _check_sorter_param_rows(
     sorter_params_exist = sort_checks and check(
         "sorter_params_exist",
         sorter_params_query,
-        f"SorterParameters row (sorter={bundle.sorter!r}, "
-        f"sorter_params_name={bundle.sorter_params_name!r}) is missing. "
-        "Run initialize_v2_defaults().",
+        _missing_row_fix(
+            f"SorterParameters row (sorter={bundle.sorter!r}, "
+            f"sorter_params_name={bundle.sorter_params_name!r})"
+        ),
     )
     sorter_row = None
     if sorter_params_exist:
@@ -2199,10 +2209,11 @@ def _check_display_waveform_params(
             "analyzer_waveform_params_exist",
             AnalyzerWaveformParameters
             & {"waveform_params_name": display_waveform_params_name},
-            f"AnalyzerWaveformParameters row {display_waveform_params_name!r} "
-            "(the display analyzer recipe for preprocessing "
-            f"{bundle.preprocessing_params_name!r}) is missing. Run "
-            "initialize_v2_defaults().",
+            _missing_row_fix(
+                "AnalyzerWaveformParameters row "
+                f"{display_waveform_params_name!r} (the display analyzer "
+                f"recipe for preprocessing {bundle.preprocessing_params_name!r})"
+            ),
         )
     return display_waveform_params_name
 
@@ -2231,16 +2242,19 @@ def _check_auto_curation_rows(
         "metric_params_exist",
         QualityMetricParameters
         & {"metric_params_name": bundle.metric_params_name},
-        f"QualityMetricParameters row {bundle.metric_params_name!r} (the "
-        "auto-curation metric set) is missing. Run "
-        "initialize_v2_defaults().",
+        _missing_row_fix(
+            f"QualityMetricParameters row {bundle.metric_params_name!r} (the "
+            "auto-curation metric set)"
+        ),
     )
     check(
         "auto_curation_rules_exist",
         AutoCurationRules
         & {"auto_curation_rules_name": bundle.auto_curation_rules_name},
-        f"AutoCurationRules row {bundle.auto_curation_rules_name!r} (the "
-        "auto-curation rule set) is missing. Run initialize_v2_defaults().",
+        _missing_row_fix(
+            f"AutoCurationRules row {bundle.auto_curation_rules_name!r} (the "
+            "auto-curation rule set)"
+        ),
     )
     metric_waveform_params_name = waveform_params_for_preprocessing(
         bundle.preprocessing_params_name
@@ -2249,9 +2263,10 @@ def _check_auto_curation_rows(
         "metric_waveform_params_exist",
         AnalyzerWaveformParameters
         & {"waveform_params_name": metric_waveform_params_name},
-        f"AnalyzerWaveformParameters row {metric_waveform_params_name!r} "
-        "(the whitened metric analyzer recipe auto-curation scores on) is "
-        "missing. Run initialize_v2_defaults().",
+        _missing_row_fix(
+            f"AnalyzerWaveformParameters row {metric_waveform_params_name!r} "
+            "(the whitened metric analyzer recipe auto-curation scores on)"
+        ),
     )
 
 
@@ -2825,9 +2840,14 @@ def _resolve_session_sort_group_ids(
         )
     if pipeline_preset not in _PIPELINE_PRESETS:
         raise PipelineInputError(
-            f"{caller}: unknown pipeline_preset {pipeline_preset!r}. Available "
-            f"pipeline presets: {sorted(_PIPELINE_PRESETS)}. Call "
-            "describe_pipeline_presets() to see what each preset does."
+            _unknown_pipeline_preset_message(
+                pipeline_preset,
+                caller=caller,
+                hint=(
+                    "Call describe_pipeline_presets() to see what each preset "
+                    "does."
+                ),
+            )
         )
     from spyglass.spikesorting.v2.recording import SortGroupV2
 

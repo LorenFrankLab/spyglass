@@ -47,7 +47,10 @@ from spyglass.spikesorting.v2._pipeline_preflight import (
     resolve_preset_sort_config,
     supplied_motion_estimate_problem,
 )
-from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+from spyglass.spikesorting.v2._pipeline_presets import (
+    _PIPELINE_PRESETS,
+    _unknown_pipeline_preset_message,
+)
 from spyglass.spikesorting.v2._pipeline_reporting import (
     _run_metadata,
     _run_warnings,
@@ -287,10 +290,15 @@ def _validate_run_request(
 
     if pipeline_preset not in _PIPELINE_PRESETS:
         raise PipelineInputError(
-            f"{caller}: unknown pipeline_preset {pipeline_preset!r}. "
-            f"Available pipeline presets: {sorted(_PIPELINE_PRESETS)}. "
-            "Call spyglass.spikesorting.v2.pipeline.describe_pipeline_presets() to see "
-            "what each preset does, or list_pipeline_presets() for just the names."
+            _unknown_pipeline_preset_message(
+                pipeline_preset,
+                caller=caller,
+                hint=(
+                    "Call spyglass.spikesorting.v2.pipeline."
+                    "describe_pipeline_presets() to see what each preset "
+                    "does, or list_pipeline_presets() for just the names."
+                ),
+            )
         )
     motion_problem = motion_request_problem(
         motion_mode, motion_correction_params_name, motion_estimate_id
