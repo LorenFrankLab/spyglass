@@ -51,6 +51,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_reference_resolution",
     "_selection_identity",
     "_selection_plan",
+    "_session_group_insert",
     "_shared_artifact_group",
     "_signal_math",
     "_sort_group_insert",
