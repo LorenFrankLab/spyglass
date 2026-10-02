@@ -31,8 +31,11 @@ DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / numpy / pynwb / spyglass
 dependencies are imported lazily inside the function. ``write_nwb_artifact``
 touches the DB / DataJoint at CALL time via lazy imports (``AnalysisNwbfile``
-path resolution + file create). It also lazily imports names from
-``recording`` (the ``_ELECTRICAL_SERIES_NAME`` constant, the
+path resolution + file create); ``rebuild_nwb_artifact`` also reads the
+``Recording`` row and re-runs its ``make_fetch``, and
+``clear_recompute_deleted_flag`` updates ``RecordingArtifactRecompute``.
+``write_nwb_artifact`` and ``compute_recording_artifact`` lazily import names
+from ``recording`` (the ``_ELECTRICAL_SERIES_NAME`` constant, the
 ``RecordingArtifactResult`` carrier, the staged-file cleanup helper) at call
 time -- by then ``recording`` is fully imported, so there is no import cycle.
 

@@ -1175,8 +1175,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         The returned value is suitable for DataJoint's tri-part dispatch
         contract: deterministic byte representations across two
         successive fetches so the framework's DeepHash integrity
-        check inside the transaction does not raise. The reads are
-        :func:`._recording_fetch.fetch_recording_inputs`.
+        check inside the transaction does not raise.
 
         Parameters
         ----------
