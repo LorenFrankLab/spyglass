@@ -33,6 +33,7 @@ from tests.spikesorting.v2._motion_db_helpers import (
     session_start_s,
     sorter_key,
 )
+from tests.spikesorting.v2._sorter_stub import active_sorter, plant_sorter
 
 #: The manual artifact exclusion, in seconds after the session start.
 EXCLUDED_S = (20.0, 21.0)
@@ -42,7 +43,7 @@ MIN_CORRECTION_UV = 10.0
 
 
 def _planted_sorter(captured):
-    """A ``Sorting._run_sorter`` stand-in: records its input and returns two
+    """A ``plant_sorter`` stand-in: records its input and returns two
     units at fixed frames."""
     import spikeinterface as si
 
@@ -141,9 +142,7 @@ def corrected_sorts(drift_recording):
 
     mp = pytest.MonkeyPatch()
     try:
-        mp.setattr(
-            Sorting, "_run_sorter", staticmethod(_planted_sorter(sorter_inputs))
-        )
+        plant_sorter(mp, _planted_sorter(sorter_inputs))
         mp.setattr(Sorting, "_build_analyzer", staticmethod(_observe_build))
         Sorting.populate([uncorrected_sort, corrected_sort], reserve_jobs=False)
     finally:
@@ -913,7 +912,7 @@ def test_corrected_concat_sort_end_to_end(
         {**concat_key, **sorter_key(), **corrected_key}
     )
     captured = {}
-    run_sorter = Sorting._run_sorter
+    run_sorter = active_sorter()
 
     def _observe(*args, **kwargs):
         captured["traces"] = kwargs["recording"].get_traces()
@@ -925,7 +924,7 @@ def test_corrected_concat_sort_end_to_end(
         assert fetched.source_n_samples == int(concat_row["n_samples"])
         assert fetched.traces.key == corrected_key
         with monkeypatch.context() as patch:
-            patch.setattr(Sorting, "_run_sorter", staticmethod(_observe))
+            plant_sorter(patch, _observe)
             Sorting.populate(sort_key, reserve_jobs=False)
 
         np.testing.assert_array_equal(captured["traces"], corrected_traces)
@@ -1147,9 +1146,7 @@ def test_corrected_concat_bundle_keeps_windows_in_spans(
 
     try:
         with monkeypatch.context() as patch:
-            patch.setattr(
-                Sorting, "_run_sorter", staticmethod(_plant_at_span_edges)
-            )
+            plant_sorter(patch, _plant_at_span_edges)
             Sorting.populate(list(sort_keys.values()), reserve_jobs=False)
         curations = {
             name: CurationV2.insert_curation(sorting_key=key)
@@ -1280,7 +1277,7 @@ def _gap_capped_corrected(source) -> tuple[dict, dict]:
 
 
 def _planted_frames(frames):
-    """A ``Sorting._run_sorter`` stand-in returning one unit at ``frames``."""
+    """A ``plant_sorter`` stand-in returning one unit at ``frames``."""
     import spikeinterface as si
 
     def _plant(sorter, sorter_params, recording, sorting_id, **kwargs):
@@ -1354,9 +1351,7 @@ def test_corrected_sort_across_a_capped_gap_keeps_source_frames_and_times(
             {**recording_key, **sorter_key(), **corrected_key}
         )
         with monkeypatch.context() as patch:
-            patch.setattr(
-                Sorting, "_run_sorter", staticmethod(_planted_frames(planted))
-            )
+            plant_sorter(patch, _planted_frames(planted))
             Sorting.populate(sort_key, reserve_jobs=False)
 
         sorting = Sorting().get_sorting(sort_key)
@@ -1447,9 +1442,7 @@ def test_corrected_concat_split_into_members_conserves_spikes(
             {**concat_key, **sorter_key(), **corrected_key}
         )
         with monkeypatch.context() as patch:
-            patch.setattr(
-                Sorting, "_run_sorter", staticmethod(_planted_frames(planted))
-            )
+            plant_sorter(patch, _planted_frames(planted))
             Sorting.populate(sort_key, reserve_jobs=False)
         curation_key = CurationV2.insert_curation(sorting_key=sort_key)
         ConcatMemberCuration.populate(curation_key, reserve_jobs=False)
@@ -1706,9 +1699,7 @@ def test_concat_member_trace_accessors_have_one_meaning_each(
                 )
             )
         with monkeypatch.context() as patch:
-            patch.setattr(
-                Sorting, "_run_sorter", staticmethod(_planted_frames(planted))
-            )
+            plant_sorter(patch, _planted_frames(planted))
             Sorting.populate(sort_keys, reserve_jobs=False)
 
         for sort_key, parent, what in (

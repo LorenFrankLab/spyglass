@@ -32,6 +32,7 @@ from tests.spikesorting.v2._motion_db_helpers import (
     session_start_s,
     sorter_key,
 )
+from tests.spikesorting.v2._sorter_stub import active_sorter, plant_sorter
 
 
 @pytest.fixture
@@ -2249,7 +2250,7 @@ def test_corrected_sort_reads_the_corrected_traces(
         }
     )
     captured = {}
-    run_sorter = Sorting._run_sorter
+    run_sorter = active_sorter()
 
     def _observe(*args, **kwargs):
         captured["traces"] = kwargs["recording"].get_traces()
@@ -2257,7 +2258,7 @@ def test_corrected_sort_reads_the_corrected_traces(
         return run_sorter(*args, **kwargs)
 
     try:
-        monkeypatch.setattr(Sorting, "_run_sorter", staticmethod(_observe))
+        plant_sorter(monkeypatch, _observe)
         Sorting.populate(sort_key, reserve_jobs=False)
         monkeypatch.undo()
 
