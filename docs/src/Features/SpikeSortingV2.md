@@ -496,7 +496,9 @@ a notebook, a test, or a remote kernel; remote use (port forwarding,
 `localhost`-only editing) is described in the Quickstart. A missing bundle
 raises with the recovery step (start the review again). If another tab saved the
 same local draft, an older tab's save is rejected without discarding its edits;
-use **Open latest draft in a new tab** and reapply them there.
+use **Open latest draft in a new tab** and reapply them there. A reopened local
+bundle gets the installed Spyglass review controls; its scientific data and
+saved annotations stay as saved.
 
 **Browser operations** run one at a time in a worker with its own DataJoint
 connection. Progress and committed identities persist in the local bundle, so
@@ -1116,7 +1118,10 @@ saved estimate rather than trusting a sort's improvement. On a simulated
 worse than no correction, interpolation cost sorting quality even with the true
 motion, and a held-out benchmark (cases in
 `tests/spikesorting/v2/motion_acceptance_held_out.json`) failed for both shipped
-recipes; no real lab recording with drift has been tested.
+recipes; no real lab recording with drift has been tested. That benchmark ran
+against an earlier estimator, so it does not cover the current estimator on
+discontinuous inputs (acquisition gaps, concatenations) or on sources that are
+not unit-calibrated float microvolts.
 
 `motion_mode` on `run_v2_pipeline` / `run_v2_pipeline_session` (and the matching
 preflight helpers) works for a single-session **or** a concat run:
@@ -1481,9 +1486,14 @@ Key behaviors and caveats:
 - **Valid time needs an explicit analysis choice.** SI `firing_rate` and
     `presence_ratio` use the analyzer sample timeline, including masked time
     (see [Observed-time metrics](#observed-time-metrics-and-downstream-analysis)).
-    NWB `obs_intervals` does not automatically restrict `SortedSpikesGroup`
-    spike indicators or decoding times. Intersect analysis windows with those
-    intervals; do not interpret masked periods as neural silence.
+    A population built with `select_units_for_analysis` freezes each unit's
+    observed intervals, mapped to original session seconds, and
+    `SortedSpikesGroup` spike indicators and sorted-spikes decoding through it
+    honor them (see
+    [Observed-time metrics](#observed-time-metrics-and-downstream-analysis)). A
+    group built without that snapshot has unknown coverage and is not
+    restricted: intersect its analysis windows with the stored intervals
+    yourself. Do not interpret masked periods as neural silence.
 - **Parent anchoring.** A concat sort's analysis NWB and each unit's `Electrode`
     FK anchor to the **first** `SessionGroup.Member`, so
     `get_unit_brain_regions` on a concat sort raises
@@ -1721,7 +1731,11 @@ The shipped rules never write `accept`, so after auto-labeling alone the
 ```python
 from spyglass.spikesorting.v2.pipeline import select_units_for_analysis
 
-receipt = select_units_for_analysis(run.auto_labeled_curation)
+# Auto-labeled only: keep every unit the rules did not flag. The default
+# accepted policy would select nothing here.
+receipt = select_units_for_analysis(
+    run.auto_labeled_curation, policy="v2_unflagged_units"
+)
 receipt.describe()  # unit_id -> included, labels, reason
 spike_times, unit_ids = receipt.fetch_spike_data(return_unit_ids=True)
 receipt.group_key  # SortedSpikesGroup key for decoding
