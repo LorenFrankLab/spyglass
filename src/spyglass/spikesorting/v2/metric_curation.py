@@ -737,27 +737,23 @@ class CurationEvaluationSelection(
     @classmethod
     def _find_existing_pk(cls, identity, deterministic_id):
         """Return the PK-only dict for ``identity`` or None; guard bad ids."""
-        from spyglass.spikesorting.v2.exceptions import (
-            DuplicateSelectionError,
+        from spyglass.spikesorting.v2._selection_identity import (
+            existing_selection_pk,
         )
 
         existing_ids = (cls & identity).fetch("curation_evaluation_id")
-        bypassed = [
-            cid
-            for cid in existing_ids
-            if uuid.UUID(str(cid)) != deterministic_id
-        ]
-        if bypassed:
-            raise DuplicateSelectionError(
+        return existing_selection_pk(
+            [uuid.UUID(str(cid)) for cid in existing_ids],
+            deterministic_id,
+            pk_field="curation_evaluation_id",
+            bypass_message=lambda bypassed: (
                 "CurationEvaluationSelection has duplicate selection rows for "
                 f"{identity} with non-deterministic id(s) "
                 f"{sorted(map(str, bypassed))} (expected the content-addressed "
                 f"{deterministic_id}). This is an integrity bug -- a row was "
                 "inserted bypassing insert_selection."
-            )
-        if len(existing_ids):
-            return {"curation_evaluation_id": deterministic_id}
-        return None
+            ),
+        )
 
     @classmethod
     def pc_requesting(cls):
