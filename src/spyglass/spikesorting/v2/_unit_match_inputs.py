@@ -12,7 +12,8 @@ transaction. It returns an existing selection when one matches
 
 ``UnitMatch.make_fetch`` and the ``TrackedUnit`` readers re-run the same input
 checks on the frozen rows and compare them with a fresh resolution
-(:func:`_snapshot_mismatches`, :func:`_session_start_mismatches`).
+(:func:`_snapshot_mismatches`); ``make_fetch`` also re-checks the session start
+times (:func:`_session_start_mismatches`).
 ``UnitMatchSelection.insert_selection`` validates its per-member choices with
 :func:`normalize_curation_choices` and :func:`_validate_member_curations`.
 
