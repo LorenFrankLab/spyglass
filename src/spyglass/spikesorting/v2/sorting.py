@@ -24,8 +24,6 @@ and the analysis-NWB parent to the first frozen
 from __future__ import annotations
 
 import copy
-import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 import datajoint as dj
@@ -59,7 +57,11 @@ from spyglass.spikesorting.v2._sorting_dispatch import (
     run_si_sorter,
     sorter_distribution_version,
 )
-from spyglass.spikesorting.v2 import _sorting_fetch, _sorting_units
+from spyglass.spikesorting.v2 import (
+    _analyzer_cache,
+    _sorting_fetch,
+    _sorting_units,
+)
 from spyglass.spikesorting.v2._source_resolution import (
     EffectiveSource,
     EffectiveTraces,
@@ -2750,124 +2752,10 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             ``computed_analyzer_path`` is resolved from ``sorting_id`` (there is
             no stored ``analyzer_folder`` column).
         """
-        import shutil
 
-        import datajoint as dj
-
-        from spyglass.spikesorting.v2._analyzer_cache import (
-            analyzer_cache_folder_identity,
-            analyzer_cache_lock,
-            analyzer_cache_root,
-            classify_orphaned_analyzer_folders,
-            cleanup_analyzer_staging,
-            collect_analyzer_cache_references,
-            is_canonical_analyzer_folder_name,
+        return _analyzer_cache.find_orphaned_analyzer_folders(
+            cls, sorting_id=sorting_id, dry_run=dry_run
         )
-
-        # One collector owns references for BOTH cache kinds. Keeping this out
-        # of the filesystem loop prevents a new curation cache from being
-        # accidentally classified as garbage by a raw-sort-only sweep.
-        if sorting_id is not None:
-            sorting_id = uuid.UUID(str(sorting_id))
-        references = collect_analyzer_cache_references(
-            cls & ({} if sorting_id is None else {"sorting_id": sorting_id})
-        )
-        analyzer_root = analyzer_cache_root()
-        # Only typed canonical raw/curation directories are deletion candidates.
-        # Hidden atomic-publisher siblings and unrelated directories are never
-        # considered, even under a misconfigured shared cache root.
-        disk_dir_paths = (
-            [
-                str(c)
-                for c in sorted(
-                    analyzer_root.iterdir()
-                    if sorting_id is None
-                    else analyzer_root.glob(f"{sorting_id}*")
-                )
-                if c.is_dir()
-                and not c.name.startswith(".")
-                and is_canonical_analyzer_folder_name(c.name)
-            ]
-            if analyzer_root.exists()
-            else []
-        )
-        classification = classify_orphaned_analyzer_folders(
-            references["units_bearing"],
-            references["referenced_paths"],
-            disk_dir_paths,
-            reclaimed_paths=references["reclaimed_paths"],
-        )
-        db_side = classification["db_side"]
-        disk_side = classification["disk_side"]
-        reclaimed = classification["reclaimed"]
-        staging = cleanup_analyzer_staging(sorting_id)
-
-        logger.info(
-            "Sorting.find_orphaned_analyzer_folders: "
-            f"{len(db_side)} DB-side orphan(s) (row present, folder missing), "
-            f"{len(disk_side)} disk-side orphan(s) (folder present, no row), "
-            f"{len(reclaimed)} reclaimed folder(s) (missing with deleted=1), "
-            f"{len(staging)} abandoned staging folder(s)."
-        )
-        for row in db_side:
-            logger.info(
-                "  DB-side orphan: sorting_id=%s computed_analyzer_path=%s",
-                row["sorting_id"],
-                row["computed_analyzer_path"],
-            )
-        for row in reclaimed:
-            logger.info(
-                "  reclaimed analyzer: sorting_id=%s computed_analyzer_path=%s",
-                row["sorting_id"],
-                row["computed_analyzer_path"],
-            )
-        for folder in disk_side:
-            logger.info("  disk-side orphan: %s", folder)
-        for folder in staging:
-            logger.info("  abandoned staging: %s", folder)
-
-        if dry_run or not (disk_side or staging):
-            return {
-                "db_side": db_side,
-                "disk_side": disk_side,
-                "reclaimed": reclaimed,
-                "staging": staging,
-            }
-
-        # Confirmation covers disk-side orphans and abandoned staging only;
-        # this audit never deletes database rows.
-        msg = (
-            f"Delete {len(disk_side)} orphaned analyzer folder(s) and "
-            f"{len(staging)} abandoned staging folder(s)? This cannot "
-            "be undone [yes/no]: "
-        )
-        if dj.utils.user_choice(msg).lower() in ("y", "yes"):
-            # Recheck ownership after confirmation; never reclaim a live build.
-            deleted_staging = cleanup_analyzer_staging(
-                sorting_id, dry_run=False, candidates=staging
-            )
-            for folder in disk_side:
-                identity = analyzer_cache_folder_identity(Path(folder).name)
-                if identity is None:  # pragma: no cover - classified above
-                    continue
-                with analyzer_cache_lock(identity.sorting_id):
-                    shutil.rmtree(folder, ignore_errors=False)
-            logger.info(
-                "Sorting.find_orphaned_analyzer_folders: deleted "
-                f"{len(disk_side)} disk-side orphan folder(s) and "
-                f"{len(deleted_staging)} abandoned staging folder(s)."
-            )
-        else:
-            logger.info(
-                "Sorting.find_orphaned_analyzer_folders: aborted; nothing "
-                "deleted."
-            )
-        return {
-            "db_side": db_side,
-            "disk_side": disk_side,
-            "reclaimed": reclaimed,
-            "staging": staging,
-        }
 
     def get_unit_brain_regions(
         self, key: dict, *, allow_anchor_member: bool = False

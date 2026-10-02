@@ -36,7 +36,9 @@ those folders can be deleted from the analyzer root by hand.
 
 This module reads ``dj.config`` and ``temp_dir`` but opens no DB connection
 and activates no ``dj.schema``; the reads happen at call time so import stays
-side-effect free.
+side-effect free. ``find_orphaned_analyzer_folders`` (the audit behind
+``Sorting.find_orphaned_analyzer_folders``) queries the tables it is handed at
+call time.
 """
 
 from __future__ import annotations
@@ -1018,3 +1020,123 @@ def classify_orphaned_analyzer_folders(
         and derivative_base_path(path) not in referenced
     ]
     return {"db_side": db_side, "disk_side": disk_side, "reclaimed": reclaimed}
+
+
+def find_orphaned_analyzer_folders(
+    table_cls, *, sorting_id=None, dry_run: bool = True
+) -> dict:
+    """Audit analyzer-folder disk leaks; never delete database rows.
+
+    The body of ``Sorting.find_orphaned_analyzer_folders``; see that method
+    for the four classes it reports and the ``dry_run`` contract.
+    ``table_cls`` is the ``Sorting`` class, whose rows (restricted to
+    ``sorting_id`` when given) define the referenced cache folders.
+    """
+    import datajoint as dj
+
+    from spyglass.utils import logger
+
+    # One collector owns references for BOTH cache kinds. Keeping this out
+    # of the filesystem loop prevents a new curation cache from being
+    # accidentally classified as garbage by a raw-sort-only sweep.
+    if sorting_id is not None:
+        sorting_id = uuid.UUID(str(sorting_id))
+    references = collect_analyzer_cache_references(
+        table_cls & ({} if sorting_id is None else {"sorting_id": sorting_id})
+    )
+    analyzer_root = analyzer_cache_root()
+    # Only typed canonical raw/curation directories are deletion candidates.
+    # Hidden atomic-publisher siblings and unrelated directories are never
+    # considered, even under a misconfigured shared cache root.
+    disk_dir_paths = (
+        [
+            str(c)
+            for c in sorted(
+                analyzer_root.iterdir()
+                if sorting_id is None
+                else analyzer_root.glob(f"{sorting_id}*")
+            )
+            if c.is_dir()
+            and not c.name.startswith(".")
+            and is_canonical_analyzer_folder_name(c.name)
+        ]
+        if analyzer_root.exists()
+        else []
+    )
+    classification = classify_orphaned_analyzer_folders(
+        references["units_bearing"],
+        references["referenced_paths"],
+        disk_dir_paths,
+        reclaimed_paths=references["reclaimed_paths"],
+    )
+    db_side = classification["db_side"]
+    disk_side = classification["disk_side"]
+    reclaimed = classification["reclaimed"]
+    staging = cleanup_analyzer_staging(sorting_id)
+
+    logger.info(
+        "Sorting.find_orphaned_analyzer_folders: "
+        f"{len(db_side)} DB-side orphan(s) (row present, folder missing), "
+        f"{len(disk_side)} disk-side orphan(s) (folder present, no row), "
+        f"{len(reclaimed)} reclaimed folder(s) (missing with deleted=1), "
+        f"{len(staging)} abandoned staging folder(s)."
+    )
+    for row in db_side:
+        logger.info(
+            "  DB-side orphan: sorting_id=%s computed_analyzer_path=%s",
+            row["sorting_id"],
+            row["computed_analyzer_path"],
+        )
+    for row in reclaimed:
+        logger.info(
+            "  reclaimed analyzer: sorting_id=%s computed_analyzer_path=%s",
+            row["sorting_id"],
+            row["computed_analyzer_path"],
+        )
+    for folder in disk_side:
+        logger.info("  disk-side orphan: %s", folder)
+    for folder in staging:
+        logger.info("  abandoned staging: %s", folder)
+
+    if dry_run or not (disk_side or staging):
+        return {
+            "db_side": db_side,
+            "disk_side": disk_side,
+            "reclaimed": reclaimed,
+            "staging": staging,
+        }
+
+    # Confirmation covers disk-side orphans and abandoned staging only;
+    # this audit never deletes database rows.
+    msg = (
+        f"Delete {len(disk_side)} orphaned analyzer folder(s) and "
+        f"{len(staging)} abandoned staging folder(s)? This cannot "
+        "be undone [yes/no]: "
+    )
+    if dj.utils.user_choice(msg).lower() in ("y", "yes"):
+        # Recheck ownership after confirmation; never reclaim a live build.
+        deleted_staging = cleanup_analyzer_staging(
+            sorting_id, dry_run=False, candidates=staging
+        )
+        for folder in disk_side:
+            identity = analyzer_cache_folder_identity(Path(folder).name)
+            if identity is None:  # pragma: no cover - classified above
+                continue
+            with analyzer_cache_lock(identity.sorting_id):
+                shutil.rmtree(folder, ignore_errors=False)
+        logger.info(
+            "Sorting.find_orphaned_analyzer_folders: deleted "
+            f"{len(disk_side)} disk-side orphan folder(s) and "
+            f"{len(deleted_staging)} abandoned staging folder(s)."
+        )
+    else:
+        logger.info(
+            "Sorting.find_orphaned_analyzer_folders: aborted; nothing "
+            "deleted."
+        )
+    return {
+        "db_side": db_side,
+        "disk_side": disk_side,
+        "reclaimed": reclaimed,
+        "staging": staging,
+    }
