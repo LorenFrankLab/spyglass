@@ -422,7 +422,9 @@ def test_existing_selection_pk_rejects_any_non_deterministic_master():
     from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
 
     canonical, first, second = (uuid.UUID(int=i) for i in (1, 2, 3))
-    for found in ([first], [canonical, first, second]):
+    # ``second`` is collected before ``first``, so a helper that sorted the
+    # bypassed ids would produce a different message.
+    for found in ([first], [canonical, second, first]):
         with pytest.raises(DuplicateSelectionError) as exc_info:
             existing_selection_pk(
                 found,
