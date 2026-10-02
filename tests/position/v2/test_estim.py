@@ -687,7 +687,7 @@ class TestPoseEstimationToDataframe:
 class StubFileSystem:
     """Stub filesystem for testing without real file I/O.
 
-    Implements FileSystemProtocol to enable testing of strategy classes
+    Stands in for RealFileSystem to enable testing of strategy classes
     without requiring actual files to exist.
     """
 
