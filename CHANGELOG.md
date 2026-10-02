@@ -219,9 +219,11 @@ or `log_export` positionally must pass them by keyword.
         declared when the v2 module imports; if it cannot import, a warning names
         the cause and the parts are omitted. `get_restricted_merge_ids` now
         defaults to every available source, including v2 #1609
-    - `SpikeSortingOutput` and `SortedSpikesGroup` `get_spike_indicator` /
-        `get_firing_rate` gain `return_unit_ids` and `return_validity`; bins
-        outside observed time are NaN for v2 sorts. Add
+    - `get_spike_indicator` gains keyword-only `return_validity` on
+        `SpikeSortingOutput` and `SortedSpikesGroup`, and
+        `SpikeSortingOutput.get_spike_indicator` gains `return_unit_ids`
+        (`SortedSpikesGroup` already had it). For v2 sorts, spike-indicator and
+        firing-rate bins outside observed time are NaN. Add
         `SpikeSortingOutput.get_observation_intervals` and
         `get_spike_times_by_unit`; `get_spike_times` warns when a restriction
         spans sources #1609
