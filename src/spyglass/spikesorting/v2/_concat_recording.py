@@ -221,12 +221,10 @@ def cumulative_member_boundaries(
     list[int]
         Cumulative end-sample boundaries, same length as the input.
     """
-    boundaries: list[int] = []
-    running = 0
-    for n in num_samples_per_member:
-        running += int(n)
-        boundaries.append(running)
-    return boundaries
+    import numpy as np
+
+    counts = [int(n) for n in num_samples_per_member]
+    return np.cumsum(counts, dtype=np.int64).tolist()
 
 
 def split_unit_spike_trains(
