@@ -68,6 +68,7 @@ dependencies = [
   "position-tools>=0.1",
   "probeinterface>=0.3.2",         # required by spikeinterface 0.104
   "pubnub<6.4",                    # TODO: remove this when sortingview is updated
+  "pydantic>=2",                   # spikesorting v2 parameter models
   "pydotplus",
   "pynwb>=3.1.3",
   "ripple-detection>=1.7",         # spyglass.mua needs core.normalize_signal
