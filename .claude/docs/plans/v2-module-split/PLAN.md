@@ -1,6 +1,11 @@
 # Spike Sorting v2 Module Split Implementation Plan
 
-**Status:** Not started. Design settled (see "Decisions").
+**Status:** Recording done on branch `v2-split-recording` (2026-10-02,
+unpushed): `recording.py` 2,564 -> 1,869 lines; new `_recording_fetch.py`,
+`_sort_group_insert.py`; artifact pipeline + rebuild moved into
+`_recording_nwb.py`. `make_insert`, `_insert_sort_group_rows` and
+`_write_nwb_artifact` stayed on their classes (transaction/staging
+orchestration, or already a thin delegate). Sorting not started.
 
 **Goal:** Make the four largest v2 table modules readable by moving long method
 bodies and private helpers out of the table classes, with no change to behavior,
