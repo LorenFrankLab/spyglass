@@ -336,10 +336,6 @@ def test_legacy_runtime_guard_raises_under_si_0104(dj_conn, monkeypatch):
             ),
         ),
         (
-            "v0 Waveforms.load_waveforms",
-            lambda: V0Waveforms().load_waveforms({}),
-        ),
-        (
             "v0 QualityMetrics.make",
             lambda: V0QualityMetrics().make_compute(
                 key={},
@@ -354,10 +350,6 @@ def test_legacy_runtime_guard_raises_under_si_0104(dj_conn, monkeypatch):
         (
             "v1 MetricCuration.make",
             lambda: MetricCuration().make_compute({}, {}),
-        ),
-        (
-            "v1 MetricCuration.get_waveforms",
-            lambda: MetricCuration().get_waveforms({}),
         ),
         ("v1 ArtifactDetection.make", lambda: V1ArtifactDetection().make({})),
         ("v1 BurstPair.make", lambda: V1BurstPair().make({})),

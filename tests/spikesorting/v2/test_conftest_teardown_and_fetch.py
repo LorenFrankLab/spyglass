@@ -322,6 +322,9 @@ def test_require_fixtures_gate_still_exits_nonzero():
             __file__,
             "--collect-only",
             "--no-docker",
+            # The child shares this session's tests/_data; without this its
+            # teardown deletes the parent's tmp/ and analysis/ mid-session.
+            "--no-teardown",
             "-p",
             "no:xvfb",
             "-p",
