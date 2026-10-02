@@ -862,10 +862,74 @@ def start_review(
 ) -> FigPackReview:
     """Evaluate one pinned curation and build/reuse its seeded review view.
 
-    ``display_options`` (:class:`ReviewDisplayOptions`; ``None`` = defaults)
-    bounds the browser payload -- per-unit amplitude sample and correlogram
-    pair filter -- and is persisted with the review, never affecting the
-    scientific evaluation.
+    Resolves ``profile`` to its persisted recipe, evaluates ``parent`` with
+    that recipe (or checks the supplied ``evaluation``), then builds the
+    FigPack review view, reusing an existing view with the same inputs. A
+    review's identity includes the parent's children at the time it starts,
+    so once a child has been committed the same call starts a new review;
+    use :meth:`FigPackReview.find` to resume an earlier one.
+
+    Parameters
+    ----------
+    parent : CurationRef
+        The curation generation to review. Its identity is re-verified
+        before use.
+    profile : str or ReviewProfileRef
+        A ``CurationReviewProfile`` name or a resolved profile reference. It
+        supplies the evaluation recipe, label options, and displayed unit
+        properties. A ``ReviewProfileRef`` must still match its persisted
+        row.
+    upload : bool, optional
+        Publish a hosted figpack.org figure (requires ``FIGPACK_API_KEY``
+        unless ``ephemeral``). Default ``False`` saves a local bundle.
+    ephemeral : bool, optional
+        For ``upload=True``, publish a temporary figure that needs no API
+        key. Ignored when ``upload=False``. Default ``False``.
+    evaluation : EvaluationResult, optional
+        An existing evaluation to display. It must cover ``parent`` with the
+        profile's exact recipe names. Default ``None`` creates or reuses the
+        profile's evaluation of ``parent`` and populates it.
+    annotation_sets : sequence, optional
+        Annotation-set references (anything ``AnnotationSetRef.from_key``
+        accepts) to include in the review. Each must belong to ``parent``
+        and none may repeat. Default ``()`` includes none.
+    display_options : ReviewDisplayOptions or mapping, optional
+        Bounds the browser payload -- per-unit amplitude sample and
+        correlogram pair filter -- and is persisted with the review, never
+        affecting the scientific evaluation. A mapping may only use
+        ``ReviewDisplayOptions`` field names. Default ``None`` uses the
+        ``ReviewDisplayOptions`` defaults.
+
+    Returns
+    -------
+    FigPackReview
+        Handle for the review. ``uri`` locates the built view, and
+        ``stages`` reports whether this call computed or reused the
+        evaluation and the view.
+
+    Raises
+    ------
+    ImportError
+        If the optional ``figpack`` or ``figpack-spike-sorting`` package is
+        not installed.
+    TypeError
+        If ``parent`` is not a ``CurationRef``, or ``display_options`` is not
+        a ``ReviewDisplayOptions``, a mapping, or ``None``.
+    ValueError
+        If ``display_options`` has unknown or invalid fields; an annotation
+        set belongs to a different curation or is listed twice; ``profile``
+        does not resolve to exactly one ``CurationReviewProfile`` row or no
+        longer matches its pinned hash; or ``evaluation`` is not over
+        ``parent`` with the profile's recipe names.
+    CurationNotFoundError
+        If ``parent`` no longer identifies its curation generation (the row
+        was deleted or its numeric id reused).
+    LookupError
+        If the ``CurationEvaluation`` row for ``evaluation`` is not
+        populated.
+    FigPackUploadError
+        If ``upload=True``, ``ephemeral=False``, and ``FIGPACK_API_KEY`` is
+        not set.
     """
     resolved_display = ReviewDisplayOptions.from_mapping(display_options)
     from spyglass.spikesorting.v2.figpack_curation import (

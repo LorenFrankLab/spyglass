@@ -1102,7 +1102,52 @@ def merge_and_evaluate(
     spec: EvaluationSpec,
     groups: Sequence[Sequence[int]],
 ) -> MergeEvaluateReceipt:
-    """Lower-level orchestration form with an explicit parent and spec."""
+    """Commit merges and evaluate the child, with an explicit parent and spec.
+
+    Lower-level orchestration form of
+    :meth:`EvaluationResult.merge_and_evaluate`. It evaluates
+    ``parent_curation`` with ``spec`` (creating and populating the
+    evaluation, or reusing an existing one), commits ``groups`` into a
+    merged child curation, and evaluates that child with the same ``spec``.
+    Each stage reuses rows that already exist, so repeating the call after
+    an interruption resumes rather than duplicating work. Call it outside
+    any open DataJoint transaction; ``populate`` manages its own.
+
+    Parameters
+    ----------
+    parent_curation : CurationRef
+        The curation whose units are merged. Its identity is re-verified
+        before use.
+    spec : EvaluationSpec
+        Metric-parameter and auto-curation-rule names used for both the
+        parent and the child evaluation.
+    groups : sequence of sequence of int
+        Disjoint merge groups of ``parent_curation`` unit ids, each with at
+        least two distinct ids.
+
+    Returns
+    -------
+    MergeEvaluateReceipt
+        The child curation, its evaluation, the normalized merge groups, and
+        whether this call computed or reused the child curation, its
+        evaluation selection, and its evaluation.
+
+    Raises
+    ------
+    TypeError
+        If ``parent_curation`` is not a ``CurationRef`` or ``spec`` is not
+        an ``EvaluationSpec``.
+    CurationNotFoundError
+        If ``parent_curation`` no longer identifies its curation generation
+        (the row was deleted or its numeric id reused).
+    RuntimeError
+        If called inside an open DataJoint transaction.
+    ValueError
+        If ``groups`` is empty or malformed (a group with fewer than two
+        ids, a repeated id, overlapping groups, or a non-integer id), or
+        references unit ids absent from ``parent_curation``. Groups are
+        checked after the parent evaluation is populated.
+    """
     parent = _require_parent_ref(parent_curation, caller="merge_and_evaluate")
     if not isinstance(spec, EvaluationSpec):
         raise TypeError(
@@ -1116,7 +1161,38 @@ def merge_and_evaluate(
 def create_initial_curation(
     sorting_key: Mapping[str, Any], **kwargs
 ) -> CurationRef:
-    """Create the only facade operation that does not require a typed parent."""
+    """Create the root curation of a sorting; no typed parent is required.
+
+    This is the only facade operation that does not take a ``CurationRef``
+    parent. It forwards to ``CurationV2.create_initial_curation``, which
+    inserts a root curation with no merges. If a root already exists for
+    the sorting, it is returned when no labels or description are passed;
+    otherwise a ``ValueError`` is raised rather than ignoring them.
+
+    Parameters
+    ----------
+    sorting_key : mapping
+        Mapping with the ``sorting_id`` of the upstream ``Sorting`` row.
+    **kwargs
+        Forwarded to ``CurationV2.create_initial_curation``, which accepts
+        ``labels`` (``{unit_id: [label, ...]}``, default ``None``),
+        ``description`` (str, default ``""``), and ``allow_custom_labels``
+        (bool, default ``False``; accept labels outside the canonical
+        ``CurationLabel`` set).
+
+    Returns
+    -------
+    CurationRef
+        Reference pinned to the root curation's current generation.
+
+    Raises
+    ------
+    ValueError
+        If ``sorting_id`` is not in ``Sorting``; a root curation already
+        exists and ``labels`` or ``description`` were passed; or ``labels``
+        are invalid (not a list per unit, a label outside ``CurationLabel``
+        without ``allow_custom_labels=True``, or an unknown unit id).
+    """
     from spyglass.spikesorting.v2.curation import CurationV2
 
     return CurationRef.from_key(
@@ -1130,7 +1206,48 @@ def preview_merges(
     groups: Sequence[Sequence[int]],
     **kwargs,
 ) -> CurationRef:
-    """Create a preview child; a typed, current parent is mandatory."""
+    """Create a preview child; a typed, current parent is mandatory.
+
+    Records ``groups`` as proposed merges without applying them: every
+    parent unit keeps its id in the child, and the proposals are stored in
+    ``CurationV2.MergeGroup`` for review. ``groups`` are checked against the
+    parent's units before any write. Forwards to
+    ``CurationV2.propose_merge_curation`` with ``reuse_existing`` defaulting
+    to ``True``, so repeating the call returns the matching existing child.
+
+    Parameters
+    ----------
+    parent_curation : CurationRef
+        The curation to branch from. Its identity is re-verified before use.
+    groups : sequence of sequence of int
+        Disjoint merge groups of ``parent_curation`` unit ids, each with at
+        least two distinct ids.
+    **kwargs
+        Forwarded to ``CurationV2.propose_merge_curation``: ``labels``,
+        ``description``, ``reuse_existing`` (default ``True`` here),
+        ``label_policy`` (``"inherit"`` or ``"replace"``), and
+        ``allow_custom_labels``. The sorting key, ``merge_groups``, and
+        ``parent_curation_id`` are set from ``parent_curation`` and
+        ``groups``.
+
+    Returns
+    -------
+    CurationRef
+        Reference pinned to the preview child's current generation.
+
+    Raises
+    ------
+    TypeError
+        If ``parent_curation`` is not a ``CurationRef``.
+    CurationNotFoundError
+        If ``parent_curation`` no longer identifies its curation generation
+        (the row was deleted or its numeric id reused).
+    ValueError
+        If ``groups`` is empty or malformed (a group with fewer than two
+        ids, a repeated id, overlapping groups, or a non-integer id) or
+        references unit ids absent from ``parent_curation``, or if
+        ``parent_curation`` is itself an uncommitted preview.
+    """
     parent = _require_parent_ref(parent_curation, caller="preview_merges")
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -1151,7 +1268,50 @@ def commit_merges(
     groups: Sequence[Sequence[int]],
     **kwargs,
 ) -> CurationRef:
-    """Commit a merge child without evaluation; a typed parent is mandatory."""
+    """Commit a merge child without evaluation; a typed parent is mandatory.
+
+    Applies ``groups`` in a new child curation: each merged unit's spike
+    train is the union of its contributors, and the contributors are
+    absorbed, so the child has fewer units than the parent. The child is
+    not evaluated; use :func:`merge_and_evaluate` to commit and evaluate in
+    one call. ``groups`` are checked against the parent's units before any
+    write. Forwards to ``CurationV2.create_merged_curation`` with
+    ``reuse_existing`` defaulting to ``True``, so repeating the call returns
+    the matching existing child.
+
+    Parameters
+    ----------
+    parent_curation : CurationRef
+        The curation to branch from. Its identity is re-verified before use.
+    groups : sequence of sequence of int
+        Disjoint merge groups of ``parent_curation`` unit ids, each with at
+        least two distinct ids.
+    **kwargs
+        Forwarded to ``CurationV2.create_merged_curation``: ``labels``,
+        ``description``, ``reuse_existing`` (default ``True`` here),
+        ``label_policy`` (``"inherit"`` or ``"replace"``), and
+        ``allow_custom_labels``. The sorting key, ``merge_groups``, and
+        ``parent_curation_id`` are set from ``parent_curation`` and
+        ``groups``.
+
+    Returns
+    -------
+    CurationRef
+        Reference pinned to the merged child's current generation.
+
+    Raises
+    ------
+    TypeError
+        If ``parent_curation`` is not a ``CurationRef``.
+    CurationNotFoundError
+        If ``parent_curation`` no longer identifies its curation generation
+        (the row was deleted or its numeric id reused).
+    ValueError
+        If ``groups`` is empty or malformed (a group with fewer than two
+        ids, a repeated id, overlapping groups, or a non-integer id) or
+        references unit ids absent from ``parent_curation``, or if
+        ``parent_curation`` is itself an uncommitted preview.
+    """
     parent = _require_parent_ref(parent_curation, caller="commit_merges")
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -1169,7 +1329,48 @@ def commit_merges(
 def save_manual_curation(
     *, parent_curation: CurationRef, **kwargs
 ) -> CurationRef:
-    """Save a manual child from a typed parent; root sentinels are not accepted."""
+    """Save a manual child from a typed parent; root sentinels are not accepted.
+
+    Forwards to ``CurationV2.save_manual_curation`` with the parent's
+    ``sorting_id`` and ``curation_id``. Labels and merge groups come from a
+    FigPack/FigURL-style ``payload`` or from ``labels=`` / ``merge_groups=``.
+    Unlike :func:`preview_merges` and :func:`commit_merges`, this facade
+    does not pre-check merge groups and does not default ``reuse_existing``
+    to ``True``; ``CurationV2`` validates the merge groups.
+
+    Parameters
+    ----------
+    parent_curation : CurationRef
+        The curation to branch from. Its identity is re-verified before use.
+    **kwargs
+        Forwarded to ``CurationV2.save_manual_curation``: ``payload`` (dict
+        with ``labelsByUnit`` / ``mergeGroups`` or ``labels_by_unit`` /
+        ``merge_groups``), ``labels``, ``merge_groups``, ``merge_action``
+        (``"preview"`` by default, or ``"commit"``; aliases ``"propose"``,
+        ``"draft"``, ``"apply"``), ``curation_source`` (default
+        ``"manual"``), ``description`` (default ``"manual curation"``),
+        ``reuse_existing`` (default ``False``), ``allow_unknown_unit_ids``,
+        ``allow_custom_labels``, and ``label_policy`` (default
+        ``"inherit"``). ``parent_curation_id`` is set from
+        ``parent_curation``.
+
+    Returns
+    -------
+    CurationRef
+        Reference pinned to the saved child's current generation.
+
+    Raises
+    ------
+    TypeError
+        If ``parent_curation`` is not a ``CurationRef``.
+    CurationNotFoundError
+        If ``parent_curation`` no longer identifies its curation generation
+        (the row was deleted or its numeric id reused).
+    ValueError
+        If ``merge_action`` is not a recognized value, the payload, labels,
+        or merge groups are invalid, or ``parent_curation`` is itself an
+        uncommitted preview.
+    """
     parent = _require_parent_ref(parent_curation, caller="save_manual_curation")
     from spyglass.spikesorting.v2.curation import CurationV2
 
