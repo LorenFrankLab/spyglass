@@ -398,7 +398,8 @@ def allocate_merged_unit_ids(
     This order matches the stored preview's merge leaders, so preview,
     committed rows, and review labels agree on each merged unit's ID.
     Contributor order within a group is preserved for metadata tie-breaking.
-    Callers validate group membership, size, uniqueness, and disjointness.
+    Callers validate group membership, size, uniqueness, and that groups do
+    not overlap.
     """
     next_id = max(source_unit_ids, default=-1) + 1
     return {
