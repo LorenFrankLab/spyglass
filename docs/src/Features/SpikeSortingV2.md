@@ -2176,9 +2176,9 @@ quiet; a genuine distinct-probe mix-up also shows up as poor matcher AUC / few
 pairs. (Concatenation is stricter — it reads members in one electrode frame, so
 a mismatched electrode space is rejected outright.)
 
-Matching is pluggable behind a `MatcherProtocol`. The shipped backend is
-[UnitMatch](https://github.com/EnnyvanBeest/UnitMatch) (`matcher="unitmatch"`),
-installed via the optional extra:
+Matching uses [UnitMatch](https://github.com/EnnyvanBeest/UnitMatch)
+(`matcher="unitmatch"`), the one supported backend, installed via the optional
+extra:
 
 ```bash
 pip install -e ".[spikesorting-v2-matching]"   # UnitMatchPy + mat73
@@ -2369,8 +2369,7 @@ Key behaviors and caveats:
     A unit with fewer than two such spikes is excluded from
     the bundle, logged, and left unmatched (it stays in the matchable universe).
     The bundle hands the matcher self-contained directories — never a recording,
-    a `SortingAnalyzer`, or a table key. A new backend implements
-    `MatcherProtocol` and registers via `register_matcher()`.
+    a `SortingAnalyzer`, or a table key.
 - **Small unit counts destabilize the match calibration.** UnitMatch fits its
     match threshold, prior and score distributions from the units present in
     each run, so with few units per session (about 20 or fewer) results can
