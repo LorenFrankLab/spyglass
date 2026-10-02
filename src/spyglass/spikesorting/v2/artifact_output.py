@@ -21,6 +21,8 @@ tables' ``get_artifact_removed_intervals``.
 
 from __future__ import annotations
 
+from collections import Counter
+
 import datajoint as dj
 
 from spyglass.spikesorting.v2.artifact import (
@@ -227,12 +229,14 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
             ``discriminator_ok`` (whether the one part matches ``source``).
             Well-formed masters are omitted.
         """
+        part_ids = {
+            name: Counter(getattr(cls, name).fetch("merge_id"))
+            for name in ("RecordingSource", "SharedGroupSource")
+        }
         flagged: list[dict] = []
         for master in cls.fetch(as_dict=True):
-            key = {"merge_id": master["merge_id"]}
             per_part = {
-                name: len(getattr(cls, name) & key)
-                for name in ("RecordingSource", "SharedGroupSource")
+                name: ids[master["merge_id"]] for name, ids in part_ids.items()
             }
             count = sum(per_part.values())
             discriminator_ok = (

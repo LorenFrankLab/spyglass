@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import numbers
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -435,11 +436,11 @@ def find_orphaned_masters(master_table, part_tables: list) -> list[dict]:
     list[dict]
         The primary-key dicts of masters with zero source-part rows.
     """
-    orphans: list[dict] = []
-    for master in master_table.fetch("KEY", as_dict=True):
-        if sum(len(part & master) for part in part_tables) == 0:
-            orphans.append(master)
-    return orphans
+    # Each part is keyed by ``-> master`` only: antijoin on the master key.
+    orphans = master_table.proj()
+    for part in part_tables:
+        orphans = orphans - part.proj()
+    return orphans.fetch("KEY", as_dict=True)
 
 
 def audit_source_part_integrity(master_table, part_tables: list) -> list[dict]:
@@ -476,9 +477,15 @@ def audit_source_part_integrity(master_table, part_tables: list) -> list[dict]:
         ``"source_part_count"`` (``0`` = orphan, ``>= 2`` = ambiguous). Masters
         with exactly one source part are omitted.
     """
+    pk = master_table.primary_key
+    counts = Counter(
+        tuple(row[attr] for attr in pk)
+        for part in part_tables
+        for row in part.fetch("KEY", as_dict=True)
+    )
     flagged: list[dict] = []
     for master in master_table.fetch("KEY", as_dict=True):
-        count = sum(len(part & master) for part in part_tables)
+        count = counts[tuple(master[attr] for attr in pk)]
         if count != 1:
             flagged.append({**master, "source_part_count": count})
     return flagged
