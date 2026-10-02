@@ -7,18 +7,8 @@ deterministic-seed pins, the 3D->2D probe projection, the zero-unit
 short-circuit, and partial-folder cleanup on failure. The table threads the
 fetched ``SorterParameters`` row and resolved job kwargs in (the tri-part
 ``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
-compute). ``load_or_rebuild_analyzer`` and ``rebuild_analyzer_folder`` keep the
-cache-miss / reconstruction policy out of ``sorting.py`` so future analyzer
-extension growth can be added behind the same boundary.
-
-Why this lives in its own module rather than in ``sorting.py``:
-``sorting.py`` is a DataJoint *schema* module -- importing it activates
-``dj.schema(...)`` and the source-part / merge dependencies. The analyzer build
-needs none of that at import, so ``Sorting`` becomes a thin orchestrator. Same
-"thin DataJoint shell over pure/IO services" direction as ``_artifact_compute``
-/ ``_selection_identity`` / ``_analyzer_cache`` / ``_curation_transforms`` /
-``_units_nwb`` / ``_sorting_units`` / ``_sorting_artifact_mask`` /
-``_sorting_dispatch``.
+compute). ``load_or_rebuild_analyzer`` and ``rebuild_analyzer_folder`` hold the
+cache-miss / reconstruction policy.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / spyglass dependencies are imported
@@ -302,11 +292,7 @@ def load_or_rebuild_analyzer(
     """
     from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
 
-    # Resolve the canonical sorting_id from the matched row rather than
-    # assuming ``key`` literally carries "sorting_id" -- a general
-    # restriction (e.g. {"object_id": ...} or any single-row selector)
-    # must work too. ``fetch1`` enforces that the restriction selects
-    # exactly one Sorting row, so the resolved id is unambiguous.
+    # ``key`` may be any single-row restriction, not only a sorting_id.
     sorting_id, n_units = (sorting_table & key).fetch1("sorting_id", "n_units")
     if int(n_units) == 0:
         raise ZeroUnitAnalyzerError(
@@ -721,34 +707,11 @@ def build_analyzer(
     channel-sparsity estimation (or a dense analyzer); every effective value,
     including SI defaults, comes from the tracked row.
 
-    ``sorter_row`` is the already-fetched ``SorterParameters`` row
-    from ``make_fetch``; passing it through avoids three redundant
-    DB round-trips during ``make_compute`` (we cannot read inside
-    ``make_compute`` per the tri-part contract). The rebuild path
-    does not have the row pre-fetched, so it leaves
-    ``sorter_row=None`` and pays the DB cost once -- that path is
-    rare (missing analyzer folder) and not on the populate hot
-    path, so the lookup is acceptable there.
-
-    ``job_kwargs`` is the already-resolved dict from
-    ``_resolved_job_kwargs`` -- when ``make_compute`` calls
-    ``run_sorter`` and ``build_analyzer`` from the same
-    invocation it resolves once and threads through; the rebuild
-    path falls back to resolving locally (same DB-read tradeoff
-    as ``sorter_row``).
-
-    ``analyzer_folder`` is the resolved cache folder to write -- the caller
-    computes it via ``analyzer_path(sorting_id, waveform_params_name)`` so the
-    folder carries the recipe identity. It is required because that name is not
-    recoverable from the params dict alone, and this function does no DB I/O.
-
-    ``waveform_params`` is the RESOLVED analyzer-waveform params dict (the
-    ``AnalyzerWaveformParameters`` row's blob: ``ms_before`` / ``ms_after`` /
-    ``max_spikes_per_unit`` / ``whiten`` / ``purpose``) the caller already
-    fetched -- this function never resolves a bare recipe name to params (no DB
-    I/O per the tri-part contract). It is required: ``None`` raises so a caller
-    can never silently build the wrong (schema-default) window into a
-    recipe-named folder.
+    Inside ``make_compute`` (no DB reads) the caller passes the fetched
+    ``sorter_row`` and resolved ``job_kwargs``; the rebuild path may omit
+    them and pays one DB fetch. ``analyzer_folder`` and ``waveform_params``
+    are always required, so the folder's recipe name and the params built
+    into it cannot disagree.
 
     Parameters
     ----------
@@ -817,11 +780,8 @@ def build_analyzer(
             "default window."
         )
 
-    # ``whiten`` is part of the analyzer recipe identity (display=False,
-    # metric=True). A whitened analyzer is the metric recipe for PC/NN
-    # cluster-separation metrics; it is whitened below (after the 2D probe
-    # projection, before ``create_sorting_analyzer``) and built with
-    # ``return_in_uV=False`` (see below).
+    # ``whiten`` is part of the recipe identity: display=False, metric=True
+    # (PC/NN cluster-separation metrics).
     whiten = bool(waveform_params.get("whiten"))
     # Channel sparsity comes from the tracked recipe (``SparsityParams``); a
     # blob without the field means SI's radius/100 um default, which the
@@ -834,15 +794,9 @@ def build_analyzer(
         waveform_params.get("sparsity") or {}
     ).si_create_kwargs()
 
-    # Zero-unit short-circuit BEFORE any I/O or DB fetch:
-    # ``create_sorting_analyzer(sparse=True)`` -> ``estimate_sparsity``
-    # -> ``random_spikes_selection`` crashes on ``np.concatenate([])``
-    # for empty sortings. ``_populate_unit_part`` iterates an empty
-    # ``sorting.unit_ids`` and writes zero Unit rows; the Sorting
-    # master row commits with ``n_units=0``. Return the (not yet
-    # created) folder path for the row; ``Sorting.get_analyzer``
-    # raises ``ZeroUnitAnalyzerError`` for a zero-unit sort rather
-    # than trying to load this never-built folder.
+    # SI's sparse analyzer build crashes on an empty sorting
+    # (``np.concatenate([])`` in ``random_spikes_selection``). The folder is
+    # never built; ``Sorting.get_analyzer`` raises ZeroUnitAnalyzerError.
     if sorting.get_num_units() == 0:
         logger.warning(
             "Sorting._build_analyzer: sorting_id="
@@ -867,21 +821,12 @@ def build_analyzer(
     if job_kwargs is None:
         job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
 
-    # Refuse coincident contacts BEFORE any probe is built or any extension is
-    # computed. Every consumer below goes through a probe, and probeinterface
-    # rejects duplicate contact positions -- but its message ("Contact
-    # positions must be unique within a probe. Found 1 duplicate(s)...") names
-    # neither the sort nor the table to fix, and it is raised from inside
-    # ``get_probe()`` on the very next line, so wrapping the projection would
-    # never see it. ``assert_unique_contact_positions`` reads
-    # ``get_channel_locations()``, which is the x-y projection SpikeInterface
-    # will use and does NOT construct a probe, so it can run first. It also
-    # catches a 3D probe whose contacts are distinct in 3D but collapse under
-    # the ``to_2d()`` projection below. ``require_2d=False``: the artifact
-    # writer persists ``rel_z``, so ``NwbRecordingExtractor`` rebuilds a 3D
-    # ``location`` property for EVERY reloaded artifact -- this path projects
-    # it deliberately (``probe.to_2d()`` below), unlike the recording stage,
-    # which must refuse a recording it never normalized.
+    # Check contacts before ``get_probe()``: probeinterface's own duplicate-
+    # position error names neither the sort nor the table to fix. The check
+    # reads channel locations without building a probe, and also catches
+    # contacts distinct in 3D that collapse under ``to_2d()`` below.
+    # ``require_2d=False`` because a reloaded artifact always carries a 3D
+    # location (``rel_z`` is persisted) and is projected here on purpose.
     from spyglass.spikesorting.v2._recording_geometry import (
         assert_unique_contact_positions,
     )
@@ -898,16 +843,9 @@ def build_analyzer(
             f"({exc})"
         ) from exc
 
-    # Project the probe to 2D before building the analyzer. Spyglass electrode
-    # geometry is stored in 3D (the z coordinate is typically 0), but several
-    # SortingAnalyzer extensions and consumers assume 2D contact positions:
-    # ``unit_locations`` (monopolar_triangulation / center_of_mass) and the
-    # spikeinterface-gui probe view both raise
-    # ``could not broadcast input array from shape (3,) into shape (2,)`` on a
-    # 3D probe. The in-plane (x, y) coordinates are unchanged by the projection,
-    # so sparsity, templates, and waveforms are unaffected ONLY when the z axis
-    # is degenerate (all-zero, as Spyglass stores it). Done here (rather than at
-    # recording materialization) so the sort itself still sees the recording
+    # Project the probe to 2D: ``unit_locations`` and the spikeinterface-gui
+    # probe view raise a (3,)-into-(2,) broadcast error on a 3D probe. Done
+    # here, not at recording materialization, so the sort sees the recording
     # untouched.
     probe = recording.get_probe()
     if probe.ndim == 3:
@@ -915,10 +853,8 @@ def build_analyzer(
 
         from spyglass.utils import logger
 
-        # Dropping a non-degenerate z axis would shift channel distances (and
-        # therefore sparsity), so the "x/y unchanged" guarantee above no longer
-        # holds. Frank-lab probes are planar (z=0); warn on a genuinely
-        # non-planar probe, which may need a different projection axis.
+        # Dropping a non-constant z shifts channel distances (and sparsity);
+        # Frank-lab probes are planar, so warn.
         z = np.asarray(probe.contact_positions)[:, 2]
         if z.size and not np.allclose(z, z[0]):
             logger.warning(
@@ -931,10 +867,7 @@ def build_analyzer(
         recording = recording.set_probe(probe.to_2d())
 
     if whiten:
-        # The metric recipe: whiten BEFORE building so PC/NN cluster-separation
-        # metrics compute in the decorrelated space. Reuse the sorter's pinned
-        # whitening (same seed source) -- one implementation, not two. The
-        # display recipe leaves the recording in real voltages.
+        # Same seeded whitening as the sorter path.
         from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
 
         recording = pinned_whiten(
@@ -972,35 +905,21 @@ def build_analyzer(
             format="binary_folder",
             folder=folder,
             **sparsity_kwargs,
-            # Display (unwhitened) -> True: real uV amplitudes. Metric
-            # (whitened) -> False: ``sip.whiten`` preserves per-channel gains,
-            # so a True readback would re-apply them and partially un-normalize
-            # the whitened space for non-uniform gains -- defeating the point of
-            # whitening for PC/NN metrics. So ``return_in_uV`` derives from the
-            # recipe's ``whiten`` flag, it is not an independent knob.
+            # Display: real uV. Metric: False, because ``sip.whiten`` keeps
+            # per-channel gains and a uV readback would partly un-whiten
+            # channels with non-uniform gains.
             return_in_uV=not whiten,
             overwrite=True,
         )
-        # ``random_seed`` is a Spyglass-side knob (consumed by the sorter
-        # and the whitening pin in ``run_si_sorter``), not a valid
-        # ``SortingAnalyzer.compute`` keyword -- SI raises
-        # "please remove {'random_seed'}". Strip it here, mirroring the
-        # detect_peaks path. It stays in ``job_kwargs`` upstream so the
-        # sorter/whitening still read the seed.
+        # ``random_seed`` is a Spyglass-side knob; ``SortingAnalyzer.compute``
+        # rejects it.
         analyzer_job_kwargs = {
             k: v for k, v in job_kwargs.items() if k != "random_seed"
         }
-        # Window + subsample come from the resolved AnalyzerWaveformParameters
-        # row (tracked in the DB), NOT hardcoded -- so the settings that
-        # produced each analyzer are recorded and reproducible. The window is
-        # region-specific (hippocampus 0.5/0.5, cortex 1.0/2.0) and the
-        # subsample is the lab's 20000.
-        # Default base set computes ``noise_levels`` (needed by downstream
-        # quality/template metrics -- SNR -- on the STORED analyzer). It is
-        # seed-pinned (see the noise_levels extension_params below), so it
-        # rebuilds identically and is part of ``ANALYZER_RECOMPUTE_EXTENSIONS``:
-        # the recompute-verify path hashes it alongside random_spikes /
-        # templates / waveforms.
+        # Window and subsample come from the tracked recipe row. The random
+        # extensions (random_spikes, noise_levels) are seed-pinned so a rebuild
+        # is identical, which the recompute check
+        # (``ANALYZER_RECOMPUTE_EXTENSIONS``) relies on.
         base_extensions = list(
             extensions if extensions is not None else BASE_ANALYZER_EXTENSIONS
         )
@@ -1010,31 +929,15 @@ def build_analyzer(
                     waveform_params["max_spikes_per_unit"]
                 ),
                 "method": "uniform",
-                # Pin the stochastic spike subsampling. When a unit has more
-                # than ``max_spikes_per_unit`` spikes, ``random_spikes`` draws a
-                # uniform random subset; the SI 0.104 extension defaults
-                # ``seed=None`` (verified against
-                # ``ComputeRandomSpikes._set_params``), so an unseeded build
-                # selects a different subset each time -- and the persisted
-                # ``peak_amplitude_uv`` / peak channel (computed from the
-                # subset's templates) drifts across rebuilds of the same sort.
-                # Defaults to 0 but honors the per-row
-                # ``job_kwargs={"random_seed": N}`` override, the same knob the
-                # whitening / noise_levels pins read in ``run_si_sorter`` /
-                # ``run_clusterless_thresholder`` -- so a user changing the seed
-                # gets a consistent seed across the sort AND the analyzer
-                # subsample.
+                # SI 0.104 defaults seed=None; unseeded, the subset (and the
+                # persisted peak_amplitude_uv / peak channel derived from its
+                # templates) drifts between rebuilds. Same row seed as the
+                # sort's whitening / noise pins.
                 "seed": (job_kwargs or {}).get("random_seed", 0),
             },
             "noise_levels": {
-                # Pin the stochastic noise estimate. ``get_noise_levels`` reads
-                # random recording chunks (via ``random_slices_kwargs``), which
-                # SI leaves UNSEEDED by default -- so each build samples
-                # different chunks and the per-channel noise, and any SNR /
-                # SNR-based curation rule computed from it, drifts run-to-run.
-                # Same seed source as the random_spikes / whitening pins, so
-                # noise_levels rebuilds identically and can join the recompute
-                # comparison (ANALYZER_RECOMPUTE_EXTENSIONS).
+                # SI samples unseeded random chunks by default, so noise (and
+                # SNR-based curation) would drift between builds.
                 "random_slices_kwargs": {
                     "seed": (job_kwargs or {}).get("random_seed", 0)
                 },
