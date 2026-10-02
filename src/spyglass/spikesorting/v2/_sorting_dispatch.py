@@ -10,16 +10,8 @@ restore), and ``remove_excess_spikes`` which trims spikes outside the recording
 window. They operate on SpikeInterface objects and already-fetched parameter
 rows; the table threads the fetched DB state in (the tri-part
 ``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
-compute), so the hot path here is DB-free.
-
-Why this lives in its own module rather than in ``sorting.py``:
-``sorting.py`` is a DataJoint *schema* module -- importing it activates
-``dj.schema(...)`` and the source-part / merge dependencies. The sort-time
-dispatch needs none of that at import, so ``Sorting`` becomes a thin
-orchestrator (fetch -> call these -> insert). Same "thin DataJoint shell over
-pure/IO services" direction as ``_artifact_compute`` / ``_selection_identity``
-/ ``_analyzer_cache`` / ``_curation_transforms`` / ``_units_nwb`` /
-``_sorting_units`` / ``_sorting_artifact_mask`` / ``_sorting_analyzer``.
+compute), so the hot path here is DB-free. Keeping it out of the ``sorting``
+schema module lets it be imported and tested without activating a schema.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / numpy / spyglass dependencies are
@@ -30,31 +22,18 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-# MATLAB-backed sorters in SpikeInterface (Kilosort 2.5 / 3, IronClust). Their
-# algorithm runtime is a compiled MATLAB binary that ships only as a container
-# image, so they CANNOT run on a ``backend="local"`` execution row -- a local
-# row for one of these raises a clear error (see
-# ``assert_matlab_sorter_has_container_backend``). Unlike v1's name-based
-# ``singularity_image=True`` auto-fallback, the container backend comes from
-# tracked ``SorterParameters.execution_params`` provenance, never from the
-# sorter name alone, so a custom Kilosort/IronClust row is never silently
-# reinterpreted as local execution.
-#
-# This set coincides today with
-# ``_params.sorter._INTERNAL_WHITEN_NO_KWARG_SORTERS`` but encodes a DIFFERENT
-# concept (container-execution policy, not internal whitening); they are kept
-# separate on purpose -- see the note there.
+# MATLAB-backed sorters, whose compiled runtime ships only as a container image:
+# a ``backend="local"`` row raises
+# (``assert_matlab_sorter_has_container_backend``). Unlike v1, the container
+# comes from the tracked ``execution_params``, never from the sorter name. The
+# set coincides with
+# ``_params.sorter._INTERNAL_WHITEN_NO_KWARG_SORTERS`` but encodes a different
+# concept (container policy, not whitening); keep them separate.
 MATLAB_SORTERS = ("kilosort2_5", "kilosort3", "ironclust")
-# Sorters that whiten via the v2 runtime's external float64 whitening by design:
-# they deliberately carry ``whiten=True`` and the dispatcher routes that to
-# ``pinned_whiten`` (whitening the signal exactly once). The interception is
-# allowlisted to exactly these so an *uncurated/generic* sorter's truthy
-# ``whiten`` is passed through to the sorter unchanged rather than silently
-# rewritten. NOT keyed on ``_INTERNAL_WHITEN_NO_KWARG_SORTERS``
-# (kilosort2_5/3/ironclust): those reject a truthy ``whiten`` at insert
-# (``reject_internal_whiten``) and so can never reach the dispatcher with
-# ``whiten=True`` -- allowlisting them would disable interception for the wrong
-# set.
+# Sorters whose ``whiten=True`` the dispatcher routes to ``pinned_whiten``
+# (whitening exactly once). Any other sorter's ``whiten`` passes through
+# unchanged. The internal-whitening MATLAB sorters reject a truthy ``whiten`` at
+# insert, so they never reach this check with ``whiten=True``.
 _EXTERNAL_WHITEN_SORTERS = frozenset({"mountainsort4", "mountainsort5"})
 
 
@@ -571,30 +550,19 @@ def run_clusterless_thresholder(
     ``spikeinterface.sortingcomponents.peak_detection.detect_peaks``
     directly and wraps the result in a ``NumpySorting``.
 
-    ``noise_levels`` handling: when the params row supplies a
-    non-``None`` value (e.g. ``default_clusterless`` ships
-    ``noise_levels=[1.0]``), SI's ``locally_exclusive`` interprets
-    ``detect_threshold`` in the recording's amplitude units. With
-    ``threshold_unit="uv"`` this method scales the recording to
-    microvolts (``scale_to_uV``, using the stored NWB gain) before
-    ``detect_peaks``, so ``detect_threshold`` is a TRUE microvolt
-    threshold. For Frank-lab data gain==1 uV/count so this is a no-op;
-    for non-unity-gain rigs it converts a raw-count threshold into true
-    microvolts. A scalar (singleton list) is
-    broadcast to length ``n_channels``
-    because SI's ``locally_exclusive`` indexes ``noise_levels[chan]
-    * detect_threshold`` per channel. When the params row omits
-    ``noise_levels``, the runtime derives it from ``threshold_unit``:
-    ``"uv"`` (the schema default, and the production Frank-lab row)
-    derives ``[1.0]`` and scales to microvolts as above; ``"mad"``
-    (what the ``smoke_clusterless_5uv`` / synthetic-fixture rows set
-    EXPLICITLY) leaves it unset so SI computes per-channel MAD and
-    ``detect_threshold`` is a MAD multiplier, which finds peaks on the
-    low-amplitude MEArec fixture. On that MAD path the per-channel MAD is
-    estimated only from samples inside ``statistics_spans``
-    (``cache_span_noise_levels``), so artifact-masked zeros do not lower
-    the threshold; without spans, or with one span covering the
-    recording, SpikeInterface's own estimator runs unchanged.
+    The per-channel threshold is ``noise_levels[chan] * detect_threshold``
+    in the recording's amplitude units. ``threshold_unit="uv"`` (the schema
+    default and the production Frank-lab row) scales the recording to
+    microvolts with its stored NWB gain (a no-op at 1 uV/count). An explicit
+    ``noise_levels`` wins (a singleton is broadcast to ``n_channels``);
+    otherwise (:func:`_clusterless_noise_levels`):
+
+    - ``"uv"``: ``[1.0]``, so ``detect_threshold`` is in microvolts.
+    - ``"mad"``: SI estimates per-channel MAD and ``detect_threshold`` is a
+      MAD multiplier. The MAD is estimated only from samples inside
+      ``statistics_spans`` (:func:`cache_span_noise_levels`), so
+      artifact-masked zeros do not lower the threshold; without spans, or
+      with one span covering the recording, SI's own estimator runs.
 
     Parameters
     ----------
@@ -639,31 +607,15 @@ def run_clusterless_thresholder(
     for stale in ("outputs", "random_chunk_kwargs"):
         params.pop(stale, None)
 
-    # ``threshold_unit`` is a Spyglass-side knob, not a detect_peaks
-    # kwarg: strip it and use it to resolve the noise_levels
-    # precedence (explicit noise_levels win; otherwise "uv" -> [1.0]
-    # AND the recording is scaled to microvolts below via
-    # ``scale_to_uV``, so detect_threshold is a TRUE microvolt
-    # threshold; "mad" -> None so SI estimates per-channel MAD and
-    # detect_threshold is a MAD multiplier).
-    #
-    # The fallback is "uv" (matching ClusterlessThresholderSchema's
-    # default), NOT "mad": a row missing ``threshold_unit`` -- a row with
-    # ``schema_version`` < 4, or a default-shaped row carrying only
-    # noise_levels=[1.0] -- is interpreted as a microvolt threshold and
-    # scaled, not silently thresholded in native counts (which on Intan
-    # 0.195 uV/count data would make "100" ~19.5 uV instead of 100 uV).
-    # The runtime fallback must agree with the schema default.
+    # ``threshold_unit`` is a Spyglass-side knob, not a detect_peaks kwarg.
+    # A row without it (``schema_version`` < 4) falls back to the schema
+    # default "uv", so it is scaled to microvolts rather than thresholded in
+    # native counts (on Intan 0.195 uV/count, "100" would be ~19.5 uV).
     threshold_unit = params.pop("threshold_unit", "uv")
-    # Reject an invalid ``threshold_unit`` LOUDLY rather than silently
-    # treating it as MAD. The schema's
-    # ``Literal["uv", "mad"]`` enforces this at insert, but ``update1`` and
-    # pre-validator rows bypass it, and make/sort-time consumes the fetched
-    # blob WITHOUT re-validating. Without this guard ANY non-"uv" value
-    # falls through to the MAD path -- ``_clusterless_noise_levels`` returns
-    # ``None`` for everything except "uv" -- so a typo like "microvolts" or
-    # "UV" would silently change what ``detect_threshold`` means instead of
-    # failing.
+    # The schema enforces ``Literal["uv", "mad"]`` at insert, but ``update1``
+    # and pre-validator rows bypass it and the fetched blob is not
+    # re-validated; any non-"uv" value would otherwise silently take the MAD
+    # path.
     if threshold_unit not in ("uv", "mad"):
         raise ValueError(
             "clusterless_thresholder: threshold_unit must be 'uv' or "
@@ -671,14 +623,9 @@ def run_clusterless_thresholder(
             "update1 or before the SorterParameters validator existed can "
             "carry an invalid value; fix the stored params row."
         )
-    # Defense-in-depth: the SorterParameters insert
-    # validator rejects this combo, but it is bypassed by ``update1`` and
-    # by rows written before the validator existed, and make/sort-time
-    # consumes the fetched blob WITHOUT re-validating. A microvolt-scale
-    # detect_threshold left in MAD units with no explicit noise_levels
-    # makes SI treat e.g. 100 as a 100x-MAD threshold and detect almost
-    # nothing -- a silent zero-unit sort. Re-assert the guard here so it
-    # surfaces regardless of how the row reached the detector.
+    # Same bypass as above for the insert validator's MAD-multiplier check:
+    # a microvolt-scale threshold read as a MAD multiplier (e.g. 100x MAD)
+    # detects almost nothing -- a silent zero-unit sort.
     from spyglass.spikesorting.v2._params.sorter import (
         _MAX_PLAUSIBLE_MAD_MULTIPLIER,
     )
@@ -703,32 +650,19 @@ def run_clusterless_thresholder(
         params.get("noise_levels"), threshold_unit
     )
     if nl_in is None:
-        # Drop the key entirely so ``detect_peaks`` falls through to
-        # SI's per-channel MAD estimation path.
+        # Absent noise_levels -> detect_peaks estimates per-channel MAD.
         params.pop("noise_levels", None)
-        # Pin SI's random-chunk sampling inside
-        # ``get_noise_levels`` (the path detect_peaks takes when
-        # noise_levels is absent) to a deterministic seed.
-        # PR #3359 (merged 2024-10-25) changed SI's default from
-        # ``seed=0`` to ``seed=None``, making the per-channel MAD
-        # non-deterministic across runs on the same input --
-        # which at a detect_threshold of 5 (a MAD multiplier, not
-        # 5σ) can flip ~10-20 borderline peaks per shank. Per PR
-        # #3359's stated principle
-        # (*"seed must be explicit and no implicit"*) Spyglass IS
-        # the explicit-seeder. Same seed pin + same user-override
-        # mechanism as the ``sip.whiten`` pin in
-        # ``run_si_sorter`` -- set ``random_seed`` in the per-
-        # row ``SorterParameters.job_kwargs`` blob to override.
+        # SI PR #3359 (2024-10-25) made ``get_noise_levels``'s default seed
+        # None, so an unpinned MAD varies between runs and can flip ~10-20
+        # borderline peaks per shank at a MAD multiplier of 5. Pin it, as
+        # ``pinned_whiten`` does; override via the row's
+        # ``job_kwargs["random_seed"]``.
         _random_seed = (job_kwargs or {}).get("random_seed", 0)
         params.setdefault("random_slices_kwargs", {"seed": _random_seed})
     else:
         n_channels = recording.get_num_channels()
-        # Reject an explicit noise_levels of the wrong length BEFORE
-        # broadcasting / indexing it per channel: a singleton is
-        # broadcast, an n_channels-length array is used as-is, and
-        # any other explicit length is a configuration error (it
-        # would otherwise mis-index inside SI's ``locally_exclusive``).
+        # Only a singleton or an n_channels-length array is valid; any other
+        # length would mis-index inside SI's ``locally_exclusive``.
         _assert_noise_levels_length(nl_in, n_channels)
         nl = np.asarray(nl_in, dtype=np.float64)
         if nl.size == 1:
@@ -736,24 +670,14 @@ def run_clusterless_thresholder(
         params["noise_levels"] = nl
 
     method = params.pop("method", "locally_exclusive")
-    # ``random_seed`` is a Spyglass-side knob (already threaded into
-    # ``random_slices_kwargs`` above for the noise_levels=None path);
-    # it is NOT a valid SI job kwarg, so leaving it in ``job_kwargs``
-    # makes ``detect_peaks`` -> ``fix_job_kwargs`` raise
-    # ``AssertionError: random_seed is not a valid job keyword
-    # argument``. Strip it before the call.
+    # ``random_seed`` is a Spyglass-side knob; SI's ``fix_job_kwargs`` raises
+    # on it.
     detect_job_kwargs = {
         k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"
     }
     if threshold_unit == "uv":
-        # Honor the "uv" label: scale the detector's input from raw ADC
-        # counts to microvolts using the recording's STORED gain/offset
-        # (the NWB ElectricalSeries conversion/offset, reloaded onto the
-        # recording's channel gains by se.read_nwb_recording). With
-        # noise_levels=[1.0], detect_threshold is then a genuine
-        # microvolt threshold. For Frank-lab data (gain==1 uV/count) this
-        # is a no-op; for non-unity-gain rigs (e.g. Intan ~0.195) it
-        # converts a raw-count threshold into true uV.
+        # The stored gain/offset is the NWB ElectricalSeries conversion/offset
+        # that se.read_nwb_recording loads onto the recording.
         import spikeinterface.preprocessing as sip
 
         if recording.get_channel_gains() is None:
@@ -809,27 +733,18 @@ def run_si_sorter(
     sorter subprocess with a different uid (rootless container, slurm
     scenarios) can write into it; a local run keeps the 0o700 default.
 
-    External float64 whitening: if the sorter asks for whitening,
-    run it externally at float64 and turn the sorter's internal
-    whitening off so we do not whiten twice. It runs on the
-    artifact-masked recording, whose masked frames are zeros; the
-    covariance is estimated only from samples inside
-    ``statistics_spans`` (see ``pinned_whiten``), so those zeros never
-    enter it. An unmasked continuous recording (``statistics_spans``
-    ``None`` or one span covering it) uses SpikeInterface's sampler
-    unchanged.
+    External float64 whitening: for an external-whitening sorter asking for
+    whitening, the runtime whitens at float64 and turns the sorter's own
+    whitening off, so the signal is whitened once. The covariance is
+    estimated only from samples inside ``statistics_spans`` (see
+    ``pinned_whiten``), so artifact-masked zeros never enter it.
 
     Container execution: the ``execution_params`` row selects the backend.
-    ``backend="local"`` runs the sorter on the host (no container kwargs). A
-    container backend passes SI's ``docker_image`` / ``singularity_image`` (the
-    explicit pinned image) plus the container-install controls
-    (``build_run_sorter_container_kwargs``). MATLAB-backed sorters
-    (Kilosort 2.5 / 3, IronClust) MUST select a container backend -- a local
-    row raises (``assert_matlab_sorter_has_container_backend``); unlike v1,
-    the sorter name never selects ``singularity_image=True``. The
-    ``MATLAB_SORTER_STRIP_KWARGS`` (``tempdir`` / ``mp_context`` /
-    ``max_threads_per_process``) are stripped only when a MATLAB sorter runs on
-    a container backend (they do not survive containerization).
+    A container backend passes the pinned image and install controls
+    (``build_run_sorter_container_kwargs``). MATLAB-backed sorters must
+    select a container backend (a local row raises), and
+    ``MATLAB_SORTER_STRIP_KWARGS`` are stripped when one runs in a
+    container.
 
     Parameters
     ----------
@@ -872,15 +787,11 @@ def run_si_sorter(
     )
     from spyglass.utils import logger
 
-    # Resolve + validate execution provenance (None -> default local), then
-    # enforce the MATLAB-sorter container policy BEFORE any scratch/whitening
-    # work so a misconfigured local MATLAB row fails fast and clearly.
+    # Enforce the MATLAB container policy before any scratch/whitening work.
     execution_params = validate_execution_params(execution_params)
     assert_matlab_sorter_has_container_backend(sorter, execution_params)
     container_kwargs = build_run_sorter_container_kwargs(execution_params)
-    # ONE resolution of what this sort executes (whiten routing, seed, job
-    # kwargs, MATLAB-container strip) -- the same function preflight and the
-    # run receipt call, so what runs is what was described.
+    # The same resolution preflight and the run receipt report.
     config = resolve_sort_config(
         sorter,
         sorter_params,
@@ -894,119 +805,73 @@ def run_si_sorter(
     )
     patched_numpy_inf = False
     try:
-        # World-writable scratch only for a CONTAINER backend: the sorter's
-        # container process may run as a different uid and must be able to write
-        # into this per-sort scratch. A LOCAL run is same-uid, so the 0o700
-        # default of TemporaryDirectory is sufficient -- a gratuitous 0o777 on a
-        # local run needlessly widens access.
+        # A container process may run as a different uid; a local run keeps
+        # TemporaryDirectory's 0o700.
         if is_container_backend(execution_params):
             os.chmod(sorter_temp_dir.name, 0o777)
 
-        # spikeextractors 0.9.11 (a transitive dep of SI's MS4
-        # wrapper at ``spikeinterface/sorters/external/mountainsort4.py``)
-        # references the removed ``numpy.Inf`` alias at
-        # ``spikeextractors/extraction_tools.py:766``; that crashes
-        # under numpy >= 2.0. Restore the alias only for the duration
-        # of this call and delete it again in the ``finally`` -- a
-        # persistent global mutation would make every later module
-        # that probes ``hasattr(np, "Inf")`` (some scipy versions)
-        # see a different numpy than import time. ``np.inf`` is what
-        # ``np.Inf`` always aliased, so the patch is value-safe; only
-        # its lifetime is scoped. TODO: drop once SI's MS4 wrapper /
-        # spikeextractors stops referencing the removed alias.
+        # spikeextractors 0.9.11 (pulled in by SI's MS4 wrapper) references
+        # ``numpy.Inf``, removed in numpy 2. Restore the alias only for this
+        # call (the ``finally`` deletes it) so later ``hasattr(np, "Inf")``
+        # probes (some scipy versions) see the same numpy as at import.
+        # TODO: drop once spikeextractors stops referencing the alias.
         if sorter.lower() == "mountainsort4" and not hasattr(np, "Inf"):
             np.Inf = np.inf
             patched_numpy_inf = True
 
         if config.external_whiten:
-            # Pin SI's random-chunk-based covariance estimate inside
-            # ``sip.whiten`` to a deterministic seed (see ``pinned_whiten``).
-            # Empirically verified: 3 v2 MS4 runs with seed=0 produce identical
-            # (n_units, median_fr); without the pin, 4 runs produced 4 distinct
-            # states. User override: set ``random_seed`` in the per-row
-            # ``SorterParameters.job_kwargs`` blob (for robustness studies);
-            # Spyglass's default 0 makes re-runs of a parameter row reproducible
-            # by default. Only the external-whitening sorters are intercepted;
-            # ``config.si_sorter_params`` already carries ``whiten=False`` for
-            # them and passes a generic sorter's ``whiten`` through unchanged.
+            # Seeded covariance (default 0, override via the row's
+            # ``job_kwargs["random_seed"]``): three seeded MS4 runs gave
+            # identical (n_units, median_fr); four unseeded runs gave four
+            # different results. ``config.si_sorter_params`` already carries
+            # ``whiten=False``.
             recording = pinned_whiten(
                 recording,
                 random_seed=config.random_seed,
                 spans=statistics_spans,
             )
 
-        # Resolved job_kwargs (n_jobs, chunk_duration, progress_bar,
-        # etc.) install via ``si.set_global_job_kwargs`` and are
-        # picked up by ``run_sorter`` through SI's global state.
-        # They MUST NOT be splatted into ``run_sorter(**...)``: SI
-        # 0.104's ``run_sorter`` signature has ``**sorter_params``
-        # as the only catch-all, so any extra kwargs flow straight
-        # into the sorter and trip strict per-sorter validators
-        # (MS4, MS5, KS4 all raise ``Invalid parameters: [...]``
-        # for pool_engine / n_jobs / chunk_duration / progress_bar
-        # / mp_context / max_threads_per_worker). ``random_seed`` (a
-        # Spyglass-side knob) was already removed by ``resolve_sort_config``
-        # because SI's ``set_global_job_kwargs`` rejects unknown keys.
+        # Job kwargs reach run_sorter through SI's global state. Splatting them
+        # into run_sorter would route them into ``**sorter_params``, which
+        # MS4/MS5/KS4 reject (``Invalid parameters: [...]``).
+        # ``resolve_sort_config`` already removed ``random_seed``, which
+        # ``set_global_job_kwargs`` rejects.
         sj_kwargs = dict(config.job_kwargs)
         previous_global = dict(si.get_global_job_kwargs())
         if sj_kwargs:
             si.set_global_job_kwargs(**sj_kwargs)
-        # Pass a CHILD output folder, not the temp root, so SI's container
-        # runner writes its fixed-name ``in_container_recording.*`` /
-        # ``in_container_params.json`` files into ``folder.parent`` ==
-        # ``sorter_temp_dir.name`` (unique per sort) rather than the SHARED
-        # ``spyglass_temp_dir``. Without this, two parallel container populates
-        # would stomp each other's fixed-name files in the common parent. The
-        # 0o777 chmod above is on that per-sort parent, so the container's
-        # (possibly different-uid) writes still land somewhere world-writable.
+        # A CHILD output folder makes SI's container runner write its
+        # fixed-name ``in_container_*`` files into the per-sort (chmod-ed)
+        # temp dir, not the shared ``spyglass_temp_dir`` where parallel
+        # container populates would overwrite each other's files.
         output_folder = os.path.join(sorter_temp_dir.name, "sorter_output")
         run_kwargs = dict(
             sorter_name=sorter,
             recording=recording,
             folder=output_folder,
             remove_existing_folder=True,
-            # Container execution kwargs (empty for local). docker_image /
-            # singularity_image / delete_container_files bind to run_sorter's
-            # named params; installation_mode / spikeinterface_version /
-            # extra_requirements flow through **sorter_params into
-            # run_sorter_container. They originate ONLY from execution_params --
-            # the reserved-key rule keeps them out of the scientific params blob,
-            # so there is no collision with **effective_params below.
+            # Empty for local. The reserved-key rule keeps these out of the
+            # scientific params, so they cannot collide with
+            # **effective_params.
             **container_kwargs,
         )
-        # The MATLAB-sorter kwarg strip (only when one of those sorters actually
-        # runs in a container) is folded into ``config.si_sorter_params``.
         effective_params = config.si_sorter_params
         try:
             raw_sorting = sis.run_sorter(**run_kwargs, **effective_params)
-            # run_sorter returns a sorting that READS from sorter_temp_dir,
-            # which the outer finally cleans up -- downstream _build_analyzer /
-            # _stage_sorting_artifact would then read freed files. Sever the
-            # file backing here, while the temp dir still exists, by
-            # materializing the (small) spike trains into an in-memory
-            # NumpySorting. The return expression evaluates BEFORE either finally
-            # runs. with_metadata=True so unit properties/annotations survive
-            # (SI 0.104.3 default False drops them); copy_spike_vector=True
-            # forces an owned copy of the spike vector (the SI default False can
-            # leave it aliasing a memmap into the temp dir for some sorter
-            # outputs). Neither flag loads traces.
+            # The returned sorting reads from sorter_temp_dir, which the
+            # finally below deletes; copy the spike trains into memory first.
+            # with_metadata=True keeps unit properties (SI 0.104.3 defaults to
+            # False); copy_spike_vector=True avoids aliasing a memmap into the
+            # temp dir.
             return si.NumpySorting.from_sorting(
                 raw_sorting, with_metadata=True, copy_spike_vector=True
             )
         finally:
             if sj_kwargs:
-                # ``set_global_job_kwargs`` UPDATES (does not
-                # replace) the global, so a job kwarg the sort
-                # installed that was ABSENT from the prior global
-                # (chunk_size / total_memory / chunk_memory are not
-                # in SI's default global set) would leak into every
-                # later populate. Reset to the baseline first, then
-                # re-apply the captured prior global for an exact
-                # restore. Guard the restore so a restore failure
-                # cannot MASK an in-flight sort exception (classic
-                # finally-block masking): if ``run_sorter`` raised,
-                # that exception must propagate, not a secondary
-                # ``set_global_job_kwargs`` error.
+                # ``set_global_job_kwargs`` updates rather than replaces, so a
+                # key absent from the prior global (e.g. chunk_size) would
+                # leak into later populates: reset, then re-apply. A restore
+                # failure is logged so it cannot mask a sort exception.
                 try:
                     si.reset_global_job_kwargs()
                     si.set_global_job_kwargs(**previous_global)
@@ -1018,19 +883,11 @@ def run_si_sorter(
                         "any) preserved."
                     )
     finally:
-        # Undo the scoped ``np.Inf`` patch so the global numpy
-        # module is left exactly as the rest of the process saw it.
         if patched_numpy_inf and hasattr(np, "Inf"):
             del np.Inf
-        # ``TemporaryDirectory`` auto-cleans on garbage collection,
-        # but the explicit ``.cleanup()`` in a ``finally`` makes
-        # the cleanup point obvious and survives worker-process
-        # exit predictably under the parallel-populate process
-        # pool. Catch + log any cleanup error: if the sort itself
-        # raised, a cleanup failure (e.g. a stale lock on a network
-        # FS) must NOT replace the original sort exception -- that
-        # would hide the real failure behind a misleading
-        # PermissionError on the tempdir.
+        # Explicit cleanup (not garbage collection) is predictable in pool
+        # workers; a cleanup failure (e.g. a stale network-FS lock) is logged
+        # so it cannot replace the sort's own exception.
         try:
             sorter_temp_dir.cleanup()
         except Exception as cleanup_exc:
