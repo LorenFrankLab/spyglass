@@ -2395,13 +2395,7 @@ def run_v2_pipeline_session(
         Propagated from a per-group :func:`run_v2_pipeline` when
         ``continue_on_error=False``.
     """
-    from spyglass.spikesorting.v2.exceptions import (
-        PipelineInputError,
-        PipelineStageError,
-        PreflightError,
-        ZeroUnitSortError,
-    )
-    from spyglass.utils import logger
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
     motion_problem = motion_request_problem(
         motion_mode, motion_correction_params_name
@@ -2421,57 +2415,21 @@ def run_v2_pipeline_session(
 
     # Up-front, read-only whole-session preflight (when requested).
     if preflight:
-        session_report = preflight_v2_pipeline_session(
+        _run_session_preflight(
             nwb_file_name=nwb_file_name,
             interval_list_name=interval_list_name,
             team_name=team_name,
             pipeline_preset=pipeline_preset,
-            sort_group_ids=targets,
+            targets=targets,
             auto_curate=auto_curate,
             manual_excluded_times=manual_excluded_times,
             motion_mode=motion_mode,
             motion_correction_params_name=motion_correction_params_name,
+            continue_on_error=continue_on_error,
+            results=results,
+            failed_preflight_ids=failed_preflight_ids,
+            preflight_warnings_by_group=preflight_warnings_by_group,
         )
-        # Capture each group's non-blocking advisories. OK groups run below with
-        # preflight=False (the DB checks are not repeated), so without this their
-        # preflight warnings would never reach the run summary and the batch
-        # warning count would under-report.
-        for row in session_report.group_reports:
-            if row.get("warnings"):
-                preflight_warnings_by_group[row["sort_group_id"]] = list(
-                    row["warnings"]
-                )
-        if not session_report.ok:
-            if not continue_on_error:
-                raise PreflightError("\n".join(session_report.errors))
-            # continue_on_error: record the failed groups, run only the rest.
-            for row in session_report.group_reports:
-                if row["ok"]:
-                    continue
-                sort_group_id = row["sort_group_id"]
-                failed_preflight_ids.add(sort_group_id)
-                logger.warning(
-                    "run_v2_pipeline_session: sort_group_id="
-                    f"{sort_group_id} failed preflight; skipping. "
-                    f"{row['errors']}"
-                )
-                results.append(
-                    RunV2PipelineSessionFailed(
-                        sort_group_id=sort_group_id,
-                        pipeline_preset=pipeline_preset,
-                        outcome="failed",
-                        error_type="PreflightError",
-                        error="\n".join(row["errors"]),
-                        # A preflight failure is not a stage failure -- keep the
-                        # structured fields present (shape-consistent) but None.
-                        stage=None,
-                        original_error_type=None,
-                        partial_run_summary=None,
-                        # Carry this group's advisories too, so describe_run /
-                        # the batch warning count do not under-report failures.
-                        warnings=list(row.get("warnings", [])),
-                    )
-                )
 
     # Per-group compute. Groups covered by the session preflight (or skipped via
     # preflight=False) run with preflight=False so the DB-only checks are not
@@ -2480,87 +2438,242 @@ def run_v2_pipeline_session(
     for sort_group_id in targets:
         if sort_group_id in failed_preflight_ids:
             continue
-        try:
-            summary = run_v2_pipeline(
+        results.append(
+            _run_session_group(
+                sort_group_id,
                 nwb_file_name=nwb_file_name,
-                sort_group_id=sort_group_id,
                 interval_list_name=interval_list_name,
                 team_name=team_name,
                 pipeline_preset=pipeline_preset,
                 curation_description=curation_description,
                 require_units=require_units,
                 auto_curate=auto_curate,
-                preflight=False,
                 manual_excluded_times=manual_excluded_times,
                 motion_mode=motion_mode,
                 motion_correction_params_name=motion_correction_params_name,
+                continue_on_error=continue_on_error,
+                preflight_warnings_by_group=preflight_warnings_by_group,
             )
-        except (
-            PipelineStageError,
-            PreflightError,
-            ZeroUnitSortError,
-        ) as exc:
-            if not continue_on_error:
-                raise
+        )
+
+    # Stable, group-ordered result (preflight-failed entries were appended
+    # first; restore ascending sort_group_id order).
+    results.sort(key=lambda entry: entry["sort_group_id"])
+
+    _log_session_receipt(results)
+    return results
+
+
+def _run_session_preflight(
+    *,
+    nwb_file_name: str,
+    interval_list_name: str,
+    team_name: str,
+    pipeline_preset: str,
+    targets: list[int],
+    auto_curate: bool,
+    manual_excluded_times,
+    motion_mode,
+    motion_correction_params_name: "str | None",
+    continue_on_error: bool,
+    results: list,
+    failed_preflight_ids: set[int],
+    preflight_warnings_by_group: dict[int, list[str]],
+) -> None:
+    """Run the whole-session preflight once and record its outcome.
+
+    Parameters
+    ----------
+    nwb_file_name, interval_list_name, team_name, pipeline_preset, auto_curate
+        As in :func:`run_v2_pipeline_session`.
+    manual_excluded_times, motion_mode, motion_correction_params_name
+        As in :func:`run_v2_pipeline_session`.
+    targets : list[int]
+        The sort groups to check.
+    continue_on_error : bool
+        If False, any failed group raises; if True, each failed group gets a
+        ``outcome="failed"`` entry.
+    results : list
+        The batch's entries (failed-preflight entries appended).
+    failed_preflight_ids : set[int]
+        The groups that failed preflight (added to).
+    preflight_warnings_by_group : dict[int, list[str]]
+        Each group's non-blocking advisories (filled in).
+
+    Raises
+    ------
+    PreflightError
+        If a group fails preflight and ``continue_on_error`` is False.
+    """
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.utils import logger
+
+    session_report = preflight_v2_pipeline_session(
+        nwb_file_name=nwb_file_name,
+        interval_list_name=interval_list_name,
+        team_name=team_name,
+        pipeline_preset=pipeline_preset,
+        sort_group_ids=targets,
+        auto_curate=auto_curate,
+        manual_excluded_times=manual_excluded_times,
+        motion_mode=motion_mode,
+        motion_correction_params_name=motion_correction_params_name,
+    )
+    # Capture each group's non-blocking advisories. OK groups run below with
+    # preflight=False (the DB checks are not repeated), so without this their
+    # preflight warnings would never reach the run summary and the batch
+    # warning count would under-report.
+    for row in session_report.group_reports:
+        if row.get("warnings"):
+            preflight_warnings_by_group[row["sort_group_id"]] = list(
+                row["warnings"]
+            )
+    if not session_report.ok:
+        if not continue_on_error:
+            raise PreflightError("\n".join(session_report.errors))
+        # continue_on_error: record the failed groups, run only the rest.
+        for row in session_report.group_reports:
+            if row["ok"]:
+                continue
+            sort_group_id = row["sort_group_id"]
+            failed_preflight_ids.add(sort_group_id)
             logger.warning(
                 "run_v2_pipeline_session: sort_group_id="
-                f"{sort_group_id} failed: {exc!r}"
+                f"{sort_group_id} failed preflight; skipping. "
+                f"{row['errors']}"
             )
             results.append(
                 RunV2PipelineSessionFailed(
                     sort_group_id=sort_group_id,
                     pipeline_preset=pipeline_preset,
                     outcome="failed",
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                    # Surface the failing STAGE and the underlying error type (a
-                    # PipelineStageError wraps e.g. an IndexError) so a batch
-                    # caller can triage without re-parsing the message. Both are
-                    # None for non-stage failures (preflight / zero-unit).
-                    stage=getattr(exc, "stage", None),
-                    original_error_type=getattr(exc, "original_type", None),
-                    partial_run_summary=getattr(
-                        exc, "partial_run_summary", None
-                    ),
-                    # This group passed preflight (ran with preflight=False) but
-                    # failed mid-run; keep its preflight advisories visible. Any
-                    # stage warnings live on partial_run_summary, which
-                    # _run_warnings reads too.
-                    warnings=preflight_warnings_by_group.get(sort_group_id, []),
+                    error_type="PreflightError",
+                    error="\n".join(row["errors"]),
+                    # A preflight failure is not a stage failure -- keep the
+                    # structured fields present (shape-consistent) but None.
+                    stage=None,
+                    original_error_type=None,
+                    partial_run_summary=None,
+                    # Carry this group's advisories too, so describe_run /
+                    # the batch warning count do not under-report failures.
+                    warnings=list(row.get("warnings", [])),
                 )
             )
-        else:
-            # Fold this group's preflight advisories (captured above) into its
-            # run summary; the per-group run did no preflight, so there is no
-            # overlap with the stage warnings it already carries.
-            group_preflight_warnings = preflight_warnings_by_group.get(
-                sort_group_id, []
-            )
-            for warning in group_preflight_warnings:
-                logger.warning(
-                    "run_v2_pipeline_session: sort_group_id="
-                    f"{sort_group_id} preflight: {warning}"
-                )
-            # The successful entry is the RunResult itself (keeps the
-            # curation accessors); its keys are RunV2PipelineSessionOk.
-            ok_entry = RunResult(
-                {
-                    **summary,
-                    "sort_group_id": sort_group_id,
-                    "outcome": "ok",
-                    "warnings": list(summary.get("warnings", []))
-                    + group_preflight_warnings,
-                }
-            )
-            results.append(cast(RunV2PipelineSessionOk, ok_entry))
 
-    # Stable, group-ordered result (preflight-failed entries were appended
-    # first; restore ascending sort_group_id order).
-    results.sort(key=lambda entry: entry["sort_group_id"])
 
-    # End-of-batch receipt in the log. Surfaces the outcomes that are easy to
-    # miss when scrolling a long run -- not just failures but zero-unit sorts
-    # and warnings too. ``describe_run(results)`` is the richer table form.
+def _run_session_group(
+    sort_group_id: int,
+    *,
+    nwb_file_name: str,
+    interval_list_name: str,
+    team_name: str,
+    pipeline_preset: str,
+    curation_description: str,
+    require_units: bool,
+    auto_curate: bool,
+    manual_excluded_times,
+    motion_mode,
+    motion_correction_params_name: "str | None",
+    continue_on_error: bool,
+    preflight_warnings_by_group: dict[int, list[str]],
+) -> RunV2PipelineSessionResult:
+    """Run one sort group of a session batch; return its result entry.
+
+    The group runs :func:`run_v2_pipeline` with ``preflight=False``; its
+    preflight advisories are folded into the entry either way.
+
+    Raises
+    ------
+    PipelineStageError, PreflightError, ZeroUnitSortError
+        From the group's run when ``continue_on_error`` is False; with it
+        True they become an ``outcome="failed"`` entry.
+    """
+    from spyglass.spikesorting.v2.exceptions import (
+        PipelineStageError,
+        PreflightError,
+        ZeroUnitSortError,
+    )
+    from spyglass.utils import logger
+
+    try:
+        summary = run_v2_pipeline(
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            interval_list_name=interval_list_name,
+            team_name=team_name,
+            pipeline_preset=pipeline_preset,
+            curation_description=curation_description,
+            require_units=require_units,
+            auto_curate=auto_curate,
+            preflight=False,
+            manual_excluded_times=manual_excluded_times,
+            motion_mode=motion_mode,
+            motion_correction_params_name=motion_correction_params_name,
+        )
+    except (
+        PipelineStageError,
+        PreflightError,
+        ZeroUnitSortError,
+    ) as exc:
+        if not continue_on_error:
+            raise
+        logger.warning(
+            "run_v2_pipeline_session: sort_group_id="
+            f"{sort_group_id} failed: {exc!r}"
+        )
+        return RunV2PipelineSessionFailed(
+            sort_group_id=sort_group_id,
+            pipeline_preset=pipeline_preset,
+            outcome="failed",
+            error_type=type(exc).__name__,
+            error=str(exc),
+            # Surface the failing STAGE and the underlying error type (a
+            # PipelineStageError wraps e.g. an IndexError) so a batch
+            # caller can triage without re-parsing the message. Both are
+            # None for non-stage failures (preflight / zero-unit).
+            stage=getattr(exc, "stage", None),
+            original_error_type=getattr(exc, "original_type", None),
+            partial_run_summary=getattr(exc, "partial_run_summary", None),
+            # This group passed preflight (ran with preflight=False) but
+            # failed mid-run; keep its preflight advisories visible. Any
+            # stage warnings live on partial_run_summary, which
+            # _run_warnings reads too.
+            warnings=preflight_warnings_by_group.get(sort_group_id, []),
+        )
+    # Fold this group's preflight advisories (captured above) into its
+    # run summary; the per-group run did no preflight, so there is no
+    # overlap with the stage warnings it already carries.
+    group_preflight_warnings = preflight_warnings_by_group.get(
+        sort_group_id, []
+    )
+    for warning in group_preflight_warnings:
+        logger.warning(
+            "run_v2_pipeline_session: sort_group_id="
+            f"{sort_group_id} preflight: {warning}"
+        )
+    # The successful entry is the RunResult itself (keeps the
+    # curation accessors); its keys are RunV2PipelineSessionOk.
+    ok_entry = RunResult(
+        {
+            **summary,
+            "sort_group_id": sort_group_id,
+            "outcome": "ok",
+            "warnings": list(summary.get("warnings", []))
+            + group_preflight_warnings,
+        }
+    )
+    return cast(RunV2PipelineSessionOk, ok_entry)
+
+
+def _log_session_receipt(results: list) -> None:
+    """Log a session batch's end-of-run outcome counts.
+
+    Surfaces the outcomes that are easy to miss when scrolling a long run --
+    not just failures but zero-unit sorts and warnings too.
+    ``describe_run(results)`` is the richer table form.
+    """
+    from spyglass.utils import logger
+
     n_ok = sum(entry["outcome"] == "ok" for entry in results)
     n_failed = sum(entry["outcome"] == "failed" for entry in results)
     n_zero = 0
@@ -2589,7 +2702,6 @@ def run_v2_pipeline_session(
         f"{n_warn} with warnings. "
         "Call describe_run(results) for the per-group receipt."
     )
-    return results
 
 
 def run_v2_unit_match(
