@@ -958,9 +958,10 @@ def compute_recording_artifact(
     -----
     Cleanup contract: ``_write_nwb_artifact`` either writes a full file or
     raises before any registration. On a write/hash failure a freshly
-    staged partial file is unlinked before the error propagates, so a
-    half-written artifact never outlives a failed compute; an existing file
-    named by ``existing_analysis_file_name`` is never unlinked.
+    staged partial file is unlinked before the error propagates; an existing
+    file named by ``existing_analysis_file_name`` is never unlinked. When the
+    file was freshly staged (every current caller), a half-written artifact
+    never outlives a failed compute.
 
     A rebuild whose content drifted is rejected by the caller
     (``RecordingContentDriftError``) and the canonical slot is never

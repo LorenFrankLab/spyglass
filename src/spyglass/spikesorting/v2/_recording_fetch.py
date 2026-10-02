@@ -123,7 +123,8 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
     raw_object_id = (Raw & {"nwb_file_name": nwb_file_name}).fetch1(
         "raw_object_id"
     )
-    # The validated model is DeepHash-stable (its ``__dict__`` is primitives).
+    # The validated model is DeepHash-stable across DataJoint's two
+    # ``make_fetch`` calls (its ``__dict__`` is primitives).
     preprocessing_row = (
         PreprocessingParameters
         & {"preprocessing_params_name": sel["preprocessing_params_name"]}

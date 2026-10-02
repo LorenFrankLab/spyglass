@@ -461,7 +461,8 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
           because the recording is already filtered), so SI's full default
           dict would fail validation or lose keys.
 
-        Not called by ``initialize_v2_defaults``. Idempotent via
+        Not called by ``initialize_v2_defaults``, so users who do not need v1
+        sorter names do not pay for the inserts. Idempotent via
         ``skip_duplicates=True``.
 
         Examples

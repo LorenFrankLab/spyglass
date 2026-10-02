@@ -284,8 +284,10 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         )
 
     # The per-frame math (in ``_artifact_compute``) OR-combines the amplitude
-    # and across-channel z-score detectors; the z-score uses each frame's own
-    # channels, so chunk boundaries do not change the flagged set.
+    # and across-channel z-score detectors (an AND would make the
+    # dual-threshold mode less sensitive than either single-threshold mode);
+    # the z-score uses each frame's own channels, so chunk boundaries do not
+    # change the flagged set.
     runs = scan_artifact_frames(recording, validated, job_kwargs)
     if len(runs) == 0:
         # Distinguishes attempted-and-empty from the detect=False skip.

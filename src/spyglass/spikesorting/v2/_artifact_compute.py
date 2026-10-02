@@ -71,9 +71,8 @@ def _init_artifact_worker(
 def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     """Flag artifact frame indices within a ``[start_frame, end_frame)`` chunk.
 
-    Reproduces the EXACT per-frame detection math of the former full-in-memory
-    scan, applied to a single chunk: read traces already in µV, then
-    OR-combine the amplitude and across-channel z-score detectors.
+    Applies the per-frame detection math to one chunk: read traces already in
+    µV, then OR-combine the amplitude and across-channel z-score detectors.
     The across-channel (``axis=1``) z-score uses only the chunk row's own
     columns, so it is identical regardless of where the chunk boundaries fall --
     this is what makes the chunked output frame-identical to the in-memory one.

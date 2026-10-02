@@ -1,9 +1,10 @@
 """Read-only configuration checks run before any pipeline populate.
 
 Holds ``preflight_v2_pipeline`` / ``preflight_v2_pipeline_session`` and their
-``Preflight*`` report types, the ``assert_*`` guards the runners call when
-preflight is skipped, motion-recipe and geometry checks, and
-``describe_scientific_setup``. ``pipeline.py`` re-exports the public names.
+``Preflight*`` report types, the raising ``assert_*`` guards that concat-mode
+preflight runs (``assert_concat_preflight`` / ``assert_preset_compute_rows``),
+motion-recipe and geometry checks, and ``describe_scientific_setup``.
+``pipeline.py`` re-exports the preflight entry points and report types.
 At import time this module depends only on ``_pipeline_presets``,
 ``_pipeline_types``, and ``_recipe_catalog``; table modules are imported
 inside the functions that query them. ``_pipeline_run`` imports this module.

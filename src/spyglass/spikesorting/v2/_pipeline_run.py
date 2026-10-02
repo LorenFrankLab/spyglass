@@ -1393,9 +1393,9 @@ def run_v2_pipeline(
     # Import the merge, sorting, and curation table modules after the DB-free
     # checks and before preflight, so a schema that cannot activate fails the
     # run before any compute. The names are unused here (each stage helper
-    # imports what it uses); the auto-curation (``metric_curation``) and
-    # FigPack (``_figpack_curation``) modules are imported only by their
-    # stages.
+    # imports what it uses). The auto-curation (``metric_curation``) and
+    # FigPack (``figpack_curation``) schema modules load later -- at
+    # preflight or in their own stage -- and only when those options are on.
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import (
         CONCAT_MERGE_GATE_MESSAGE,

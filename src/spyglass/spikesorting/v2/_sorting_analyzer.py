@@ -797,6 +797,8 @@ def build_analyzer(
     # SI's sparse analyzer build crashes on an empty sorting
     # (``np.concatenate([])`` in ``random_spikes_selection``). The folder is
     # never built; ``Sorting.get_analyzer`` raises ZeroUnitAnalyzerError.
+    # Checked before the folder's parent is created and before the
+    # ``sorter_row`` fetch, so a zero-unit sort does no I/O here.
     if sorting.get_num_units() == 0:
         logger.warning(
             "Sorting._build_analyzer: sorting_id="

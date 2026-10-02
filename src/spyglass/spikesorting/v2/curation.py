@@ -1929,11 +1929,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
           family routes and, alone, matches both.
 
         Accepted keys: the recording keys (``nwb_file_name``, ``team_name``,
-        ``sort_group_id``, ``interval_list_name``, ``recording_id``,
-        ``artifact_detection_id``), the cross-source
-        ``preprocessing_params_name``, the concat keys above, and the shared
-        sort / curation keys (``sorter``, ``sorter_params_name``,
-        ``sorting_id``, ``motion_corrected_recording_id``, ``curation_id``).
+        ``sort_group_id``, ``interval_list_name``, ``recording_id``), the
+        cross-source ``preprocessing_params_name``, the concat keys above, and
+        the shared sort / curation keys (``sorter``, ``sorter_params_name``,
+        ``sorting_id``, ``artifact_detection_id``,
+        ``motion_corrected_recording_id``, ``curation_id``).
         Mixing recording and concat source keys is rejected (a sort has
         exactly one input source).
 
