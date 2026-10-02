@@ -117,9 +117,9 @@ class _IdentityMasterGuard:
 
     The shared body of :class:`SelectionMasterInsertGuard` and
     :class:`FactoryOnlyMaster`, which differ only in their rejection text:
-    each subclass defines ``_direct_insert_reason()`` (the rationale plus the
-    create-path sentence) and ``_update1_create_hint()`` (the create path to
-    use instead of an in-place edit).
+    each subclass implements :meth:`_direct_insert_reason` and
+    :meth:`_update1_create_hint`. Both are methods, not class attributes,
+    because the text names the concrete table or its factory call.
 
     The ``insert`` signature mirrors ``dj.Table.insert`` so positional
     ``replace`` / ``skip_duplicates`` keep working; only
@@ -128,6 +128,14 @@ class _IdentityMasterGuard:
     ``insert``, so an ``insert1(row, allow_direct_insert=True)`` reaches this
     override too.
     """
+
+    def _direct_insert_reason(self) -> str:
+        """The rationale and create-path sentence for a rejected insert."""
+        raise NotImplementedError
+
+    def _update1_create_hint(self) -> str:
+        """The create path to use instead of a rejected ``update1``."""
+        raise NotImplementedError
 
     def insert(
         self,
