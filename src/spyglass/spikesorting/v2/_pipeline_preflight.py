@@ -20,6 +20,8 @@ from spyglass.spikesorting.v2._pipeline_types import MotionMode
 from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import pandas as pd
 
 
@@ -1793,7 +1795,7 @@ def preflight_v2_pipeline(
         checks.append(PreflightCheck(name, ok, "" if ok else fix))
         return ok
 
-    # 1. pipeline_preset_known. Short-circuit before any DB access on failure: the
+    # pipeline_preset_known. Short-circuit before any DB access on failure: the
     # remaining checks (and expected_ids) all derive from the resolved
     # bundle's param names, which are unknown for a bogus pipeline preset.
     if pipeline_preset not in _PIPELINE_PRESETS:
@@ -1804,14 +1806,7 @@ def preflight_v2_pipeline(
             f"{sorted(_PIPELINE_PRESETS)}. Call describe_pipeline_presets() to see what each "
             "one does.",
         )
-        return PreflightReport(
-            ok=False,
-            errors=[c.fix for c in checks if not c.ok],
-            warnings=warnings,
-            resolved_pipeline_preset=pipeline_preset,
-            expected_ids={},
-            checks=checks,
-        )
+        return _blocked_preflight_report(pipeline_preset, checks, warnings)
     _check("pipeline_preset_known", True, "")
     # A contradictory motion request short-circuits the same way: the motion
     # checks below need a valid mode and recipe name, and this one is DB-free.
@@ -1821,14 +1816,7 @@ def preflight_v2_pipeline(
     if not _check(
         "motion_request_valid", motion_problem is None, motion_problem
     ):
-        return PreflightReport(
-            ok=False,
-            errors=[c.fix for c in checks if not c.ok],
-            warnings=warnings,
-            resolved_pipeline_preset=pipeline_preset,
-            expected_ids={},
-            checks=checks,
-        )
+        return _blocked_preflight_report(pipeline_preset, checks, warnings)
     bundle = _PIPELINE_PRESETS[pipeline_preset]
     from spyglass.spikesorting.v2._manual_artifacts import (
         artifact_recipe_with_manual_exclusions,
@@ -1840,389 +1828,51 @@ def preflight_v2_pipeline(
         bundle, manual_excluded_times
     )
 
-    import spikeinterface.sorters as sis
-
-    from spyglass.common import IntervalList, LabTeam, Raw, Session
-    from spyglass.spikesorting.v2._selection_plan import (
-        build_sorting_selection_plan,
-    )
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetectionParameters,
-        RecordingArtifactDetection,
-        RecordingArtifactSelection,
-    )
-    from spyglass.spikesorting.v2.recording import (
-        PreprocessingParameters,
-        Recording,
-        RecordingSelection,
-        SortGroupV2,
-    )
-    from spyglass.spikesorting.v2._recipe_catalog import (
-        waveform_params_for_preprocessing,
-    )
-    from spyglass.spikesorting.v2.sorting import (
-        AnalyzerWaveformParameters,
-        SorterParameters,
-        Sorting,
-        SortingSelection,
-    )
-
-    if auto_curate:
-        from spyglass.spikesorting.v2.metric_curation import (
-            AutoCurationRules,
-            QualityMetricParameters,
-        )
-
     sort_group_id = int(sort_group_id)
 
-    # 2-6. Upstream session/raw/interval/team/sort-group rows.
-    _check(
-        "session_exists",
-        Session & {"nwb_file_name": nwb_file_name},
-        f"session {nwb_file_name!r} is not ingested. Ingest it with "
-        "insert_sessions(...) first.",
-    )
-    # ``RecordingSelection`` FKs ``Raw`` (not ``Session``), so a session whose
-    # ``Raw`` row is missing (e.g. a partial ingestion) would pass
-    # ``session_exists`` yet fail the recording insert with an opaque
-    # foreign-key error. Check ``Raw`` explicitly so preflight stays honest.
-    _check(
-        "raw_exists",
-        Raw & {"nwb_file_name": nwb_file_name},
-        f"Raw electrical-series row for {nwb_file_name!r} is missing (the "
-        "session is ingested but its Raw data is not). Re-run ingestion "
-        "(e.g. populate_all_common / insert_sessions) so Raw is populated.",
-    )
-    _check(
-        "interval_exists",
-        IntervalList
-        & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": interval_list_name,
-        },
-        f"interval_list_name {interval_list_name!r} not found for "
-        f"{nwb_file_name!r}. A full-session sort typically uses "
-        "'raw data valid times'.",
-    )
-    # The recording build reads BOTH the sort interval (above) and the raw
-    # 'raw data valid times' interval -- for the raw sample bounds -- even when
-    # the sort interval differs. A partial ingest can have the sort interval but
-    # miss 'raw data valid times', which would otherwise surface late as a bare
-    # fetch1 error deep in Recording.make_fetch. Check it up front.
-    _check(
-        "raw_valid_times_exists",
-        IntervalList
-        & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": "raw data valid times",
-        },
-        f"IntervalList 'raw data valid times' not found for {nwb_file_name!r}; "
-        "the recording build reads it for the raw sample bounds. A partial "
-        "ingest can miss it -- re-run ingestion (populate_all_common / "
-        "insert_sessions).",
-    )
-    _check(
-        "team_exists",
-        LabTeam & {"team_name": team_name},
-        f"LabTeam {team_name!r} does not exist. Create it with "
-        "LabTeam.insert1({'team_name': ..., 'team_description': ...}).",
-    )
-    sort_group_exists = _check(
-        "sort_group_exists",
-        SortGroupV2
-        & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id},
-        f"SortGroupV2 sort_group_id={sort_group_id} not found for "
-        f"{nwb_file_name!r}. Create sort groups first with "
-        "SortGroupV2.set_group_by_shank(nwb_file_name=...).",
-    )
-    # A SortGroupV2 master row can exist with ZERO electrode members (created
-    # then partially deleted, or a shank that resolved to an empty group);
-    # Recording.populate then raises "has zero electrodes" minutes into the
-    # run. Checking the master alone is a false-green. Only run this when the
-    # master exists, to avoid a confusing second failure when it is absent.
-    if sort_group_exists:
-        _check(
-            "sort_group_has_electrodes",
-            SortGroupV2.SortGroupElectrode
-            & {
-                "nwb_file_name": nwb_file_name,
-                "sort_group_id": sort_group_id,
-            },
-            f"SortGroupV2 sort_group_id={sort_group_id} for {nwb_file_name!r} "
-            "has zero electrode members; Recording.populate would raise 'has "
-            "zero electrodes'. Recreate it with "
-            "SortGroupV2.set_group_by_shank(nwb_file_name=...).",
-        )
-        # Geometry the sort would actually see: a group whose contacts
-        # coincide cannot produce a probe, and the failure otherwise lands
-        # minutes into Recording.populate (or later, at the analyzer build).
-        geometry_problem = sort_group_geometry_problem(
-            nwb_file_name, sort_group_id
-        )
-        _check(
-            "sort_group_geometry_distinct",
-            geometry_problem is None,
-            geometry_problem or "",
-        )
-
-    # 6-8. The preset's parameter Lookup rows.
-    preprocessing_params_exist = _check(
-        "preprocessing_params_exist",
-        PreprocessingParameters
-        & {"preprocessing_params_name": bundle.preprocessing_params_name},
-        f"PreprocessingParameters row {bundle.preprocessing_params_name!r} is "
-        "missing. Run initialize_v2_defaults().",
-    )
-    # An explicit no-mask preset has no artifact parameter row to require.
-    if bundle.artifact_detection_params_name is not None:
-        _check(
-            "artifact_detection_params_exist",
-            ArtifactDetectionParameters
-            & {
-                "artifact_detection_params_name": bundle.artifact_detection_params_name
-            },
-            f"ArtifactDetectionParameters row {bundle.artifact_detection_params_name!r} "
-            "is missing. Run initialize_v2_defaults().",
-        )
-    sorter_params_query = SorterParameters & {
-        "sorter": bundle.sorter,
-        "sorter_params_name": bundle.sorter_params_name,
-    }
-    # The sorter-only checks (7-7a, the display analyzer row, 8b and 9) are
-    # skipped for a caller that builds no sort (``sort_checks=False``).
-    sorter_params_exist = sort_checks and _check(
-        "sorter_params_exist",
+    _check_session_rows(_check, nwb_file_name, interval_list_name, team_name)
+    sort_group_exists = _check_sort_group(_check, nwb_file_name, sort_group_id)
+    preprocessing_params_exist = _check_source_param_rows(_check, bundle)
+    # The sorter-only checks (the sorter row and its params, the display
+    # analyzer row, the sampling rate and the sorter execution) are skipped
+    # for a caller that builds no sort (``sort_checks=False``).
+    (
         sorter_params_query,
-        f"SorterParameters row (sorter={bundle.sorter!r}, "
-        f"sorter_params_name={bundle.sorter_params_name!r}) is missing. "
-        "Run initialize_v2_defaults().",
+        sorter_params_exist,
+        sorter_row,
+        effective_config,
+    ) = _check_sorter_param_rows(_check, bundle, sort_checks=sort_checks)
+    display_waveform_params_name = _check_display_waveform_params(
+        _check, bundle, sort_checks=sort_checks
     )
-    # 7a. sorter_params_valid + the effective configuration. The row's params
-    # are re-checked against the installed SI wrapper's parameter vocabulary
-    # (a custom row inserted before the wrapper changed, or under a different
-    # SI, would otherwise fail minutes into the sort), and the effective
-    # configuration is resolved by the dispatcher's own resolver so the report
-    # states exactly what run_sorter would receive.
-    effective_config = None
-    if sorter_params_exist:
-        from spyglass.spikesorting.v2._params.sorter import (
-            validate_sorter_params_against_wrapper,
-        )
-
-        sorter_row = sorter_params_query.fetch1()
-        try:
-            validate_sorter_params_against_wrapper(
-                sorter_row["sorter"], sorter_row["params"]
-            )
-        except ValueError as exc:
-            _check("sorter_params_valid", False, str(exc))
-        else:
-            _check("sorter_params_valid", True, "")
-        effective_config = resolve_preset_sort_config(bundle)
-    # The display analyzer recipe is region-resolved from the preprocessing
-    # recipe and FK-required on the Sorting row, so Sorting.make_fetch fails if
-    # its AnalyzerWaveformParameters row is missing. Gate it here (up front)
-    # rather than crashing deep in populate, matching the other params checks.
-    display_waveform_params_name = waveform_params_for_preprocessing(
-        bundle.preprocessing_params_name
-    )[0]
-    if sort_checks:
-        _check(
-            "analyzer_waveform_params_exist",
-            AnalyzerWaveformParameters
-            & {"waveform_params_name": display_waveform_params_name},
-            f"AnalyzerWaveformParameters row {display_waveform_params_name!r} "
-            "(the display analyzer recipe for preprocessing "
-            f"{bundle.preprocessing_params_name!r}) is missing. Run "
-            "initialize_v2_defaults().",
-        )
-
-    # 8a. auto-curation prerequisites -- only when the caller opts into
-    # auto_curate, so a default run is unchanged. CurationEvaluation scores the
-    # root curation with the preset's metric + auto-curation rule rows on the
-    # whitened (metric) analyzer recipe, so a missing one of those would
-    # otherwise fail only after the upstream compute. The metric waveform row is
-    # the [1] element of the same source-resolved (display, metric) pair.
+    # Auto-curation prerequisites -- only when the caller opts into
+    # auto_curate, so a default run is unchanged.
     if auto_curate:
-        _check(
-            "metric_params_exist",
-            QualityMetricParameters
-            & {"metric_params_name": bundle.metric_params_name},
-            f"QualityMetricParameters row {bundle.metric_params_name!r} (the "
-            "auto-curation metric set) is missing. Run "
-            "initialize_v2_defaults().",
+        _check_auto_curation_rows(_check, bundle)
+    if sort_checks:
+        _check_sampling_rate(_check, bundle, nwb_file_name, pipeline_preset)
+        _check_sorter_execution(
+            _check,
+            warnings,
+            bundle,
+            pipeline_preset,
+            sorter_params_query,
+            sorter_params_exist,
         )
-        _check(
-            "auto_curation_rules_exist",
-            AutoCurationRules
-            & {"auto_curation_rules_name": bundle.auto_curation_rules_name},
-            f"AutoCurationRules row {bundle.auto_curation_rules_name!r} (the "
-            "auto-curation rule set) is missing. Run initialize_v2_defaults().",
-        )
-        metric_waveform_params_name = waveform_params_for_preprocessing(
-            bundle.preprocessing_params_name
-        )[1]
-        _check(
-            "metric_waveform_params_exist",
-            AnalyzerWaveformParameters
-            & {"waveform_params_name": metric_waveform_params_name},
-            f"AnalyzerWaveformParameters row {metric_waveform_params_name!r} "
-            "(the whitened metric analyzer recipe auto-curation scores on) is "
-            "missing. Run initialize_v2_defaults().",
-        )
-
-    # 8b. sampling_rate_matches. The MS4/MS5 snippet window (clip_size /
-    # detect_interval on the rate-keyed sorter row) assumes a specific
-    # acquisition rate, so a 30 kHz preset on a 20 kHz recording (or the
-    # reverse) silently sorts with a mistuned window. The clusterless preset
-    # is rate-agnostic (sampling_rate_hz is None) and is skipped; the check is
-    # also skipped if Raw is not ingested yet (raw_exists already reports that,
-    # so this would only add a confusing second failure).
-    if sort_checks and bundle.sampling_rate_hz is not None:
-        raw = Raw & {"nwb_file_name": nwb_file_name}
-        if raw:
-            actual_rate = float(raw.fetch1("sampling_rate"))
-            # 0.5% tolerance absorbs float drift in an estimated rate.
-            rate_ok = (
-                abs(actual_rate - bundle.sampling_rate_hz)
-                <= 0.005 * bundle.sampling_rate_hz
-            )
-            _check(
-                "sampling_rate_matches",
-                rate_ok,
-                f"recording {nwb_file_name!r} samples at {actual_rate:g} Hz "
-                f"but pipeline_preset {pipeline_preset!r} is tuned for "
-                f"{bundle.sampling_rate_hz} Hz: the rate-keyed sorter row "
-                f"{bundle.sorter_params_name!r} holds its clip_size / "
-                "detect_interval snippet window at that rate. Pick the "
-                "rate-matched preset (call describe_pipeline_presets() and "
-                "match sampling_rate_hz to the recording).",
-            )
-
-    # 9. Sorter execution. The selected backend (local vs container) is read
-    # ONLY from the SorterParameters row's execution_params (the single source of
-    # truth -- never the preset). When the row is absent, sorter_params_exist
-    # above already reported the blocking error and the backend is unknowable, so
-    # the container / MATLAB-policy checks are skipped; the sorter NAME is still
-    # validated as a local sorter (the pre-execution-params behavior) so a
-    # misspelled sorter keeps its spelling hint.
-    if sort_checks and not sorter_params_exist:
-        _check_local_sorter_runtime(
-            bundle, sis, SorterParameters._NON_SI_SORTERS, _check
-        )
-    elif sort_checks:
-        from spyglass.spikesorting.v2._params.sorter import (
-            validate_execution_params,
-        )
-        from spyglass.spikesorting.v2._sorting_dispatch import (
-            MATLAB_SORTERS,
-            matlab_container_required_message,
-        )
-
-        execution_params = validate_execution_params(
-            sorter_params_query.fetch1("execution_params")
-        )
-        execution_backend = execution_params["backend"]
-        container_image = execution_params["container_image"]
-
-        if execution_backend == "local":
-            # MATLAB-backed sorters (Kilosort 2.5/3, IronClust) ship only as
-            # container images; a local row for one of them cannot run. Surface
-            # the SAME tracked-container-backend message the dispatch raises,
-            # rather than the local-install checks.
-            if bundle.sorter.lower() in MATLAB_SORTERS:
-                _check(
-                    "sorter_execution_backend",
-                    False,
-                    matlab_container_required_message(bundle.sorter),
-                )
-            else:
-                _check_local_sorter_runtime(
-                    bundle, sis, SorterParameters._NON_SI_SORTERS, _check
-                )
-        else:
-            # Container backend: verify the container RUNTIME (engine + Python
-            # package), not the local sorter install. The sorter runtime lives
-            # in the image, so a missing LOCAL runtime is irrelevant here. A
-            # missing CONTAINER runtime is an actionable, blocking
-            # selected-preset error -- preflight never silently falls back to
-            # local execution.
-            if execution_backend == "docker":
-                runtime_ok, runtime_detail = _docker_runtime_available()
-            else:
-                runtime_ok, runtime_detail = _singularity_runtime_available()
-            _check(
-                "container_runtime_available",
-                runtime_ok,
-                f"pipeline_preset {pipeline_preset!r} selects the "
-                f"{execution_backend} execution backend (image "
-                f"{container_image!r}) for sorter {bundle.sorter!r}, but it is "
-                f"not runnable here: {runtime_detail}. Install the container "
-                "runtime and its Python package, or pick a local-execution "
-                "preset. Preflight does not fall back to local execution.",
-            )
-            # Informational advisory (only when the container is actually
-            # runnable, so it never sits next to a blocking runtime failure):
-            # the host can stay on numpy>=2 -- the sorter runtime (e.g. MS4's
-            # numpy<2-era ml_ms4alg) lives in the container, not on the host.
-            if runtime_ok:
-                warnings.append(
-                    f"pipeline_preset {pipeline_preset!r} runs sorter "
-                    f"{bundle.sorter!r} inside the {execution_backend} image "
-                    f"{container_image!r}: the host can stay on the v2 numpy>=2 "
-                    "environment because the sorter runtime lives in the "
-                    "container, not on the host."
-                )
-
-    # 10. Motion stage (estimate / apply). The recipe must exist and resolve,
-    # the preset's preprocessing recipe must filter (motion is estimated on
-    # filtered, unwhitened traces; MotionEstimateSelection.insert_selection
-    # refuses the same source), the group's effective geometry must support
-    # the estimation recipe (checked here on the registered positions, before
-    # any populate; the estimator re-checks the actual recording), and a sort
-    # of a corrected recording must not run the sorter's own motion
-    # correction.
     motion_recipe = None
     if motion_mode != "off":
-        from spyglass.spikesorting.v2.motion import (
-            preprocessing_filter_problem,
+        motion_recipe = _check_motion_stage(
+            _check,
+            bundle,
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            motion_mode=motion_mode,
+            motion_correction_params_name=motion_correction_params_name,
+            preprocessing_params_exist=preprocessing_params_exist,
+            sort_group_exists=sort_group_exists,
+            sorter_params_exist=sorter_params_exist,
+            sorter_row=sorter_row,
         )
-
-        if preprocessing_params_exist:
-            unfiltered = preprocessing_filter_problem(
-                bundle.preprocessing_params_name
-            )
-            _check(
-                "motion_source_filtered",
-                unfiltered is None,
-                f"motion_mode={motion_mode!r}: {unfiltered}",
-            )
-        try:
-            motion_recipe = resolve_motion_recipe(motion_correction_params_name)
-        except ValueError as exc:
-            _check("motion_recipe_exists", False, str(exc))
-        else:
-            _check("motion_recipe_exists", True, "")
-            if sort_group_exists:
-                motion_geometry = motion_geometry_problem(
-                    nwb_file_name,
-                    sort_group_id,
-                    motion_recipe.resolved_estimation,
-                )
-                _check(
-                    "motion_geometry_supported",
-                    motion_geometry is None,
-                    motion_geometry or "",
-                )
-        if motion_mode == "apply" and sorter_params_exist:
-            sorter_motion = sorter_motion_correction_problem(
-                bundle.sorter, sorter_row["params"], bundle.sorter_params_name
-            )
-            _check(
-                "sorter_motion_correction_off",
-                sorter_motion is None,
-                sorter_motion or "",
-            )
 
     # Non-blocking advisory: the "none" artifact params are a no-op
     # pass-through (no masking). "default" performs real amplitude-threshold
@@ -2246,102 +1896,24 @@ def preflight_v2_pipeline(
     if not (sort_group_exists and preprocessing_params_exist):
         expected_ids = {}
     else:
-        recording_id, artifact_detection_id = expected_source_ids(
+        expected_ids = _preflight_expected_ids(
+            _check,
             bundle,
             nwb_file_name=nwb_file_name,
             sort_group_id=sort_group_id,
             interval_list_name=interval_list_name,
             team_name=team_name,
             manual_excluded_times=manual_excluded_times,
-        )
-        if motion_estimate_id is not None and motion_recipe is not None:
-            from spyglass.spikesorting.v2._source_resolution import (
-                SourceLineage,
-            )
-
-            supplied = supplied_motion_estimate_problem(
-                motion_estimate_id,
-                motion_recipe,
-                source_lineage=SourceLineage(
-                    kind="recording",
-                    key={"recording_id": recording_id},
-                    artifact_detection_id=artifact_detection_id,
-                ),
-            )
-            _check("motion_estimate_applicable", supplied is None, supplied)
-        motion_ids = _expected_motion_ids(
-            motion_mode,
-            motion_recipe,
-            recording_id=recording_id,
-            artifact_detection_id=artifact_detection_id,
+            motion_mode=motion_mode,
+            motion_recipe=motion_recipe,
             motion_estimate_id=motion_estimate_id,
         )
-        corrected = motion_ids.get("motion_corrected_recording_id", {})
-        if corrected.get("pending"):
-            sorting_entry = _pending_id_entry(corrected["pending"])
-        else:
-            sorting_id = build_sorting_selection_plan(
-                {
-                    "recording_id": recording_id,
-                    "sorter": bundle.sorter,
-                    "sorter_params_name": bundle.sorter_params_name,
-                    "artifact_detection_id": artifact_detection_id,
-                    "motion_corrected_recording_id": corrected.get("id"),
-                }
-            ).sorting_id
-            sorting_entry = {
-                "id": sorting_id,
-                "exists": bool(SortingSelection & {"sorting_id": sorting_id}),
-                "computed_exists": bool(Sorting & {"sorting_id": sorting_id}),
-            }
-        # Per stage, ``exists`` is whether the SELECTION row exists (the run
-        # would reuse this PK) and ``computed_exists`` whether the COMPUTED
-        # output row exists (the populate already ran -- a reused, near-zero-cost
-        # stage). Distinguishing them tells a caller what work the run would
-        # actually do: a selection can exist with its output not yet populated.
-        expected_ids = {
-            "recording_id": {
-                "id": recording_id,
-                "exists": bool(
-                    RecordingSelection & {"recording_id": recording_id}
-                ),
-                "computed_exists": bool(
-                    Recording & {"recording_id": recording_id}
-                ),
-            },
-            "artifact_detection_id": (
-                {"id": None, "exists": False, "computed_exists": False}
-                if artifact_detection_id is None
-                else {
-                    "id": artifact_detection_id,
-                    "exists": bool(
-                        RecordingArtifactSelection
-                        & {"artifact_detection_id": artifact_detection_id}
-                    ),
-                    "computed_exists": bool(
-                        RecordingArtifactDetection
-                        & {"artifact_detection_id": artifact_detection_id}
-                    ),
-                }
-            ),
-            **motion_ids,
-            "sorting_id": sorting_entry,
-        }
 
     errors = [c.fix for c in checks if not c.ok]
-    resource_notes = _resource_notes(
+    resource_notes = _group_resource_notes(
         display_waveform_params_name,
-        n_channels=len(
-            SortGroupV2.SortGroupElectrode
-            & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
-        ),
-        sampling_rate_hz=(
-            float(
-                (Raw & {"nwb_file_name": nwb_file_name}).fetch1("sampling_rate")
-            )
-            if Raw & {"nwb_file_name": nwb_file_name}
-            else None
-        ),
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
         effective_config=effective_config,
     )
     return PreflightReport(
@@ -2361,6 +1933,665 @@ def preflight_v2_pipeline(
             motion_mode=motion_mode,
             motion_recipe=motion_recipe,
         ),
+    )
+
+
+def _blocked_preflight_report(
+    pipeline_preset: str, checks: list[PreflightCheck], warnings: list[str]
+) -> PreflightReport:
+    """The report of a request that fails before any database check."""
+    return PreflightReport(
+        ok=False,
+        errors=[c.fix for c in checks if not c.ok],
+        warnings=warnings,
+        resolved_pipeline_preset=pipeline_preset,
+        expected_ids={},
+        checks=checks,
+    )
+
+
+def _check_session_rows(
+    check: "Callable[[str, Any, str], bool]",
+    nwb_file_name: str,
+    interval_list_name: str,
+    team_name: str,
+) -> None:
+    """Check the session, Raw, interval and team rows a recording build reads.
+
+    Parameters
+    ----------
+    check : Callable[[str, Any, str], bool]
+        The report's check-recording closure.
+    nwb_file_name, interval_list_name, team_name : str
+        As in :func:`preflight_v2_pipeline`.
+    """
+    from spyglass.common import IntervalList, LabTeam, Raw, Session
+
+    check(
+        "session_exists",
+        Session & {"nwb_file_name": nwb_file_name},
+        f"session {nwb_file_name!r} is not ingested. Ingest it with "
+        "insert_sessions(...) first.",
+    )
+    # ``RecordingSelection`` FKs ``Raw`` (not ``Session``), so a session whose
+    # ``Raw`` row is missing (e.g. a partial ingestion) would pass
+    # ``session_exists`` yet fail the recording insert with an opaque
+    # foreign-key error. Check ``Raw`` explicitly so preflight stays honest.
+    check(
+        "raw_exists",
+        Raw & {"nwb_file_name": nwb_file_name},
+        f"Raw electrical-series row for {nwb_file_name!r} is missing (the "
+        "session is ingested but its Raw data is not). Re-run ingestion "
+        "(e.g. populate_all_common / insert_sessions) so Raw is populated.",
+    )
+    check(
+        "interval_exists",
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_list_name,
+        },
+        f"interval_list_name {interval_list_name!r} not found for "
+        f"{nwb_file_name!r}. A full-session sort typically uses "
+        "'raw data valid times'.",
+    )
+    # The recording build reads BOTH the sort interval (above) and the raw
+    # 'raw data valid times' interval -- for the raw sample bounds -- even when
+    # the sort interval differs. A partial ingest can have the sort interval but
+    # miss 'raw data valid times', which would otherwise surface late as a bare
+    # fetch1 error deep in Recording.make_fetch. Check it up front.
+    check(
+        "raw_valid_times_exists",
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        },
+        f"IntervalList 'raw data valid times' not found for {nwb_file_name!r}; "
+        "the recording build reads it for the raw sample bounds. A partial "
+        "ingest can miss it -- re-run ingestion (populate_all_common / "
+        "insert_sessions).",
+    )
+    check(
+        "team_exists",
+        LabTeam & {"team_name": team_name},
+        f"LabTeam {team_name!r} does not exist. Create it with "
+        "LabTeam.insert1({'team_name': ..., 'team_description': ...}).",
+    )
+
+
+def _check_sort_group(
+    check: "Callable[[str, Any, str], bool]",
+    nwb_file_name: str,
+    sort_group_id: int,
+) -> bool:
+    """Check the sort group exists, has electrodes and has distinct contacts.
+
+    Returns
+    -------
+    bool
+        Whether the ``SortGroupV2`` master row exists.
+    """
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    sort_group_exists = check(
+        "sort_group_exists",
+        SortGroupV2
+        & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id},
+        f"SortGroupV2 sort_group_id={sort_group_id} not found for "
+        f"{nwb_file_name!r}. Create sort groups first with "
+        "SortGroupV2.set_group_by_shank(nwb_file_name=...).",
+    )
+    # A SortGroupV2 master row can exist with ZERO electrode members (created
+    # then partially deleted, or a shank that resolved to an empty group);
+    # Recording.populate then raises "has zero electrodes" minutes into the
+    # run. Checking the master alone is a false-green. Only run this when the
+    # master exists, to avoid a confusing second failure when it is absent.
+    if sort_group_exists:
+        check(
+            "sort_group_has_electrodes",
+            SortGroupV2.SortGroupElectrode
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_id,
+            },
+            f"SortGroupV2 sort_group_id={sort_group_id} for {nwb_file_name!r} "
+            "has zero electrode members; Recording.populate would raise 'has "
+            "zero electrodes'. Recreate it with "
+            "SortGroupV2.set_group_by_shank(nwb_file_name=...).",
+        )
+        # Geometry the sort would actually see: a group whose contacts
+        # coincide cannot produce a probe, and the failure otherwise lands
+        # minutes into Recording.populate (or later, at the analyzer build).
+        geometry_problem = sort_group_geometry_problem(
+            nwb_file_name, sort_group_id
+        )
+        check(
+            "sort_group_geometry_distinct",
+            geometry_problem is None,
+            geometry_problem or "",
+        )
+    return sort_group_exists
+
+
+def _check_source_param_rows(
+    check: "Callable[[str, Any, str], bool]", bundle
+) -> bool:
+    """Check the preset's preprocessing and artifact-detection Lookup rows.
+
+    Returns
+    -------
+    bool
+        Whether the ``PreprocessingParameters`` row exists.
+    """
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    preprocessing_params_exist = check(
+        "preprocessing_params_exist",
+        PreprocessingParameters
+        & {"preprocessing_params_name": bundle.preprocessing_params_name},
+        f"PreprocessingParameters row {bundle.preprocessing_params_name!r} is "
+        "missing. Run initialize_v2_defaults().",
+    )
+    # An explicit no-mask preset has no artifact parameter row to require.
+    if bundle.artifact_detection_params_name is not None:
+        check(
+            "artifact_detection_params_exist",
+            ArtifactDetectionParameters
+            & {
+                "artifact_detection_params_name": bundle.artifact_detection_params_name
+            },
+            f"ArtifactDetectionParameters row {bundle.artifact_detection_params_name!r} "
+            "is missing. Run initialize_v2_defaults().",
+        )
+    return preprocessing_params_exist
+
+
+def _check_sorter_param_rows(
+    check: "Callable[[str, Any, str], bool]", bundle, *, sort_checks: bool
+) -> tuple:
+    """Check the preset's ``SorterParameters`` row and resolve what it runs.
+
+    The row's params are re-checked against the installed SI wrapper's
+    parameter vocabulary (a custom row inserted before the wrapper changed, or
+    under a different SI, would otherwise fail minutes into the sort), and the
+    effective configuration is resolved by the dispatcher's own resolver so
+    the report states exactly what run_sorter would receive.
+
+    Returns
+    -------
+    sorter_params_query : QueryExpression
+        The ``SorterParameters`` restriction to the preset's row.
+    sorter_params_exist : bool
+        Whether the row exists; False when ``sort_checks`` is False.
+    sorter_row : dict or None
+        The fetched row, or ``None`` when it was not checked.
+    effective_config : dict or None
+        ``EffectiveSortConfig.as_dict()``, or ``None`` when the row was not
+        checked.
+    """
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    sorter_params_query = SorterParameters & {
+        "sorter": bundle.sorter,
+        "sorter_params_name": bundle.sorter_params_name,
+    }
+    sorter_params_exist = sort_checks and check(
+        "sorter_params_exist",
+        sorter_params_query,
+        f"SorterParameters row (sorter={bundle.sorter!r}, "
+        f"sorter_params_name={bundle.sorter_params_name!r}) is missing. "
+        "Run initialize_v2_defaults().",
+    )
+    sorter_row = None
+    effective_config = None
+    if sorter_params_exist:
+        from spyglass.spikesorting.v2._params.sorter import (
+            validate_sorter_params_against_wrapper,
+        )
+
+        sorter_row = sorter_params_query.fetch1()
+        try:
+            validate_sorter_params_against_wrapper(
+                sorter_row["sorter"], sorter_row["params"]
+            )
+        except ValueError as exc:
+            check("sorter_params_valid", False, str(exc))
+        else:
+            check("sorter_params_valid", True, "")
+        effective_config = resolve_preset_sort_config(bundle)
+    return (
+        sorter_params_query,
+        sorter_params_exist,
+        sorter_row,
+        effective_config,
+    )
+
+
+def _check_display_waveform_params(
+    check: "Callable[[str, Any, str], bool]", bundle, *, sort_checks: bool
+) -> str:
+    """Check the display analyzer recipe's row; return the recipe name.
+
+    The display analyzer recipe is region-resolved from the preprocessing
+    recipe and FK-required on the Sorting row, so Sorting.make_fetch fails if
+    its AnalyzerWaveformParameters row is missing. Gate it here (up front)
+    rather than crashing deep in populate, matching the other params checks.
+    The name is returned even when ``sort_checks`` is False, for the
+    resource notes.
+    """
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        waveform_params_for_preprocessing,
+    )
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    display_waveform_params_name = waveform_params_for_preprocessing(
+        bundle.preprocessing_params_name
+    )[0]
+    if sort_checks:
+        check(
+            "analyzer_waveform_params_exist",
+            AnalyzerWaveformParameters
+            & {"waveform_params_name": display_waveform_params_name},
+            f"AnalyzerWaveformParameters row {display_waveform_params_name!r} "
+            "(the display analyzer recipe for preprocessing "
+            f"{bundle.preprocessing_params_name!r}) is missing. Run "
+            "initialize_v2_defaults().",
+        )
+    return display_waveform_params_name
+
+
+def _check_auto_curation_rows(
+    check: "Callable[[str, Any, str], bool]", bundle
+) -> None:
+    """Check the rows ``auto_curate=True`` scores the root curation with.
+
+    CurationEvaluation scores the root curation with the preset's metric +
+    auto-curation rule rows on the whitened (metric) analyzer recipe, so a
+    missing one of those would otherwise fail only after the upstream compute.
+    The metric waveform row is the [1] element of the same source-resolved
+    (display, metric) pair.
+    """
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        waveform_params_for_preprocessing,
+    )
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    check(
+        "metric_params_exist",
+        QualityMetricParameters
+        & {"metric_params_name": bundle.metric_params_name},
+        f"QualityMetricParameters row {bundle.metric_params_name!r} (the "
+        "auto-curation metric set) is missing. Run "
+        "initialize_v2_defaults().",
+    )
+    check(
+        "auto_curation_rules_exist",
+        AutoCurationRules
+        & {"auto_curation_rules_name": bundle.auto_curation_rules_name},
+        f"AutoCurationRules row {bundle.auto_curation_rules_name!r} (the "
+        "auto-curation rule set) is missing. Run initialize_v2_defaults().",
+    )
+    metric_waveform_params_name = waveform_params_for_preprocessing(
+        bundle.preprocessing_params_name
+    )[1]
+    check(
+        "metric_waveform_params_exist",
+        AnalyzerWaveformParameters
+        & {"waveform_params_name": metric_waveform_params_name},
+        f"AnalyzerWaveformParameters row {metric_waveform_params_name!r} "
+        "(the whitened metric analyzer recipe auto-curation scores on) is "
+        "missing. Run initialize_v2_defaults().",
+    )
+
+
+def _check_sampling_rate(
+    check: "Callable[[str, Any, str], bool]",
+    bundle,
+    nwb_file_name: str,
+    pipeline_preset: str,
+) -> None:
+    """Check the recording samples at the rate the preset is tuned for.
+
+    The MS4/MS5 snippet window (clip_size / detect_interval on the rate-keyed
+    sorter row) assumes a specific acquisition rate, so a 30 kHz preset on a
+    20 kHz recording (or the reverse) silently sorts with a mistuned window.
+    The clusterless preset is rate-agnostic (sampling_rate_hz is None) and is
+    skipped; the check is also skipped if Raw is not ingested yet (raw_exists
+    already reports that, so this would only add a confusing second failure).
+    """
+    from spyglass.common import Raw
+
+    if bundle.sampling_rate_hz is not None:
+        raw = Raw & {"nwb_file_name": nwb_file_name}
+        if raw:
+            actual_rate = float(raw.fetch1("sampling_rate"))
+            # 0.5% tolerance absorbs float drift in an estimated rate.
+            rate_ok = (
+                abs(actual_rate - bundle.sampling_rate_hz)
+                <= 0.005 * bundle.sampling_rate_hz
+            )
+            check(
+                "sampling_rate_matches",
+                rate_ok,
+                f"recording {nwb_file_name!r} samples at {actual_rate:g} Hz "
+                f"but pipeline_preset {pipeline_preset!r} is tuned for "
+                f"{bundle.sampling_rate_hz} Hz: the rate-keyed sorter row "
+                f"{bundle.sorter_params_name!r} holds its clip_size / "
+                "detect_interval snippet window at that rate. Pick the "
+                "rate-matched preset (call describe_pipeline_presets() and "
+                "match sampling_rate_hz to the recording).",
+            )
+
+
+def _check_sorter_execution(
+    check: "Callable[[str, Any, str], bool]",
+    warnings: list[str],
+    bundle,
+    pipeline_preset: str,
+    sorter_params_query,
+    sorter_params_exist: bool,
+) -> None:
+    """Check the sorter can execute on the row's execution backend.
+
+    The selected backend (local vs container) is read ONLY from the
+    SorterParameters row's execution_params (the single source of truth --
+    never the preset). When the row is absent, sorter_params_exist already
+    reported the blocking error and the backend is unknowable, so the
+    container / MATLAB-policy checks are skipped; the sorter NAME is still
+    validated as a local sorter so a misspelled sorter keeps its spelling
+    hint. A runnable container backend appends an advisory to ``warnings``.
+    """
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    if not sorter_params_exist:
+        _check_local_sorter_runtime(
+            bundle, sis, SorterParameters._NON_SI_SORTERS, check
+        )
+    else:
+        from spyglass.spikesorting.v2._params.sorter import (
+            validate_execution_params,
+        )
+        from spyglass.spikesorting.v2._sorting_dispatch import (
+            MATLAB_SORTERS,
+            matlab_container_required_message,
+        )
+
+        execution_params = validate_execution_params(
+            sorter_params_query.fetch1("execution_params")
+        )
+        execution_backend = execution_params["backend"]
+        container_image = execution_params["container_image"]
+
+        if execution_backend == "local":
+            # MATLAB-backed sorters (Kilosort 2.5/3, IronClust) ship only as
+            # container images; a local row for one of them cannot run. Surface
+            # the SAME tracked-container-backend message the dispatch raises,
+            # rather than the local-install checks.
+            if bundle.sorter.lower() in MATLAB_SORTERS:
+                check(
+                    "sorter_execution_backend",
+                    False,
+                    matlab_container_required_message(bundle.sorter),
+                )
+            else:
+                _check_local_sorter_runtime(
+                    bundle, sis, SorterParameters._NON_SI_SORTERS, check
+                )
+        else:
+            # Container backend: verify the container RUNTIME (engine + Python
+            # package), not the local sorter install. The sorter runtime lives
+            # in the image, so a missing LOCAL runtime is irrelevant here. A
+            # missing CONTAINER runtime is an actionable, blocking
+            # selected-preset error -- preflight never silently falls back to
+            # local execution.
+            if execution_backend == "docker":
+                runtime_ok, runtime_detail = _docker_runtime_available()
+            else:
+                runtime_ok, runtime_detail = _singularity_runtime_available()
+            check(
+                "container_runtime_available",
+                runtime_ok,
+                f"pipeline_preset {pipeline_preset!r} selects the "
+                f"{execution_backend} execution backend (image "
+                f"{container_image!r}) for sorter {bundle.sorter!r}, but it is "
+                f"not runnable here: {runtime_detail}. Install the container "
+                "runtime and its Python package, or pick a local-execution "
+                "preset. Preflight does not fall back to local execution.",
+            )
+            # Informational advisory (only when the container is actually
+            # runnable, so it never sits next to a blocking runtime failure):
+            # the host can stay on numpy>=2 -- the sorter runtime (e.g. MS4's
+            # numpy<2-era ml_ms4alg) lives in the container, not on the host.
+            if runtime_ok:
+                warnings.append(
+                    f"pipeline_preset {pipeline_preset!r} runs sorter "
+                    f"{bundle.sorter!r} inside the {execution_backend} image "
+                    f"{container_image!r}: the host can stay on the v2 numpy>=2 "
+                    "environment because the sorter runtime lives in the "
+                    "container, not on the host."
+                )
+
+
+def _check_motion_stage(
+    check: "Callable[[str, Any, str], bool]",
+    bundle,
+    *,
+    nwb_file_name: str,
+    sort_group_id: int,
+    motion_mode,
+    motion_correction_params_name: str,
+    preprocessing_params_exist: bool,
+    sort_group_exists: bool,
+    sorter_params_exist: bool,
+    sorter_row: "dict | None",
+) -> "MotionRecipe | None":
+    """Check a motion stage (estimate / apply) can run; return its recipe.
+
+    The recipe must exist and resolve, the preset's preprocessing recipe must
+    filter (motion is estimated on filtered, unwhitened traces;
+    MotionEstimateSelection.insert_selection refuses the same source), the
+    group's effective geometry must support the estimation recipe (checked
+    here on the registered positions, before any populate; the estimator
+    re-checks the actual recording), and a sort of a corrected recording must
+    not run the sorter's own motion correction.
+
+    Returns
+    -------
+    MotionRecipe or None
+        The resolved recipe, or ``None`` when it does not resolve.
+    """
+    from spyglass.spikesorting.v2.motion import (
+        preprocessing_filter_problem,
+    )
+
+    motion_recipe = None
+    if preprocessing_params_exist:
+        unfiltered = preprocessing_filter_problem(
+            bundle.preprocessing_params_name
+        )
+        check(
+            "motion_source_filtered",
+            unfiltered is None,
+            f"motion_mode={motion_mode!r}: {unfiltered}",
+        )
+    try:
+        motion_recipe = resolve_motion_recipe(motion_correction_params_name)
+    except ValueError as exc:
+        check("motion_recipe_exists", False, str(exc))
+    else:
+        check("motion_recipe_exists", True, "")
+        if sort_group_exists:
+            motion_geometry = motion_geometry_problem(
+                nwb_file_name,
+                sort_group_id,
+                motion_recipe.resolved_estimation,
+            )
+            check(
+                "motion_geometry_supported",
+                motion_geometry is None,
+                motion_geometry or "",
+            )
+    if motion_mode == "apply" and sorter_params_exist:
+        sorter_motion = sorter_motion_correction_problem(
+            bundle.sorter, sorter_row["params"], bundle.sorter_params_name
+        )
+        check(
+            "sorter_motion_correction_off",
+            sorter_motion is None,
+            sorter_motion or "",
+        )
+    return motion_recipe
+
+
+def _preflight_expected_ids(
+    check: "Callable[[str, Any, str], bool]",
+    bundle,
+    *,
+    nwb_file_name: str,
+    sort_group_id: int,
+    interval_list_name: str,
+    team_name: str,
+    manual_excluded_times,
+    motion_mode,
+    motion_recipe: "MotionRecipe | None",
+    motion_estimate_id,
+) -> dict:
+    """The selection PKs a run would produce, each with its existence flags.
+
+    Also records the ``motion_estimate_applicable`` check for a supplied
+    ``motion_estimate_id``, which needs the expected recording and artifact
+    detection ids.
+
+    Returns
+    -------
+    dict
+        The :attr:`PreflightReport.expected_ids` mapping.
+    """
+    from spyglass.spikesorting.v2._selection_plan import (
+        build_sorting_selection_plan,
+    )
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    recording_id, artifact_detection_id = expected_source_ids(
+        bundle,
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name=interval_list_name,
+        team_name=team_name,
+        manual_excluded_times=manual_excluded_times,
+    )
+    if motion_estimate_id is not None and motion_recipe is not None:
+        from spyglass.spikesorting.v2._source_resolution import (
+            SourceLineage,
+        )
+
+        supplied = supplied_motion_estimate_problem(
+            motion_estimate_id,
+            motion_recipe,
+            source_lineage=SourceLineage(
+                kind="recording",
+                key={"recording_id": recording_id},
+                artifact_detection_id=artifact_detection_id,
+            ),
+        )
+        check("motion_estimate_applicable", supplied is None, supplied)
+    motion_ids = _expected_motion_ids(
+        motion_mode,
+        motion_recipe,
+        recording_id=recording_id,
+        artifact_detection_id=artifact_detection_id,
+        motion_estimate_id=motion_estimate_id,
+    )
+    corrected = motion_ids.get("motion_corrected_recording_id", {})
+    if corrected.get("pending"):
+        sorting_entry = _pending_id_entry(corrected["pending"])
+    else:
+        sorting_id = build_sorting_selection_plan(
+            {
+                "recording_id": recording_id,
+                "sorter": bundle.sorter,
+                "sorter_params_name": bundle.sorter_params_name,
+                "artifact_detection_id": artifact_detection_id,
+                "motion_corrected_recording_id": corrected.get("id"),
+            }
+        ).sorting_id
+        sorting_entry = {
+            "id": sorting_id,
+            "exists": bool(SortingSelection & {"sorting_id": sorting_id}),
+            "computed_exists": bool(Sorting & {"sorting_id": sorting_id}),
+        }
+    # Per stage, ``exists`` is whether the SELECTION row exists (the run
+    # would reuse this PK) and ``computed_exists`` whether the COMPUTED
+    # output row exists (the populate already ran -- a reused, near-zero-cost
+    # stage). Distinguishing them tells a caller what work the run would
+    # actually do: a selection can exist with its output not yet populated.
+    return {
+        "recording_id": {
+            "id": recording_id,
+            "exists": bool(RecordingSelection & {"recording_id": recording_id}),
+            "computed_exists": bool(Recording & {"recording_id": recording_id}),
+        },
+        "artifact_detection_id": (
+            {"id": None, "exists": False, "computed_exists": False}
+            if artifact_detection_id is None
+            else {
+                "id": artifact_detection_id,
+                "exists": bool(
+                    RecordingArtifactSelection
+                    & {"artifact_detection_id": artifact_detection_id}
+                ),
+                "computed_exists": bool(
+                    RecordingArtifactDetection
+                    & {"artifact_detection_id": artifact_detection_id}
+                ),
+            }
+        ),
+        **motion_ids,
+        "sorting_id": sorting_entry,
+    }
+
+
+def _group_resource_notes(
+    display_waveform_params_name: str,
+    *,
+    nwb_file_name: str,
+    sort_group_id: int,
+    effective_config: "dict | None",
+) -> list[str]:
+    """:func:`_resource_notes` for one sort group, read from its rows."""
+    from spyglass.common import Raw
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    return _resource_notes(
+        display_waveform_params_name,
+        n_channels=len(
+            SortGroupV2.SortGroupElectrode
+            & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
+        ),
+        sampling_rate_hz=(
+            float(
+                (Raw & {"nwb_file_name": nwb_file_name}).fetch1("sampling_rate")
+            )
+            if Raw & {"nwb_file_name": nwb_file_name}
+            else None
+        ),
+        effective_config=effective_config,
     )
 
 
