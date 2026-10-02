@@ -1,6 +1,6 @@
 # Change Log
 
-## [Unreleased]
+## [0.6.1] (Unreleased)
 
 ### Release Notes
 
@@ -2288,6 +2288,9 @@ cross-referenced here, not duplicated.
     sort" quickstart walking defaults → sort group → preflight → pipeline →
     curation summary → downstream fetch, gated by an end-to-end UX smoke test
 
+- Add LFP artifact detection to the LFP notebook #1641
+- Add File Backends developer page #1662
+
 ### Infrastructure
 
 - Add `spyglass.spikesorting.v2` module scaffolding: new module tree with
@@ -2466,7 +2469,23 @@ cross-referenced here, not duplicated.
     outlier channel among 8. A committed script checks that four regression
     tests actually fail when their fixes are reverted.
 
+- Prevent errors during update for dandi standard from propagating to other
+    files #1677
+- Refactor `get_nwb_file` fallbacks into a pluggable `FileBackend` protocol
+    #1662
+- Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
+- Add `prefer_download` custom config for stream-capable backends #1662
+
 ### Pipelines
+
+- Spike Sorting
+
+    - Store `hash` on `SpikeSortingRecording` insert, and fix the `Path`/`str`
+        comparison that skipped hash verification on recompute. A recompute that
+        does not match the stored hash now deletes the new files and raises. Rows
+        written before this have a null hash; a recompute of one warns and is
+        accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
+        #1662
 
     - Add `spyglass.spikesorting.v2` single-session pipeline on
         SpikeInterface 0.104's `SortingAnalyzer` API: `SortGroupV2`,
