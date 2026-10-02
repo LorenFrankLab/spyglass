@@ -53,13 +53,7 @@ from spyglass.spikesorting.v2._sorting_analyzer import (
 )
 from spyglass.spikesorting.v2._sorting_artifact_mask import (
     apply_artifact_mask,
-    artifact_frame_ranges,
-    boundary_spans_from_timestamps,
-    corrected_statistics_spans,
-    silence_frame_ranges,
-)
-from spyglass.spikesorting.v2._sorting_artifact_mask import (
-    statistics_spans as compute_statistics_spans,
+    sorting_statistics_spans,
 )
 from spyglass.spikesorting.v2._sorting_dispatch import (
     remove_excess_spikes,
@@ -2214,7 +2208,7 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         # is the anchor (threaded from make_fetch) used for the per-unit
         # Electrode FK, NOT necessarily the loaded recording's own id. A single
         # recording's traces load unmasked because the artifact mask is applied
-        # below through ``artifact_frame_ranges``, whose excluded ranges also
+        # below (``sorting_statistics_spans``), whose excluded ranges also
         # feed the statistics spans. Concat and motion-corrected masks are
         # already materialized. Both modes pass observation intervals to the
         # units writer.
@@ -2226,42 +2220,18 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         # Statistics spans: the artifact-free frame ranges every noise and
         # whitening estimate samples from, persisted with the sort so each
-        # later analyzer rebuild reuses them. Selection and member joins are
-        # boundaries even when nothing is masked.
-        if traces.kind == "motion_corrected_recording":
-            # Persisted masked, with the source's spans copied onto its row.
-            statistics_spans = corrected_statistics_spans(
-                recording,
-                traces.row,
-                source_n_samples=source_n_samples,
-                concat_statistics_spans=concat_statistics_spans,
-                obs_intervals=obs_intervals,
-                artifact_detection_id=sel_row.get("artifact_detection_id"),
-                recording_id=(
-                    recording_id if source.kind == "recording" else None
-                ),
-            )
-        elif source.kind == "recording":
-            # Boundaries from the reloaded recording's persisted timestamps,
-            # read before masking (silencing keeps the same timestamps).
-            boundary_spans = boundary_spans_from_timestamps(recording)
-            excluded_ranges = []
-            if traces.apply_artifact_mask:
-                excluded_ranges = artifact_frame_ranges(
-                    recording,
-                    obs_intervals,
-                    artifact_detection_id=sel_row.get("artifact_detection_id"),
-                    recording_id=recording_id,
-                )
-                recording = silence_frame_ranges(recording, excluded_ranges)
-            statistics_spans = compute_statistics_spans(
-                recording.get_num_samples(), excluded_ranges, boundary_spans
-            )
-        else:  # concat member masks and spans were materialized upstream
-            statistics_spans = [
-                (int(a), int(b))
-                for a, b in np.asarray(concat_statistics_spans).reshape(-1, 2)
-            ]
+        # later analyzer rebuild reuses them. A masked single recording is
+        # silenced over its artifact frames here.
+        recording, statistics_spans = sorting_statistics_spans(
+            recording,
+            traces,
+            source_kind=source.kind,
+            recording_id=recording_id,
+            artifact_detection_id=sel_row.get("artifact_detection_id"),
+            obs_intervals=obs_intervals,
+            concat_statistics_spans=concat_statistics_spans,
+            source_n_samples=source_n_samples,
+        )
 
         sorter = sorter_row["sorter"]
         sorter_params = dict(sorter_row["params"])
@@ -3299,9 +3269,10 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ``Sorting._apply_artifact_mask`` directly. The analyzer reconstruction
         paths mask through
         :func:`._source_resolution.load_effective_recording`.
-        ``make_compute`` masks through ``artifact_frame_ranges`` /
-        ``silence_frame_ranges`` itself so it keeps the excluded ranges for
-        the statistics spans. The complement-walk
+        ``make_compute`` masks through
+        :func:`._sorting_artifact_mask.sorting_statistics_spans`
+        (``artifact_frame_ranges`` / ``silence_frame_ranges``) so it keeps the
+        excluded ranges for the statistics spans. The complement-walk
         masking + input validation (empty/shape/order checks, the
         disjoint-gap boundary carve-out) live in the service module.
         """

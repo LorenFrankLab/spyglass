@@ -2,7 +2,8 @@
 
 ``apply_artifact_mask`` zeros the complement of the artifact-removed
 ``valid_times`` on the recording before sorting, so the sorter never sees
-artifact frames. ``make_fetch`` already fetched ``valid_times`` (the tri-part
+artifact frames. ``sorting_statistics_spans`` masks ``Sorting.make_compute``'s
+input and resolves the artifact-free statistics spans for each source kind. ``make_fetch`` already fetched ``valid_times`` (the tri-part
 ``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
 compute), so this operates purely on the SpikeInterface recording.
 
@@ -854,3 +855,89 @@ def sample_span_snippet_starts(
         a, b = spans[i]
         starts[k] = rng.integers(a, b - nsamples + 1)
     return np.sort(starts)
+
+
+def sorting_statistics_spans(
+    recording,
+    traces,
+    *,
+    source_kind,
+    recording_id,
+    artifact_detection_id,
+    obs_intervals,
+    concat_statistics_spans,
+    source_n_samples,
+):
+    """Mask a sort's input and resolve its statistics spans.
+
+    Statistics spans are the artifact-free frame ranges every noise and
+    whitening estimate samples from. Selection and member joins are
+    boundaries even when nothing is masked. A motion-corrected recording was
+    persisted masked, with its source's spans copied onto its row. A single
+    recording is silenced here over its artifact frames (when its traces
+    apply the mask) and its boundaries are read from its persisted
+    timestamps. A concatenation's member masks and spans were materialized
+    upstream and are used as stored.
+
+    Parameters
+    ----------
+    recording : spikeinterface.BaseRecording
+        The sort input, loaded from the effective traces.
+    traces : EffectiveTraces
+        The sort's effective traces (``kind``, ``row``,
+        ``apply_artifact_mask``).
+    source_kind : str
+        ``"recording"`` or ``"concatenated_recording"``.
+    recording_id : str
+        The sort's anchor ``recording_id``.
+    artifact_detection_id : str or None
+        The sort's artifact detection, if any.
+    obs_intervals : numpy.ndarray or None
+        Artifact-removed valid times, shape ``(n_intervals, 2)`` in seconds.
+    concat_statistics_spans : numpy.ndarray or None
+        A concat source's stored spans; ``None`` for a single recording.
+    source_n_samples : int or None
+        The source's frame count a corrected recording must keep.
+
+    Returns
+    -------
+    tuple
+        ``(recording, statistics_spans)``: the recording to sort (silenced
+        over the artifact frames of a masked single recording, otherwise
+        unchanged) and the spans as ``(start_frame, end_frame)`` pairs.
+    """
+    import numpy as np
+
+    if traces.kind == "motion_corrected_recording":
+        # Persisted masked, with the source's spans copied onto its row.
+        spans = corrected_statistics_spans(
+            recording,
+            traces.row,
+            source_n_samples=source_n_samples,
+            concat_statistics_spans=concat_statistics_spans,
+            obs_intervals=obs_intervals,
+            artifact_detection_id=artifact_detection_id,
+            recording_id=(recording_id if source_kind == "recording" else None),
+        )
+    elif source_kind == "recording":
+        # Boundaries from the reloaded recording's persisted timestamps,
+        # read before masking (silencing keeps the same timestamps).
+        boundary_spans = boundary_spans_from_timestamps(recording)
+        excluded_ranges = []
+        if traces.apply_artifact_mask:
+            excluded_ranges = artifact_frame_ranges(
+                recording,
+                obs_intervals,
+                artifact_detection_id=artifact_detection_id,
+                recording_id=recording_id,
+            )
+            recording = silence_frame_ranges(recording, excluded_ranges)
+        spans = statistics_spans(
+            recording.get_num_samples(), excluded_ranges, boundary_spans
+        )
+    else:  # concat member masks and spans were materialized upstream
+        spans = [
+            (int(a), int(b))
+            for a, b in np.asarray(concat_statistics_spans).reshape(-1, 2)
+        ]
+    return recording, spans
