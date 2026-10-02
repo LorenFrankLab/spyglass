@@ -489,6 +489,7 @@ def cache_span_noise_levels(
         cached.
     """
     import numpy as np
+    from scipy.stats import median_abs_deviation
 
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
         spans_cover_recording,
@@ -504,10 +505,7 @@ def cache_span_noise_levels(
         recording, spans, seed=seed, return_in_uV=return_in_uV
     )
     if method == "mad":
-        median = np.median(data, axis=0, keepdims=True)
-        noise_levels = (
-            np.median(np.abs(data - median), axis=0) / 0.6744897501960817
-        )
+        noise_levels = median_abs_deviation(data, axis=0, scale="normal")
     else:
         noise_levels = np.std(data, axis=0)
     suffix = "scaled" if return_in_uV else "raw"
