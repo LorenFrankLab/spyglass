@@ -201,6 +201,9 @@ def inspection_view(
     import figpack.views as fv
     import spikeinterface.widgets as sw
     from figpack_spike_sorting.views import UnitSimilarityScore
+    from spikeinterface.widgets.sorting_summary import (
+        _default_displayed_unit_properties,
+    )
     from spikeinterface.widgets.utils_figpack import generate_unit_table_view
 
     ids = analyzer.unit_ids if unit_ids is None else np.asarray(unit_ids)
@@ -213,18 +216,10 @@ def inspection_view(
         for u, i in zip(ids, indices)
         for v, j in zip(ids, indices)
     ]
-    properties = (
-        [
-            "firing_rate",
-            "num_spikes",
-            "x",
-            "y",
-            "amplitude_median",
-            "snr",
-            "rp_violations",
-        ]
+    properties = list(
+        _default_displayed_unit_properties
         if displayed_unit_properties is None
-        else list(displayed_unit_properties)
+        else displayed_unit_properties
     )
     properties = list(
         dict.fromkeys([*properties, *(extra_unit_properties or {})])
