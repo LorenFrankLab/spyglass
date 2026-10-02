@@ -277,15 +277,8 @@ def _run_operation(*, review_id, bundle, request, operation_id):
                                     for unit, labels in conflict.contributor_labels.items()
                                 },
                                 "choices": list(
-                                    dict.fromkeys(
-                                        [
-                                            *review.profile.label_options,
-                                            *(
-                                                label
-                                                for labels in conflict.contributor_labels.values()
-                                                for label in labels
-                                            ),
-                                        ]
+                                    conflict.resolution_choices(
+                                        review.profile.label_options
                                     )
                                 ),
                             }
@@ -340,17 +333,7 @@ def _run_operation(*, review_id, bundle, request, operation_id):
                 if receipt.needs_merge_verification:
                     report("Preparing the merged-unit verification review…")
                     child_review = receipt.continue_review()
-                    from spyglass.spikesorting.v2._curation_transforms import (
-                        allocate_merged_unit_ids,
-                    )
-                    from spyglass.spikesorting.v2.curation import CurationV2
-
-                    unit_ids = (CurationV2.Unit & review.parent.as_key()).fetch(
-                        "unit_id"
-                    )
-                    focus = list(
-                        allocate_merged_unit_ids(unit_ids, changes.merge_groups)
-                    )
+                    focus = list(changes.merged_unit_ids())
                     result["verification_review_id"] = str(
                         child_review.review_id
                     )

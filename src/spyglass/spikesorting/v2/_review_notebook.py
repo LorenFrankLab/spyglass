@@ -29,18 +29,7 @@ class ReviewCommitPanel:
         self.resolutions = {}
         items = []
         for conflict in self.changes.label_conflicts:
-            choices = tuple(
-                dict.fromkeys(
-                    [
-                        *review.profile.label_options,
-                        *(
-                            label
-                            for labels in conflict.contributor_labels.values()
-                            for label in labels
-                        ),
-                    ]
-                )
-            )
+            choices = conflict.resolution_choices(review.profile.label_options)
             caption = widgets.Label(
                 "Merged contributors: "
                 + ", ".join(map(str, conflict.contributor_unit_ids))
@@ -96,23 +85,9 @@ class ReviewCommitPanel:
                         self.verification_review = (
                             self.receipt.continue_review()
                         )
-                        from spyglass.spikesorting.v2._curation_transforms import (
-                            allocate_merged_unit_ids,
-                        )
-                        from spyglass.spikesorting.v2.curation import (
-                            CurationV2,
-                        )
-
-                        source_ids = (
-                            CurationV2.Unit & review.parent.as_key()
-                        ).fetch("unit_id")
-                        merged = tuple(
-                            allocate_merged_unit_ids(
-                                source_ids, self.changes.merge_groups
-                            )
-                        )
                         url = self.verification_review.open(
-                            open_browser=open_browser, focus_unit_ids=merged
+                            open_browser=open_browser,
+                            focus_unit_ids=self.changes.merged_unit_ids(),
                         )
                         print(f"Inspect merged units: {url}")
                         print(

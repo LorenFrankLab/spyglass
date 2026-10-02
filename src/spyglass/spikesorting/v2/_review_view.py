@@ -14,7 +14,10 @@ else beyond the standard library.
 
 from __future__ import annotations
 
-from spyglass.spikesorting.v2._figpack_curation import FIGPACK_INSTALL_HINT
+from spyglass.spikesorting.v2._figpack_curation import (
+    FIGPACK_INSTALL_HINT,
+    curation_state,
+)
 
 #: Fixed height (px) reserved for the curation control when expanded. A
 #: LayoutItem with only ``max_size`` reserves NO space when a sibling has
@@ -73,15 +76,9 @@ def curation_control(label_options, seed_labels=None):
         def write_to_zarr_group(self, group):
             super().write_to_zarr_group(group)
             group.attrs["label_options"] = list(label_options)
-            group.attrs["curation"] = {
-                "labelsByUnit": {
-                    str(unit_id): list(labels)
-                    for unit_id, labels in (seed_labels or {}).items()
-                },
-                "mergeGroups": [],
-                "isClosed": False,
-                "labelChoices": list(label_options),
-            }
+            group.attrs["curation"] = curation_state(
+                seed_labels, [], label_options=label_options
+            )
 
     return ReviewControls(
         extension=extension, view_type="spyglass.ReviewControls"

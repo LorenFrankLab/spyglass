@@ -165,6 +165,21 @@ class MergeLabelConflict:
             MappingProxyType(dict(self.contributor_labels)),
         )
 
+    def inherited_labels(self) -> tuple[str, ...]:
+        """Every contributor label, in contributor order (may repeat)."""
+        return tuple(
+            label
+            for labels in self.contributor_labels.values()
+            for label in labels
+        )
+
+    def resolution_choices(self, label_options: Sequence[str]) -> tuple:
+        """Labels a reviewer may pick: the palette, then inherited labels.
+
+        Deduplicated, keeping the first occurrence's order.
+        """
+        return tuple(dict.fromkeys([*label_options, *self.inherited_labels()]))
+
 
 def _unknown_conflict_resolution_labels(
     values: Sequence[str],
@@ -177,12 +192,9 @@ def _unknown_conflict_resolution_labels(
     valid labels inherited from the merged contributors, even when an older or
     site-specific label is absent from the active profile.
     """
-    inherited_labels = {
-        label
-        for labels in conflict.contributor_labels.values()
-        for label in labels
-    }
-    return sorted(set(map(str, values)) - valid_labels - inherited_labels)
+    return sorted(
+        set(map(str, values)) - valid_labels - set(conflict.inherited_labels())
+    )
 
 
 @dataclass(frozen=True)
@@ -585,6 +597,19 @@ class CurationChangeSet:
     newer_sibling_curations: tuple[CurationRef, ...]
     reviewed_parent_created_at: Any
     reviewed_parent_created_by: str
+
+    def merged_unit_ids(self) -> tuple[int, ...]:
+        """Unit ids the merges will receive in the committed child.
+
+        Reads the reviewed parent's unit ids from ``CurationV2.Unit`` and
+        allocates as ``insert_curation`` does.
+        """
+        from spyglass.spikesorting.v2.curation import CurationV2
+
+        source_ids = (CurationV2.Unit & self.review.parent.as_key()).fetch(
+            "unit_id"
+        )
+        return tuple(allocate_merged_unit_ids(source_ids, self.merge_groups))
 
     @property
     def has_changes(self) -> bool:

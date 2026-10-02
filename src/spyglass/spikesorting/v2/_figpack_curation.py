@@ -221,6 +221,33 @@ def normalize_displayed_unit_properties(
     return normalized
 
 
+def curation_state(
+    labels: dict | None,
+    merge_groups: list | None,
+    *,
+    label_options: list[str] | None = None,
+    is_closed: bool = False,
+) -> dict:
+    """Build the curation state the review control reads and writes.
+
+    ``{"labelsByUnit": {str(unit_id): [label, ...]}, "mergeGroups":
+    [[unit_id, ...]], "isClosed": bool}``, plus ``"labelChoices"`` when
+    ``label_options`` is not ``None``. ``None`` labels or merge groups are
+    treated as empty.
+    """
+    state = {
+        "labelsByUnit": {
+            str(unit_id): list(unit_labels)
+            for unit_id, unit_labels in (labels or {}).items()
+        },
+        "mergeGroups": [list(group) for group in (merge_groups or [])],
+        "isClosed": bool(is_closed),
+    }
+    if label_options is not None:
+        state["labelChoices"] = list(label_options)
+    return state
+
+
 def labels_and_merges_to_annotations(
     labels: dict | None,
     merge_groups: list | None,
@@ -252,16 +279,12 @@ def labels_and_merges_to_annotations(
     dict
         The ``annotations.json`` payload.
     """
-    state = {
-        "labelsByUnit": {
-            str(unit_id): list(unit_labels)
-            for unit_id, unit_labels in (labels or {}).items()
-        },
-        "mergeGroups": [list(group) for group in (merge_groups or [])],
-        "isClosed": bool(is_closed),
-    }
-    if label_options:
-        state["labelChoices"] = list(label_options)
+    state = curation_state(
+        labels,
+        merge_groups,
+        label_options=label_options or None,
+        is_closed=is_closed,
+    )
     return {
         "annotations": {
             ANNOTATION_ROOT_PATH: {SORTING_CURATION_KEY: json.dumps(state)}
