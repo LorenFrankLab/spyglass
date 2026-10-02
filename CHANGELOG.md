@@ -153,16 +153,15 @@ or `log_export` positionally must pass them by keyword.
 - Update dependency pins: `numpy>=1.26,<3` (was `<2`), `scipy>=1.13` (was
     `<1.13`), `spikeinterface==0.104.3`, `probeinterface>=0.3.2` (was `<0.3`),
     `jax<0.10` (was `<0.7.2`), `non-local-detector==0.6.9`,
-    `ripple-detection>=1.7`, `deeplabcut[tf]>=3.0`, `keypoint-moseq>=0.6`, and
-    declare `networkx` #1609
+    `ripple-detection>=1.7`, `deeplabcut[tf]>=3.0`, `keypoint-moseq>=0.6`;
+    declare `networkx`; drop the `panel>=1.4` pin, which Spyglass does not
+    import and which blocked `keypoint-moseq` 0.6 (it pins `panel==0.14.4`)
+    #1609
 - `environment.yml` and `environment_min.yml` move to NumPy 2 and `scipy>=1.13`;
     `environment.yml` installs `torch>=2` from pip instead of conda
     `pytorch<1.12` and no longer installs `mountainsort4`, which does not run on
     NumPy 2. The DLC and MoSeq environments stay on NumPy < 2 and drop their
     conda `pytorch` and `jax` pins #1609
-- The `moseq-cpu` / `moseq-gpu` extras and the MoSeq environments do not
-    currently install: every `keypoint-moseq` 0.6 release pins `panel==0.14.4`,
-    which conflicts with Spyglass's `panel>=1.4` #1609
 - Add `environments/environment_spikesorting_v2.yml` and
     `environments/environment_spikesorting_legacy.yml` #1609
 - Add optional extras `spikesorting-v2` (MountainSort5, torch),
