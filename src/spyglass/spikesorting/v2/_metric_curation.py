@@ -225,36 +225,14 @@ def apply_label_rules(
             # missing_policy alone.
             policy_missing_ids = missing_unit_ids
         else:
-            expected_set = expected_missing.get(metric_name)
-            if expected_set is None:
-                # No registered eligibility rule for this column (or it was
-                # never classified): fail closed on any non-finite value.
-                if missing_unit_ids:
-                    raise ValueError(
-                        f"Auto-curation rule {rule_name!r}: "
-                        + _unregistered_column_message(
-                            metric_name, missing_unit_ids
-                        )
-                    )
-                policy_missing_ids = []
-            else:
-                unexpected_ids = [
-                    unit_id
-                    for unit_id in missing_unit_ids
-                    if unit_id not in expected_set
-                ]
-                if unexpected_ids:
-                    raise ValueError(
-                        f"Auto-curation rule {rule_name!r}: "
-                        + _computation_failure_message(
-                            metric_name, unexpected_ids
-                        )
-                    )
-                policy_missing_ids = [
-                    unit_id
-                    for unit_id in missing_unit_ids
-                    if unit_id in expected_set
-                ]
+            # A column never classified (absent) fails closed like one with
+            # no registered eligibility rule.
+            policy_missing_ids = _expected_missing_unit_ids(
+                metric_name,
+                missing_unit_ids,
+                expected_missing.get(metric_name),
+                prefix=f"Auto-curation rule {rule_name!r}: ",
+            )
 
         if missing_policy == "error" and policy_missing_ids:
             raise ValueError(
@@ -592,6 +570,28 @@ def _computation_failure_message(column: str, unit_ids: list) -> str:
     )
 
 
+def _expected_missing_unit_ids(
+    column: str, non_finite_ids: list, expected: set | None, *, prefix=""
+) -> list:
+    """Return the non-finite unit ids that are expected to be missing.
+
+    Raises ``ValueError`` (message prefixed by ``prefix``) if ``expected`` is
+    ``None`` -- the column has no registered eligibility rule -- and any unit
+    is non-finite, or if a non-finite unit is not in ``expected`` (a metric
+    computation failure).
+    """
+    if expected is None:
+        if non_finite_ids:
+            raise ValueError(
+                prefix + _unregistered_column_message(column, non_finite_ids)
+            )
+        return []
+    failed = [unit_id for unit_id in non_finite_ids if unit_id not in expected]
+    if failed:
+        raise ValueError(prefix + _computation_failure_message(column, failed))
+    return [unit_id for unit_id in non_finite_ids if unit_id in expected]
+
+
 def assert_rule_metrics_computed(
     metrics_df: pd.DataFrame,
     rule_columns: Iterable[str],
@@ -626,16 +626,7 @@ def assert_rule_metrics_computed(
             for unit_id in metrics_df.index
             if not _is_finite_metric_value(values.loc[unit_id])
         ]
-        expected = expected_missing[column]
-        if expected is None:
-            if non_finite:
-                raise ValueError(
-                    _unregistered_column_message(column, non_finite)
-                )
-            continue
-        failed = [unit_id for unit_id in non_finite if unit_id not in expected]
-        if failed:
-            raise ValueError(_computation_failure_message(column, failed))
+        _expected_missing_unit_ids(column, non_finite, expected_missing[column])
 
 
 # ---------- SpikeInterface metric-computation errors -------------------------

@@ -99,22 +99,19 @@ def accept_evaluation_outputs(
     The body of ``CurationEvaluation.accept_evaluation_outputs`` (see its
     docstring for the arguments).
     """
-    from spyglass.spikesorting.v2.curation import CurationV2
-
     curation_key = evaluated_curation_key(key)
     accepted = resolve_accepted_merges(
         table, key, merge_groups, use_all_suggested_merges
     )
-    effective_labels = table.get_labels(key) if labels is None else labels
-    return CurationV2.insert_curation(
-        {"sorting_id": curation_key["sorting_id"]},
-        labels=effective_labels or None,
-        merge_groups=accepted or None,
+    return _insert_evaluation_child(
+        table,
+        key,
+        curation_key,
+        accepted,
+        labels,
         apply_merge=bool(accepted),
-        parent_curation_id=curation_key["curation_id"],
-        description=description,
-        curation_source="curation_evaluation",
         label_policy=label_policy,
+        description=description,
         allow_custom_labels=allow_custom_labels,
         reuse_existing=reuse_existing,
     )
@@ -179,8 +176,6 @@ def create_preview_curation(
 
     Returns the child's ``{"sorting_id", "curation_id"}``.
     """
-    from spyglass.spikesorting.v2.curation import CurationV2
-
     curation_key = evaluated_curation_key(key)
     accepted = resolve_accepted_merges(
         table, key, merge_groups, use_all_suggested_merges
@@ -194,12 +189,47 @@ def create_preview_curation(
             "call use_evaluation_labels() or overlay_evaluation_labels() "
             "instead."
         )
+    return _insert_evaluation_child(
+        table,
+        key,
+        curation_key,
+        accepted,
+        labels,
+        apply_merge=False,
+        label_policy=label_policy,
+        description=description,
+        allow_custom_labels=allow_custom_labels,
+        reuse_existing=reuse_existing,
+    )
+
+
+def _insert_evaluation_child(
+    table,
+    key,
+    curation_key: dict,
+    accepted: list[list[int]],
+    labels: dict | None,
+    *,
+    apply_merge: bool,
+    label_policy: str,
+    description: str,
+    allow_custom_labels: bool,
+    reuse_existing: bool,
+) -> dict:
+    """Insert an evaluation-sourced child of the evaluated curation.
+
+    ``labels=None`` takes the evaluation's proposed labels
+    (``table.get_labels``). Returns the child's
+    ``{"sorting_id", "curation_id"}``.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
     effective_labels = table.get_labels(key) if labels is None else labels
     return CurationV2.insert_curation(
         {"sorting_id": curation_key["sorting_id"]},
         labels=effective_labels or None,
         merge_groups=accepted or None,
-        apply_merge=False,
+        apply_merge=apply_merge,
         parent_curation_id=curation_key["curation_id"],
         description=description,
         curation_source="curation_evaluation",
