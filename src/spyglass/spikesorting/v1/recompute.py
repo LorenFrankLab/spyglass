@@ -157,6 +157,10 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         _ = this_env.pop("spyglass", None)  # ignore spyglass version
         return this_env
 
+    def namespace_dict(self, type_map):
+        """Return a dictionary of namespaces and their versions."""
+        return get_namespace_versions(type_map)
+
     def make(self, key):
         """Inventory the namespaces present in an analysis file."""
         query = SpikeSortingRecording() & key
