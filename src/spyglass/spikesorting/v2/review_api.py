@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from spyglass.spikesorting.v2._curation_transforms import (
     allocate_merged_unit_ids,
+    validate_merge_groups,
 )
 from spyglass.spikesorting.v2._figpack_curation import (
     annotations_payload_hash,
@@ -1081,23 +1082,11 @@ def _normalize_review_edits(
             )
         edited[uid] = values
 
-    normalized_groups = []
-    seen: set[int] = set()
-    for group in merge_groups:
-        members = tuple(sorted(map(int, group)))
-        if len(members) < 2 or len(set(members)) != len(members):
-            raise ValueError(
-                "FigPack merge groups must contain at least two distinct unit "
-                f"ids; got {list(group)}."
-            )
-        overlap = seen & set(members)
-        if overlap:
-            raise ValueError(
-                "FigPack merge groups must be disjoint; repeated unit ids: "
-                f"{sorted(overlap)}."
-            )
-        seen.update(members)
-        normalized_groups.append(members)
+    normalized_groups = [
+        tuple(sorted(map(int, group))) for group in merge_groups
+    ]
+    validate_merge_groups(normalized_groups, prefix="FigPack annotations: ")
+    seen = {unit_id for group in normalized_groups for unit_id in group}
     normalized_groups.sort(key=min)
     referenced = set(edited) | seen
     unknown_units = sorted(referenced - unit_ids)

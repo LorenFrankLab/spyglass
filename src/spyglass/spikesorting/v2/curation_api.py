@@ -10,7 +10,6 @@ this module deliberately has no optional FigPack imports.
 from __future__ import annotations
 
 import uuid
-from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -18,6 +17,7 @@ from typing import Any, Literal
 
 import pandas as pd
 
+from spyglass.spikesorting.v2._curation_transforms import validate_merge_groups
 from spyglass.spikesorting.v2._lookup_validation import lossless_int
 
 # Whether THIS call materialized a row ("computed") or found it already
@@ -56,22 +56,7 @@ def _normalize_merge_groups(groups) -> list[list[int]]:
         )
     if not normalized:
         raise ValueError("merge groups must contain at least one group.")
-    for group in normalized:
-        if len(group) < 2:
-            raise ValueError(
-                "each merge group must contain at least two unit ids; "
-                f"got {group}."
-            )
-        if len(set(group)) != len(group):
-            raise ValueError(
-                f"merge group contains duplicate unit ids: {group}."
-            )
-    counts = Counter(unit_id for group in normalized for unit_id in group)
-    repeated = sorted(unit_id for unit_id, n in counts.items() if n > 1)
-    if repeated:
-        raise ValueError(
-            f"merge groups must be disjoint; repeated unit ids: {repeated}."
-        )
+    validate_merge_groups(normalized)
     return normalized
 
 

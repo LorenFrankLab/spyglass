@@ -23,7 +23,7 @@ add no DB/SpikeInterface dependency of their own.)
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 
 from spyglass.spikesorting.v2._enums import CurationLabel
 from spyglass.spikesorting.v2._lookup_validation import lossless_int
@@ -377,6 +377,73 @@ def compose_curation_labels(
     return {k: v for k, v in composed.items() if v}
 
 
+def validate_merge_groups(
+    merge_groups: Iterable[Sequence[int]],
+    *,
+    unit_ids: Collection[int] | None = None,
+    unit_namespace: str = "",
+    prefix: str = "",
+) -> None:
+    """Reject merge groups that are not disjoint sets of at least 2 units.
+
+    Groups are checked in order. For each group: it has at least 2 members,
+    no member repeats, every member is in ``unit_ids`` (when given), and no
+    member belongs to an earlier group. The first violation raises.
+
+    Parameters
+    ----------
+    merge_groups : iterable of sequence of int
+        Merge groups whose members are already integer unit ids.
+    unit_ids : collection of int, optional
+        The unit ids a member must belong to. ``None`` skips the membership
+        check (the caller checks membership itself).
+    unit_namespace : str, optional
+        Names the ``unit_ids`` source in the membership error.
+    prefix : str, optional
+        Prepended to every error message (e.g. the calling method's name).
+
+    Raises
+    ------
+    ValueError
+        On the first group that is too small, repeats a member, references
+        a unit outside ``unit_ids``, or overlaps an earlier group.
+    """
+    seen: set[int] = set()
+    for group in merge_groups:
+        if len(group) < 2:
+            # Empty or singleton "merge groups" aren't merges; silently
+            # no-oping (empty) or renaming the singleton would hide a likely
+            # typo.
+            raise ValueError(
+                f"{prefix}merge_groups contains a group with fewer than 2 "
+                f"members ({group}); each merge group must contain at least "
+                "two unit ids (at least 2 units)."
+            )
+        if len(set(group)) != len(group):
+            # A group like [0, 0] passes the size check but would
+            # double-count contributor 0.
+            raise ValueError(
+                f"{prefix}merge_groups contains a group with duplicate "
+                f"members ({group}); each unit can appear at most once per "
+                "merge group."
+            )
+        if unit_ids is not None:
+            for unit_id in group:
+                if unit_id not in unit_ids:
+                    raise ValueError(
+                        f"{prefix}merge_groups references unit_id={unit_id} "
+                        f"that is not in {unit_namespace}."
+                    )
+        overlap = seen & set(group)
+        if overlap:
+            raise ValueError(
+                f"{prefix}merge_groups overlap on unit_ids {sorted(overlap)}; "
+                "merge groups must be disjoint (a unit can belong to at most "
+                "one merge group)."
+            )
+        seen.update(group)
+
+
 def allocate_merged_unit_ids(
     source_unit_ids: Iterable[int],
     merge_groups: Iterable[Sequence[int]],
@@ -386,8 +453,7 @@ def allocate_merged_unit_ids(
     This order matches the stored preview's merge leaders, so preview,
     committed rows, and review labels agree on each merged unit's ID.
     Contributor order within a group is preserved for metadata tie-breaking.
-    Callers validate group membership, size, uniqueness, and that groups do
-    not overlap.
+    Callers validate the groups first (:func:`validate_merge_groups`).
     """
     next_id = max(source_unit_ids, default=-1) + 1
     return {
@@ -463,45 +529,14 @@ def build_curated_unit_rows(
     ]
     # Validate ALL merge groups eagerly -- BEFORE any early return
     # below -- so a zero-unit sort with non-empty merge_groups raises
-    # rather than silently no-op. Checks: shape (>=2 members),
-    # intra-group uniqueness (no double-counting), id membership in
-    # by_id, and across-group overlap. ``merged_ids`` is populated
-    # here and reused by the non-merged-units loop later.
-    merged_ids: set[int] = set()
-    for int_group in normalized_groups:
-        if len(int_group) < 2:
-            # Empty or singleton "merge groups" aren't merges.
-            # Silently no-oping (empty) or renaming the singleton to
-            # max+1 would hide a likely typo; raise instead.
-            raise ValueError(
-                f"CurationV2.insert_curation: merge_groups contains "
-                f"a group with fewer than 2 members ({int_group}); "
-                "each merge group must have at least 2 units."
-            )
-        if len(set(int_group)) != len(int_group):
-            # ``len`` is list-length, not set-size: a group like
-            # [0, 0] passes the >=2 check but would double-count
-            # contributor 0 during staging.
-            raise ValueError(
-                f"CurationV2.insert_curation: merge_groups contains "
-                f"a group with duplicate members ({int_group}); "
-                "each unit can appear at most once per merge group."
-            )
-        for uid in int_group:
-            if uid not in by_id:
-                raise ValueError(
-                    f"CurationV2.insert_curation: merge_groups "
-                    f"references unit_id={uid} that is not in "
-                    f"Sorting.Unit for sorting_id={sorting_id}."
-                )
-        overlap = merged_ids & set(int_group)
-        if overlap:
-            raise ValueError(
-                f"CurationV2.insert_curation: merge_groups overlap "
-                f"on unit_ids {sorted(overlap)}. A unit can belong "
-                "to at most one merge group."
-            )
-        merged_ids.update(int_group)
+    # rather than silently no-op.
+    validate_merge_groups(
+        normalized_groups,
+        unit_ids=by_id,
+        unit_namespace=f"Sorting.Unit for sorting_id={sorting_id}",
+        prefix="CurationV2.insert_curation: ",
+    )
+    merged_ids = {uid for group in normalized_groups for uid in group}
 
     if not by_id:
         # Zero-unit sort with no merge groups -> empty curation.
