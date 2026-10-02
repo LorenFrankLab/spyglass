@@ -901,3 +901,141 @@ def pipeline_preset_specs() -> dict[str, dict]:
             ),
         ),
     }
+
+
+def quality_metric_default_rows() -> list[dict]:
+    """Shipped ``QualityMetricParameters`` rows, as raw insert input.
+
+    ``franklab_default`` and ``neuropixels_default`` carry the full metric set
+    (including the ``nn_advanced`` PCA metric); ``minimal`` computes only
+    ``snr``, ``isi_violation`` and ``firing_rate``.
+    """
+    # nn_advanced is a PCA metric -> these rows set skip_pc_metrics=False so
+    # the nn_noise_overlap column exists for the default auto-curation rule.
+    nn_kwargs = {
+        "n_components": 7,
+        "n_neighbors": 5,
+        "max_spikes": 20000,
+        "min_spikes": 10,
+        "seed": 0,
+    }
+    isi_kwargs = {"isi_threshold_ms": 2.0, "min_isi_ms": 0.0}
+    full_metrics = [
+        "snr",
+        "isi_violation",
+        "firing_rate",
+        "num_spikes",
+        "presence_ratio",
+        "amplitude_cutoff",
+        "nn_advanced",
+    ]
+    # franklab and neuropixels share the same full metric set today; build
+    # both from one payload so they cannot silently drift (a probe-specific
+    # divergence would be expressed as an explicit override here).
+    full_metric_kwargs = {
+        "snr": {"peak_sign": "neg"},
+        "isi_violation": isi_kwargs,
+        "nn_advanced": nn_kwargs,
+    }
+    rows = [
+        {
+            "metric_params_name": name,
+            "metric_names": full_metrics,
+            "metric_kwargs": full_metric_kwargs,
+            "skip_pc_metrics": False,
+        }
+        for name in ("franklab_default", "neuropixels_default")
+    ]
+    rows.append(
+        {
+            "metric_params_name": "minimal",
+            "metric_names": ["snr", "isi_violation", "firing_rate"],
+            "metric_kwargs": {
+                "snr": {"peak_sign": "neg"},
+                "isi_violation": isi_kwargs,
+            },
+            "skip_pc_metrics": True,
+        }
+    )
+    return rows
+
+
+def auto_curation_default_payloads() -> list[tuple[dict, list[dict]]]:
+    """Shipped ``AutoCurationRules`` masters with their ordered rule rows."""
+    return [
+        (
+            {
+                "auto_curation_rules_name": "none",
+                "auto_merge_preset": "none",
+            },
+            [],
+        ),
+        (
+            {
+                "auto_curation_rules_name": V1_NOISE_CURATION_RULES,
+                "auto_merge_preset": "none",
+            },
+            [
+                {
+                    "rule_index": 0,
+                    "rule_name": "nn_noise",
+                    "metric_name": "nn_noise_overlap",
+                    "operator": ">",
+                    "threshold": 0.1,
+                    "label": "noise",
+                    "missing_policy": "pass",
+                },
+                {
+                    "rule_index": 1,
+                    "rule_name": "nn_reject",
+                    "metric_name": "nn_noise_overlap",
+                    "operator": ">",
+                    "threshold": 0.1,
+                    "label": "reject",
+                    "missing_policy": "pass",
+                },
+            ],
+        ),
+        (
+            {
+                "auto_curation_rules_name": "similarity_merge",
+                "auto_merge_preset": "similarity_correlograms",
+            },
+            [],
+        ),
+        (
+            # Frank-lab default labeling set: thresholds the lab's ~2% ISI
+            # refractory policy in addition to nn_noise_overlap. ISI-violation
+            # units are labeled ``reject`` (not ``mua``) so they fall out of
+            # the default matchable-unit set (CurationV2.get_matchable_unit_ids
+            # excludes reject/noise/artifact). Merges stay a manual step, so
+            # this set runs no auto-merge (auto_merge_preset='none'). The
+            # metric-params row it pairs with must compute nn_advanced (for
+            # the nn_noise_overlap column) and isi_violation -- the shipped
+            # ``franklab_default`` QualityMetricParameters row does both.
+            {
+                "auto_curation_rules_name": FRANKLAB_CURATION_RULES,
+                "auto_merge_preset": "none",
+            },
+            [
+                {
+                    "rule_index": 0,
+                    "rule_name": "nn_noise",
+                    "metric_name": "nn_noise_overlap",
+                    "operator": ">",
+                    "threshold": 0.1,
+                    "label": "noise",
+                    "missing_policy": "pass",
+                },
+                {
+                    "rule_index": 1,
+                    "rule_name": "isi_reject",
+                    "metric_name": "isi_violation",
+                    "operator": ">",
+                    "threshold": 0.02,
+                    "label": "reject",
+                    "missing_policy": "pass",
+                },
+            ],
+        ),
+    ]
