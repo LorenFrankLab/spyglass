@@ -65,6 +65,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_unit_match_compute",
     "_unit_match_fetch",
     "_unit_match_inputs",
+    "_unit_match_readers",
     "_unitmatch_backend",
     "_units_nwb",
 ]
