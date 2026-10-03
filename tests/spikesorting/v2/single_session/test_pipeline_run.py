@@ -781,20 +781,26 @@ def test_run_v2_pipeline_pipeline_preset_wiring_to_run_summary(
 def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
     """The franklab MS4 pipeline preset runs end-to-end where MS4 is runnable.
 
-    ``mountainsort4`` appears in ``installed_sorters()`` but its ``ml_ms4alg``
-    backend is unavailable in the SI 0.104 test image. This inspects the
-    structured preflight report and self-skips ONLY when the sole failed check
-    is ``sorter_runtime_available`` (the ml_ms4alg backend gate) -- any other
-    preflight failure fails the test, so the narrow skip can't mask a real
-    regression. Where MS4 is runnable (preflight passes) it runs with
+    MS4 does not install on the NumPy 2 test image, so the test skips where
+    ``mountainsort4`` is absent from ``installed_sorters()``. Where it is
+    installed, its ``ml_ms4alg`` backend may still be unavailable; this
+    inspects the structured preflight report and self-skips ONLY when the sole
+    failed check is ``sorter_runtime_available`` (the ml_ms4alg backend gate)
+    -- any other preflight failure fails the test, so the narrow skip can't
+    mask a real regression. Where MS4 is runnable (preflight passes) it runs with
     ``preflight=False`` and asserts the MS4 sorter wiring; a sort crash is a
     test failure, not a skip.
     """
+    import spikeinterface.sorters as sis
+
     from spyglass.spikesorting.v2.pipeline import (
         preflight_v2_pipeline,
         run_v2_pipeline,
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    if "mountainsort4" not in sis.installed_sorters():
+        pytest.skip("mountainsort4 is not installed")
 
     nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
         polymer_smoke_session

@@ -265,43 +265,62 @@ def test_optional_matching_extra_resolution():
 
 
 def test_ms4_default_row_only_inserted_when_ms4_installed():
-    """MS4 runtime guard: the default row inserts iff MS4 is installed.
+    """MS4 runtime guard: the local default rows insert iff MS4 is installed.
 
     ``_DEFAULT_CONTENTS`` keeps the full catalog (MS4 rows included) for
-    introspection, but ``insert_default`` gates each SI sorter on
+    introspection, but ``insert_default`` gates each local SI sorter row on
     ``spikeinterface.sorters.installed_sorters()`` via
     ``_gated_default_rows``. On a platform without MS4 (the v2 SI-0.104
-    test image) the MS4 rows are routed to "skipped"; on a platform with
-    MS4 they are routed to "insertable". Without the gate, a v2 user who
-    inserts an uninstalled sorter's default row and then populates
-    ``Sorting`` hits an unhelpful SI "sorter not registered" error.
+    test image) the local MS4 rows are routed to "skipped"; on a platform
+    with MS4 they are routed to "insertable". The containerized MS4 row
+    always inserts, since its runtime ships in the image. Without the gate,
+    a v2 user who inserts an uninstalled sorter's local default row and then
+    populates ``Sorting`` hits an unhelpful SI "sorter not registered" error.
     """
     import spikeinterface.sorters as sis
 
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        is_container_backend,
+    )
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     # Assert the gating DECISION (independent of the live table state,
-    # which other tests may have populated).
+    # which other tests may have populated), per (sorter, params name) row.
     insertable, skipped = SorterParameters._gated_default_rows()
-    insertable_sorters = {row[0] for row in insertable}
-    skipped_sorters = {row[0] for row in skipped}
+    insertable_rows = {row[:2] for row in insertable}
+    skipped_rows = {row[:2] for row in skipped}
 
     # clusterless_thresholder is Spyglass-internal -> never gated.
-    assert "clusterless_thresholder" in insertable_sorters
-    assert "clusterless_thresholder" not in skipped_sorters
+    clusterless = {
+        row[:2]
+        for row in SorterParameters._DEFAULT_CONTENTS
+        if row[0] == "clusterless_thresholder"
+    }
+    assert clusterless and clusterless <= insertable_rows
+    assert not clusterless & skipped_rows
 
     # The catalog always advertises MS4 (introspection), regardless of
-    # install status.
-    assert any(
-        row[0] == "mountainsort4" for row in SorterParameters._DEFAULT_CONTENTS
-    )
+    # install status, as local rows plus a containerized one.
+    ms4_rows = [
+        row
+        for row in SorterParameters._DEFAULT_CONTENTS
+        if row[0] == "mountainsort4"
+    ]
+    local_ms4 = {
+        row[:2] for row in ms4_rows if not is_container_backend(row[5])
+    }
+    container_ms4 = {
+        row[:2] for row in ms4_rows if is_container_backend(row[5])
+    }
+    assert local_ms4 and container_ms4
 
+    assert container_ms4 <= insertable_rows
     if "mountainsort4" in sis.installed_sorters():
-        assert "mountainsort4" in insertable_sorters
-        assert "mountainsort4" not in skipped_sorters
+        assert local_ms4 <= insertable_rows
+        assert not local_ms4 & skipped_rows
     else:
-        assert "mountainsort4" in skipped_sorters
-        assert "mountainsort4" not in insertable_sorters
+        assert local_ms4 <= skipped_rows
+        assert not local_ms4 & insertable_rows
 
 
 def test_clusterless_schema_documents_dead_fields_or_drops_them():

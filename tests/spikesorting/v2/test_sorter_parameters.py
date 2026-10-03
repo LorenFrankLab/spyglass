@@ -48,36 +48,42 @@ def test_sorter_parameters_skips_uninstalled_sorters(monkeypatch):
     ``_DEFAULT_CONTENTS`` directly (bypassing the gate) would pass the
     decision test but fail here.
 
-    With ``installed_sorters()`` forced empty, every SI-registered default
-    row is gated out while the Spyglass-internal ``clusterless_thresholder``
-    row (never gated) still inserts. The skip is asserted on default
-    sorters genuinely absent from the box, whose rows are therefore
-    guaranteed clean (no earlier test inserted them) -- if the gate
-    regressed, those rows would appear.
+    With ``installed_sorters()`` forced empty, every local SI-registered
+    default row is gated out while the Spyglass-internal
+    ``clusterless_thresholder`` row (never gated) still inserts. The skip is
+    asserted on local default rows of sorters genuinely absent from the box,
+    whose rows are therefore guaranteed clean (no earlier test inserted
+    them) -- if the gate regressed, those rows would appear.
     """
     import spikeinterface.sorters as sis
 
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        is_container_backend,
+    )
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     real_installed = set(sis.installed_sorters())
-    si_default_sorters = {
-        row[0]
+    # Canaries: local default rows of SI sorters genuinely absent from this
+    # box. Containerized rows are never install-gated, so they are not
+    # canaries. We delete the canary rows first (a clean slate the
+    # persistent test DB may not give us -- deleting a local default Lookup
+    # row for an uninstalled, therefore unreferenced, sorter is safe) so that
+    # a row reappearing after insert_default unambiguously means the gate
+    # was bypassed.
+    clean_canaries = [
+        {"sorter": row[0], "sorter_params_name": row[1]}
         for row in SorterParameters._DEFAULT_CONTENTS
         if row[0] not in SorterParameters._NON_SI_SORTERS
-    }
-    # Canaries: SI default sorters genuinely absent from this box. We
-    # delete their rows first (a clean slate the persistent test DB may
-    # not give us -- deleting a default Lookup row for an uninstalled,
-    # therefore unreferenced, sorter is safe) so that a row reappearing
-    # after insert_default unambiguously means the gate was bypassed.
-    clean_canaries = si_default_sorters - real_installed
+        and row[0] not in real_installed
+        and not is_container_backend(row[5])
+    ]
     if not clean_canaries:
         pytest.skip(
             "every SI default sorter is installed; no clean canary row to "
             "verify the gated insert path against"
         )
-    for sorter in clean_canaries:
-        (SorterParameters & {"sorter": sorter}).delete(safemode=False)
+    for canary in clean_canaries:
+        (SorterParameters & canary).delete(safemode=False)
 
     monkeypatch.setattr(sis, "installed_sorters", lambda: [])
     SorterParameters.insert_default()
@@ -88,12 +94,12 @@ def test_sorter_parameters_skips_uninstalled_sorters(monkeypatch):
         "sorter_params_name": "default",
     }, "clusterless default row must insert even with no SI sorter installed"
 
-    # Every gated-out SI sorter stays absent: insert_default routed the
+    # Every gated-out SI sorter row stays absent: insert_default routed the
     # gating DECISION into the INSERT, it did not insert _DEFAULT_CONTENTS
     # wholesale.
-    for sorter in clean_canaries:
-        assert not (SorterParameters & {"sorter": sorter}), (
-            f"insert_default inserted uninstalled SI sorter {sorter!r} "
+    for canary in clean_canaries:
+        assert not (SorterParameters & canary), (
+            f"insert_default inserted uninstalled SI sorter row {canary!r} "
             "despite installed_sorters()==[]; the install gate was "
             "bypassed on the insert path."
         )
