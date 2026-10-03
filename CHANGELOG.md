@@ -154,9 +154,9 @@ or `log_export` positionally must pass them by keyword.
     `<1.13`), `spikeinterface==0.104.3`, `probeinterface>=0.3.2` (was `<0.3`),
     `jax<0.10` (was `<0.7.2`), `non-local-detector==0.6.9`,
     `ripple-detection>=1.7`, `deeplabcut[tf]>=3.0`, `keypoint-moseq>=0.6`;
-    declare `networkx` and `pydantic>=2`; drop the `panel>=1.4` pin, which
-    Spyglass does not import and which blocked `keypoint-moseq` 0.6 (it pins
-    `panel==0.14.4`) #1609
+    declare `networkx`, `numba` and `pydantic>=2`; drop the `panel>=1.4` pin,
+    which Spyglass does not import and which blocked `keypoint-moseq` 0.6 (it
+    pins `panel==0.14.4`) #1609
 - `environment.yml` and `environment_min.yml` move to NumPy 2 and `scipy>=1.13`;
     `environment.yml` installs `torch>=2` from pip instead of conda
     `pytorch<1.12` and no longer installs `mountainsort4`, which does not run on

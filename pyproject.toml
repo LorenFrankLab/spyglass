@@ -57,6 +57,8 @@ dependencies = [
   # NLD 0.6.9 uses the clip(a_min=..., a_max=...) keywords removed in JAX 0.10.
   # Keep the published detector API and test real fitting before moving these.
   "jax<0.10",
+  "numba",                          # SI locally_exclusive peak detection
+                                    # (clusterless) and burst-curation correlograms
   # The v2 SpikeInterface 0.104 stack pins numpy>=2 through the
   # `spikesorting-v2` / `spikesorting-v2-matching` extras; DeepLabCut 3.x and
   # keypoint-moseq 0.6 require numpy<2, so the base floor admits both lines.
