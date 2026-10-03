@@ -1,8 +1,8 @@
 """Memory contract of the analyzer cache: extraction and load stay out of core.
 
-Real measurements (``ru_maxrss`` of a fresh subprocess, normalized to bytes:
-macOS reports bytes, Linux KiB), not mocks. The
-subprocess builds a dense analyzer whose waveform volume is a few hundred MB
+Real measurements (peak RSS of a fresh subprocess: ``ru_maxrss`` on macOS,
+``VmHWM`` on Linux, where ``ru_maxrss`` inherits the parent's peak), not
+mocks. The subprocess builds a dense analyzer whose waveform volume is a few hundred MB
 and reports the peak-RSS growth of (a) waveform extraction and (b) a later
 load + per-unit read through ``load_analyzer_folder``. On this SpikeInterface
 pin the ``zarr`` path extracts into a whole-volume shared-memory buffer and
@@ -24,8 +24,22 @@ import textwrap
 
 import pytest
 
-_SCRIPT = textwrap.dedent("""
-    import json, resource, sys
+_MAXRSS = textwrap.dedent("""
+    import resource, sys
+    def maxrss():
+        # Peak RSS of this process, in bytes. Linux folds the parent's peak
+        # into a child's ru_maxrss at exec (pytest's, here), so read the
+        # process's own high-water mark there; ru_maxrss is bytes on macOS.
+        if sys.platform.startswith("linux"):
+            with open("/proc/self/status") as status:
+                for line in status:
+                    if line.startswith("VmHWM:"):
+                        return int(line.split()[1]) * 1024
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    """)
+
+_SCRIPT = _MAXRSS + textwrap.dedent("""
+    import json, sys
     from pathlib import Path
     import numpy as np
     import spikeinterface as si
@@ -41,10 +55,6 @@ _SCRIPT = textwrap.dedent("""
         generate_sorting_kwargs=dict(firing_rates=25.0, refractory_period_ms=2.0),
         seed=0,
     )
-    def maxrss():
-        # ru_maxrss is bytes on macOS but KiB on Linux (getrusage(2)).
-        value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        return value * 1024 if sys.platform.startswith("linux") else value
     folder = workdir / f"gate{ANALYZER_FOLDER_SUFFIX}"
     params = {
         "ms_before": 1.0, "ms_after": 2.0, "max_spikes_per_unit": 20000,
@@ -61,14 +71,14 @@ _SCRIPT = textwrap.dedent("""
     build_delta = maxrss() - base
     wf_file = folder / "extensions" / "waveforms" / "waveforms.npy"
     volume = wf_file.stat().st_size
-    # ru_maxrss is monotonic; measure the load in a second process for a clean
+    # Peak RSS is monotonic; measure the load in a second process for a clean
     # baseline.
     print(json.dumps({"volume": int(volume), "build_delta": int(build_delta),
                       "folder": str(folder)}))
     """)
 
-_ZARR_SCRIPT = textwrap.dedent("""
-    import json, resource, sys
+_ZARR_SCRIPT = _MAXRSS + textwrap.dedent("""
+    import json, sys
     from pathlib import Path
     import spikeinterface as si
     workdir = Path(sys.argv[1])
@@ -78,10 +88,6 @@ _ZARR_SCRIPT = textwrap.dedent("""
         generate_sorting_kwargs=dict(firing_rates=25.0, refractory_period_ms=2.0),
         seed=0,
     )
-    def maxrss():
-        # ru_maxrss is bytes on macOS but KiB on Linux (getrusage(2)).
-        value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        return value * 1024 if sys.platform.startswith("linux") else value
     base = maxrss()
     an = si.create_sorting_analyzer(
         sort, rec, format="zarr", folder=workdir / "gate.zarr", sparse=False,
@@ -99,15 +105,11 @@ _ZARR_SCRIPT = textwrap.dedent("""
                       "build_delta": int(maxrss() - base)}))
     """)
 
-_LOAD_SCRIPT = textwrap.dedent("""
-    import json, resource, sys
+_LOAD_SCRIPT = _MAXRSS + textwrap.dedent("""
+    import json, sys
     import numpy as np
     from spyglass.spikesorting.v2._analyzer_cache import load_analyzer_folder
     folder = sys.argv[1]
-    def maxrss():
-        # ru_maxrss is bytes on macOS but KiB on Linux (getrusage(2)).
-        value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        return value * 1024 if sys.platform.startswith("linux") else value
     base = maxrss()
     analyzer = load_analyzer_folder(folder)
     ext = analyzer.get_extension("waveforms")
