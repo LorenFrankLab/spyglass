@@ -1706,9 +1706,13 @@ def test_unitmatch_records_backend_version(two_session_curated_group):
     assert row["matcher_backend"] == (
         "spyglass.spikesorting.v2._unitmatch_backend"
     )
-    assert row["matcher_backend_version"] == importlib.metadata.version(
-        "unitmatchpy"
-    )
+    # The single-session path never calls UnitMatchPy, so it also runs (and
+    # records NULL) where the optional package is not installed.
+    try:
+        expected_version = importlib.metadata.version("unitmatchpy")
+    except importlib.metadata.PackageNotFoundError:
+        expected_version = None
+    assert row["matcher_backend_version"] == expected_version
 
 
 @pytest.mark.slow
