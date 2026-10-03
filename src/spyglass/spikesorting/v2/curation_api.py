@@ -1,0 +1,1707 @@
+"""Public, identity-safe facade for Spike Sorting V2 curation.
+
+The table classes remain the expert layer.  This module provides the smaller
+scripted surface used by notebooks and automation: a generation-pinned
+``CurationRef``, evaluation snapshots, merge/evaluate receipts, and lifecycle
+inspection.  Browser review entry points are added by the FigPack review layer;
+this module deliberately has no optional FigPack imports.
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Any, Literal
+
+import pandas as pd
+
+from spyglass.spikesorting.v2._curation_transforms import (
+    group_contributor_rows,
+    inherit_parent_labels,
+    is_merge_preview,
+    normalize_label_state,
+    validate_merge_groups,
+)
+from spyglass.spikesorting.v2._lookup_validation import lossless_int
+
+# Whether THIS call materialized a row ("computed") or found it already
+# present ("reused"). Distinct from the pipeline-level ``StageStatus`` in
+# ``_pipeline_types`` (which adds "skipped") and from the review layer's
+# ``ReviewStageState`` (which adds "complete").
+MaterializationStatus = Literal["computed", "reused"]
+CommitStatus = Literal["preview", "committed"]
+
+
+def _uuid(value) -> uuid.UUID:
+    """Normalize UUID-like values returned by DataJoint drivers."""
+    return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+
+
+def _normalize_merge_groups(groups) -> list[list[int]]:
+    """Validate merge-group SHAPE (DB-free): containers, ids, no overlaps."""
+    if isinstance(groups, (str, bytes, Mapping)) or not isinstance(
+        groups, Iterable
+    ):
+        raise ValueError(
+            "merge groups must be a sequence of unit-id sequences; got "
+            f"{type(groups).__name__}."
+        )
+    normalized: list[list[int]] = []
+    for group in groups:
+        if isinstance(group, (str, bytes, Mapping)) or not isinstance(
+            group, Iterable
+        ):
+            raise ValueError(
+                "each merge group must be a sequence of unit ids; got "
+                f"{group!r} ({type(group).__name__})."
+            )
+        normalized.append(
+            [lossless_int(unit_id, "unit id") for unit_id in group]
+        )
+    if not normalized:
+        raise ValueError("merge groups must contain at least one group.")
+    validate_merge_groups(normalized)
+    return normalized
+
+
+def _require_outside_merge_evaluation_transaction() -> None:
+    """Reject orchestration before it can perform any nested write."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    if CurationV2.connection.in_transaction:
+        raise RuntimeError(
+            "merge_and_evaluate must be called outside any open DataJoint "
+            "transaction; populate manages its own transaction."
+        )
+
+
+@dataclass(frozen=True)
+class CurationOperation:
+    """Schema-free provenance summary for one curation operation."""
+
+    producer: str
+    change_kind: str
+
+
+def _curation_operation(row, groups, labels, parent_labels):
+    """Describe a curation from one snapshot of its row and part data."""
+    if int(row["parent_curation_id"]) == -1:
+        kind = "initial"
+    else:
+        has_merge = any(len(group) > 1 for group in groups.values())
+        inherited = _inherited_labels_after_operation(
+            normalize_label_state(parent_labels),
+            groups,
+            merges_applied=bool(row["merges_applied"]),
+        )
+        has_labels = normalize_label_state(labels) != inherited
+        if has_merge and has_labels:
+            kind = "merge+label"
+        elif has_merge:
+            kind = "merge"
+        elif has_labels:
+            kind = "label"
+        else:
+            kind = "no_change"
+    return CurationOperation(str(row["curation_source"]), kind)
+
+
+def _group_curation_parts(rows, field):
+    """Index part values by curation and unit, preserving fetch order."""
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(int(row["curation_id"]), {}).setdefault(
+            int(row["unit_id"]), []
+        ).append(row[field])
+    return grouped
+
+
+def _contributor_groups_by_curation(
+    relation, contributor_field: str
+) -> dict[int, dict[int, list[int]]]:
+    """Fetch merge-provenance rows once and group them per curation.
+
+    Returns ``{curation_id: {unit_id: [contributor, ...]}}`` with units and
+    contributors in ascending order, the per-curation grouping
+    ``CurationV2._fetch_contributor_groups`` returns.
+    """
+    rows = relation.fetch(
+        "curation_id",
+        "unit_id",
+        contributor_field,
+        as_dict=True,
+        order_by=("curation_id", "unit_id", contributor_field),
+    )
+    by_curation: dict[int, list[dict]] = {}
+    for row in rows:
+        by_curation.setdefault(int(row["curation_id"]), []).append(row)
+    return {
+        curation_id: group_contributor_rows(curation_rows, contributor_field)
+        for curation_id, curation_rows in by_curation.items()
+    }
+
+
+@dataclass(frozen=True)
+class CurationDeletePreview:
+    """Leaf-first deletion inventory for a curation subtree."""
+
+    root: "CurationRef"
+    leaf_first: tuple["CurationRef", ...]
+
+    @property
+    def count(self) -> int:
+        return len(self.leaf_first)
+
+
+@dataclass(frozen=True)
+class CurationDeleteReceipt:
+    """Identity snapshots of the rows removed by a subtree deletion."""
+
+    deleted: tuple["CurationRef", ...]
+
+    @property
+    def count(self) -> int:
+        return len(self.deleted)
+
+
+@dataclass(frozen=True)
+class CurationRef:
+    """A curation handle pinned to one immutable row generation.
+
+    The numeric ``curation_id`` is ergonomic but reusable after deletion.
+    Every database-consuming operation therefore verifies ``curation_uuid``
+    again and raises ``CurationNotFoundError`` if the row is gone or replaced.
+    """
+
+    sorting_id: uuid.UUID
+    curation_id: int
+    curation_uuid: uuid.UUID
+
+    @classmethod
+    def from_key(cls, key: Mapping[str, Any] | "CurationRef") -> "CurationRef":
+        """Validate a curation key and pin its generation UUID.
+
+        A bare ``{sorting_id, curation_id}`` key resolves the CURRENT
+        generation of that numeric id. A key that also carries
+        ``curation_uuid`` (a ``CurationRef``, its ``dataclasses.asdict``
+        form, a fetched row, a persisted snapshot) pins THAT generation:
+        if the numeric id was deleted and reused, ``CurationNotFoundError``
+        is raised rather than silently resolving the replacement row.
+        """
+        if isinstance(key, cls):
+            key._current_row()
+            return key
+        missing = {"sorting_id", "curation_id"} - set(key)
+        if missing:
+            raise ValueError(
+                "CurationRef.from_key requires sorting_id and curation_id; "
+                f"missing {sorted(missing)}."
+            )
+        from spyglass.spikesorting.v2.curation import CurationV2
+        from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
+
+        dj_key = {
+            "sorting_id": key["sorting_id"],
+            "curation_id": lossless_int(key["curation_id"], "curation_id"),
+        }
+        rows = (CurationV2 & dj_key).fetch("curation_uuid")
+        if len(rows) != 1:
+            raise CurationNotFoundError(
+                "CurationRef.from_key: no current CurationV2 row for "
+                f"sorting_id={dj_key['sorting_id']}, "
+                f"curation_id={dj_key['curation_id']}."
+            )
+        current_uuid = _uuid(rows[0])
+        # Presence, not truthiness: a supplied null/invalid uuid is refused by
+        # _uuid rather than silently treated as an omitted field.
+        if "curation_uuid" in key:
+            supplied = _uuid(key["curation_uuid"])
+            if supplied != current_uuid:
+                raise CurationNotFoundError(
+                    "CurationRef.from_key: key carries a stale curation_uuid "
+                    f"for sorting_id={dj_key['sorting_id']}, "
+                    f"curation_id={dj_key['curation_id']} (supplied "
+                    f"{supplied}, current {current_uuid}); the numeric id was "
+                    "replaced. Resolve a fresh CurationRef from the intended "
+                    "curation."
+                )
+        return cls(
+            sorting_id=_uuid(dj_key["sorting_id"]),
+            curation_id=dj_key["curation_id"],
+            curation_uuid=current_uuid,
+        )
+
+    def _unchecked_key(self) -> dict[str, Any]:
+        return {
+            "sorting_id": self.sorting_id,
+            "curation_id": self.curation_id,
+        }
+
+    def _current_row(self) -> dict[str, Any]:
+        """Fetch this exact generation or raise the typed stale-ref error."""
+        from spyglass.spikesorting.v2.curation import CurationV2
+        from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
+
+        rows = (CurationV2 & self._unchecked_key()).fetch(as_dict=True)
+        current_uuid = (
+            _uuid(rows[0]["curation_uuid"]) if len(rows) == 1 else None
+        )
+        if current_uuid != self.curation_uuid:
+            detail = "was deleted" if current_uuid is None else "was replaced"
+            raise CurationNotFoundError(
+                "CurationRef no longer identifies its CurationV2 generation: "
+                f"sorting_id={self.sorting_id}, curation_id={self.curation_id} "
+                f"{detail} (expected curation_uuid={self.curation_uuid}, "
+                f"current={current_uuid}). Resolve a fresh CurationRef from "
+                "the intended curation."
+            )
+        return rows[0]
+
+    def as_key(self) -> dict[str, Any]:
+        """Return the expert-layer key after re-validating row identity."""
+        self._current_row()
+        return self._unchecked_key()
+
+    @property
+    def merge_id(self) -> uuid.UUID | None:
+        """Return this exact curation's downstream merge id, if registered.
+
+        Returns
+        -------
+        uuid.UUID or None
+            The ``merge_id`` of this curation's
+            ``SpikeSortingOutput.CurationV2`` row, or ``None`` if the curation
+            is not registered there.
+
+        Raises
+        ------
+        CurationNotFoundError
+            If this ref's generation was deleted or replaced.
+        RuntimeError
+            If more than one ``SpikeSortingOutput.CurationV2`` row exists for
+            the curation.
+        """
+        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+        key = self.as_key()
+        merge_ids = (SpikeSortingOutput.CurationV2 & key).fetch("merge_id")
+        if len(merge_ids) > 1:
+            raise RuntimeError(
+                "CurationRef.merge_id: expected at most one curated merge row "
+                f"for {key}; found {len(merge_ids)}."
+            )
+        return _uuid(merge_ids[0]) if len(merge_ids) else None
+
+    @property
+    def member_merge_ids(self) -> Mapping[int, uuid.UUID]:
+        """Return concat member ``member_index -> merge_id`` outputs.
+
+        Returns
+        -------
+        Mapping[int, uuid.UUID]
+            Read-only mapping from ``member_index`` to the ``merge_id`` of
+            each ``ConcatMemberCuration`` row of this curation that is
+            registered in ``SpikeSortingOutput.ConcatMemberCuration``. Empty
+            for a curation of a single-recording sort, or before the member
+            rows are populated and registered.
+
+        Raises
+        ------
+        CurationNotFoundError
+            If this ref's generation was deleted or replaced.
+        """
+        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+        from spyglass.spikesorting.v2.concat_member_curation import (
+            ConcatMemberCuration,
+        )
+
+        rows = (
+            ConcatMemberCuration * SpikeSortingOutput.ConcatMemberCuration
+            & self.as_key()
+        ).fetch("member_index", "merge_id", as_dict=True)
+        return MappingProxyType(
+            {int(row["member_index"]): _uuid(row["merge_id"]) for row in rows}
+        )
+
+    @property
+    def parent(self) -> "CurationRef | None":
+        """Return the parent curation, or ``None`` for a root curation.
+
+        Returns
+        -------
+        CurationRef or None
+            A ref to the current generation of the row named by this
+            curation's ``parent_curation_id``; ``None`` when
+            ``parent_curation_id`` is ``-1``.
+
+        Raises
+        ------
+        CurationNotFoundError
+            If this ref's generation was deleted or replaced, or no
+            ``CurationV2`` row exists for the parent id.
+        """
+        row = self._current_row()
+        parent_id = int(row["parent_curation_id"])
+        if parent_id == -1:
+            return None
+        return type(self).from_key(
+            {"sorting_id": self.sorting_id, "curation_id": parent_id}
+        )
+
+    @property
+    def children(self) -> tuple["CurationRef", ...]:
+        """Return the direct child curations, ordered by ``curation_id``.
+
+        Returns
+        -------
+        tuple[CurationRef, ...]
+            One ref per ``CurationV2`` row of the same sort whose
+            ``parent_curation_id`` is this curation's id, each pinned to the
+            generation read here. Empty for a leaf.
+
+        Raises
+        ------
+        CurationNotFoundError
+            If this ref's generation was deleted or replaced.
+        """
+        from spyglass.spikesorting.v2.curation import CurationV2
+
+        self._current_row()
+        # One fetch carries each child's generation UUID; building the refs
+        # from these rows pins exactly the generations seen in this read.
+        rows = (
+            CurationV2
+            & {
+                "sorting_id": self.sorting_id,
+                "parent_curation_id": self.curation_id,
+            }
+        ).fetch(
+            "curation_id", "curation_uuid", order_by="curation_id", as_dict=True
+        )
+        return tuple(
+            type(self)(
+                sorting_id=self.sorting_id,
+                curation_id=int(row["curation_id"]),
+                curation_uuid=_uuid(row["curation_uuid"]),
+            )
+            for row in rows
+        )
+
+    @property
+    def commit_status(self) -> CommitStatus:
+        """Return whether this curation is committed or a merge preview.
+
+        Returns
+        -------
+        {"committed", "preview"}
+            ``"preview"`` when the curation records proposed merge groups it
+            did not apply (``CurationV2.is_committed_curation`` is false);
+            ``"committed"`` for a root, a label-only child, or an
+            applied-merge child.
+
+        Raises
+        ------
+        CurationNotFoundError
+            If this ref's generation was deleted or replaced.
+        """
+        from spyglass.spikesorting.v2.curation import CurationV2
+
+        row = self._current_row()
+        committed = CurationV2.is_committed_curation(
+            self._unchecked_key(), merges_applied=row["merges_applied"]
+        )
+        return "committed" if committed else "preview"
+
+    @property
+    def is_root(self) -> bool:
+        """Return whether this is a root curation (``parent_curation_id`` -1).
+
+        Raises
+        ------
+        CurationNotFoundError
+            If this ref's generation was deleted or replaced.
+        """
+        return int(self._current_row()["parent_curation_id"]) == -1
+
+    @property
+    def is_leaf(self) -> bool:
+        """Return whether this curation has no child curations.
+
+        Raises
+        ------
+        CurationNotFoundError
+            If this ref's generation was deleted or replaced.
+        """
+        return not self.children
+
+    @property
+    def created_at(self):
+        """Return the database timestamp recorded for this curation.
+
+        Returns
+        -------
+        datetime.datetime
+            The row's ``created_at`` value, set by the database to the insert
+            time.
+
+        Raises
+        ------
+        CurationNotFoundError
+            If this ref's generation was deleted or replaced.
+        """
+        return self._current_row()["created_at"]
+
+    @property
+    def created_by(self) -> str:
+        """Return the database user recorded for this curation.
+
+        Returns
+        -------
+        str
+            The row's ``created_by`` value: the ``dj.config["database.user"]``
+            that ``CurationV2.insert_curation`` recorded when it inserted the
+            row.
+
+        Raises
+        ------
+        CurationNotFoundError
+            If this ref's generation was deleted or replaced.
+        """
+        return str(self._current_row()["created_by"])
+
+    @property
+    def has_committed_children(self) -> bool:
+        """Return whether any direct child curation is committed.
+
+        Returns
+        -------
+        bool
+            ``True`` if at least one of :attr:`children` has
+            :attr:`commit_status` ``"committed"``; ``False`` for a leaf or
+            when every child is a merge preview.
+
+        Raises
+        ------
+        CurationNotFoundError
+            If this ref's generation, or a child's, was deleted or replaced
+            while it was being read.
+        """
+        return any(
+            child.commit_status == "committed" for child in self.children
+        )
+
+    @property
+    def operation_type(self) -> CurationOperation:
+        """Return producer plus the change kind derived from actual part rows."""
+        from spyglass.spikesorting.v2.curation import CurationV2
+
+        row = self._current_row()
+        if int(row["parent_curation_id"]) == -1:
+            return CurationOperation(
+                producer=str(row["curation_source"]), change_kind="initial"
+            )
+
+        key = self._unchecked_key()
+        groups = CurationV2.get_unit_contributor_groups(key)
+        current_labels = CurationV2._labels_by_unit(key)
+        parent_key = {
+            "sorting_id": self.sorting_id,
+            "curation_id": int(row["parent_curation_id"]),
+        }
+        return _curation_operation(
+            row, groups, current_labels, CurationV2._labels_by_unit(parent_key)
+        )
+
+    def evaluate(
+        self,
+        *,
+        metric_params_name: str,
+        auto_curation_rules_name: str,
+    ) -> "EvaluationResult":
+        """Create/reuse and populate an evaluation over this curation."""
+        self.as_key()
+        spec = EvaluationSpec(
+            metric_params_name=metric_params_name,
+            auto_curation_rules_name=auto_curation_rules_name,
+        )
+        return _evaluate_curation(self, spec)
+
+    def start_review(
+        self,
+        profile,
+        *,
+        upload: bool = False,
+        ephemeral: bool = False,
+        annotation_sets=(),
+        display_options=None,
+    ):
+        """Start/reuse a seeded browser review over this exact generation.
+
+        ``display_options`` (``ReviewDisplayOptions`` / mapping / ``None``)
+        bounds the browser payload and is persisted with the review.
+        """
+        from spyglass.spikesorting.v2.review_api import start_review
+
+        return start_review(
+            self,
+            profile,
+            upload=upload,
+            ephemeral=ephemeral,
+            annotation_sets=annotation_sets,
+            display_options=display_options,
+        )
+
+    def open_analyzer(self, *, extra_extensions=None):
+        """Context manager: a disk-backed WORKING COPY of this curation's
+        display analyzer.
+
+        Expert SpikeInterface access over exactly this generation's units (a
+        merged child's merged units), in real microvolts. The copy lives in a
+        temp directory under Spyglass's temp dir and is removed on exit;
+        mutating it cannot touch the published cache. ``extra_extensions``
+        (``{name: params}``) are resolved into the published cache /
+        parameter-keyed derivative first, so repeated calls with the same
+        parameters reuse them. The whitened metric analyzer is an
+        evaluation-internal object and is not exposed here.
+        """
+        from spyglass.spikesorting.v2._curation_analyzer import (
+            open_curation_analyzer,
+        )
+        from spyglass.spikesorting.v2.sorting import Sorting
+
+        recipe = (Sorting & {"sorting_id": self.sorting_id}).fetch1(
+            "display_waveform_params_name"
+        )
+        return open_curation_analyzer(
+            self, recipe, "display", extra_extensions=extra_extensions
+        )
+
+    def preview_merges(
+        self, groups: Sequence[Sequence[int]], **kwargs
+    ) -> "CurationRef":
+        """Create/reuse a manual preview child from this typed parent."""
+        return preview_merges(parent_curation=self, groups=groups, **kwargs)
+
+    def commit_merges(
+        self, groups: Sequence[Sequence[int]], **kwargs
+    ) -> "CurationRef":
+        """Create/reuse a committed manual merge child without evaluation."""
+        return commit_merges(parent_curation=self, groups=groups, **kwargs)
+
+    def lineage(self) -> tuple["CurationRef", ...]:
+        """Return ancestors from root through this curation."""
+        lineage: list[CurationRef] = []
+        current: CurationRef | None = self
+        seen: set[tuple[uuid.UUID, int]] = set()
+        while current is not None:
+            identity = (current.sorting_id, current.curation_id)
+            if identity in seen:
+                raise RuntimeError(
+                    "Curation lineage contains a cycle at "
+                    f"sorting_id={current.sorting_id}, "
+                    f"curation_id={current.curation_id}."
+                )
+            seen.add(identity)
+            lineage.append(current)
+            current = current.parent
+        return tuple(reversed(lineage))
+
+    def visualize_lineage(self) -> str:
+        """Return a compact text tree for every curation in this sorting."""
+        from spyglass.spikesorting.v2.curation import CurationV2
+
+        self._current_row()
+        rows = (CurationV2 & {"sorting_id": self.sorting_id}).fetch(
+            as_dict=True, order_by="curation_id"
+        )
+        key = {"sorting_id": self.sorting_id}
+        labels = _group_curation_parts(
+            (CurationV2.UnitLabel & key).fetch(as_dict=True), "curation_label"
+        )
+        groups = _contributor_groups_by_curation(
+            CurationV2.ParentMergeGroup & key, "parent_unit_id"
+        )
+        # Match get_unit_contributor_groups: a child (any ParentMergeGroup
+        # rows) uses its parent namespace; a root uses its raw MergeGroup.
+        root_keys = [
+            {"curation_id": row["curation_id"]}
+            for row in rows
+            if int(row["curation_id"]) not in groups
+        ]
+        if root_keys:
+            groups.update(
+                _contributor_groups_by_curation(
+                    CurationV2.MergeGroup & key & root_keys,
+                    "contributor_unit_id",
+                )
+            )
+        by_parent: dict[int, list[dict[str, Any]]] = {}
+        for row in rows:
+            by_parent.setdefault(int(row["parent_curation_id"]), []).append(row)
+        lines: list[str] = []
+
+        def visit(row, prefix: str) -> None:
+            cid = int(row["curation_id"])
+            marker = (
+                "*"
+                if _uuid(row["curation_uuid"]) == self.curation_uuid
+                else "-"
+            )
+            contributors = groups.get(cid, {})
+            operation = _curation_operation(
+                row,
+                contributors,
+                labels.get(cid, {}),
+                labels.get(int(row["parent_curation_id"]), {}),
+            )
+            status = (
+                "preview"
+                if is_merge_preview(row["merges_applied"], contributors)
+                else "committed"
+            )
+            lines.append(
+                f"{prefix}{marker} curation {cid} "
+                f"[{status}; {operation.producer}/"
+                f"{operation.change_kind}]"
+            )
+            for child in by_parent.get(cid, []):
+                visit(child, prefix + "  ")
+
+        for root in by_parent.get(-1, []):
+            visit(root, "")
+        return "\n".join(lines)
+
+    def preview_curation_delete(self) -> CurationDeletePreview:
+        """Inventory this subtree in the leaf-first order deletion will use."""
+        self._current_row()
+        leaf_first: list[CurationRef] = []
+
+        def visit(ref: CurationRef) -> None:
+            for child in ref.children:
+                visit(child)
+            leaf_first.append(ref)
+
+        visit(self)
+        return CurationDeletePreview(root=self, leaf_first=tuple(leaf_first))
+
+    def delete_subtree(self, *, safemode: bool = True) -> CurationDeleteReceipt:
+        """Delete this curation and descendants leaf-up without orphaning lineage."""
+        from spyglass.spikesorting.v2.curation import CurationV2
+
+        preview = self.preview_curation_delete()
+        for ref in preview.leaf_first:
+            (CurationV2 & ref._unchecked_key()).delete(safemode=safemode)
+        return CurationDeleteReceipt(deleted=preview.leaf_first)
+
+    def health_report(self) -> Mapping[str, Any]:
+        """Compose lineage and analyzer-cache health for this sorting."""
+        from spyglass.spikesorting.v2.curation import CurationV2
+        from spyglass.spikesorting.v2.sorting import Sorting
+
+        self._current_row()
+        lineage = CurationV2.audit_orphaned_lineage(sorting_id=self.sorting_id)
+        analyzer = Sorting.find_orphaned_analyzer_folders(
+            sorting_id=self.sorting_id, dry_run=True
+        )
+        return MappingProxyType(
+            {"orphaned_lineage": tuple(lineage), "analyzer_cache": analyzer}
+        )
+
+    def summarize(
+        self,
+        *,
+        evaluation: "EvaluationResult | None" = None,
+        annotation_sets=None,
+    ) -> dict:
+        """Summarize this curation and explicitly selected unit properties."""
+        from spyglass.spikesorting.v2.curation import CurationV2
+
+        return CurationV2.summarize_curation(
+            self.as_key(),
+            evaluation=evaluation,
+            annotation_sets=annotation_sets,
+        )
+
+
+def _inherited_labels_after_operation(
+    parent_labels: Mapping[int, tuple[str, ...]],
+    groups: Mapping[int, Sequence[int]],
+    *,
+    merges_applied: bool,
+) -> dict[int, tuple[str, ...]]:
+    """Predict label inheritance so a pure merge is not called a label edit."""
+    if not merges_applied:
+        return dict(parent_labels)
+    return {
+        unit_id: tuple(labels)
+        for unit_id, labels in inherit_parent_labels(
+            parent_labels, groups, apply_merge=True
+        ).items()
+    }
+
+
+@dataclass(frozen=True)
+class EvaluationSpec:
+    """The exact metric and rule recipes used for an evaluation."""
+
+    metric_params_name: str
+    auto_curation_rules_name: str
+
+
+class EvaluationPlots:
+    """Controlled plotting facade for one persisted evaluation."""
+
+    def __init__(self, result: "EvaluationResult"):
+        self._result = result
+
+    def _call(self, method: str, *args, **kwargs):
+        from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+        key = self._result._current_evaluation_key()
+        return getattr(CurationEvaluation(), method)(key, *args, **kwargs)
+
+    def metrics(self, **kwargs):
+        return self._call("plot_metrics", **kwargs)
+
+    def units_qc(self, **kwargs):
+        return self._call("plot_units_qc", **kwargs)
+
+    def correlograms(self, **kwargs):
+        return self._call("plot_correlograms", **kwargs)
+
+    def suggested_merges(self, **kwargs):
+        return self._call("plot_suggested_merges", **kwargs)
+
+    def si_quality_metrics(self, **kwargs):
+        return self._call("plot_si_quality_metrics", **kwargs)
+
+    def si_template_metrics(self, **kwargs):
+        return self._call("plot_si_template_metrics", **kwargs)
+
+    def pair_correlograms(self, pairs, **kwargs):
+        return self._call("investigate_pair_xcorrel", pairs, **kwargs)
+
+    def pair_peaks(self, pairs, **kwargs):
+        return self._call("investigate_pair_peaks", pairs, **kwargs)
+
+    def peak_over_time(self, pairs, **kwargs):
+        return self._call("plot_peak_over_time", pairs, **kwargs)
+
+    def burst_pair_metrics(self, pairs=None, **kwargs):
+        return self._call("plot_burst_pair_metrics", pairs=pairs, **kwargs)
+
+
+@dataclass(frozen=True, init=False)
+class EvaluationResult:
+    """Point-in-time evaluation snapshot with defensive mutable-value copies."""
+
+    curation: CurationRef
+    spec: EvaluationSpec
+    evaluation_id: uuid.UUID
+    warnings: tuple[str, ...]
+    _metrics: pd.DataFrame = field(repr=False, compare=False)
+    _suggested_merges: tuple[tuple[int, ...], ...] = field(
+        repr=False, compare=False
+    )
+    _proposed_labels: tuple[tuple[int, tuple[str, ...]], ...] = field(
+        repr=False, compare=False
+    )
+
+    def __init__(
+        self,
+        *,
+        curation: CurationRef,
+        spec: EvaluationSpec,
+        evaluation_id,
+        metrics: pd.DataFrame,
+        suggested_merges: Sequence[Sequence[int]],
+        proposed_labels: Mapping[int, Sequence[str]],
+        warnings: Sequence[str] = (),
+    ):
+        object.__setattr__(self, "curation", curation)
+        object.__setattr__(self, "spec", spec)
+        object.__setattr__(self, "evaluation_id", _uuid(evaluation_id))
+        object.__setattr__(self, "warnings", tuple(map(str, warnings)))
+        object.__setattr__(self, "_metrics", metrics.copy(deep=True))
+        object.__setattr__(
+            self,
+            "_suggested_merges",
+            tuple(tuple(map(int, group)) for group in suggested_merges),
+        )
+        object.__setattr__(
+            self,
+            "_proposed_labels",
+            tuple(
+                (int(unit_id), tuple(map(str, labels)))
+                for unit_id, labels in sorted(proposed_labels.items())
+            ),
+        )
+
+    @property
+    def metrics(self) -> pd.DataFrame:
+        """Return a deep copy of the quality-metrics table in this snapshot.
+
+        Returns
+        -------
+        pandas.DataFrame
+            ``CurationEvaluation.get_metrics`` as read when the snapshot was
+            taken: one row per unit, indexed by ``unit_id``, one column per
+            metric. Editing the copy does not change the snapshot.
+        """
+        return self._metrics.copy(deep=True)
+
+    def missing_qc_inputs(self) -> pd.Series:
+        """Unavailable rule inputs per unit for this exact evaluation.
+
+        A rule input is unavailable for a unit when the metric a rule of
+        ``spec.auto_curation_rules_name`` reads is absent from
+        :attr:`metrics` or is not finite for that unit. This reports
+        evidence coverage, not a quality verdict.
+
+        Returns
+        -------
+        pandas.Series
+            Named ``"unavailable_qc"``, indexed like :attr:`metrics`: per unit,
+            a comma-separated list of the unavailable metric names in rule
+            order, or ``""`` when every rule input is available.
+
+        Raises
+        ------
+        CurationNotFoundError
+            If the evaluated curation's generation was deleted or replaced.
+        LookupError
+            If the evaluation's selection or populated ``CurationEvaluation``
+            row is gone, or its selection no longer names the evaluated
+            curation.
+        """
+        from spyglass.spikesorting.v2._review_unit_properties import (
+            missing_rule_metrics,
+        )
+        from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+        self._current_evaluation_key()
+        names = (
+            AutoCurationRules.Rule
+            & {"auto_curation_rules_name": self.spec.auto_curation_rules_name}
+        ).fetch("metric_name", order_by="rule_index")
+        return missing_rule_metrics(self._metrics, names)
+
+    @property
+    def suggested_merges(self) -> list[list[int]]:
+        """Return a copy of the evaluation's suggested merge groups.
+
+        Returns
+        -------
+        list[list[int]]
+            One list of unit ids per merge group the evaluation proposed, as
+            read by ``CurationEvaluation.get_suggested_merge_groups`` when the
+            snapshot was taken.
+        """
+        return [list(group) for group in self._suggested_merges]
+
+    @property
+    def proposed_labels(self) -> dict[int, list[str]]:
+        """Return a copy of the evaluation's proposed labels.
+
+        Returns
+        -------
+        dict[int, list[str]]
+            ``{unit_id: [label, ...]}`` in ascending ``unit_id`` order, for
+            the units the evaluation proposed labels for, as read by
+            ``CurationEvaluation.get_labels`` when the snapshot was taken.
+        """
+        return {
+            unit_id: list(labels) for unit_id, labels in self._proposed_labels
+        }
+
+    @property
+    def plots(self) -> EvaluationPlots:
+        """Return the plotting facade for this evaluation.
+
+        Returns
+        -------
+        EvaluationPlots
+            Each plotting method re-verifies the evaluation (raising
+            ``CurationNotFoundError`` or ``LookupError`` if it is stale) and
+            then calls the matching ``CurationEvaluation`` plot method.
+        """
+        return EvaluationPlots(self)
+
+    def burst_pair_metrics(self, pairs=None, **kwargs) -> pd.DataFrame:
+        """Burst-merge diagnostics per ordered unit pair, as a DataFrame.
+
+        The data twin of ``plots.burst_pair_metrics()``. A method rather than
+        a property like ``metrics`` because it loads the display analyzer on
+        demand instead of being part of the frozen snapshot. See
+        ``CurationEvaluation.get_burst_pair_metrics`` for the columns and
+        keyword arguments.
+
+        Parameters
+        ----------
+        pairs : sequence of (int, int), optional
+            Ordered unit-id pairs to report; ``None`` reports every ordered
+            pair.
+        **kwargs
+            Forwarded to ``CurationEvaluation.get_burst_pair_metrics``.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per ordered unit pair, indexed by ``(unit1, unit2)``.
+
+        Raises
+        ------
+        CurationNotFoundError
+            If the evaluated curation's generation was deleted or replaced.
+        LookupError
+            If the evaluation's selection or populated ``CurationEvaluation``
+            row is gone, or its selection no longer names the evaluated
+            curation.
+        """
+        from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+        key = self._current_evaluation_key()
+        return CurationEvaluation().get_burst_pair_metrics(
+            key, pairs=pairs, **kwargs
+        )
+
+    @classmethod
+    def from_key(cls, key: Mapping[str, Any]) -> "EvaluationResult":
+        """Load one populated evaluation and freeze a defensive snapshot.
+
+        Parameters
+        ----------
+        key : Mapping[str, Any]
+            Restriction selecting exactly one ``CurationEvaluationSelection``
+            row.
+
+        Returns
+        -------
+        EvaluationResult
+            The snapshot, pinned to the current generation of the evaluated
+            curation, with the metrics, suggested merges and proposed labels
+            read from the populated ``CurationEvaluation``.
+
+        Raises
+        ------
+        datajoint.errors.DataJointError
+            If ``key`` does not select exactly one selection row.
+        LookupError
+            If the selection's ``CurationEvaluation`` row is not populated.
+        CurationNotFoundError
+            If the evaluated curation no longer exists.
+        """
+        from spyglass.spikesorting.v2.metric_curation import (
+            CurationEvaluation,
+            CurationEvaluationSelection,
+        )
+
+        selection = (CurationEvaluationSelection & key).fetch1()
+        evaluation_key = {
+            "curation_evaluation_id": selection["curation_evaluation_id"]
+        }
+        if not (CurationEvaluation & evaluation_key):
+            raise LookupError(
+                "EvaluationResult.from_key requires a populated "
+                f"CurationEvaluation; populate {evaluation_key} first."
+            )
+        curation = CurationRef.from_key(selection)
+        return cls(
+            curation=curation,
+            spec=EvaluationSpec(
+                metric_params_name=str(selection["metric_params_name"]),
+                auto_curation_rules_name=str(
+                    selection["auto_curation_rules_name"]
+                ),
+            ),
+            evaluation_id=selection["curation_evaluation_id"],
+            metrics=CurationEvaluation.get_metrics(evaluation_key),
+            suggested_merges=CurationEvaluation.get_suggested_merge_groups(
+                evaluation_key
+            ),
+            proposed_labels=CurationEvaluation.get_labels(evaluation_key),
+        )
+
+    def _current_evaluation_key(self) -> dict[str, uuid.UUID]:
+        from spyglass.spikesorting.v2.metric_curation import (
+            CurationEvaluation,
+            CurationEvaluationSelection,
+        )
+
+        self.curation.as_key()
+        key = {"curation_evaluation_id": self.evaluation_id}
+        selections = (CurationEvaluationSelection & key).fetch(as_dict=True)
+        if len(selections) != 1 or not (CurationEvaluation & key):
+            raise LookupError(
+                "EvaluationResult no longer has its populated evaluation row: "
+                f"curation_evaluation_id={self.evaluation_id}."
+            )
+        selected = selections[0]
+        if (
+            _uuid(selected["sorting_id"]) != self.curation.sorting_id
+            or int(selected["curation_id"]) != self.curation.curation_id
+        ):
+            raise LookupError(
+                "EvaluationResult selection identity no longer matches its "
+                f"curation: curation_evaluation_id={self.evaluation_id}."
+            )
+        return key
+
+    def preview_merges(self, groups: Sequence[Sequence[int]]) -> CurationRef:
+        """Draft merges as a preview child curation, without applying them.
+
+        Records ``groups`` in the child's ``CurationV2.MergeGroup`` with
+        ``merges_applied`` false, so the child keeps every unit of the
+        evaluated curation, inherits its labels, and has
+        :attr:`CurationRef.commit_status` ``"preview"``. An existing child
+        with the same content is reused.
+
+        Parameters
+        ----------
+        groups : sequence of sequence of int
+            Disjoint merge groups of at least two unit ids each, in the
+            evaluated curation's unit namespace.
+
+        Returns
+        -------
+        CurationRef
+            The preview child curation.
+
+        Raises
+        ------
+        ValueError
+            If ``groups`` is malformed (not a sequence of unit-id sequences,
+            empty, a group of fewer than two ids, duplicate or overlapping
+            ids) or names a unit absent from the evaluated curation.
+        CurationNotFoundError
+            If the evaluated curation's generation was deleted or replaced.
+        LookupError
+            If the evaluation's selection or populated ``CurationEvaluation``
+            row is gone, or its selection no longer names the evaluated
+            curation.
+        """
+        from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+        key = self._current_evaluation_key()
+        child = CurationEvaluation().preview_merges(
+            key, merge_groups=_validate_merge_groups(self.curation, groups)
+        )
+        return CurationRef.from_key(child)
+
+    def commit_merges(self, groups: Sequence[Sequence[int]]) -> CurationRef:
+        """Expert scripted merge commit without re-evaluating the child.
+
+        Applies ``groups`` in a committed child curation that inherits the
+        evaluated curation's labels and does not apply this evaluation's
+        proposed labels. An existing child with the same content is reused.
+        Use :meth:`merge_and_evaluate` to also evaluate the child.
+
+        Parameters
+        ----------
+        groups : sequence of sequence of int
+            Disjoint merge groups of at least two unit ids each, in the
+            evaluated curation's unit namespace.
+
+        Returns
+        -------
+        CurationRef
+            The committed child curation.
+
+        Raises
+        ------
+        ValueError
+            If ``groups`` is malformed (not a sequence of unit-id sequences,
+            empty, a group of fewer than two ids, duplicate or overlapping
+            ids) or names a unit absent from the evaluated curation.
+        CurationNotFoundError
+            If the evaluated curation's generation was deleted or replaced.
+        LookupError
+            If the evaluation's selection or populated ``CurationEvaluation``
+            row is gone, or its selection no longer names the evaluated
+            curation.
+        """
+        from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+        key = self._current_evaluation_key()
+        child = CurationEvaluation().accept_merges(
+            key, merge_groups=_validate_merge_groups(self.curation, groups)
+        )
+        return CurationRef.from_key(child)
+
+    def merge_and_evaluate(
+        self, groups: Sequence[Sequence[int]]
+    ) -> "MergeEvaluateReceipt":
+        """Commit merges and evaluate the child with this exact recipe spec."""
+        from spyglass.spikesorting.v2.curation import CurationV2
+        from spyglass.spikesorting.v2.metric_curation import (
+            CurationEvaluation,
+            CurationEvaluationSelection,
+        )
+
+        _require_outside_merge_evaluation_transaction()
+        evaluation_key = self._current_evaluation_key()
+        normalized = _validate_merge_groups(self.curation, groups)
+        existing_children = {
+            int(value)
+            for value in (
+                CurationV2
+                & {
+                    "sorting_id": self.curation.sorting_id,
+                    "parent_curation_id": self.curation.curation_id,
+                }
+            ).fetch("curation_id")
+        }
+        child_key = CurationEvaluation().accept_merges(
+            evaluation_key,
+            merge_groups=normalized,
+            reuse_existing=True,
+        )
+        curation_status: MaterializationStatus = (
+            "reused"
+            if int(child_key["curation_id"]) in existing_children
+            else "computed"
+        )
+        child = CurationRef.from_key(child_key)
+        selection_identity = {
+            **child._unchecked_key(),
+            "metric_params_name": self.spec.metric_params_name,
+            "auto_curation_rules_name": self.spec.auto_curation_rules_name,
+        }
+        selection_existed = bool(
+            CurationEvaluationSelection & selection_identity
+        )
+        selection_key = CurationEvaluationSelection.insert_by_curation_id(
+            child.sorting_id,
+            child.curation_id,
+            self.spec.metric_params_name,
+            self.spec.auto_curation_rules_name,
+        )
+        evaluation_existed = bool(CurationEvaluation & selection_key)
+        CurationEvaluation.populate(selection_key, reserve_jobs=False)
+        post_merge = EvaluationResult.from_key(selection_key)
+        return MergeEvaluateReceipt(
+            child=child,
+            evaluation=post_merge,
+            merge_groups=tuple(tuple(group) for group in normalized),
+            warnings=(),
+            curation_status=curation_status,
+            evaluation_selection_status=(
+                "reused" if selection_existed else "computed"
+            ),
+            evaluation_status="reused" if evaluation_existed else "computed",
+        )
+
+    def accept_labels(
+        self, mode: Literal["replace", "overlay"] = "replace"
+    ) -> CurationRef:
+        """Accept proposed labels with explicit replace or overlay semantics."""
+        from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+        key = self._current_evaluation_key()
+        if mode == "replace":
+            child = CurationEvaluation().use_evaluation_labels(key)
+        elif mode == "overlay":
+            child = CurationEvaluation().overlay_evaluation_labels(key)
+        else:
+            raise ValueError(
+                "EvaluationResult.accept_labels mode must be 'replace' or "
+                f"'overlay'; got {mode!r}."
+            )
+        return CurationRef.from_key(child)
+
+    def start_review(
+        self,
+        profile,
+        *,
+        upload: bool = False,
+        ephemeral: bool = False,
+        annotation_sets=(),
+        display_options=None,
+    ):
+        """Start a review after verifying this evaluation matches its profile."""
+        from spyglass.spikesorting.v2.review_api import start_review
+
+        return start_review(
+            self.curation,
+            profile,
+            upload=upload,
+            ephemeral=ephemeral,
+            evaluation=self,
+            annotation_sets=annotation_sets,
+            display_options=display_options,
+        )
+
+
+@dataclass(frozen=True)
+class MergedCuration:
+    """A merge child plus the canonical groups and create/reuse status."""
+
+    curation: CurationRef
+    merge_groups: tuple[tuple[int, ...], ...]
+    status: MaterializationStatus
+
+
+@dataclass(frozen=True)
+class MergeEvaluateReceipt:
+    """Resumable per-stage receipt for a merge followed by evaluation."""
+
+    child: CurationRef
+    evaluation: EvaluationResult
+    merge_groups: tuple[tuple[int, ...], ...]
+    warnings: tuple[str, ...]
+    curation_status: MaterializationStatus
+    evaluation_selection_status: MaterializationStatus
+    evaluation_status: MaterializationStatus
+
+    @property
+    def merged(self) -> MergedCuration:
+        return MergedCuration(
+            curation=self.child,
+            merge_groups=self.merge_groups,
+            status=self.curation_status,
+        )
+
+    @property
+    def stage_statuses(self) -> Mapping[str, MaterializationStatus]:
+        return MappingProxyType(
+            {
+                "curation": self.curation_status,
+                "evaluation_selection": self.evaluation_selection_status,
+                "evaluation": self.evaluation_status,
+            }
+        )
+
+
+class RunResult(dict):
+    """Mapping run receipt with generation-pinned curation accessors.
+
+    ``root_curation`` / ``auto_labeled_curation`` are built from the
+    ``*_curation_uuid`` keys the run recorded, so a receipt kept across a
+    delete-and-recreate of the same numeric ``curation_id`` raises
+    ``CurationNotFoundError`` instead of resolving the replacement row.
+    """
+
+    @property
+    def sorting_id(self) -> uuid.UUID:
+        return _uuid(self["sorting_id"])
+
+    def _pinned_ref(self, id_key: str, uuid_key: str) -> CurationRef:
+        ref = CurationRef(
+            sorting_id=self.sorting_id,
+            curation_id=int(self[id_key]),
+            curation_uuid=_uuid(self[uuid_key]),
+        )
+        ref._current_row()
+        return ref
+
+    @property
+    def root_curation(self) -> CurationRef:
+        return self._pinned_ref("root_curation_id", "root_curation_uuid")
+
+    @property
+    def auto_labeled_curation(self) -> CurationRef | None:
+        """The auto-labeled child, or ``None`` for a root-only run.
+
+        Automatic labels are not approval and the row still holds every unit;
+        pass it to ``select_units_for_analysis`` to choose the analysis set.
+        """
+        if self.get("auto_labeled_curation_id") is None:
+            return None
+        return self._pinned_ref(
+            "auto_labeled_curation_id", "auto_labeled_curation_uuid"
+        )
+
+    def start_review(
+        self,
+        profile,
+        *,
+        source: Literal["auto_labeled", "root"] = "auto_labeled",
+        upload: bool = False,
+        ephemeral: bool = False,
+        annotation_sets=(),
+        display_options=None,
+    ):
+        """Start the canonical review without silently changing its source."""
+        if source == "auto_labeled":
+            curation = self.auto_labeled_curation
+            if curation is None:
+                raise ValueError(
+                    "RunResult.start_review(source='auto_labeled') requires an "
+                    "auto-labeled child, but this run did not auto-curate. "
+                    "Pass source='root' explicitly to review the root curation."
+                )
+        elif source == "root":
+            curation = self.root_curation
+        else:
+            raise ValueError(
+                "RunResult.start_review source must be 'auto_labeled' or 'root'; "
+                f"got {source!r}."
+            )
+        return curation.start_review(
+            profile,
+            upload=upload,
+            ephemeral=ephemeral,
+            annotation_sets=annotation_sets,
+            display_options=display_options,
+        )
+
+
+def _validate_merge_groups(
+    parent_curation: CurationRef,
+    groups: Sequence[Sequence[int]],
+) -> list[list[int]]:
+    """Validate merge shape and membership before any facade write."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    normalized = _normalize_merge_groups(groups)
+    key = parent_curation.as_key()
+    available = {
+        int(value) for value in (CurationV2.Unit & key).fetch("unit_id")
+    }
+    flattened = [unit_id for group in normalized for unit_id in group]
+    unknown = sorted(set(flattened) - available)
+    if unknown:
+        raise ValueError(
+            "merge groups reference unit ids absent from parent curation "
+            f"{parent_curation.curation_id}: {unknown}. Available unit ids: "
+            f"{sorted(available)}."
+        )
+    return normalized
+
+
+def _evaluate_curation(
+    curation: CurationRef, spec: EvaluationSpec
+) -> EvaluationResult:
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+
+    key = curation.as_key()
+    selection = CurationEvaluationSelection.insert_by_curation_id(
+        key["sorting_id"],
+        key["curation_id"],
+        spec.metric_params_name,
+        spec.auto_curation_rules_name,
+    )
+    CurationEvaluation.populate(selection, reserve_jobs=False)
+    return EvaluationResult.from_key(selection)
+
+
+def merge_and_evaluate(
+    *,
+    parent_curation: CurationRef,
+    spec: EvaluationSpec,
+    groups: Sequence[Sequence[int]],
+) -> MergeEvaluateReceipt:
+    """Commit merges and evaluate the child, with an explicit parent and spec.
+
+    Lower-level orchestration form of
+    :meth:`EvaluationResult.merge_and_evaluate`. It evaluates
+    ``parent_curation`` with ``spec`` (creating and populating the
+    evaluation, or reusing an existing one), commits ``groups`` into a
+    merged child curation, and evaluates that child with the same ``spec``.
+    Each stage reuses rows that already exist, so repeating the call after
+    an interruption resumes rather than duplicating work. Call it outside
+    any open DataJoint transaction; ``populate`` manages its own.
+
+    Parameters
+    ----------
+    parent_curation : CurationRef
+        The curation whose units are merged. Its identity is re-verified
+        before use.
+    spec : EvaluationSpec
+        Metric-parameter and auto-curation-rule names used for both the
+        parent and the child evaluation.
+    groups : sequence of sequence of int
+        Disjoint merge groups of ``parent_curation`` unit ids, each with at
+        least two distinct ids.
+
+    Returns
+    -------
+    MergeEvaluateReceipt
+        The child curation, its evaluation, the normalized merge groups, and
+        whether this call computed or reused the child curation, its
+        evaluation selection, and its evaluation.
+
+    Raises
+    ------
+    TypeError
+        If ``parent_curation`` is not a ``CurationRef`` or ``spec`` is not
+        an ``EvaluationSpec``.
+    CurationNotFoundError
+        If ``parent_curation`` no longer identifies its curation generation
+        (the row was deleted or its numeric id reused).
+    RuntimeError
+        If called inside an open DataJoint transaction.
+    ValueError
+        If ``groups`` is empty or malformed (a group with fewer than two
+        ids, a repeated id, overlapping groups, or a non-integer id), or
+        references unit ids absent from ``parent_curation``, or if
+        ``parent_curation`` is an uncommitted merge preview. Groups are
+        checked after the parent evaluation is populated.
+    """
+    parent = _require_parent_ref(parent_curation, caller="merge_and_evaluate")
+    if not isinstance(spec, EvaluationSpec):
+        raise TypeError(
+            "merge_and_evaluate requires spec=EvaluationSpec; pass the exact "
+            "metric and auto-curation rule recipe names."
+        )
+    _require_outside_merge_evaluation_transaction()
+    return _evaluate_curation(parent, spec).merge_and_evaluate(groups)
+
+
+def create_initial_curation(
+    sorting_key: Mapping[str, Any], **kwargs
+) -> CurationRef:
+    """Create the root curation of a sorting; no typed parent is required.
+
+    This is the only facade operation that does not take a ``CurationRef``
+    parent. It forwards to ``CurationV2.create_initial_curation``, which
+    inserts a root curation with no merges. If a root already exists for
+    the sorting, it is returned when no labels or description are passed;
+    otherwise a ``ValueError`` is raised rather than ignoring them.
+
+    Parameters
+    ----------
+    sorting_key : mapping
+        Mapping with the ``sorting_id`` of the upstream ``Sorting`` row.
+    **kwargs
+        Forwarded to ``CurationV2.create_initial_curation``, which accepts
+        ``labels`` (``{unit_id: [label, ...]}``, default ``None``),
+        ``description`` (str, default ``""``), and ``allow_custom_labels``
+        (bool, default ``False``; accept labels outside the canonical
+        ``CurationLabel`` set).
+
+    Returns
+    -------
+    CurationRef
+        Reference pinned to the root curation's current generation.
+
+    Raises
+    ------
+    ValueError
+        If ``sorting_id`` is not in ``Sorting``; a root curation already
+        exists and ``labels`` or ``description`` were passed; or ``labels``
+        are invalid (not a list per unit, a label outside ``CurationLabel``
+        without ``allow_custom_labels=True``, or an unknown unit id).
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    return CurationRef.from_key(
+        CurationV2.create_initial_curation(dict(sorting_key), **kwargs)
+    )
+
+
+def preview_merges(
+    *,
+    parent_curation: CurationRef,
+    groups: Sequence[Sequence[int]],
+    **kwargs,
+) -> CurationRef:
+    """Create a preview child; a typed, current parent is mandatory.
+
+    Records ``groups`` as proposed merges without applying them: every
+    parent unit keeps its id in the child, and the proposals are stored in
+    ``CurationV2.MergeGroup`` for review. ``groups`` are checked against the
+    parent's units before any write. Forwards to
+    ``CurationV2.propose_merge_curation`` with ``reuse_existing`` defaulting
+    to ``True``, so repeating the call returns the matching existing child.
+
+    Parameters
+    ----------
+    parent_curation : CurationRef
+        The curation to branch from. Its identity is re-verified before use.
+    groups : sequence of sequence of int
+        Disjoint merge groups of ``parent_curation`` unit ids, each with at
+        least two distinct ids.
+    **kwargs
+        Forwarded to ``CurationV2.propose_merge_curation``: ``labels``,
+        ``description``, ``reuse_existing`` (default ``True`` here),
+        ``label_policy`` (``"inherit"`` or ``"replace"``), and
+        ``allow_custom_labels``. The sorting key, ``merge_groups``, and
+        ``parent_curation_id`` are set from ``parent_curation`` and
+        ``groups``.
+
+    Returns
+    -------
+    CurationRef
+        Reference pinned to the preview child's current generation.
+
+    Raises
+    ------
+    TypeError
+        If ``parent_curation`` is not a ``CurationRef``.
+    CurationNotFoundError
+        If ``parent_curation`` no longer identifies its curation generation
+        (the row was deleted or its numeric id reused).
+    ValueError
+        If ``groups`` is empty or malformed (a group with fewer than two
+        ids, a repeated id, overlapping groups, or a non-integer id) or
+        references unit ids absent from ``parent_curation``, or if
+        ``parent_curation`` is itself an uncommitted preview.
+    """
+    parent = _require_parent_ref(parent_curation, caller="preview_merges")
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    normalized = _validate_merge_groups(parent, groups)
+    kwargs.setdefault("reuse_existing", True)
+    child = CurationV2.propose_merge_curation(
+        {"sorting_id": parent.sorting_id},
+        merge_groups=normalized,
+        parent_curation_id=parent.curation_id,
+        **kwargs,
+    )
+    return CurationRef.from_key(child)
+
+
+def commit_merges(
+    *,
+    parent_curation: CurationRef,
+    groups: Sequence[Sequence[int]],
+    **kwargs,
+) -> CurationRef:
+    """Commit a merge child without evaluation; a typed parent is mandatory.
+
+    Applies ``groups`` in a new child curation: each merged unit's spike
+    train is the union of its contributors, and the contributors are
+    absorbed, so the child has fewer units than the parent. The child is
+    not evaluated; use :func:`merge_and_evaluate` to commit and evaluate in
+    one call. ``groups`` are checked against the parent's units before any
+    write. Forwards to ``CurationV2.create_merged_curation`` with
+    ``reuse_existing`` defaulting to ``True``, so repeating the call returns
+    the matching existing child.
+
+    Parameters
+    ----------
+    parent_curation : CurationRef
+        The curation to branch from. Its identity is re-verified before use.
+    groups : sequence of sequence of int
+        Disjoint merge groups of ``parent_curation`` unit ids, each with at
+        least two distinct ids.
+    **kwargs
+        Forwarded to ``CurationV2.create_merged_curation``: ``labels``,
+        ``description``, ``reuse_existing`` (default ``True`` here),
+        ``label_policy`` (``"inherit"`` or ``"replace"``), and
+        ``allow_custom_labels``. The sorting key, ``merge_groups``, and
+        ``parent_curation_id`` are set from ``parent_curation`` and
+        ``groups``.
+
+    Returns
+    -------
+    CurationRef
+        Reference pinned to the merged child's current generation.
+
+    Raises
+    ------
+    TypeError
+        If ``parent_curation`` is not a ``CurationRef``.
+    CurationNotFoundError
+        If ``parent_curation`` no longer identifies its curation generation
+        (the row was deleted or its numeric id reused).
+    ValueError
+        If ``groups`` is empty or malformed (a group with fewer than two
+        ids, a repeated id, overlapping groups, or a non-integer id) or
+        references unit ids absent from ``parent_curation``, or if
+        ``parent_curation`` is itself an uncommitted preview.
+    """
+    parent = _require_parent_ref(parent_curation, caller="commit_merges")
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    normalized = _validate_merge_groups(parent, groups)
+    kwargs.setdefault("reuse_existing", True)
+    child = CurationV2.create_merged_curation(
+        {"sorting_id": parent.sorting_id},
+        merge_groups=normalized,
+        parent_curation_id=parent.curation_id,
+        **kwargs,
+    )
+    return CurationRef.from_key(child)
+
+
+def save_manual_curation(
+    *, parent_curation: CurationRef, **kwargs
+) -> CurationRef:
+    """Save a manual child from a typed parent; root sentinels are not accepted.
+
+    Forwards to ``CurationV2.save_manual_curation`` with the parent's
+    ``sorting_id`` and ``curation_id``. Labels and merge groups come from a
+    FigPack/FigURL-style ``payload`` or from ``labels=`` / ``merge_groups=``.
+    Unlike :func:`preview_merges` and :func:`commit_merges`, this facade
+    does not pre-check merge groups and does not default ``reuse_existing``
+    to ``True``; ``CurationV2`` validates the merge groups.
+
+    Parameters
+    ----------
+    parent_curation : CurationRef
+        The curation to branch from. Its identity is re-verified before use.
+    **kwargs
+        Forwarded to ``CurationV2.save_manual_curation``: ``payload`` (dict
+        with ``labelsByUnit`` / ``mergeGroups`` or ``labels_by_unit`` /
+        ``merge_groups``), ``labels``, ``merge_groups``, ``merge_action``
+        (``"preview"`` by default, or ``"commit"``; aliases ``"propose"``,
+        ``"draft"``, ``"apply"``), ``curation_source`` (default
+        ``"manual"``), ``description`` (default ``"manual curation"``),
+        ``reuse_existing`` (default ``False``), ``allow_unknown_unit_ids``,
+        ``allow_custom_labels``, and ``label_policy`` (default
+        ``"inherit"``). ``parent_curation_id`` is set from
+        ``parent_curation``.
+
+    Returns
+    -------
+    CurationRef
+        Reference pinned to the saved child's current generation.
+
+    Raises
+    ------
+    TypeError
+        If ``parent_curation`` is not a ``CurationRef``.
+    CurationNotFoundError
+        If ``parent_curation`` no longer identifies its curation generation
+        (the row was deleted or its numeric id reused).
+    ValueError
+        If ``merge_action`` is not a recognized value, the payload, labels,
+        or merge groups are invalid, or ``parent_curation`` is itself an
+        uncommitted preview.
+    """
+    parent = _require_parent_ref(parent_curation, caller="save_manual_curation")
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    child = CurationV2.save_manual_curation(
+        {"sorting_id": parent.sorting_id},
+        parent_curation_id=parent.curation_id,
+        **kwargs,
+    )
+    return CurationRef.from_key(child)
+
+
+def _require_parent_ref(parent_curation, *, caller: str) -> CurationRef:
+    """Enforce the facade's typed-parent boundary for every child operation."""
+    if not isinstance(parent_curation, CurationRef):
+        raise TypeError(
+            f"{caller} requires parent_curation=CurationRef; raw key dicts "
+            "and parent_curation_id sentinels are only supported by the expert "
+            "table layer. Use CurationRef.from_key(...) first."
+        )
+    return CurationRef.from_key(parent_curation)
+
+
+__all__ = [
+    "CurationDeletePreview",
+    "CurationDeleteReceipt",
+    "CurationOperation",
+    "CurationRef",
+    "EvaluationPlots",
+    "EvaluationResult",
+    "EvaluationSpec",
+    "MergedCuration",
+    "MergeEvaluateReceipt",
+    "RunResult",
+    "commit_merges",
+    "create_initial_curation",
+    "merge_and_evaluate",
+    "preview_merges",
+    "save_manual_curation",
+]

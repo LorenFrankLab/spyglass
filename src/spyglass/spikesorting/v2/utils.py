@@ -1,0 +1,883 @@
+"""Shared helpers for the spike sorting tables and pipeline."""
+
+from __future__ import annotations
+
+import functools
+import numbers
+from collections import Counter
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+import datajoint as dj
+import spikeinterface as si
+
+# Schema enums live in the stdlib-only _enums.py so dependency-light
+# service modules can import the canonical label set without pulling
+# DataJoint/SpikeInterface through this module; re-exported here so
+# existing ``from .utils import CurationLabel`` call sites are unchanged.
+from spyglass.spikesorting.v2._enums import (  # noqa: F401
+    CurationLabel,
+    CurationSource,
+)
+
+# Pure signal/frame/interval math lives in _signal_math.py; re-exported
+# here so existing ``from .utils import _spike_times_to_frames`` (etc.)
+# keep working unchanged.
+from spyglass.spikesorting.v2._signal_math import (  # noqa: F401
+    _dedup_merged_spike_times,
+    _get_recording_timestamps,
+    _spike_times_to_frames,
+)
+
+# Pure reference-resolution lives in _reference_resolution.py (DB-free);
+# re-exported so ``from .utils import resolve_group_reference`` (etc.) and the
+# ``ReferenceMode`` type keep working unchanged.
+from spyglass.spikesorting.v2._reference_resolution import (  # noqa: F401
+    ReferenceMode,
+    _validate_reference_fields,
+    assert_reference_not_member,
+    resolve_group_reference,
+)
+
+# Parameter-Lookup validation lives in _lookup_validation.py and NWB /
+# recording-metadata helpers in _nwb_metadata_helpers.py (both import-light);
+# re-exported so existing ``from .utils import validate_lookup_rows`` /
+# ``electrode_table_region`` (etc.) call sites are unchanged.
+from spyglass.spikesorting.v2._lookup_validation import (  # noqa: F401
+    _assert_schema_version_matches,
+    _ensure_lookup_row_exists,
+    _insert_row_to_dict,
+    _jsonable_blob,
+    _validate_params,
+    reject_duplicate_parameter_content,
+    reject_duplicate_quality_metric_content,
+    reject_stale_quality_metric_defaults,
+    validate_lookup_rows,
+)
+from spyglass.spikesorting.v2._nwb_metadata_helpers import (  # noqa: F401
+    electrode_table_region,
+    resolve_conversion_and_offset,
+)
+
+# The artifact-detection IntervalList naming convention lives in the
+# stdlib-only _artifact_naming.py so the DB-free source-routing module
+# (_curation_routing) can import the parser without pulling DataJoint /
+# SpikeInterface through this barrel; re-exported here so existing
+# ``from .utils import artifact_detection_interval_list_name`` (etc.) call
+# sites are unchanged.
+from spyglass.spikesorting.v2._artifact_naming import (  # noqa: F401
+    _ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX,
+    artifact_detection_interval_list_name,
+    parse_artifact_detection_interval_list_name,
+)
+
+
+def split_leading_restrictions(args: tuple) -> tuple[list, tuple]:
+    """Peel leading restriction positionals off a ``delete`` arg tuple.
+
+    DataJoint's ``delete`` takes no positional restrictions; Spyglass's
+    cautious-delete layer reads the first positional as the truthy
+    ``force_permission`` and would then cascade-delete EVERY row of the
+    unrestricted instance. The v2 table ``delete`` overrides
+    (``Sorting``, guarding a 5-50 GB per-row analyzer folder; the
+    ``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection``, guarding
+    owned ``IntervalList`` rows + the merge registration) defend against the
+    easy-to-mistype
+    ``Table().delete(restriction)`` form by peeling every leading
+    ``dict`` / ``list`` / ``str`` positional into a restriction list and
+    re-dispatching ``(self & r1 & r2 & ...).delete(*rest)``.
+
+    This is the pure half of that guard: it does not touch the DB.
+
+    Parameters
+    ----------
+    args : tuple
+        The ``*args`` a ``delete`` override received.
+
+    Returns
+    -------
+    restrictions : list
+        The leading restriction positionals, in order. Empty when ``args``
+        does not start with a restriction (a normal ``.delete()`` call).
+    remaining : tuple
+        The rest of ``args`` after the leading restrictions, untouched.
+    """
+    restrictions = []
+    remaining = args
+    while remaining and isinstance(remaining[0], (dict, list, str)):
+        restrictions.append(remaining[0])
+        remaining = remaining[1:]
+    return restrictions, remaining
+
+
+class _IdentityMasterGuard:
+    """Reject a direct ``insert`` / in-place ``update1`` of an identity master.
+
+    The shared body of :class:`SelectionMasterInsertGuard` and
+    :class:`FactoryOnlyMaster`, which differ only in their rejection text:
+    each subclass implements :meth:`_direct_insert_reason` and
+    :meth:`_update1_create_hint`. Both are methods, not class attributes,
+    because the text names the concrete table or its factory call.
+
+    The ``insert`` signature mirrors ``dj.Table.insert`` so positional
+    ``replace`` / ``skip_duplicates`` keep working; only
+    ``allow_direct_insert`` is keyword-only (it cannot accidentally bind a
+    positional flag). DataJoint forwards ``insert1``'s ``**kwargs`` to
+    ``insert``, so an ``insert1(row, allow_direct_insert=True)`` reaches this
+    override too.
+    """
+
+    def _direct_insert_reason(self) -> str:
+        """The rationale and create-path sentence for a rejected insert."""
+        raise NotImplementedError
+
+    def _update1_create_hint(self) -> str:
+        """The create path to use instead of a rejected ``update1``."""
+        raise NotImplementedError
+
+    def insert(
+        self,
+        rows,
+        replace=False,
+        skip_duplicates=False,
+        ignore_extra_fields=False,
+        *,
+        allow_direct_insert=False,
+        **kwargs,
+    ):
+        """Reject a direct insert unless ``allow_direct_insert`` is set.
+
+        Parameters
+        ----------
+        rows : iterable
+            Rows to insert, forwarded to ``dj.Table.insert``.
+        replace : bool, optional
+            Replace existing rows on key conflict. Default ``False``.
+        skip_duplicates : bool, optional
+            Silently skip duplicate-key rows. Default ``False``.
+        ignore_extra_fields : bool, optional
+            Drop row keys not in the table heading. Default ``False``.
+        allow_direct_insert : bool, optional
+            Escape hatch for a deliberate maintenance or test bypass of
+            the create path. Default ``False``.
+        **kwargs
+            Additional keyword arguments forwarded to
+            ``super().insert``.
+
+        Raises
+        ------
+        datajoint.errors.DataJointError
+            If ``allow_direct_insert`` is ``False`` (the default),
+            directing the caller to the create path instead.
+        """
+        if not allow_direct_insert:
+            raise dj.errors.DataJointError(
+                f"Direct insert into {type(self).__name__} is not supported: "
+                f"{self._direct_insert_reason()} Pass allow_direct_insert=True "
+                "only for a deliberate maintenance or test bypass."
+            )
+        super().insert(
+            rows,
+            replace=replace,
+            skip_duplicates=skip_duplicates,
+            ignore_extra_fields=ignore_extra_fields,
+            **kwargs,
+        )
+
+    def update1(self, row, *, allow_master_mutation=False):
+        """Reject an in-place row mutation unless ``allow_master_mutation``.
+
+        A master's identity-bearing columns feed the deterministic ids (or
+        are the provenance roots) that live dependents reference, so editing
+        them in place retargets those references -- the symmetric hazard to a
+        direct insert. ``update1`` is the only standard in-place mutation
+        path, so guard it the same way :class:`ImmutableParamsLookup` guards
+        the param Lookups.
+
+        Parameters
+        ----------
+        row : dict
+            The row to update, forwarded to ``dj.Table.update1``.
+        allow_master_mutation : bool, optional
+            Escape hatch for a deliberate maintenance or test mutation of a
+            row known to have no live downstream references. Default ``False``.
+
+        Raises
+        ------
+        datajoint.errors.DataJointError
+            If ``allow_master_mutation`` is ``False`` (the default).
+        """
+        if not allow_master_mutation:
+            raise dj.errors.DataJointError(
+                f"In-place update1 of {type(self).__name__} is not supported: "
+                "its identity-bearing columns feed the deterministic ids (or "
+                "are the provenance roots) that live dependents reference, so "
+                "editing them in place silently retargets those references. "
+                f"{self._update1_create_hint()} Pass "
+                "allow_master_mutation=True only for a deliberate maintenance "
+                "edit of a row with no live references."
+            )
+        super().update1(row)
+
+
+class SelectionMasterInsertGuard(_IdentityMasterGuard):
+    """Reject a direct ``insert`` into a deterministic-id selection master.
+
+    The v2 deterministic-id selection masters (``RecordingSelection`` /
+    ``RecordingArtifactSelection`` / ``SharedGroupArtifactSelection`` /
+    ``SortingSelection``) derive their primary key from the selection's FULL
+    logical identity, and ``insert_selection`` is the only entry point that
+    holds that full payload: it computes the deterministic PK, pre-checks the
+    lookup-row FKs, and inserts the row(s). Only ``SortingSelection`` is
+    part-bearing -- its optional ``ArtifactDetectionSource`` pass genuinely
+    CANNOT be verified from the master row alone (it lives in a part table). The
+    two artifact selections carry their source as a REQUIRED FK on the
+    master (structural exactly-one-source), and ``RecordingSelection`` has no
+    source part either; routing all of them through the same boundary keeps one
+    consistent create path.
+
+    This guard is a guard-RAIL, not the integrity boundary: it rejects the
+    easy mistake (calling ``insert`` / ``insert1`` instead of
+    ``insert_selection``) early and loudly. The actual integrity enforcement
+    is downstream -- the deterministic-PK uniqueness + the
+    ``SchemaBypassError`` / ``DuplicateSelectionError`` checks that detect a
+    bypassed or orphaned master. ``allow_direct_insert=True`` is the escape
+    hatch for a deliberate maintenance or test bypass -- the SAME keyword
+    DataJoint uses to override its own auto-populated-table insert guard
+    (note: on a ``dj.Manual`` table that keyword is otherwise inert, so it
+    is repurposed here). ``insert_selection`` itself passes
+    ``allow_direct_insert=True`` for its already-validated master insert.
+    """
+
+    def _direct_insert_reason(self) -> str:
+        return (
+            "the primary key is derived from the selection's full logical "
+            "identity (and, for the part-bearing masters, the source-part "
+            "rows are inserted atomically with it). Use "
+            f"{type(self).__name__}.insert_selection()."
+        )
+
+    def _update1_create_hint(self) -> str:
+        return (
+            f"Insert a new selection via {self.__class__.__name__}."
+            "insert_selection() instead."
+        )
+
+
+class FactoryOnlyMaster(_IdentityMasterGuard):
+    """Reject direct ``insert`` / ``update1`` of a factory-constructed master.
+
+    ``CurationV2`` (`curation.py`) and ``SessionGroup`` (`session_group.py`)
+    are not selection masters, but they are identity / provenance roots that
+    downstream rows reference. A direct ``insert`` skips the atomic master +
+    part construction the factory classmethod performs (the analysis-file row
+    and ``Unit`` / ``UnitLabel`` parts for ``CurationV2``; the ``Member`` rows
+    for ``SessionGroup``), and an in-place ``update1`` retargets what existing
+    dependents point at. Both are blocked unless an explicit bypass keyword is
+    passed; the factory classmethods (``CurationV2.insert_curation`` /
+    ``SessionGroup.create_group``) pass ``allow_direct_insert=True`` for their
+    already-validated master insert.
+
+    Shares :class:`SelectionMasterInsertGuard`'s ``insert`` /
+    ``update1`` guards (``allow_direct_insert`` / ``allow_master_mutation``),
+    with factory-specific messages: the mixin must precede
+    ``SpyglassMixin`` / ``dj.Manual`` in the MRO so its overrides take
+    precedence. Subclasses set :attr:`_factory_create_call` to the factory the
+    error message points to.
+    """
+
+    #: The factory call named in the rejection messages (e.g.
+    #: ``"CurationV2.insert_curation()"``). Subclasses override.
+    _factory_create_call: str = "its factory classmethod"
+
+    def _direct_insert_reason(self) -> str:
+        return (
+            "it is an identity / provenance root that downstream rows "
+            f"reference. Write it through {self._factory_create_call}, "
+            "which constructs the master and its parts atomically."
+        )
+
+    def _update1_create_hint(self) -> str:
+        return f"Insert a new row via {self._factory_create_call} instead."
+
+
+class ImmutableParamsLookup:
+    """Reject in-place mutation of a content-addressed parameter Lookup row.
+
+    The v2 parameter Lookups
+    (``PreprocessingParameters`` / ``ArtifactDetectionParameters`` /
+    ``SorterParameters`` / ``AnalyzerWaveformParameters`` /
+    ``MatcherParameters``) are keyed by a
+    human-chosen NAME, and that name -- not the parameter content -- is what
+    flows into the deterministic ``recording_id`` / ``artifact_detection_id``
+    / ``sorting_id`` / ``concat_recording_id`` / ``unitmatch_id`` of every
+    downstream selection. The ``insert`` overrides already reject a SECOND
+    name for identical content (``reject_duplicate_parameter_content``)
+    because that forks provenance; the symmetric hazard is editing a row's
+    blob IN PLACE under the SAME name, which silently re-defines what every
+    already-minted id means. DataJoint offers two standard in-place mutation
+    paths -- ``update1`` and ``insert(..., replace=True)`` -- so both are
+    guarded here: a backend/parameter change requires a NEW named row, not an
+    in-place edit or overwrite.
+
+    ``allow_param_mutation=True`` is the escape hatch for a deliberate
+    maintenance or test edit of ``update1`` (mirroring ``allow_direct_insert``
+    on :class:`SelectionMasterInsertGuard`) of a row known to have no live
+    downstream references; ``insert(..., replace=True)`` has no such escape
+    hatch. The mixin must precede ``SpyglassMixin`` / ``dj.Lookup`` in the
+    MRO so its ``update1`` / ``insert`` take precedence.
+    """
+
+    def update1(self, row, *, allow_param_mutation=False):
+        """Reject an in-place row mutation unless ``allow_param_mutation``.
+
+        Parameters
+        ----------
+        row : dict
+            The row to update, forwarded to ``dj.Table.update1``.
+        allow_param_mutation : bool, optional
+            Escape hatch for a deliberate maintenance or test mutation of a
+            content-addressed parameter row. Default ``False``.
+
+        Raises
+        ------
+        datajoint.errors.DataJointError
+            If ``allow_param_mutation`` is ``False`` (the default),
+            directing the caller to insert a new named row instead.
+        """
+        if not allow_param_mutation:
+            raise dj.errors.DataJointError(
+                f"In-place update1 of {self.__class__.__name__} is not "
+                "supported: this row's content is folded into the deterministic "
+                "id of downstream selections (directly, or via the named set it "
+                "belongs to), so editing it under the same key silently "
+                "re-defines what existing ids mean. Insert a NEW named row "
+                "instead. Pass allow_param_mutation=True only for a deliberate "
+                "maintenance or test edit of a row with no live references."
+            )
+        super().update1(row)
+
+    def insert(self, rows, replace=False, *args, **kwargs):
+        """Reject ``replace=True``; otherwise forward to the next ``insert``.
+
+        DataJoint's ``insert(..., replace=True)`` overwrites a row's content
+        in place under its EXISTING primary key (SQL ``REPLACE``) -- the same
+        identity-forking hazard ``update1`` above guards against, reachable
+        through a different DataJoint entry point. Unlike ``update1``, there
+        is no escape hatch here: a deliberate content change still needs a
+        NEW named row, not an in-place overwrite of one every downstream
+        selection may already reference.
+
+        Every subclass whose own ``insert`` override forwards ``**kwargs`` to
+        ``super().insert(...)`` reaches this check; a subclass that never
+        calls ``super().insert`` at all (``AutoCurationRules`` /
+        ``AutoCurationRules.Rule`` reject direct inserts unconditionally) or
+        that guards ``replace`` itself before calling ``super()``
+        (``UnitAnnotationDefinition``, ``CurationReviewProfile``) is already
+        covered without reaching here.
+
+        ``replace`` takes DataJoint's own position (second), so a positional
+        ``insert(rows, True)`` is rejected like ``replace=True`` on a subclass
+        without an ``insert`` override (e.g. ``MotionCorrectionParameters``).
+        Subclass overrides forward only ``rows`` and keyword arguments here.
+
+        Parameters
+        ----------
+        rows
+            Forwarded to ``super().insert`` unchanged.
+        replace : bool, optional
+            Must be ``False`` (the default); ``True`` raises.
+        *args
+            DataJoint's later positional flags (``skip_duplicates``, ...),
+            forwarded after ``replace`` so they keep their positions.
+
+        Raises
+        ------
+        datajoint.errors.DataJointError
+            If ``replace=True``.
+        """
+        if replace:
+            raise dj.errors.DataJointError(
+                f"insert(replace=True) on {self.__class__.__name__} is not "
+                "supported: this row's content is folded into the "
+                "deterministic id of downstream selections, so overwriting "
+                "it in place under the same key silently re-defines what "
+                "existing ids mean. Insert a NEW named row instead."
+            )
+        super().insert(rows, replace, *args, **kwargs)
+
+
+# ``CurationSource`` and ``CurationLabel`` are defined in the stdlib-only
+# ``_enums`` module and re-exported at the top of this file; see the
+# import there for why they live outside ``utils``.
+
+
+def find_orphaned_masters(master_table, part_tables: list) -> list[dict]:
+    """Return master PKs whose source-part counts sum to zero.
+
+    Backs ``SortingSelection.prune_orphaned_selections`` and
+    ``MotionEstimateSelection.prune_orphaned_selections``: ``part_tables`` is
+    that master's XOR source-part set
+    ``[RecordingSource, ConcatenatedRecordingSource]``. (The artifact
+    selections and ``MotionCorrectedRecordingSelection`` carry their input as
+    a REQUIRED FK on the master, so they cannot be orphaned and have no
+    ``prune_orphaned_selections``.)
+
+    Source-part atomicity is enforced at insert time by the transactional
+    ``insert_selection`` helper, but DataJoint cannot enforce "exactly one
+    source per master" across two part tables; an upstream cascade-delete from
+    ``Recording`` / ``ConcatenatedRecording`` can leave the master row without
+    any source children. This helper finds those orphans so a maintenance
+    script can review or remove them.
+
+    Parameters
+    ----------
+    master_table : datajoint.Table
+        The selection master table to scan for orphaned rows.
+    part_tables : list
+        The source-part tables to count against each master row.
+
+    Returns
+    -------
+    list[dict]
+        The primary-key dicts of masters with zero source-part rows.
+    """
+    # Each part is keyed by ``-> master`` only: antijoin on the master key.
+    orphans = master_table.proj()
+    for part in part_tables:
+        orphans = orphans - part.proj()
+    return orphans.fetch("KEY", as_dict=True)
+
+
+def audit_source_part_integrity(master_table, part_tables: list) -> list[dict]:
+    """Return masters whose source-part row count is not exactly one.
+
+    Complements :func:`find_orphaned_masters`, which flags only the
+    zero-source case. A master with TWO source-part rows is an
+    AMBIGUOUS-source bug -- ``resolve_source`` would raise lazily, only when
+    something happens to read it -- so flag both ``0`` (orphan) and ``>1``
+    (ambiguous) here for a maintenance script to review.
+
+    ``part_tables`` must be the recording-source parts ONLY -- the
+    exactly-one-of XOR set. For ``SortingSelection`` (its only user) that is
+    ``[RecordingSource, ConcatenatedRecordingSource]``; ``ArtifactDetectionSource``
+    is deliberately EXCLUDED because it is an independent zero-or-one part (a
+    valid artifact-backed sorting carries one, so including it would falsely
+    flag every artifact-bearing sorting as ``count == 2``). This is the same
+    part list ``find_orphaned_masters`` / ``prune_orphaned_selections`` pass.
+    (The ``ArtifactDetectionOutput`` merge has its OWN, separate
+    ``audit_source_part_integrity`` classmethod for its two source parts.)
+
+    Parameters
+    ----------
+    master_table : datajoint.Table
+        The selection master table to scan.
+    part_tables : list
+        The recording-source part tables (the exactly-one-of XOR set) to count
+        against each master row.
+
+    Returns
+    -------
+    list[dict]
+        One entry per offending master: its primary-key fields plus
+        ``"source_part_count"`` (``0`` = orphan, ``>= 2`` = ambiguous). Masters
+        with exactly one source part are omitted.
+    """
+    pk = master_table.primary_key
+    counts = Counter(
+        tuple(row[attr] for attr in pk)
+        for part in part_tables
+        for row in part.fetch("KEY", as_dict=True)
+    )
+    flagged: list[dict] = []
+    for master in master_table.fetch("KEY", as_dict=True):
+        count = counts[tuple(master[attr] for attr in pk)]
+        if count != 1:
+            flagged.append({**master, "source_part_count": count})
+    return flagged
+
+
+def resolve_peak_sign(params) -> str:
+    """Map a validated sorter params blob to a SpikeInterface ``peak_sign``.
+
+    Used by ``Sorting._populate_unit_part`` so per-unit peak channel and
+    amplitude attribution honor the sorter's configured detection polarity
+    instead of hardcoding ``"neg"`` (SpikeInterface's default). Sorters
+    express polarity differently:
+
+    * ``clusterless_thresholder`` carries ``peak_sign`` directly
+      (``"neg"`` / ``"pos"`` / ``"both"``).
+    * MountainSort 4/5 carry ``detect_sign`` (``-1`` neg, ``1`` pos,
+      ``0`` both).
+    * Kilosort4 / SpykingCircus2 / Tridesclous2 / the generic schema
+      carry neither; fall back to ``"neg"`` (SI's default).
+
+    Parameters
+    ----------
+    params : Mapping or None
+        The validated ``SorterParameters.params`` blob. A non-mapping /
+        ``None`` returns ``"neg"`` rather than raising.
+
+    Returns
+    -------
+    str
+        One of ``"neg"`` / ``"pos"`` / ``"both"``.
+    """
+    if not isinstance(params, Mapping):
+        return "neg"
+    if params.get("peak_sign") is not None:
+        return str(params["peak_sign"])
+    if params.get("detect_sign") is not None:
+        return {-1: "neg", 0: "both", 1: "pos"}.get(
+            int(params["detect_sign"]), "neg"
+        )
+    return "neg"
+
+
+def write_buffer_gb(
+    n_channels: int,
+    sampling_frequency: float,
+    max_seconds: float = 30.0,
+    itemsize: int = 8,
+    cap_gb: float = 5.0,
+) -> float:
+    """Streaming-write buffer size (GB) bounded to ~``max_seconds`` of data.
+
+    A fixed 5 GB buffer would hold the WHOLE recording for narrow sort
+    groups -- a 4-channel tetrode is ~87 min in 5 GB -- defeating the
+    HDMF streaming write and spiking RAM under parallel per-group workers.
+    Scale the buffer with channel count so every group buffers ~the same
+    bounded duration, capped at ``cap_gb`` so wide groups are unchanged.
+
+    Parameters
+    ----------
+    n_channels : int
+        Number of channels in the recording being written.
+    sampling_frequency : float
+        Sampling frequency of the recording, in Hz.
+    max_seconds : float, optional
+        Target buffered duration, in seconds. Default ``30.0``.
+    itemsize : int, optional
+        Bytes per sample of the trace dtype. Default ``8`` (float64).
+    cap_gb : float, optional
+        Upper bound on the returned buffer size, in GB. Default ``5.0``.
+
+    Returns
+    -------
+    float
+        Buffer size in GB, in ``[0, cap_gb]`` (``0`` only for the degenerate
+        ``n_channels == 0``; ``> 0`` for any real recording).
+    """
+    seconds_gb = (
+        float(n_channels)
+        * float(sampling_frequency)
+        * float(max_seconds)
+        * itemsize
+        / 1e9
+    )
+    return min(cap_gb, seconds_gb)
+
+
+def unit_brain_region_df(unit_relation, resolution: str):
+    """Join a Unit-part relation against Electrode * BrainRegion.
+
+    Shared implementation of ``Sorting.get_unit_brain_regions`` and
+    ``CurationV2.get_unit_brain_regions``. The Unit relation must
+    carry an ``Electrode`` FK; the join walks it to ``BrainRegion``
+    (non-null FK on ``Electrode``) and returns a DataFrame with the
+    standard column set + a ``region_resolution`` literal label so
+    concat-backed callers can distinguish anchor-member results.
+
+    Parameters
+    ----------
+    unit_relation : datajoint.expression.QueryExpression
+        A Unit-part relation carrying an ``Electrode`` FK.
+    resolution : str
+        Literal label written verbatim into the ``region_resolution``
+        column of every returned row.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``unit_id``, ``electrode_id``, ``region_name``,
+        ``subregion_name``, ``subsubregion_name``, and the
+        ``region_resolution`` literal label. Carries the full schema
+        even when empty.
+    """
+    import pandas as pd
+
+    from spyglass.common.common_ephys import Electrode as _Electrode
+    from spyglass.common.common_region import BrainRegion
+
+    columns = [
+        "unit_id",
+        "electrode_id",
+        "region_name",
+        "subregion_name",
+        "subsubregion_name",
+    ]
+    joined = (unit_relation * _Electrode * BrainRegion).fetch(
+        *columns, as_dict=True
+    )
+    # Pass ``columns=`` so an empty result still carries the full schema;
+    # ``pd.DataFrame([])`` would otherwise drop every column and leave
+    # callers a frame with only ``region_resolution``.
+    df = pd.DataFrame(joined, columns=columns)
+    df["region_resolution"] = resolution
+    return df
+
+
+@dataclass(frozen=True)
+class SourceResolution:
+    """Result of ``SortingSelection.resolve_source(key)``.
+
+    Used by ``Sorting.make_fetch`` and the sorting / curation / unit-matching
+    readers to dispatch on which source-part row backs a ``SortingSelection``.
+    ``kind`` is the source enum; ``key`` is the source-row PK fields
+    (``{"recording_id": ...}`` or ``{"concat_recording_id": ...}``) so the
+    caller can pass it straight into the upstream table's ``get_*`` / fetch
+    helpers.
+    """
+
+    kind: Literal[
+        "recording",
+        "concatenated_recording",
+        "shared_artifact_group",
+    ]
+    key: dict
+
+
+def _assert_noise_levels_length(
+    noise_levels: list[float] | None, n_channels: int
+) -> None:
+    """Reject an explicit ``noise_levels`` of an unusable length.
+
+    The clusterless-thresholder broadcasts a singleton ``noise_levels``
+    to ``n_channels`` and otherwise indexes it per channel
+    (``noise_levels[chan]``). An explicit array whose length is neither
+    1 (broadcast) nor ``n_channels`` would either silently truncate the
+    channel set or raise an opaque ``IndexError`` deep inside SI's
+    ``detect_peaks``. ``None`` is valid (SI estimates per-channel MAD).
+
+    Parameters
+    ----------
+    noise_levels : list[float] | None
+        The resolved noise levels (explicit user value or the
+        ``[1.0]`` raw-uV broadcast). ``None`` short-circuits to valid.
+    n_channels : int
+        Number of channels on the recording the detector runs over.
+
+    Raises
+    ------
+    ValueError
+        If ``noise_levels`` is non-``None`` and ``len(noise_levels)`` is
+        neither 1 nor ``n_channels``.
+    """
+    if noise_levels is None:
+        return
+    if isinstance(noise_levels, (str, bytes)):
+        raise ValueError(
+            "clusterless noise_levels must be a numeric sequence with length "
+            "1 (broadcast) or n_channels; got a string/bytes value."
+        )
+    try:
+        length = len(noise_levels)
+    except TypeError as exc:
+        raise ValueError(
+            "clusterless noise_levels must be a numeric sequence with length "
+            "1 (broadcast) or n_channels; got a scalar value."
+        ) from exc
+    if length not in (1, n_channels):
+        raise ValueError(
+            "clusterless noise_levels must have length 1 (broadcast) or "
+            f"n_channels={n_channels}; got {length}."
+        )
+
+
+def _ambient_job_kwargs() -> dict:
+    """Return the ambient job-kwargs layer: SI globals then dj.config custom.
+
+    The process-global precedence stack beneath any per-row blob -- the
+    SpikeInterface global defaults overlaid with
+    ``dj.config['custom']['spikesorting_v2_job_kwargs']``. Single source of this
+    merge so :func:`_resolved_job_kwargs` and :func:`resolve_effective_seed`
+    (which needs the ambient layer in isolation to attribute a seed) cannot
+    drift.
+    """
+    merged = dict(si.get_global_job_kwargs())
+    custom = dj.config.get("custom", {}) or {}
+    merged.update(custom.get("spikesorting_v2_job_kwargs", {}) or {})
+    return merged
+
+
+def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
+    """Merge SpikeInterface-global, DataJoint-config, and per-row job kwargs.
+
+    Sources are merged in increasing precedence order: the SpikeInterface
+    global defaults, then ``dj.config['custom']['spikesorting_v2_job_kwargs']``,
+    then each per-row blob in the order given.
+
+    Parameters
+    ----------
+    *row_job_kwargs : dict or None
+        ``job_kwargs`` blob values from the parameter rows that govern this
+        compute stage, in increasing precedence order (a later argument wins
+        on key conflict). ``None`` and empty-dict entries are skipped.
+
+    Returns
+    -------
+    dict
+        The merged kwargs, ready to splat into a compute call.
+    """
+    merged = _ambient_job_kwargs()
+    for override in row_job_kwargs:
+        if override:
+            merged.update(override)
+    return merged
+
+
+@functools.lru_cache(maxsize=None)
+def _warn_ambient_seed_once(seed: int) -> None:
+    """Emit the ambient-seed warning at most once per distinct seed value.
+
+    Deduped per ``seed`` value so a repeated populate (or several sort groups
+    sharing one ambient seed) does not spam the log, while a genuinely new
+    ambient seed is still surfaced. ``cache_clear()`` resets the dedup (used by
+    the unit tests).
+    """
+    from spyglass.utils import logger
+
+    logger.warning(
+        "spikesorting v2: random_seed=%s is supplied via the ambient "
+        "SI-global / dj.config['custom']['spikesorting_v2_job_kwargs'] layer, "
+        "not a per-row job_kwargs blob. It is used and recorded as the "
+        "effective seed, but an ambient seed is process-global rather than "
+        "pinned to a parameter row, so the run is harder to reproduce. Prefer "
+        "setting random_seed in the per-row job_kwargs.",
+        seed,
+    )
+
+
+def resolve_effective_seed(
+    *row_job_kwargs: dict | None, reject_ambient_seed: bool = False
+) -> int:
+    """Return the ``random_seed`` actually used by a v2 compute stage.
+
+    Resolves the seed through the same precedence the dispatch reads --
+    SpikeInterface globals, then ``dj.config['custom']['spikesorting_v2_job_kwargs']``,
+    then the per-row ``job_kwargs`` blob(s) -- so the value stored on a computed
+    row equals the value the sorter / analyzer consumed. The resolution bottoms
+    out on :func:`_resolved_job_kwargs`, the exact merge the seed sites read, so
+    the stored seed cannot drift from the used seed. Defaults to ``0``.
+
+    Emits a one-time warning (per distinct seed value) when a ``random_seed``
+    arrives via the ambient SI-global / ``dj.config`` layer rather than a
+    per-row blob -- a process-global ambient seed already takes effect, but it
+    is not pinned to a parameter row, so surfacing it keeps a non-reproducible
+    ambient seed visible rather than silent. At the sort-identity boundary
+    (``reject_ambient_seed=True``) the same ambient-only seed is a hard error
+    instead: a ``Sorting`` whose seed is not folded into its identity (via
+    ``sorter_params_name``) could be silently reused after a later seed change.
+
+    Parameters
+    ----------
+    *row_job_kwargs : dict or None
+        The per-row ``job_kwargs`` blob(s) governing this stage, in increasing
+        precedence order (a later argument wins). ``None`` / empty entries are
+        skipped, matching :func:`_resolved_job_kwargs`.
+    reject_ambient_seed : bool, optional
+        When ``True``, an ambient-only ``random_seed`` (present in the SI-global
+        / ``dj.config`` layer but not in any per-row blob) raises ``ValueError``
+        instead of warning. The sorting stage passes this so a stochastic sort
+        cannot be created with a seed absent from ``sorting_id``. Default
+        ``False`` (warn), for stages where the seed is captured as provenance.
+
+    Returns
+    -------
+    int
+        The resolved effective random seed (``0`` when unset).
+
+    Raises
+    ------
+    ValueError
+        If the resolved ``random_seed`` is not a non-negative integer (e.g.
+        ``"7"``, ``7.9``, or ``-1``). The seed sites consume this resolved value
+        directly, so a bad seed is rejected here -- BEFORE compute -- rather than
+        silently ``int()``-coerced (which would store ``7`` while the sorter saw
+        the original object) or deferred to a later SI/NumPy RNG failure. This is
+        the call that runs first in ``make_compute``, so a bad seed aborts the
+        populate before any row is written. Mirrors the ``seed >= 0`` constraint
+        on the UnitMatch bundle-seed schema.
+    """
+    resolved = _resolved_job_kwargs(*row_job_kwargs).get("random_seed", 0)
+    # ``bool`` is an ``int`` subclass but never a valid seed; ``numbers.Integral``
+    # accepts Python and numpy integers (which are seed-equivalent to ``int``).
+    # SI/NumPy RNG seeds must be non-negative, so reject ``< 0`` here too.
+    if (
+        isinstance(resolved, bool)
+        or not isinstance(resolved, numbers.Integral)
+        or resolved < 0
+    ):
+        raise ValueError(
+            "spikesorting v2 random_seed must be a non-negative integer, got "
+            f"{resolved!r} ({type(resolved).__name__}). Set an int random_seed "
+            "in the per-row job_kwargs blob (or "
+            "dj.config['custom']['spikesorting_v2_job_kwargs'])."
+        )
+    effective = int(resolved)
+    per_row_has_seed = any(
+        isinstance(blob, Mapping) and "random_seed" in blob
+        for blob in row_job_kwargs
+    )
+    if not per_row_has_seed:
+        ambient = _ambient_job_kwargs()
+        if "random_seed" in ambient:
+            if reject_ambient_seed:
+                raise ValueError(
+                    "spike sorting requires random_seed to live in the "
+                    "SorterParameters job_kwargs (where it is part of the "
+                    "sort's identity via sorter_params_name), not the ambient "
+                    "dj.config['custom']['spikesorting_v2_job_kwargs'] / "
+                    "SI-global layer. An ambient random_seed="
+                    f"{int(ambient['random_seed'])} changes the sort output "
+                    "WITHOUT changing sorting_id, so a later seed change would "
+                    "silently reuse this sort. Move random_seed into the "
+                    "SorterParameters row (or clear the ambient seed)."
+                )
+            _warn_ambient_seed_once(int(ambient["random_seed"]))
+    return effective
+
+
+def get_spike_sorting_v2_merge_ids(
+    restriction: dict, as_dict: bool = False
+) -> list:
+    """Return merge ids for a v2 spike-sorting restriction.
+
+    Notebook-discoverable helper for downstream-analysis handoffs;
+    thin wrapper over ``SpikeSortingOutput()._get_restricted_merge_ids_v2`` so
+    users can do ``get_spike_sorting_v2_merge_ids(restriction)``
+    without poking at the private merge-table method directly.
+
+    ``as_dict=True`` returns ``{"merge_id": uuid}`` dicts; the default
+    ``False`` returns a plain list of UUIDs, matching the v1 helper return
+    shape.
+
+    Parameters
+    ----------
+    restriction : dict
+        Restriction on any v2 column (``nwb_file_name``,
+        ``sort_group_id``, ``interval_list_name``,
+        ``preprocessing_params_name``, ``recording_id``, ``artifact_detection_id``,
+        ``sorter``, ``sorter_params_name``, ``sorting_id``,
+        ``curation_id``). Unknown keys raise ``ValueError``.
+    as_dict : bool, optional
+        Return list of ``{"merge_id": uuid}`` dicts when True;
+        a list of UUIDs when False (default).
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    return SpikeSortingOutput()._get_restricted_merge_ids_v2(
+        restriction, as_dict=as_dict
+    )

@@ -1,0 +1,779 @@
+"""Artifact masking on member and concatenated frame coordinates."""
+
+import numpy as np
+import pytest
+
+from tests.spikesorting.v2._sorter_stub import plant_sorter
+
+
+def test_mask_members_preserves_disjoint_times_and_exact_boundaries():
+    from spikeinterface.core import NumpyRecording
+
+    from spyglass.spikesorting.v2._concat_recording import (
+        mask_member_recordings,
+        observation_intervals,
+    )
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        apply_artifact_mask,
+    )
+
+    first = NumpyRecording(np.ones((1000, 2), dtype="float32"), 1000)
+    first.set_times(
+        np.r_[10 + np.arange(500) / 1000, 20 + np.arange(500) / 1000]
+    )
+    second = NumpyRecording(np.ones((1000, 2), dtype="float32"), 1000)
+    second.set_times(100 + np.arange(1000) / 1000)
+    valid = [
+        np.array([[10, 10.499], [20, 20.45]]),
+        np.array([[100.02, 100.999]]),
+    ]
+    masked, ranges = mask_member_recordings([first, second], valid)
+    assert ranges == [(950, 1000), (1000, 1020)]
+    for original, result, intervals in zip([first, second], masked, valid):
+        np.testing.assert_array_equal(result.get_times(), original.get_times())
+        np.testing.assert_array_equal(
+            result.get_traces(),
+            apply_artifact_mask(original, intervals).get_traces(),
+        )
+    np.testing.assert_array_equal(masked[0].get_traces()[499], [1, 1])
+    np.testing.assert_array_equal(masked[0].get_traces()[950:], 0)
+    np.testing.assert_array_equal(masked[1].get_traces()[:20], 0)
+    np.testing.assert_allclose(
+        observation_intervals(2000, 1000, ranges), [[0, 0.95], [1.02, 2]]
+    )
+
+
+def test_unmasked_members_keep_their_samples():
+    from spikeinterface.core import NumpyRecording
+
+    from spyglass.spikesorting.v2._concat_recording import (
+        mask_member_recordings,
+    )
+
+    recording = NumpyRecording(np.ones((100, 2), dtype="float32"), 1000)
+    recordings, ranges = mask_member_recordings([recording], [None])
+    assert recordings == [recording]
+    assert ranges == []
+
+
+def _offset_member(start_s, *, dtype="int16", gain=0.25, offset=-2500.0):
+    """A 2-channel member whose counts encode 0 uV plus a ramp, with the
+    acquisition offset an unfiltered, unreferenced integer source keeps."""
+    from spikeinterface.core import NumpyRecording
+
+    ramp_uv = np.linspace(-50.0, 50.0, 1000)[:, None] * np.ones((1, 2))
+    counts = np.round((ramp_uv - offset) / gain).astype(dtype)
+    member = NumpyRecording(counts, 1000)
+    member.set_channel_gains([gain] * 2)
+    member.set_channel_offsets([offset] * 2)
+    member.set_channel_locations([[0.0, 0.0], [0.0, 20.0]])
+    member.set_times(start_s + np.arange(1000) / 1000)
+    return member
+
+
+def test_offset_members_concatenate_in_microvolts_with_masks_at_zero():
+    """Members with a nonzero offset are concatenated as float microvolts
+    with a unit calibration, so the masked frames of the stitched artifact
+    read 0 uV rather than the offset voltage, and an unmasked member stays
+    on the same scale as a masked one."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        build_concatenated_recording,
+        mask_member_recordings,
+    )
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        silence_frame_ranges,
+    )
+
+    first, second = _offset_member(10.0), _offset_member(100.0)
+    valid = [np.array([[10.0, 10.0995], [10.2, 10.999]]), None]
+    masked, ranges = mask_member_recordings([first, second], valid)
+    assert ranges == [(100, 200)]
+    concatenated = silence_frame_ranges(
+        build_concatenated_recording(masked), ranges
+    )
+
+    np.testing.assert_array_equal(
+        concatenated.get_traces(return_in_uV=True)[100:200], 0.0
+    )
+    assert concatenated.get_dtype() == np.dtype("float32")
+    np.testing.assert_array_equal(concatenated.get_channel_gains(), 1.0)
+    np.testing.assert_array_equal(concatenated.get_channel_offsets(), 0.0)
+    stored = concatenated.get_traces()
+    np.testing.assert_array_equal(stored[100:200], 0.0)
+    first_uv = first.get_traces(return_in_uV=True)
+    np.testing.assert_array_equal(stored[:100], first_uv[:100])
+    np.testing.assert_array_equal(stored[200:1000], first_uv[200:])
+    np.testing.assert_array_equal(
+        stored[1000:], second.get_traces(return_in_uV=True)
+    )
+    np.testing.assert_array_equal(
+        concatenated.get_traces(return_in_uV=True), stored
+    )
+
+
+def test_members_with_different_offsets_are_refused_before_conversion():
+    """Converting members to microvolts would put members with different
+    offsets on one scale; the members themselves must still share offsets,
+    gains and dtype, as the unconverted concatenation required."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        mask_member_recordings,
+    )
+
+    first = _offset_member(10.0)
+    other_offset = _offset_member(100.0, offset=-2000.0)
+    with pytest.raises(ValueError, match="offsets"):
+        mask_member_recordings([first, other_offset], [None, None])
+
+
+def test_members_with_nearly_equal_offsets_are_converted_together():
+    """Offsets 0 and 1e-9 pass the members' compatibility check (``allclose``)
+    but only the second is nonzero. Every member is then converted to
+    microvolts, so the concatenation never mixes dtypes."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        build_concatenated_recording,
+        mask_member_recordings,
+    )
+
+    first = _offset_member(10.0, offset=0.0)
+    second = _offset_member(100.0, offset=1e-9)
+    valid = [np.array([[10.0, 10.0995], [10.2, 10.999]]), None]
+    masked, ranges = mask_member_recordings([first, second], valid)
+
+    assert [m.get_dtype() for m in masked] == [np.dtype("float32")] * 2
+    concatenated = build_concatenated_recording(masked)
+    stored = concatenated.get_traces()
+    np.testing.assert_array_equal(stored[100:200], 0.0)
+    np.testing.assert_array_equal(
+        stored[1000:], second.get_traces(return_in_uV=True)
+    )
+
+
+@pytest.mark.parametrize(
+    "dtype, gain", [("float32", 1.0), ("float64", 0.25)], ids=["uv", "counts"]
+)
+def test_zero_offset_members_are_masked_in_their_stored_units(dtype, gain):
+    """Members whose offsets are 0 -- every filtered or referenced
+    recording -- are masked in their stored units: the masked members and
+    their concatenation keep the members' dtype, calibration and bytes, so
+    those concat artifacts (and their content hashes) are unchanged."""
+    import spikeinterface.preprocessing as sip
+
+    from spyglass.spikesorting.v2._concat_recording import (
+        build_concatenated_recording,
+        mask_member_recordings,
+    )
+
+    first = _offset_member(10.0, dtype=dtype, gain=gain, offset=0.0)
+    second = _offset_member(100.0, dtype=dtype, gain=gain, offset=0.0)
+    valid = [np.array([[10.0, 10.0995], [10.2, 10.999]]), None]
+    masked, ranges = mask_member_recordings([first, second], valid)
+
+    assert masked[1] is second
+    reference = sip.silence_periods(first, list_periods=[ranges], mode="zeros")
+    np.testing.assert_array_equal(
+        masked[0].get_traces(), reference.get_traces()
+    )
+    concatenated = build_concatenated_recording(masked)
+    assert concatenated.get_dtype() == np.dtype(dtype)
+    np.testing.assert_array_equal(concatenated.get_channel_gains(), gain)
+    np.testing.assert_array_equal(concatenated.get_channel_offsets(), 0.0)
+    np.testing.assert_array_equal(
+        concatenated.get_traces(),
+        np.concatenate([reference.get_traces(), second.get_traces()]),
+    )
+
+
+def test_concat_preserves_member_internal_gaps():
+    """Concat continuity and statistics spans split at member joins and
+    member-internal gaps, and each continuity span keeps its real first and
+    last timestamps.
+
+    The first member is continuous with one artifact; the second has a
+    wall-clock gap between its internal spans ``[0, 500)`` and ``[500, 1000)``.
+    The concat span list must keep both offset internal spans (not one
+    ``[800, 1800)``), split at the member join (frame 800) even though
+    neither side is masked there, and drop the artifact frames.
+    """
+    from spikeinterface.core import NumpyRecording
+
+    from spyglass.spikesorting.v2._concat_recording import (
+        concat_continuity,
+        mask_member_recordings,
+    )
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        statistics_spans,
+    )
+
+    first = NumpyRecording(np.ones((800, 2), dtype="float32"), 1000)
+    first.set_times(5 + np.arange(800) / 1000)
+    gapped = NumpyRecording(np.ones((1000, 2), dtype="float32"), 1000)
+    gapped.set_times(
+        np.r_[10 + np.arange(500) / 1000, 20 + np.arange(500) / 1000]
+    )
+    # Keep everything in the first member except frames [100, 150).
+    valid = [np.array([[5.0, 5.0995], [5.15, 5.799]]), None]
+    _masked, artifact_ranges = mask_member_recordings([first, gapped], valid)
+    assert artifact_ranges == [(100, 150)]
+
+    continuity = concat_continuity([first, gapped], [800, 1000])
+
+    assert continuity.spans == [(0, 800), (800, 1300), (1300, 1800)]
+    assert continuity.start_s == [5.0, 10.0, 20.0]
+    assert continuity.end_s == [5.799, 10.499, 20.499]
+    assert statistics_spans(1800, artifact_ranges, continuity.spans) == [
+        (0, 100),
+        (150, 800),
+        (800, 1300),
+        (1300, 1800),
+    ]
+    # The gapless case still splits at the member join, and a member without
+    # a time vector starts at its own t_start.
+    continuous = NumpyRecording(np.ones((1000, 2), dtype="float32"), 1000)
+    continuous.shift_times(7.5)
+    assert concat_continuity([first, continuous], [800, 1000]) == (
+        [(0, 800), (800, 1800)],
+        [5.0, 7.5],
+        [5.799, 7.5 + 999 / 1000],
+    )
+
+
+@pytest.mark.slow
+def test_detected_artifacts_survive_concat_rebuild_and_member_export(
+    chronic_2_session_minirec,
+    monkeypatch,
+    curation_evaluation_defaults,
+):
+    from pathlib import Path
+
+    from spyglass.common import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import _concat_recording as concat_services
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        artifact_frame_ranges,
+    )
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+
+    fixture = chronic_2_session_minirec
+    name = "artifact_concat"
+    SessionGroup.create_group(
+        fixture["owner"], name, fixture["same_day_members"]
+    )
+    group = {
+        "session_group_owner": fixture["owner"],
+        "session_group_name": name,
+    }
+    request = {
+        **group,
+        "preprocessing_params_name": fixture["preprocessing_params_name"],
+    }
+    recordings = [
+        Recording().get_recording(key) for key in fixture["recording_pks"]
+    ]
+    detection_ids, valid_times, ranges = {}, [], []
+    for i, (recording, rec_key) in enumerate(
+        zip(recordings, fixture["recording_pks"])
+    ):
+        # Detect rare, real high-amplitude periods in each fixed-seed recording.
+        threshold = float(
+            np.quantile(np.abs(recording.get_traces(return_in_uV=True)), 0.999)
+        )
+        recipe = f"concat_artifacts_{i}"
+        ArtifactDetectionParameters.insert1(
+            {
+                "artifact_detection_params_name": recipe,
+                "params": {
+                    "amplitude_threshold_uv": threshold,
+                    "proportion_above_threshold": 0.25,
+                    "min_length_s": 0.001,
+                },
+            },
+            skip_duplicates=True,
+            allow_duplicate_params=True,
+        )
+        art_key = RecordingArtifactSelection.insert_selection(
+            {
+                **rec_key,
+                "artifact_detection_params_name": recipe,
+                "manual_excluded_times": [
+                    [
+                        float(recording.sample_index_to_time(200)),
+                        float(recording.sample_index_to_time(210)),
+                    ]
+                ],
+            }
+        )
+        RecordingArtifactDetection.populate(art_key, reserve_jobs=False)
+        detection_ids[i] = art_key["artifact_detection_id"]
+        valid = RecordingArtifactDetection().get_artifact_removed_intervals(
+            art_key
+        )
+        valid_times.append(valid)
+        ranges.append(artifact_frame_ranges(recording, valid))
+        assert ranges[-1], "Fixture must actually exercise nonempty masks."
+        assert any(start <= 200 and end >= 210 for start, end in ranges[-1])
+
+    observed = []
+    original = concat_services.build_concatenated_recording
+
+    def inspect_concat_input(member_recordings):
+        for member, excluded in zip(member_recordings, ranges):
+            for start, end in excluded:
+                np.testing.assert_array_equal(
+                    member.get_traces(start_frame=start, end_frame=end), 0
+                )
+        observed.append(True)
+        return original(member_recordings)
+
+    monkeypatch.setattr(
+        concat_services, "build_concatenated_recording", inspect_concat_input
+    )
+    key = ConcatenatedRecordingSelection.insert_selection(
+        request, artifact_detection_ids=detection_ids
+    )
+    assert (
+        ConcatenatedRecordingSelection.insert_selection(
+            request, artifact_detection_ids=detection_ids
+        )
+        == key
+    )
+    different = ConcatenatedRecordingSelection.insert_selection(
+        request, artifact_detection_ids={**detection_ids, 1: None}
+    )
+    assert different != key
+    with pytest.raises(ValueError, match="must be populated for recording"):
+        ConcatenatedRecordingSelection.insert_selection(
+            request,
+            artifact_detection_ids={0: detection_ids[1], 1: detection_ids[0]},
+        )
+    with pytest.raises(ValueError, match="referenced"):
+        (
+            RecordingArtifactDetection
+            & {"artifact_detection_id": detection_ids[0]}
+        ).delete(safemode=False)
+
+    ConcatenatedRecording.populate(key, reserve_jobs=False)
+    row = (ConcatenatedRecording & key).fetch1()
+    combined = ConcatenatedRecording().get_recording(key)
+    offset = 0
+    for i, (recording, excluded, valid) in enumerate(
+        zip(recordings, ranges, valid_times)
+    ):
+        for start, end in excluded:
+            np.testing.assert_array_equal(
+                combined.get_traces(
+                    start_frame=offset + start, end_frame=offset + end
+                ),
+                0,
+            )
+        persisted = (
+            ConcatenatedRecording.MemberBoundary & key & {"member_index": i}
+        ).fetch1("member_valid_times")
+        np.testing.assert_array_equal(persisted, valid)
+        offset += recording.get_num_samples()
+    assert len(observed) == 1
+    assert combined.get_num_samples() == offset
+    assert np.diff(row["obs_intervals"], axis=1).sum() < row["total_duration_s"]
+
+    # Concatenation applies no motion correction: the artifact holds exactly
+    # the members' stored traces, in order, with the selected ranges zeroed,
+    # and keeps every member channel.
+    expected_parts = []
+    for recording, excluded in zip(recordings, ranges):
+        member_traces = recording.get_traces().copy()
+        for start, end in excluded:
+            member_traces[start:end] = 0
+        expected_parts.append(member_traces)
+    np.testing.assert_array_equal(
+        combined.get_traces(), np.concatenate(expected_parts, axis=0)
+    )
+    assert row["n_channels"] == combined.get_num_channels()
+    for recording in recordings:
+        assert combined.get_num_channels() == recording.get_num_channels()
+        assert list(combined.get_channel_ids()) == list(
+            recording.get_channel_ids()
+        )
+
+    before = combined.get_traces()
+    Path(AnalysisNwbfile.get_abs_path(row["analysis_file_name"])).unlink()
+    after = ConcatenatedRecording().get_recording(key)
+    np.testing.assert_array_equal(after.get_traces(), before)
+    assert len(observed) == 2
+
+    # Inspect the actual sorter input, then plant two deterministic units so
+    # the test covers interval propagation even if a detector finds no units.
+    from spikeinterface.core import NumpySorting
+
+    from spyglass.spikesorting.v2._pipeline_reporting import (
+        _observed_duration_s,
+    )
+    from spyglass.spikesorting.v2._units_nwb import (
+        read_units_abs_times_and_sample_indices,
+    )
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import (
+        Sorting,
+        SortingSelection,
+    )
+    from tests.spikesorting.v2._motion_db_helpers import sorter_key
+
+    def sort_masked(sorter, sorter_params, recording, sorting_id, **kwargs):
+        cursor = 0
+        samples, labels = [], []
+        for member, excluded in zip(recordings, ranges):
+            for start, end in excluded:
+                np.testing.assert_array_equal(
+                    recording.get_traces(
+                        start_frame=cursor + start, end_frame=cursor + end
+                    ),
+                    0,
+                )
+            samples.extend([cursor + 100, cursor + 200])
+            labels.extend([0, 1])
+            cursor += member.get_num_samples()
+        return NumpySorting.from_samples_and_labels(
+            [np.asarray(samples)],
+            [np.asarray(labels)],
+            recording.get_sampling_frequency(),
+        )
+
+    sorting_key = SortingSelection.insert_selection({**key, **sorter_key()})
+    plant_sorter(monkeypatch, sort_masked)
+    Sorting.populate(sorting_key, reserve_jobs=False)
+    # The sort reads the concat cache itself, whose member masks are already
+    # written in, so no mask is applied again at load.
+    effective = SortingSelection.resolve_effective_source(sorting_key)
+    source = SortingSelection.resolve_source(sorting_key)
+    assert str(source.key["concat_recording_id"]) == str(
+        key["concat_recording_id"]
+    )
+    assert tuple(effective.lineage) == (
+        "concatenated_recording",
+        source.key,
+        None,
+    )
+    assert effective.traces.kind == "concatenated_recording"
+    assert effective.traces.key == source.key
+    assert effective.traces.row["content_hash"] == row["content_hash"]
+    assert effective.traces.apply_artifact_mask is False
+    # Both analyzer rebuild routes must see the exact materialized mask, not
+    # reload an unmasked member or apply member wall-clock intervals to concat.
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        reconstruct_recording_and_sorting,
+    )
+    from spyglass.spikesorting.v2._source_resolution import (
+        load_effective_recording,
+    )
+
+    rebuilt, canonical_sorting = reconstruct_recording_and_sorting(
+        Sorting(), sorting_key
+    )
+    resolved = load_effective_recording(effective.traces)
+    for recording in (rebuilt, resolved):
+        np.testing.assert_array_equal(
+            recording.get_traces(), combined.get_traces()
+        )
+    assert set(canonical_sorting.unit_ids) == {0, 1}
+    assert _observed_duration_s(sorting_key["sorting_id"]) == pytest.approx(
+        sum(
+            (
+                member.get_num_samples()
+                - sum(end - start for start, end in excluded)
+            )
+            / member.sampling_frequency
+            for member, excluded in zip(recordings, ranges)
+        )
+    )
+    root = CurationV2.insert_curation(
+        sorting_key=sorting_key, labels={0: ["accept"], 1: ["accept"]}
+    )
+    merged = CurationV2.create_merged_curation(
+        sorting_key=sorting_key,
+        parent_curation_id=root["curation_id"],
+        merge_groups=[[0, 1]],
+    )
+    for table, table_key in [
+        (Sorting, sorting_key),
+        (CurationV2, root),
+        (CurationV2, merged),
+    ]:
+        path = AnalysisNwbfile.get_abs_path(
+            (table & table_key).fetch1("analysis_file_name")
+        )
+        _, _, intervals = read_units_abs_times_and_sample_indices(path)
+        for valid in intervals.values():
+            np.testing.assert_array_equal(valid, row["obs_intervals"])
+    # Artifact restrictions include source-owned member detections; a masked
+    # concat cannot leak into a request for no artifact pass.
+    assert not (
+        CurationV2.resolve_restriction({"artifact_detection_id": None}) & merged
+    )
+    assert (
+        CurationV2.resolve_restriction(
+            {"artifact_detection_id": detection_ids[0]}
+        )
+        & merged
+    )
+    ConcatMemberCuration.populate(merged, reserve_jobs=False)
+    for member in (ConcatMemberCuration & merged).fetch(as_dict=True):
+        path = AnalysisNwbfile.get_abs_path(member["analysis_file_name"])
+        times, frames, intervals = read_units_abs_times_and_sample_indices(path)
+        i = member["member_index"]
+        for uid, valid in intervals.items():
+            np.testing.assert_array_equal(valid, valid_times[i])
+            np.testing.assert_allclose(
+                times[uid], recordings[i].get_times()[frames[uid]]
+            )
+
+    # The analysis snapshot uses the same global unit decision on each
+    # member's real session timeline, through the downstream group accessor.
+    from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
+    from spyglass.spikesorting.v2.analysis_selection import (
+        select_units_for_analysis,
+    )
+
+    selection = select_units_for_analysis(merged)
+    try:
+        from spyglass.spikesorting.v2.curation_api import CurationRef
+
+        evaluation = CurationRef.from_key(merged).evaluate(
+            metric_params_name="minimal", auto_curation_rules_name="none"
+        )
+        metrics = evaluation.metrics
+        # The planted sorter deliberately returned events in the masked interval.
+        # Observed metrics count only available events and use sample exposure;
+        # the original SI firing-rate column keeps its own full-timeline meaning.
+        observed_count = sum(
+            not any(start <= frame < stop for start, stop in excluded)
+            for excluded in ranges
+            for frame in (100, 200)
+        )
+        duration = _observed_duration_s(sorting_key["sorting_id"])
+        assert metrics.loc[2, "observed_duration_s"] == pytest.approx(duration)
+        assert metrics.loc[2, "observed_firing_rate_hz"] == pytest.approx(
+            observed_count / duration
+        )
+        assert metrics.loc[2, "firing_rate"] == pytest.approx(
+            4 * combined.sampling_frequency / combined.get_num_samples()
+        )
+        assert selection.included_unit_ids == (2,)
+        assert len(selection.groups) == len(recordings)
+        for selected in selection.groups:
+            _, identities = SortedSpikesGroup.fetch_spike_data(
+                dict(selected.group_key), return_unit_ids=True
+            )
+            assert identities == [
+                {"spikesorting_merge_id": selected.merge_id, "unit_id": 2}
+            ]
+            observed = selected.observation
+            assert observed.duration_s > 0 and not observed.unknown_sources
+            i = selected.member_index
+            member = recordings[i]
+            expected = (
+                member.get_num_samples()
+                - sum(end - start for start, end in ranges[i])
+            ) / member.sampling_frequency
+            assert observed.duration_s == pytest.approx(expected)
+            assert not observed.contains([member.get_times()[200]])[0]
+    finally:
+        for selected in selection.groups:
+            (SortedSpikesGroup & dict(selected.group_key)).super_delete(
+                warn=False
+            )
+
+    # The nullable detection FK must cascade through the concat master, not
+    # just remove one snapshot member and leave a truncated selection behind.
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    member_keys = (ConcatMemberCuration & merged).fetch("KEY")
+    (
+        RecordingArtifactDetection & {"artifact_detection_id": detection_ids[0]}
+    ).cascade_delete(safemode=False)
+    assert not (ConcatenatedRecordingSelection & key)
+    assert not (ConcatenatedRecordingSelection & different)
+    assert not (Sorting & sorting_key)
+    assert not (CurationV2 & sorting_key)
+    assert not (ConcatMemberCuration & merged)
+    assert not (SpikeSortingOutput.ConcatMemberCuration & member_keys)
+
+
+@pytest.mark.slow
+def test_member_artifact_failure_retry_and_reuse(
+    chronic_2_session_minirec, monkeypatch
+):
+    from spikeinterface.core import NumpySorting
+
+    from spyglass.spikesorting.v2 import _pipeline_presets as presets
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        RecordingArtifactDetection,
+    )
+    from spyglass.spikesorting.v2.exceptions import PipelineStageError
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+    from tests.spikesorting.v2._motion_db_helpers import sorter_key
+
+    fixture = chronic_2_session_minirec
+    name = "artifact_retry_test"
+    SessionGroup.create_group(
+        fixture["owner"], name, fixture["same_day_members"]
+    )
+    first = Recording().get_recording(fixture["recording_pks"][0])
+    threshold = float(
+        np.quantile(np.abs(first.get_traces(return_in_uV=True)), 0.999)
+    )
+    ArtifactDetectionParameters.insert1(
+        {
+            "artifact_detection_params_name": name,
+            "params": {
+                "amplitude_threshold_uv": threshold,
+                "proportion_above_threshold": 0.25,
+                "min_length_s": 0.001,
+            },
+        },
+        allow_duplicate_params=True,
+    )
+    smoke_sorter = sorter_key()
+    base = presets._PIPELINE_PRESETS[
+        "franklab_probe_hippocampus_30khz_ms5_2026_06"
+    ]
+    monkeypatch.setitem(
+        presets._PIPELINE_PRESETS,
+        name,
+        base.model_copy(
+            update={
+                "preprocessing_params_name": fixture[
+                    "preprocessing_params_name"
+                ],
+                "artifact_detection_params_name": name,
+                **smoke_sorter,
+            }
+        ),
+    )
+    original_populate = RecordingArtifactDetection.populate
+    calls = []
+
+    def interrupt_second_member(key, **kwargs):
+        calls.append(key)
+        if len(calls) == 2:
+            raise RuntimeError("Interrupted member detection")
+        return original_populate(key, **kwargs)
+
+    monkeypatch.setattr(
+        RecordingArtifactDetection,
+        "populate",
+        staticmethod(interrupt_second_member),
+    )
+    plant_sorter(
+        monkeypatch,
+        lambda sorter, sorter_params, recording, sorting_id, **kwargs: NumpySorting.from_unit_dict(
+            {0: np.array([100, 1000, 10000])},
+            recording.get_sampling_frequency(),
+        ),
+    )
+    request = {
+        "concat_session_group_owner": fixture["owner"],
+        "concat_session_group_name": name,
+        "pipeline_preset": name,
+    }
+    with pytest.raises(PipelineStageError) as error:
+        run_v2_pipeline(**request)
+    assert error.value.stage == "member_artifact_detection"
+    completed = error.value.partial_run_summary["member_artifacts"]
+    assert len(completed) == 1 and completed[0]["masked_duration_s"] > 0
+    retry = run_v2_pipeline(**request)
+    assert [member["status"] for member in retry["member_artifacts"]] == [
+        "reused",
+        "computed",
+    ]
+    assert retry["artifact_masked_duration_s"] == pytest.approx(
+        sum(member["masked_duration_s"] for member in retry["member_artifacts"])
+    )
+    again = run_v2_pipeline(**request)
+    assert again["sorting_id"] == retry["sorting_id"]
+    assert again["concat_recording_id"] == retry["concat_recording_id"]
+    assert again["member_artifact_detection_status"] == "reused"
+    assert again["sorting_status"] == "reused"
+
+    # A detection that leaves no usable time must identify the failing member,
+    # even when its recording and detection were already populated.
+    artifact_id = again["member_artifacts"][1]["artifact_detection_id"]
+    recording_id = again["member_recording_ids"][1]
+    original_intervals = (
+        RecordingArtifactDetection.get_artifact_removed_intervals
+    )
+
+    def empty_second_member(self, key, as_dict=False):
+        if key["artifact_detection_id"] == artifact_id:
+            return np.empty((0, 2))
+        return original_intervals(self, key, as_dict=as_dict)
+
+    monkeypatch.setattr(
+        RecordingArtifactDetection,
+        "get_artifact_removed_intervals",
+        empty_second_member,
+    )
+    with pytest.raises(PipelineStageError) as error:
+        run_v2_pipeline(**request)
+    assert error.value.stage == "member_artifact_detection"
+    assert str(artifact_id) in str(error.value)
+    assert str(recording_id) in str(error.value)
+    assert len(error.value.partial_run_summary["member_artifacts"]) == 1
+
+
+def test_concat_of_offset_members_persists_masks_at_zero_microvolts(
+    offset_source_concat,
+):
+    """The persisted concatenation of two unfiltered, unreferenced int16
+    members that keep a -2500 uV offset reads 0 uV over the masked second of
+    member A (not -2500 uV), and every other frame at its member's voltage;
+    it is stored as float microvolts with a unit calibration."""
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    members = [
+        Recording().get_recording(offset_source_concat[name])
+        for name in ("member_a", "member_b")
+    ]
+    for member in members:
+        assert member.get_dtype() == np.dtype("int16")
+        np.testing.assert_allclose(member.get_channel_gains(), 0.25)
+        np.testing.assert_allclose(member.get_channel_offsets(), -2500.0)
+    first = members[0]
+    fs = first.get_sampling_frequency()
+    t_a = float(first.sample_index_to_time(0))
+    masked = slice(
+        int(first.time_to_sample_index(t_a + 1.0)),
+        int(first.time_to_sample_index(t_a + 2.0)),
+    )
+    assert masked.stop - masked.start == round(fs)
+
+    concat = ConcatenatedRecording().get_recording(
+        offset_source_concat["concat_key"]
+    )
+    uv = concat.get_traces(return_in_uV=True)
+    np.testing.assert_array_equal(uv[masked], 0.0)
+    assert concat.get_dtype() == np.dtype("float32")
+    np.testing.assert_allclose(concat.get_channel_gains(), 1.0)
+    np.testing.assert_allclose(concat.get_channel_offsets(), 0.0)
+    n_a = first.get_num_samples()
+    first_uv = first.get_traces(return_in_uV=True)
+    np.testing.assert_array_equal(uv[: masked.start], first_uv[: masked.start])
+    np.testing.assert_array_equal(
+        uv[masked.stop : n_a], first_uv[masked.stop :]
+    )
+    np.testing.assert_array_equal(
+        uv[n_a:], members[1].get_traces(return_in_uV=True)
+    )

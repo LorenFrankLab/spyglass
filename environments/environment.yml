@@ -19,24 +19,28 @@ dependencies:
   # - cudatoolkit=11.3 # dlc-only
   # - ffmpeg # dlc-only
   - ipympl
-  - jax<0.7.2  # jax 0.7.2 requires numpy>=2/scipy>=1.13
+  - jax<0.10  # non_local_detector 0.6.9 calls clip(a_min=..., a_max=...), keywords JAX 0.10 removed
   - jupyterlab>=3.*
   # - libgcc # dlc-only
   - matplotlib
-  - non_local_detector
-  - numpy<2  # spikeinterface 0.99.1 calls np.issctype, removed in numpy 2.0
+  - non_local_detector==0.6.9
+  - numpy>=2,<3
   - pip
-  - scipy<1.13  # spikeinterface 0.99.x uses scipy.linalg.tril, removed in 1.13
   - position_tools
-  - pybind11  # req by mountainsort4 -> isosplit5
   - pydotplus
   - python>=3.10,<3.13
-  - pytorch<1.12.0
   - ripple_detection
+  - scipy>=1.13  # numpy>=2 (the v2 SI 0.104 stack) needs scipy>=1.13; the legacy SI 0.99 env is environments/environment_spikesorting_legacy.yml
   - seaborn
   # - torchaudio # dlc-only
   # - torchvision # dlc-only
   - track_linearization>=2.3
   - pip:
-      - mountainsort4
+      # torch is installed via pip, not conda: conda ``pytorch>=2`` does not
+      # solve against ``numpy>=2`` on the enabled channels (conda-forge/franklab/
+      # edeno) -- it drags in a numpy<2 pin -- whereas the pip ``torch>=2``
+      # wheels are numpy>=2-compatible. The v2 SI 0.104 stack needs torch>=2.
+      - torch>=2
+      # No mountainsort4: its ml_ms4alg backend does not run on numpy>=2. Run
+      # MountainSort4 from environments/environment_spikesorting_legacy.yml.
       - ..

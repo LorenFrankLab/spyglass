@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.2
+#       jupytext_version: 1.19.5
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -356,7 +356,6 @@ sgp.TrodesPosV1.populate(pos_key, display_progress=True)
 sgp.TrodesPosV1 & pos_key
 
 # +
-from spyglass.position import PositionOutput  # noqa: F401, F403
 
 pos_key = PositionOutput.merge_get_part(pos_key).fetch1("KEY")
 (PositionOutput & pos_key).fetch1_dataframe()

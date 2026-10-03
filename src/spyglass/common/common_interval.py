@@ -13,7 +13,7 @@ import pynwb
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassIngestion, logger
-from spyglass.utils.dj_helper_fn import get_child_tables
+from spyglass.utils.dj_helper_fn import get_child_references
 
 schema = dj.schema("common_interval")
 
@@ -314,7 +314,7 @@ class IntervalList(SpyglassIngestion, dj.Manual):
 
     def cleanup(self, dry_run=True):
         """Clean up orphaned IntervalList entries."""
-        orphans = self - get_child_tables(self)
+        orphans = self - get_child_references(self)
         if dry_run:
             return orphans
         orphans.super_delete(warn=False)
