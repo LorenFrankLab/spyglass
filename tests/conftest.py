@@ -54,7 +54,6 @@ import pytest
 import sklearn.utils.parallel as _sklearn_parallel
 from datajoint.logging import logger as dj_logger
 from hdmf.build.warnings import MissingRequiredBuildWarning
-from numba import NumbaWarning
 from pandas.errors import PerformanceWarning
 
 from ._teardown_exit import escalate_exit_on_teardown_failure
@@ -227,7 +226,14 @@ warnings.filterwarnings(
 )
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
-warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+
+# numba is only a transitive dependency (absent from the spike sorting envs).
+try:
+    from numba import NumbaWarning
+except ImportError:
+    pass
+else:
+    warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
 
 # RuntimeWarning: os.fork() was called after os.forkserver() or JAX import.
 # JAX disables fork after parallelism starts; these are harmless in tests.
