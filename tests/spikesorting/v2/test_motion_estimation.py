@@ -1447,12 +1447,14 @@ def test_peak_near_a_join_is_not_suppressed_across_it():
 
 
 def test_peak_window_must_lie_inside_one_span():
-    from spyglass.spikesorting.v2._motion import peaks_within_spans
+    from spyglass.spikesorting.v2._signal_math import (
+        frames_with_window_in_one_span,
+    )
 
     spans = [(10, 30), (30, 60)]
     peaks = np.array([5, 12, 13, 21, 22, 30, 33, 51, 52, 70])
 
-    keep = peaks_within_spans(peaks, spans, n_before=3, n_after=9)
+    keep = frames_with_window_in_one_span(peaks, spans, n_before=3, n_after=9)
 
     # 13 reads [10, 22); 21 reads [18, 30); 33 reads [30, 42); 51 reads
     # [48, 60). 30 reads [27, 39), crossing the span edge at 30.

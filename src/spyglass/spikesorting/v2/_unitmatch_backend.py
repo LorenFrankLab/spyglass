@@ -34,6 +34,9 @@ from types import SimpleNamespace
 import numpy as np
 
 from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
+from spyglass.spikesorting.v2._signal_math import (
+    frames_with_window_in_one_span,
+)
 from spyglass.spikesorting.v2.matcher_protocol import (
     MatchPair,
     SessionMatcherInput,
@@ -133,65 +136,6 @@ class NoMatchableUnitsError(ValueError):
     """
 
 
-def spikes_with_window_in_one_span(
-    sample_indices, spans, nbefore: int, nafter: int
-) -> np.ndarray:
-    """Say which spikes have their whole waveform window inside one span.
-
-    A spike at frame ``s`` is kept when its waveform window
-    ``[s - nbefore, s + nafter)`` lies inside a single half-open span
-    ``[start, end)``: ``start <= s - nbefore`` and ``s + nafter <= end``. A
-    window that runs across the edge between two adjacent spans is not kept,
-    because adjacent spans are separated by a join, an acquisition gap or an
-    artifact exclusion.
-
-    Parameters
-    ----------
-    sample_indices : array-like of int, shape (n_spikes,)
-        Spike frames of a single-segment recording, in any order.
-    spans : sequence of (int, int)
-        Sorted, non-overlapping half-open frame spans ``[start, end)`` with
-        ``start < end``; adjacent spans (one's end equal to the next's start)
-        are allowed.
-    nbefore, nafter : int
-        Waveform window samples before and after the spike frame.
-
-    Returns
-    -------
-    np.ndarray of bool, shape (n_spikes,)
-        ``True`` where the spike's window lies inside one span.
-
-    Raises
-    ------
-    ValueError
-        ``spans`` is not an ``(n, 2)`` list of increasing, non-overlapping
-        spans, or ``nbefore`` / ``nafter`` is negative.
-    """
-    sample_indices = np.asarray(sample_indices, dtype=np.int64)
-    if nbefore < 0 or nafter < 0:
-        raise ValueError(
-            f"waveform window ({nbefore}, {nafter}) must not be negative."
-        )
-    spans = np.asarray(spans, dtype=np.int64).reshape(-1, 2)
-    starts, ends = spans[:, 0], spans[:, 1]
-    if np.any(ends <= starts) or np.any(starts[1:] < ends[:-1]):
-        raise ValueError(
-            "spans must be sorted, non-overlapping [start, end) frame ranges "
-            f"with start < end; got {spans.tolist()}."
-        )
-    window_start = sample_indices - nbefore
-    # The only span that can hold the window is the last one starting at or
-    # before the window's first sample; it holds the window when the window
-    # ends by that span's end.
-    span_index = np.searchsorted(starts, window_start, side="right") - 1
-    has_span = span_index >= 0
-    kept = np.zeros(sample_indices.shape, dtype=bool)
-    kept[has_span] = (
-        sample_indices[has_span] + nafter <= ends[span_index[has_span]]
-    )
-    return kept
-
-
 def _sorting_with_window_in_one_span(
     sorting, recording, spans, nbefore: int, nafter: int
 ):
@@ -219,8 +163,8 @@ def _sorting_with_window_in_one_span(
             "do not describe this recording."
         )
     spikes = sorting.to_spike_vector()
-    kept = spikes_with_window_in_one_span(
-        spikes["sample_index"], spans, nbefore, nafter
+    kept = frames_with_window_in_one_span(
+        spikes["sample_index"], spans, n_before=nbefore, n_after=nafter
     )
     return NumpySorting(
         spikes[kept], sorting.get_sampling_frequency(), sorting.unit_ids

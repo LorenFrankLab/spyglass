@@ -40,6 +40,9 @@ import numpy as np
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
 from spyglass.spikesorting.v2._selection_identity import sha256_json
+from spyglass.spikesorting.v2._signal_math import (
+    frames_with_window_in_one_span,
+)
 from spyglass.spikesorting.v2._sorting_dispatch import (
     STATISTICS_SAMPLE_CHUNK_MS,
     STATISTICS_SAMPLE_NUM_CHUNKS,
@@ -559,44 +562,6 @@ def _check_estimation_spans(
             f"{[statistics_spans[i] for i in crossing]} cross a continuity "
             f"span edge ({clock.spans.tolist()})."
         )
-
-
-def peaks_within_spans(
-    sample_index, spans: list[tuple[int, int]], *, n_before: int, n_after: int
-) -> np.ndarray:
-    """Mark peaks whose waveform window lies inside a single span.
-
-    A peak at frame ``s`` reads frames ``[s - n_before, s + n_after)``
-    (SpikeInterface's ``ExtractDenseWaveforms``,
-    ``core/node_pipeline.py:363-364``). It is kept only when some span
-    ``[a, b)`` holds all of them, so no kept localization reads a masked
-    sample, the zero padding past the recording's ends, or across a span edge.
-
-    Parameters
-    ----------
-    sample_index : numpy.ndarray
-        ``(n_peaks,)`` peak frames.
-    spans : list[tuple[int, int]]
-        Sorted, disjoint, half-open frame spans.
-    n_before, n_after : int
-        Keyword-only. Waveform frames before and from the peak.
-
-    Returns
-    -------
-    numpy.ndarray
-        ``(n_peaks,)`` bool mask of kept peaks.
-    """
-    sample_index = np.asarray(sample_index, dtype=np.int64)
-    starts = np.array([a for a, _ in spans], dtype=np.int64)
-    ends = np.array([b for _, b in spans], dtype=np.int64)
-    span = np.searchsorted(starts, sample_index, side="right") - 1
-    found = span >= 0
-    span = np.clip(span, 0, len(spans) - 1)
-    return (
-        found
-        & (sample_index - n_before >= starts[span])
-        & (sample_index + n_after <= ends[span])
-    )
 
 
 def peaks_clear_of_joins(
@@ -1347,7 +1312,8 @@ def estimate_motion_in_spans(
        instead of ``compute_motion``'s unseeded ``get_noise_levels`` call
        (``motion.py:359``).
     3. Between localization and estimation, only peaks whose localization
-       window lies inside one statistics span (:func:`peaks_within_spans`)
+       window lies inside one statistics span
+       (:func:`~._signal_math.frames_with_window_in_one_span`)
        and whose detection did not read across a join between continuity
        spans (:func:`peaks_clear_of_joins`) are kept.
     4. ``estimate_motion`` reads peak times on the estimation clock
@@ -1482,7 +1448,7 @@ def estimate_motion_in_spans(
         names=None,
     )
 
-    keep = peaks_within_spans(
+    keep = frames_with_window_in_one_span(
         peaks["sample_index"],
         statistics,
         n_before=waveform_node.nbefore,

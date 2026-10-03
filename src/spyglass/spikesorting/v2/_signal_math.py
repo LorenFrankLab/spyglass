@@ -362,6 +362,58 @@ def intersect_interval_sets(interval_sets):
     return acc
 
 
+def frames_with_window_in_one_span(frames, spans, *, n_before, n_after):
+    """Say which frames have their whole waveform window inside one span.
+
+    A frame ``s`` reads ``[s - n_before, s + n_after)`` (SpikeInterface's
+    waveform window). It is kept when the span holding ``s`` also holds that
+    whole window, so no kept waveform reads across a join, an acquisition gap
+    or an artifact exclusion, or past the recording's ends.
+
+    Parameters
+    ----------
+    frames : array-like of int, shape (n_frames,)
+        Spike or peak frames of a single-segment recording, in any order.
+    spans : sequence of (int, int)
+        Sorted, non-overlapping half-open frame spans ``[start, end)`` with
+        ``start < end``; adjacent spans are allowed.
+    n_before, n_after : int
+        Waveform window samples before and from the frame.
+
+    Returns
+    -------
+    numpy.ndarray of bool, shape (n_frames,)
+        ``True`` where the frame and its whole window lie in one span.
+
+    Raises
+    ------
+    ValueError
+        ``spans`` is not sorted, non-overlapping and non-empty per span, or
+        ``n_before`` / ``n_after`` is negative.
+    """
+    import numpy as np
+
+    frames = np.asarray(frames, dtype=np.int64)
+    if n_before < 0 or n_after < 0:
+        raise ValueError(
+            f"waveform window ({n_before}, {n_after}) must not be negative."
+        )
+    spans = np.asarray(spans, dtype=np.int64).reshape(-1, 2)
+    starts, ends = spans[:, 0], spans[:, 1]
+    if np.any(ends <= starts) or np.any(starts[1:] < ends[:-1]):
+        raise ValueError(
+            "spans must be sorted, non-overlapping [start, end) frame ranges "
+            f"with start < end; got {spans.tolist()}."
+        )
+    span = np.searchsorted(starts, frames, side="right") - 1
+    found = span >= 0
+    kept = np.zeros(frames.shape, dtype=bool)
+    kept[found] = (frames[found] - n_before >= starts[span[found]]) & (
+        frames[found] + n_after <= ends[span[found]]
+    )
+    return kept
+
+
 def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
     """Map absolute spike times (seconds) to recording frame indices.
 

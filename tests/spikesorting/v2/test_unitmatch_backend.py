@@ -762,28 +762,47 @@ def test_window_in_one_span_known_answers(
     spans, nbefore, nafter, samples, expected
 ):
     """Hand-computed answers at span edges, joins, gaps and exclusions."""
-    from spyglass.spikesorting.v2._unitmatch_backend import (
-        spikes_with_window_in_one_span,
+    from spyglass.spikesorting.v2._signal_math import (
+        frames_with_window_in_one_span,
     )
 
-    kept = spikes_with_window_in_one_span(samples, spans, nbefore, nafter)
+    kept = frames_with_window_in_one_span(
+        samples, spans, n_before=nbefore, n_after=nafter
+    )
     assert kept.dtype == bool
     assert kept.tolist() == expected
 
 
 def test_window_in_one_span_rejects_malformed_spans():
     """Unsorted, overlapping or empty spans, or a negative window, raise."""
-    from spyglass.spikesorting.v2._unitmatch_backend import (
-        spikes_with_window_in_one_span,
+    from spyglass.spikesorting.v2._signal_math import (
+        frames_with_window_in_one_span,
     )
 
     for spans in ([(100, 200), (0, 100)], [(0, 100), (90, 200)], [(5, 5)]):
         with pytest.raises(ValueError, match="spans must be sorted"):
-            spikes_with_window_in_one_span([50], spans, 1, 1)
+            frames_with_window_in_one_span([50], spans, n_before=1, n_after=1)
     with pytest.raises(ValueError, match="must not be negative"):
-        spikes_with_window_in_one_span([50], [(0, 100)], -1, 1)
+        frames_with_window_in_one_span([50], [(0, 100)], n_before=-1, n_after=1)
     # No span holds anything.
-    assert spikes_with_window_in_one_span([50], [], 1, 1).tolist() == [False]
+    assert frames_with_window_in_one_span(
+        [50], [], n_before=1, n_after=1
+    ).tolist() == [False]
+
+
+def test_window_with_no_samples_after_needs_the_frame_in_its_span():
+    """With ``n_after=0`` the window excludes the frame itself; a frame on
+    the edge between adjacent spans is dropped, because the frame and its
+    window would sit in different spans."""
+    from spyglass.spikesorting.v2._signal_math import (
+        frames_with_window_in_one_span,
+    )
+
+    spans = [(50, 59), (59, 371)]
+    kept = frames_with_window_in_one_span(
+        [58, 59, 64], spans, n_before=5, n_after=0
+    )
+    assert kept.tolist() == [True, False, True]
 
 
 @pytest.fixture
