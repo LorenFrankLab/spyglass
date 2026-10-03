@@ -23,6 +23,14 @@ class _UnitsRelation(_Relation):
         return self.merge_ids
 
 
+class _NoSnapshotRelation(_Relation):
+    """A group without frozen ``UnitSelection`` rows."""
+
+    def fetch(self, *, as_dict):
+        assert as_dict is True
+        return []
+
+
 class _ParamsRelation(_Relation):
     def fetch1(self, *attributes):
         # ``fetch_spike_data`` fetches the whole row and reads the columns by
@@ -65,6 +73,7 @@ def test_fetch_spike_data_skips_zero_unit_file(monkeypatch):
 
     class _FakeSortedSpikesGroup:
         Units = _UnitsRelation([empty_merge_id, populated_merge_id])
+        UnitSelection = _NoSnapshotRelation()
         fetch_spike_data = classmethod(original.fetch_spike_data.__func__)
 
         @classmethod
