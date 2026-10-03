@@ -423,11 +423,10 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import (
-        SorterParameters,
         Sorting,
         SortingSelection,
     )
-    from tests.spikesorting.v2._smoke_constants import SMOKE_CLUSTERLESS_PARAMS
+    from tests.spikesorting.v2._motion_db_helpers import sorter_key
 
     def sort_masked(sorter, sorter_params, recording, sorting_id, **kwargs):
         cursor = 0
@@ -449,22 +448,7 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
             recording.get_sampling_frequency(),
         )
 
-    SorterParameters.insert1(
-        {
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "artifact_concat_test",
-            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
-        },
-        skip_duplicates=True,
-        allow_duplicate_params=True,
-    )
-    sorting_key = SortingSelection.insert_selection(
-        {
-            **key,
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "artifact_concat_test",
-        }
-    )
+    sorting_key = SortingSelection.insert_selection({**key, **sorter_key()})
     plant_sorter(monkeypatch, sort_masked)
     Sorting.populate(sorting_key, reserve_jobs=False)
     # The sort reads the concat cache itself, whose member masks are already
@@ -639,8 +623,7 @@ def test_member_artifact_failure_retry_and_reuse(
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import SessionGroup
-    from spyglass.spikesorting.v2.sorting import SorterParameters
-    from tests.spikesorting.v2._smoke_constants import SMOKE_CLUSTERLESS_PARAMS
+    from tests.spikesorting.v2._motion_db_helpers import sorter_key
 
     fixture = chronic_2_session_minirec
     name = "artifact_retry_test"
@@ -662,14 +645,7 @@ def test_member_artifact_failure_retry_and_reuse(
         },
         allow_duplicate_params=True,
     )
-    SorterParameters.insert1(
-        {
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": name,
-            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
-        },
-        allow_duplicate_params=True,
-    )
+    smoke_sorter = sorter_key()
     base = presets._PIPELINE_PRESETS[
         "franklab_probe_hippocampus_30khz_ms5_2026_06"
     ]
@@ -682,8 +658,7 @@ def test_member_artifact_failure_retry_and_reuse(
                     "preprocessing_params_name"
                 ],
                 "artifact_detection_params_name": name,
-                "sorter": "clusterless_thresholder",
-                "sorter_params_name": name,
+                **smoke_sorter,
             }
         ),
     )
