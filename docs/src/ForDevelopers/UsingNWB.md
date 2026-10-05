@@ -58,6 +58,21 @@ NWB files are backed by HDF5 and use *lazy loading*: objects like `lfp.data` are
 files open between calls to avoid redundant reopening, and evicts
 least-recently-used files when free RAM or file-descriptor limits are reached.
 
+The file-descriptor check counts **every** descriptor the process holds, not
+only cached NWB files: sockets, pipes, and GPU device handles draw on the same
+OS limit, and a file with external links opens more than one handle. Eviction
+begins at `max_file_fraction` × the soft limit — the default `0.8` leaves about
+200 descriptors free at the common limit of 1024. Tune the thresholds under
+`custom.nwb_cache` in your `dj_local_conf.json`:
+
+```json
+"nwb_cache": {
+  "min_free_gb": 2.0,
+  "min_free_pct": 0.1,
+  "max_file_fraction": 0.8
+}
+```
+
 Call `close_nwb()` on the **same restriction** once all lazy reads are complete.
 This releases the cache's hold on those files so they become eligible for
 eviction:

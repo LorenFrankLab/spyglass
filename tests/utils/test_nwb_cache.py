@@ -196,7 +196,7 @@ def test_eviction_on_fd_limit(NWBFileCache):
     ):
         cache["/a.nwb"] = (io_a, MagicMock())
 
-    # 1020 descriptors against a 0.99 × 1024 = 1013 budget
+    # 1020 descriptors against a 0.8 × 1024 = 819 budget
     with (
         patch("psutil.virtual_memory", return_value=_fake_vm(16)),
         patch("resource.getrlimit", return_value=(1024, 1024)),
@@ -270,7 +270,7 @@ def test_fd_count_falls_back_to_cache_size(NWBFileCache):
     ):
         cache["/a.nwb"] = (io_a, MagicMock())
 
-    # Soft limit of 1 → budget 0.99 → the one cached entry exceeds it
+    # Soft limit of 1 → budget 0.8 → the one cached entry exceeds it
     with (
         patch("psutil.virtual_memory", return_value=_fake_vm(16)),
         patch("resource.getrlimit", return_value=(1, 1024)),
@@ -320,6 +320,11 @@ def test_warns_once_when_fd_pressure_outlives_cache(NWBFileCache):
 
 
 # ── configure_nwb_cache ───────────────────────────────────────────────────────
+
+
+def test_default_max_file_fraction(nwb_mod):
+    """The default leaves descriptor headroom for non-cache handles."""
+    assert nwb_mod._NWB_CACHE_MAX_FILE_FRACTION == 0.8
 
 
 def test_configure_updates_thresholds(configure_nwb_cache):

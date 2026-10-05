@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover
 # SpyglassConfig.load_config() overwrites these via configure_nwb_cache().
 _NWB_CACHE_MIN_FREE_GB = 2.0
 _NWB_CACHE_MIN_FREE_PCT = 0.1
-_NWB_CACHE_MAX_FILE_FRACTION = 0.99
+_NWB_CACHE_MAX_FILE_FRACTION = 0.8
 
 
 class NWBFileCache:

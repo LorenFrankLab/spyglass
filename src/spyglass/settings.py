@@ -102,7 +102,7 @@ class SpyglassConfig:
         self.load_failed = False
         self._nwb_min_free_gb = 2.0
         self._nwb_min_free_pct = 0.1
-        self._nwb_max_file_fraction = 0.99
+        self._nwb_max_file_fraction = 0.8
 
         # Load directory schema from JSON file (single source of truth)
         # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
@@ -178,7 +178,7 @@ class SpyglassConfig:
         self._nwb_min_free_gb = float(dj_nwb_cache.get("min_free_gb", 2.0))
         self._nwb_min_free_pct = float(dj_nwb_cache.get("min_free_pct", 0.1))
         self._nwb_max_file_fraction = float(
-            dj_nwb_cache.get("max_file_fraction", 0.99)
+            dj_nwb_cache.get("max_file_fraction", 0.8)
         )
         from spyglass.utils.nwb_helper_fn import configure_nwb_cache
 
@@ -691,7 +691,7 @@ if sg_config.load_failed:  # Failed to load
     moseq_video_dir = None
     nwb_min_free_gb = 2.0
     nwb_min_free_pct = 0.1
-    nwb_max_file_fraction = 0.99
+    nwb_max_file_fraction = 0.8
 else:
     config = sg_config.config
     base_dir = sg_config.base_dir
