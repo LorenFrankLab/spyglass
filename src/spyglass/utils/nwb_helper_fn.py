@@ -1,5 +1,6 @@
 """NWB helper functions for finding processing modules and data interfaces."""
 
+import atexit
 import os
 import os.path
 import time
@@ -13,6 +14,7 @@ import pynwb
 import yaml
 
 from spyglass.utils.logging import logger
+from spyglass.utils.mixins.base import BaseMixin
 
 try:  # no RLIMIT_NOFILE on Windows
     import resource
@@ -26,13 +28,14 @@ _NWB_CACHE_MIN_FREE_PCT = 0.1
 _NWB_CACHE_MAX_FILE_FRACTION = 0.8
 
 
-class NWBFileCache:
+class NWBFileCache(BaseMixin):
     """LRU cache for open NWB files with ref-count-aware eviction.
 
     Eviction priority when memory or file-descriptor limits are reached:
 
     1. **Released files** — ``refcount == 0``; evict LRU among these first.
-    2. **Active files** — ``refcount > 0``; last resort, emits a warning.
+    2. **Active files** — ``refcount > 0``; last resort. Warns once per
+       process, then counts further occurrences for a total at exit.
 
     Hold counts are managed by :class:`~spyglass.utils.mixins.fetch.FetchMixin`:
     calling ``fetch_nwb()`` acquires each opened file; calling ``close_nwb()``
@@ -50,7 +53,8 @@ class NWBFileCache:
     def __init__(self):
         # path → (io, nwbfile, last_used_monotonic, refcount)
         self._cache: dict = {}
-        self._warned_fd_pressure = False
+        self._warned: set = set()  # one-shot warning keys, see _warn_once
+        self._held_evictions = 0
 
     # ------------------------------------------------------------------
     # Public dict-compatible interface
@@ -94,7 +98,7 @@ class NWBFileCache:
         """Close every open IO handle and clear the cache."""
         active = [p for p, (_, _, _, rc) in self._cache.items() if rc > 0]
         if active:
-            logger.warning(
+            self._warn_msg(
                 f"Closing {len(active)} NWB file(s) with active holds. "
                 "Lazy h5py reads from these files will fail: "
                 + ", ".join(active)
@@ -102,6 +106,7 @@ class NWBFileCache:
         for io, _, _, _ in self._cache.values():
             io.close()
         self._cache.clear()
+        self._report_held_evictions()
 
     def acquire(self, path):
         """Increment the hold count, protecting the file from LRU eviction."""
@@ -149,31 +154,47 @@ class NWBFileCache:
             candidates = released
         else:
             candidates = set(self._cache.keys())
-            logger.warning(
+            self._held_evictions += 1
+            self._warn_once(
+                "held_eviction",
                 "NWB cache must evict an active file under memory/fd pressure."
                 " Lazy h5py reads from the evicted file may fail."
-                " Call close_nwb() when finished with fetch_nwb() results."
+                " Call close_nwb() when finished with fetch_nwb(), or"
+                " close_nwb_files() to release everything.",
             )
         lru_path = min(candidates, key=lambda p: self._cache[p][2])
         io, _, _, _ = self._cache.pop(lru_path)
         io.close()
-        logger.info(f"Closed LRU NWB file: {lru_path}")
+        logger.debug(f"Closed LRU NWB file: {lru_path}")
 
     def _evict_if_needed(self):
         while self._cache and not (self._free_ram_ok() and self._num_open_ok()):
             self._evict_lru()
         if not self._cache and not self._num_open_ok():
-            self._warn_fd_pressure()
+            self._warn_once(
+                "fd_pressure",
+                "Open file descriptors exceed the NWB cache budget with no NWB"
+                " files left to close. Raise the limit with `ulimit -n`.",
+            )
 
-    def _warn_fd_pressure(self):
-        """Warn once that descriptors outside the cache exceed the budget."""
-        if self._warned_fd_pressure:
+    def _warn_once(self, key: str, message: str):
+        """Log *message* only the first time *key* is raised this process."""
+        if key in self._warned:
             return
-        self._warned_fd_pressure = True
-        logger.warning(
-            "Open file descriptors exceed the NWB cache budget with no NWB "
-            "files left to close. Raise the limit with `ulimit -n`."
+        self._warned.add(key)
+        self._warn_msg(message)
+
+    def _report_held_evictions(self):
+        """Log the running total of evicted held files, then reset."""
+        if not self._held_evictions:
+            return
+        self._warn_msg(
+            f"Evicted {self._held_evictions} NWB file(s) still holding an"
+            " active reference. Call close_nwb() or close_nwb_files() at"
+            " points where reads are complete."
         )
+        self._held_evictions = 0
+        self._warned.discard("held_eviction")
 
 
 def configure_nwb_cache(
@@ -215,6 +236,8 @@ def configure_nwb_cache(
 
 
 __open_nwb_files = NWBFileCache()
+# Report held-file evictions for jobs that never call close_nwb_files()
+atexit.register(__open_nwb_files._report_held_evictions)
 
 # dict mapping NWB file path to config after it is loaded once
 __configs = dict()

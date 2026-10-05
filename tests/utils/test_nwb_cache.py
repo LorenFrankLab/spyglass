@@ -57,6 +57,15 @@ def _make_io():
     return io
 
 
+def _warn_texts(mock_warn):
+    """Return the messages passed to a patched ``_warn_msg``.
+
+    Warnings are asserted through ``_warn_msg`` rather than log capture
+    because it routes to debug in test mode. See BaseMixin._warn_msg.
+    """
+    return [call.args[0] for call in mock_warn.call_args_list]
+
+
 # ── basic dict interface ───────────────────────────────────────────────────────
 
 
@@ -308,11 +317,11 @@ def test_warns_once_when_fd_pressure_outlives_cache(NWBFileCache):
         patch("psutil.virtual_memory", return_value=_fake_vm(16)),
         patch("resource.getrlimit", return_value=(1024, 1024)),
         patch("psutil.Process", return_value=_fake_proc(1020)),
-        patch("spyglass.utils.nwb_helper_fn.logger") as mock_logger,
+        patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
         cache["/a.nwb"] = (_make_io(), MagicMock())
         cache["/b.nwb"] = (_make_io(), MagicMock())
-        warnings = [str(c) for c in mock_logger.warning.call_args_list]
+        warnings = _warn_texts(mock_warn)
 
     assert len(warnings) == 1  # one warning despite two inserts
     assert "ulimit" in warnings[0]
@@ -440,13 +449,10 @@ def test_tier3_eviction_warns(NWBFileCache):
     with (
         patch("psutil.virtual_memory", side_effect=mem_responses),
         patch("resource.getrlimit", return_value=(1024, 4096)),
-        patch("spyglass.utils.nwb_helper_fn.logger") as mock_logger,
+        patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
         cache["/b.nwb"] = (_make_io(), MagicMock())
-        warning_calls = [
-            str(call) for call in mock_logger.warning.call_args_list
-        ]
-        assert any("active" in w for w in warning_calls)
+        assert any("active" in w for w in _warn_texts(mock_warn))
 
 
 def test_close_all_warns_on_active(NWBFileCache):
@@ -459,14 +465,72 @@ def test_close_all_warns_on_active(NWBFileCache):
 
     cache.acquire("/a.nwb")
 
-    with patch("spyglass.utils.nwb_helper_fn.logger") as mock_logger:
+    with patch.object(NWBFileCache, "_warn_msg") as mock_warn:
         cache.close_all()
-        warning_calls = [
-            str(call) for call in mock_logger.warning.call_args_list
-        ]
         assert any(
-            "active" in w.lower() or "hold" in w.lower() for w in warning_calls
+            "active" in w.lower() or "hold" in w.lower()
+            for w in _warn_texts(mock_warn)
         )
 
     io_a.close.assert_called_once()
     assert len(cache) == 0
+
+
+# ── held-eviction warning volume ──────────────────────────────────────────────
+
+
+def test_held_eviction_warns_once(NWBFileCache):
+    """Repeat evictions of held files are counted, not re-warned."""
+    cache = NWBFileCache()
+
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=_fake_proc(10)),
+    ):
+        for path in ("/a.nwb", "/b.nwb"):
+            cache[path] = (_make_io(), MagicMock())
+            cache.acquire(path)
+
+    # Each insert finds only held files to evict. RAM reads low, then OK, so
+    # one file is evicted per insert and the cache never empties.
+    low_then_ok = [_fake_vm(0.5), _fake_vm(16)] * 3
+    with (
+        patch("psutil.virtual_memory", side_effect=low_then_ok),
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=_fake_proc(10)),
+        patch.object(NWBFileCache, "_warn_msg") as mock_warn,
+    ):
+        for path in ("/c.nwb", "/d.nwb", "/e.nwb"):
+            cache[path] = (_make_io(), MagicMock())
+            cache.acquire(path)
+        warnings = _warn_texts(mock_warn)
+
+    assert len(warnings) == 1  # one warning for three evictions
+    assert cache._held_evictions == 3
+
+
+def test_close_all_reports_held_eviction_count(NWBFileCache):
+    """close_all logs the running total of held evictions, then resets."""
+    cache = NWBFileCache()
+    cache._held_evictions = 2  # stands in for earlier memory pressure
+    cache._warned.add("held_eviction")
+
+    with patch.object(NWBFileCache, "_warn_msg") as mock_warn:
+        cache.close_all()
+        warnings = _warn_texts(mock_warn)
+
+    assert any("2 NWB file(s)" in w for w in warnings)
+    assert cache._held_evictions == 0
+    assert "held_eviction" not in cache._warned  # next batch warns again
+
+
+def test_no_held_summary_when_clean(NWBFileCache):
+    """No summary when every evicted file had been released."""
+    cache = NWBFileCache()
+    with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
+        cache["/a.nwb"] = (_make_io(), MagicMock())
+
+    with patch.object(NWBFileCache, "_warn_msg") as mock_warn:
+        cache.close_all()
+        mock_warn.assert_not_called()
