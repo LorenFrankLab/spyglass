@@ -41,7 +41,7 @@ def clean_plan(common, mini_copy_name, mini_insert):
     plan = plan_nwbfile(mini_copy_name)
 
     if plan.verdict != "no_op":  # repair, then look again
-        insert_plan(plan, on_divergence="accept", allow_partial=True)
+        insert_plan(plan, on_divergence="report", allow_partial=True)
         plan = plan_nwbfile(mini_copy_name)
 
     assert plan.verdict == "no_op", (
@@ -123,7 +123,7 @@ def test_missing_parent_is_reported_once_not_per_child(
         type(common.Session()), "entries_for_row", _no_entries, raising=False
     )
 
-    plan = plan_nwbfile(mini_copy_name)
+    plan = plan_nwbfile(mini_copy_name, force_replan=True)
 
     hard = [p for p in plan.problems if p.severity == "hard"]
     blocked = [
@@ -260,10 +260,14 @@ def test_verdict_is_partial_new_when_one_table_is_missing(
         table.insert_from_nwbfile(mini_copy_name)
 
 
-def test_verdict_reports_conflict_over_novelty(
+def test_a_divergence_is_reported_without_changing_the_verdict(
     common, mini_copy_name, mini_insert, monkeypatch
 ):
-    """An entry that exists with different values is a conflict, not new."""
+    """A disagreement is a warning; the verdict still says what will happen.
+
+    It used to answer `conflict` ahead of counting novelty, so one trivial
+    mismatch headlined a file that was otherwise entirely new (D7).
+    """
 
     def _changed(self, source, ctx):
         from spyglass.utils.ingestion_plan import PlannedEntries
@@ -279,10 +283,20 @@ def test_verdict_reports_conflict_over_novelty(
         type(common.SampleCount()), "entries_for_row", _changed, raising=False
     )
 
-    plan = plan_nwbfile(mini_copy_name)
+    # force_replan: reuse would serve the staged plan and the patched parse
+    # above would never run, so the test would assert on an empty problem list.
+    plan = plan_nwbfile(mini_copy_name, force_replan=True)
 
-    assert plan.verdict == "conflict", f"Saw {plan.verdict}"
-    assert any(problem.code == "divergence" for problem in plan.problems)
+    assert plan.verdict != "conflict", "conflict left the vocabulary"
+    divergences = [p for p in plan.problems if p.code == "divergence"]
+    assert divergences, "The disagreement must still be reported"
+    assert all(
+        p.severity == "soft" for p in divergences
+    ), "A divergence is a warning, not a blocker"
+    assert not plan.blocking, "It must not block"
+    assert "Disagrees with stored rows" in plan.report(
+        log=False
+    ), "A soft divergence must still appear in the default report"
 
 
 def test_report_leads_with_the_verdict(clean_plan):
@@ -296,90 +310,6 @@ def test_report_leads_with_the_verdict(clean_plan):
 # --- divergence policy (D7) -------------------------------------------------
 # A divergence is the file disagreeing with a row already stored. The policy
 # decides what a *real* run does about it; a dry run only ever records it.
-
-
-def _divergence(plan_types=None):
-    """One divergence problem, enough to exercise a policy."""
-    from spyglass.utils.ingestion_plan import Problem
-
-    return [
-        Problem(
-            severity="hard",
-            code="divergence",
-            message="subject 54321 exists with different values",
-            table="`common_subject`.`subject`",
-            suggested_revision={"sex": "M"},
-        )
-    ]
-
-
-def test_divergence_accept_keeps_the_stored_value():
-    """`accept` takes what is already stored and inserts the rest."""
-    from spyglass.data_import.planner import _divergence_accepted
-
-    assert _divergence_accepted(
-        _divergence(), "accept"
-    ), "accept should proceed"
-
-
-def test_divergence_raise_inserts_nothing():
-    """`raise` refuses the run rather than choosing for the user."""
-    from spyglass.data_import.planner import _divergence_accepted
-
-    assert not _divergence_accepted(
-        _divergence(), "raise"
-    ), "raise should decline"
-
-
-def test_divergence_interactive_declines_via_the_shared_utility(monkeypatch):
-    """An unattended run must fail, not block on stdin.
-
-    A suite that prompted would hang rather than fail, which is worse than
-    either outcome. The short-circuit is `accept_divergence`'s own, not a
-    second copy of it here: the planner path and the insert path must decline
-    for the same reason, or one of them will stop doing so.
-    """
-    from spyglass.data_import import planner
-    from spyglass.utils import dj_helper_fn
-
-    called = []
-    real = dj_helper_fn.accept_divergence
-
-    def spy(*args, **kwargs):
-        called.append(kwargs)
-        return real(*args, **kwargs)
-
-    monkeypatch.setattr(dj_helper_fn, "accept_divergence", spy)
-
-    assert not planner._divergence_accepted(
-        _divergence(), "interactive"
-    ), "interactive must decline under test mode rather than prompt"
-    assert called, "The shared utility is what decides, not a local branch"
-    assert called[0]["test_mode"], "It is told this is a test run"
-
-
-def test_divergence_interactive_asks_once_and_obeys(monkeypatch):
-    """Outside test mode it asks once for the batch, and takes the answer."""
-    import spyglass.settings
-    from spyglass.data_import import planner
-
-    monkeypatch.setattr(spyglass.settings, "test_mode", False)
-
-    asked = []
-
-    def fake_input(prompt):
-        asked.append(prompt)
-        return answer
-
-    monkeypatch.setattr("builtins.input", fake_input)
-
-    answer = "yes"
-    assert planner._divergence_accepted(_divergence(), "interactive")
-    answer = "no"
-    assert not planner._divergence_accepted(_divergence(), "interactive")
-
-    assert len(asked) == 2, "One prompt per run, not one per divergence"
-    assert "disagree" in asked[0]
 
 
 def test_a_fatal_plan_does_not_close_its_staging_area(common, mini_copy_name):
@@ -400,7 +330,7 @@ def test_a_fatal_plan_does_not_close_its_staging_area(common, mini_copy_name):
 
     assert plan.verdict == "fatal", f"Expected fatal, got {plan.verdict}"
 
-    result = insert_plan(plan, on_divergence="accept")
+    result = insert_plan(plan, on_divergence="report")
 
     assert result, "A file that could not be planned is not a success"
     assert not (
@@ -461,30 +391,57 @@ def test_rollback_is_off_by_default_and_scoped_to_a_miss(
         "_novel_rows",
         lambda table, rows: (_ for _ in ()).throw(RuntimeError("boom")),
     )
-    result = planner.insert_plan(plan, on_divergence="accept")
+    result = planner.insert_plan(plan, on_divergence="report")
 
     assert any(
         problem.code == "planner_miss" for problem in result
     ), f"A failure inserting a validated plan is a planner_miss: {result!r}"
     assert not rolled, "rollback_on_miss defaults to False"
 
-    planner.insert_plan(plan, on_divergence="accept", rollback_on_miss=True)
+    planner.insert_plan(plan, on_divergence="report", rollback_on_miss=True)
     assert rolled == [mini_copy_name], "Asked for, it rolls back that file"
 
 
-def test_accepting_a_divergence_lets_the_run_proceed(
-    common, mini_copy_name, monkeypatch
-):
-    """`accept` must actually insert the rest, not just log differently.
+def _divergent_plan(common, nwb_file_name):
+    """A plan whose only problem is one divergence."""
+    from spyglass.utils.ingestion_plan import (
+        IngestionPlan,
+        PlannedEntries,
+        Problem,
+        TablePlan,
+    )
 
-    A divergence is recorded as `hard` because it stops an unattended run. But
-    `on_divergence` is the decision that resolves it: "keep the stored value
-    and insert the rest" (D7). Those problems were left in `plan.blocking`, so
-    the gate refused a run the caller had just approved -- `accept` and `raise`
-    reached the same outcome and differed only in their log lines.
+    entries = PlannedEntries()
+    entries.add(common.Institution, [{"institution_name": "_divergence test"}])
+    return IngestionPlan(
+        nwb_file_name=nwb_file_name,
+        novel={"`common_lab`.`institution`": 1},
+        table_plans=(
+            TablePlan(
+                table_name="`common_lab`.`institution`",
+                entries=entries,
+                problems=(
+                    Problem(
+                        severity="soft",
+                        code="divergence",
+                        message="stored with different values",
+                        table="`common_lab`.`institution`",
+                        suggested_revision={"institution_name": "other"},
+                        primary_key={"institution_name": "_divergence test"},
+                    ),
+                ),
+            ),
+        ),
+    )
 
-    Pinned on the gate rather than on a whole ingestion: `_refuse` returning
-    None is what "go on and insert" means.
+
+def test_a_divergence_does_not_stop_the_run(common, mini_copy_name):
+    """Reporting a disagreement must not stop the rest of the file.
+
+    This is the babysit behaviour removed in D7: a divergence used to be
+    `hard`, so the gate refused an unattended run over a mismatch as small as
+    a hyphen. Pinned on the gate rather than a whole ingestion: `_refuse`
+    returning None is what "go on and insert" means.
     """
     from spyglass.data_import import planner
     from spyglass.utils.ingestion_plan import (
@@ -505,7 +462,7 @@ def test_accepting_a_divergence_lets_the_run_proceed(
                 entries=entries,
                 problems=(
                     Problem(
-                        severity="hard",
+                        severity="soft",
                         code="divergence",
                         message="stored with different values",
                         table="`common_lab`.`institution`",
@@ -516,25 +473,25 @@ def test_accepting_a_divergence_lets_the_run_proceed(
         ),
     )
 
-    assert plan.blocking, "Premise: a divergence blocks until it is resolved"
+    assert not plan.blocking, "Premise: a divergence is soft, so never blocking"
 
     assert (
-        planner._refuse(plan, allow_partial=False, on_divergence="accept")
+        planner._refuse(plan, allow_partial=False, on_divergence="report")
         is None
-    ), "accept resolves the divergence, so the run proceeds"
+    ), "reporting a divergence lets the run proceed"
 
     assert (
         planner._refuse(plan, allow_partial=False, on_divergence="raise")
         is not None
-    ), "raise still declines, and the two must not be the same outcome"
+    ), "raise still declines, so the two are not the same outcome"
 
 
 def test_accepting_a_divergence_does_not_excuse_other_failures(
     common, mini_copy_name
 ):
-    """Only the divergence is resolved; a real failure still blocks.
+    """A divergence stops blocking; a real failure does not.
 
-    The narrow reading matters: `accept` answers one question, and must not
+    The narrow reading matters: making a disagreement non-blocking must not
     become a way to insert a file with a missing parent or an unset required
     column.
     """
@@ -574,6 +531,97 @@ def test_accepting_a_divergence_does_not_excuse_other_failures(
     )
 
     assert (
-        planner._refuse(plan, allow_partial=False, on_divergence="accept")
+        planner._refuse(plan, allow_partial=False, on_divergence="report")
         is not None
     ), "A missing parent still blocks, whatever was decided about divergence"
+
+
+def test_a_soft_problem_is_visible_in_the_default_report(
+    common, mini_copy_name
+):
+    """A warning nobody sees is not a warning.
+
+    D7 replaces the divergence prompt with a line in the report, which only
+    works if the default report shows it. `report(verbose=False)` used to show
+    blocking problems only, so making divergence `soft` without this would
+    have hidden it completely -- quieter than the behaviour it replaced.
+    """
+    from spyglass.utils.ingestion_plan import (
+        IngestionPlan,
+        PlannedEntries,
+        Problem,
+        TablePlan,
+    )
+
+    plan = IngestionPlan(
+        nwb_file_name=mini_copy_name,
+        table_plans=(
+            TablePlan(
+                table_name="`common_lab`.`institution`",
+                entries=PlannedEntries(),
+                problems=(
+                    Problem(
+                        severity="soft",
+                        code="divergence",
+                        message="{'institution_name': 'x'} exists with "
+                        + "different values for ['institution_name']",
+                        table="`common_lab`.`institution`",
+                        suggested_revision={"institution_name": "stored"},
+                        primary_key={"institution_name": "x"},
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    report = plan.report(log=False)
+
+    assert "Disagrees with stored rows (1)" in report
+    assert "institution_name" in report
+    assert not plan.blocking, "A soft problem must not block"
+    assert not plan, "A plan with only warnings is falsy"
+
+
+def test_on_divergence_report_proceeds_and_raise_declines(
+    common, mini_copy_name
+):
+    """The two policies left, pinned on the gate.
+
+    `interactive` and `accept` are gone: accept became the default, so the
+    name stopped meaning anything, and the prompt is the behaviour D7
+    removes. What remains is report -- warn and insert the rest -- and raise,
+    for a caller that wants a disagreement to be an error.
+    """
+    from spyglass.data_import import planner
+
+    plan = _divergent_plan(common, mini_copy_name)
+
+    assert (
+        planner._refuse(plan, allow_partial=False, on_divergence="report")
+        is None
+    ), "report proceeds"
+
+    refused = planner._refuse(plan, allow_partial=False, on_divergence="raise")
+    assert refused is not None, "raise declines"
+    assert any(
+        p.code == "divergence" for p in refused.problems
+    ), "and hands back the plan carrying why"
+
+
+def test_nothing_prompts_on_a_divergence(common, mini_copy_name, monkeypatch):
+    """No path may read stdin over a disagreement.
+
+    The regression this guards is the whole point of D7: an ingest that stops
+    to ask cannot run unattended, and a suite that prompts hangs rather than
+    fails.
+    """
+    from spyglass.data_import import planner
+
+    def explode(prompt=""):  # pragma: no cover - must not be reached
+        raise AssertionError(f"something prompted: {prompt!r}")
+
+    monkeypatch.setattr("builtins.input", explode)
+
+    plan = _divergent_plan(common, mini_copy_name)
+    for policy in ("report", "raise"):
+        planner._refuse(plan, allow_partial=False, on_divergence=policy)

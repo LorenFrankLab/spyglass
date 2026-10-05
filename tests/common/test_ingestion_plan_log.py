@@ -109,7 +109,7 @@ def test_inserting_a_plan_closes_its_staging_area(common, mini_copy_name):
     log = IngestionPlanLog()
     key = log.stage(plan_nwbfile(mini_copy_name))
 
-    result = insert_plan(plan_nwbfile(mini_copy_name), on_divergence="accept")
+    result = insert_plan(plan_nwbfile(mini_copy_name))
 
     assert not result, f"Nothing should have blocked:\n{result}"
     assert (

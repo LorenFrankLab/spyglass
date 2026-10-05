@@ -60,7 +60,7 @@ def insert_sessions(
     raise_err: bool = False,
     reinsert: bool = False,
     dry_run: bool = False,
-    on_divergence: str = "interactive",
+    on_divergence: str = "report",
 ):
     """Populate the database with new sessions.
 
@@ -92,9 +92,9 @@ def insert_sessions(
         reference to one this ingestion also fills sees the planned rows.
 
     on_divergence : str, optional
-        What to do when the file disagrees with a stored row: `interactive`
-        asks once, `accept` keeps the stored value and inserts the rest,
-        `raise` declines. Default `interactive`.
+        What to do when the file disagrees with a stored row: `report`
+        keeps the stored rows, warns, and inserts the rest; `raise` declines.
+        Default `report`. Nothing prompts (D7).
 
     Returns
     -------

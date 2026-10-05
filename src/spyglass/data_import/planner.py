@@ -11,6 +11,7 @@ missing object would be reported once per dependent table rather than once.
 """
 
 from dataclasses import replace
+from contextlib import suppress
 from typing import Dict, List, Optional, Tuple
 
 from spyglass.utils.ingestion_plan import (
@@ -553,7 +554,7 @@ def _blocking_parents(table, failed_tables: set) -> Tuple[str, ...]:
 def insert_plan(
     plan: IngestionPlan,
     allow_partial: bool = False,
-    on_divergence: str = "interactive",
+    on_divergence: str = "report",
     rollback_on_miss: bool = False,
 ) -> IngestionPlan:
     """Insert what a plan worked out, re-deriving nothing.
@@ -578,10 +579,10 @@ def insert_plan(
         half-ingested file is a choice rather than an accident.
     on_divergence : str, optional
         What to do when the file disagrees with a stored row (D7).
-        `interactive` asks once per run, outside any transaction; `accept`
-        keeps the stored value and inserts the rest; `raise` declines the run
-        and logs the report. Default `interactive`. None of the three raises:
-        the plan comes back truthy, carrying what stopped it.
+        `report` keeps the stored rows, warns, and inserts everything else;
+        `raise` declines the run and logs the report. Default `report`.
+        Nothing prompts, and neither value raises an exception: `raise`
+        returns the plan truthy, carrying what stopped it.
     rollback_on_miss : bool, optional
         Delete the session when a `planner_miss` leaves the file part
         inserted. Default False. This is the *only* case a rollback is for
@@ -601,7 +602,7 @@ def insert_plan(
     if (refused := _refuse(plan, allow_partial, on_divergence)) is not None:
         return refused
 
-    inserted, existing, misses = _write_plan(plan)
+    inserted, existing, conflicting, misses = _write_plan(plan)
 
     if misses and rollback_on_miss:
         _rollback(plan.nwb_file_name)
@@ -609,8 +610,18 @@ def insert_plan(
     if skipped := sum(len(rows) for _, _, rows in existing):
         logger.info(f"{plan.nwb_file_name}: {skipped} entries already stored")
 
+    if clashes := sum(len(rows) for _, _, rows in conflicting):
+        logger.warning(
+            f"{plan.nwb_file_name}: {clashes} entries disagree with stored "
+            + "rows; the stored values were kept. See the report."
+        )
+
     IngestionPlanLog().mark_inserted(
-        plan, inserted, existing=existing, complete=not misses
+        plan,
+        inserted,
+        existing=existing,
+        conflicting=conflicting,
+        complete=not misses,
     )
 
     if misses:  # attach them, so the caller sees what the plan missed
@@ -634,7 +645,7 @@ def _refuse(
     allow_partial : bool
         Insert the tables that planned cleanly even though others did not.
     on_divergence : str
-        `interactive`, `accept` or `raise`.
+        `report` to warn and keep the stored rows, `raise` to decline.
 
     Returns
     -------
@@ -643,10 +654,10 @@ def _refuse(
     """
     from spyglass.common.common_usage import IngestionPlanLog
 
-    if on_divergence not in ("interactive", "accept", "raise"):
+    if on_divergence not in ("report", "raise"):
         raise ValueError(
             f"Unknown on_divergence {on_divergence!r}. "
-            + "Expected interactive, accept or raise."
+            + "Expected report or raise."
         )
 
     # `is_clean` as well as the verdict: a plan that failed plans no entries,
@@ -663,23 +674,15 @@ def _refuse(
         )
         return plan
 
-    divergences = [p for p in plan.problems if p.code == "divergence"]
-    if divergences and not _divergence_accepted(divergences, on_divergence):
+    # A divergence is `soft`, so it never reaches `blocking`; the only thing
+    # left to decide is whether a caller asked for it to be an error (D7).
+    if on_divergence == "raise" and any(
+        problem.code == "divergence" for problem in plan.problems
+    ):
         logger.error(plan.report(log=False))
         return plan
 
-    # An accepted divergence no longer blocks. A divergence is recorded as
-    # `hard` because it stops an *unattended* run, but the policy above is
-    # exactly the decision that resolves it: the caller said to keep the stored
-    # value and insert the rest. Leaving it in `blocking` made the gate below
-    # refuse a run the caller had just approved, so `accept` and `raise`
-    # differed only in what they logged -- contradicting D7 and this function's
-    # own docstring. Other `hard` problems are untouched.
-    blocking = tuple(
-        problem
-        for problem in plan.blocking
-        if not (divergences and problem.code == "divergence")
-    )
+    blocking = plan.blocking
 
     if blocking and not allow_partial:
         logger.error(
@@ -705,10 +708,21 @@ def _write_plan(plan: IngestionPlan):
     Returns
     -------
     tuple of (list, list, list)
-        `(inserted, existing, misses)`. The first two hold
+        `(inserted, existing, conflicting, misses)`. The first three hold
         `(table_name, target, rows)`; the last holds `planner_miss` problems.
     """
-    inserted, existing, misses = [], [], []
+    inserted, existing, conflicting, misses = [], [], [], []
+
+    # Which stored rows the file disagreed with, so they stage as `conflict`
+    # keeping their planned value rather than as `exists` losing it (D7).
+    # Built from the plan: the planner already compared every row.
+    diverged = set()
+    for problem in plan.problems:
+        if problem.code == "divergence" and problem.primary_key:
+            with suppress(Exception):
+                diverged.add(
+                    (problem.table, tuple(sorted(problem.primary_key.items())))
+                )
 
     for table_plan in plan.table_plans:
         if table_plan.status != "ok":
@@ -744,11 +758,29 @@ def _write_plan(plan: IngestionPlan):
                 break
 
             if stored:
-                existing.append((name, target, stored))
+                matched, clashed = [], []
+                for row in stored:
+                    key = None
+                    with suppress(Exception):
+                        key = (
+                            name,
+                            tuple(
+                                sorted(
+                                    (attr, row.get(attr))
+                                    for attr in target.as_instance.primary_key
+                                )
+                            ),
+                        )
+                    target_list = clashed if key in diverged else matched
+                    target_list.append(row)
+                if matched:
+                    existing.append((name, target, matched))
+                if clashed:
+                    conflicting.append((name, target, clashed))
             if novel:
                 inserted.append((name, target, novel))
 
-    return inserted, existing, misses
+    return inserted, existing, conflicting, misses
 
 
 def _insert_target(target, rows, nwb_file_name: str):
@@ -884,57 +916,3 @@ def _novel_rows(table, rows) -> List[dict]:
         return list(rows)
 
     return [row for row in rows if row_key(table, row) not in stored]
-
-
-def _divergence_accepted(divergences, on_divergence: str) -> bool:
-    """Apply the divergence policy, outside any transaction.
-
-    Prompting mid-transaction is what the plan pass exists to avoid: a
-    question asked with rows half-written holds a lock open on an answer
-    nobody is there to give.
-
-    The prompt itself is `dj_helper_fn.accept_divergence`, the utility the
-    insert path also uses, so both sites decline the same way when nobody is
-    there to answer -- a suite that blocked on stdin would hang rather than
-    fail. What stays local is the framing: one question for the whole run,
-    since a file can diverge in dozens of places and asking per divergence is
-    unanswerable.
-
-    Parameters
-    ----------
-    divergences : list of Problem
-        The divergence problems this plan recorded.
-    on_divergence : str
-        `interactive`, `accept` or `raise`.
-
-    Returns
-    -------
-    bool
-        Whether to go on and insert.
-    """
-    from spyglass.settings import test_mode
-    from spyglass.utils.dj_helper_fn import accept_divergence
-
-    if on_divergence == "accept":
-        logger.info(
-            f"Keeping the stored values for {len(divergences)} divergences"
-        )
-        return True
-
-    if on_divergence == "raise":
-        logger.error(
-            f"{len(divergences)} entries disagree with stored rows. "
-            + "Nothing inserted."
-        )
-        return False
-
-    for problem in divergences:  # the detail, before the one question
-        logger.warning(str(problem))
-
-    return accept_divergence(
-        test_mode=test_mode,
-        prompt=(
-            f"{len(divergences)} entries disagree with rows already stored, "
-            + "listed above.\nKeep the stored values and insert the rest?"
-        ),
-    )

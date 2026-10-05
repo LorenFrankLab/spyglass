@@ -86,7 +86,7 @@ def test_planned_run_inserts_what_the_plan_reported(
     tables, key = emptied_leaves
     before = counts()
 
-    result = populate_all_common(mini_copy_name, on_divergence="accept")
+    result = populate_all_common(mini_copy_name)
 
     assert not result, f"A good file should insert cleanly: {list(result)}"
     for table in tables:
@@ -107,7 +107,7 @@ def test_planned_run_is_idempotent(common, mini_copy_name, mini_insert, counts):
 
     before = counts()
 
-    result = populate_all_common(mini_copy_name, on_divergence="accept")
+    result = populate_all_common(mini_copy_name)
 
     assert counts() == before, "A finished file should gain no rows"
     assert result.verdict == "no_op", f"Expected no_op, got {result.verdict}"
@@ -138,7 +138,7 @@ def test_planned_run_writes_nothing_when_the_plan_blocks(
 
     monkeypatch.setattr(IngestionMixin, "_parse", _parse)
 
-    result = populate_all_common(mini_copy_name, on_divergence="accept")
+    result = populate_all_common(mini_copy_name)
 
     assert result, "A file with a broken table must not report success"
     assert counts() == before, (
@@ -178,7 +178,7 @@ def test_raise_err_raises_after_the_whole_file_is_checked(
         populate_all_common(
             mini_copy_name,
             raise_err=True,
-            on_divergence="accept",
+            on_divergence="report",
         )
 
     message = str(err.value)

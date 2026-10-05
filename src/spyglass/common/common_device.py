@@ -13,7 +13,6 @@ import datajoint as dj
 from spyglass.common.errors import PopulateException
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassIngestion, logger
-from spyglass.utils.dj_helper_fn import accept_divergence
 
 schema = dj.schema("common_device")
 
@@ -171,13 +170,15 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         ----------
         new_device_dict : dict
             Dict of new device properties
+        test_mode : bool, optional
+            Treat a disagreement with the stored entry as an error rather than
+            reporting it and keeping what is stored. Default None.
 
         Raises
         ------
         PopulateException
-            If user chooses not to add a device to the database when prompted or
-            if the device properties from the NWB file do not match the
-            properties of the corresponding database entry.
+            If `test_mode` and the device properties from the NWB file do not
+            match the properties of the corresponding database entry.
         """
         name = new_device_dict["data_acquisition_device_name"]
         all_values = DataAcquisitionDevice.fetch(
@@ -191,20 +192,26 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         db_dict = (
             DataAcquisitionDevice & {"data_acquisition_device_name": name}
         ).fetch1()
-        for k, existing_val in db_dict.items():
-            new_val = new_device_dict.get(k, None)
-            if new_val == existing_val:
-                continue  # values match, no need to check further
-            # if the values do not match, check whether the user wants to
-            # accept the entry in the database, or raise an exception
-            if not accept_divergence(
-                k, new_val, existing_val, test_mode, cls.camel_name
-            ):
+        # Keep the stored device and report. This used to prompt per property
+        # and raise on a decline, failing a whole file over a mismatch as
+        # small as `manufacturer-1` vs `manufacturer 1` (D7). A caller that
+        # wants a disagreement to be an error asks for it, the same way
+        # `on_divergence="raise"` does on the plan path.
+        if differing := sorted(
+            k
+            for k, existing_val in db_dict.items()
+            if new_device_dict.get(k, None) != existing_val
+        ):
+            message = (
+                f"Data acquisition device '{name}' already exists with "
+                + f"different values for {', '.join(differing)}"
+            )
+            if test_mode:
                 raise PopulateException(
-                    "Data acquisition device properties of PyNWB Device object "
-                    + f"with name '{name}': {new_device_dict} do not match "
-                    f"properties of the corresponding database entry: {db_dict}"
+                    f"{message}: {new_device_dict} does not match the stored "
+                    + f"entry {db_dict}"
                 )
+            logger.info(f"{message}; kept what is stored.")
 
     @classmethod
     def _add_system(cls, system: Optional[str] = None) -> Optional[str]:

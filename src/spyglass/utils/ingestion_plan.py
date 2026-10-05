@@ -45,6 +45,10 @@ class Problem:
     # For a divergence: the secondary-key values that would align the planned
     # entry with the row already stored.
     suggested_revision: Optional[dict] = None
+    # For a divergence: which row. Carried in-run so the insert pass can stage
+    # the row as `conflict` and keep its planned value; not persisted, since
+    # the Problem part names its own columns.
+    primary_key: Optional[dict] = None
 
     def __post_init__(self):
         """Reject a severity outside the taxonomy."""
@@ -455,8 +459,6 @@ class IngestionPlan:
         One answer in place of a wall of duplicate errors on a re-run:
 
         - `fatal` — the file could not be planned at all
-        - `conflict` — an entry exists with different values, which is a
-          disagreement to resolve rather than work to do
         - `no_op` — every planned entry is already present and matches
         - `all_new` — none of it is in the database yet
         - `partial_new` — some of it is
@@ -467,9 +469,6 @@ class IngestionPlan:
         """
         if any(problem.severity == "fatal" for problem in self.problems):
             return "fatal"
-
-        if any(problem.code == "divergence" for problem in self.problems):
-            return "conflict"
 
         novel = sum(self.novel.values())
         if not novel:
@@ -503,7 +502,6 @@ class IngestionPlan:
             "no_op": "already ingested, nothing to do",
             "all_new": f"{self.entry_count} entries, all new",
             "partial_new": f"{sum(self.novel.values())} new entries",
-            "conflict": "conflicts with what is already stored",
         }[self.verdict]
 
         lines = [f"{self.nwb_file_name}: {self.verdict} — {headline}"]
@@ -515,11 +513,17 @@ class IngestionPlan:
                 f"  {count:>5}  {name}" for name, count in sorted(novel.items())
             )
 
-        shown = (
-            self.problems
-            if verbose
-            else [p for p in self.problems if p.severity in BLOCKING]
-        )
+        lines.extend(self._divergence_lines())
+
+        # Soft problems are shown by default: an absence that is not an error
+        # is still something the reader has to know about. `verbose` adds
+        # `info`, which is resolution noise rather than news.
+        shown = [
+            p
+            for p in self.problems
+            if p.code != "divergence"  # reported in its own section above
+            and (verbose or p.severity != "info")
+        ]
         if shown:
             by_severity = {}
             for problem in shown:
@@ -568,10 +572,49 @@ class IngestionPlan:
         if log:
             from spyglass.utils.logging import logger
 
-            emit = logger.warning if self.blocking else logger.info
+            # Anything beyond `info` is news, so a file that only disagrees
+            # with stored rows still warns rather than whispering.
+            notable = [p for p in self.problems if p.severity != "info"]
+            emit = logger.warning if notable else logger.info
             emit(text)
 
         return text
+
+    def _divergence_lines(self) -> List[str]:
+        """Render the rows the file disagrees with, grouped by table.
+
+        Its own section because a divergence is not a failure and should not
+        read like one: nothing is blocked, and the run will insert the rest.
+        Grouped and counted so a re-ingest that touched many rows stays
+        skimmable -- the whole point of reporting rather than prompting is
+        that the reader can take it in at once.
+        """
+        divergences = [p for p in self.problems if p.code == "divergence"]
+        if not divergences:
+            return []
+
+        by_table: Dict[str, List[Problem]] = {}
+        for problem in divergences:
+            by_table.setdefault(problem.table or "", []).append(problem)
+
+        lines = ["", f"Disagrees with stored rows ({len(divergences)}):"]
+        for table in sorted(by_table):
+            group = by_table[table]
+            lines.append(f"  {table} ({len(group)}):")
+            for problem in sorted(group, key=lambda p: p.message):
+                lines.append(f"    {problem.message}")
+                if problem.suggested_revision:
+                    # The dict literal, not a prose summary: the point of a
+                    # suggested revision is that it can be pasted rather than
+                    # retyped from the message.
+                    lines.append(
+                        f"      stored values: {problem.suggested_revision!r}"
+                    )
+        lines.append(
+            "  -> The stored rows were kept. Edit the file to match, or "
+            + "update the rows, if the file is right."
+        )
+        return lines
 
     @property
     def problems(self) -> Tuple[Problem, ...]:

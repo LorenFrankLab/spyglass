@@ -15,7 +15,6 @@ from spyglass.utils.ingestion_plan import (
     TablePlan,
     row_key,
 )
-from spyglass.utils.dj_helper_fn import accept_divergence
 from spyglass.utils.logging import logger
 from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import get_file_namespaces
@@ -803,8 +802,8 @@ class IngestionMixin(BaseMixin):
 
     def _adjust_keys_for_entry(self, keys: List[dict]) -> List[dict]:
         """Passthrough. Allows children to adjust keys before comparing."""
-        # Motivated by Subject.sex: comparing None to "U" should be equal
-        # Without this step, reinsert triggers accept_divergence prompt
+        # Motivated by Subject.sex: comparing None to "U" should be equal,
+        # so a reinsert is not reported as a divergence.
         # By default, checks that all non-nullable keys present
         return [key for key in keys if self._key_has_required_attrs(key)]
 
@@ -1053,23 +1052,21 @@ class IngestionMixin(BaseMixin):
 
         existing = query.fetch1()
 
-        for key in set(adj_new_key).union(existing):
-            if not self._unequal_vals(key, adj_new_key, existing):
-                continue  # skip if values are equal
-            if not accept_divergence(
-                key,
-                adj_new_key.get(key),
-                existing.get(key),
-                self._test_mode,
-                tbl.camel_name,
-            ):
-                # If the user does not accept the divergence,
-                # raise an error to prevent data inconsistency
-                raise dj.errors.DuplicateError(
-                    f"Attempted entry in {self.camel_name} already exists "
-                    + f"with different values for {key}: "
-                    + f"{adj_new_key.get(key)} != {existing.get(key)}"
-                )
+        # Keep the stored row and report. Prompting here asked a question
+        # with rows half-written, holding a lock open on an answer nobody was
+        # there to give -- and raising on a declined answer aborted a whole
+        # file over one mismatched attribute. Plan the file to get this as a
+        # report instead; see D7.
+        if differing := sorted(
+            key
+            for key in set(adj_new_key).union(existing)
+            if self._unequal_vals(key, adj_new_key, existing)
+        ):
+            self._info_msg(
+                f"{tbl.camel_name} already holds "
+                + f"{ {k: v for k, v in primary_key.items()} } with different "
+                + f"values for {', '.join(differing)}; kept what is stored."
+            )
 
         return  # validated existing entry, nothing to insert
 
@@ -1262,7 +1259,7 @@ class IngestionMixin(BaseMixin):
 
         return [
             Problem(
-                severity="hard",
+                severity="soft",
                 code="divergence",
                 message=(
                     f"{primary} exists with different values for "
@@ -1270,6 +1267,7 @@ class IngestionMixin(BaseMixin):
                 ),
                 table=table.full_table_name,
                 suggested_revision=differing,
+                primary_key=primary,
             )
         ]
 

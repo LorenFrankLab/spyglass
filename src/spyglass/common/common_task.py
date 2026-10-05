@@ -8,7 +8,6 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
-from spyglass.utils.dj_helper_fn import accept_divergence
 from spyglass.utils.nwb_helper_fn import get_nwb_file, is_nwb_obj_type
 
 schema = dj.schema("common_task")
@@ -77,23 +76,19 @@ class Task(SpyglassMixin, dj.Manual):
                 inserts.append(task_dict)  # only append novel tasks
                 continue
             existing = query.fetch1()
-            for key in set(task_dict).union(existing):
-                if not unequal_vals(key, task_dict, existing):
-                    continue  # skip if values are equal
-                if not accept_divergence(
-                    key,
-                    task_dict.get(key),
-                    existing.get(key),
-                    self._test_mode,
-                    self.camel_name,
-                ):
-                    # If the user does not accept the divergence,
-                    # raise an error to prevent data inconsistency
-                    raise ValueError(
-                        f"Task {task_dict['task_name']} already exists "
-                        + f"with different values for {key}: "
-                        + f"{task_dict.get(key)} != {existing.get(key)}"
-                    )
+            # Keep the stored task and report. This used to prompt per
+            # attribute and raise on a decline, aborting the whole file over
+            # one mismatched task field; see D7.
+            if differing := sorted(
+                key
+                for key in set(task_dict).union(existing)
+                if unequal_vals(key, task_dict, existing)
+            ):
+                logger.info(
+                    f"Task {task_dict['task_name']} already exists with "
+                    + f"different values for {', '.join(differing)}; "
+                    + "kept what is stored."
+                )
         # Insert the tasks into the table
         self.insert(inserts)
 

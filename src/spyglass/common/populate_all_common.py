@@ -90,7 +90,7 @@ def _plan_only(nwb_file_name: str):
 def _insert_from_plan(
     nwb_file_name: str,
     raise_err: bool = False,
-    on_divergence: str = "interactive",
+    on_divergence: str = "report",
     allow_partial: bool = False,
     rollback_on_miss: bool = False,
 ):
@@ -110,7 +110,8 @@ def _insert_from_plan(
         Raise at the end if anything blocked. Default False, returning the plan
         for the caller to test. Nothing raises mid-pass either way.
     on_divergence : str, optional
-        `interactive`, `accept` or `raise`. Default `interactive`.
+        `report` to warn and keep the stored rows, `raise` to decline.
+        Default `report`.
     allow_partial : bool, optional
         Insert the tables that planned cleanly even though others did not.
     rollback_on_miss : bool, optional
@@ -306,7 +307,7 @@ def populate_all_common(
     rollback_on_fail=False,
     raise_err=False,
     dry_run=False,
-    on_divergence="interactive",
+    on_divergence="report",
     allow_partial=False,
 ) -> Union[List, None]:
     """Insert all common tables for a given NWB file.
@@ -329,9 +330,9 @@ def populate_all_common(
         Plan the file and return the report without inserting anything.
         Default False.
     on_divergence : str, optional
-        What to do when the file disagrees with a stored row: `interactive`
-        asks once, `accept` keeps the stored value and inserts the rest,
-        `raise` declines. Default `interactive`.
+        What to do when the file disagrees with a stored row: `report`
+        keeps the stored rows, warns, and inserts the rest; `raise` declines.
+        Default `report`. Nothing prompts (D7).
     allow_partial : bool, optional
         Insert the tables that planned cleanly even though others did not.
         Default False: a blocking problem inserts nothing, so a half-ingested

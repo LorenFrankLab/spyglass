@@ -30,11 +30,12 @@ def _broken(plan_types):
                         nwb_object_id="abc-123",
                     ),
                     plan_types.Problem(
-                        "hard",
+                        "soft",
                         "divergence",
                         "already stored with different values",
                         table="`common`.`subject`",
                         suggested_revision={"sex": "M"},
+                        primary_key={"subject_id": "54321"},
                     ),
                     plan_types.Problem(
                         "soft",
@@ -64,21 +65,29 @@ def test_a_clean_plan_is_one_line(plan_types):
 
 
 def test_the_verdict_leads(plan_types):
-    """The first line answers 'what happened', before any detail."""
+    """The first line answers 'what happened', before any detail.
+
+    A divergence no longer decides it: the verdict says what the run will do,
+    and a disagreement about one stored row does not stop the rest (D7).
+    """
     report = _broken(plan_types).report(log=False)
     first = report.splitlines()[0]
 
-    assert first.startswith("broken_.nwb: conflict"), first
+    assert first.startswith("broken_.nwb: partial_new"), first
 
 
 def test_problems_group_by_severity_worst_first(plan_types):
-    """Blocking problems come before advisory ones."""
+    """Blocking problems come before advisory ones.
+
+    One hard problem, not two: the divergence is soft now and renders in its
+    own section rather than among the severities.
+    """
     report = _broken(plan_types).report(verbose=True, log=False)
 
-    assert report.index("Hard (2):") < report.index(
+    assert report.index("Hard (1):") < report.index(
         "Soft (1):"
     ), "Hard problems must precede soft ones"
-    assert "Hard (2)" in report, "The count tells you how much to read"
+    assert "Hard (1)" in report, "The count tells you how much to read"
 
 
 def test_a_problem_names_the_object_and_the_remedy(plan_types):
@@ -93,19 +102,49 @@ def test_a_problem_names_the_object_and_the_remedy(plan_types):
 
 
 def test_a_divergence_revision_is_pasteable(plan_types):
-    """A suggested revision should be usable without retyping it."""
-    report = _broken(plan_types).report(verbose=True, log=False)
+    """A suggested revision should be usable without retyping it.
+
+    It renders inside the divergence section now, and in the *default*
+    report: a warning the reader has to ask for is not a warning (D7).
+    """
+    report = _broken(plan_types).report(log=False)
 
     assert "{'sex': 'M'}" in report, "The revision renders as a dict literal"
-    assert "Suggested revisions, to apply as-is:" in report
+    assert "Disagrees with stored rows (1):" in report
+    assert "`common`.`subject`" in report, "grouped under its table"
 
 
-def test_soft_problems_are_hidden_unless_asked_for(plan_types):
-    """The default report is what blocks you, not everything noticed."""
+def test_the_default_report_shows_warnings_but_not_resolutions(plan_types):
+    """Soft problems show by default; only `info` is opt-in.
+
+    Reversed with D7. Hiding soft problems meant a divergence, once it became
+    a warning rather than a blocker, would have vanished from the report that
+    replaced the prompt -- quieter than the behaviour it replaced.
+    """
     quiet = _broken(plan_types).report(log=False)
 
-    assert "Soft (1):" not in quiet, "Advisory problems are opt-in"
-    assert "Hard (2):" in quiet, "Blocking problems always show"
+    assert "Soft (1):" in quiet, "An advisory problem is still news"
+    assert "Hard (1):" in quiet, "Blocking problems always show"
+
+    plan = plan_types.IngestionPlan(
+        nwb_file_name="chatty_.nwb",
+        table_plans=(
+            plan_types.TablePlan(
+                table_name="`common`.`session`",
+                entries=plan_types.PlannedEntries(),
+                problems=(
+                    plan_types.Problem(
+                        "info",
+                        "file_will_be_registered",
+                        "planned as though registered",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert "Info (1):" not in plan.report(log=False), "info is opt-in"
+    assert "Info (1):" in plan.report(verbose=True, log=False)
 
 
 def test_blocked_tables_are_named_once_at_the_end(plan_types):
@@ -177,7 +216,7 @@ def test_a_returned_plan_carries_only_blocking_problems(plan_types):
     plan = _broken(plan_types)
 
     assert plan, "A blocked plan must be truthy"
-    assert len(plan) == 2, "Two hard problems, the soft one excluded"
+    assert len(plan) == 1, "One hard problem; both soft ones excluded"
     assert all(
         problem.severity in plan_types.BLOCKING for problem in plan
     ), "Iterating yields the problems that actually blocked"

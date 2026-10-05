@@ -102,7 +102,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     definition = """
     nwb_file_name: varchar(64)
     ---
-    verdict: varchar(16)                 # fatal|no_op|all_new|partial_new|conflict
+    verdict: varchar(16)                 # fatal|no_op|all_new|partial_new
     status = "open": enum("open", "complete")
     attempt = 1: int                     # how many times this file was planned
     nwb_hash = NULL: varchar(32)         # provenance only, never a gate
@@ -387,7 +387,12 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         return master_key
 
     def mark_inserted(
-        self, plan, inserted, existing=(), complete: bool = False
+        self,
+        plan,
+        inserted,
+        existing=(),
+        conflicting=(),
+        complete: bool = False,
     ) -> None:
         """Record which staged entries made it into their real tables.
 
@@ -408,6 +413,12 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             is that no blob is kept for an entry present in its own table,
             and an entry that was skipped is no less present than one just
             written.
+        conflicting : list of (str, table, rows), optional
+            Rows whose stored version disagrees with the file. Recorded as
+            `conflict` and **keeping** their payload -- the one exception to
+            the rule above, because the planned value is the thing a reader
+            needs in order to act on the warning, and re-deriving it means
+            re-parsing the file (D7).
         complete : bool, optional
             Whether every entry is now stored, closing the plan. Default
             False.
@@ -434,7 +445,11 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
 
         done = [
             (entry_key, state)
-            for state, group in (("inserted", inserted), ("exists", existing))
+            for state, group in (
+                ("inserted", inserted),
+                ("exists", existing),
+                ("conflict", conflicting),
+            )
             for table_name, target, rows in group
             for entry_key in identify(table_name, target, rows)
         ]
@@ -447,16 +462,23 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
                     continue  # not staged, nothing to migrate
                 # update1 on the table itself: DataJoint refuses it on a
                 # restricted query, and the key is already complete.
-                self.Entry.update1(
-                    {**entry_key, "state": state, "entry_blob": None}
-                )
+                # A conflict keeps its payload: the planned value is what a
+                # reader needs to act on the warning, and re-deriving it
+                # means re-parsing the file. Every other state loses it --
+                # no blob for a row present in its own table.
+                update = {**entry_key, "state": state}
+                if state != "conflict":
+                    update["entry_blob"] = None
+                self.Entry.update1(update)
             if complete:
                 self.update1({**master_key, "status": "complete"})
 
         migrated = sum(1 for _, state in done if state == "inserted")
+        clashed = sum(1 for _, state in done if state == "conflict")
         logger.info(
             f"{plan.nwb_file_name}: {migrated} entries migrated, "
             + f"{len(done) - migrated} already stored"
+            + (f" ({clashed} in conflict)" if clashed else "")
             + (", plan complete" if complete else "")
         )
 
