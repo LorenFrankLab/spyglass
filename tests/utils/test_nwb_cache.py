@@ -1,6 +1,5 @@
 """Unit tests for NWBFileCache LRU memory management."""
 
-import resource
 import time
 from unittest.mock import MagicMock, patch
 
@@ -23,12 +22,33 @@ def configure_nwb_cache():
     return configure_nwb_cache
 
 
+@pytest.fixture(scope="module")
+def nwb_mod():
+    import spyglass.utils.nwb_helper_fn as mod
+
+    return mod
+
+
 def _fake_vm(available_gb, total_gb=32.0):
     """Return a psutil.virtual_memory()-like object."""
     vm = MagicMock()
     vm.available = int(available_gb * 1e9)
     vm.total = int(total_gb * 1e9)
     return vm
+
+
+def _fake_proc(num_fds):
+    """Return a psutil.Process()-like object reporting *num_fds* descriptors.
+
+    *num_fds* may be an int, or a list consumed one value per call to mimic
+    the count dropping as files are closed.
+    """
+    proc = MagicMock()
+    if isinstance(num_fds, list):
+        proc.num_fds = MagicMock(side_effect=num_fds)
+    else:
+        proc.num_fds = MagicMock(return_value=num_fds)
+    return proc
 
 
 def _make_io():
@@ -165,25 +185,22 @@ def test_lru_eviction_order(NWBFileCache):
 
 
 def test_eviction_on_fd_limit(NWBFileCache):
-    """LRU file is evicted when cache size reaches the OS fd soft limit."""
+    """LRU file is evicted when process descriptors reach the fd budget."""
     cache = NWBFileCache()
     io_a, io_b = _make_io(), _make_io()
 
-    # Soft limit of 10 fds; fraction 0.99 → threshold is 9.9, so 10 entries
-    # would exceed it. Add two files: first with plenty of memory and a limit
-    # that allows it, then tighten the limit so the second insert evicts the first.
-    fake_limits = (10, 1024)  # (soft, hard)
-
     with (
         patch("psutil.virtual_memory", return_value=_fake_vm(16)),
-        patch("resource.getrlimit", return_value=fake_limits),
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=_fake_proc(10)),
     ):
         cache["/a.nwb"] = (io_a, MagicMock())
 
-    # Drop soft limit to 1 so one open file already exceeds the fraction
+    # 1020 descriptors against a 0.99 × 1024 = 1013 budget
     with (
         patch("psutil.virtual_memory", return_value=_fake_vm(16)),
-        patch("resource.getrlimit", return_value=(1, 1024)),
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=_fake_proc([1020, 800])),
     ):
         cache["/b.nwb"] = (io_b, MagicMock())
 
@@ -193,20 +210,113 @@ def test_eviction_on_fd_limit(NWBFileCache):
 
 
 def test_no_eviction_when_fd_ok(NWBFileCache):
-    """No eviction when cache is well within the OS fd limit."""
+    """No eviction when the process is well within the OS fd limit."""
     cache = NWBFileCache()
     io_a = _make_io()
-    fake_limits = (1024, 4096)
 
     with (
         patch("psutil.virtual_memory", return_value=_fake_vm(16)),
-        patch("resource.getrlimit", return_value=fake_limits),
+        patch("resource.getrlimit", return_value=(1024, 4096)),
+        patch("psutil.Process", return_value=_fake_proc(10)),
     ):
         cache["/a.nwb"] = (io_a, MagicMock())
         cache["/b.nwb"] = (_make_io(), MagicMock())
 
     assert len(cache) == 2
     io_a.close.assert_not_called()
+
+
+def test_fd_eviction_counts_non_cache_fds(NWBFileCache, nwb_mod):
+    """Descriptors held outside the cache consume the same budget."""
+    cache = NWBFileCache()
+    io_a, io_b = _make_io(), _make_io()
+
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=_fake_proc(10)),
+    ):
+        cache["/a.nwb"] = (io_a, MagicMock())
+        time.sleep(0.01)
+        cache["/b.nwb"] = (io_b, MagicMock())
+
+    # Only two cache entries, but 900 process descriptors against a budget of
+    # 0.8 × 1024 = 819. Counting cache entries alone would not evict here.
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=_fake_proc([900, 700])),
+        patch.object(nwb_mod, "_NWB_CACHE_MAX_FILE_FRACTION", 0.8),
+    ):
+        cache["/c.nwb"] = (_make_io(), MagicMock())
+
+    io_a.close.assert_called_once()  # LRU of the two
+    io_b.close.assert_not_called()
+    assert "/a.nwb" not in cache
+    assert len(cache) == 2
+
+
+def test_fd_count_falls_back_to_cache_size(NWBFileCache):
+    """Where num_fds is unavailable, the cache's own size is the count."""
+    cache = NWBFileCache()
+    io_a = _make_io()
+    no_num_fds = MagicMock()
+    no_num_fds.num_fds = MagicMock(side_effect=AttributeError)
+
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=no_num_fds),
+    ):
+        cache["/a.nwb"] = (io_a, MagicMock())
+
+    # Soft limit of 1 → budget 0.99 → the one cached entry exceeds it
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=(1, 1024)),
+        patch("psutil.Process", return_value=no_num_fds),
+    ):
+        cache["/b.nwb"] = (_make_io(), MagicMock())
+
+    io_a.close.assert_called_once()
+    assert "/a.nwb" not in cache
+    assert "/b.nwb" in cache
+
+
+def test_fd_check_skipped_without_resource(NWBFileCache, nwb_mod):
+    """Without `resource`, only the RAM check governs eviction."""
+    cache = NWBFileCache()
+    io_a = _make_io()
+
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("psutil.Process", return_value=_fake_proc(10**6)),
+        patch.object(nwb_mod, "resource", None),
+    ):
+        cache["/a.nwb"] = (io_a, MagicMock())
+        cache["/b.nwb"] = (_make_io(), MagicMock())
+
+    assert len(cache) == 2
+    io_a.close.assert_not_called()
+
+
+def test_warns_once_when_fd_pressure_outlives_cache(NWBFileCache):
+    """An empty cache under fd pressure warns once instead of looping."""
+    cache = NWBFileCache()
+
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=_fake_proc(1020)),
+        patch("spyglass.utils.nwb_helper_fn.logger") as mock_logger,
+    ):
+        cache["/a.nwb"] = (_make_io(), MagicMock())
+        cache["/b.nwb"] = (_make_io(), MagicMock())
+        warnings = [str(c) for c in mock_logger.warning.call_args_list]
+
+    assert len(warnings) == 1  # one warning despite two inserts
+    assert "ulimit" in warnings[0]
+    assert len(cache) == 1  # /a evicted on /b's insert, /b still added
 
 
 # ── configure_nwb_cache ───────────────────────────────────────────────────────

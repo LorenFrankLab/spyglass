@@ -2,7 +2,6 @@
 
 import os
 import os.path
-import resource
 import time
 from itertools import groupby
 from pathlib import Path
@@ -14,6 +13,11 @@ import pynwb
 import yaml
 
 from spyglass.utils.logging import logger
+
+try:  # no RLIMIT_NOFILE on Windows
+    import resource
+except ImportError:  # pragma: no cover
+    resource = None
 
 # Fallback thresholds used when spyglass.settings has not been loaded.
 # SpyglassConfig.load_config() overwrites these via configure_nwb_cache().
@@ -38,12 +42,15 @@ class NWBFileCache:
 
     - Free RAM below ``_NWB_CACHE_MIN_FREE_GB`` GB *or*
       ``_NWB_CACHE_MIN_FREE_PCT`` × total RAM, whichever is larger.
-    - Cache size ≥ ``_NWB_CACHE_MAX_FILE_FRACTION`` × OS fd soft limit.
+    - Open descriptors held by this process ≥ ``_NWB_CACHE_MAX_FILE_FRACTION``
+      × OS fd soft limit. The whole process is counted, not just the cache,
+      so descriptors opened elsewhere consume the same budget.
     """
 
     def __init__(self):
         # path → (io, nwbfile, last_used_monotonic, refcount)
         self._cache: dict = {}
+        self._warned_fd_pressure = False
 
     # ------------------------------------------------------------------
     # Public dict-compatible interface
@@ -121,8 +128,18 @@ class NWBFileCache:
         return vm.available >= min_free_bytes
 
     def _num_open_ok(self) -> bool:
+        if resource is None:  # no fd limit to compare against
+            return True
         soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
-        return len(self._cache) < _NWB_CACHE_MAX_FILE_FRACTION * soft_limit
+        try:
+            # Counts descriptors held outside the cache -- sockets, pipes, GPU
+            # handles -- and files opened more than once via external links.
+            # A fresh Process() so forked workers count their own, not the
+            # parent's. POSIX-only; falls back to the cache's own size.
+            num_open = psutil.Process().num_fds()
+        except (AttributeError, NotImplementedError, psutil.Error, OSError):
+            num_open = len(self._cache)
+        return num_open < _NWB_CACHE_MAX_FILE_FRACTION * soft_limit
 
     def _evict_lru(self):
         if not self._cache:
@@ -145,6 +162,18 @@ class NWBFileCache:
     def _evict_if_needed(self):
         while self._cache and not (self._free_ram_ok() and self._num_open_ok()):
             self._evict_lru()
+        if not self._cache and not self._num_open_ok():
+            self._warn_fd_pressure()
+
+    def _warn_fd_pressure(self):
+        """Warn once that descriptors outside the cache exceed the budget."""
+        if self._warned_fd_pressure:
+            return
+        self._warned_fd_pressure = True
+        logger.warning(
+            "Open file descriptors exceed the NWB cache budget with no NWB "
+            "files left to close. Raise the limit with `ulimit -n`."
+        )
 
 
 def configure_nwb_cache(
@@ -161,8 +190,8 @@ def configure_nwb_cache(
     min_free_pct : float, optional
         Minimum free system RAM as a fraction of total (0–1).
     max_file_fraction : float, optional
-        Maximum fraction of the OS soft limit on open file descriptors
-        the cache may occupy before LRU eviction triggers (0–1].
+        Maximum fraction of the OS soft limit on open file descriptors this
+        process may occupy before LRU eviction triggers (0–1].
     """
     global _NWB_CACHE_MIN_FREE_GB, _NWB_CACHE_MIN_FREE_PCT
     global _NWB_CACHE_MAX_FILE_FRACTION
