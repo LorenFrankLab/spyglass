@@ -115,10 +115,10 @@ class NWBFileCache(BaseMixin):
             self._cache[path] = (io, nwb, last_used, rc + 1)
 
     def release(self, path):
-        """Decrement the hold count, allowing LRU eviction again."""
+        """Clear the hold on a file, allowing it to be closed again."""
         if path in self._cache:
-            io, nwb, last_used, rc = self._cache[path]
-            self._cache[path] = (io, nwb, last_used, max(0, rc - 1))
+            io, nwb, last_used, _ = self._cache[path]
+            self._cache[path] = (io, nwb, last_used, 0)
 
     # ------------------------------------------------------------------
     # Memory helpers

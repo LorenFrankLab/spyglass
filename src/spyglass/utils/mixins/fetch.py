@@ -362,10 +362,10 @@ class FetchMixin(BaseMixin):
     def close_nwb(self) -> bool:
         """Release NWB file holds for the files relevant to this restriction.
 
-        ``fetch_nwb()`` marks each opened NWB file as active so the LRU cache
-        will not evict it while the caller holds lazy h5py dataset references.
-        Call ``close_nwb()`` with the **same restriction** once you have
-        finished reading data, to allow those files to be reclaimed.
+        ``fetch_nwb()`` marks each opened NWB file as held, so the cache will
+        not close it while the caller holds lazy h5py dataset references. Call
+        ``close_nwb()`` with the **same restriction** once you have finished
+        reading data, to let those files be closed again.
 
         Both methods resolve file paths from the current table restriction, so
         the restriction in the ``close_nwb()`` call must match the one used in

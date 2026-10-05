@@ -405,6 +405,20 @@ def test_release_floors_at_zero(NWBFileCache):
     assert cache._cache["/a.nwb"][3] == 0
 
 
+def test_release_clears_repeated_holds(NWBFileCache):
+    """One release clears every hold, so repeat fetches need one close."""
+    cache = NWBFileCache()
+    with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
+        cache["/a.nwb"] = (_make_io(), MagicMock())
+
+    cache.acquire("/a.nwb")  # as two fetch_nwb() calls would
+    cache.acquire("/a.nwb")
+    assert cache._cache["/a.nwb"][3] == 2
+
+    cache.release("/a.nwb")  # one close_nwb() releases both
+    assert cache._cache["/a.nwb"][3] == 0
+
+
 def test_released_evicted_before_active(NWBFileCache):
     """A released (refcount=0) file is evicted before an active (refcount>0) one."""
     cache = NWBFileCache()
