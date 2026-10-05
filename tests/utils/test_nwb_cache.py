@@ -16,10 +16,17 @@ def NWBFileCache():
 
 
 @pytest.fixture(scope="module")
-def configure_nwb_cache():
-    from spyglass.utils.nwb_helper_fn import configure_nwb_cache
+def sg_config():
+    from spyglass.settings import sg_config
 
-    return configure_nwb_cache
+    return sg_config
+
+
+@pytest.fixture(scope="module")
+def SpyglassConfig():
+    from spyglass.settings import SpyglassConfig
+
+    return SpyglassConfig
 
 
 @pytest.fixture(scope="module")
@@ -235,7 +242,7 @@ def test_no_eviction_when_fd_ok(NWBFileCache):
     io_a.close.assert_not_called()
 
 
-def test_fd_eviction_counts_non_cache_fds(NWBFileCache, nwb_mod):
+def test_fd_eviction_counts_non_cache_fds(NWBFileCache, sg_config):
     """Descriptors held outside the cache consume the same budget."""
     cache = NWBFileCache()
     io_a, io_b = _make_io(), _make_io()
@@ -255,7 +262,7 @@ def test_fd_eviction_counts_non_cache_fds(NWBFileCache, nwb_mod):
         patch("psutil.virtual_memory", return_value=_fake_vm(16)),
         patch("resource.getrlimit", return_value=(1024, 1024)),
         patch("psutil.Process", return_value=_fake_proc([900, 700])),
-        patch.object(nwb_mod, "_NWB_CACHE_MAX_FILE_FRACTION", 0.8),
+        patch.dict(sg_config._nwb_cache, {"max_file_fraction": 0.8}),
     ):
         cache["/c.nwb"] = (_make_io(), MagicMock())
 
@@ -328,59 +335,50 @@ def test_warns_once_when_fd_pressure_outlives_cache(NWBFileCache):
     assert len(cache) == 1  # /a evicted on /b's insert, /b still added
 
 
-# ── configure_nwb_cache ───────────────────────────────────────────────────────
+# ── threshold settings ────────────────────────────────────────────────────────
 
 
-def test_default_max_file_fraction(nwb_mod):
+def test_default_max_file_fraction(sg_config):
     """The default leaves descriptor headroom for non-cache handles."""
-    assert nwb_mod._NWB_CACHE_MAX_FILE_FRACTION == 0.8
+    assert sg_config.nwb_max_file_fraction == 0.8
 
 
-def test_configure_updates_thresholds(configure_nwb_cache):
-    import spyglass.utils.nwb_helper_fn as mod
-
-    original_gb = mod._NWB_CACHE_MIN_FREE_GB
-    original_pct = mod._NWB_CACHE_MIN_FREE_PCT
-    try:
-        configure_nwb_cache(min_free_gb=8.0, min_free_pct=0.2)
-        assert mod._NWB_CACHE_MIN_FREE_GB == 8.0
-        assert mod._NWB_CACHE_MIN_FREE_PCT == 0.2
-    finally:
-        mod._NWB_CACHE_MIN_FREE_GB = original_gb
-        mod._NWB_CACHE_MIN_FREE_PCT = original_pct
+def test_config_overrides_defaults(SpyglassConfig):
+    """Supplied keys win; unsupplied keys keep their default."""
+    ret = SpyglassConfig._validated_nwb_cache(
+        {"min_free_gb": 8.0, "min_free_pct": 0.2}
+    )
+    assert ret["min_free_gb"] == 8.0
+    assert ret["min_free_pct"] == 0.2
+    assert ret["max_file_fraction"] == 0.8  # untouched
 
 
-def test_configure_partial_update(configure_nwb_cache):
-    import spyglass.utils.nwb_helper_fn as mod
-
-    original_gb = mod._NWB_CACHE_MIN_FREE_GB
-    try:
-        configure_nwb_cache(min_free_gb=4.0)
-        assert mod._NWB_CACHE_MIN_FREE_GB == 4.0
-        # pct should be unchanged
-        assert mod._NWB_CACHE_MIN_FREE_PCT == 0.1
-    finally:
-        mod._NWB_CACHE_MIN_FREE_GB = original_gb
+def test_config_coerces_to_float(SpyglassConfig):
+    """Integers from JSON become floats."""
+    ret = SpyglassConfig._validated_nwb_cache({"min_free_gb": 4})
+    assert isinstance(ret["min_free_gb"], float)
 
 
-def test_configure_max_file_fraction(configure_nwb_cache):
-    import spyglass.utils.nwb_helper_fn as mod
-
-    original = mod._NWB_CACHE_MAX_FILE_FRACTION
-    try:
-        configure_nwb_cache(max_file_fraction=0.5)
-        assert mod._NWB_CACHE_MAX_FILE_FRACTION == 0.5
-    finally:
-        mod._NWB_CACHE_MAX_FILE_FRACTION = original
+def test_cache_reads_live_config(NWBFileCache, sg_config):
+    """The cache honors thresholds changed after it was built."""
+    cache = NWBFileCache()
+    with patch.dict(sg_config._nwb_cache, {"min_free_gb": 1e6}):
+        assert not cache._free_ram_ok()  # 1M GB free RAM is never available
+    assert cache._free_ram_ok()
 
 
-def test_configure_max_file_fraction_invalid(configure_nwb_cache):
-    import pytest
-
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"max_file_fraction": 0.0},
+        {"max_file_fraction": 1.5},
+        {"min_free_gb": -1.0},
+        {"min_free_pct": 1.5},
+    ],
+)
+def test_config_rejects_out_of_range(SpyglassConfig, bad):
     with pytest.raises(ValueError):
-        configure_nwb_cache(max_file_fraction=0.0)
-    with pytest.raises(ValueError):
-        configure_nwb_cache(max_file_fraction=1.5)
+        SpyglassConfig._validated_nwb_cache(bad)
 
 
 # ── hybrid eviction (idle time + ref count) ───────────────────────────────────

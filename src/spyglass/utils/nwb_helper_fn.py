@@ -21,12 +21,6 @@ try:  # no RLIMIT_NOFILE on Windows
 except ImportError:  # pragma: no cover
     resource = None
 
-# Fallback thresholds used when spyglass.settings has not been loaded.
-# SpyglassConfig.load_config() overwrites these via configure_nwb_cache().
-_NWB_CACHE_MIN_FREE_GB = 2.0
-_NWB_CACHE_MIN_FREE_PCT = 0.1
-_NWB_CACHE_MAX_FILE_FRACTION = 0.8
-
 
 class NWBFileCache(BaseMixin):
     """LRU cache for open NWB files with ref-count-aware eviction.
@@ -43,11 +37,14 @@ class NWBFileCache(BaseMixin):
 
     Thresholds checked before each insert:
 
-    - Free RAM below ``_NWB_CACHE_MIN_FREE_GB`` GB *or*
-      ``_NWB_CACHE_MIN_FREE_PCT`` × total RAM, whichever is larger.
-    - Open descriptors held by this process ≥ ``_NWB_CACHE_MAX_FILE_FRACTION``
-      × OS fd soft limit. The whole process is counted, not just the cache,
-      so descriptors opened elsewhere consume the same budget.
+    - Free RAM below ``min_free_gb`` GB *or* ``min_free_pct`` × total RAM,
+      whichever is larger.
+    - Open descriptors held by this process ≥ ``max_file_fraction`` × OS fd
+      soft limit. The whole process is counted, not just the cache, so
+      descriptors opened elsewhere consume the same budget.
+
+    Thresholds come from :data:`spyglass.settings.NWB_CACHE_DEFAULTS`, which
+    ``custom.nwb_cache`` in ``dj_local_conf.json`` overrides.
     """
 
     def __init__(self):
@@ -125,16 +122,20 @@ class NWBFileCache(BaseMixin):
     # ------------------------------------------------------------------
 
     def _free_ram_ok(self) -> bool:
+        from spyglass.settings import sg_config
+
         vm = psutil.virtual_memory()
         min_free_bytes = max(
-            _NWB_CACHE_MIN_FREE_GB * 1e9,
-            _NWB_CACHE_MIN_FREE_PCT * vm.total,
+            sg_config.nwb_min_free_gb * 1e9,
+            sg_config.nwb_min_free_pct * vm.total,
         )
         return vm.available >= min_free_bytes
 
     def _num_open_ok(self) -> bool:
         if resource is None:  # no fd limit to compare against
             return True
+        from spyglass.settings import sg_config
+
         soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
         try:
             # Counts descriptors held outside the cache -- sockets, pipes, GPU
@@ -144,7 +145,7 @@ class NWBFileCache(BaseMixin):
             num_open = psutil.Process().num_fds()
         except (AttributeError, NotImplementedError, psutil.Error, OSError):
             num_open = len(self._cache)
-        return num_open < _NWB_CACHE_MAX_FILE_FRACTION * soft_limit
+        return num_open < sg_config.nwb_max_file_fraction * soft_limit
 
     def _evict_lru(self):
         if not self._cache:
@@ -195,44 +196,6 @@ class NWBFileCache(BaseMixin):
         )
         self._held_evictions = 0
         self._warned.discard("held_eviction")
-
-
-def configure_nwb_cache(
-    min_free_gb: float = None,
-    min_free_pct: float = None,
-    max_file_fraction: float = None,
-):
-    """Set eviction thresholds for the NWB file cache.
-
-    Parameters
-    ----------
-    min_free_gb : float, optional
-        Minimum free system RAM in GB before LRU eviction triggers.
-    min_free_pct : float, optional
-        Minimum free system RAM as a fraction of total (0–1).
-    max_file_fraction : float, optional
-        Maximum fraction of the OS soft limit on open file descriptors this
-        process may occupy before LRU eviction triggers (0–1].
-    """
-    global _NWB_CACHE_MIN_FREE_GB, _NWB_CACHE_MIN_FREE_PCT
-    global _NWB_CACHE_MAX_FILE_FRACTION
-    if min_free_gb is not None:
-        min_free_gb = float(min_free_gb)
-        if min_free_gb < 0:
-            raise ValueError("min_free_gb must be >= 0")
-        _NWB_CACHE_MIN_FREE_GB = min_free_gb
-    if min_free_pct is not None:
-        min_free_pct = float(min_free_pct)
-        if not 0 <= min_free_pct <= 1:
-            raise ValueError("min_free_pct must be between 0 and 1")
-        _NWB_CACHE_MIN_FREE_PCT = min_free_pct
-    if max_file_fraction is not None:
-        max_file_fraction = float(max_file_fraction)
-        if not 0 < max_file_fraction <= 1:
-            raise ValueError(
-                "max_file_fraction must be between 0 (exclusive) and 1"
-            )
-        _NWB_CACHE_MAX_FILE_FRACTION = max_file_fraction
 
 
 __open_nwb_files = NWBFileCache()
