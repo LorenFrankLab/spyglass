@@ -161,12 +161,45 @@ def test_planned_parents_satisfy_their_children(
     )
 
 
-def test_duplicate_primary_keys_within_the_plan_are_caught(
+def test_conflicting_entries_for_one_key_are_reported(
     common, mini_copy_name, mini_insert, monkeypatch
 ):
-    """Two planned entries with one primary key is a problem, not a crash.
+    """Same key, different values is a problem, not a crash.
 
-    This is the mid-transaction DuplicateError, moved before the transaction.
+    The mid-transaction DuplicateError, moved before the transaction. Neither
+    row is stored, so there is no stored value to defer to.
+    """
+
+    def _conflicting(self, source, ctx):
+        from spyglass.utils.ingestion_plan import PlannedEntries
+
+        entries = PlannedEntries()
+        row = dict(ctx.base_key, sample_count_object_id="x" * 8)
+        entries.add(self, [row, dict(row, sample_count_object_id="y" * 8)])
+        return entries
+
+    monkeypatch.setattr(
+        type(common.SampleCount()),
+        "entries_for_row",
+        _conflicting,
+        raising=False,
+    )
+
+    plan = plan_nwbfile(mini_copy_name, force_replan=True)
+
+    assert any(
+        problem.code == "duplicate_key" for problem in plan.problems
+    ), f"Expected a duplicate_key problem, saw {plan.problems}"
+
+
+def test_identical_repeats_of_one_key_collapse(
+    common, mini_copy_name, mini_insert, monkeypatch
+):
+    """Same key, same values is normal content and must not block.
+
+    Two task epochs naming one task emit that task twice. The direct insert
+    path has always collapsed these; blocking them instead would refuse files
+    that ingested fine before planning existed.
     """
 
     def _twice(self, source, ctx):
@@ -181,11 +214,20 @@ def test_duplicate_primary_keys_within_the_plan_are_caught(
         type(common.SampleCount()), "entries_for_row", _twice, raising=False
     )
 
-    plan = plan_nwbfile(mini_copy_name)
+    plan = plan_nwbfile(mini_copy_name, force_replan=True)
 
-    assert any(
-        problem.code == "duplicate_key" for problem in plan.problems
-    ), f"Expected a duplicate_key problem, saw {plan.problems}"
+    duplicates = [p for p in plan.problems if p.code == "duplicate_key"]
+    assert not duplicates, f"Identical repeats must collapse, got {duplicates}"
+
+    counts = {
+        tp.table_name: tp.entry_count
+        for tp in plan.table_plans
+        if tp.table_name == common.SampleCount().full_table_name
+    }
+    assert counts, "SampleCount should still plan its row"
+    assert all(
+        n == 1 for n in counts.values()
+    ), f"Expected one row after collapsing, got {counts}"
 
 
 # ---------------------------------------------------------------------------

@@ -417,9 +417,8 @@ class IngestionMixin(BaseMixin):
         # institution would otherwise plan an Institution entry with no
         # institution_name, and that `missing_attribute` blocked Session and
         # the nine tables under it.
-        return PlannedEntries.from_dict(
-            self._adjust_entries(planned.as_dict()) or {}
-        )
+        adjusted = self._adjust_entries(planned.as_dict()) or {}
+        return PlannedEntries.from_dict(self._dedup_planned(adjusted, ctx))
 
     # ------------------------- parse contract --------------------------
 
@@ -895,54 +894,88 @@ class IngestionMixin(BaseMixin):
         """
         return getattr(tbl, "_expected_duplicates", self._expected_duplicates)
 
-    def _dedup_within_batch(self, tbl, table_entries: List[dict]) -> List[dict]:
-        """Collapse planned entries that share a primary key.
-
-        The database check in `validate1_duplicate` compares each entry to what
-        is already stored, not to its siblings in the same plan. Two objects in
-        one file can name the same novel parent and `_run_nwbfile_insert`
-        inserts with `skip_duplicates=False`, so the pair would raise and abort
-        the file.
+    def _collapse_by_primary_key(self, tbl, rows: List[dict]):
+        """Group rows by primary key, keeping the first of each.
 
         Parameters
         ----------
         tbl : dj.Table
-            The table the entries are planned for.
-        table_entries : list of dict
-            Planned entries for that table, in emission order.
+            The table the rows are destined for.
+        rows : list of dict
+            Planned rows for that table, in emission order.
 
         Returns
         -------
-        list of dict
-            The entries with later same-primary-key repeats removed.
+        tuple of (list of dict, list of tuple)
+            The rows to keep, and one `(key, attrs)` pair for each primary key
+            whose repeats disagreed, `attrs` naming the columns that differ.
+        """
+        seen, kept, conflicts = dict(), [], []
+
+        for row in rows:
+            pk = tuple(row.get(attr) for attr in tbl.primary_key)
+            if (first := seen.get(pk)) is None:
+                seen[pk] = row
+                kept.append(row)
+                continue
+            if differing := sorted(
+                key
+                for key in set(first).union(row)
+                if self._unequal_vals(key, first, row)
+            ):
+                conflicts.append((dict(zip(tbl.primary_key, pk)), differing))
+
+        return kept, conflicts
+
+    def _dedup_within_batch(self, tbl, table_entries: List[dict]) -> List[dict]:
+        """Collapse planned entries that share a primary key.
+
+        Two objects in one file can name the same novel parent, and
+        `_run_nwbfile_insert` inserts with `skip_duplicates=False`, so the pair
+        would raise and abort the file.
 
         Raises
         ------
         dj.errors.DuplicateError
-            If two planned entries share a primary key but disagree on a
-            secondary value. Neither is stored yet, so there is no existing
-            value to defer to.
+            If two entries share a primary key but disagree on a secondary
+            value. Neither is stored yet, so there is no existing value to
+            defer to.
         """
-        seen = dict()
-        deduped = []
+        kept, conflicts = self._collapse_by_primary_key(tbl, table_entries)
 
-        for entry in table_entries:
-            pk = tuple(entry.get(attr) for attr in tbl.primary_key)
-            if (first := seen.get(pk)) is None:
-                seen[pk] = entry
-                deduped.append(entry)
-                continue
-            for key in set(first).union(entry):
-                if self._unequal_vals(key, first, entry):
-                    raise dj.errors.DuplicateError(
-                        f"{self.camel_name} generated conflicting entries "
-                        + f"for {tbl.camel_name} key "
-                        + f"{dict(zip(tbl.primary_key, pk))}: {key} is "
-                        + f"{first.get(key)} in one and {entry.get(key)} "
-                        + "in another."
-                    )
+        for key, differing in conflicts:
+            raise dj.errors.DuplicateError(
+                f"{self.camel_name} generated conflicting entries for "
+                + f"{tbl.camel_name} key {key}: "
+                + f"{', '.join(differing)} disagree."
+            )
 
-        return deduped
+        return kept
+
+    def _dedup_planned(self, entries: IngestionEntries, ctx):
+        """Collapse same-key rows while planning, reporting only conflicts.
+
+        Agreeing repeats are normal content -- two task epochs naming one
+        task -- so they collapse, matching what the direct insert path has
+        always done. A disagreement is reported rather than raised: planning
+        reports, and neither row is stored, so there is no value to defer to.
+        """
+        for table, rows in entries.items():
+            tbl = table() if inspect.isclass(table) else table
+            kept, conflicts = self._collapse_by_primary_key(tbl, rows)
+
+            for key, differing in conflicts:
+                ctx.problem(
+                    "hard",
+                    "duplicate_key",
+                    f"Two planned entries for {key} disagree on "
+                    + ", ".join(differing),
+                    table=tbl.full_table_name,
+                )
+
+            entries[table] = kept
+
+        return entries
 
     def validate_duplicates(self, entry_dict: Dict[dj.Table, List[dict]]):
         """Validate new entries against existing entries in the database.
