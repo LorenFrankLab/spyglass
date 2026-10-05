@@ -9,11 +9,9 @@ Tables
     plus the file's trials table. Read from the `TaskRecording` object in
     `nwbf.acquisition`.
 
-The extension is not a Spyglass dependency: it has no PyPI release yet, so it
-cannot be pinned in `pyproject.toml` and is imported here inside a `try`. A
-file that does not use it simply has none of these objects. Each table also
-declares `_extension_requirements`, so a file written against an older version
-of the schema is skipped with a warning rather than raising.
+The extension has no PyPI release, so it cannot be pinned in `pyproject.toml`
+and may be missing or unusable. It is imported inside a `try`, and each file is
+gated on its own cached spec version at ingestion.
 
 Example use
 -----------
@@ -42,12 +40,20 @@ actions_df = (TaskRecording & {"nwb_file_name": nwb_file_name}).fetch1_dataframe
 `insert_sessions` fills these tables without the calls above.
 """
 
+from importlib.util import find_spec
+
 import datajoint as dj
+from packaging.version import Version
 
 from spyglass.common.common_nwbfile import Nwbfile
-from spyglass.utils import SpyglassIngestion
+from spyglass.utils import SpyglassIngestion, logger
 
-try:  # ndx_structured_behavior has no PyPI release, so it cannot be pinned
+_EXTENSION_NAME = "ndx-structured-behavior"
+# Exact, not a floor: the mappings below name the columns of one spec, and this
+# extension is pre-1.0 -- 0.1.0 named different ones.
+_EXTENSION_VERSION = "0.2.0"
+
+try:
     from ndx_structured_behavior import (
         ActionTypesTable,
         EventTypesTable,
@@ -56,8 +62,14 @@ try:  # ndx_structured_behavior has no PyPI release, so it cannot be pinned
         TaskArgumentsTable,
     )
     from ndx_structured_behavior import TaskRecording as NwbTaskRecording
-except ImportError:
-    # Fall back to matching on class name. .
+except ImportError as err:
+    # Fall back to matching on class name: pynwb rebuilds these classes from
+    # the namespace cached in each file, so ingestion works without the
+    # package. Not being installed is the ordinary case and stays quiet; a
+    # module that is present but still fails to import is a real problem worth
+    # naming -- 0.2.0 reads `pynwb.event`, which needs pynwb >= 4.1.
+    if find_spec("ndx_structured_behavior"):
+        logger.warning(f"Matching {_EXTENSION_NAME} objects by name: {err}")
     ActionTypesTable = "ActionTypesTable"
     EventTypesTable = "EventTypesTable"
     StateTypesTable = "StateTypesTable"
@@ -67,64 +79,76 @@ except ImportError:
 
 schema = dj.schema("common_task_rec")
 
-# Minimum schema version. The 0.2.0 spec is the first to name the columns
-# these tables map, so an older file cannot be read by this mapping.
-_EXTENSION = {"ndx-structured-behavior": "0.2.0"}
 
-# Sub-tables of the lab_meta_data `Task` object, and of the `TaskRecording`
-# object, are optional. A file may declare states but no actions.
+class _StructuredBehaviorIngestion(SpyglassIngestion):
+    """Shared by every table here, which all gate on the same spec version."""
 
+    def check_extension_requirements(self, nwb_file_name: str) -> bool:
+        """Whether a file's cached spec is the one these mappings target.
 
-def _description_of(group_name: str):
-    """Build a mapping callable reading a sub-table's description.
+        Replaces the mixin's check because it sets an exact match for only
+        tables in this schema.
 
-    The generic nested-object form of `table_key_to_obj_attr` raises when the
-    named object is absent, and every one of these groups is optional, so the
-    lookup is done in a callable that tolerates a missing group.
+        Parameters
+        ----------
+        nwb_file_name : str
+            The file about to be ingested.
 
-    Parameters
-    ----------
-    group_name : str
-        Attribute of the `Task` object holding the sub-table.
+        Returns
+        -------
+        bool
+            True if the file caches exactly `_EXTENSION_VERSION`. A file with
+            no such namespace returns False silently -- having no structured
+            behavior is ordinary, not a problem to report.
+        """
+        from spyglass.utils.nwb_hash import get_file_namespaces
 
-    Returns
-    -------
-    callable
-        Takes the `Task` object, returns the group's description or None.
-    """
-
-    def get_description(task_obj):
-        return getattr(getattr(task_obj, group_name, None), "description", None)
-
-    get_description.__name__ = f"{group_name}.description"
-    return get_description
-
-
-def _object_id_of(group_name: str):
-    """Build a mapping callable reading a sub-object's `object_id`.
-
-    Parameters
-    ----------
-    group_name : str
-        Attribute of the `TaskRecording` object holding the sub-table.
-
-    Returns
-    -------
-    callable
-        Takes the `TaskRecording` object, returns its id or None.
-    """
-
-    def get_object_id(recording_obj):
-        return getattr(
-            getattr(recording_obj, group_name, None), "object_id", None
+        found = get_file_namespaces(Nwbfile().get_abs_path(nwb_file_name)).get(
+            _EXTENSION_NAME
         )
 
-    get_object_id.__name__ = f"{group_name}.object_id"
-    return get_object_id
+        if found and Version(found) == Version(_EXTENSION_VERSION):
+            return True
+
+        if found:
+            self._warn_msg(
+                f"{nwb_file_name} declares {_EXTENSION_NAME} {found}, not "
+                + f"{_EXTENSION_VERSION}. Skipping {self.camel_name}."
+            )
+
+        return False
+
+
+def _attr_of(group_name: str, attr: str):
+    """Mapping callable reading `<group_name>.<attr>` off a parent object.
+
+    Every sub-table of `Task` and of `TaskRecording` is optional -- a file may
+    declare states but no actions -- and the nested-object form of
+    `table_key_to_obj_attr` raises when the named object is absent.
+
+    Parameters
+    ----------
+    group_name : str
+        Attribute of the parent holding the sub-table.
+    attr : str
+        Attribute to read off that sub-table.
+
+    Returns
+    -------
+    callable
+        Takes the parent object, returns the value or None. Named for the
+        pair, so the ingestion-mapping docs read `action_types.description`.
+    """
+
+    def get_attr(parent_obj):
+        return getattr(getattr(parent_obj, group_name, None), attr, None)
+
+    get_attr.__name__ = f"{group_name}.{attr}"
+    return get_attr
 
 
 @schema
-class TaskRecordingTypes(SpyglassIngestion, dj.Manual):
+class TaskRecordingTypes(_StructuredBehaviorIngestion, dj.Manual):
     definition = """
     # Types declared by an ndx_structured_behavior task
     -> Nwbfile
@@ -135,17 +159,16 @@ class TaskRecordingTypes(SpyglassIngestion, dj.Manual):
     """
 
     _source_nwb_object_type = Task
-    _extension_requirements = _EXTENSION
 
     table_key_to_obj_attr = {
         "self": {
-            "action_description": _description_of("action_types"),
-            "event_description": _description_of("event_types"),
-            "state_description": _description_of("state_types"),
+            "action_description": _attr_of("action_types", "description"),
+            "event_description": _attr_of("event_types", "description"),
+            "state_description": _attr_of("state_types", "description"),
         }
     }
 
-    class ActionTypes(SpyglassIngestion, dj.Part):
+    class ActionTypes(_StructuredBehaviorIngestion, dj.Part):
         definition = """
         -> TaskRecordingTypes
         id: int unsigned  # Unique identifier for the action type
@@ -154,7 +177,6 @@ class TaskRecordingTypes(SpyglassIngestion, dj.Manual):
         """
 
         _source_nwb_object_type = ActionTypesTable
-        _extension_requirements = _EXTENSION
 
         # `Index` is the row id: SpyglassIngestion expands a DynamicTable with
         # `to_dataframe().itertuples()`, which names the index `Index`.
@@ -162,7 +184,7 @@ class TaskRecordingTypes(SpyglassIngestion, dj.Manual):
             "self": {"id": "Index", "action_name": "action_name"}
         }
 
-    class EventTypes(SpyglassIngestion, dj.Part):
+    class EventTypes(_StructuredBehaviorIngestion, dj.Part):
         definition = """
         -> TaskRecordingTypes
         id : int unsigned  # Unique identifier for the event type
@@ -171,13 +193,12 @@ class TaskRecordingTypes(SpyglassIngestion, dj.Manual):
         """
 
         _source_nwb_object_type = EventTypesTable
-        _extension_requirements = _EXTENSION
 
         table_key_to_obj_attr = {
             "self": {"id": "Index", "event_name": "event_name"}
         }
 
-    class StateTypes(SpyglassIngestion, dj.Part):
+    class StateTypes(_StructuredBehaviorIngestion, dj.Part):
         definition = """
         -> TaskRecordingTypes
         id : int unsigned  # Unique identifier for the state type
@@ -186,13 +207,12 @@ class TaskRecordingTypes(SpyglassIngestion, dj.Manual):
         """
 
         _source_nwb_object_type = StateTypesTable
-        _extension_requirements = _EXTENSION
 
         table_key_to_obj_attr = {
             "self": {"id": "Index", "state_name": "state_name"}
         }
 
-    class Arguments(SpyglassIngestion, dj.Part):
+    class Arguments(_StructuredBehaviorIngestion, dj.Part):
         definition = """
         -> TaskRecordingTypes
         argument_name             : varchar(255)  # Argument name
@@ -204,7 +224,6 @@ class TaskRecordingTypes(SpyglassIngestion, dj.Manual):
         """
 
         _source_nwb_object_type = TaskArgumentsTable
-        _extension_requirements = _EXTENSION
 
         # Keyed by argument name, so the row id is not stored.
         table_key_to_obj_attr = {
@@ -219,7 +238,7 @@ class TaskRecordingTypes(SpyglassIngestion, dj.Manual):
 
 
 @schema
-class TaskRecording(SpyglassIngestion, dj.Manual):
+class TaskRecording(_StructuredBehaviorIngestion, dj.Manual):
     definition = """
     # Object ids for one ndx_structured_behavior task recording
     -> TaskRecordingTypes
@@ -232,7 +251,6 @@ class TaskRecording(SpyglassIngestion, dj.Manual):
 
     _nwb_table = Nwbfile
     _source_nwb_object_type = NwbTaskRecording
-    _extension_requirements = _EXTENSION
 
     @property
     def table_key_to_obj_attr(self):
@@ -245,9 +263,9 @@ class TaskRecording(SpyglassIngestion, dj.Manual):
         """
         return {
             "self": {
-                "actions_object_id": _object_id_of("actions"),
-                "events_object_id": _object_id_of("events"),
-                "states_object_id": _object_id_of("states"),
+                "actions_object_id": _attr_of("actions", "object_id"),
+                "events_object_id": _attr_of("events", "object_id"),
+                "states_object_id": _attr_of("states", "object_id"),
                 "trials_object_id": self._trials_object_id,
             }
         }
