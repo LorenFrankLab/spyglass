@@ -1113,17 +1113,26 @@ def test_master_update1_bypass_allows_mutation(fresh_recording_identity):
     ``RecordingSelection`` (cheapest real-FK master)."""
     import datajoint as dj
 
+    from spyglass.common import LabTeam
     from spyglass.spikesorting.v2.recording import RecordingSelection
 
     pk = RecordingSelection.insert_selection(fresh_recording_identity)
     # Without the flag: rejected, row unchanged.
     with pytest.raises(dj.errors.DataJointError, match="is not supported"):
         RecordingSelection().update1({**pk, "team_name": "other_team"})
-    # With the flag the guard forwards to super().update1; the team_name is a
-    # real FK, so use a value that exists (the row's own team) to prove the
-    # call reaches DataJoint rather than raising at the guard.
     current_team = (RecordingSelection & pk).fetch1("team_name")
-    RecordingSelection().update1(
-        {**pk, "team_name": current_team}, allow_master_mutation=True
-    )
-    assert (RecordingSelection & pk).fetch1("team_name") == current_team
+    replacement_team = {"team_name": "v2_identity_mutation_test_team"}
+    assert replacement_team["team_name"] != current_team
+    LabTeam.insert1(replacement_team)
+    try:
+        RecordingSelection().update1(
+            {**pk, **replacement_team}, allow_master_mutation=True
+        )
+        assert (RecordingSelection & pk).fetch1(
+            "team_name"
+        ) == replacement_team["team_name"]
+    finally:
+        RecordingSelection().update1(
+            {**pk, "team_name": current_team}, allow_master_mutation=True
+        )
+        (LabTeam & replacement_team).delete(safemode=False)

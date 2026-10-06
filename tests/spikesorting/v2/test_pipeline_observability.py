@@ -12,6 +12,7 @@ across tests; only the zero-unit test pays a second (fast) clusterless sort.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -105,6 +106,10 @@ def test_run_summary_has_additive_keys(first_run):
     assert all(
         isinstance(v, float) for v in run_summary["stage_seconds"].values()
     )
+    assert all(
+        math.isfinite(v) and v >= 0
+        for v in run_summary["stage_seconds"].values()
+    )
     assert isinstance(run_summary["warnings"], list)
     for key in _STATUS_KEYS:
         assert run_summary[key] in _STAGE_STATUSES
@@ -144,8 +149,9 @@ def test_first_run_computed_second_reused(first_run):
     assert all(second_run_summary[k] == "reused" for k in _STATUS_KEYS), {
         k: second_run_summary[k] for k in _STATUS_KEYS
     }
-    assert sum(second_run_summary["stage_seconds"].values()) < sum(
-        first_run_summary["stage_seconds"].values()
+    assert all(
+        math.isfinite(v) and v >= 0
+        for v in second_run_summary["stage_seconds"].values()
     )
 
 

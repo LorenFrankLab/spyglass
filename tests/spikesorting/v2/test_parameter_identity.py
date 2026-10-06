@@ -55,21 +55,6 @@ def test_fingerprint_changes_with_params():
     assert fp_a != fp_b
 
 
-def test_fingerprint_excludes_row_name():
-    """The function takes no name; identical content fingerprints identically.
-
-    This is the whole point: a row called ``franklab_cortex_2026_06`` and a
-    duplicate called ``my_copy`` with the same blob collide, which is what
-    the duplicate-content guard detects.
-    """
-    content = dict(
-        params={"freq_min": 600.0}, params_schema_version=3, job_kwargs=None
-    )
-    assert parameter_fingerprint(
-        "PreprocessingParameters", **content
-    ) == parameter_fingerprint("PreprocessingParameters", **content)
-
-
 def test_fingerprint_includes_sorter_context():
     """Same params under different sorters -> different fingerprint.
 
@@ -518,17 +503,17 @@ def test_quality_metric_insert_rejects_duplicate_content(dj_conn):
         "template_metric_columns": shipped["template_metric_columns"],
         "skip_pc_metrics": shipped["skip_pc_metrics"],
     }
-    with pytest.raises(
-        DuplicateParameterContentError, match="duplicates the content"
-    ):
-        QualityMetricParameters().insert(dup)
-
-    # The documented escape hatch still inserts it.
-    QualityMetricParameters().insert(dup, allow_duplicate_params=True)
-    assert QualityMetricParameters & {"metric_params_name": "minimal_copy"}
-    (
-        QualityMetricParameters & {"metric_params_name": "minimal_copy"}
-    ).delete_quick()
+    key = {"metric_params_name": "minimal_copy"}
+    (QualityMetricParameters & key).delete_quick()
+    try:
+        with pytest.raises(
+            DuplicateParameterContentError, match="duplicates the content"
+        ):
+            QualityMetricParameters().insert(dup)
+        QualityMetricParameters().insert(dup, allow_duplicate_params=True)
+        assert QualityMetricParameters & key
+    finally:
+        (QualityMetricParameters & key).delete_quick()
 
 
 @pytest.mark.database

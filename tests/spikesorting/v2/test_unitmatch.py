@@ -417,7 +417,7 @@ def test_pairs_nwb_round_trip_preserves_fdr_none(tmp_path):
             "session_b_curation_id": 1,
             "unit_b_id": 7,
             "match_probability": 0.85,
-            "drift_estimate_um": 0.0,
+            "drift_estimate_um": 2.5,
             "fdr_estimate": None,
         },
         {
@@ -428,7 +428,7 @@ def test_pairs_nwb_round_trip_preserves_fdr_none(tmp_path):
             "session_b_curation_id": 1,
             "unit_b_id": 9,
             "match_probability": 0.91,
-            "drift_estimate_um": 0.0,
+            "drift_estimate_um": -3.125,
             "fdr_estimate": 0.05,
         },
     ]
@@ -443,6 +443,9 @@ def test_pairs_nwb_round_trip_preserves_fdr_none(tmp_path):
     assert back[1]["fdr_estimate"] == pytest.approx(0.05)
     assert isinstance(back[0]["session_a_sorting_id"], str)
     assert back[0]["unit_a_id"] == 3 and back[0]["unit_b_id"] == 7
+    assert back == [
+        {"pair_index": index, **row} for index, row in enumerate(pairs)
+    ]
 
     # Empty table writes and reads back empty (concrete dtypes, no inference).
     empty_oid = write_pairs_table(_fresh_nwb("empty.nwb"), [])
@@ -1914,8 +1917,9 @@ def test_make_runs_full_matcher_table_path(
     grp = two_session_curated_group
     matchable_a = CurationV2().get_matchable_unit_ids(grp["choices"][0])
     matchable_b = CurationV2().get_matchable_unit_ids(grp["choices"][1])
-    if len(matchable_a) == 0 or len(matchable_b) == 0:
-        pytest.skip("minirec sort produced no matchable units to pair")
+    assert len(matchable_a) and len(
+        matchable_b
+    ), "planted units must be matchable"
     unit_a, unit_b = int(matchable_a[0]), int(matchable_b[0])
 
     class _FixturePairer:
@@ -2212,8 +2216,9 @@ def test_full_unitmatch_workflow_with_accepted_evaluation_children(
             ]
             for member_index, choice in accepted_choices.items()
         }
-        if any(len(units) == 0 for units in matchable.values()):
-            pytest.skip("minirec sort produced no matchable units to pair")
+        assert all(
+            matchable.values()
+        ), "planted accepted units must be matchable"
         unit_a, unit_b = matchable[0][0], matchable[1][0]
 
         saved_registry = _install_fixture_pairer(
@@ -2350,8 +2355,7 @@ def test_unitmatch_populate_with_committed_merged_child_member(
         member1_matchable = [
             int(u) for u in CurationV2().get_matchable_unit_ids(member1_choice)
         ]
-        if not member1_matchable:
-            pytest.skip("member 1 minirec sort produced no matchable units")
+        assert member1_matchable, "member 1's planted unit must be matchable"
         unit_b = member1_matchable[0]
 
         saved_registry = _install_fixture_pairer(
@@ -3302,8 +3306,9 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
 
     matchable_a = CurationV2().get_matchable_unit_ids(grp["choices"][0])
     matchable_b = CurationV2().get_matchable_unit_ids(grp["choices"][1])
-    if len(matchable_a) == 0 or len(matchable_b) == 0:
-        pytest.skip("minirec sort produced no matchable units to pair")
+    assert len(matchable_a) and len(
+        matchable_b
+    ), "planted units must be matchable"
     unit_a, unit_b = int(matchable_a[0]), int(matchable_b[0])
 
     class _FixtureMatcherParams(BaseModel):

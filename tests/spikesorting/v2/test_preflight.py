@@ -1365,7 +1365,7 @@ def test_preflight_auto_curate_flags_missing_metric_row(
 
 
 @pytest.mark.database
-def test_preflight_is_read_only(preflight_inputs):
+def test_preflight_is_read_only(preflight_inputs, monkeypatch):
     """Preflight inserts nothing: every Selection/Lookup count is unchanged."""
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2.artifact import (
@@ -1393,7 +1393,30 @@ def test_preflight_is_read_only(preflight_inputs):
         SortGroupV2,
     ]
     before = [len(t()) for t in tables]
-    preflight_v2_pipeline(**preflight_inputs)
+    real_query = dj.Connection.query
+    queries = []
+
+    def read_only_query(connection, query, *args, **kwargs):
+        command = query.lstrip().split(None, 1)[0].upper()
+        assert command not in {
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "REPLACE",
+            "CREATE",
+            "ALTER",
+            "DROP",
+            "TRUNCATE",
+        }, f"Preflight mutated the database: {query}"
+        queries.append(command)
+        return real_query(connection, query, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(dj.Connection, "query", read_only_query)
+        preflight_v2_pipeline(**preflight_inputs)
+    assert (
+        "SELECT" in queries
+    ), "the guard must observe the real preflight reads"
     after = [len(t()) for t in tables]
     assert before == after
 

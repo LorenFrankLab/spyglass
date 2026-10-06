@@ -246,6 +246,8 @@ def test_sorting_row_records_effective_seed_and_versions(populated_sorting):
     assert row["effective_random_seed"] == 0
 
 
+@pytest.mark.database
+@pytest.mark.usefixtures("dj_conn")
 def test_ambient_seed_rejected_then_records_clusterless_provenance(
     restore_custom_config,
 ):

@@ -314,7 +314,10 @@ def test_typed_annotation_sets_and_explicit_common_reader(
                 ),
                 producer="typed-annotation-test",
             )
-            assert str(ref.to_dataframe().dtypes.iloc[0]) == expected_dtype
+            stored = ref.to_dataframe()
+            assert str(stored.dtypes.iloc[0]) == expected_dtype
+            assert stored.index.tolist() == unit_ids
+            assert stored.iloc[:, 0].tolist() == values
 
         special_definition = UnitAnnotationDefinition.insert_definition(
             "typed_annotation_special_float", 1, "float"

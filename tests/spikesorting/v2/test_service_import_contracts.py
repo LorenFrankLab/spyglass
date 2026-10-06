@@ -13,6 +13,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -25,19 +26,25 @@ _DB_FREE_SERVICE_MODULES = [
     "bad_channels",
     "_concat_recording",
     "_concat_recording_fetch",
+    "_curation_analyzer",
     "_curation_insert",
     "_curation_plan",
     "_curation_readers",
     "_curation_restriction",
     "_curation_routing",
     "_curation_transforms",
+    "_db_locking",
     "_enums",
     "_evaluation_acceptance",
     "_evaluation_analyzers",
     "_figpack_curation",
+    "_json_io",
     "_lookup_validation",
+    "_manual_artifacts",
+    "_matcher_graph",
     "_metric_curation",
     "_metric_curation_fetch",
+    "_metric_curation_nwb",
     "_metric_curation_plots",
     "_motion",
     "_motion_compute",
@@ -45,20 +52,40 @@ _DB_FREE_SERVICE_MODULES = [
     "_motion_report_inputs",
     "_motion_selection_insert",
     "_nwb_metadata_helpers",
+    "_nwb_iterators",
+    "_nwb_provenance",
+    "_observation_io",
+    "_observed_time",
+    "_parameter_identity",
+    "_pipeline_geometry",
+    "_pipeline_preflight",
     "_pipeline_presets",
+    "_pipeline_public",
+    "_pipeline_reporting",
+    "_pipeline_run",
     "_pipeline_types",
     "_recipe_catalog",
+    "_recompute",
     "_recording_fetch",
+    "_recording_fingerprint",
     "_recording_geometry",
     "_recording_nwb",
     "_recording_preprocessing",
     "_recording_restriction",
     "_reference_resolution",
+    "_review_delivery",
+    "_review_inspection",
+    "_review_notebook",
+    "_review_operations",
+    "_review_profile",
+    "_review_unit_properties",
+    "_review_view",
     "_selection_identity",
     "_selection_plan",
     "_session_group_insert",
     "_shared_artifact_group",
     "_signal_math",
+    "_si_metric_patches",
     "_sort_group_insert",
     "_sort_group_planning",
     "_sorter_parameters",
@@ -68,13 +95,38 @@ _DB_FREE_SERVICE_MODULES = [
     "_sorting_fetch",
     "_sorting_selection_insert",
     "_sorting_units",
+    "_source_resolution",
+    "_staged_outputs",
+    "_unit_annotation",
     "_unit_match_compute",
     "_unit_match_fetch",
     "_unit_match_inputs",
+    "_unit_match_planning",
     "_unit_match_readers",
     "_unitmatch_backend",
+    "_unitmatch_nwb",
     "_units_nwb",
+    "_visualization",
 ]
+
+
+def test_cold_import_probes_cover_all_private_services():
+    """New service modules must retain the worker-import contract."""
+    service_dir = (
+        Path(__file__).resolve().parents[3]
+        / "src"
+        / "spyglass"
+        / "spikesorting"
+        / "v2"
+    )
+    assert service_dir.is_dir()
+    services = {
+        path.stem
+        for path in service_dir.glob("_*.py")
+        if path.stem != "__init__"
+    }
+    missing = services - set(_DB_FREE_SERVICE_MODULES)
+    assert not missing, f"Missing cold-import probes: {sorted(missing)!r}"
 
 
 @pytest.mark.parametrize("modname", _DB_FREE_SERVICE_MODULES)
@@ -91,16 +143,38 @@ def test_service_module_imports_without_db_layer(modname):
     any v2 schema module. Hermetic -- no DB, no container.
     """
     probe = textwrap.dedent(f"""
+        import importlib.abc
         import sys
 
-        import spyglass.spikesorting.v2.{modname}  # noqa: F401
-
         schema_mods = {{
+            "spyglass.spikesorting.v2.artifact_output",
             "spyglass.spikesorting.v2.artifact",
+            "spyglass.spikesorting.v2.concat_member_curation",
+            "spyglass.spikesorting.v2.figpack_curation",
+            "spyglass.spikesorting.v2.metric_curation",
+            "spyglass.spikesorting.v2.motion",
+            "spyglass.spikesorting.v2.recompute",
+            "spyglass.spikesorting.v2.review_profile",
+            "spyglass.spikesorting.v2.session_group",
             "spyglass.spikesorting.v2.sorting",
             "spyglass.spikesorting.v2.recording",
             "spyglass.spikesorting.v2.curation",
+            "spyglass.spikesorting.v2.unit_annotation",
+            "spyglass.spikesorting.v2.unit_matching",
         }}
+        attempted = []
+
+        class RejectSchemaImports(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname.startswith("spyglass.common") or fullname in schema_mods:
+                    attempted.append(fullname)
+                    raise ImportError("Forbidden DB-layer import: " + fullname)
+
+        # Fail before schema activation can connect to a developer's database.
+        # Keep attempts as well so catching ImportError cannot hide a violation.
+        sys.meta_path.insert(0, RejectSchemaImports())
+        import spyglass.spikesorting.v2.{modname}  # noqa: F401
+
         leaked = sorted(
             m
             for m in sys.modules
@@ -109,9 +183,16 @@ def test_service_module_imports_without_db_layer(modname):
         assert not leaked, "cold-import pulled in DB-layer modules: " + repr(
             leaked
         )
+        assert not attempted, "cold-import attempted DB-layer imports: " + repr(
+            attempted
+        )
         """)
     result = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
     assert result.returncode == 0, (
         f"{modname} must import without a DB dependency\n"
@@ -320,7 +401,11 @@ def test_package_root_imports_without_optional_extra_modules():
         )
         """)
     result = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
     assert result.returncode == 0, (
         "spyglass.spikesorting.v2 must cold-import without optional "

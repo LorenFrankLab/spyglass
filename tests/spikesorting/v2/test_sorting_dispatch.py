@@ -424,6 +424,7 @@ def test_v2_recording_chain_survives_run_sorter_serialization(tmp_path):
         # Mirror SI basesorter.setup_recording: JSON when the recording claims
         # json-serializability, else pickle -- then reload. ``load`` raises if
         # the dumped form cannot be reconstructed.
+        expected_traces = recording.get_traces().copy()
         folder = tmp_path / name
         folder.mkdir()
         if recording.check_serializability("json"):
@@ -436,7 +437,23 @@ def test_v2_recording_chain_survives_run_sorter_serialization(tmp_path):
             raise AssertionError(
                 f"{name}: neither json- nor pickle-serializable"
             )
-        load(rec_file, base_folder=folder)
+        reopened = load(rec_file, base_folder=folder)
+        assert (
+            reopened.get_sampling_frequency()
+            == recording.get_sampling_frequency()
+        )
+        assert reopened.get_num_samples() == recording.get_num_samples()
+        assert reopened.get_num_channels() == recording.get_num_channels()
+        if name in ("whitened", "composed"):
+            # SI serializes the whitening matrix through JSON numeric values,
+            # which can change intermediate float32 rounding after reload.
+            np.testing.assert_allclose(
+                reopened.get_traces(), expected_traces, rtol=1e-6, atol=1e-6
+            )
+        else:
+            np.testing.assert_array_equal(
+                reopened.get_traces(), expected_traces
+            )
 
     rec = si.generate_recording(
         num_channels=4, durations=[1.0], sampling_frequency=30_000.0

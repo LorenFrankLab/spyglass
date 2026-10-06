@@ -254,6 +254,15 @@ def test_sorter_parameters_rejects_unknown_sorter_name(request):
         "params": {},
         "job_kwargs": None,
     }
+    request.addfinalizer(
+        lambda: (
+            SorterParameters
+            & {
+                "sorter": "simple",
+                "sorter_params_name": "audit_a5_escape_hatch",
+            }
+        ).delete(safemode=False)
+    )
     SorterParameters().insert1(escape_hatch, skip_duplicates=True)
     assert (
         SorterParameters

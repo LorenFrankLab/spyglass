@@ -846,11 +846,13 @@ def test_get_merge_id_distinguishes_unregistered_from_corrupt(dj_conn):
     # Corrupt: two RecordingSource rows for one artifact_detection_id (only
     # reachable via a raw insert bypassing insert_detection).
     art_id = uuid.uuid4()
+    planted_merge_ids = []
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
         for _ in range(2):
             mid = uuid.uuid4()
+            planted_merge_ids.append(mid)
             dj.Table.insert(
                 ArtifactDetectionOutput(),
                 [{"merge_id": mid, "source": "RecordingSource"}],
@@ -873,13 +875,8 @@ def test_get_merge_id_distinguishes_unregistered_from_corrupt(dj_conn):
                 ArtifactDetectionOutput.RecordingSource
                 & {"artifact_detection_id": art_id}
             ).delete_quick()
-            for mid in (
-                ArtifactDetectionOutput & {"source": "RecordingSource"}
-            ).fetch("merge_id"):
-                if not (
-                    ArtifactDetectionOutput.RecordingSource & {"merge_id": mid}
-                ):
-                    (ArtifactDetectionOutput & {"merge_id": mid}).delete_quick()
+            for mid in planted_merge_ids:
+                (ArtifactDetectionOutput & {"merge_id": mid}).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 

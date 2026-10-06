@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.integration, pytest.mark.nwb, pytest.mark.io_heavy]
 
 
 def _new_nwbfile():

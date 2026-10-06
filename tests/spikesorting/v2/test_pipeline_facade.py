@@ -14,12 +14,91 @@ from spyglass.spikesorting.v2._pipeline_public import (
     PIPELINE_FACADE_EXPORTS,
 )
 
+# These required names are independent of the production export manifest.
+# Additive exports are allowed; deleting a manifest entry must not also erase
+# the test's expectation and silently shrink the public API.
+_ROOT_REEXPORTS = frozenset(
+    [
+        "run_v2_pipeline",
+        "run_v2_pipeline_session",
+        "estimate_motion",
+        "run_v2_unit_match",
+        "plan_v2_unit_match",
+        "plan_v2_unit_match_from_sorts",
+        "preflight_v2_pipeline",
+        "preflight_v2_pipeline_session",
+        "describe_run",
+        "describe_units",
+        "describe_parameter_rows",
+        "describe_sort_groups",
+        "describe_pipeline_presets",
+        "describe_pipeline_preset",
+        "describe_recommendation_status",
+        "list_pipeline_presets",
+        "register_pipeline_preset",
+        "clone_pipeline_preset",
+        "describe_unit_match_choices",
+        "plot_sort_group_geometry",
+        "RunResult",
+        "CurationRef",
+        "EvaluationSpec",
+        "EvaluationResult",
+        "MergedCuration",
+        "MergeEvaluateReceipt",
+        "ReviewProfileRef",
+        "FigPackReview",
+        "CurationChangeSet",
+        "MergeLabelConflict",
+        "ReviewImportReceipt",
+        "ReviewStageStatus",
+        "AnnotationDefinitionRef",
+        "AnnotationSetRef",
+        "read_unit_properties",
+        "open_curation_analyzer",
+        "select_units_for_analysis",
+        "UnitSelectionReceipt",
+        "SelectedGroup",
+        "V2_UNIT_SELECTION_POLICIES",
+    ]
+)
+_FACADE_REEXPORTS = _ROOT_REEXPORTS | frozenset(
+    [
+        "PreflightCheck",
+        "PreflightReport",
+        "PreflightSessionReport",
+        "UnitMatchPlan",
+        "UnitMatchInputPlan",
+        "PipelineOutcome",
+        "PipelineStageSeconds",
+        "RunV2ConcatSummary",
+        "RunV2PipelineInputs",
+        "RunV2PipelineSessionFailed",
+        "RunV2PipelineSessionInputs",
+        "RunV2PipelineSessionOk",
+        "RunV2PipelineSessionRequiredInputs",
+        "RunV2PipelineSessionResult",
+        "RunV2PipelineSummary",
+        "RunV2SingleSessionSummary",
+        "RunV2UnitMatchSummary",
+        "EstimateMotionReceipt",
+        "MotionEstimateDiagnostics",
+        "MotionMode",
+        "SourceMode",
+        "StageStatus",
+        "UnitMatchCurationChoice",
+        "UnitMatchInputSummary",
+        "UnitMatchMemberChoices",
+        "UnitMatchStageSeconds",
+    ]
+)
+
 
 def test_pipeline_facade_reexports_public_api():
     """Every public name resolves from ``spyglass.spikesorting.v2.pipeline``."""
     import spyglass.spikesorting.v2.pipeline as pl
 
     assert tuple(pl.__all__) == PIPELINE_FACADE_EXPORTS
+    assert _FACADE_REEXPORTS <= set(pl.__all__)
     missing = [
         name for name in PIPELINE_FACADE_EXPORTS if not hasattr(pl, name)
     ]
@@ -30,9 +109,6 @@ def test_pipeline_facade_reexports_public_api():
 # must also import from the PACKAGE ROOT (``spyglass.spikesorting.v2``), where
 # ``initialize_v2_defaults`` already lives, so the natural
 # ``from spyglass.spikesorting.v2 import run_v2_pipeline`` does not raise.
-_ROOT_REEXPORTS = PACKAGE_ROOT_REEXPORTS
-
-
 def test_package_root_reexports_primary_entrypoints():
     """The main entrypoints resolve from ``spyglass.spikesorting.v2`` itself.
 
@@ -43,6 +119,7 @@ def test_package_root_reexports_primary_entrypoints():
     import importlib
 
     v2 = importlib.import_module("spyglass.spikesorting.v2")
+    assert _ROOT_REEXPORTS <= set(PACKAGE_ROOT_REEXPORTS)
 
     missing = [name for name in _ROOT_REEXPORTS if not hasattr(v2, name)]
     assert not missing, f"package root no longer re-exports: {missing}"

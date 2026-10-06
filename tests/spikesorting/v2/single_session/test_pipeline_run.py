@@ -949,7 +949,10 @@ def test_verify_v2_default_catalog_flags_validated_and_part_drift(dj_conn):
 
     # QualityMetricParameters.template_metric_columns is filled by validation, so
     # _default_rows omits it -- the audit must still catch a stored drift.
-    qm_name = str(QualityMetricParameters.fetch("metric_params_name")[0])
+    # Other modules can insert custom metric rows; only shipped rows are
+    # covered by this catalog audit.
+    qm_name = "franklab_default"
+    assert QualityMetricParameters & {"metric_params_name": qm_name}
     qm_key = {"metric_params_name": qm_name}
     qm_original = (QualityMetricParameters & qm_key).fetch1(
         "template_metric_columns"

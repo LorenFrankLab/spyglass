@@ -377,8 +377,27 @@ def test_describe_units_reports_sort_time_quality(first_hour):
     # firing_rate uses ONE shared denominator (the sort's observed seconds), so
     # n_spikes / firing_rate is the same for every unit -- the property that
     # makes the rate honest for an artifact-masked sort.
-    denom = units["n_spikes"] / units["firing_rate_hz"]
-    assert np.allclose(denom, denom.iloc[0])
+    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    key = {"sorting_id": run_summary["sorting_id"]}
+    sorting = Sorting().get_sorting(key)
+    recording = Recording().get_recording(
+        {"recording_id": run_summary["recording_id"]}
+    )
+    valid_times = RecordingArtifactDetection().get_artifact_removed_intervals(
+        {"artifact_detection_id": run_summary["artifact_detection_id"]}
+    )
+    time = recording.get_times()
+    kept = np.zeros(len(time), dtype=bool)
+    for start, stop in valid_times:
+        kept |= (time >= start) & (time <= stop)
+    duration = kept.sum() / recording.get_sampling_frequency()
+    for _, row in units.iterrows():
+        count = len(sorting.get_unit_spike_train(int(row["unit_id"])))
+        assert row["n_spikes"] == count
+        assert row["firing_rate_hz"] == pytest.approx(count / duration)
 
 
 @pytest.mark.slow

@@ -555,139 +555,70 @@ def test_get_restricted_merge_ids_default_sources_includes_v2():
 # ---------- Tri-part dispatch + make_compute purity ------------------------
 
 
+def _make_compute_db_write_violations(src):
+    """The source gate used by both real methods and planted fault controls."""
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(src))
+    forbidden_attrs = {"insert", "insert1", "insert_many"}
+    receiver_types = {"IntervalList", "AnalysisNwbfile"}
+    tainted = set(receiver_types)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            callee = node.value.func
+            if isinstance(callee, ast.Name) and callee.id in receiver_types:
+                tainted.update(
+                    target.id
+                    for target in node.targets
+                    if isinstance(target, ast.Name)
+                )
+    violations = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(
+            node.func, ast.Attribute
+        ):
+            continue
+        func = node.func
+        receiver = func.value
+        name = receiver.id if isinstance(receiver, ast.Name) else None
+        instance_type = (
+            receiver.func.id
+            if isinstance(receiver, ast.Call)
+            and isinstance(receiver.func, ast.Name)
+            else None
+        )
+        writes_rows = func.attr in forbidden_attrs and (
+            name == "self" or name in tainted or instance_type in receiver_types
+        )
+        writes_analysis = func.attr == "add" and (
+            name in tainted or instance_type == "AnalysisNwbfile"
+        )
+        controls_transaction = (
+            isinstance(receiver, ast.Attribute)
+            and isinstance(receiver.value, ast.Name)
+            and receiver.value.id == "self"
+            and receiver.attr == "connection"
+        )
+        if writes_rows or writes_analysis or controls_transaction:
+            violations.append(ast.unparse(node))
+    return violations
+
+
 def test_make_compute_is_pure():
-    """make_compute on Recording / RecordingArtifactDetection / Sorting writes no DB rows.
-
-    Static AST guard. The forbidden surface is:
-
-    1. **Any** call whose attribute name is ``insert1`` / ``insert``
-       on a name or call expression (catches ``self.insert1``,
-       ``IntervalList.insert1``, ``IntervalList().insert1``,
-       and aliased forms like ``tbl = IntervalList(); tbl.insert1``).
-    2. ``AnalysisNwbfile().add`` and the aliased
-       ``nwb = AnalysisNwbfile(); nwb.add`` form.
-    3. Any access on ``self.connection`` (transaction control belongs
-       in ``make_insert``).
-
-    Local-alias receivers are caught by walking assigns: a binding
-    like ``tbl = IntervalList()`` taints ``tbl`` for the rest of
-    the function body. The previous narrow check only flagged
-    direct ``IntervalList.insert1(...)`` calls; this widened
-    version surfaces refactors that route through a local alias.
-
-    This is a defense-in-depth AST guard, not the load-bearing test:
-    the behavioral counterparts that actually prove a failed populate
-    leaves no orphaned NWB/DB state are
-    ``single_session/test_sorting.py::test_sorting_make_rollback_cleans_units_nwb``
-    and its siblings (``test_recording.py::test_recording_make_rollback_cleans_analysis_nwb``,
-    ``test_curation_insert.py::test_curation_v2_insert_rollback_cleans_units_nwb``).
-    """
+    """make_compute on Recording / RecordingArtifactDetection / Sorting writes no DB rows."""
     from spyglass.spikesorting.v2 import artifact, recording, sorting
 
-    forbidden_attrs = {"insert", "insert1", "insert_many"}
-    forbidden_receiver_types = {"IntervalList", "AnalysisNwbfile"}
-
-    for mod, cls_name in [
+    for module, name in (
         (recording, "Recording"),
         (artifact, "RecordingArtifactDetection"),
         (sorting, "Sorting"),
-    ]:
-        cls = getattr(mod, cls_name)
-        src = inspect.getsource(cls.make_compute)
-        tree = ast.parse(inspect.cleandoc(src))
-
-        # Walk assigns to build the set of local names that bind a
-        # forbidden-receiver-type instance (``x = IntervalList()``,
-        # ``y = AnalysisNwbfile()``). Receivers tainted this way
-        # propagate the same write-forbidden semantics.
-        tainted_names = set(forbidden_receiver_types)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Assign) and isinstance(
-                node.value, ast.Call
-            ):
-                callee = node.value.func
-                callee_name = (
-                    callee.id if isinstance(callee, ast.Name) else None
-                )
-                if callee_name in forbidden_receiver_types:
-                    for tgt in node.targets:
-                        if isinstance(tgt, ast.Name):
-                            tainted_names.add(tgt.id)
-
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            if not isinstance(func, ast.Attribute):
-                continue
-            attr = func.attr
-
-            # (1) Any insert*/insert1/insert_many on self, a tainted
-            # local alias, or directly on a forbidden receiver type.
-            if attr in forbidden_attrs:
-                # ``self.insert1``
-                if isinstance(func.value, ast.Name) and func.value.id == "self":
-                    pytest.fail(
-                        f"{cls_name}.make_compute calls "
-                        f"self.{attr}; make_compute must be pure "
-                        "(no DB writes)."
-                    )
-                # ``IntervalList.insert1`` / ``aliased.insert1``
-                if (
-                    isinstance(func.value, ast.Name)
-                    and func.value.id in tainted_names
-                ):
-                    pytest.fail(
-                        f"{cls_name}.make_compute calls "
-                        f"{func.value.id}.{attr}; that DB write "
-                        "must move to make_insert."
-                    )
-                # ``IntervalList().insert1`` (instance-call form)
-                if (
-                    isinstance(func.value, ast.Call)
-                    and isinstance(func.value.func, ast.Name)
-                    and func.value.func.id in forbidden_receiver_types
-                ):
-                    pytest.fail(
-                        f"{cls_name}.make_compute calls "
-                        f"{func.value.func.id}().{attr}; that DB "
-                        "write must move to make_insert."
-                    )
-
-            # (2) ``AnalysisNwbfile().add`` and aliased ``nwb.add``.
-            if attr == "add":
-                if (
-                    isinstance(func.value, ast.Call)
-                    and isinstance(func.value.func, ast.Name)
-                    and func.value.func.id == "AnalysisNwbfile"
-                ):
-                    pytest.fail(
-                        f"{cls_name}.make_compute calls "
-                        "AnalysisNwbfile().add; that must run in "
-                        "make_insert."
-                    )
-                if (
-                    isinstance(func.value, ast.Name)
-                    and func.value.id in tainted_names
-                ):
-                    pytest.fail(
-                        f"{cls_name}.make_compute calls "
-                        f"{func.value.id}.add (likely aliased "
-                        "AnalysisNwbfile); must move to make_insert."
-                    )
-
-            # (3) ``self.connection.<anything>`` (transaction control).
-            if (
-                isinstance(func.value, ast.Attribute)
-                and isinstance(func.value.value, ast.Name)
-                and func.value.value.id == "self"
-                and func.value.attr == "connection"
-            ):
-                pytest.fail(
-                    f"{cls_name}.make_compute calls self.connection"
-                    f".{attr}; transaction control belongs in "
-                    "make_insert."
-                )
+    ):
+        violations = _make_compute_db_write_violations(
+            inspect.getsource(getattr(module, name).make_compute)
+        )
+        assert (
+            not violations
+        ), f"{name}.make_compute must perform no DB writes: {violations}"
 
 
 def test_make_compute_purity_guard_actually_catches_regressions():
@@ -700,9 +631,6 @@ def test_make_compute_purity_guard_actually_catches_regressions():
     that narrows the guard would silently leave production
     refactors un-guarded.
     """
-    import ast
-    import textwrap
-
     REGRESSION_SAMPLES = {
         "self.insert1": "def make_compute(self, key):\n    self.insert1({'x': 1})\n",
         "IntervalList.insert1 direct": (
@@ -733,68 +661,21 @@ def test_make_compute_purity_guard_actually_catches_regressions():
         ),
     }
 
-    # Re-derive the same forbidden surface the guard uses; if the
-    # guard ever drifts, this meta-test naturally drifts with it
-    # because both reference the same constants.
-    forbidden_attrs = {"insert", "insert1", "insert_many"}
-    forbidden_receiver_types = {"IntervalList", "AnalysisNwbfile"}
-
-    def _guard_walks(src: str) -> bool:
-        """Return True iff the AST walk (mirror of the real guard)
-        would have failed on this source."""
-        tree = ast.parse(textwrap.dedent(src))
-        tainted = set(forbidden_receiver_types)
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call):
-                cf = n.value.func
-                if (
-                    isinstance(cf, ast.Name)
-                    and cf.id in forbidden_receiver_types
-                ):
-                    for tgt in n.targets:
-                        if isinstance(tgt, ast.Name):
-                            tainted.add(tgt.id)
-        for n in ast.walk(tree):
-            if not isinstance(n, ast.Call):
-                continue
-            f = n.func
-            if not isinstance(f, ast.Attribute):
-                continue
-            if f.attr in forbidden_attrs:
-                if isinstance(f.value, ast.Name) and f.value.id == "self":
-                    return True
-                if isinstance(f.value, ast.Name) and f.value.id in tainted:
-                    return True
-                if (
-                    isinstance(f.value, ast.Call)
-                    and isinstance(f.value.func, ast.Name)
-                    and f.value.func.id in forbidden_receiver_types
-                ):
-                    return True
-            if f.attr == "add":
-                if (
-                    isinstance(f.value, ast.Call)
-                    and isinstance(f.value.func, ast.Name)
-                    and f.value.func.id == "AnalysisNwbfile"
-                ):
-                    return True
-                if isinstance(f.value, ast.Name) and f.value.id in tainted:
-                    return True
-            if (
-                isinstance(f.value, ast.Attribute)
-                and isinstance(f.value.value, ast.Name)
-                and f.value.value.id == "self"
-                and f.value.attr == "connection"
-            ):
-                return True
-        return False
-
+    # Exercise the helper that inspects the actual runtime methods above.
     for label, src in REGRESSION_SAMPLES.items():
-        assert _guard_walks(src), (
+        assert _make_compute_db_write_violations(src), (
             f"AST guard failed to catch regression sample {label!r}; "
             "test_make_compute_is_pure would silently pass on this "
             "pattern. Widen the guard."
         )
+    assert (
+        _make_compute_db_write_violations(
+            "def make_compute(self, key):\n"
+            "    arrays = compute_arrays(key)\n"
+            "    return arrays\n"
+        )
+        == []
+    )
 
 
 def test_curation_v2_nwb_write_outside_transaction():
