@@ -9,9 +9,10 @@ Tables
     plus the file's trials table. Read from the `TaskRecording` object in
     `nwbf.acquisition`.
 
-The extension has no PyPI release, so it cannot be pinned in `pyproject.toml`
-and may be missing or unusable. It is imported inside a `try`, and each file is
-gated on its own cached spec version at ingestion.
+The extension is not a Spyglass dependency: 0.2.0 requires pynwb >= 4.1 and
+hdmf >= 6.2, both above Spyglass's own floors, so it may be missing or
+unusable. It is imported inside a `try`, and each file is gated on its own
+cached spec version at ingestion.
 
 Example use
 -----------
