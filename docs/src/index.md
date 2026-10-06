@@ -21,11 +21,11 @@ Features of Spyglass include:
     code. This ensures that all analysis is reproducible and that the results
     are automatically updated when the data or analysis code changes.
 - **Common analysis tools** - Spyglass provides easy usage of the open-source
-    packages [SpikeInterface](https://github.com/SpikeInterface/spikeinterface),
-    [Ghostipy](https://github.com/kemerelab/ghostipy), and
-    [DeepLabCut](https://github.com/DeepLabCut/DeepLabCut) for common analysis
-    tasks. These packages are well-documented and have active developer
-    communities.
+    packages [SpikeInterface](https://github.com/SpikeInterface/spikeinterface)
+    and [DeepLabCut](https://github.com/DeepLabCut/DeepLabCut) for common
+    analysis tasks. These packages are well-documented and have active developer
+    communities. Its LFP filtering is derived from
+    [Ghostipy](https://github.com/kemerelab/ghostipy).
 - **Interactive data visualization** - Spyglass uses
     [figurl](https://github.com/flatironinstitute/figurl) to create interactive
     data visualizations that can be shared with collaborators and the broader
@@ -36,7 +36,8 @@ Features of Spyglass include:
     via [Kachery](https://github.com/flatironinstitute/kachery-cloud), a
     decentralized content addressable data sharing platform. Kachery Cloud
     allows users to access the database and pull data and analysis results
-    directly to their local machine.
+    directly to their local machine. Kachery is an optional dependency; install
+    it with `pip install spyglass-neuro[kachery-cloud]`.
 - **Pipeline versioning** - Processing and analysis of data in neuroscience is
     often dynamic, requiring new features. Spyglass uses *Merge tables* to
     ensure that analysis pipelines can be versioned. This allows users to easily
@@ -96,10 +97,11 @@ information.
 
 > Lee, K.H.\*, Denovellis, E.L.\*, Ly, R., Magland, J., Soules, J., Comrie,
 > A.E., Gramling, D.P., Guidera, J.A., Nevers, R., Adenekan, P., Brozdowski, C.,
-> Bray, S., Monroe, E., Bak, J.H., Coulter, M.E., Sun, X., Tritt, A., Rübel, O.,
-> Nguyen, T., Yatsenko, D., Chu, J., Kemere, C., Garcia, S., Buccino, A., Frank,
-> L.M., 2024. Spyglass: a data analysis framework for reproducible and shareable
-> neuroscience research. bioRxiv.
+> Bray, S., Monroe, E., Bak, J.H., Coulter, M.E., Sun, X., Broyles, E., Shin,
+> D., Chiang, S., Holobetz, C., Tritt, A., Rübel, O., Nguyen, T., Yatsenko, D.,
+> Chu, J., Kemere, C., Garcia, S., Buccino, A., Frank, L.M., 2024. Spyglass: a
+> data analysis framework for reproducible and shareable neuroscience research.
+> bioRxiv.
 > [10.1101/2024.01.25.577295](https://doi.org/10.1101/2024.01.25.577295).
 
 *\* Equal contribution*

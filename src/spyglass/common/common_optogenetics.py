@@ -6,13 +6,13 @@ from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_task import TaskEpoch
 from spyglass.utils import logger
-from spyglass.utils.dj_mixin import SpyglassIngestion, SpyglassMixin
+from spyglass.utils.dj_mixin import SpyglassIngestion
 
 schema = dj.schema("common_optogenetics")
 
 
 @schema
-class OptogeneticProtocol(SpyglassMixin, dj.Manual):
+class OptogeneticProtocol(SpyglassIngestion, dj.Manual):
     definition = """
     # Describes the optogenetic stimulation protocol used within an epoch
     -> TaskEpoch
@@ -27,149 +27,102 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
     """
 
     _nwb_table = Nwbfile
+    _source_nwb_object_name = "optogenetic_epochs"
+    # Exact class name: ndx_franklab_novela may not be importable
+    _source_nwb_object_type = "FrankLabOptogeneticEpochsTable"
+    # Master columns, read straight off a row of the epochs table. Each part
+    # declares its own columns the same way, so every mapping is visible to
+    # the ingestion-mapping doc generator.
+    table_key_to_obj_attr = {
+        "self": {
+            "epoch": "epoch_number",
+            "description": "convenience_code",
+            "pulse_length": "pulse_length_in_ms",
+            "pulses_per_train": "number_pulses_per_pulse_train",
+            "period": "period_in_ms",
+            "intertrain_interval": "intertrain_interval_in_ms",
+            "stimulus_power": "power_in_mW",
+        },
+        "stimulus_signal": {"stimulus_object_id": "object_id"},
+    }
 
-    table_key_to_obj_map = dict(
-        epoch="epoch_number",
-        description="convenience_code",
-        pulse_length="pulse_length_in_ms",
-        pulses_per_train="number_pulses_per_pulse_train",
-        period="period_in_ms",
-        intertrain_interval="intertrain_interval_in_ms",
-        stimulus_power="power_in_mW",
-        threshold_sd="ripple_filter_threshold_sd",
-        n_above_threshold="ripple_filter_num_above_threshold",
-        ripple_lockout_period="ripple_filter_lockout_period_in_samples",
-        filter_phase="theta_filter_phase_in_deg",
-        reference_ntrode="theta_filter_reference_ntrode",
-        theta_lockout_period="theta_filter_lockout_period_in_samples",
-        speed_threshold="speed_filter_threshold_in_cm_per_s",
-        active_above_threshold="speed_filter_on_above_threshold",
-    )
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Generate a master entry plus whichever conditional parts apply.
+
+        Called once per row of the optogenetic epochs table. Each row yields
+        one master entry and a part entry for every trigger or condition the
+        row switches on.
+        """
+        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+
+        if hasattr(nwb_obj, "to_dataframe"):
+            # Handed the whole epochs table: super() has already expanded it
+            # row by row, back through this method. Nothing to add here.
+            return entries
+
+        epoch_key = dict(
+            nwb_file_name=entries[self][0]["nwb_file_name"],
+            epoch=nwb_obj.epoch_number,
+        )
+
+        # Classes, not instances: entries from several rows are merged by
+        # dict key, and a fresh instance would be a fresh key each time.
+        conditions = [
+            ("ripple_filter_on", self.RippleTrigger),
+            ("theta_filter_on", self.ThetaTrigger),
+            ("speed_filter_on", self.SpeedConditional),
+        ]
+        for flag, part in conditions:
+            if getattr(nwb_obj, flag, None):
+                entries.setdefault(part, []).append(
+                    dict(epoch_key, **self._part_fields(nwb_obj, part))
+                )
+
+        if (
+            nodes := getattr(
+                nwb_obj,
+                "spatial_filter_region_node_coordinates_in_pixels",
+                None,
+            )
+        ) is not None:
+            entries.setdefault(self.SpatialConditional, []).append(
+                dict(
+                    epoch_key,
+                    nodes=nodes * nwb_obj.spatial_filter_cameras_cm_per_pixel,
+                )
+            )
+
+        return entries
+
+    def _part_fields(self, row, part) -> dict:
+        """Read a part table's own columns off a row of the epochs table.
+
+        The part declares which row attribute each of its columns comes from,
+        so the mapping lives on the table it describes rather than in a shared
+        dict on the master.
+
+        Parameters
+        ----------
+        row : namedtuple
+            One row of the optogenetic epochs dataframe.
+        part : dj.Part
+            The part table whose secondary attributes are wanted.
+
+        Returns
+        -------
+        dict
+            Attribute values keyed by part table column name.
+        """
+        return {
+            name: getattr(row, attr)
+            for name, attr in part.table_key_to_obj_attr["self"].items()
+        }
 
     def make(self, key):
-        nwb_key = {
-            "nwb_file_name": key["nwb_file_name"],
-        }
-        nwb = (Nwbfile() & nwb_key).fetch_nwb()[0]
-        opto_epoch_obj = nwb.intervals.get("optogenetic_epochs", None)
-        if opto_epoch_obj is None:
-            self._warn_msg(
-                f"No optogenetic epochs found in NWB file {nwb_key['nwb_file_name']}"
-            )
-            return
-        opto_epoch_df = opto_epoch_obj.to_dataframe()
-
-        epoch_inserts = []
-        ripple_inserts = []
-        theta_inserts = []
-        speed_inserts = []
-        spatial_inserts = []
-        for row in opto_epoch_df.itertuples():
-            # master table key for epoch
-            epoch_inserts.append(
-                self.make_epoch_entry(nwb_key["nwb_file_name"], row)
-            )
-            # Ripple trigger part if present
-            if getattr(row, "ripple_filter_on", None):
-                ripple_inserts.append(
-                    self.make_ripple_trigger_entry(
-                        nwb_key["nwb_file_name"], row
-                    )
-                )
-            # Theta trigger part if present
-            if getattr(row, "theta_filter_on", None):
-                theta_inserts.append(
-                    self.make_theta_trigger_entry(nwb_key["nwb_file_name"], row)
-                )
-            # Speed conditional part if present
-            if getattr(row, "speed_filter_on", None):
-                speed_inserts.append(
-                    self.make_speed_filter_entry(nwb_key["nwb_file_name"], row)
-                )
-            # Spatial conditional part if present
-            if (
-                spatial_nodes := getattr(
-                    row,
-                    "spatial_filter_region_node_coordinates_in_pixels",
-                    None,
-                )
-            ) is not None:
-                spatial_key = dict(
-                    nwb_file_name=nwb_key["nwb_file_name"],
-                    epoch=row.epoch_number,
-                    nodes=spatial_nodes
-                    * row.spatial_filter_cameras_cm_per_pixel,
-                )
-                spatial_inserts.append(spatial_key)
-        # insert keys
-        with self._safe_context():
-            self._info_msg("Inserting Protocol")
-            self.insert(epoch_inserts)
-            self._info_msg("Inserting RippleTrigger")
-            self.RippleTrigger.insert(ripple_inserts)
-            self._info_msg("Inserting ThetaTrigger")
-            self.ThetaTrigger.insert(theta_inserts)
-            self._info_msg("Inserting SpeedConditional")
-            self.SpeedConditional.insert(speed_inserts)
-            self._info_msg("Inserting SpatialConditional")
-            self.SpatialConditional.insert(spatial_inserts)
-
-    @staticmethod
-    def make_epoch_entry(nwb_file_name, row):
-        entry = {
-            key: getattr(row, OptogeneticProtocol.table_key_to_obj_map[key])
-            for key in [
-                "epoch",
-                "description",
-                "pulse_length",
-                "pulses_per_train",
-                "period",
-                "intertrain_interval",
-                "stimulus_power",
-            ]
-        }
-        return dict(
-            nwb_file_name=nwb_file_name,
-            stimulus_object_id=row.stimulus_signal.object_id,
-            **entry,
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "OptogeneticProtocol.make is deprecated. Use insert_from_nwbfile."
         )
-
-    @classmethod
-    def make_ripple_trigger_entry(cls, nwb_file_name, row):
-        entry = {
-            key: getattr(row, cls.table_key_to_obj_map[key])
-            for key in [
-                "epoch",
-                "threshold_sd",
-                "n_above_threshold",
-                "ripple_lockout_period",
-            ]
-        }
-        return dict(
-            nwb_file_name=nwb_file_name,
-            **entry,
-        )
-
-    @classmethod
-    def make_theta_trigger_entry(cls, nwb_file_name, row):
-        entry = {
-            key: getattr(row, cls.table_key_to_obj_map[key])
-            for key in [
-                "epoch",
-                "filter_phase",
-                "reference_ntrode",
-                "theta_lockout_period",
-            ]
-        }
-        return dict(nwb_file_name=nwb_file_name, **entry)
-
-    @classmethod
-    def make_speed_filter_entry(cls, nwb_file_name, row):
-        entry = {
-            key: getattr(row, cls.table_key_to_obj_map[key])
-            for key in ["epoch", "speed_threshold", "active_above_threshold"]
-        }
-        return dict(nwb_file_name=nwb_file_name, **entry)
 
     def get_stimulus_on_intervals(self, key):
         self.ensure_single_entry(key)
@@ -195,7 +148,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         stim_on_interval = np.array([t_on, t_off]).T
         return stim_on_interval
 
-    class RippleTrigger(SpyglassMixin, dj.Part):
+    class RippleTrigger(SpyglassIngestion, dj.Part):
         definition = """
         # Parameters for detecting LFP ripples to trigger optogenetic stimulation
         -> master
@@ -205,7 +158,17 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         ripple_lockout_period: int  # minimum number of samples between ripple-triggered stimulations
         """
 
-    class ThetaTrigger(SpyglassMixin, dj.Part):
+        table_key_to_obj_attr = {
+            "self": {
+                "threshold_sd": "ripple_filter_threshold_sd",
+                "n_above_threshold": "ripple_filter_num_above_threshold",
+                "ripple_lockout_period": (
+                    "ripple_filter_lockout_period_in_samples"
+                ),
+            }
+        }
+
+    class ThetaTrigger(SpyglassIngestion, dj.Part):
         definition = """
         # Parameters for detecting LFP theta-phase to trigger optogenetic stimulation
         -> master
@@ -215,7 +178,17 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         theta_lockout_period: int # lockout period in sample steps
         """
 
-    class SpeedConditional(SpyglassMixin, dj.Part):
+        table_key_to_obj_attr = {
+            "self": {
+                "filter_phase": "theta_filter_phase_in_deg",
+                "reference_ntrode": "theta_filter_reference_ntrode",
+                "theta_lockout_period": (
+                    "theta_filter_lockout_period_in_samples"
+                ),
+            }
+        }
+
+    class SpeedConditional(SpyglassIngestion, dj.Part):
         definition = """
         # Speed-related condition gating optogenetic stimulation
         -> master
@@ -224,7 +197,14 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         active_above_threshold: bool # whether the stimulation is active above or below the threshold
         """
 
-    class SpatialConditional(SpyglassMixin, dj.Part):
+        table_key_to_obj_attr = {
+            "self": {
+                "speed_threshold": "speed_filter_threshold_in_cm_per_s",
+                "active_above_threshold": "speed_filter_on_above_threshold",
+            }
+        }
+
+    class SpatialConditional(SpyglassIngestion, dj.Part):
         definition = """
         # Spatial region where animal must be for optogenetic stimulation to be applied
         -> master

@@ -64,6 +64,13 @@ def _make_io():
     return io
 
 
+def _opened(io=None, streamed=False):
+    """Wrap a mock IO handle in the ``Opened`` record the cache stores."""
+    from spyglass.utils.file_backends import Opened
+
+    return Opened(io=io or _make_io(), nwbfile=MagicMock(), streamed=streamed)
+
+
 def _warn_texts(mock_warn):
     """Return the messages passed to a patched ``_warn_msg``.
 
@@ -78,33 +85,48 @@ def _warn_texts(mock_warn):
 
 def test_setitem_getitem(NWBFileCache):
     cache = NWBFileCache()
-    io, nwb = _make_io(), MagicMock()
+    opened = _opened()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = (io, nwb)
+        cache["/a.nwb"] = opened
     assert "/a.nwb" in cache
-    assert cache["/a.nwb"] == (io, nwb)
+    assert cache["/a.nwb"] is opened
 
 
 def test_get_returns_default_for_missing(NWBFileCache):
     cache = NWBFileCache()
-    assert cache.get("/missing.nwb") == (None, None)
+    assert cache.get("/missing.nwb") is None
     assert cache.get("/missing.nwb", ("x", "y")) == ("x", "y")
 
 
 def test_len(NWBFileCache):
     cache = NWBFileCache()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = (_make_io(), MagicMock())
-        cache["/b.nwb"] = (_make_io(), MagicMock())
+        cache["/a.nwb"] = _opened()
+        cache["/b.nwb"] = _opened()
     assert len(cache) == 2
+
+
+def test_iter_and_delete(NWBFileCache):
+    """Iterating yields keys and ``del`` drops an entry, as on a dict."""
+    cache = NWBFileCache()
+    io_a = _make_io()
+    with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
+        cache["/a.nwb"] = _opened(io_a)
+        cache["/b.nwb"] = _opened()
+
+    assert set(cache) == {"/a.nwb", "/b.nwb"}
+
+    del cache["/a.nwb"]
+    assert set(cache) == {"/b.nwb"}
+    io_a.close.assert_not_called()  # del drops, it does not close
 
 
 def test_close_all(NWBFileCache):
     cache = NWBFileCache()
     io_a, io_b = _make_io(), _make_io()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = (io_a, MagicMock())
-        cache["/b.nwb"] = (io_b, MagicMock())
+        cache["/a.nwb"] = _opened(io_a)
+        cache["/b.nwb"] = _opened(io_b)
     cache.close_all()
     io_a.close.assert_called_once()
     io_b.close.assert_called_once()
@@ -117,25 +139,23 @@ def test_close_all(NWBFileCache):
 def test_get_updates_last_used(NWBFileCache):
     """Accessing via .get() should bump the last-used timestamp."""
     cache = NWBFileCache()
-    io, nwb = _make_io(), MagicMock()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = (io, nwb)
-    t_before = cache._cache["/a.nwb"][2]
+        cache["/a.nwb"] = _opened()
+    t_before = cache._cache["/a.nwb"][1]
     time.sleep(0.01)
     cache.get("/a.nwb")
-    t_after = cache._cache["/a.nwb"][2]
+    t_after = cache._cache["/a.nwb"][1]
     assert t_after > t_before
 
 
 def test_getitem_updates_last_used(NWBFileCache):
     cache = NWBFileCache()
-    io, nwb = _make_io(), MagicMock()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = (io, nwb)
-    t_before = cache._cache["/a.nwb"][2]
+        cache["/a.nwb"] = _opened()
+    t_before = cache._cache["/a.nwb"][1]
     time.sleep(0.01)
     _ = cache["/a.nwb"]
-    t_after = cache._cache["/a.nwb"][2]
+    t_after = cache._cache["/a.nwb"][1]
     assert t_after > t_before
 
 
@@ -147,8 +167,8 @@ def test_no_eviction_when_memory_ok(NWBFileCache):
     cache = NWBFileCache()
     io_a = _make_io()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = (io_a, MagicMock())
-        cache["/b.nwb"] = (_make_io(), MagicMock())
+        cache["/a.nwb"] = _opened(io_a)
+        cache["/b.nwb"] = _opened()
     assert len(cache) == 2
     io_a.close.assert_not_called()
 
@@ -159,11 +179,11 @@ def test_eviction_on_low_memory(NWBFileCache):
     io_a = _make_io()
     # Add first file with plenty of RAM
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = (io_a, MagicMock())
+        cache["/a.nwb"] = _opened(io_a)
 
     # Simulate low available RAM for the second insert
     with patch("psutil.virtual_memory", return_value=_fake_vm(0.5)):
-        cache["/b.nwb"] = (_make_io(), MagicMock())
+        cache["/b.nwb"] = _opened()
 
     # /a.nwb was LRU and should have been evicted
     io_a.close.assert_called_once()
@@ -177,9 +197,9 @@ def test_lru_eviction_order(NWBFileCache):
     io_a, io_b = _make_io(), _make_io()
 
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = (io_a, MagicMock())
+        cache["/a.nwb"] = _opened(io_a)
         time.sleep(0.01)
-        cache["/b.nwb"] = (io_b, MagicMock())
+        cache["/b.nwb"] = _opened(io_b)
         # Touch /a so /b is now the LRU
         time.sleep(0.01)
         cache.get("/a.nwb")
@@ -188,7 +208,7 @@ def test_lru_eviction_order(NWBFileCache):
     # loop stops before also evicting /a.
     mem_responses = [_fake_vm(0.5), _fake_vm(16)]
     with patch("psutil.virtual_memory", side_effect=mem_responses):
-        cache["/c.nwb"] = (_make_io(), MagicMock())
+        cache["/c.nwb"] = _opened()
 
     io_b.close.assert_called_once()
     io_a.close.assert_not_called()
@@ -210,7 +230,7 @@ def test_eviction_on_fd_limit(NWBFileCache):
         patch("resource.getrlimit", return_value=(1024, 1024)),
         patch("psutil.Process", return_value=_fake_proc(10)),
     ):
-        cache["/a.nwb"] = (io_a, MagicMock())
+        cache["/a.nwb"] = _opened(io_a)
 
     # 1020 descriptors against a 0.8 × 1024 = 819 budget
     with (
@@ -218,7 +238,7 @@ def test_eviction_on_fd_limit(NWBFileCache):
         patch("resource.getrlimit", return_value=(1024, 1024)),
         patch("psutil.Process", return_value=_fake_proc([1020, 800])),
     ):
-        cache["/b.nwb"] = (io_b, MagicMock())
+        cache["/b.nwb"] = _opened(io_b)
 
     io_a.close.assert_called_once()
     assert "/a.nwb" not in cache
@@ -235,8 +255,8 @@ def test_no_eviction_when_fd_ok(NWBFileCache):
         patch("resource.getrlimit", return_value=(1024, 4096)),
         patch("psutil.Process", return_value=_fake_proc(10)),
     ):
-        cache["/a.nwb"] = (io_a, MagicMock())
-        cache["/b.nwb"] = (_make_io(), MagicMock())
+        cache["/a.nwb"] = _opened(io_a)
+        cache["/b.nwb"] = _opened()
 
     assert len(cache) == 2
     io_a.close.assert_not_called()
@@ -252,9 +272,9 @@ def test_fd_eviction_counts_non_cache_fds(NWBFileCache, sg_config):
         patch("resource.getrlimit", return_value=(1024, 1024)),
         patch("psutil.Process", return_value=_fake_proc(10)),
     ):
-        cache["/a.nwb"] = (io_a, MagicMock())
+        cache["/a.nwb"] = _opened(io_a)
         time.sleep(0.01)
-        cache["/b.nwb"] = (io_b, MagicMock())
+        cache["/b.nwb"] = _opened(io_b)
 
     # Only two cache entries, but 900 process descriptors against a budget of
     # 0.8 × 1024 = 819. Counting cache entries alone would not evict here.
@@ -264,7 +284,7 @@ def test_fd_eviction_counts_non_cache_fds(NWBFileCache, sg_config):
         patch("psutil.Process", return_value=_fake_proc([900, 700])),
         patch.dict(sg_config._nwb_cache, {"max_file_fraction": 0.8}),
     ):
-        cache["/c.nwb"] = (_make_io(), MagicMock())
+        cache["/c.nwb"] = _opened()
 
     io_a.close.assert_called_once()  # LRU of the two
     io_b.close.assert_not_called()
@@ -284,7 +304,7 @@ def test_fd_count_falls_back_to_cache_size(NWBFileCache):
         patch("resource.getrlimit", return_value=(1024, 1024)),
         patch("psutil.Process", return_value=no_num_fds),
     ):
-        cache["/a.nwb"] = (io_a, MagicMock())
+        cache["/a.nwb"] = _opened(io_a)
 
     # Soft limit of 1 → budget 0.8 → the one cached entry exceeds it
     with (
@@ -292,7 +312,7 @@ def test_fd_count_falls_back_to_cache_size(NWBFileCache):
         patch("resource.getrlimit", return_value=(1, 1024)),
         patch("psutil.Process", return_value=no_num_fds),
     ):
-        cache["/b.nwb"] = (_make_io(), MagicMock())
+        cache["/b.nwb"] = _opened()
 
     io_a.close.assert_called_once()
     assert "/a.nwb" not in cache
@@ -309,8 +329,8 @@ def test_fd_check_skipped_without_resource(NWBFileCache, nwb_mod):
         patch("psutil.Process", return_value=_fake_proc(10**6)),
         patch.object(nwb_mod, "resource", None),
     ):
-        cache["/a.nwb"] = (io_a, MagicMock())
-        cache["/b.nwb"] = (_make_io(), MagicMock())
+        cache["/a.nwb"] = _opened(io_a)
+        cache["/b.nwb"] = _opened()
 
     assert len(cache) == 2
     io_a.close.assert_not_called()
@@ -326,8 +346,8 @@ def test_warns_once_when_fd_pressure_outlives_cache(NWBFileCache):
         patch("psutil.Process", return_value=_fake_proc(1020)),
         patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
-        cache["/a.nwb"] = (_make_io(), MagicMock())
-        cache["/b.nwb"] = (_make_io(), MagicMock())
+        cache["/a.nwb"] = _opened()
+        cache["/b.nwb"] = _opened()
         warnings = _warn_texts(mock_warn)
 
     assert len(warnings) == 1  # one warning despite two inserts
@@ -387,33 +407,33 @@ def test_config_rejects_out_of_range(SpyglassConfig, bad):
 def test_acquire_and_release_set_held(NWBFileCache):
     cache = NWBFileCache()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = (_make_io(), MagicMock())
-    assert cache._cache["/a.nwb"][3] is False
+        cache["/a.nwb"] = _opened()
+    assert cache._cache["/a.nwb"][2] is False
     cache.acquire("/a.nwb")
-    assert cache._cache["/a.nwb"][3] is True
+    assert cache._cache["/a.nwb"][2] is True
     cache.release("/a.nwb")
-    assert cache._cache["/a.nwb"][3] is False
+    assert cache._cache["/a.nwb"][2] is False
 
 
 def test_release_without_acquire(NWBFileCache):
     cache = NWBFileCache()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = (_make_io(), MagicMock())
+        cache["/a.nwb"] = _opened()
     cache.release("/a.nwb")  # release without prior acquire
-    assert cache._cache["/a.nwb"][3] is False
+    assert cache._cache["/a.nwb"][2] is False
 
 
 def test_release_clears_repeated_holds(NWBFileCache):
     """Repeat fetches leave one hold, which one close releases."""
     cache = NWBFileCache()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = (_make_io(), MagicMock())
+        cache["/a.nwb"] = _opened()
 
     cache.acquire("/a.nwb")  # as two fetch_nwb() calls would
     cache.acquire("/a.nwb")
 
     cache.release("/a.nwb")  # one close_nwb() is enough
-    assert cache._cache["/a.nwb"][3] is False
+    assert cache._cache["/a.nwb"][2] is False
 
 
 def test_unheld_closed_before_held(NWBFileCache):
@@ -425,8 +445,8 @@ def test_unheld_closed_before_held(NWBFileCache):
         patch("psutil.virtual_memory", return_value=_fake_vm(16)),
         patch("resource.getrlimit", return_value=(1024, 4096)),
     ):
-        cache["/a.nwb"] = (io_a, MagicMock())
-        cache["/b.nwb"] = (io_b, MagicMock())
+        cache["/a.nwb"] = _opened(io_a)
+        cache["/b.nwb"] = _opened(io_b)
 
     cache.acquire("/b.nwb")  # protect /b; /a stays unheld
 
@@ -435,7 +455,7 @@ def test_unheld_closed_before_held(NWBFileCache):
         patch("psutil.virtual_memory", side_effect=mem_responses),
         patch("resource.getrlimit", return_value=(1024, 4096)),
     ):
-        cache["/c.nwb"] = (_make_io(), MagicMock())
+        cache["/c.nwb"] = _opened()
 
     io_a.close.assert_called_once()  # /a closed, it was unheld
     io_b.close.assert_not_called()  # /b protected by its hold
@@ -452,7 +472,7 @@ def test_held_close_warns(NWBFileCache):
         patch("psutil.virtual_memory", return_value=_fake_vm(16)),
         patch("resource.getrlimit", return_value=(1024, 4096)),
     ):
-        cache["/a.nwb"] = (io_a, MagicMock())
+        cache["/a.nwb"] = _opened(io_a)
 
     cache.acquire("/a.nwb")  # every file is now held
 
@@ -462,7 +482,7 @@ def test_held_close_warns(NWBFileCache):
         patch("resource.getrlimit", return_value=(1024, 4096)),
         patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
-        cache["/b.nwb"] = (_make_io(), MagicMock())
+        cache["/b.nwb"] = _opened()
         assert any("still held" in w for w in _warn_texts(mock_warn))
 
 
@@ -472,7 +492,7 @@ def test_close_all_warns_on_held(NWBFileCache):
     io_a = _make_io()
 
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = (io_a, MagicMock())
+        cache["/a.nwb"] = _opened(io_a)
 
     cache.acquire("/a.nwb")
 
@@ -497,7 +517,7 @@ def test_held_eviction_warns_once(NWBFileCache):
         patch("psutil.Process", return_value=_fake_proc(10)),
     ):
         for path in ("/a.nwb", "/b.nwb"):
-            cache[path] = (_make_io(), MagicMock())
+            cache[path] = _opened()
             cache.acquire(path)
 
     # Each insert finds only held files to evict. RAM reads low, then OK, so
@@ -510,7 +530,7 @@ def test_held_eviction_warns_once(NWBFileCache):
         patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
         for path in ("/c.nwb", "/d.nwb", "/e.nwb"):
-            cache[path] = (_make_io(), MagicMock())
+            cache[path] = _opened()
             cache.acquire(path)
         warnings = _warn_texts(mock_warn)
 
@@ -537,7 +557,7 @@ def test_no_held_summary_when_clean(NWBFileCache):
     """No summary when every evicted file had been released."""
     cache = NWBFileCache()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = (_make_io(), MagicMock())
+        cache["/a.nwb"] = _opened()
 
     with patch.object(NWBFileCache, "_warn_msg") as mock_warn:
         cache.close_all()

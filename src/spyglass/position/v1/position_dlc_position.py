@@ -15,6 +15,7 @@ from spyglass.position.v1.dlc_utils import (
     interp_pos,
     validate_option,
     validate_smooth_params,
+    check_bounds_all_bodyparts,
 )
 from spyglass.position.v1.position_dlc_pose_estimation import DLCPoseEstimation
 from spyglass.settings import test_mode
@@ -217,8 +218,25 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             inds_to_span=params["num_inds_to_span"],
         )
 
-        nan_spans = get_span_start_stop(np.where(bad_inds)[0])
+        if params.get("set_boundary"):
+            if (bounds := params.get("boundary")) is None:
+                raise ValueError(
+                    "Parameter 'boundary' must be provided when 'set_boundary' is True."
+                )
+            try:
+                bounds = np.asarray(bounds, dtype=float)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "Parameter 'boundary' must be a numeric array-like with shape (N, 2)."
+                ) from exc
+            if bounds.ndim != 2 or bounds.shape[1] != 2:
+                raise ValueError(
+                    f"Parameter 'boundary' must have shape (N, 2); got {bounds.shape}."
+                )
+            df_w_nans = check_bounds_all_bodyparts(df_w_nans, bounds)
 
+        nan_mask = df_w_nans[["x", "y"]].isna().any(axis=1).to_numpy()
+        nan_spans = get_span_start_stop(np.where(nan_mask)[0])
         if params.get("interpolate"):
             interp_params = params.get("interp_params", dict())
             self._info_msg("interpolating across low likelihood times")

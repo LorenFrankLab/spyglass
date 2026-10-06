@@ -287,18 +287,6 @@
 # pip install mountainsort4
 # ```
 #
-# #### LFP
-#
-# The LFP pipeline uses `ghostipy`.
-#
-# __WARNING:__ If you are on an M1 Mac, you need to install `pyfftw` via `conda`
-# BEFORE installing `ghostipy`:
-#
-# ```bash
-# conda install -c conda-forge pyfftw # for M1 Macs
-# pip install ghostipy
-# ```
-#
 # #### Decoding
 #
 # The Decoding pipeline relies on `jax` to process data with GPUs. Please see

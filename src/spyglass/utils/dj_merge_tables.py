@@ -942,26 +942,3 @@ _Merge = Merge
 
 # Underscore as class name avoids errors when this included in a Diagram
 # Aliased because underscore otherwise excludes from API docs.
-
-
-def delete_downstream_merge(
-    table: dj.Table,
-    **kwargs,
-) -> list:
-    """Given a table/restriction, id or delete relevant downstream merge entries
-
-    Passthrough to SpyglassMixin.delete_downstream_parts
-    """
-    from spyglass.common.common_usage import ActivityLog
-    from spyglass.utils.dj_mixin import SpyglassMixin
-
-    ActivityLog().deprecate_log(
-        name="delete_downstream_merge",
-        alternate="Table.delete_downstream_merge",
-    )
-
-    if not isinstance(table, SpyglassMixin):
-        raise ValueError("Input must be a Spyglass Table.")
-    table = table if isinstance(table, dj.Table) else table()
-
-    return table.delete_downstream_parts(**kwargs)

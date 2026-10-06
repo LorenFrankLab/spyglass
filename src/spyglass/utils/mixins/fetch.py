@@ -12,7 +12,7 @@ from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_helper_fn import (
     _acquire_nwb_file,
     _release_nwb_file,
-    file_from_dandi,
+    file_is_remote,
     get_nwb_file,
 )
 
@@ -238,8 +238,9 @@ class FetchMixin(BaseMixin):
         # get filepath for each. Use datajoint for checksum if local
         for rec_dict in rec_dicts:
             file_path = file_path_fn(rec_dict[file_name_attr])
-            if file_from_dandi(file_path):
-                # skip the filepath checksum if streamed from Dandi
+            if file_is_remote(file_path):
+                # skip the filepath checksum for any streamed file; there is
+                # no local copy to check against
                 rec_dict["nwb2load_filepath"] = file_path
                 continue
 
