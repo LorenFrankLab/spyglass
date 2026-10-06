@@ -93,6 +93,64 @@ def test_bidirectional_match_reports_mean_probability():
     assert pairs[0].match_probability == pytest.approx(0.85)
 
 
+@pytest.mark.parametrize("column_ids", [False, True])
+@pytest.mark.parametrize("empty_middle", [False, True])
+def test_pairs_from_matrix_preserves_sparse_ids_and_session_boundaries(
+    column_ids, empty_middle
+):
+    """Uneven inputs, including an empty input, keep their keys and unit ids."""
+    from spyglass.spikesorting.v2._unitmatch_backend import UnitMatchBackend
+    from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
+
+    inputs = [
+        SessionMatcherInput(
+            curation_key={"sorting_id": name, "curation_id": index + 4},
+            waveform_dir=Path("/unused"),
+            channel_positions_path=Path("/unused/positions.npy"),
+        )
+        for index, name in enumerate(("A", "B", "C"))
+    ]
+    ids = np.array([7, 3, 12, 7, 3] + ([] if empty_middle else [45]))
+    boundaries = [0, 2, 2, 5] if empty_middle else [0, 2, 5, 6]
+    probability = np.zeros((len(ids), len(ids)))
+    # Same-input candidates and a candidate exactly on the strict threshold
+    # must be ignored. The surviving directions have different probabilities.
+    probability[0, 1] = probability[1, 0] = 0.99
+    probability[0, 2], probability[2, 0] = 0.5, 0.99
+    probability[1, 2], probability[2, 1] = 0.9, 0.2
+    probability[0, 3], probability[3, 0] = 0.9, 0.8
+    probability[1, 4], probability[4, 1] = 0.75, 0.625
+    later, later_curation = ("C", 6) if empty_middle else ("B", 5)
+    expected = {
+        ("A", 4, 7, later, later_curation, 7): 0.85,
+        ("A", 4, 3, later, later_curation, 3): 0.6875,
+    }
+    if not empty_middle:
+        probability[2, 5], probability[5, 2] = 0.875, 0.625
+        expected[("B", 5, 12, "C", 6, 45)] = 0.75
+
+    pairs = UnitMatchBackend._pairs_from_matrix(
+        probability,
+        boundaries,
+        ids[:, None] if column_ids else ids,
+        inputs,
+        0.5,
+    )
+    actual = {
+        (
+            pair.session_a_sorting_id,
+            pair.session_a_curation_id,
+            pair.unit_a_id,
+            pair.session_b_sorting_id,
+            pair.session_b_curation_id,
+            pair.unit_b_id,
+        ): pair.match_probability
+        for pair in pairs
+    }
+    assert len(pairs) == len(actual) == len(expected)
+    assert actual == pytest.approx(expected)
+
+
 def test_match_raises_if_unitmatch_drops_a_session(tmp_path, monkeypatch):
     """A dropped bundle (fewer loaded sessions than inputs) fails loudly.
 

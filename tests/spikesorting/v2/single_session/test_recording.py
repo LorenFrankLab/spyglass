@@ -795,6 +795,7 @@ def test_recording_timestamps_reads_persisted_vector(tmp_path, dj_conn):
     t0 = 12345.6
     n_samples = 100
     timestamps = t0 + np.arange(n_samples) / fs
+    timestamps[n_samples // 2 :] += 0.5  # an affine clock loses this gap
     data = np.zeros((n_samples, 4), dtype=np.int16)
 
     nwbf = pynwb.NWBFile(
@@ -845,9 +846,10 @@ def test_recording_timestamps_reads_persisted_vector(tmp_path, dj_conn):
         "t=0 fixtures but break on real session recordings that start "
         "mid-day."
     )
-    assert np.allclose(recovered, timestamps), (
-        "_recording_timestamps must return the persisted timestamp "
-        "vector verbatim (searchsorted readback depends on it)."
+    np.testing.assert_array_equal(
+        recovered,
+        timestamps,
+        err_msg="the persisted clock, including its gap, must return verbatim",
     )
 
 
@@ -995,7 +997,7 @@ def test_recording_make_rollback_cleans_analysis_nwb(
 
 
 @pytest.mark.slow
-def test_recording_make_global_median_reference(polymer_smoke_session):
+def test_recording_make_global_median_reference(polymer_smoke_session, request):
     """``apply_spatial_preprocessing`` applies the
     global-median reference when ``reference_mode == "global_median"``.
 
@@ -1029,6 +1031,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
     )
 
     _clean_session_v2(polymer_smoke_session)
+    request.addfinalizer(lambda: _clean_session_v2(polymer_smoke_session))
     initialize_v2_defaults()
     LabTeam.insert1(
         {
@@ -2525,7 +2528,7 @@ def _square_offsets(locations):
 
 
 @pytest.mark.slow
-def test_tetrode_geometry_persists_across_reload(dj_conn, tmp_path):
+def test_tetrode_geometry_persists_across_reload(dj_conn, tmp_path, request):
     """A repaired all-zero tetrode reloads with its repaired geometry.
 
     ``maybe_apply_tetrode_geometry`` spreads a legacy four-channel
@@ -2556,6 +2559,9 @@ def test_tetrode_geometry_persists_across_reload(dj_conn, tmp_path):
     )
     zero_raw_electrode_geometry(source)
     nwb_file_name = _ingest_fresh(source, "v2_zero_geometry_tetrode.nwb")
+    session_key = {"nwb_file_name": nwb_file_name}
+    _clean_session_v2(session_key)
+    request.addfinalizer(lambda: _clean_session_v2(session_key))
 
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
     sort_group_id = int(
@@ -2612,7 +2618,7 @@ def test_tetrode_geometry_persists_across_reload(dj_conn, tmp_path):
 
 
 @pytest.mark.slow
-def test_xz_geometry_reloads_with_four_positions(dj_conn, tmp_path):
+def test_xz_geometry_reloads_with_four_positions(dj_conn, tmp_path, request):
     """A real x-z tetrode session reloads probe-able and analyzer-able.
 
     ``minirec20230622`` stores its contacts in the x-z plane (``rel_y`` is 0,
@@ -2647,6 +2653,9 @@ def test_xz_geometry_reloads_with_four_positions(dj_conn, tmp_path):
     shutil.copy(_MINIREC_PATH, source)
     rename_probe_type(source, "tetrode_12.5_xz_unrepaired")
     nwb_file_name = _ingest_fresh(source, "v2_xz_geometry_minirec.nwb")
+    session_key = {"nwb_file_name": nwb_file_name}
+    _clean_session_v2(session_key)
+    request.addfinalizer(lambda: _clean_session_v2(session_key))
 
     # This session's electrodes reference an electrode INSIDE their own
     # tetrode, which SortGroupV2 rejects (subtracting then dropping it would

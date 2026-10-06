@@ -154,7 +154,6 @@ def test_member_rows_preserve_units_spikes_labels_and_wall_clock(
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecording,
         ConcatenatedRecordingSelection,
     )
 
@@ -165,9 +164,6 @@ def test_member_rows_preserve_units_spikes_labels_and_wall_clock(
     assert not any(int(row["n_units"]) != 1 for row in rows)
 
     curated = CurationV2.get_sorting(curation_key)
-    expected = ConcatenatedRecording().split_sorting_by_session(
-        curated, ctx["concat_key"]
-    )
     parent_labels = CurationV2._labels_by_unit(curation_key)
     assert len(parent_labels) == 1
     expected_unit_ids = {int(unit_id) for unit_id in curated.unit_ids}
@@ -191,18 +187,11 @@ def test_member_rows_preserve_units_spikes_labels_and_wall_clock(
             expected_unit_ids
         )
 
-        split_key = (
-            snapshot["nwb_file_name"],
-            int(snapshot["sort_group_id"]),
-            snapshot["interval_list_name"],
-            snapshot["team_name"],
-        )
-        expected_member = expected[split_key]
         for unit_id in expected_unit_ids:
             actual_frames = member_sorting.get_unit_spike_train(unit_id=unit_id)
             np.testing.assert_array_equal(
                 actual_frames,
-                expected_member.get_unit_spike_train(unit_id=unit_id),
+                [100, 200],  # the two planted contributors, on each local axis
             )
             member_counts[unit_id] += len(actual_frames)
 
@@ -440,6 +429,10 @@ def test_waveform_features_use_member_recording(concat_member_curation):
         WaveformFeaturesParams,
     )
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
 
     row = concat_member_curation["rows"][0]
     member_key = {
@@ -485,6 +478,27 @@ def test_waveform_features_use_member_recording(concat_member_curation):
     assert len(spike_times) == len(features) == len(direct) == 1
     np.testing.assert_array_equal(spike_times[0], direct[0])
     assert features[0].shape[0] == len(direct[0])
+
+    # estimate_peak_time=False makes every mark the source voltage at its
+    # planted spike frame. Resolve that source independently of merge dispatch
+    # so dispatching waveforms to another member cannot produce a false pass.
+    snapshot = (
+        ConcatenatedRecordingSelection.MemberSnapshot
+        & concat_member_curation["concat_key"]
+        & {"member_index": 0}
+    ).fetch1()
+    source = Recording().get_recording(
+        {"recording_id": snapshot["recording_id"]}
+    )
+    expected_marks = np.vstack(
+        [
+            source.get_traces(
+                start_frame=frame, end_frame=frame + 1, return_in_uV=True
+            )
+            for frame in (100, 200)
+        ]
+    )
+    np.testing.assert_allclose(features[0], expected_marks, rtol=0, atol=1e-6)
 
 
 @pytest.mark.slow

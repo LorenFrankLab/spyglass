@@ -100,11 +100,25 @@ def test_get_sort_group_info_returns_multi_electrode_relation(
     ``fetch(limit=1)`` single-row bug).
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.recording import (
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
 
     _, merge_id = _make_v2_root_curation(populated_sorting)
     info = SpikeSortingOutput.get_sort_group_info({"merge_id": merge_id})
     rows = info.fetch(as_dict=True)
-    assert len(rows) > 0
+    source = SortingSelection.resolve_source(populated_sorting)
+    recording_selection = (RecordingSelection & source.key).fetch1()
+    expected = set(
+        (SortGroupV2.SortGroupElectrode & recording_selection).fetch(
+            "electrode_id"
+        )
+    )
+    assert len(expected) > 1, "fixture must distinguish all electrodes from one"
+    assert {row["electrode_id"] for row in rows} == expected
+    assert len(rows) == len(expected)
     # Spot-check that the relation joined to BrainRegion, so every
     # electrode's region is reported (v1 under-reports multi-region groups).
     assert "electrode_id" in rows[0]
@@ -311,12 +325,9 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
         for name in DecodingParameters.fetch("decoding_param_name")
         if "sorted" in name
     ]
-    if not sorted_param_names:
-        pytest.skip(
-            "DecodingParameters.contents has no sorted-spikes entry "
-            "(upstream rename or content drop); cannot exercise the "
-            "FK chain without a valid decoding_param_name."
-        )
+    assert (
+        sorted_param_names
+    ), "installed decoder defaults must expose sorted-spikes parameters"
     decoding_param_name = sorted_param_names[0]
 
     selection_key = {
@@ -656,7 +667,13 @@ def test_labeled_curation_fetch_keeps_accept_drops_noise(
         "nwb_file_name"
     )
 
-    def _n_units(filter_name):
+    expected_frame = (CurationV2 & child).fetch_nwb()[0]["object_id"]
+    expected_times = {
+        int(unit_id): np.asarray(row["spike_times"])
+        for unit_id, row in expected_frame.iterrows()
+    }
+
+    def _fetch_units(filter_name):
         gname = f"lbl_{filter_name}"
         existing = SortedSpikesGroup & {
             "sorted_spikes_group_name": gname,
@@ -670,19 +687,29 @@ def test_labeled_curation_fetch_keeps_accept_drops_noise(
             unit_filter_params_name=filter_name,
             keys=[{"spikesorting_merge_id": merge_id}],
         )
-        return len(
-            SortedSpikesGroup.fetch_spike_data(
-                {"sorted_spikes_group_name": gname, "nwb_file_name": nwb}
-            )
+        spikes, identities = SortedSpikesGroup.fetch_spike_data(
+            {"sorted_spikes_group_name": gname, "nwb_file_name": nwb},
+            return_unit_ids=True,
         )
+        assert len(spikes) == len(identities)
+        result = {}
+        for train, identity in zip(spikes, identities, strict=True):
+            assert identity["spikesorting_merge_id"] == merge_id
+            unit_id = int(identity["unit_id"])
+            assert unit_id not in result
+            np.testing.assert_array_equal(train, expected_times[unit_id])
+            result[unit_id] = train
+        return result
 
     try:
-        n_total = _n_units("all_units")
-        assert n_total >= 2, "baseline curation must contribute >=2 units"
+        all_units = _fetch_units("all_units")
+        assert set(all_units) == set(unit_ids)
         # include=accept -> ONLY the accept-labeled unit.
-        assert _n_units("lbl_include_accept") == 1
+        assert set(_fetch_units("lbl_include_accept")) == {accept_id}
         # exclude=noise -> everything except the noise-labeled unit.
-        assert _n_units("lbl_exclude_noise") == n_total - 1
+        assert set(_fetch_units("lbl_exclude_noise")) == set(unit_ids) - {
+            noise_id
+        }
     finally:
         for filter_name in (
             "all_units",

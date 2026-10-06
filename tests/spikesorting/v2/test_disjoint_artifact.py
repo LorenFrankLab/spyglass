@@ -296,8 +296,9 @@ def test_detect_artifacts_removal_window_does_not_spill_across_gap():
     )
     valid_times = RecordingArtifactDetection._detect_artifacts(rec, validated)
 
-    starts = [s for s, _ in valid_times]
-    assert any(abs(s - chunk2_start) <= 1.0 / fs for s in starts), (
+    assert any(
+        start == chunk2_start and end == times[-1] for start, end in valid_times
+    ), (
         "chunk 2's first sample was removed: chunk-1's artifact removal "
         f"window spilled across the gap. valid_times={valid_times.tolist()}, "
         f"expected a chunk-2 interval starting at {chunk2_start}."

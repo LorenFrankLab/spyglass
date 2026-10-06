@@ -105,6 +105,24 @@ def two_source_output(populated_sorting, dj_conn, tmp_path_factory):
     mid_imported = (
         SpikeSortingOutput.ImportedSpikeSorting & imp_rows[0]
     ).fetch1("merge_id")
+    # Read the v2 source table directly, independently of the aggregate merge
+    # accessors under test. Imported trains come from the literal planted data.
+    v2_units = (CurationV2 & cur_v2).fetch_nwb()[0]["object_id"]
+    assert (
+        len(v2_units) > 0
+    ), "the v2 source must contribute units to the aggregate"
+    expected = {
+        (mid_v2, int(unit_id)): tuple(row["spike_times"])
+        for unit_id, row in v2_units.iterrows()
+    }
+    expected.update(
+        {
+            (mid_imported, i): tuple(
+                0.1 * i + offset for offset in (0.01, 0.05, 0.09)
+            )
+            for i in range(3)
+        }
+    )
 
     yield {
         "mid_v2": mid_v2,
@@ -112,6 +130,7 @@ def two_source_output(populated_sorting, dj_conn, tmp_path_factory):
         "mid_imported": mid_imported,
         "imported_name": imported_name,
         "v2_nwb_file_name": v2_nwb_file_name,
+        "expected_spikes": expected,
     }
 
     # cleanup: drop the merge rows (master-first), then the v2 curation.
@@ -182,7 +201,9 @@ def test_spikesortingoutput_get_spike_times_spans_sources(two_source_output):
 
     spike_times = SpikeSortingOutput().get_spike_times(merge_keys)
 
-    assert len(spike_times) >= 3
+    assert sorted(map(tuple, spike_times)) == sorted(
+        ctx["expected_spikes"].values()
+    )
 
 
 @pytest.mark.slow
@@ -268,12 +289,21 @@ def test_sorted_spikes_group_fetch_spike_data_spans_sources(
         ],
     )
 
-    spike_times = SortedSpikesGroup.fetch_spike_data(group_key)
-    # Units from BOTH sources are returned (the imported NWB planted 3 units;
-    # the v2 sort contributes its curated units), and nothing raised.
-    assert len(spike_times) >= 3
-
-    (SortedSpikesGroup & group_key).super_delete(warn=False)
+    try:
+        spike_times, identities = SortedSpikesGroup.fetch_spike_data(
+            group_key, return_unit_ids=True
+        )
+        actual = {
+            (
+                identity["spikesorting_merge_id"],
+                int(identity["unit_id"]),
+            ): tuple(train)
+            for identity, train in zip(identities, spike_times, strict=True)
+        }
+        assert len(actual) == len(identities)  # no duplicated unit identities
+        assert actual == ctx["expected_spikes"]
+    finally:
+        (SortedSpikesGroup & group_key).super_delete(warn=False)
 
 
 @pytest.mark.slow

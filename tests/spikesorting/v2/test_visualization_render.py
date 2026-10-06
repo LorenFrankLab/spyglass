@@ -119,9 +119,19 @@ def test_local_report_export_writes_folder(populated_sorting, tmp_path):
     )
     assert output_folder.is_dir()
     assert (output_folder / "spyglass_provenance.json").exists()
-    # SI writes a per-unit figure folder and a unit list; assert the folder is
-    # non-empty rather than pinning SI's exact filenames.
-    assert any(output_folder.iterdir())
+    import pandas as pd
+
+    expected_ids = sorted(
+        int(unit) for unit in Sorting().get_sorting(populated_sorting).unit_ids
+    )
+    units = pd.read_csv(output_folder / "unit list.csv", sep="\t", index_col=0)
+    assert sorted(units.index.tolist()) == expected_ids
+    for path in (
+        output_folder / "unit_locations.png",
+        output_folder / "unit_depths.png",
+        *(output_folder / "units" / f"{unit}.png" for unit in expected_ids),
+    ):
+        assert path.stat().st_size > 0
     plt.close("all")
 
 

@@ -894,7 +894,9 @@ def test_artifact_scan_multiprocess_worker_path_runs(dj_conn, tmp_path):
 
 
 @pytest.mark.slow
-def test_artifact_detection_peak_memory_bounded_by_chunk_size(dj_conn):
+def test_artifact_detection_peak_memory_bounded_by_chunk_size(
+    dj_conn, tmp_path
+):
     """Peak memory of the chunked scan is bounded by chunk size, not by
     the full recording length.
 
@@ -920,12 +922,11 @@ def test_artifact_detection_peak_memory_bounded_by_chunk_size(dj_conn):
     n_samples = int(fs * 300)  # 5 minutes
     # Memmap-backed traces so building the fixture itself does not dominate
     # the measured peak; the scan reads it chunk by chunk.
-    import tempfile
-
-    tmp = tempfile.NamedTemporaryFile(suffix=".raw", delete=False)
-    tmp.close()
     arr = np.memmap(
-        tmp.name, dtype=np.float32, mode="w+", shape=(n_samples, n_channels)
+        tmp_path / "memory_probe.raw",
+        dtype=np.float32,
+        mode="w+",
+        shape=(n_samples, n_channels),
     )
     arr[:] = 0.0
     arr[1_000_000:1_000_300, :] = 300.0  # one planted burst
@@ -944,11 +945,17 @@ def test_artifact_detection_peak_memory_bounded_by_chunk_size(dj_conn):
     )
 
     tracemalloc.start()
-    RecordingArtifactDetection._scan_artifact_frames(
-        rec, validated, job_kwargs={"n_jobs": 1, "chunk_duration": "1s"}
+    try:
+        runs = RecordingArtifactDetection._scan_artifact_frames(
+            rec, validated, job_kwargs={"n_jobs": 1, "chunk_duration": "1s"}
+        )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    np.testing.assert_array_equal(
+        _expand_runs(runs), np.arange(1_000_000, 1_000_300)
     )
-    _, peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
 
     full_working_set = 4 * n_samples * n_channels * 4  # ~4.6 GB
     ceiling = 256 * 1024 * 1024  # 256 MB

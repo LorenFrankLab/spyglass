@@ -243,6 +243,8 @@ def test_ground_truth_reads_cell_types_and_positions(monkeypatch):
 
     gt = mearec_to_nwb._read_ground_truth(Path("x.h5"))
     assert gt.n_units == 2
+    np.testing.assert_array_equal(gt.spike_times[0], [1.0, 2.0])
+    np.testing.assert_array_equal(gt.spike_times[1], [3.0])
     assert gt.cell_types == ["E", "I"]
     np.testing.assert_allclose(gt.positions_um[0], [1.0, 2.0, 3.0])
     np.testing.assert_allclose(gt.positions_um[1], [4.0, 5.0, 6.0])

@@ -117,6 +117,7 @@ def artifact_e2e_session(dj_conn):
     session_key = {"nwb_file_name": nwb_file_name}
 
     _clean_session_v2(session_key)
+
     initialize_v2_defaults()
     LabTeam.insert1(
         {"team_name": "v2_test_team", "team_description": "v2 artifact e2e"},
@@ -145,6 +146,14 @@ def artifact_e2e_session(dj_conn):
     }
 
     _clean_session_v2(session_key)
+
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+
+    for params_name in ("v2_e2e_amp1000", "manual_and_automatic_test"):
+        (
+            ArtifactDetectionParameters
+            & {"artifact_detection_params_name": params_name}
+        ).super_delete(warn=False, safemode=False)
 
 
 @pytest.mark.slow
@@ -367,6 +376,12 @@ def gt60_recording(dj_conn):
         Recording.populate(rec_pk, reserve_jobs=False)
     yield session, rec_pk["recording_id"]
     _clean_session_v2(session)
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+
+    (
+        ArtifactDetectionParameters
+        & {"artifact_detection_params_name": "v2_gt_artifact_1500"}
+    ).super_delete(warn=False, safemode=False)
 
 
 @pytest.mark.slow
@@ -627,6 +642,16 @@ def test_parallel_artifact_detection_matches_serial(dj_conn):
         )
     finally:
         _clean_session_v2(session)
+
+        from spyglass.spikesorting.v2.artifact import (
+            ArtifactDetectionParameters,
+        )
+
+        for params_name in ("v2_njobs_serial", "v2_njobs_parallel"):
+            (
+                ArtifactDetectionParameters
+                & {"artifact_detection_params_name": params_name}
+            ).super_delete(warn=False, safemode=False)
 
 
 @pytest.mark.slow

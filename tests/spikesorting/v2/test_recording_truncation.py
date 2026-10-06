@@ -254,10 +254,14 @@ def test_disjoint_multichunk_not_false_truncation(truncation_session):
     if (t_end - t0) < 2.7:
         pytest.skip("smoke fixture too short for a 2-epoch disjoint test")
 
-    # Two ~1.2 s epochs (each > the 1.0 s default min_segment_length) with a
-    # 0.2 s gap, with deliberately non-sample-aligned endpoints.
-    c1 = (t0 + 0.05, t0 + 1.25)
-    c2 = (t0 + 1.45, t0 + 2.65)
+    # The smoke fixture is rate-based at 30 kHz. Put each requested boundary
+    # 0.1 frame inside an integer sample line: each epoch then contains 35,999
+    # samples, while its continuous requested duration spans 35,999.8 sample
+    # periods. Across two epochs the saved (N-1)/fs span is 2.6 samples short,
+    # which must exceed the old interval-count-blind 1.5-sample allowance.
+    fs = 30_000.0
+    c1 = (t0 + 1500.1 / fs, t0 + 37499.9 / fs)
+    c2 = (t0 + 43500.1 / fs, t0 + 79499.9 / fs)
     valid_times = np.array([list(c1), list(c2)])
     interval_name = f"v2_truncation_disjoint_{uuid.uuid4().hex[:8]}"
     IntervalList.insert1(
@@ -286,9 +290,11 @@ def test_disjoint_multichunk_not_false_truncation(truncation_session):
     Recording.populate(rec_pk, reserve_jobs=False)
     assert Recording & rec_pk, "disjoint multi-epoch Recording.populate failed"
 
-    duration_s = float((Recording & rec_pk).fetch1("duration_s"))
-    kept = (c1[1] - c1[0]) + (c2[1] - c2[0])  # ~2.4 s
-    assert abs(duration_s - kept) < 0.01, (
-        f"saved duration {duration_s:.4f}s should match the summed kept "
-        f"epochs {kept:.4f}s within sample-level slop (both epochs kept)"
+    duration_s, saved_fs = (Recording & rec_pk).fetch1(
+        "duration_s", "sampling_frequency"
     )
+    assert float(saved_fs) == fs
+    kept = (c1[1] - c1[0]) + (c2[1] - c2[0])  # ~2.4 s
+    assert 1.5 < (kept - float(duration_s)) * fs < 3.5
+    assert float(duration_s) == pytest.approx(71_997 / fs, abs=1e-12)
+    assert Recording().get_recording(rec_pk).get_num_samples() == 71_998

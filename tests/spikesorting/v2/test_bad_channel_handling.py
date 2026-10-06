@@ -626,12 +626,55 @@ def test_interpolate_completes_probe_remove_omits(handling_session):
         # and reference; this confirms the end-to-end result is real.) `remove`
         # omits it entirely.
         import numpy as np
+        import spikeinterface.preprocessing as sip
+
+        from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+        from spyglass.utils.nwb_helper_fn import (
+            raw_eseries_path_and_timestamp_mode,
+        )
 
         interp_rec = Recording().get_recording(interp_pk)
         interp_ids = [int(c) for c in interp_rec.get_channel_ids()]
         assert bad_eid in interp_ids
         col = np.asarray(interp_rec.get_traces()[:, interp_ids.index(bad_eid)])
         assert np.all(np.isfinite(col)) and np.any(col != 0)
+
+        # A healthy fixture channel is merely marked bad: retaining its
+        # original traces would also be finite/nonzero. Compare with the raw
+        # channel filtered independently of the production compute/spatial
+        # stack, so losing the fetched bad-channel IDs cannot pass unnoticed.
+        fetched = Recording().make_fetch(interp_pk)
+        assert fetched.reference_mode == "none"
+        series_path, load_times = raw_eseries_path_and_timestamp_mode(
+            fetched.raw_path, fetched.raw_object_id
+        )
+        raw = read_recording_nwb(
+            fetched.raw_path,
+            electrical_series_path=series_path,
+            load_time_vector=load_times,
+        )
+        bandpass = fetched.preprocessing_params.bandpass_filter
+        baseline = sip.bandpass_filter(
+            raw,
+            freq_min=bandpass.freq_min,
+            freq_max=bandpass.freq_max,
+            dtype=np.float64,
+        )
+        original_bad = baseline.get_traces(
+            channel_ids=[bad_eid], return_in_uV=True
+        )[:, 0]
+        assert len(original_bad) == len(col)
+        scale = max(1.0, float(np.max(np.abs(original_bad))))
+        assert np.max(np.abs(col - original_bad)) > 1e-3 * scale
+        # Interpolation replaces only the requested bad contact; it must not
+        # manufacture the difference above by changing neighboring good ones.
+        good_ids = [bad_eid - 1, bad_eid + 1]
+        np.testing.assert_allclose(
+            interp_rec.get_traces(channel_ids=good_ids, return_in_uV=True),
+            baseline.get_traces(channel_ids=good_ids, return_in_uV=True),
+            rtol=0.0,
+            atol=1e-6,
+        )
         remove_ids = {
             int(c)
             for c in Recording().get_recording(remove_pk).get_channel_ids()

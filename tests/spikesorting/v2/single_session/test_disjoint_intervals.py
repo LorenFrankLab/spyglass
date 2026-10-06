@@ -148,6 +148,11 @@ def test_boundary_spike_round_trip_does_not_raise(
         "Boundary-spike sorting did not survive Sorting.get_sorting "
         f"round-trip; unit_ids={list(sorting_obj.get_unit_ids())}."
     )
+    n_samples = Recording().get_recording(rec_pk).get_num_samples()
+    expected_frames = [100, n_samples - 1]
+    np.testing.assert_array_equal(
+        sorting_obj.get_unit_spike_train(unit_id=0), expected_frames
+    )
 
     # Second read path: CurationV2 + CurationV2.get_sorting. The
     # curated NWB write goes through a different code path than
@@ -164,6 +169,9 @@ def test_boundary_spike_round_trip_does_not_raise(
     assert 0 in curated.get_unit_ids(), (
         "Boundary-spike unit lost on the CurationV2 round-trip; "
         f"curated unit_ids={list(curated.get_unit_ids())}."
+    )
+    np.testing.assert_array_equal(
+        curated.get_unit_spike_train(unit_id=0), expected_frames
     )
 
 
@@ -465,6 +473,7 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
         "no-artifact obs_intervals over a disjoint recording must be one "
         f"interval per recorded chunk; got {obs.tolist()}"
     )
+    np.testing.assert_allclose(obs, disjoint_times, rtol=0, atol=1.0 / 30_000.0)
     for start, end in obs:
         assert not (start < gap_mid < end), (
             f"obs_interval [{start}, {end}] spans the inter-chunk gap "

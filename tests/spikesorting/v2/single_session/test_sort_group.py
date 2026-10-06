@@ -155,6 +155,23 @@ def test_set_group_by_column_matches_by_shank(polymer_smoke_session):
     )
     assert len(SortGroupV2 & polymer_smoke_session) == 4
     assert len(SortGroupV2.SortGroupElectrode & polymer_smoke_session) == 128
+    electrode_rows = (Electrode & polymer_smoke_session).fetch(
+        "electrode_id", "probe_shank", as_dict=True
+    )
+    for sort_group_id, selected_shanks in enumerate(groups):
+        expected_ids = {
+            int(row["electrode_id"])
+            for row in electrode_rows
+            if int(row["probe_shank"]) in selected_shanks
+        }
+        actual_ids = {
+            int(eid)
+            for eid in (
+                SortGroupV2.SortGroupElectrode
+                & {**polymer_smoke_session, "sort_group_id": sort_group_id}
+            ).fetch("electrode_id")
+        }
+        assert actual_ids == expected_ids
 
 
 @pytest.mark.slow
@@ -268,7 +285,7 @@ def test_set_group_by_column_surfaces_unitrode_skip(polymer_smoke_session):
 
 
 @pytest.mark.slow
-def test_sort_group_reference_mode_enforced(polymer_smoke_session):
+def test_sort_group_reference_mode_enforced(polymer_smoke_session, request):
     """SortGroupV2.insert1 enforces the reference_mode / electrode invariants.
 
     ``reference_mode`` is validated against the ``ReferenceMode`` Literal
@@ -283,6 +300,7 @@ def test_sort_group_reference_mode_enforced(polymer_smoke_session):
     _clean_session_v2(polymer_smoke_session)
 
     base = {"nwb_file_name": nwb_file_name, "sort_group_id": 900}
+    request.addfinalizer(lambda: _clean_session_v2(polymer_smoke_session))
 
     # Typo'd mode rejected by the Literal guard (varchar, not enum).
     with pytest.raises(ValueError, match="reference_mode"):
@@ -321,7 +339,9 @@ def test_sort_group_reference_mode_enforced(polymer_smoke_session):
     assert eid is None
 
 
-def test_sort_group_update1_validates_merged_reference(polymer_smoke_session):
+def test_sort_group_update1_validates_merged_reference(
+    polymer_smoke_session, request
+):
     """``SortGroupV2.update1`` permits a valid reference edit (the reference is
     folded into recording_id, so a change mints a distinct recording) but
     validates the MERGED (current + payload) state: an invalid mode, a
@@ -334,6 +354,7 @@ def test_sort_group_update1_validates_merged_reference(polymer_smoke_session):
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
     _clean_session_v2(polymer_smoke_session)
     pk = {"nwb_file_name": nwb_file_name, "sort_group_id": 950}
+    request.addfinalizer(lambda: _clean_session_v2(polymer_smoke_session))
     # A group of four real electrodes (the part table FKs Electrode, whose PK
     # includes electrode_group_name), with no reference to start.
     elecs = (Electrode & {"nwb_file_name": nwb_file_name}).fetch(

@@ -1369,16 +1369,16 @@ def test_artifact_empty_warning_has_context(dj_conn, monkeypatch):
 def test_shared_artifact_group_multi_member_union(
     populated_recording, polymer_smoke_session, monkeypatch
 ):
-    """Two-member ``SharedArtifactGroup``: the union scan sees an artifact
-    on ONE member's channels, and every member shares the written times.
+    """The union scan reads both members and applies its channel quorum.
 
     Every existing shared-group populate test has a single member, so the
     ``si.aggregate_channels`` union-scan branch of ``make_compute`` is
     untested. Here two time-aligned members are grouped; a supra-threshold
-    transient is planted on member A's channels only, member B is clean.
+    separate transients are planted on member A and member B.
     With ``proportion_above_threshold=0.4`` over the 8-channel union, A's 4
     channels alone exceed the required count, so the union scan removes the
-    artifact window -- a per-member scan of the CLEAN member B would not.
+    artifact windows. A three-channel excursion on member A stays below the
+    four-of-eight quorum; a per-member denominator would wrongly flag it.
     The single session writes one shared ``IntervalList`` row that every
     member resolves to, so all members see identical artifact-removed times.
 
@@ -1414,11 +1414,16 @@ def test_shared_artifact_group_multi_member_union(
     n_samples = 90000  # 3 s
     n_ch = 4
     art_lo, art_hi = 45000, 45050  # transient at 1.5 s
+    second_art_lo, second_art_hi = 15000, 15050  # member B at 0.5 s
+    below_quorum_lo, below_quorum_hi = 65000, 65050
 
     def _synth_recording(with_artifact):
         traces = np.zeros((n_samples, n_ch), dtype=np.int16)
         if with_artifact:
             traces[art_lo:art_hi, :] = 5000
+            traces[below_quorum_lo:below_quorum_hi, :3] = 5000
+        else:
+            traces[second_art_lo:second_art_hi, :] = 5000
         rec = si.NumpyRecording([traces], sampling_frequency=fs)
         rec.set_channel_gains([1.0] * n_ch)  # µV == counts
         rec.set_channel_offsets([0.0] * n_ch)
@@ -1460,7 +1465,7 @@ def test_shared_artifact_group_multi_member_union(
     Recording.populate(second_rec_pk, reserve_jobs=False)
 
     rid_a = populated_recording["recording_id"]  # member A: artifact
-    rid_b = second_rec_pk["recording_id"]  # member B: clean
+    rid_b = second_rec_pk["recording_id"]  # member B: separate artifact
 
     def _fake_get_recording(self, key):
         return _synth_recording(
@@ -1562,25 +1567,28 @@ def test_shared_artifact_group_multi_member_union(
         ), f"expected one shared IntervalList row; got {len(rows)}"
         valid_times = rows[0]["valid_times"]
 
-        # The union scan removed member A's artifact: the single base chunk
-        # is split into exactly two valid intervals around the 1.5 s
-        # transient, and no valid interval contains it. A clean-only
-        # (member B) scan would leave one full-window interval instead.
+        # Both members contribute a different artifact window; dropping either
+        # member would leave only two valid intervals.
         art_mid = 0.5 * (art_lo + art_hi) / fs  # ~1.5 s
-        assert valid_times.shape == (2, 2), (
-            f"union scan should split into 2 intervals at the artifact; got "
+        second_art_mid = 0.5 * (second_art_lo + second_art_hi) / fs
+        assert valid_times.shape == (3, 2), (
+            f"union scan should split into 3 intervals at both artifacts; got "
             f"valid_times={valid_times.tolist()} (shape {valid_times.shape}). "
-            "A per-member scan of the clean member would leave a single "
-            "full-window interval -- the union channels were not combined."
+            "Every member's channels must contribute."
         )
         for start, end in valid_times:
-            assert not (start < art_mid < end), (
-                f"a valid interval [{start}, {end}] spans the artifact at "
-                f"{art_mid}s; the union scan did not remove it."
-            )
+            for planted_mid in (art_mid, second_art_mid):
+                assert not (start < planted_mid < end), (
+                    f"a valid interval [{start}, {end}] spans the artifact at "
+                    f"{planted_mid}s; the union scan did not remove it."
+                )
         # Coverage survives on both sides of the artifact.
-        assert any(s <= 0.5 <= e for s, e in valid_times), "pre-artifact lost"
+        assert any(s <= 0.2 <= e for s, e in valid_times), "pre-artifact lost"
         assert any(s <= 2.4 <= e for s, e in valid_times), "post-artifact lost"
+        below_quorum_mid = 0.5 * (below_quorum_lo + below_quorum_hi) / fs
+        assert any(
+            s <= below_quorum_mid <= e for s, e in valid_times
+        ), "three channels must remain valid under the four-of-eight quorum"
 
         # Every member resolves to the SAME artifact-removed times (single
         # shared row; the per-member dict has one session entry equal to it).
@@ -1591,6 +1599,10 @@ def test_shared_artifact_group_multi_member_union(
         np.testing.assert_array_equal(shared[nwb_file_name], valid_times)
     finally:
         _clear_shared_group()
+        (
+            ArtifactDetectionParameters
+            & {"artifact_detection_params_name": params_name}
+        ).super_delete(warn=False, safemode=False)
 
 
 # ---------- a raw NaN makes populate raise instead of inserting empty ------

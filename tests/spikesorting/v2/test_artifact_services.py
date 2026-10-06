@@ -54,13 +54,22 @@ def _artifact_params(**overrides):
     return ArtifactDetectionParamsSchema.model_validate(base)
 
 
-def test_detect_artifacts_detect_false_returns_full_window():
-    """``detect=False`` returns the recorded window untouched (no DB)."""
-    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+def test_detect_artifacts_detect_false_returns_full_window(monkeypatch):
+    """``detect=False`` returns recorded coverage without reading artifact traces."""
+    from spyglass.spikesorting.v2 import _artifact_intervals
+
+    def reject_scan(*args, **kwargs):
+        raise AssertionError("detect=False must skip the artifact scan")
+
+    monkeypatch.setattr(
+        _artifact_intervals, "scan_artifact_frames", reject_scan
+    )
 
     traces = np.zeros((100, 2), dtype="float32")
     rec = _rec(traces)
-    vt = detect_artifacts(rec, _artifact_params(detect=False))
+    vt = _artifact_intervals.detect_artifacts(
+        rec, _artifact_params(detect=False)
+    )
     assert vt.shape == (1, 2)
     assert vt[0, 0] == pytest.approx(0.0)
     # One interval spanning the recording.

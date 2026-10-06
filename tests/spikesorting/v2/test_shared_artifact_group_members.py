@@ -96,6 +96,18 @@ def _np_recording(n_samples, fs, dtype="float32", channel_ids=(1, 2)):
     )
 
 
+def _recording_with_different_interior_clock():
+    import numpy as np
+
+    recording = _np_recording(100, 30000.0)
+    times = np.arange(100, dtype=np.float64) / 30000.0
+    # Frame count, rate, dtype, and clock endpoints all agree with the
+    # reference. Only the acquisition times of interior samples differ.
+    times[40:60] += 0.25 / 30000.0
+    recording.set_times(times, with_warning=False)
+    return recording
+
+
 def test_assert_shared_group_aggregatable_accepts_matching_members():
     from spyglass.spikesorting.v2._shared_artifact_group import (
         assert_shared_group_recordings_aggregatable,
@@ -122,6 +134,11 @@ def test_assert_shared_group_aggregatable_accepts_matching_members():
             "dtype",
         ),
         (lambda: _np_recording(100, 30000.0), ["s.nwb", "b.nwb"], "session"),
+        (
+            _recording_with_different_interior_clock,
+            ["s.nwb", "s.nwb"],
+            "timestamp vector",
+        ),
     ],
 )
 def test_assert_shared_group_aggregatable_rejects_bypass(

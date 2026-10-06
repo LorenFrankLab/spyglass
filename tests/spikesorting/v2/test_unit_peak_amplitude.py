@@ -14,14 +14,10 @@ channel as the attributed electrode. This test recomputes the extremum
 directly from the analyzer's template array (an independent code path, not
 ``template_tools``) and asserts equality + channel consistency.
 
-Scope note: this runs on the MountainSort5 ``populated_sorting`` fixture,
-whose templates are aligned to the trough -- so ``at_index`` coincides with
-``extremum`` and ``mode="extremum"`` makes no difference here (the test
-passes with and without it). It is therefore an *invariant* guard
-(``peak_amplitude_uv`` is the extremum on the attributed electrode), not a
-discriminating test: ``mode="extremum"`` changes the result only for sorters
-whose detection alignment differs from the template peak, and no
-clusterless fixture here exercises that case.
+The MountainSort5 integration fixture is trough-aligned, so it checks the
+persisted invariant. The synthetic row-producer regression deliberately
+places the strongest peak after alignment on a different electrode, with
+distinct gains and positive/negative polarity, to distinguish the modes.
 """
 
 from __future__ import annotations
@@ -94,3 +90,90 @@ def test_peak_amplitude_is_extremum_on_attributed_electrode(populated_sorting):
             f"unit {uid}: stored peak_amplitude_uv "
             f"{row['peak_amplitude_uv']} != template extremum {expected_amp}"
         )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "sorter_params, sign",
+    [
+        ({"peak_sign": "neg"}, -1),
+        ({"peak_sign": "pos"}, 1),
+        ({"detect_sign": -1}, -1),
+        ({"detect_sign": 1}, 1),
+        ({"peak_sign": "both"}, -1),
+    ],
+)
+def test_row_producer_uses_off_alignment_extremum_and_configured_sign(
+    tmp_path, sorter_params, sign
+):
+    """The actual row producer connects polarity, peak time, gains and IDs."""
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting_units import (
+        build_unit_rows_from_analyzer,
+    )
+
+    frames = np.array([500, 1500, 2500])
+    traces = np.zeros((10_000, 2), dtype=np.float32)
+    # At the detection frame electrode 24 leads (20 counts * 3 = 60 uV).
+    # The true extremum is one sample later on electrode 12 (50 * 2 = 100 uV).
+    traces[frames, 1] = sign * 20
+    traces[frames + 1, 0] = sign * 50
+    recording = si.NumpyRecording(
+        traces, sampling_frequency=1000.0, channel_ids=[12, 24]
+    )
+    recording.set_dummy_probe_from_locations(np.array([[0, 0], [0, 20]]))
+    recording.set_channel_gains([2.0, 3.0])
+    recording.set_channel_offsets(0.0)
+    recording = recording.save(
+        folder=tmp_path / "recording", n_jobs=1, progress_bar=False
+    )
+    sorting = si.NumpySorting.from_unit_dict(
+        {17: frames}, sampling_frequency=1000.0
+    )
+    folder = tmp_path / "off_alignment.analyzer"
+    build_analyzer(
+        sorting,
+        recording,
+        {"sorting_id": "off_alignment"},
+        sorter_row={"job_kwargs": {}},
+        job_kwargs={"n_jobs": 1, "progress_bar": False, "random_seed": 0},
+        analyzer_folder=folder,
+        waveform_params={
+            "ms_before": 2.0,
+            "ms_after": 3.0,
+            "max_spikes_per_unit": 10,
+            "whiten": False,
+            "purpose": "display",
+            "sparsity": {"method": "dense"},
+        },
+    )
+    electrode_by_id = {
+        electrode_id: {
+            "nwb_file_name": "synthetic.nwb",
+            "electrode_group_name": "probe",
+            "electrode_id": electrode_id,
+        }
+        for electrode_id in (12, 24)
+    }
+    rows = build_unit_rows_from_analyzer(
+        sorting=sorting,
+        analyzer_folder=folder,
+        sorter_row={"params": sorter_params},
+        electrode_by_id=electrode_by_id,
+        sort_group_id=0,
+        nwb_file_name="synthetic.nwb",
+        key={"sorting_id": "off_alignment"},
+    )
+    assert rows == [
+        {
+            "sorting_id": "off_alignment",
+            "unit_id": 17,
+            "nwb_file_name": "synthetic.nwb",
+            "electrode_group_name": "probe",
+            "electrode_id": 12,
+            "peak_amplitude_uv": 100.0,
+            "n_spikes": 3,
+        }
+    ]

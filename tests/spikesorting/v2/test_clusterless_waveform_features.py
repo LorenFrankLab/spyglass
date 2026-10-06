@@ -65,6 +65,7 @@ def wave_session(dj_conn):
         pytest.skip(f"Fixture {_FIXTURE_PATH.name} not found.")
     nwb_file_name = copy_and_insert_nwb(_FIXTURE_PATH)
     yield {"nwb_file_name": nwb_file_name}
+    _reset({"nwb_file_name": nwb_file_name})
 
 
 @pytest.fixture(scope="module")
@@ -82,6 +83,7 @@ def polymer_60s_session(dj_conn):
         pytest.skip(f"Fixture {_POLYMER_60S_PATH.name} not found.")
     nwb_file_name = copy_and_insert_nwb(_POLYMER_60S_PATH)
     yield {"nwb_file_name": nwb_file_name}
+    _reset({"nwb_file_name": nwb_file_name})
 
 
 def _amplitude_param():
@@ -316,6 +318,86 @@ def test_analyzer_waveform_accessor_zero_unit_contract():
 
     with pytest.raises(ValueError, match="zero-unit sorting"):
         _AnalyzerWaveformAccessor(sorting=_FakeSorting(3))
+
+
+@pytest.mark.usefixtures("dj_conn")
+@pytest.mark.database
+@pytest.mark.db_unit
+@pytest.mark.parametrize("n_dimensions", [2, 3])
+@pytest.mark.parametrize("extensions_present", [False, True])
+def test_location_accessor_preserves_sparse_units_segments_and_coordinates(
+    n_dimensions, extensions_present
+):
+    """Equal-sized units still keep their distinct coordinates and spike order."""
+    from spyglass.decoding.v1.waveform_features import (
+        _AnalyzerWaveformAccessor,
+    )
+
+    fields = [(axis, "float64") for axis in ("x", "y", "z")[:n_dimensions]]
+    locations = {
+        0: {
+            2: np.array(
+                [tuple(row[:n_dimensions]) for row in [(1, 2, 3), (4, 5, 6)]],
+                dtype=fields,
+            ),
+            7: np.array(
+                [
+                    tuple(row[:n_dimensions])
+                    for row in [(40, 50, 60), (70, 80, 90)]
+                ],
+                dtype=fields,
+            ),
+        },
+        1: {
+            2: np.array([tuple((7, 8, 9)[:n_dimensions])], dtype=fields),
+            7: np.array([tuple((100, 110, 120)[:n_dimensions])], dtype=fields),
+        },
+    }
+    expected = {
+        2: np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])[:, :n_dimensions],
+        7: np.array([[40, 50, 60], [70, 80, 90], [100, 110, 120]])[
+            :, :n_dimensions
+        ],
+    }
+    reads, computations = [], []
+
+    class LocationExtension:
+        def get_data(self, *, outputs):
+            reads.append(outputs)
+            return locations
+
+    class Analyzer:
+        def __init__(self):
+            self.present = (
+                {"templates", "spike_locations"}
+                if extensions_present
+                else set()
+            )
+
+        def has_extension(self, name):
+            return name in self.present
+
+        def compute(self, name):
+            computations.append(name)
+            self.present.add(name)
+
+        def get_extension(self, name):
+            if name == "waveforms":
+                return None  # location access does not read waveform arrays
+            assert name == "spike_locations" and name in self.present
+            return LocationExtension()
+
+    accessor = _AnalyzerWaveformAccessor(sorting=object(), analyzer=Analyzer())
+    # Request out of unit-id order, then repeat a unit. Positional lookups,
+    # sorted/flattened coordinate fields, or a second extraction all fail.
+    for unit_id in (7, 2, 7):
+        actual = accessor.get_spike_locations(unit_id)
+        np.testing.assert_array_equal(actual, expected[unit_id])
+        assert actual.dtype.kind == "f"
+    assert reads == ["by_unit"]
+    assert computations == (
+        [] if extensions_present else ["templates", "spike_locations"]
+    )
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -594,12 +676,13 @@ def test_unit_waveform_features_v2_full_waveform_and_spike_location(
         "n_jobs": 1,
         "chunk_duration": "1000s",
     }
+    full_extract = {**_extract, "ms_before": 0.25, "ms_after": 0.75}
     WaveformFeaturesParams().insert(
         [
             {
                 "features_param_name": fw_param,
                 "params": {
-                    "waveform_extraction_params": _extract,
+                    "waveform_extraction_params": full_extract,
                     "waveform_features_params": {"full_waveform": {}},
                 },
             },
@@ -648,6 +731,36 @@ def test_unit_waveform_features_v2_full_waveform_and_spike_location(
             "full_waveform should flatten n_time*n_channels into axis 1; got "
             f"{fw.shape}"
         )
+
+        # Read the source artifact directly. Every interior row must contain
+        # its complete, asymmetric trace window in time-then-channel order;
+        # shape alone also passes for zeros, transposed windows, or reordered
+        # spike rows. The location recipe above keeps its original window.
+        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+        recording = SpikeSortingOutput.get_recording({"merge_id": merge_id})
+        sorting = SpikeSortingOutput.get_sorting({"merge_id": merge_id})
+        assert recording.get_num_segments() == 1
+        frames = sorting.get_unit_spike_train(0)
+        np.testing.assert_array_equal(spikes, recording.get_times()[frames])
+        fs = recording.get_sampling_frequency()
+        before = int(full_extract["ms_before"] * fs / 1000)
+        after = int(full_extract["ms_after"] * fs / 1000)
+        assert before != after
+        traces = recording.get_traces(return_in_uV=True)
+        interior = (frames >= before) & (frames < len(traces) - after)
+        assert interior.sum() >= 0.8 * len(frames)
+        expected = np.array(
+            [
+                traces[frame - before : frame + after].reshape(-1)
+                for frame in frames[interior]
+            ]
+        )
+        np.testing.assert_allclose(fw[interior], expected, rtol=1e-3, atol=1e-2)
+        if (~interior).any():
+            np.testing.assert_array_equal(
+                fw[~interior], np.zeros_like(fw[~interior])
+            )
 
         # spike_location: supported for v2; writes a (n_spikes, 2 or 3) column
         # per unit aligned 1:1 with spike_times, alongside amplitude.

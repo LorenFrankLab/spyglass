@@ -177,6 +177,43 @@ def test_recording_content_fingerprint_discriminates(tmp_path):
     ), "sub-TRACE_ROUNDING noise must be absorbed (same hash)"
 
 
+@pytest.mark.integration
+@pytest.mark.nwb
+@pytest.mark.io_heavy
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"channel_ids": [10, 20, 30, 40]},
+        {"filtering": "no temporal filtering"},
+    ],
+    ids=["electrode_identity", "filtering_provenance"],
+)
+def test_fingerprint_discriminates_metadata_without_signal_changes(
+    tmp_path, overrides
+):
+    """Metadata contributes independently of voltage, time, and probe positions."""
+    from spyglass.spikesorting.v2._recording_fingerprint import (
+        recording_content_fingerprint,
+    )
+
+    base_path, base_series = _baseline(tmp_path / "base.nwb")
+    changed_path, changed_series = _baseline(
+        tmp_path / "changed.nwb", **overrides
+    )
+    base = recording_content_fingerprint(
+        base_path, electrical_series_path=base_series
+    )
+    changed = recording_content_fingerprint(
+        changed_path, electrical_series_path=changed_series
+    )
+    for component in ("traces", "timestamps", "geometry"):
+        assert base[component] == changed[component], component
+    assert base["metadata"] != changed["metadata"]
+    assert _aggregate(base_path, base_series) != _aggregate(
+        changed_path, changed_series
+    )
+
+
 def test_fingerprint_geometry_parity(tmp_path):
     """The persisted-region geometry hash equals one recomputed from
     SpikeInterface ``get_channel_locations`` for an unperturbed file -- pinning

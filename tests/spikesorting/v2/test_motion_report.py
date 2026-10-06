@@ -382,7 +382,12 @@ def test_figure_draws_trace_windows_when_given():
     )
 
     time_s = 110.0 + np.arange(100) / FS
-    original = np.tile(np.sin(np.arange(100) / 5.0)[:, None], (1, 2)) * 50.0
+    original = np.column_stack(
+        [
+            50.0 * np.sin(np.arange(100) / 5.0),
+            20.0 * np.cos(np.arange(100) / 7.0),
+        ]
+    )
     window = TraceWindow(
         source_time_s=time_s,
         channel_ids=[3, 4],
@@ -401,6 +406,20 @@ def test_figure_draws_trace_windows_when_given():
         "original",
         "corrected",
     }
+    # Display offsets are the channel baselines; after removing them the
+    # plotted signals must equal the supplied voltages, not a constant, the
+    # other channel, or the other version of the recording.
+    for channel, offset in enumerate(traces.get_yticks()):
+        np.testing.assert_allclose(
+            traces.get_lines()[2 * channel].get_ydata() - offset,
+            original[:, channel],
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            traces.get_lines()[2 * channel + 1].get_ydata() - offset,
+            original[:, channel] * 0.5,
+            atol=1e-12,
+        )
 
 
 def test_trace_lines_break_at_an_acquisition_gap():

@@ -195,7 +195,9 @@ def test_missing_extension_error_is_runtime_error():
 
 
 @pytest.mark.unit
-def test_plot_metrics_figure_one_histogram_per_metric_with_nan_dropped():
+def test_plot_metrics_figure_one_histogram_per_metric_with_nan_dropped(
+    monkeypatch,
+):
     """One histogram per numeric column; non-finite values dropped per-column."""
     metrics = pd.DataFrame(
         {
@@ -204,7 +206,23 @@ def test_plot_metrics_figure_one_histogram_per_metric_with_nan_dropped():
         },
         index=pd.Index([0, 1, 2], name="unit_id"),
     )
+    from matplotlib.axes import Axes
+
+    plotted = []
+    real_hist = Axes.hist
+
+    def record_hist(axis, values, *args, **kwargs):
+        plotted.append((axis, np.asarray(values).copy()))
+        return real_hist(axis, values, *args, **kwargs)
+
+    monkeypatch.setattr(Axes, "hist", record_hist)
     fig = plot_metrics_figure(metrics)
+    by_title = {axis.get_title(): values for axis, values in plotted}
+    assert set(by_title) == {"snr", "trough_half_width"}
+    np.testing.assert_array_equal(by_title["snr"], [3.0, 5.0])
+    np.testing.assert_array_equal(
+        by_title["trough_half_width"], [0.2, 0.25, 0.3]
+    )
     titles = [ax.get_title() for ax in fig.axes]
     assert "snr" in titles
     # The surfaced waveform-shape column is plotted as-is, not re-derived.

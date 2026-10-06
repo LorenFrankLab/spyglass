@@ -413,14 +413,42 @@ def test_detection_runs_per_shank(badchan_session, monkeypatch):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_suggest_forwards_detection_params(badchan_session, monkeypatch):
-    """`detection_params` is forwarded to the detector on every shank."""
+    """Every shank receives the requested filtering and detection parameters."""
+    import numpy as np
+    import spikeinterface.extractors as se
+    import spikeinterface.preprocessing as sip
+
+    from spyglass.common.common_nwbfile import Nwbfile
     from spyglass.spikesorting.v2 import bad_channels
 
     nwb = badchan_session["nwb_file_name"]
     captured: list[dict] = []
+    # This fixture's known raw acquisition is rate-based. Build the signal
+    # reference independently of suggest_bad_channels, using a non-default
+    # high-pass so ignoring the requested bandpass cannot pass unnoticed.
+    raw = se.read_nwb_recording(
+        Nwbfile.get_abs_path(nwb),
+        electrical_series_path="acquisition/e-series",
+        load_time_vector=False,
+        use_pynwb=True,
+    )
+    expected = sip.bandpass_filter(raw, freq_min=600.0, freq_max=6000.0)
 
     def spy_detect(recording, **kwargs):
         captured.append(kwargs)
+        np.testing.assert_allclose(
+            recording.get_traces(
+                start_frame=5000, end_frame=9000, return_in_uV=True
+            ),
+            expected.get_traces(
+                start_frame=5000,
+                end_frame=9000,
+                channel_ids=recording.get_channel_ids(),
+                return_in_uV=True,
+            ),
+            rtol=0.0,
+            atol=1e-6,
+        )
         return {
             "bad_channel_ids": [],
             "labels": {c: "good" for c in recording.get_channel_ids()},
@@ -428,7 +456,10 @@ def test_suggest_forwards_detection_params(badchan_session, monkeypatch):
 
     monkeypatch.setattr(bad_channels, "detect_bad_channels", spy_detect)
     bad_channels.suggest_bad_channels(
-        nwb, detection_params={"dead_channel_threshold": -0.4}, persist=False
+        nwb,
+        bandpass=(600.0, 6000.0),
+        detection_params={"dead_channel_threshold": -0.4},
+        persist=False,
     )
 
     assert captured  # at least one shank scanned
