@@ -684,7 +684,10 @@ def test_sorting_make_rollback_cleans_units_nwb(
     # written and AnalysisNwbfile.add has run inside the transaction.
     # (_populate_unit_part is a staticmethod taking only unit_rows; replacing it
     # with a plain function binds self on instance access.)
+    unit_part_calls = []
+
     def _broken_unit_part(self, unit_rows):
+        unit_part_calls.append(unit_rows)
         raise RuntimeError("simulated unit-part failure")
 
     monkeypatch.setattr(Sorting, "_populate_unit_part", _broken_unit_part)
@@ -693,6 +696,8 @@ def test_sorting_make_rollback_cleans_units_nwb(
     # machinery via suppress_errors; assert by checking the
     # after-state instead.
     Sorting.populate(sort_pk, reserve_jobs=False, suppress_errors=True)
+    assert len(unit_part_calls) == 1, "injected insert failure was not reached"
+    assert unit_part_calls[0], "the rollback fixture must produce unit rows"
     assert len(Sorting & sort_pk) == 0, (
         "Sorting row should not be present after rollback; "
         "the transaction was supposed to roll back."

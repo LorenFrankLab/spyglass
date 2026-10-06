@@ -17,6 +17,53 @@ import datajoint as dj
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.serial
+
+
+def _restore_column_snapshot(table, definitions, rows):
+    """Restore the original schema and values even if the upgrade fails early."""
+    present = {
+        row[0]
+        for row in table.connection.query(
+            "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s",
+            args=(table.database, table.table_name),
+        ).fetchall()
+    }
+    for name, definition in definitions.items():
+        if name not in present:
+            table.connection.query(
+                f"ALTER TABLE {table.full_table_name} ADD COLUMN {definition}"
+            )
+        elif _column_ddl(table, name) != definition:
+            # An interrupted upgrade can leave a nullable UUID column without
+            # its DataJoint type comment. Restore the adapter before update1
+            # encodes the UUIDs, while allowing unfilled rows until restored.
+            nullable = definition.replace(" NOT NULL", " NULL")
+            table.connection.query(
+                f"ALTER TABLE {table.full_table_name} MODIFY COLUMN {nullable}"
+            )
+    restored = dj.FreeTable(table.connection, table.full_table_name)
+    for row in rows:
+        restored.update1(row)
+    for name, definition in definitions.items():
+        if _column_ddl(table, name) != definition:
+            table.connection.query(
+                f"ALTER TABLE {table.full_table_name} MODIFY COLUMN {definition}"
+            )
+    if "curation_uuid" in definitions:
+        # DROP COLUMN also drops this index. Restore it after original UUIDs
+        # replace temporary default values, so uniqueness is safe to enforce.
+        indexed = table.connection.query(
+            f"SHOW INDEX FROM {table.full_table_name} "
+            "WHERE Key_name='curation_uuid'"
+        ).fetchall()
+        if not indexed:
+            table.connection.query(
+                f"ALTER TABLE {table.full_table_name} "
+                "ADD UNIQUE KEY `curation_uuid` (`curation_uuid`)"
+            )
+
 
 def _build_documented_upgrade_script(tmp_path: Path) -> tuple[Path, Path]:
     """Extract the doc's upgrade code block into a runnable script.
@@ -260,6 +307,10 @@ def test_documented_upgrade_preserves_retained_data(
         table: table.proj(*names).fetch(as_dict=True)
         for table, names in columns.items()
     }
+    definitions = {
+        table: {name: _column_ddl(table, name) for name in names}
+        for table, names in columns.items()
+    }
     script, config_file = _build_documented_upgrade_script(tmp_path)
     try:
         for table, names in columns.items():
@@ -312,6 +363,4 @@ def test_documented_upgrade_preserves_retained_data(
     finally:
         config_file.unlink(missing_ok=True)
         for table, rows in snapshots.items():
-            restored = dj.FreeTable(dj.conn(), table.full_table_name)
-            for row in rows:
-                restored.update1(row)
+            _restore_column_snapshot(table, definitions[table], rows)

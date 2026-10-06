@@ -221,8 +221,6 @@ def test_cache_rejects_storage_drift_before_loading_analyzer(
     """Changed chunks invalidate a cache without opening their array payloads."""
     import json
 
-    import spikeinterface as si
-
     from spyglass.spikesorting.v2 import _curation_analyzer as resolver
 
     expected = {
@@ -237,6 +235,7 @@ def test_cache_rejects_storage_drift_before_loading_analyzer(
         "source_artifact_hashes": {},
         "waveform_recipe_hash": "recipe-hash",
         "spikeinterface_version": "si-version",
+        "extension_request": {},
     }
     payload = tmp_path / "extensions" / "templates" / "data.bin"
     payload.parent.mkdir(parents=True)
@@ -252,14 +251,32 @@ def test_cache_rejects_storage_drift_before_loading_analyzer(
     )
     payload.write_bytes(b"externally modified with a different size")
     loads = []
-    monkeypatch.setattr(
-        si, "load_sorting_analyzer", lambda _folder: loads.append(_folder)
-    )
+
+    def observed_loader(folder):
+        loads.append(folder)
+        raise RuntimeError("reached analyzer loader boundary")
+
+    monkeypatch.setattr(resolver, "load_analyzer_folder", observed_loader)
     assert (
         resolver._load_valid_cached_analyzer(tmp_path, expected, "display")
         is None
     )
     assert loads == []
+
+    # Positive control: when the fingerprint matches the current files, the
+    # same manifest reaches the loader. Its deliberate failure still returns
+    # None, so the recorded call distinguishes loading from early rejection.
+    manifest["storage_fingerprint"] = resolver._folder_storage_fingerprint(
+        tmp_path
+    )
+    (tmp_path / resolver.CURATION_ANALYZER_MANIFEST).write_text(
+        json.dumps(manifest)
+    )
+    assert (
+        resolver._load_valid_cached_analyzer(tmp_path, expected, "display")
+        is None
+    )
+    assert loads == [tmp_path]
 
 
 def test_open_curation_analyzer_yields_disk_backed_working_copy(
@@ -358,16 +375,24 @@ def test_concurrent_resolve_builds_once(tmp_path):
     ]
     for process in processes:
         process.start()
-    start_event.set()
-    for process in processes:
-        process.join(timeout=15)
-        assert not process.is_alive(), "concurrent resolver process hung"
-        assert process.exitcode == 0
+    try:
+        start_event.set()
+        for process in processes:
+            process.join(timeout=15)
+            assert not process.is_alive(), "concurrent resolver process hung"
+            assert process.exitcode == 0
 
-    outcomes = sorted(results.get(timeout=2) for _ in processes)
-    assert outcomes == [("ok", "complete"), ("ok", "complete")]
-    assert (tmp_path / "build_count.txt").read_text() == "1"
-    assert (folder / "complete.txt").read_text() == "complete"
+        outcomes = sorted(results.get(timeout=2) for _ in processes)
+        assert outcomes == [("ok", "complete"), ("ok", "complete")]
+        assert (tmp_path / "build_count.txt").read_text() == "1"
+        assert (folder / "complete.txt").read_text() == "complete"
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+            process.join(timeout=5)
+        results.close()
+        results.join_thread()
 
 
 @pytest.mark.slow
@@ -673,7 +698,9 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         import datajoint as dj
 
         monkeypatch.setattr(dj.utils, "user_choice", lambda message: "yes")
-        Sorting.find_orphaned_analyzer_folders(dry_run=False)
+        Sorting.find_orphaned_analyzer_folders(
+            sorting_id=sorting_key["sorting_id"], dry_run=False
+        )
         assert not folder.exists()
         clear_curations_for(sorting_key)
         folder = None

@@ -672,6 +672,7 @@ def test_make_rejects_offline_ephemeral_bypass(populated_sorting_with_curation):
         figpack_config_hash,
     )
     from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
     from spyglass.spikesorting.v2.figpack_curation import (
         FigPackCuration,
@@ -684,6 +685,9 @@ def test_make_rejects_offline_ephemeral_bypass(populated_sorting_with_curation):
     config_hash = figpack_config_hash(
         sorting_id=populated_sorting_with_curation["sorting_id"],
         curation_id=populated_sorting_with_curation["curation_id"],
+        curation_uuid=(CurationV2 & populated_sorting_with_curation).fetch1(
+            "curation_uuid"
+        ),
         label_options=label_options,
         displayed_unit_properties=None,
         upload=False,
@@ -705,7 +709,9 @@ def test_make_rejects_offline_ephemeral_bypass(populated_sorting_with_curation):
         },
         allow_direct_insert=True,
     )
-    with pytest.raises(SchemaBypassError):
+    with pytest.raises(
+        SchemaBypassError, match="upload=False with ephemeral=True"
+    ):
         FigPackCuration.populate({"figpack_curation_id": figpack_id})
 
 

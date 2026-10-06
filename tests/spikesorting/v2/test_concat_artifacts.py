@@ -610,7 +610,7 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
 
 @pytest.mark.slow
 def test_member_artifact_failure_retry_and_reuse(
-    chronic_2_session_minirec, monkeypatch
+    chronic_2_session_minirec, monkeypatch, request
 ):
     from spikeinterface.core import NumpySorting
 
@@ -618,15 +618,55 @@ def test_member_artifact_failure_retry_and_reuse(
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
         RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.exceptions import PipelineStageError
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
     from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.session_group import SessionGroup
-    from tests.spikesorting.v2._motion_db_helpers import sorter_key
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from tests.spikesorting.v2._motion_db_helpers import (
+        drop_pipeline_sorts,
+        sorter_key,
+    )
 
     fixture = chronic_2_session_minirec
     name = "artifact_retry_test"
+    group_key = {
+        "session_group_owner": fixture["owner"],
+        "session_group_name": name,
+    }
+    recipe_key = {"artifact_detection_params_name": name}
+
+    def cleanup_case():
+        # Only this retry case's dependents and recipe are removed; the shared
+        # chronic Recording inputs stay available to later tests.
+        concat_keys = (ConcatenatedRecordingSelection & group_key).fetch(
+            "KEY", as_dict=True
+        )
+        if concat_keys:
+            sorting_ids = (
+                SortingSelection.ConcatenatedRecordingSource & concat_keys
+            ).fetch("sorting_id")
+            drop_pipeline_sorts(sorting_ids)
+        for key in concat_keys:
+            (ConcatenatedRecording & key).super_delete(warn=False)
+            (ConcatenatedRecordingSelection & key).super_delete(warn=False)
+        (SessionGroup & group_key).super_delete(warn=False)
+        for key in (RecordingArtifactSelection & recipe_key).fetch(
+            "KEY", as_dict=True
+        ):
+            if RecordingArtifactDetection & key:
+                (RecordingArtifactDetection & key).delete(safemode=False)
+            (RecordingArtifactSelection & key).super_delete(warn=False)
+        (ArtifactDetectionParameters & recipe_key).super_delete(warn=False)
+
+    cleanup_case()
+    request.addfinalizer(cleanup_case)
     SessionGroup.create_group(
         fixture["owner"], name, fixture["same_day_members"]
     )
@@ -683,17 +723,17 @@ def test_member_artifact_failure_retry_and_reuse(
             recording.get_sampling_frequency(),
         ),
     )
-    request = {
+    pipeline_request = {
         "concat_session_group_owner": fixture["owner"],
         "concat_session_group_name": name,
         "pipeline_preset": name,
     }
     with pytest.raises(PipelineStageError) as error:
-        run_v2_pipeline(**request)
+        run_v2_pipeline(**pipeline_request)
     assert error.value.stage == "member_artifact_detection"
     completed = error.value.partial_run_summary["member_artifacts"]
     assert len(completed) == 1 and completed[0]["masked_duration_s"] > 0
-    retry = run_v2_pipeline(**request)
+    retry = run_v2_pipeline(**pipeline_request)
     assert [member["status"] for member in retry["member_artifacts"]] == [
         "reused",
         "computed",
@@ -701,7 +741,7 @@ def test_member_artifact_failure_retry_and_reuse(
     assert retry["artifact_masked_duration_s"] == pytest.approx(
         sum(member["masked_duration_s"] for member in retry["member_artifacts"])
     )
-    again = run_v2_pipeline(**request)
+    again = run_v2_pipeline(**pipeline_request)
     assert again["sorting_id"] == retry["sorting_id"]
     assert again["concat_recording_id"] == retry["concat_recording_id"]
     assert again["member_artifact_detection_status"] == "reused"
@@ -726,7 +766,7 @@ def test_member_artifact_failure_retry_and_reuse(
         empty_second_member,
     )
     with pytest.raises(PipelineStageError) as error:
-        run_v2_pipeline(**request)
+        run_v2_pipeline(**pipeline_request)
     assert error.value.stage == "member_artifact_detection"
     assert str(artifact_id) in str(error.value)
     assert str(recording_id) in str(error.value)

@@ -246,6 +246,7 @@ def test_reopened_bundle_uses_current_save_protocol_without_rewriting_draft(
 def test_competing_processes_cannot_both_replace_the_same_draft(bundle):
     """Separate review servers must coordinate through shared bundle storage."""
     import concurrent.futures
+    import selectors
     import subprocess
     import sys
 
@@ -265,6 +266,11 @@ sys.stdin.read()
         text=True,
     )
     try:
+        with selectors.DefaultSelector() as ready:
+            ready.register(process.stdout, selectors.EVENT_READ)
+            assert ready.select(
+                timeout=10
+            ), "Review server did not become ready"
         other = process.stdout.readline().strip() + "annotations.json"
         baseline = _revision(target)
         assert _revision(other) == baseline
@@ -281,7 +287,12 @@ sys.stdin.read()
             "writer"
         ] in (1, 2)
     finally:
-        process.communicate(timeout=10)
+        try:
+            process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=10)
+            raise
 
 
 def test_review_open_returns_url_without_launching_browser(bundle, monkeypatch):

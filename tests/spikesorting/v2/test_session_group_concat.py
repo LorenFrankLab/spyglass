@@ -329,21 +329,39 @@ def test_create_group_rejects_caller_supplied_recording_date(
 
 
 @pytest.mark.slow
-def test_create_group_is_atomic_on_member_failure(chronic_2_session_minirec):
-    """A failed Member insert leaves no master row and no partial Members."""
+def test_create_group_is_atomic_on_member_failure(
+    chronic_2_session_minirec, monkeypatch
+):
+    """A failure after the first Member write rolls back master and parts."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.exceptions import SessionGroupInputError
     from spyglass.spikesorting.v2.session_group import SessionGroup
 
     sub = chronic_2_session_minirec
     owner, name = sub["owner"], "sg_atomic"
     key = {"session_group_owner": owner, "session_group_name": name}
-    good = sub["same_day_members"][0]
-    # Second member shares a valid Session (so date derivation succeeds) but
-    # names a nonexistent sort_group_id, so the Member insert fails its FK
-    # INSIDE the transaction -- after the master insert -- exercising rollback.
-    bad = {**sub["same_day_members"][1], "sort_group_id": 99999}
+    real_insert = SessionGroup.Member.insert
+    reached = []
+
+    def fail_after_first_member(rows, **kwargs):
+        assert SessionGroup.connection.in_transaction
+        assert SessionGroup & key, "master must be visible before member insert"
+        real_insert(rows[:1], **kwargs)
+        assert len(SessionGroup.Member & key) == 1
+        reached.append("first member stored")
+        raise dj.errors.IntegrityError(
+            "injected failure after first Member write"
+        )
+
+    monkeypatch.setattr(
+        SessionGroup.Member, "insert", staticmethod(fail_after_first_member)
+    )
     try:
-        with pytest.raises(Exception):  # noqa: B017 -- DataJoint IntegrityError
-            SessionGroup.create_group(owner, name, [good, bad])
+        with pytest.raises(SessionGroupInputError) as error:
+            SessionGroup.create_group(owner, name, sub["same_day_members"])
+        assert isinstance(error.value.__cause__, dj.errors.IntegrityError)
+        assert reached == ["first member stored"]
         assert not (SessionGroup & key)
         assert len(SessionGroup.Member & key) == 0
     finally:
@@ -1326,6 +1344,7 @@ def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
         read_long_provenance,
         read_provenance_values,
     )
+    from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
         SessionGroup,
@@ -1348,6 +1367,32 @@ def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
         read_long_provenance(abs_path, CONCAT_MEMBERS),
         key=lambda r: r["member_index"],
     )
+    # Every export row independently names the requested source Recording and
+    # its full frame span. Missing rows, placeholder/wrong recording ids, and
+    # compensating frame-map errors cannot satisfy this complete oracle.
+    expected_members = []
+    concat_start = 0
+    for index, (member, recording_key) in enumerate(
+        zip(grp["same_day_members"], grp["recording_pks"], strict=True)
+    ):
+        count = Recording().get_recording(recording_key).get_num_samples()
+        expected_members.append(
+            {
+                "member_index": index,
+                "recording_id": str(recording_key["recording_id"]),
+                "nwb_file_name": member["nwb_file_name"],
+                "interval_list_name": member["interval_list_name"],
+                "artifact_detection_id": "none",
+                "start_sample": 0,
+                "end_sample": count,
+                "concat_start_sample": concat_start,
+                "concat_end_sample": concat_start + count,
+                "provenance_schema_version": 1,
+            }
+        )
+        concat_start += count
+    assert members == expected_members
+    assert concat_start == row["n_samples"]
 
     # Frame boundaries reproduce MemberBoundary (split_sorting_by_session's
     # arithmetic basis), contiguously partitioning the concat timeline.

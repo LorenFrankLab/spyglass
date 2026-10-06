@@ -113,12 +113,14 @@ def _export_and_populate(merge_id, paper_id, *, also_spike_times=False):
     (Export() & {"paper_id": paper_id}).super_delete(warn=False, safemode=False)
 
     es.start_export(paper_id=paper_id, analysis_id=1)
-    SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})
-    if also_spike_times:
-        # Exercised for the zero-unit case: must not raise
-        # KeyError: 'spike_times' on the empty (no-column) units table.
-        SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
-    es.stop_export()
+    try:
+        SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})
+        if also_spike_times:
+            # Exercised for the zero-unit case: must not raise
+            # KeyError: 'spike_times' on the empty (no-column) units table.
+            SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
+    finally:
+        es.stop_export()
 
     eid = es._max_export_id(paper_id)
     selection = {
@@ -142,6 +144,48 @@ def _cleanup_export(paper_id):
     (ExportSelection() & {"paper_id": paper_id}).super_delete(
         warn=False, safemode=False
     )
+
+
+@pytest.mark.unit
+def test_export_helper_stops_logging_when_fetch_fails(monkeypatch):
+    """A failed export cannot leave later tests logging to its export ID."""
+    import sys
+    from types import SimpleNamespace
+
+    calls = []
+
+    class Selection:
+        def __and__(self, restriction):
+            return self
+
+        def super_delete(self, **kwargs):
+            pass
+
+        def start_export(self, **kwargs):
+            calls.append("start")
+
+        def stop_export(self):
+            calls.append("stop")
+
+    class Output:
+        def fetch_nwb(self, key):
+            raise RuntimeError("injected fetch failure")
+
+    # Stub the DB endpoints, retaining the real helper's try/finally control
+    # flow. The successful export/cascade behavior is covered below with DB IO.
+    monkeypatch.setitem(
+        sys.modules,
+        "spyglass.common.common_usage",
+        SimpleNamespace(ExportSelection=Selection, Export=Selection),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "spyglass.spikesorting.spikesorting_merge",
+        SimpleNamespace(SpikeSortingOutput=Output),
+    )
+    with pytest.raises(RuntimeError, match="injected fetch failure"):
+        _export_and_populate("merge", "paper")
+    assert calls == ["start", "stop"]
 
 
 @pytest.mark.slow

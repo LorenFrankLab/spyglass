@@ -1802,27 +1802,71 @@ def test_concat_member_trace_accessors_have_one_meaning_each(
 
 
 def test_motion_cleanup_drops_the_sorts_of_corrected_recordings(
-    corrected_sorts,
+    drift_recording, monkeypatch
 ):
-    """The module teardown's motion cleanup also removes populated sorts of
-    the recording's corrected recordings (a test that failed before its own
-    cleanup leaves them), instead of failing on their correction parts.
-
-    Runs last: it removes the module's corrected sorts.
-    """
+    """Cleanup removes corrected sorts on an independently owned recording."""
+    from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecording,
         MotionEstimateSelection,
     )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
-    sorts = corrected_sorts
-    sort = sorts["corrected_sort"]
-    assert Sorting & sort
-    drop_motion_selections(sorts["recording_key"])
-    assert not (SortingSelection & sort)
-    assert not (MotionCorrectedRecording & sorts["corrected_key"])
-    assert not (
-        MotionEstimateSelection.RecordingSource & sorts["recording_key"]
+    nwb = drift_recording["nwb_file_name"]
+    t0 = session_start_s(nwb)
+    interval = "motion cleanup isolated interval"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb,
+            "interval_list_name": interval,
+            "valid_times": np.asarray([[t0 + 16.0, t0 + 20.0]]),
+            "pipeline": "motion_cleanup_test",
+        },
+        skip_duplicates=True,
     )
-    assert SortingSelection & sorts["uncorrected_sort"]
+    parent = (RecordingSelection & drift_recording["recording_key"]).fetch1()
+    recording_key = RecordingSelection.insert_selection(
+        {
+            name: parent[name]
+            for name in (
+                "nwb_file_name",
+                "sort_group_id",
+                "team_name",
+                "preprocessing_params_name",
+            )
+        }
+        | {"interval_list_name": interval}
+    )
+    sort_keys = []
+    try:
+        Recording.populate(recording_key, reserve_jobs=False)
+        corrected_key = populated_corrected(populated_estimate(**recording_key))
+        for correction in ({}, corrected_key):
+            sort_keys.append(
+                SortingSelection.insert_selection(
+                    {**recording_key, **sorter_key(), **correction}
+                )
+            )
+        plant_sorter(monkeypatch, _planted_sorter({}))
+        Sorting.populate(sort_keys, reserve_jobs=False)
+        uncorrected_sort, corrected_sort = sort_keys
+        assert Sorting & corrected_sort
+
+        drop_motion_selections(recording_key)
+        assert not (SortingSelection & corrected_sort)
+        assert not (MotionCorrectedRecording & corrected_key)
+        assert not (MotionEstimateSelection.RecordingSource & recording_key)
+        assert SortingSelection & uncorrected_sort
+        assert Sorting & uncorrected_sort
+    finally:
+        drop_pipeline_sorts([key["sorting_id"] for key in sort_keys])
+        drop_motion_selections(recording_key)
+        (RecordingSelection & recording_key).super_delete(warn=False)
+        (
+            IntervalList
+            & {"nwb_file_name": nwb, "interval_list_name": interval}
+        ).delete_quick()

@@ -1310,7 +1310,7 @@ def test_recording_recompute_age_gate_refuses_recent_or_unknown(
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_delete_files_round_trip(populated_sorting, clean_recompute):
+def test_delete_files_round_trip(populated_sorting, clean_recompute, tmp_path):
     """The full reclamation round-trip (gates the delete_files re-enable):
     populate -> recompute matched -> delete_files removes the file ->
     get_recording rebuilds + reconciles -> traces equal pre-delete -> the
@@ -1343,24 +1343,44 @@ def test_delete_files_round_trip(populated_sorting, clean_recompute):
         RecordingArtifactRecompute & rec_key & "matched=1"
     ), "a fresh rebuild must reproduce content_hash -> matched=1"
 
-    removed = RecordingArtifactRecompute().delete_files(
-        rec_key, dry_run=False, days_since_creation=0
-    )
-    assert (
-        removed and not Path(abs_path).exists()
-    ), "delete_files must reclaim the matched artifact"
-    assert RecordingArtifactRecompute & rec_key & "deleted=1"
+    # Restore independently of the accessor being tested, including when its
+    # self-heal path raises, so the package fixture remains usable after failure.
+    import shutil
 
-    # get_recording rebuilds + reconciles the checksum; traces are identical.
-    rec = Recording().get_recording(rec_key)
-    np.testing.assert_array_equal(rec.get_traces(), before)
-    assert Path(
-        AnalysisNwbfile.get_abs_path(analysis_file_name)
-    ).exists(), "the canonical file must be back on disk"
-    # The rebuild's best-effort clear flips the recompute rows to deleted=0.
-    assert not (
-        RecordingArtifactRecompute & rec_key & "deleted=1"
-    ), "rebuild must clear the stale deleted=1 flag (presence-aware)"
+    backup = tmp_path / "recording-before-reclamation.nwb"
+    shutil.copy2(abs_path, backup)
+    try:
+        removed = RecordingArtifactRecompute().delete_files(
+            rec_key, dry_run=False, days_since_creation=0
+        )
+        assert (
+            removed and not Path(abs_path).exists()
+        ), "delete_files must reclaim the matched artifact"
+        assert RecordingArtifactRecompute & rec_key & "deleted=1"
+
+        # get_recording rebuilds + reconciles the checksum; traces are identical.
+        rec = Recording().get_recording(rec_key)
+        np.testing.assert_array_equal(rec.get_traces(), before)
+        assert Path(
+            AnalysisNwbfile.get_abs_path(analysis_file_name)
+        ).exists(), "the canonical file must be back on disk"
+        # The rebuild's best-effort clear flips the recompute rows to deleted=0.
+        assert not (
+            RecordingArtifactRecompute & rec_key & "deleted=1"
+        ), "rebuild must clear the stale deleted=1 flag (presence-aware)"
+    finally:
+        # Readers of the rebuilt file can keep their open handle while the
+        # canonical path is restored atomically to the original artifact.
+        import os
+
+        restore = Path(abs_path).with_name(f".{Path(abs_path).name}.restore")
+        shutil.copy2(backup, restore)
+        os.replace(restore, abs_path)
+        # A successful rebuild registered its new whole-file bytes. Restoring
+        # the original artifact must restore that checksum too: regenerated
+        # NWB object IDs and creation timestamps can differ despite equal data.
+        AnalysisNwbfile()._resolve_external(analysis_file_name)
+        assert Path(AnalysisNwbfile.get_abs_path(analysis_file_name)).exists()
 
 
 @pytest.mark.slow
@@ -1462,7 +1482,9 @@ def test_sorting_analyzer_recompute_mismatch_records_hash_rows(
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_analyzer_recompute_round_trip(populated_sorting, clean_recompute):
+def test_analyzer_recompute_round_trip(
+    populated_sorting, clean_recompute, tmp_path
+):
     """The full analyzer reclamation round-trip -- the ``dry_run=False`` analog
     of ``test_delete_files_round_trip`` (recording).
 
@@ -1504,6 +1526,13 @@ def test_analyzer_recompute_round_trip(populated_sorting, clean_recompute):
             {**matched_key, "created_at": old}
         )
 
+    import shutil
+
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_lock
+
+    backup = tmp_path / "analyzer-before-reclamation"
+    with analyzer_cache_lock(populated_sorting["sorting_id"]):
+        shutil.copytree(folder, backup)
     try:
         removed = rc.SortingAnalyzerRecompute().delete_files(
             populated_sorting, dry_run=False, days_since_creation=0
@@ -1524,13 +1553,11 @@ def test_analyzer_recompute_round_trip(populated_sorting, clean_recompute):
         assert rc.SortingAnalyzerVersions & version_key
         assert not (rc.SortingAnalyzerRecomputeSelection & version_key)
     finally:
-        # The folder belongs to the shared package fixture; restore it if the
-        # body failed after the reclaim, so siblings do not cascade-fail.
-        if not folder.exists():
-            try:
-                Sorting().get_analyzer(populated_sorting)
-            except Exception:
-                pass
+        # A failing loader cannot restore itself. Copy back the original cache
+        # under the same real lock used by canonical readers/writers.
+        with analyzer_cache_lock(populated_sorting["sorting_id"]):
+            shutil.rmtree(folder, ignore_errors=True)
+            shutil.copytree(backup, folder)
 
 
 @pytest.mark.slow
