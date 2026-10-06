@@ -1,61 +1,119 @@
 # Change Log
 
-## [0.5.6] (Unreleased)
+## [0.6.1] (Unreleased)
 
+<!--
 ### Release Notes
 
-Running draft to be removed immediately prior to release. When altering tables,
-import all foreign key references.
-
 ```python
-# Alter Decoding v1 table
-from spyglass.common.common_filter import FirFilterParameters
-from spyglass.decoding.v1.core import DecodingParameters
-
-FirFilterParameters().alter()
-DecodingParameters().alter()
-
-# Alter v0 recompute table
-from spyglass.spikesorting.v0.spikesorting_recompute import (
-    RecordingRecompute,
-    RecordingRecomputeSelection,
-    RecordingRecomputeVersions,  # noqa F401
-    UserEnvironment,  # noqa F401
-)
-
-RecordingRecomputeSelection().alter()
-RecordingRecompute().alter()
-
-# Alter v1 recompute table
-from spyglass.spikesorting.v1.recompute import (
-    RecordingRecompute,
-    RecordingRecomputeSelection,
-    RecordingRecomputeVersions,  # noqa F401
-    UserEnvironment,  # noqa F401
-)
-
-RecordingRecomputeSelection().alter()
-RecordingRecompute().alter()
-
-
-# Fix LFPBandV1 issue #1481
-from spyglass.lfp.analysis.v1 import LFPBandV1
-
-LFPBandV1().fix_1481()
-
-# Increase DLCProject.config_path length
-from spyglass.position.v1.position_dlc_project import DLCProject
-
-DLCProject().alter()
+# Add alter commands here
 ```
+-->
+
+### Documentation
+
+- Add LFP artifact detection to the LFP notebook #1641
+- Add File Backends developer page #1662
+
+### Infrastructure
+
+- Prevent errors during update for dandi standard from propagating to other
+    files #1677
+- Refactor `get_nwb_file` fallbacks into a pluggable `FileBackend` protocol
+    #1662
+- Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
+- Add `prefer_download` custom config for stream-capable backends #1662
+
+### Pipelines
+
+- Spike Sorting
+
+    - Store `hash` on `SpikeSortingRecording` insert, and fix the `Path`/`str`
+        comparison that skipped hash verification on recompute. A recompute that
+        does not match the stored hash now deletes the new files and raises. Rows
+        written before this have a null hash; a recompute of one warns and is
+        accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
+        #1662
+
+## [0.6.0] (Sep 1st 2026)
 
 ### Breaking Changes
+
+#### `insert_sessions` Returns a List (#1660)
+
+`insert_sessions` returned from inside its loop over `nwb_file_names`, so a list
+argument only ever processed its first file. It now processes every file and
+returns one `populate_all_common` result per file, rather than a single result.
+
+#### Ingestion Raises Instead of Skipping (#1660)
+
+Two cases ingestion used to pass over silently now raise.
+
+`_expected_duplicates` is read per table rather than once for the whole
+ingestion, so a table that legitimately recurs across files (`Task`) can be
+validated while the table driving the ingestion is not. `TaskEpoch`,
+`ImportedPose` and `ImportedLFP` no longer expect duplicates: re-ingesting an
+already-ingested file raises `DuplicateError` instead of validating and
+skipping.
+
+A `TaskEpoch` whose `camera_id` matched no `CameraDevice` in the NWB file or
+config was dropped with only an info log, and with it the `VideoFile`,
+`StateScriptFile` and `OptogeneticProtocol` rows referencing that epoch. A
+dangling camera reference now raises `ValueError`; an epoch that genuinely names
+no camera stores `camera_names = []` and is kept.
+
+#### NwbfileHasher Now Includes Dataset Content (#1600)
+
+`NwbfileHasher` previously discarded the return value of `hash_dataset()`, so
+HDF5 Dataset values (the actual array data) were never incorporated into
+`SpikeSortingRecording.hash`. Only metadata (attrs, shape, dtype) was hashed.
+
+**Impact**: All V1 `SpikeSortingRecording` hashes computed before this fix are
+metadata-only. Running `RecordingRecompute.populate()` against a pre-fix stored
+hash will produce `matched=False` even when the file is identical, because the
+old and new hashers disagree on what to include.
+
+**If you have existing `matched=1` entries** from before this fix, those matches
+only verified metadata — Dataset content was not compared. These entries should
+be re-validated once all users have upgraded.
+
+**Backward compatibility**: Set `SPYGLASS_LEGACY_HASHES=true` in your shell
+environment to restore pre-fix (metadata-only) hashing in `RecordingRecompute`.
+This allows existing matched entries to be reproduced without recomputing, and
+is intended as a temporary bridge while labs transition:
+
+```bash
+SPYGLASS_LEGACY_HASHES=true python -c "
+from spyglass.spikesorting.v1.recompute import RecordingRecompute
+RecordingRecompute().populate(...)
+"
+```
 
 #### LFPBandV1 Fix
 
 If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
 2025, you may have stored inaccurate interval list times due to #1481. To fix
-these, please run `LFPBandV1().fix_1481()` as shown in the release notes.
+these, please run the following after updating:
+
+```python
+from spyglass.lfp.analysis.v1 import LFPBandV1
+
+LFPBandV1().fix_1481()
+```
+
+#### AutomaticCuration Fix
+
+If you were using `v0.AutomaticCuration` after April 2025, you may have stored
+inaccurate labels due to #1513. To fix these, please run the following after
+updating:
+
+```python
+from spyglass.spikesorting.v0 import Fix1513Status
+
+Fix1513Status.populate()
+Fix1513Status.activate_pending_nwb_repairs()
+Fix1513Status.run_pending_repopulates()
+```
 
 #### Decoding Results Structure
 
@@ -98,7 +156,7 @@ for label, interval_data in results.groupby("interval_labels"):
 
 ### Documentation
 
-- Delete extra pyscripts that were renamed # 1363
+- Delete extra pyscripts that were renamed #1363
 - Add note on fetching changes to setup notebook #1371
 - Revise table field docstring heading and `mermaid` diagram generation #1402
 - Add pages for custom analysis tables and class inheritance structure #1435
@@ -124,7 +182,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Default to globally saved config #1430
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
-    #1484, #1489, #1507
+    #1484, #1489, #1507, #1614, #1660
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440
@@ -132,7 +190,7 @@ for label, interval_data in results.groupby("interval_labels"):
     #1490
 - Update fixes for accessing files from DANDI #1477
 - Deprecate `populate` transaction workaround with tripart `make` calls #1422
-    #1505
+    #1505, #1633
 - Improve export process for speed and generalization #1387
 - Additional methods for updating files for DANDI standards #1387
 - Implementation of union and intersect methods for restriction graphs #1387
@@ -155,12 +213,88 @@ for label, interval_data in results.groupby("interval_labels"):
     `starting_time + rate` (no timestamps) #1571
 - Parallelize `AnalysisFileIssues` checks #1557
 - Tests update config sooner to avoid false-negative `test_mode` errors #1572
+- Tests default `--base-dir` to `./tests/_data/` and ignore an exported
+    `SPYGLASS_BASE_DIR`. `SpyglassConfig.load_config` now resolves and validates
+    every path before creating anything, and under `test_mode` requires each
+    resolved directory to sit inside the base dir, keeping destructive tests off
+    shared/production filesystems. A config instance binds `test_mode` before an
+    explicit load is validated (or when an ambient load succeeds), refuses later
+    mode changes, and therefore cannot fall back to production paths after a
+    failed test-mode load. Ambient/implicit loads with an out-of-sandbox base
+    degrade gracefully rather than raising, so they never crash an unrelated
+    import #1573 #1574
+- `AnalysisNwbfile.cleanup()` follows leaf `*.nwb` symlinks and deletes their
+    targets, so analysis files spread across volumes are cleaned in one pass.
+    Directory symlinks are not traversed (`followlinks=False`), so cleanup
+    cannot follow a symlinked subdirectory out of `analysis_dir`; only leaf
+    `*.nwb` symlinks are eligible. The sweep uses the same trust-the-disk model
+    as other Spyglass cleanup routines: one tracked-path/filesystem snapshot, a
+    24-hour `mtime` gate, aggregate deletion limits, dry-run reporting, and
+    ordinary unlink error logging #1573 #1574
+- Add filesystem deletion limits to `AnalysisNwbfile.cleanup()`, computed over
+    the files the sweep was eligible to act on #1573 #1574
+- Analysis cleanup, including a dry-run preview, refuses a pre-existing
+    insert-blocking trigger, which may represent an active cleanup or stale
+    state. Confirm no cleanup is active before using
+    `AnalysisRegistry().unblock_new_inserts()`. This check is not a full cleanup
+    lease or per-run trigger-ownership protocol #1574
+- Fix: `AnalysisNwbfile.cleanup()` no longer deletes a **tracked** 0-byte
+    analysis file, which left a dangling DataJoint row (pre-existing)
+- Fix: honor `SpyglassConfig(test_mode=...)` and `debug_mode`; `load_config`
+    previously discarded the constructor/call kwargs in favor of `dj.config`
+    (pre-existing) #1574
+- The maintenance cron now propagates a cleanup refusal or failure instead of
+    reporting a successful run #1574
 - Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575
 - Warn on no-operation restrictions #1586
 - Improved efficiency for writing multiple objects to analysis file #1594
 - Pin `scipy<1.13` for `spikeinterface==0.99.1` compatibility #1612
+- Fix `NwbfileHasher` to include HDF5 Dataset content in file hash; add
+    `SPYGLASS_LEGACY_HASHES` env var to `RecordingRecompute` for backward
+    compatibility with pre-fix hashes #1600
+- Fix redundant hash computation in `SpikeSortingRecording._make_file`:
+    `_update_external` no longer re-reads the NWB file to verify a hash that was
+    just computed by the caller #1600
+- Kachery as optional dependency #1607
+- Allow revisited nodes in graph cascade #1610
+- Add `DandiValidation` tables for tracking dandi compliance during export #1584
+- Save disk checks as csv, predict runway of primary data directory #1611
+- Fix package scanning without database import #1621
+- Allow `RestrGraph` to inspect tables outside of Spyglass #1595
+- Drop the `ghostipy` dependency by vendoring the FIR filter design and
+    out-of-core filtering it used (`scipy.fft` backend, no `pyfftw`). Filter
+    coefficients are bit-identical and the filtered float result matches the
+    previous implementation to round-off (~1e-15). Note that LFP is stored in
+    the raw data's dtype, so for `int16` raw data the float result is truncated
+    on write, and truncation can turn that round-off into a one-count difference
+    in a small fraction of stored samples -- recomputing an existing LFP entry
+    may not reproduce it exactly to the bit. Declares `scipy` explicitly and
+    ships Ghostipy's Apache-2.0 license #1635
+- Fix an inherited overlap-save bug in the vendored FIR filter: a signal shorter
+    than the filter combined with a tight `nfft` returned a wrong convolution.
+    Unreachable at the default `nfft`, so LFP output is unaffected #1635
+- Fix filtering an on-disk electrical series with 16 or more electrodes when a
+    block read is empty -- an interval starting at sample 0, or a trailing block
+    beginning at the end of the data -- which raised an h5py "Dataspaces don't
+    have hyperslab selections" error #1635
+- `FirFilterParameters.filter_data` and `filter_data_nwb` now raise when every
+    interval in `valid_times` is empty, instead of writing a zero-length
+    electrical series and then failing, and reject a reversed interval instead
+    of silently dropping it #1635
+- Electrode selections may again be given in any order, on-disk as well as
+    in-memory; rows are returned in the order requested #1635
+- Log a warning when an interval in `valid_times` is skipped for containing no
+    samples, instead of dropping it silently #1635
+- Split the vendored FIR sizing pass into its own `describe_output` function
+    instead of a `describe_dims` flag on `filter_data_fir`, so each returns one
+    type and arguments that cannot affect the sizing answer are rejected rather
+    than ignored #1635
+- Remove items scheduled for 0.6.0 deprecation #1633
+- Add `--container-vol-dir` pytest option to store the test container's MySQL
+    data on a chosen disk, and document it alongside the existing
+    `--container-name`/`--container-port` options #1661
 
 ### Pipelines
 
@@ -182,7 +316,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix typo in VideoFile.make #1427
     - Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
         from NWB #1433
-    - Add custom/dynamic `AnalysisNwbfile` creation #1435, #1496, #1498
+    - Add custom/dynamic `AnalysisNwbfile` creation #1435, #1496, #1498, #1632
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
     - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
@@ -193,11 +327,15 @@ for label, interval_data in results.groupby("interval_labels"):
     - Allow ingestion of nwb files without behavior module #1441
     - Warn when ingesting ImageSeries without TaskEpoch #1461
     - Support ingestion of multi-epoch video files #1548
-    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
-        available #1546
-    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
+    - Fix bug with `LabTeam().create_new_team` when `google_user_name` is not
         available #1546
     - Fix bug from overlapping intervals in interval union #1520
+    - Bypass delete permission check when removing null `PositionIntervalMap`
+        entries in `convert_epoch_interval_name_to_position_interval_name` #1640
+    - Clear a file's existing `InsertError` rows at the start of
+        `populate_all_common`, so a rerun no longer reports or rolls back on
+        failures logged by an earlier attempt #1497
+    - `PositionSource` ingestion is now responsible for `RawPosition` #1660
 
 - Decoding
 
@@ -211,14 +349,26 @@ for label, interval_data in results.groupby("interval_labels"):
         with an `interval_labels` coordinate to track interval membership. This
         eliminates NaN padding and reduces memory usage. See migration guide
         above.
-    - Fix fetching position df in
-        SortedSpikesDecodingV1.get_ahead_behind_distance() #1540
+    - Fix fetching position dataframe in
+        `SortedSpikesDecodingV1.get_ahead_behind_distance()` #1540
+    - Fix `DecodingOutput.create_decoding_view()` for 2D decoders: normalize the
+        posterior over the correct spatial dimension(s), auto-detect the
+        orientation column name, and pass the `linear_position` column (not the
+        whole DataFrame) to the 1D view #1616
+    - Import `non_local_detector` inside the decoding operations that use it, so a
+        broken `jax`/`numpy` stack no longer breaks `import   spyglass.common` or
+        data ingestion #1619
+    - Pin `numpy`, `scipy`, and `jax` to the combination `spikeinterface` 0.99
+        needs. Temporary, pending #1609 #1619
+    - Fix `DecodingParameters.insert_default()`, which raised `AttributeError` on
+        every call, and stop `insert` from mutating the caller's rows #1619
     - Make `DecodingParameters` serialization robust to `non_local_detector`
         model changes: serialize via `get_params()` (the public constructor
         parameters) instead of `vars()`, so version-specific derived internals
         are not stored and re-passed to the constructor, and reconstruct via the
         stored model class so subclass-only parameters such as NonLocal's
         `non_local_*_penalty` round-trip. Legacy rows remain readable. #1618
+
 
 - LFP
 
@@ -251,6 +401,26 @@ for label, interval_data in results.groupby("interval_labels"):
     - Restrict `ImportedSpikeSorting.Annotations` to the current session in
         `make_df_from_annotations` so `fetch_nwb` works across multiple sessions
         with overlapping unit ids #1581, #1592
+    - Fix `NwbfileHasher` to include HDF5 Dataset content in
+        `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
+        hashed so in-place Dataset edits were invisible to the hasher #1600
+    - Implement fix for `AutomaticCuration` incorrect labels #1537
+    - Fix `SortGroup.set_group_by_shank` to support non-numeric
+        `electrode_group_name`s by falling back to lexicographic ordering #1624
+    - Fix `MetricCuration.populate` crash when no unit is labeled; skip the empty
+        `curation_label` column #1626
+    - Fix `MetricCuration` dropping non-empty `merge_groups` when writing to NWB
+        #1626
+    - Add `unit_criteria` to `UnitSelectionParams`, allowing units to be selected
+        on arbitrary units table columns with numeric, range, and membership
+        criteria. A criterion naming a column a sorting's units table does not
+        have raises an error #1670
+    - Fix `SpikeSorting.populate` raising
+        `AttributeError: Bad parameters:   ['tempdir']` for SpikeInterface-native
+        sorters (e.g. `spykingcircus2`, `tridesclous2`). `_run_spike_sorter` now
+        injects the `tempdir` scratch-dir param only for sorters that declare it
+        (only `mountainsort4`), instead of injecting it into every sorter and
+        maintaining hardcoded removal lists #1655
 
 ## [0.5.5] (Aug 6, 2025)
 
@@ -749,4 +919,4 @@ for label, interval_data in results.groupby("interval_labels"):
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
 [0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5
-[0.5.6]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.6
+[0.6.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.6.0

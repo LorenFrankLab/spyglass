@@ -77,18 +77,10 @@ class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
         return result
 
     def make(self, key):
-        """Legacy make method - replaced by insert_from_nwbfile.
-
-        Kept for backward compatibility during migration.
-        """
-        # Call the new SpyglassIngestion method
-        from spyglass.common.common_usage import ActivityLog
-
-        ActivityLog().deprecate_log(
-            name="ImportedSpikesorting.make", alt="insert_from_nwbfile"
+        """Legacy make method - replaced by insert_from_nwbfile."""
+        raise NotImplementedError(
+            "ImportedSpikeSorting.make deprecated. Use `insert_from_nwbfile`"
         )
-
-        return self.insert_from_nwbfile(key["nwb_file_name"])
 
     # ------------ Placeholder methods for merge table integration ------------
     @classmethod

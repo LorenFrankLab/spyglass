@@ -120,6 +120,14 @@ def graph_schema(SpyglassMixin, _Merge):
             )
         ]
 
+    class BranchNode(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> IntermediateNode
+        ---
+        -> ParentNode
+        """
+        contents = [(intermediate_id[0], parent_id[3])]
+
     class PkNode(SpyglassMixin, dj.Lookup):
         definition = """
         pk_id: int
@@ -221,6 +229,7 @@ def graph_schema(SpyglassMixin, _Merge):
         "ParentNode": ParentNode,
         "OtherParentNode": OtherParentNode,
         "IntermediateNode": IntermediateNode,
+        "BranchNode": BranchNode,
         "PkNode": PkNode,
         "SkNode": SkNode,
         "PkSkNode": PkSkNode,

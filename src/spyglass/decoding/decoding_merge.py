@@ -2,9 +2,8 @@ from pathlib import Path
 
 import datajoint as dj
 import numpy as np
-from non_local_detector.visualization.figurl_1D import create_1D_decode_view
-from non_local_detector.visualization.figurl_2D import create_2D_decode_view
 
+from spyglass.decoding.utils import resolve_orientation_col
 from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1  # noqa: F401
 from spyglass.decoding.v1.sorted_spikes import (
     SortedSpikesDecodingV1,
@@ -13,6 +12,27 @@ from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, _Merge, logger
 
 schema = dj.schema("decoding_merge")
+
+
+# Passthroughs, so that importing this module does not import
+# non_local_detector. figurl_1D/figurl_2D additionally pull in sortingview and
+# kachery, so a failure there surfaces here rather than disabling all decoding.
+def create_1D_decode_view(*args, **kwargs):
+    """Lazily dispatch to non_local_detector's 1D figurl view."""
+    from non_local_detector.visualization.figurl_1D import (
+        create_1D_decode_view as _view,
+    )
+
+    return _view(*args, **kwargs)
+
+
+def create_2D_decode_view(*args, **kwargs):
+    """Lazily dispatch to non_local_detector's 2D figurl view."""
+    from non_local_detector.visualization.figurl_2D import (
+        create_2D_decode_view as _view,
+    )
+
+    return _view(*args, **kwargs)
 
 
 @schema
@@ -121,7 +141,11 @@ class DecodingOutput(_Merge, SpyglassMixin):
         key : dict
             Key identifying the decoding output
         head_direction_name : str, optional
-            Name of head direction column, by default "head_orientation"
+            Name of the head direction column for 2D views, by default
+            "head_orientation". If the column is absent (e.g. v1 Trodes/DLC
+            position uses "orientation"), it is auto-detected; if no
+            orientation column is present, head direction is omitted from
+            the view.
         interval_idx : int, optional
             If specified, only visualize this interval (0-indexed).
             If None (default), visualize all intervals together.
@@ -150,14 +174,45 @@ class DecodingOutput(_Merge, SpyglassMixin):
             .drop_sel(state=["Local", "No-Spike"], errors="ignore")
             .sum("state")
         )
-        posterior /= posterior.sum("position")
+        # Normalize over the spatial dimension(s): 1D posteriors have a
+        # "position" dim while 2D posteriors have "x_position"/"y_position".
+        is_2d = "x_position" in results.coords
+        spatial_dims = ["x_position", "y_position"] if is_2d else ["position"]
+        posterior /= posterior.sum(spatial_dims)
         env = cls.fetch_environments(key)[0]
 
-        if "x_position" in results.coords:
+        if is_2d:
             position_info, position_variable_names = cls.fetch_position_info(
                 key
             )
-            # Not 1D
+            # The orientation column name varies by position source: v1
+            # Trodes/DLC use "orientation" while legacy common position uses
+            # "head_orientation". Honor the requested column if present;
+            # otherwise auto-detect, falling back to None (head_dir is
+            # optional). Warn so a silent substitution/drop (e.g. from a typo)
+            # is visible.
+            requested = head_direction_name
+            head_direction_name = resolve_orientation_col(
+                position_info, orientation_name=head_direction_name
+            )
+            if requested not in position_info.columns:
+                if head_direction_name is not None:
+                    logger.warning(
+                        f"head_direction_name='{requested}' not found in "
+                        f"position columns; using '{head_direction_name}'."
+                    )
+                else:
+                    logger.warning(
+                        f"head_direction_name='{requested}' not found in "
+                        f"position columns {list(position_info.columns)} and no "
+                        "orientation column detected; omitting head direction "
+                        "from the 2D view."
+                    )
+            head_dir = (
+                position_info[head_direction_name]
+                if head_direction_name is not None
+                else None
+            )
             bin_size = (
                 np.nanmedian(np.diff(np.unique(results.x_position.values))),
                 np.nanmedian(np.diff(np.unique(results.y_position.values))),
@@ -170,10 +225,14 @@ class DecodingOutput(_Merge, SpyglassMixin):
                 ],
                 place_bin_size=bin_size,
                 posterior=posterior,
-                head_dir=position_info[head_direction_name],
+                head_dir=head_dir,
             )
         else:
+            # create_1D_decode_view expects a 1D linear position, but
+            # fetch_linear_position_info returns a multi-column DataFrame.
             return create_1D_decode_view(
                 posterior=posterior,
-                linear_position=cls.fetch_linear_position_info(key),
+                linear_position=cls.fetch_linear_position_info(key)[
+                    "linear_position"
+                ],
             )

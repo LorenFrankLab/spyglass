@@ -35,10 +35,18 @@ def insert_sessions(
     reinsert : bool, optional
         If True and the nwb file already exists in the Nwbfile table,
         reinsert the data. Default is False.
+
+    Returns
+    -------
+    list
+        One `populate_all_common` result per file processed. Files skipped
+        because they are already in the Nwbfile table contribute no entry.
     """
 
     if not isinstance(nwb_file_names, list):
         nwb_file_names = [nwb_file_names]
+
+    results = []
 
     for nwb_file_name in nwb_file_names:
         nwb_file_name = str(nwb_file_name)  # in case it's a Path object
@@ -87,11 +95,17 @@ def insert_sessions(
         # the raw data in the original file
         copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name)
         Nwbfile().insert_from_relative_file_name(out_nwb_file_name)
-        return populate_all_common(
-            out_nwb_file_name,
-            rollback_on_fail=rollback_on_fail,
-            raise_err=raise_err,
+        results.append(
+            populate_all_common(
+                out_nwb_file_name,
+                rollback_on_fail=rollback_on_fail,
+                raise_err=raise_err,
+            )
         )
+
+    # One result per file. Previously returned from inside the loop, so only
+    # the first file of a list was ever processed.
+    return results
 
 
 def copy_nwb_link_raw_ephys(

@@ -139,6 +139,7 @@ class AbstractGraph(ABC):
         self.undirect_graph = self.graph.to_undirected()
 
         self.verbose = verbose
+        self.skip_external = True
         self.leaves = set()
         self.visited = set()
         self.to_visit = set()
@@ -241,6 +242,16 @@ class AbstractGraph(ABC):
 
     def _get_restr(self, table):
         """Get restriction from graph node."""
+        if (restr := self._get_node(ensure_names(table)).get("restr")) is None:
+            restr_list = self._get_restr_list(table)
+            if not restr_list:
+                return None
+            ft = self._get_ft(table)
+            self._set_node(
+                table,
+                "restr",
+                self._coerce_to_condition(ft, ft & restr_list),
+            )
         return self._get_node(ensure_names(table)).get("restr")
 
     def _get_restr_list(self, table):
@@ -312,8 +323,10 @@ class AbstractGraph(ABC):
         # Merge restrictions
         restr_list = self._get_restr_list(table) + [restriction]
         self._set_node(table, "restr_list", restr_list)
-        restriction = self._coerce_to_condition(ft, ft & restr_list)
-        self._set_node(table, "restr", restriction)
+        # restriction = self._coerce_to_condition(ft, ft & restr_list)
+        self._set_node(
+            table, "restr", None
+        )  # Placeholder to avoid redundant coercion
         return restriction
 
     @lru_cache(maxsize=128)
@@ -327,7 +340,7 @@ class AbstractGraph(ABC):
             ft = FreeTable(self.connection, table)
             self._set_node(table, "ft", ft)
 
-        return ft & restr
+        return ft & self._coerce_to_condition(ft, restr)
 
     def _get_ft(self, table, with_restr=False, warn=True):
         """Get FreeTable from graph node. If one doesn't exist, create it."""
@@ -376,17 +389,20 @@ class AbstractGraph(ABC):
             return False
 
         # If within spyglass, attempt spawn
-        ret = self._has_out_prefix(table)
-        if not ret:
-            _ = self._spawn_virtual_module(table)
+        try:
+            self._spawn_virtual_module(table)
+        except dj.errors.DataJointError:
+            if warn:
+                logger.warning(f"Skipping unimported: {table}")
+            return True
 
         # If spawn successful, return
         if self.graph.nodes.get(table):
             return False
 
-        if warn and ret:  # Log warning if outside
+        if warn:
             logger.warning(f"Skipping unimported: {table}")  # pragma: no cover
-        return ret
+        return True
 
     def enforce_restr_strings(self):
         """Ensure all restrictions are strings.
@@ -442,7 +458,9 @@ class AbstractGraph(ABC):
         List[Dict[str, str]]
             List of dicts containing primary key fields for restricted table2.
         """
-        if self._is_out(table2) or self._is_out(table1):  # 2 more likely
+        if self.skip_external and (
+            self._is_out(table2) or self._is_out(table1)
+        ):
             return ["False"]  # Stop cascade if outside, see #1002
 
         if not all([direction, attr_map]):
@@ -623,8 +641,7 @@ class AbstractGraph(ABC):
                 next_table, data = next_func(next_table).popitem()
 
             if (
-                next_table in self.visited
-                or next_table in self.no_visit  # Subclasses can set this
+                next_table in self.no_visit  # Subclasses can set this
                 or table == next_table
             ):
                 reason = (
@@ -644,6 +661,18 @@ class AbstractGraph(ABC):
 
             if next_restr == ["False"]:  # Stop cascade if empty restriction
                 continue
+
+            if next_table in self.visited:
+                # check if new restriction contains entries not in existing restriction
+                # if not, skip cascade to avoid redundant work
+                if not bool(
+                    self._get_ft_with_restr(next_table, next_restr)
+                    - self._get_restr_list(next_table)
+                ):
+                    self._log_truncate(
+                        f"Already cascaded: {self._camel(next_table)}"
+                    )
+                    continue
 
             self.cascade1(
                 table=next_table,
@@ -773,6 +802,7 @@ class RestrGraph(AbstractGraph):
         include_files: bool = False,
         cascade: bool = False,
         verbose: bool = False,
+        skip_external: bool = True,
         **kwargs,
     ):
         """Use graph to cascade restrictions up from leaves to all ancestors.
@@ -804,9 +834,13 @@ class RestrGraph(AbstractGraph):
             Default False
         verbose : bool, optional
             Whether to print verbose output. Default False
+        skip_external : bool, optional
+            Whether to skip tables outside of spyglass during cascade. Default
+            True. Set to False to continue the cascade into non-spyglass tables.
         """
         super().__init__(seed_table, verbose=verbose)
         self.include_files = include_files
+        self.skip_external = skip_external
 
         self.add_leaves(leaves)
 
@@ -998,6 +1032,7 @@ class RestrGraph(AbstractGraph):
                     direction=direction,
                     verbose=self.verbose,
                     cascade=True,
+                    skip_external=self.skip_external,
                 )
                 cascaded_leaves.append(leaf_graph)
             logger.debug("adding cascaded leaves")
@@ -1232,7 +1267,7 @@ class RestrGraph(AbstractGraph):
         self.cascade(warn=False)
         return {t: self._get_node(t).get("files", []) for t in self.restr_ft}
 
-    def _stored_files(self, as_dict=False) -> Dict[str, str] | Set[str]:
+    def _stored_files(self, as_dict=False):
         """Return dictionary of table names and files.
 
         Dictionary format is used for debugging and testing. Set format is used

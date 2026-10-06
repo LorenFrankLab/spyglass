@@ -61,7 +61,11 @@ for details on using custom analysis file tables.
 
 Older Spyglass code used two standalone functions from
 `spyglass.utils.dj_helper_fn` that required passing the NWB table and attribute
-explicitly. Both are deprecated and emit a warning once per Python process.
+explicitly. Both were removed in 0.6.0. `get_nwb_table` is gone entirely —
+importing it raises an `ImportError`. `fetch_nwb` is kept as a stub that raises
+`NotImplementedError` when called, since it is a commonly imported name and a
+runtime message is clearer than an import failure. Use the `fetch_nwb()` method
+below instead.
 
 #### `fetch_nwb` (helper function)
 

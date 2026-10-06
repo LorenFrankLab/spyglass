@@ -51,3 +51,41 @@ def test_pop_curated(spike_v0, pop_curated):
     """Test that the curated data is populated correctly"""
     units = (pop_curated & {"curation_id": 0}).fetch_nwb()[0]["units"]
     assert len(units["spike_times"][1]) == 231, "Curated data wrong shape"
+
+
+def test_multi_metric_label_params_through_populate(
+    spike_v0, pop_auto_curation_multimetric
+):
+    """Regression test for PR #1281 Bug A (AutomaticCuration.get_labels
+    early return).
+
+    ``label_params`` with 2 metrics (nn_noise_overlap and num_spikes) is
+    run end-to-end through ``AutomaticCuration.make()`` ->
+    ``Curation.insert_curation()`` -> ``CuratedSpikeSorting.make_compute()``.
+    Before the fix, the early ``return parent_labels`` inside the
+    ``for metric`` loop meant only the first metric (nn_noise_overlap) was
+    ever applied, so 'mua' (from num_spikes) would never appear.
+    """
+    _, curation, curated = pop_auto_curation_multimetric
+
+    all_labels = []
+    for key in curation.fetch("KEY"):
+        for unit_labels in (
+            (spike_v0.Curation & key).fetch1("curation_labels").values()
+        ):
+            all_labels.extend(unit_labels)
+
+    assert any(
+        lbl in all_labels for lbl in ("noise", "reject")
+    ), "First metric (nn_noise_overlap) labels not applied"
+    assert "mua" in all_labels, (
+        "Second metric (num_spikes) labels never applied -- "
+        "possible regression of PR #1281 Bug A"
+    )
+
+    # 'mua' units are not rejected, so they remain in CuratedSpikeSorting
+    # with their label preserved.
+    unit_labels = curated.Unit.fetch("label")
+    assert any(
+        "mua" in label for label in unit_labels
+    ), "'mua'-labeled units missing from CuratedSpikeSorting.Unit"

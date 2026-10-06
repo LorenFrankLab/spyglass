@@ -6,6 +6,7 @@ determine which features are used, how often, and by whom. This will help
 plan future development of Spyglass.
 """
 
+from functools import partial
 from multiprocessing import Pool, cpu_count
 from typing import List, Union
 
@@ -85,7 +86,7 @@ class ActivityLog(dj.Manual):
         """
         if warning and name not in _warned_functions:
             _warned_functions.add(name)
-            msg = f"DEPRECATION scheduled for Spyglass 0.6.0: {name}"
+            msg = f"DEPRECATION scheduled for Spyglass 0.7.0: {name}"
             if alt:
                 msg += f"\n\tUse instead: {alt}"
             if doc:
@@ -634,6 +635,31 @@ class Export(SpyglassMixin, dj.Computed):
             f"{table_count} tables, {file_count} files"
         )
 
+    @staticmethod
+    def protected_update(file, function, **kwargs):
+        """Run a function with error handling and logging.
+
+        Parameters
+        ----------
+        file : str
+            The file to process.
+        function : callable
+            The function to run on the file.
+        **kwargs : dict
+            Keyword arguments to pass to the function.
+        """
+        try:
+            return function(file, **kwargs)
+        except Exception as e:
+            logger.error(f"Failed {function.__name__} for file {file}: {e!r}")
+            ExportErrorLog().insert1(
+                {
+                    "file": file,
+                    "source": function.__name__,
+                },
+                skip_duplicates=True,
+            )
+
     def prepare_files_for_export(self, key, n_processes=1, **kwargs):
         """Resolve common known errors to make a set of analysis
         files dandi compliant
@@ -652,8 +678,16 @@ class Export(SpyglassMixin, dj.Computed):
                 update_analysis_for_dandi_standard(file, **kwargs)
             return
         with Pool(processes=n_processes) as pool:
-            pool.map(make_file_obj_id_unique, file_list)
-            pool.map(update_analysis_for_dandi_standard, file_list)
+            id_update_fn = partial(
+                self.protected_update, function=make_file_obj_id_unique
+            )
+            list(pool.imap_unordered(id_update_fn, file_list))
+            update_fn = partial(
+                self.protected_update,
+                function=update_analysis_for_dandi_standard,
+                **kwargs,
+            )
+            list(pool.imap_unordered(update_fn, file_list))
 
     def _make_fileset_ids_unique(self, key, n_processes=1):
         """Make the object_id of each nwb in a dataset unique"""

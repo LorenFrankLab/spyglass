@@ -33,25 +33,32 @@ class Session(SpyglassIngestion, dj.Imported):
     experiment_description = NULL: varchar(2000)
     """
 
-    @property
-    def _source_nwb_object_type(self):
-        """The NWB object type from which this table can ingest data."""
-        return pynwb.NWBFile
+    _source_nwb_object_type = pynwb.NWBFile
 
-    @property
-    def table_key_to_obj_attr(self):
-        return {
-            "self": {
-                "institution_name": "institution",
-                "lab_name": "lab",
-                "session_id": "session_id",
-                "session_description": "session_description",
-                "session_start_time": "session_start_time",
-                "timestamps_reference_time": "timestamps_reference_time",
-                "experiment_description": "experiment_description",
-            },
-            "subject": {"subject_id": "subject_id"},
-        }
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """The file itself is the source: a session describes the whole file.
+
+        Stated explicitly rather than leaning on the default type filter. That
+        filter searches `nwb_file.objects`, so it only finds the root NWBFile
+        if the file lists itself in its own object collection -- true today,
+        but an implicit dependency on pynwb's internals for a table whose
+        source is unambiguous. Same reasoning as PositionSource and
+        RawPosition in common_behav.
+        """
+        return [nwb_file]
+
+    table_key_to_obj_attr = {
+        "self": {
+            "institution_name": "institution",
+            "lab_name": "lab",
+            "session_id": "session_id",
+            "session_description": "session_description",
+            "session_start_time": "session_start_time",
+            "timestamps_reference_time": "timestamps_reference_time",
+            "experiment_description": "experiment_description",
+        },
+        "subject": {"subject_id": "subject_id"},
+    }
 
     class DataAcquisitionDevice(SpyglassIngestion, dj.Part):  # noqa: F811
         definition = """
@@ -60,17 +67,13 @@ class Session(SpyglassIngestion, dj.Imported):
         -> DataAcquisitionDevice
         """
 
-        @property
-        def _source_nwb_object_type(self):
-            return "DataAcqDevice"
+        _source_nwb_object_type = "DataAcqDevice"
 
-        @property
-        def table_key_to_obj_attr(self):
-            return {
-                "self": {
-                    "data_acquisition_device_name": "name",
-                }
+        table_key_to_obj_attr = {
+            "self": {
+                "data_acquisition_device_name": "name",
             }
+        }
 
     class Experimenter(SpyglassIngestion, dj.Part):
         definition = """
@@ -79,9 +82,7 @@ class Session(SpyglassIngestion, dj.Imported):
         -> LabMember
         """
 
-        @property
-        def _source_nwb_object_type(self):
-            return pynwb.NWBFile
+        _source_nwb_object_type = pynwb.NWBFile
 
         def generate_entries_from_nwb_object(
             self, nwb_obj: pynwb.NWBFile, base_key=None

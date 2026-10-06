@@ -415,13 +415,16 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 sampling_frequency=recording.get_sampling_frequency(),
             )
         else:
-            # Specify tempdir (expected by some sorters like mountainsort4)
             sorter_temp_dir = tempfile.TemporaryDirectory(dir=temp_dir)
-            sorter_params["tempdir"] = sorter_temp_dir.name
-            os.chmod(sorter_params["tempdir"], 0o777)
+            os.chmod(sorter_temp_dir.name, 0o777)
 
-            if sorter == "mountainsort5":
-                _ = sorter_params.pop("tempdir", None)
+            # Only mountainsort4 declares a `tempdir` scratch-dir param. Passing
+            # `tempdir` to any other sorter makes its parameter validation raise
+            # `AttributeError: Bad parameters: ['tempdir']`, so inject it solely
+            # for sorters that actually declare it. The temp dir is still handed
+            # to every sorter below as `output_folder`.
+            if "tempdir" in sis.get_default_sorter_params(sorter):
+                sorter_params["tempdir"] = sorter_temp_dir.name
 
             # if whitening is specified in sorter params, apply whitening separately
             # prior to sorting and turn off "sorter whitening"
@@ -440,8 +443,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 sorter_params = {
                     k: v
                     for k, v in sorter_params.items()
-                    if k
-                    not in ["tempdir", "mp_context", "max_threads_per_process"]
+                    if k not in ["mp_context", "max_threads_per_process"]
                 }
                 sorting = sis.run_sorter(
                     **common_sorter_items,

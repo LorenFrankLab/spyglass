@@ -16,6 +16,7 @@ RecordingRecompute: Attempt to recompute an analysis file, saving a new file
 """
 
 import atexit
+import os
 from datetime import datetime
 from functools import cached_property
 from pathlib import Path
@@ -607,7 +608,10 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
     def _hash_one(self, path, precision) -> NwbfileHasher:
         """Return the hasher for a given path. Store in cache."""
-        cache_val = f"{path}_{precision}"
+        legacy_mode = (
+            os.environ.get("SPYGLASS_LEGACY_HASHES", "").lower() == "true"
+        )
+        cache_val = f"{path}_{precision}_{legacy_mode}"
         if cache_val in self._hasher_cache:
             return self._hasher_cache[cache_val]
         hasher = NwbfileHasher(
@@ -616,6 +620,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             keep_obj_hash=True,
             keep_file_open=True,
             precision_lookup=precision,
+            legacy_mode=legacy_mode,
         )
         self._hasher_cache[cache_val] = hasher
         return hasher
@@ -842,6 +847,17 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             self._info_msg(f"V1 Recompute match: {new_hasher.path.name}")
             self.insert1(dict(key, matched=True, **created_key))
             return
+
+        if not os.environ.get("SPYGLASS_LEGACY_HASHES", "").lower() == "true":
+            logger.warning(
+                "Hash mismatch for %s. "
+                "If this recording was hashed before the NwbfileHasher "
+                "Dataset-content fix, the stored hash excludes Dataset "
+                "values and will never match a correctly recomputed file. "
+                "To restore legacy (metadata-only) hashing for comparison, "
+                "rerun with:\n\tSPYGLASS_LEGACY_HASHES=true",
+                key.get("recording_id", key),
+            )
 
         names, hashes = [], []
         for obj in set({**old_hasher.objs, **new_hasher.objs}):
