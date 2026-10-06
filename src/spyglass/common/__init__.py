@@ -60,6 +60,7 @@ from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
 from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import Task, TaskEpoch
+from spyglass.common.common_task_rec import TaskRecording, TaskRecordingTypes
 from spyglass.common.common_user import UserEnvironment
 from spyglass.common.populate_all_common import populate_all_common
 from spyglass.common.prepopulate import populate_from_yaml, prepopulate_default
@@ -124,6 +125,8 @@ __all__ = [
     "Subject",
     "Task",
     "TaskEpoch",
+    "TaskRecording",
+    "TaskRecordingTypes",
     "TrackGraph",
     "UserEnvironment",
     "VideoFile",

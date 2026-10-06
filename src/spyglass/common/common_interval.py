@@ -36,7 +36,14 @@ class IntervalList(SpyglassIngestion, dj.Manual):
     """
 
     # See #630, #664. Excessive key length.
-    _source_nwb_object_name = "epochs"
+    # A file's `invalid_times` is a TimeIntervals table like `epochs`, so it
+    # ingests through the same mapping. Its rows are namespaced on the way in;
+    # see `generate_entries_from_nwb_object`. Other TimeIntervals tables in a
+    # file, `trials` in particular, are not intervals of the session and are
+    # excluded by this filter.
+    _source_nwb_object_name = ["epochs", "invalid_times"]
+
+    _invalid_times_prefix = "invalid_"
 
     @property
     def _source_nwb_object_type(self):
@@ -94,6 +101,50 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         start_time = getattr(epoch_row, "start_time", None)
         stop_time = getattr(epoch_row, "stop_time", None)
         return np.asarray([[start_time, stop_time]])
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Namespace and group the rows that came from `invalid_times`. #1336.
+
+        `epochs` and `invalid_times` are read through one mapping, so both name
+        a tagless row `interval_<id>` and would collide on the primary key.
+        Rows sharing a tag collide with each other for the same reason, and are
+        merged into one list -- `valid_times` is an (n, 2) array so that one
+        list can hold many intervals.
+
+        Parameters
+        ----------
+        nwb_obj : object
+            A TimeIntervals table, or one of its rows on the recursive call
+            `super()` makes per row.
+        base_key : dict, optional
+            Key the generated entries build on. Default empty.
+
+        Returns
+        -------
+        IngestionEntries
+            Planned entries, prefixed and grouped by name.
+        """
+        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+
+        # Only the table carries a name, so the rows are renamed once, here,
+        # when the recursion returns -- a row cannot know its source table.
+        if getattr(nwb_obj, "name", None) != "invalid_times":
+            return entries
+
+        grouped = dict()  # name -> entry, in first-seen order
+        for entry in entries.get(self, []):
+            name = self._invalid_times_prefix + entry["interval_list_name"]
+            entry["interval_list_name"] = name
+
+            if (first := grouped.setdefault(name, entry)) is not entry:
+                first["valid_times"] = np.vstack(
+                    (first["valid_times"], entry["valid_times"])
+                )
+
+        if grouped:
+            entries[self] = list(grouped.values())
+
+        return entries
 
     def fetch_interval(self):
         """Fetch interval list object for a given key."""

@@ -26,6 +26,12 @@
 
 ### Pipelines
 
+- Common
+
+    - Add `TaskRecordingTypes` and `TaskRecording` for `ndx_structured_behavior`
+        #1349
+    - Ingest a file's `invalid_times` into `IntervalList` #1349
+
 - Spike Sorting
 
     - Store `hash` on `SpikeSortingRecording` insert, and fix the `Path`/`str`
