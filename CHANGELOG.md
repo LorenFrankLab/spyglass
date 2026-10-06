@@ -17,7 +17,8 @@ Spike Sorting v2 pipeline (#1609). To upgrade:
     built from `environments/environment_spikesorting_legacy.yml` (follow steps
     1-3 in its header). Both environments use the same database. See
     [Two environments, one database](Features/SpikeSortingV2_Migration.md#two-environments-one-database).
-- Run the `UnitAnnotation` migration below once, before writing new annotations.
+- Audit existing `UnitAnnotation` rows and run the migration below once before
+    reading or writing annotations that used positional unit ids.
 - If you used Spike Sorting v2 on a development database before this release,
     follow
     [Upgrading a preproduction v2 database](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database),
@@ -25,7 +26,7 @@ Spike Sorting v2 pipeline (#1609). To upgrade:
 
 ```python
 # UnitAnnotation.unit_id now stores the NWB unit id instead of the unit's
-# position in the spike-times list. Run once, before writing new annotations:
+# position in the spike-times list. Audit before reading or writing old rows:
 from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
 
 UnitAnnotation.audit_positional_unit_ids()  # inspect candidates
@@ -113,10 +114,11 @@ or `log_export` positionally must pass them by keyword.
     `return_unit_ids=True` report the NWB units-table id rather than the unit's
     position. Values change for sorts whose unit ids are not `0..n-1`, such as
     v1 curations made with `apply_merge=True`.
-- `UnitAnnotation.unit_id` stores the NWB unit id. `add_annotation` refuses a
-    merge that still holds position-based annotations until the migration in the
-    release notes has run. It now runs inside a caller's open transaction, so
-    the caller must roll back if it fails. A new
+- `UnitAnnotation.unit_id` stores the NWB unit id. Reads and `add_annotation`
+    refuse an unmarked merge whose NWB unit ids differ from their positions
+    until its annotations are audited and migrated. `add_annotation` now runs
+    inside a caller's open transaction, so the caller must roll back if it fails.
+    A new
     `UnitAnnotationPositionalIdMigration` table records the migration.
 - An include-label filter on a curation whose units carry no labels now selects
     no units (previously every unit).

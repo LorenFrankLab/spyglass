@@ -18,10 +18,27 @@ class FakeSpikeSortingOutput:
         self.merge_id = merge_id
 
     def __and__(self, restriction):
+        if isinstance(restriction, list):
+            return type(self)(
+                self.payloads, [key["merge_id"] for key in restriction]
+            )
         return type(self)(self.payloads, restriction["merge_id"])
 
-    def fetch_nwb(self):
-        return [self.payloads[self.merge_id]]
+    def fetch(self, attribute):
+        assert attribute == "source"
+        return ["CurationV1"] * len(self._merge_ids())
+
+    def _merge_ids(self):
+        return (
+            self.merge_id
+            if isinstance(self.merge_id, list)
+            else [self.merge_id]
+        )
+
+    def fetch_nwb(self, *, return_merge_ids=False):
+        merge_ids = self._merge_ids()
+        payloads = [self.payloads[merge_id] for merge_id in merge_ids]
+        return (payloads, merge_ids) if return_merge_ids else payloads
 
 
 def make_annotation_tables(dj_conn, schema_name):
@@ -39,8 +56,8 @@ def make_annotation_tables(dj_conn, schema_name):
     -------
     tuple
         ``(table, schema)``. ``table`` is the annotation table, bound to the
-        production ``add_annotation``, ``audit_positional_unit_ids`` and
-        ``migrate_positional_unit_ids``, with
+        production ``add_annotation``, ``fetch_unit_spikes``,
+        ``audit_positional_unit_ids`` and ``migrate_positional_unit_ids``, with
         ``_positional_id_migration_table`` pointing at the test marker table.
         ``schema`` is handed to :func:`drop_annotation_tables` on teardown.
     """
@@ -65,6 +82,7 @@ def make_annotation_tables(dj_conn, schema_name):
             """
 
         add_annotation = UnitAnnotation.add_annotation
+        fetch_unit_spikes = UnitAnnotation.fetch_unit_spikes
         _migration_marker_table = classmethod(
             UnitAnnotation._migration_marker_table.__func__
         )

@@ -1,15 +1,16 @@
-"""Database-backed tests for the UnitAnnotation unit-id write boundary.
+"""Database-backed tests for the UnitAnnotation unit-id read/write boundary.
 
 ``UnitAnnotation`` stores true NWB unit ids. Rows written under the older
 positional contract mean something different, so a merge still carrying them
-must not accept a new annotation until it is migrated, and a merge whose
-first-ever annotation is written under the true-id contract must be recorded
-as needing nothing.
+must not serve spikes or accept a new annotation until it is migrated. A merge
+whose first-ever annotation is written under the true-id contract must be
+recorded as needing nothing.
 """
 
 from contextlib import contextmanager
 from uuid import uuid4
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -48,9 +49,9 @@ def _count_nwb_reads(monkeypatch):
     reads = []
     original = FakeSpikeSortingOutput.fetch_nwb
 
-    def _counting_fetch_nwb(self):
+    def _counting_fetch_nwb(self, *args, **kwargs):
         reads.append(self.merge_id)
-        return original(self)
+        return original(self, *args, **kwargs)
 
     monkeypatch.setattr(
         FakeSpikeSortingOutput, "fetch_nwb", _counting_fetch_nwb
@@ -127,11 +128,78 @@ def annotation_case(annotation_table, monkeypatch):
         "sparse_id": sparse_id,
         "dense_id": dense_id,
         "fresh_id": fresh_id,
+        "payloads": payloads,
     }
 
     annotation_table._positional_id_migration_table.delete_quick()
     annotation_table.Annotation.delete_quick()
     annotation_table.delete_quick()
+
+
+@pytest.mark.parametrize("true_ids", [[2, 3, 4], [1, 2, 0]])
+def test_fetch_refuses_unmigrated_positional_id_overlap(
+    annotation_case, monkeypatch, true_ids
+):
+    """An overlapping id must not silently resolve to another unit's spikes."""
+    case = annotation_case
+    table = case["table"]
+    sparse = {"spikesorting_merge_id": case["sparse_id"]}
+    case["payloads"][case["sparse_id"]]["object_id"] = pd.DataFrame(
+        {"spike_times": [np.array([unit_id + 0.1]) for unit_id in true_ids]},
+        index=pd.Index(true_ids),
+    )
+    nwb_reads = _count_nwb_reads(monkeypatch)
+
+    # Stored positional id 2 meant the third NWB row. Looking it up as a
+    # true id would select a different row without raising a missing-id error.
+    with pytest.raises(ValueError, match="migrate_positional_unit_ids"):
+        (table & {**sparse, "unit_id": 2}).fetch_unit_spikes()
+
+    assert len(nwb_reads) == 1
+    assert not (case["marker"] & sparse)
+
+
+@pytest.mark.parametrize("state", ["migrated", "first_write", "dense"])
+def test_fetch_returns_spikes_for_current_unit_id_contract(
+    annotation_case, monkeypatch, state
+):
+    """Migrated, newly annotated and dense namespaces remain readable."""
+    case = annotation_case
+    table = case["table"]
+    merge_id = case[
+        {
+            "migrated": "sparse_id",
+            "first_write": "fresh_id",
+            "dense": "dense_id",
+        }[state]
+    ]
+    namespace = DENSE_TRUE_IDS if state == "dense" else SPARSE_TRUE_IDS
+    case["payloads"][merge_id]["object_id"] = pd.DataFrame(
+        {"spike_times": [np.array([unit_id + 0.1]) for unit_id in namespace]},
+        index=pd.Index(namespace),
+    )
+    if state == "migrated":
+        table.migrate_positional_unit_ids(dry_run=False)
+    elif state == "first_write":
+        table().add_annotation(
+            {
+                "spikesorting_merge_id": merge_id,
+                "unit_id": 2,
+                "annotation": "new",
+            }
+        )
+    nwb_reads = _count_nwb_reads(monkeypatch)
+
+    spikes, unit_ids = (
+        table & {"spikesorting_merge_id": merge_id, "unit_id": 2}
+    ).fetch_unit_spikes(return_unit_ids=True)
+
+    assert len(spikes) == 1
+    np.testing.assert_array_equal(spikes[0], [2.1])
+    assert unit_ids == [{"spikesorting_merge_id": merge_id, "unit_id": 2}]
+    assert len(nwb_reads) == 1
+    if state == "dense":
+        assert not (case["marker"] & {"spikesorting_merge_id": merge_id})
 
 
 def test_add_annotation_refuses_unmigrated_sparse_merge(annotation_case):

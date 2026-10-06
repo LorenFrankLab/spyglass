@@ -336,6 +336,11 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
     ) -> Union[list[np.ndarray], Optional[list[dict]]]:
         """Fetch the spike times for a restricted set of units
 
+        A merge with a non-positional NWB unit-id namespace must be marked
+        as migrated before its stored annotation ids can be read as true ids.
+        Otherwise an old positional id that also exists as a true id could
+        silently return a different unit's spikes.
+
         Parameters
         ----------
         return_unit_ids : bool, optional
@@ -349,6 +354,12 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         tuple of list of np.ndarray, list of str
             list of spike times for each unit in the group and the unit ids,
             if return_unit_ids is True
+
+        Raises
+        ------
+        ValueError
+            If an annotated merge has an unmigrated NWB unit-id namespace
+            whose ids differ from their positions.
         """
         if len(self) == len(UnitAnnotation()):
             logger.warning(
@@ -375,6 +386,20 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             return_merge_ids=True
         )
 
+        # Read markers BEFORE annotation rows: a migration commits its marker
+        # and rewritten rows together. A marker observed here guarantees the
+        # rows fetched below use true ids; observing no marker can safely
+        # refuse a sparse read even if migration finishes between the queries.
+        migrated_merge_ids = set(
+            (
+                self._migration_marker_table()
+                & [
+                    {"spikesorting_merge_id": merge_id}
+                    for merge_id in merge_ids
+                ]
+            ).fetch("spikesorting_merge_id")
+        )
+
         # Single DB query for every (merge_id, unit_id) selection up
         # front, then group in memory, rather than one ``self.fetch`` per
         # merge id inside the loop.
@@ -391,12 +416,26 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         unit_ids = []
         for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
             nwb_field_name = _get_spike_obj_name(nwb_file)
+            nwb_unit_ids = _get_nwb_unit_ids(nwb_file, nwb_field_name)
+            if merge_id not in migrated_merge_ids and nwb_unit_ids != list(
+                range(len(nwb_unit_ids))
+            ):
+                raise ValueError(
+                    "UnitAnnotation.fetch_unit_spikes: rows for "
+                    f"{merge_id} are unmigrated and the NWB unit ids "
+                    f"{nwb_unit_ids} differ from their positions. Run "
+                    "UnitAnnotation.audit_positional_unit_ids() and "
+                    "UnitAnnotation.migrate_positional_unit_ids(dry_run=False) "
+                    "before fetching spikes. If these annotations already "
+                    "store true unit ids, mark the merge in "
+                    "UnitAnnotationPositionalIdMigration instead of remapping."
+                )
             # Build an explicit ``unit_id -> spike_times`` map keyed
             # by the NWB's actual unit ids -- v2 sparse-id sortings
             # would mis-index a positional list-of-spike_times.
             unit_id_to_spike_times = dict(
                 zip(
-                    _get_nwb_unit_ids(nwb_file, nwb_field_name),
+                    nwb_unit_ids,
                     nwb_file[nwb_field_name]["spike_times"].to_list(),
                 )
             )

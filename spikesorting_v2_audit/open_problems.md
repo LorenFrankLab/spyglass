@@ -3,93 +3,48 @@
 Problems that are blocked on information or a judgment call, parked here so the
 fix work can proceed without them. Revisit after the P1–P4 fixes land.
 
-**Still open:** OP-1 — but only the *migration* decision (A vs B); the cheap
-actionable-error improvement shipped (2026-07-02, commit `711488b9`).
-**Resolved:** OP-2 (SI `nn_noise_overlap` sparse bug — in the decision log at the
-bottom) and OP-3 (`recording_id` honesty — the `bad_channel` id, with the
-sort-group-membership adjacent issue OP-4 folded into the same fix — marked
-**RESOLVED** in its section below, its write-up kept as the decision record).
+**Resolved:** OP-1 (unit-id migration and read/write guards), OP-2 (the local
+SI `nn_noise_overlap` sparse-analyzer fix), and OP-3/OP-4 (recording identity).
+The upstream issue and eventual removal of the OP-2 shim remain follow-ups.
 IDs are kept stable because they are referenced from commits and the memory index.
 
 ---
 
 ## OP-1 — `UnitAnnotation` positional → true unit-id migration (finding #5 / decision D2)
 
-**Status:** the cheap improvement is DONE (2026-07-02, commit `711488b9`): the
-bare `KeyError` is now an actionable `ValueError` naming the valid id set and the
-positional→true-id change, via the DB-free `spikes_for_requested_units` helper
-(unit-tested; the v1 integration test is JAX-skipped). What REMAINS deferred is
-the one-time **migration** (A vs B) — owner direction for pre-production is:
-keep true-id semantics, surface the mismatch loudly (done), document that old
-positional annotations are unsupported / must be migrated manually, and skip the
-migration script UNLESS the lab DB has known production positional annotations on
-merged curations (the decisive question below).
-**Blocks:** nothing now (the loud-error path shipped). Related: finding #21 /
-decision D4 (`fetch_unit_spikes` multi-source policy) — also touches this file.
+**Status:** RESOLVED. The one-time migration is implemented in
+`UnitAnnotation.migrate_positional_unit_ids`, with a read-only
+`audit_positional_unit_ids` probe and the durable per-merge
+`UnitAnnotationPositionalIdMigration` marker. The marker and rewritten master /
+annotation rows commit in one transaction, so repeated migrations are no-ops.
+New annotations also record the true-id contract transactionally. Reads and
+writes refuse an unmarked namespace whose NWB ids differ from their positions.
 
-### What the PR changed
-It flipped the *meaning* of `UnitAnnotation.unit_id` in **shared, production v1**
-code ([unit_annotation.py:147-156](src/spyglass/spikesorting/analysis/v1/unit_annotation.py#L147)):
-- **Old (`master`):** `unit_id` = a **positional index** into the NWB spike-times
-  list (`sorting_spike_times[unit_id]`); validated as `unit_id > len(spikes)`.
-- **New:** `unit_id` = the **true NWB units-table id** (dict keyed by real ids);
-  validated as membership in the true-id set.
+### Why the migration is required
 
-The new behavior is **more correct** — positional indexing is simply wrong for
-sparse/non-contiguous ids, which v2 *and* merge-applied v0/v1 curations produce (a
-v1 merge does `new_id = max(keys)+1` and drops constituents, so merging 0+1 of
-`{0,1,2,3}` yields the id set `{2,3,4}`).
+`UnitAnnotation.unit_id` previously stored a position in the NWB spike-times
+list; it now stores the true NWB units-table id. For ordered ids `[2, 3, 4]`,
+an old positional annotation `2` meant true unit `4`, while a new annotation
+`2` means true unit `2`. Membership validation alone cannot distinguish them.
+Dense, ordered `0..n-1` ids have identical positional and true-id meanings.
 
-### Why it's a problem
-`UnitAnnotation` is v1 = **production**. Existing rows were written under the old
-**positional** contract. After the switch, rows annotated against a **merge-applied
-(sparse-id)** curation are misread. (Contiguous-id sortings are unaffected —
-positional index == true id — which is likely the large majority.)
+### Upgrade procedure
 
-### The risk is worse than "a loud KeyError" (audit corrected this)
-For an old positional id `P` on a sparse set:
-- `P` not in the true-id set → **KeyError** (loud, fine).
-- `P` **is** a true id but sits at a different position (`true_ids[P] != P`) →
-  **silent misattribution**: returns the *wrong unit's* spikes, no error.
+Run `UnitAnnotation.audit_positional_unit_ids()` and inspect its candidates
+before reading or writing annotations after upgrading. For known positional
+rows, inspect `UnitAnnotation.migrate_positional_unit_ids()` (the default is a
+dry run), then apply it with `dry_run=False`. If a development database already
+contains true-id annotations without markers, verify their provenance before
+marking the affected merges manually; do not remap them as positional rows.
+The release notes in `CHANGELOG.md` give the operator entry points.
 
-Concrete silent case: id set `{2,3,4}`, old row `unit_id=2` meant the 3rd unit
-(true id 4) but now resolves to true-unit-2 (the 1st unit) — a curation annotation
-landing on the wrong cell. This is why it's not merely a doc note.
+### Regression coverage
 
-### Why it can't be silently auto-fixed
-Old positional rows and new true-id rows are **indistinguishable by value** (both
-small ints), and the DataJoint schema is **frozen** (no version/marker column). So
-a silent "if the id is missing, treat it as positional" rule is unsafe (it would
-corrupt legitimate new rows, and can't even detect the silent-misattribution case,
-which doesn't miss). The fix must be an explicit choice:
-
-| | Approach | Preserves old data | Handles silent case | Cost |
-|---|---|---|---|---|
-| **A** | Actionable error on miss + migration note in CHANGELOG | No | No | Low |
-| **B** | One-time migration script (rewrite positional→true id) run at upgrade | Yes | Yes | Medium; must run exactly once (no marker to guard idempotency) |
-| **C** | Fix-forward, bare `KeyError` | No | No | Trivial (status quo) |
-
-Recommendation: **B if any production annotations exist on merged curations;
-otherwise A.** The silent-misattribution case is what tips away from "just
-document it."
-
-### Decisive question (answer this to choose A vs B)
-Has anyone ever added a `UnitAnnotation` to a curation that had **merges applied**,
-in a DB worth preserving? If never → **A**. If yes / unsure → **B**.
-
-### Proposed next step
-Write a **read-only probe** to measure instead of guess: for every `UnitAnnotation`
-row, load the backing NWB, test whether the unit-id set is non-contiguous, and
-bucket each row as *safe* (contiguous) or *ambiguous / silent-risk* (non-contiguous
-— an old positional row and a new true-id row are **indistinguishable by value**,
-so a non-contiguous row can only be flagged as at-risk, not definitively
-mis-attributing). Run it against the **lab DB** (the local Colima DB has no
-production rows). The counts decide A vs B.
-
-Done (unconditional, shipped): the bare `KeyError` at
-[unit_annotation.py](src/spyglass/spikesorting/analysis/v1/unit_annotation.py) is
-now an actionable `ValueError` (helper `spikes_for_requested_units`) that names
-the valid id set and explains the positional→true-id change.
+`tests/spikesorting/v1/test_unit_annotation_migration.py` exercises remapping,
+annotation-value preservation, invalid plans and marker idempotency.
+`tests/spikesorting/test_unit_annotation_boundary.py` covers the transactional
+write boundary and read-before-migration rejection, including an overlapping
+positional/true id, dense ordered namespaces and migrated sparse namespaces.
 
 ---
 
