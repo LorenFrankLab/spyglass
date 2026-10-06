@@ -9,6 +9,8 @@ directly.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from spyglass.spikesorting.v2._unit_match_planning import (
@@ -19,12 +21,27 @@ from spyglass.spikesorting.v2._unit_match_planning import (
 pytestmark = pytest.mark.unit
 
 _S0, _S1 = "sort-0", "sort-1"
+_GENERATIONS = {
+    (_S0, 0): "ae0bb75e-7519-472b-a7ed-9e58fce09d6d",
+    (_S0, 1): "7ed44ce2-b8a5-4d42-a9bb-e8df4c699955",
+    (_S0, 2): "f06a3d4a-ad1f-4c65-bc7e-5f7324fd2a70",
+    (_S1, 0): "763b6c78-eb12-4115-90be-33026bcfa5ed",
+    (_S1, 1): "d7c7c4f0-d709-4f5b-96e4-39c8b46d5341",
+    (_S1, 2): "1500c877-90fa-40fd-b8a7-269cb402c15e",
+}
+
+
+def _pin(sorting_id, curation_id):
+    return {
+        "sorting_id": sorting_id,
+        "curation_id": curation_id,
+        "curation_uuid": _GENERATIONS[sorting_id, curation_id],
+    }
 
 
 def _cur(sorting_id, curation_id, parent, source="manual", desc=""):
     return {
-        "sorting_id": sorting_id,
-        "curation_id": curation_id,
+        **_pin(sorting_id, curation_id),
         "parent_curation_id": parent,
         "curation_source": source,
         "description": desc,
@@ -82,6 +99,7 @@ def test_member_choices_to_dataframe_one_row_per_choice():
         "team_name",
         "sorting_id",
         "curation_id",
+        "curation_uuid",
         "parent_curation_id",
         "curation_source",
         "description",
@@ -118,8 +136,8 @@ def test_root_curation_strategy_picks_root_and_warns_loudly():
     plan = _plan(members, "root")
     assert plan.ok
     assert plan.curation_choices == {
-        0: {"sorting_id": _S0, "curation_id": 0},
-        1: {"sorting_id": _S1, "curation_id": 0},
+        0: _pin(_S0, 0),
+        1: _pin(_S1, 0),
     }
     # Pinning an uncurated root is legal but loud.
     assert plan.warnings
@@ -131,7 +149,7 @@ def test_final_curated_picks_the_terminal_child():
     members = [_member(0, "day1.nwb", [_cur(_S0, 0, -1), _cur(_S0, 1, 0)])]
     plan = _plan(members, "final_curated")
     assert plan.ok
-    assert plan.curation_choices == {0: {"sorting_id": _S0, "curation_id": 1}}
+    assert plan.curation_choices == {0: _pin(_S0, 1)}
 
 
 def test_final_curated_follows_a_chain_to_the_terminal_leaf():
@@ -144,7 +162,7 @@ def test_final_curated_follows_a_chain_to_the_terminal_leaf():
         )
     ]
     plan = _plan(members, "final_curated")
-    assert plan.curation_choices == {0: {"sorting_id": _S0, "curation_id": 2}}
+    assert plan.curation_choices == {0: _pin(_S0, 2)}
 
 
 def test_final_curated_ambiguous_two_leaves_errors():
@@ -182,7 +200,7 @@ def test_auto_curated_picks_the_evaluation_child():
         )
     ]
     plan = _plan(members, "auto_curated")
-    assert plan.curation_choices == {0: {"sorting_id": _S0, "curation_id": 2}}
+    assert plan.curation_choices == {0: _pin(_S0, 2)}
 
 
 def test_auto_curated_none_errors_with_auto_curate_hint():
@@ -210,8 +228,8 @@ def test_manual_canonicalizes_and_validates_membership():
     )
     assert plan.ok
     assert plan.curation_choices == {
-        0: {"sorting_id": _S0, "curation_id": 1},
-        1: {"sorting_id": _S1, "curation_id": 0},
+        0: _pin(_S0, 1),
+        1: _pin(_S1, 0),
     }
 
 
@@ -458,6 +476,7 @@ def test_input_plan_pins_one_curation_per_sort_in_named_order():
                 "nwb_file_names": ("day2.nwb", "day2.nwb"),
                 "interval_list_names": ("interval 0", "interval 1"),
                 "curation_id": pins[0][1],
+                "curation_uuid": _pin(*pins[0])["curation_uuid"],
                 "status": "pinned",
             },
             {
@@ -467,6 +486,7 @@ def test_input_plan_pins_one_curation_per_sort_in_named_order():
                 "nwb_file_names": ("day1.nwb",),
                 "interval_list_names": ("interval 0",),
                 "curation_id": pins[1][1],
+                "curation_uuid": _pin(*pins[1])["curation_uuid"],
                 "status": "pinned",
             },
         ]
@@ -487,7 +507,7 @@ def test_input_plan_final_curated_blocks_an_ambiguous_sort_only():
     assert not plan.ok
     assert len(plan.errors) == 1
     assert f"sort {_S0}" in plan.errors[0] and "manual" in plan.errors[0]
-    assert plan.curations == [{"sorting_id": _S1, "curation_id": 1}]
+    assert plan.curations == [_pin(_S1, 1)]
     assert plan.as_dataframe()["status"].tolist() == ["UNRESOLVED", "pinned"]
     no_curation = _input_plan([_sort(_S0, [])], "root")
     assert no_curation.errors == [
@@ -508,8 +528,8 @@ def test_input_plan_manual_pins_by_sorting_id():
     )
     assert plan.ok
     assert plan.curations == [
-        {"sorting_id": _S0, "curation_id": 1},
-        {"sorting_id": _S1, "curation_id": 0},
+        _pin(_S0, 1),
+        _pin(_S1, 0),
     ]
 
     missing = _input_plan(sorts, "manual", manual_curation_choices={_S0: 1})
@@ -549,6 +569,62 @@ def test_input_plan_rejects_bad_arguments():
         _input_plan([one], "root", manual_curation_choices={_S0: 0})
 
 
+@pytest.mark.parametrize("form", ["members", "sorts"])
+@pytest.mark.parametrize(
+    "strategy", ["root", "manual", "auto_curated", "final_curated"]
+)
+def test_plans_require_the_reviewed_curation_generation(form, strategy):
+    curation_id = 0 if strategy == "root" else 1
+    choice = _cur(
+        _S0,
+        curation_id,
+        -1 if strategy == "root" else 0,
+        source="curation_evaluation",
+    )
+    original = choice["curation_uuid"]
+
+    def build():
+        if form == "members":
+            manual = (
+                {
+                    "manual_curation_choices": {
+                        0: {
+                            "sorting_id": _S0,
+                            "curation_id": curation_id,
+                        }
+                    }
+                }
+                if strategy == "manual"
+                else {}
+            )
+            return _plan([_member(0, "day1.nwb", [choice])], strategy, **manual)
+        manual = (
+            {"manual_curation_choices": {_S0: curation_id}}
+            if strategy == "manual"
+            else {}
+        )
+        return _input_plan([_sort(_S0, [choice])], strategy, **manual)
+
+    def pin(plan):
+        return (
+            plan.curation_choices[0] if form == "members" else plan.curations[0]
+        )
+
+    plan = build()
+    assert plan.ok, plan.errors
+    assert pin(plan)["curation_uuid"] == original
+    # Generations are opaque: they cannot be reconstructed from the numeric
+    # curation key. Mutating a candidate must also leave the reviewed plan fixed.
+    replacement = uuid.UUID("c7b7a213-757d-4903-9a62-506614b9858b")
+    choice["curation_uuid"] = replacement
+    assert pin(plan)["curation_uuid"] == original
+    assert pin(build())["curation_uuid"] == str(replacement)
+    choice.pop("curation_uuid")
+    missing = build()
+    assert not missing.ok
+    assert any("curation_uuid" in error for error in missing.errors)
+
+
 def test_run_v2_unit_match_checks_an_input_plan_before_the_database():
     """An input plan with explicit args, or a not-ok input plan, raises
     before any table access."""
@@ -571,3 +647,38 @@ def test_run_v2_unit_match_checks_an_input_plan_before_the_database():
         run_v2_unit_match(_plan_with([]), curation_choices={})
     with pytest.raises(PipelineInputError, match="for every sort"):
         run_v2_unit_match(_plan_with(["sort sort-0 ..."]))
+    with pytest.raises(PipelineInputError, match="lacks a curation_uuid"):
+        run_v2_unit_match(_plan_with([]))
+
+
+@pytest.mark.parametrize("form", ["members", "sorts"])
+def test_runner_refuses_unpinned_plans_before_loading_tables(monkeypatch, form):
+    import sys
+
+    from spyglass.spikesorting.v2._unit_match_planning import UnitMatchInputPlan
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
+
+    # Make the database boundary unavailable so querying it before validating
+    # the plan fails independently of any local database configuration.
+    monkeypatch.setitem(
+        sys.modules, "spyglass.spikesorting.v2.unit_matching", None
+    )
+    if form == "members":
+        plan = UnitMatchPlan(
+            session_group_owner="owner",
+            session_group_name="group",
+            matcher_params_name="unitmatch_default",
+            curation_strategy="manual",
+            curation_choices={0: {"sorting_id": _S0, "curation_id": 1}},
+            rows=[],
+        )
+    else:
+        plan = UnitMatchInputPlan(
+            matcher_params_name="unitmatch_default",
+            curation_strategy="manual",
+            curations=[{"sorting_id": _S0, "curation_id": 1}],
+            rows=[],
+        )
+    with pytest.raises(PipelineInputError, match="lacks a curation_uuid"):
+        run_v2_unit_match(plan)

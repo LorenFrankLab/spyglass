@@ -216,6 +216,7 @@ jobs:
           - name: integration
             paths: >-
               tests/spikesorting/v2/test_unitmatch.py
+              tests/spikesorting/v2/test_unit_match_generation.py
               tests/spikesorting/v2/test_unitmatch_concat.py
               tests/spikesorting/v2/test_session_group_concat.py
               tests/spikesorting/v2/test_recompute.py
@@ -234,6 +235,7 @@ jobs:
               tests/spikesorting/v2
               --ignore=tests/spikesorting/v2/single_session
               --ignore=tests/spikesorting/v2/test_unitmatch.py
+              --ignore=tests/spikesorting/v2/test_unit_match_generation.py
               --ignore=tests/spikesorting/v2/test_unitmatch_concat.py
               --ignore=tests/spikesorting/v2/test_session_group_concat.py
               --ignore=tests/spikesorting/v2/test_recompute.py

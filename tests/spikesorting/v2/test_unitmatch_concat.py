@@ -1191,6 +1191,7 @@ def test_named_sort_plan_runs_without_a_group(
     runs it through insert_inputs with no SessionGroup: the same selection
     insert_inputs mints for those curations, no group recorded, the listed
     pair stored between the two inputs, and a rerun reuses both stages."""
+    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
     from spyglass.spikesorting.v2.pipeline import (
         plan_v2_unit_match_from_sorts,
@@ -1233,10 +1234,16 @@ def test_named_sort_plan_runs_without_a_group(
             {
                 "sorting_id": str(concat["sorting_id"]),
                 "curation_id": concat["curation_id"],
+                "curation_uuid": str(
+                    (CurationV2 & concat).fetch1("curation_uuid")
+                ),
             },
             {
                 "sorting_id": str(single["sorting_id"]),
                 "curation_id": single["curation_id"],
+                "curation_uuid": str(
+                    (CurationV2 & single).fetch1("curation_uuid")
+                ),
             },
         ]
         rows = plan.as_dataframe().to_dict(orient="records")
@@ -1366,6 +1373,93 @@ def test_named_sort_plan_runs_without_a_group(
             & {"matcher_params_name": "named_sort_pairer_params"}
         ).super_delete(warn=False)
         restore_matcher_registry(saved)
+
+
+@pytest.mark.database
+@pytest.mark.stage
+@pytest.mark.parametrize(
+    "order,stale_name",
+    [("late_first", "single_b"), ("early_first", "concat_day2")],
+)
+def test_named_plan_checks_every_generation_before_reuse(
+    daily_concat_match_inputs, order, stale_name
+):
+    """A stale second input is refused in either requested/chronological order."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_sorts,
+        run_v2_unit_match,
+    )
+    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+
+    roots = daily_concat_match_inputs["curations"]
+    children, selections = {}, []
+    try:
+        for name in ("single_b", "concat_day2"):
+            root = roots[name]
+            children[name] = CurationV2.insert_curation(
+                {"sorting_id": root["sorting_id"]},
+                parent_curation_id=root["curation_id"],
+                description="reviewed matching input",
+            )
+        names = (
+            ["concat_day2", "single_b"]
+            if order == "late_first"
+            else ["single_b", "concat_day2"]
+        )
+        plan = plan_v2_unit_match_from_sorts(
+            [children[name]["sorting_id"] for name in names],
+            curation_strategy="manual",
+            manual_curation_choices={
+                child["sorting_id"]: child["curation_id"]
+                for child in children.values()
+            },
+        )
+        assert plan.ok, plan.errors
+        stale = children[stale_name]
+        assert plan.curations[1]["sorting_id"] == str(stale["sorting_id"])
+        reviewed_uuid = plan.curations[1]["curation_uuid"]
+        (CurationV2 & stale).delete(safemode=False)
+        replacement = CurationV2.insert_curation(
+            {"sorting_id": stale["sorting_id"]},
+            parent_curation_id=roots[stale_name]["curation_id"],
+            description="replacement after review",
+        )
+        children[stale_name] = replacement
+        assert replacement == stale
+        replacement_uuid = (CurationV2 & replacement).fetch1("curation_uuid")
+        assert str(replacement_uuid) != reviewed_uuid
+
+        # Set up the current-generation find-existing path independently of
+        # the stale plan, then verify chronological ordering and frozen UUIDs.
+        pk = UnitMatchSelection.insert_inputs(
+            list(children.values()), "unitmatch_default"
+        )
+        selections.append(pk)
+        inputs = _input_rows(pk)
+        assert [str(row["sorting_id"]) for row in inputs] == [
+            str(children["single_b"]["sorting_id"]),
+            str(children["concat_day2"]["sorting_id"]),
+        ]
+        pinned = {
+            str(row["sorting_id"]): row["curation_uuid"] for row in inputs
+        }
+        assert pinned[str(replacement["sorting_id"])] == replacement_uuid
+        before = UnitMatchSelection.fetch("KEY", as_dict=True, order_by="KEY")
+        with pytest.raises(
+            ValueError, match="changed curation_uuid since planning"
+        ):
+            run_v2_unit_match(plan)
+        assert (
+            UnitMatchSelection.fetch("KEY", as_dict=True, order_by="KEY")
+            == before
+        )
+        assert _input_rows(pk) == inputs
+    finally:
+        for pk in selections:
+            _drop(pk)
+        for child in children.values():
+            (CurationV2 & child).delete(safemode=False)
 
 
 def _expected_input_recordings(fx, name):

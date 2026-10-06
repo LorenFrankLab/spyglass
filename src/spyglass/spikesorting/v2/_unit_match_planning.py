@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from spyglass.spikesorting.v2._lookup_validation import lossless_int
 
@@ -56,6 +57,7 @@ _MEMBER_COLUMNS = (
 _CHOICE_COLUMNS = (
     "sorting_id",
     "curation_id",
+    "curation_uuid",
     "parent_curation_id",
     "curation_source",
     "description",
@@ -69,6 +71,7 @@ _INPUT_PLAN_COLUMNS = (
     "nwb_file_names",
     "interval_list_names",
     "curation_id",
+    "curation_uuid",
     "status",
 )
 
@@ -114,8 +117,11 @@ def member_choices_to_dataframe(members: list[dict]) -> "pd.DataFrame":
 class UnitMatchPlan:
     """A reviewable plan pinning one curation per SessionGroup member.
 
-    ``curation_choices`` is the ``{member_index: {"sorting_id", "curation_id"}}``
-    dict ``run_v2_unit_match`` consumes. ``errors`` (blocking) is non-empty when
+    ``curation_choices`` maps each member index to ``sorting_id``,
+    ``curation_id`` and ``curation_uuid``. The UUID pins the reviewed
+    generation, so deleting and recreating a numeric curation ID invalidates
+    the plan. ``run_v2_unit_match`` consumes these pins. ``errors`` (blocking)
+    is non-empty when
     the curation strategy could not pin exactly one curation for some member;
     ``ok`` is then ``False`` and running the plan raises. ``warnings`` are
     advisory (e.g. the ``root`` curation strategy pins uncurated curations).
@@ -150,6 +156,7 @@ class UnitMatchPlan:
                 "nwb_file_name",
                 "sorting_id",
                 "curation_id",
+                "curation_uuid",
                 "status",
             ],
         )
@@ -161,7 +168,9 @@ class UnitMatchInputPlan:
 
     Each named sort -- of a single recording or of a same-day concatenation
     -- is one matching input. ``curations`` is the list of pinned
-    ``{"sorting_id", "curation_id"}`` in the order the sorts were named;
+    ``{"sorting_id", "curation_id", "curation_uuid"}`` in the order the sorts
+    were named; the UUID pins the reviewed generation, even if the numeric
+    curation ID is later reused.
     ``run_v2_unit_match`` passes it to ``UnitMatchSelection.insert_inputs``,
     which numbers the inputs chronologically. ``errors`` (blocking) is
     non-empty when the curation strategy could not pin exactly one curation
@@ -293,7 +302,7 @@ def _pin_one(
     -------
     tuple
         ``(pinned_or_None, warnings, errors)`` where ``pinned`` is
-        ``{"sorting_id", "curation_id"}``.
+        ``{"sorting_id", "curation_id", "curation_uuid"}``.
     """
     warnings: list[str] = []
 
@@ -320,7 +329,13 @@ def _pin_one(
                     f"{subject}'s committed curations ({listing_hint})."
                 ],
             )
-        return dict(chosen), warnings, []
+        pick = next(
+            choice
+            for choice in choices
+            if (choice["sorting_id"], choice["curation_id"])
+            == (chosen["sorting_id"], chosen["curation_id"])
+        )
+        return _generation_pin(pick, label, warnings)
 
     candidates = _candidates(choices, curation_strategy)
     if len(candidates) == 0:
@@ -351,10 +366,25 @@ def _pin_one(
             "you want -- prefer curation_strategy='final_curated' or "
             "'auto_curated'."
         )
+    return _generation_pin(pick, label, warnings)
+
+
+def _generation_pin(pick, label, warnings):
+    """Pin the chosen row's generation; refuse candidate lists without it."""
+    if pick.get("curation_uuid") is None:
+        return (
+            None,
+            warnings,
+            [
+                f"{label}: the chosen curation has no curation_uuid; fetch "
+                "its generation and rebuild the plan before matching."
+            ],
+        )
     return (
         {
             "sorting_id": pick["sorting_id"],
             "curation_id": int(pick["curation_id"]),
+            "curation_uuid": str(UUID(str(pick["curation_uuid"]))),
         },
         warnings,
         [],
@@ -367,7 +397,7 @@ def _resolve_member(
     """Pin one curation for a SessionGroup member per the curation strategy.
 
     Returns ``(pinned_or_None, warnings, errors)`` where ``pinned`` is
-    ``{"sorting_id", "curation_id"}``.
+    ``{"sorting_id", "curation_id", "curation_uuid"}``.
     """
     idx = member["member_index"]
     chosen = None
@@ -424,7 +454,8 @@ def build_unit_match_plan(
 
     ``members`` is the structured per-member choices (one entry per member:
     ``member_index`` / ``nwb_file_name`` / ``choices`` list of ``{sorting_id,
-    curation_id, parent_curation_id, curation_source, description}``) --
+    curation_id, curation_uuid, parent_curation_id, curation_source,
+    description}``) --
     ``describe_unit_match_choices`` tabulates the same data. DB-free.
     ``curation_strategy`` is REQUIRED:
 
@@ -469,6 +500,7 @@ def build_unit_match_plan(
                 "nwb_file_name": member["nwb_file_name"],
                 "sorting_id": pinned["sorting_id"] if pinned else None,
                 "curation_id": pinned["curation_id"] if pinned else None,
+                "curation_uuid": pinned["curation_uuid"] if pinned else None,
                 "status": "pinned" if pinned else "UNRESOLVED",
             }
         )
@@ -513,8 +545,9 @@ def build_unit_match_input_plan(
     source_kind, source_id, nwb_file_names, interval_list_names, choices}``
     where ``nwb_file_names`` / ``interval_list_names`` list the sort's
     constituent recordings in recording order and ``choices`` is the sort's
-    committed curations (``{sorting_id, curation_id, parent_curation_id,
-    curation_source, description}``). DB-free. ``curation_strategy`` is
+    committed curations (``{sorting_id, curation_id, curation_uuid,
+    parent_curation_id, curation_source, description}``). DB-free.
+    ``curation_strategy`` is
     REQUIRED and resolves exactly as in :func:`build_unit_match_plan`, within
     each sort's own curations:
 
@@ -606,6 +639,7 @@ def build_unit_match_input_plan(
                 "nwb_file_names": tuple(sort["nwb_file_names"]),
                 "interval_list_names": tuple(sort["interval_list_names"]),
                 "curation_id": pinned["curation_id"] if pinned else None,
+                "curation_uuid": pinned["curation_uuid"] if pinned else None,
                 "status": "pinned" if pinned else "UNRESOLVED",
             }
         )

@@ -362,6 +362,7 @@ class UnitMatchCurationChoice(TypedDict):
 
     sorting_id: UUID
     curation_id: int
+    curation_uuid: UUID
     parent_curation_id: int
     curation_source: str
     description: str

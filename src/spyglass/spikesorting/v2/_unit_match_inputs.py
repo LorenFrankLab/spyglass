@@ -80,6 +80,7 @@ def insert_inputs(
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.session_group import SessionGroup
 
+    curations = list(curations)
     requested = _normalize_input_curations(curations)
     _check_input_count_and_sortings(requested, ValueError)
     group_key = None
@@ -101,6 +102,19 @@ def insert_inputs(
         _resolve_match_input(sorting_id, curation_id, ValueError)
         for sorting_id, curation_id in requested
     ]
+    for pin, item in zip(curations, resolved, strict=True):
+        if "curation_uuid" not in pin:
+            continue
+        expected = uuid.UUID(str(pin["curation_uuid"]))
+        if expected != uuid.UUID(str(item["curation_uuid"])):
+            raise ValueError(
+                "UnitMatchSelection.insert_inputs: input "
+                f"{_input_label(item['sorting_id'], item['curation_id'])} "
+                f"has changed curation_uuid since planning (expected "
+                f"{expected}, found {item['curation_uuid']}). The curation "
+                "was deleted and recreated; rebuild and review the plan "
+                "before matching."
+            )
     start_times = _session_start_times(
         {
             recording["nwb_file_name"]

@@ -380,6 +380,8 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         ----------
         curations : sequence of dict
             ``{"sorting_id": ..., "curation_id": ...}`` per matching input.
+            An optional ``curation_uuid`` pins the reviewed generation;
+            a recreated curation with the same numeric ID raises.
         matcher_params_name : str
             The ``MatcherParameters`` row to use.
         session_group : tuple of (str, str), optional
@@ -476,8 +478,20 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         _validate_member_curations(members, choices_by_member)
         return cls.insert_inputs(
             [
-                {"sorting_id": sorting_id, "curation_id": curation_id}
-                for _index, (sorting_id, curation_id) in sorted(
+                {
+                    "sorting_id": sorting_id,
+                    "curation_id": curation_id,
+                    **(
+                        {
+                            "curation_uuid": curation_choices[index][
+                                "curation_uuid"
+                            ]
+                        }
+                        if "curation_uuid" in curation_choices[index]
+                        else {}
+                    ),
+                }
+                for index, (sorting_id, curation_id) in sorted(
                     choices_by_member.items()
                 )
             ],

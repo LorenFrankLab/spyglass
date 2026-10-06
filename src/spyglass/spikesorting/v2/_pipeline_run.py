@@ -2818,6 +2818,13 @@ def run_v2_unit_match(
             session_group_owner = plan.session_group_owner
             session_group_name = plan.session_group_name
             curation_choices = plan.curation_choices
+        pins = input_curations if is_input_plan else curation_choices.values()
+        if any(pin.get("curation_uuid") is None for pin in pins):
+            raise PipelineInputError(
+                "run_v2_unit_match: the plan lacks a curation_uuid generation "
+                "pin. Rebuild it with plan_v2_unit_match or "
+                "plan_v2_unit_match_from_sorts before matching."
+            )
     elif session_group_owner is None or session_group_name is None:
         raise PipelineInputError(
             "run_v2_unit_match: session_group_owner and session_group_name "
@@ -3188,6 +3195,7 @@ def _unit_match_sort_choices(sorting_ids) -> list[dict]:
                 "choices": (CurationV2 & key).fetch(
                     "sorting_id",
                     "curation_id",
+                    "curation_uuid",
                     "parent_curation_id",
                     "curation_source",
                     "description",
@@ -3279,6 +3287,7 @@ def _unit_match_member_choices(
         choices = (CurationV2 & member_sortings).fetch(
             "sorting_id",
             "curation_id",
+            "curation_uuid",
             "parent_curation_id",
             "curation_source",
             "description",
