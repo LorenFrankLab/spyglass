@@ -146,8 +146,13 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         if observation.intervals is None:
             decoding_kwargs.setdefault("is_training", is_training)
         else:
+            # The decoder treats None like an omitted mask: every sample is
+            # eligible before the encoding and observation restrictions.
+            requested_training = decoding_kwargs.get("is_training")
+            if requested_training is None:
+                requested_training = True
             decoding_kwargs["is_training"] = (
-                np.asarray(decoding_kwargs.get("is_training", True), dtype=bool)
+                np.asarray(requested_training, dtype=bool)
                 & is_training
                 & observed
             )
