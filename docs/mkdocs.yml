@@ -70,6 +70,7 @@ nav:
           - Theta: notebooks/31_Theta.ipynb
           - Ripple Detection: notebooks/32_Ripple_Detection.ipynb
       - Decoding:
+          - Time Bins and Hz Migration: ForDevelopers/time_grid_migration.md
           - Extracting Waveforms: notebooks/40_Extracting_Clusterless_Waveform_Features.ipynb
           - Decoding Clusterless: notebooks/41_Decoding_Clusterless.ipynb
           - Decoding Sorted Spikes: notebooks/42_Decoding_SortedSpikes.ipynb

@@ -109,7 +109,7 @@ SortedSpikesGroup.Units & {
 
 # ## Model parameters
 #
-# As before we can specify the model parameters. The only difference is that we will use the `ContFragSortedSpikesClassifier` instead of the `ContFragClusterlessClassifier`.
+# As before we can specify the model parameters. We use `ContFragSortedSpikesClassifier` with `sampling_frequency=500` for 500 Hz decoding. Keep tracking at its measured timestamps in `PositionGroup`; the model constructs a separate uniform decode clock.
 
 # +
 from spyglass.decoding.v1.core import DecodingParameters
@@ -118,7 +118,9 @@ from non_local_detector.models import ContFragSortedSpikesClassifier
 DecodingParameters.insert1(
     {
         "decoding_param_name": "contfrag_sorted",
-        "decoding_params": ContFragSortedSpikesClassifier(),
+        "decoding_params": ContFragSortedSpikesClassifier(
+            sampling_frequency=500
+        ),
         "decoding_kwargs": dict(),
     },
     skip_duplicates=True,
@@ -129,9 +131,11 @@ DecodingParameters()
 
 # ### 1D Decoding
 #
-# As in the clusterless notebook, we can decode 1D position if we specify the `track_graph`, `edge_order`, and `edge_spacing` parameters in the `Environment` class constructor. See the [clusterless decoding tutorial](./42_Decoding_Clusterless.ipynb) for more details.
+# As in the clusterless notebook, we can decode 1D position if we specify the `track_graph`, `edge_order`, and `edge_spacing` parameters in the `Environment` class constructor. See the [clusterless decoding tutorial](./41_Decoding_Clusterless.ipynb) for more details.
 
 # ## Decoding
+#
+# Each requested decoding interval is covered by complete uniform bins at the model's sampling frequency. Result `time` values label bin centers; `time_bin_start` and `time_bin_end` preserve the explicit boundaries used to count events. A bin without tracking support is marked missing rather than treated as observed silence. Rates and sorted-spike `no_spike_rate` are in Hz; cached models and results from the older per-bin API must be recomputed. See [the migration guide](../docs/src/ForDevelopers/time_grid_migration.md) for direct API calls and mask alignment.
 #
 # Now we can decode the position using the sorted spikes using the `SortedSpikesDecodingSelection` table. Here we assume that `PositionGroup` has been specified as in the clusterless decoding tutorial.
 

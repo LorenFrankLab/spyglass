@@ -28,6 +28,10 @@ from spyglass.decoding.v1.core import DecodingParameters  # noqa: F401
 from spyglass.decoding.v1.core import PositionGroup
 from spyglass.decoding.v1.utils import (
     _get_interval_range,
+    declared_tracking_intervals,
+    decoder_interval_labels,
+    prepare_decoder_grid,
+    spikes_for_sequence,
     concatenate_interval_results,
     create_interval_labels,
     get_valid_kwargs,
@@ -121,7 +125,12 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             & {"decoding_param_name": key["decoding_param_name"]}
         ).fetch1()
 
-        decoding_params = model_params.get("decoding_params") or dict()
+        # Guard on ``is None`` (not truthiness): a reconstructed detector
+        # instance must not be discarded if it were ever falsy. ``decoding_kwargs``
+        # may legitimately be empty, so ``or dict()`` is fine there.
+        decoding_params = model_params.get("decoding_params")
+        if decoding_params is None:
+            decoding_params = dict()
         decoding_kwargs = model_params.get("decoding_kwargs") or dict()
 
         # Get position data
@@ -223,7 +232,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
     def _run_decoder(
         self,
         key: dict,
-        decoding_params: dict,
+        decoding_params: ClusterlessDetector | dict,
         decoding_kwargs: dict,
         position_info: pd.DataFrame,
         position_variable_names: list[str],
@@ -240,8 +249,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         ----------
         key : dict
             The key for the current decode operation
-        decoding_params : dict
-            Parameters for ClusterlessDetector initialization
+        decoding_params : ClusterlessDetector | dict
+            A reconstructed ClusterlessDetector instance (current-format rows)
+            or kwargs for ClusterlessDetector initialization (legacy rows)
         decoding_kwargs : dict
             Additional kwargs for fit/predict
         position_info : pd.DataFrame
@@ -289,51 +299,80 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         ValueError
             If all decoding intervals are empty (no valid time points)
         """
+        from non_local_detector.exceptions import ValidationError
+
         from non_local_detector.models.base import ClusterlessDetector
 
-        classifier = ClusterlessDetector(**decoding_params)
+        # Preserve concrete reconstructed models and legacy parameter dictionaries.
+        classifier = (
+            decoding_params
+            if isinstance(decoding_params, ClusterlessDetector)
+            else ClusterlessDetector(**decoding_params)
+        )
+
+        decoding_kwargs = dict(decoding_kwargs)
+        supplied_missing = decoding_kwargs.get("is_missing")
+        if supplied_missing is not None and not isinstance(
+            supplied_missing, pd.Series
+        ):
+            mask = np.asarray(supplied_missing, dtype=bool)
+            if mask.ndim == 0:
+                mask = np.full(len(position_info), bool(mask))
+            if mask.shape == (len(position_info),):
+                decoding_kwargs["is_missing"] = pd.Series(
+                    mask, index=position_info.index
+                )
+        tracking_intervals = declared_tracking_intervals(
+            position_info, decoding_kwargs
+        )
+        decoding_kwargs["valid_position_intervals"] = tracking_intervals
+        adapter_kwargs = {
+            name: decoding_kwargs.pop(name)
+            for name in ["discrete_transition_covariate_kinds"]
+            if name in decoding_kwargs
+        }
+        intervals = np.asarray(decoding_interval, dtype=float)
+        if (
+            intervals.ndim != 2
+            or intervals.shape[1] != 2
+            or not len(intervals)
+            or not np.isfinite(intervals).all()
+            or np.any(intervals[:, 0] >= intervals[:, 1])
+            or np.any(intervals[1:, 0] < intervals[:-1, 1])
+        ):
+            raise ValueError(
+                "Decode intervals must be ordered, non-overlapping [start, stop] intervals"
+            )
+        position_time = position_info.index.to_numpy()
+        position = position_info[position_variable_names].to_numpy()
 
         if key["estimate_decoding_params"]:
-            # When estimating parameters, treat times outside decoding intervals
-            # as missing. This means:
-            # 1. Spike data at those times is ignored
-            # 2. Only state transitions and previous time steps determine the
-            #    posterior
-            # 3. Longer gaps may lead to less reliable predictions
-            #
-            # Alternative approach: Treat intervals as multiple independent
-            # sequences (see https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
-
-            is_missing = np.ones(len(position_info), dtype=bool)
-            for interval_start, interval_end in decoding_interval:
-                is_missing[
-                    np.logical_and(
-                        position_info.index >= interval_start,
-                        position_info.index <= interval_end,
-                    )
-                ] = False
-
-            # Validate that at least some time points are in decoding intervals
-            if np.all(is_missing):
+            edges, missing, covariates = prepare_decoder_grid(
+                classifier,
+                position_info,
+                position_variable_names,
+                [position_time[0], position_time[-1]],
+                decoding_kwargs | adapter_kwargs,
+            )
+            interval_labels = decoder_interval_labels(edges, intervals)
+            missing |= interval_labels < 0
+            if np.all(missing):
                 raise ValueError(
-                    "All decoding intervals are empty - no valid time points.\n"
-                    f"Decoding intervals: {decoding_interval.tolist()}\n"
-                    f"Position data range: "
-                    f"[{position_info.index.min()}, {position_info.index.max()}]"
+                    "All decoding intervals are empty - no fully supported decode bins"
                 )
-
-            if "is_missing" not in decoding_kwargs:
-                decoding_kwargs["is_missing"] = is_missing
+            estimate_kwargs = decoding_kwargs | {"is_missing": missing}
+            if covariates is not None:
+                estimate_kwargs["discrete_transition_covariate_data"] = (
+                    covariates
+                )
             results = classifier.estimate_parameters(
-                position_time=position_info.index.to_numpy(),
-                position=position_info[position_variable_names].to_numpy(),
+                position_time=position_time,
+                position=position,
                 spike_times=spike_times,
                 spike_waveform_features=spike_waveform_features,
-                time=position_info.index.to_numpy(),
-                **decoding_kwargs,
+                time_edges=edges,
+                **estimate_kwargs,
             )
-            # Add interval_labels coordinate for consistency with predict branch
-            interval_labels = create_interval_labels(is_missing)
             results = results.assign_coords(
                 interval_labels=("time", interval_labels)
             )
@@ -341,64 +380,119 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             fit_kwargs, predict_kwargs = get_valid_kwargs(
                 classifier, decoding_kwargs, logger
             )
-
             classifier.fit(
-                position_time=position_info.index.to_numpy(),
-                position=position_info[position_variable_names].to_numpy(),
+                position_time=position_time,
+                position=position,
                 spike_times=spike_times,
                 spike_waveform_features=spike_waveform_features,
                 **fit_kwargs,
             )
-
-            # We treat each decoding interval as a separate sequence
             interval_results = []
-            for interval_start, interval_end in decoding_interval:
-                interval_time = position_info.loc[
-                    interval_start:interval_end
-                ].index.to_numpy()
-
-                if interval_time.size == 0:
+            interval_ids = []
+            for interval_id, (start, stop) in enumerate(intervals):
+                try:
+                    edges, missing, covariates = prepare_decoder_grid(
+                        classifier,
+                        position_info,
+                        position_variable_names,
+                        [start, stop],
+                        decoding_kwargs | adapter_kwargs,
+                    )
+                except ValidationError as error:
+                    if "time_range contains no complete bin" not in str(error):
+                        raise
                     logger.warning(
-                        f"Interval {interval_start}:{interval_end} is empty"
+                        f"Interval {start}:{stop} contains no complete decode bin"
                     )
                     continue
-                interval_result = classifier.predict(
-                    position_time=interval_time,
-                    position=position_info.loc[interval_start:interval_end][
-                        position_variable_names
-                    ].to_numpy(),
-                    spike_times=spike_times,
+                if np.all(missing):
+                    logger.warning(
+                        f"Interval {start}:{stop} has no fully supported decode bins"
+                    )
+                    continue
+                shared_stop = (
+                    interval_id + 1 < len(intervals)
+                    and intervals[interval_id + 1, 0] == stop
+                )
+                sequence_spikes, sequence_marks = spikes_for_sequence(
+                    spike_times,
+                    edges,
+                    shared_stop=shared_stop,
+                    shared_boundary=stop,
                     spike_waveform_features=spike_waveform_features,
-                    time=interval_time,
-                    **predict_kwargs,
+                )
+                interval_kwargs = predict_kwargs | {"is_missing": missing}
+                if covariates is not None:
+                    interval_kwargs["discrete_transition_covariate_data"] = (
+                        covariates
+                    )
+                interval_result = classifier.predict(
+                    position_time=position_time,
+                    position=position,
+                    spike_times=sequence_spikes,
+                    spike_waveform_features=sequence_marks,
+                    time_edges=edges,
+                    **interval_kwargs,
                 )
                 interval_results.append(interval_result)
-
-            # Validate that at least one interval had valid time points
+                interval_ids.extend(
+                    [interval_id] * interval_result.sizes["time"]
+                )
             if not interval_results:
                 raise ValueError(
-                    "All decoding intervals are empty - no valid time points.\n"
-                    f"Decoding intervals: {decoding_interval.tolist()}\n"
-                    f"Position data range: "
-                    f"[{position_info.index.min()}, {position_info.index.max()}]"
+                    "All decoding intervals are empty - no fully supported decode bins"
                 )
-
-            # Concatenate along time with interval_labels coordinate
-            results = concatenate_interval_results(interval_results)
+            results = concatenate_interval_results(
+                interval_results
+            ).assign_coords(
+                interval_labels=(
+                    "time",
+                    np.asarray(interval_ids, dtype=np.intp),
+                )
+            )
 
         # Save discrete transition and initial conditions
         # Use existing coordinates from results
-        state_names = results.coords["states"].values
+        state_names = np.atleast_1d(results.coords["states"].values)
         results["initial_conditions"] = xr.DataArray(
             classifier.initial_conditions_,
             dims=("state_bins",),
             coords={"state_bins": results.coords["state_bins"]},
             name="initial_conditions",
         )
+        transition_dims = ("states_from", "states_to")
+        transition_coords = {
+            "states_from": state_names,
+            "states_to": state_names,
+        }
+        if classifier.discrete_state_transitions_.ndim == 3:
+            covariates = (
+                decoding_kwargs.get("discrete_transition_covariate_data")
+                if not key["estimate_decoding_params"]
+                else covariates
+            )
+            axis = (
+                "transition_time"
+                if key["estimate_decoding_params"]
+                or isinstance(covariates, pd.DataFrame)
+                else "transition_row"
+            )
+            transition_dims = (axis,) + transition_dims
+            transition_coords[axis] = (
+                results.time.to_numpy()
+                if key["estimate_decoding_params"]
+                else (
+                    covariates.index.to_numpy()
+                    if isinstance(covariates, pd.DataFrame)
+                    else np.arange(
+                        classifier.discrete_state_transitions_.shape[0]
+                    )
+                )
+            )
         results["discrete_state_transitions"] = xr.DataArray(
             classifier.discrete_state_transitions_,
-            dims=("states_from", "states_to"),
-            coords={"states_from": state_names, "states_to": state_names},
+            dims=transition_dims,
+            coords=transition_coords,
             name="discrete_state_transitions",
         )
 
@@ -406,8 +500,15 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             vars(classifier).get("discrete_transition_coefficients_")
             is not None
         ):
-            results["discrete_transition_coefficients"] = (
+            coefficients = np.asarray(
                 classifier.discrete_transition_coefficients_
+            )
+            results["discrete_transition_coefficients"] = xr.DataArray(
+                coefficients,
+                dims=tuple(
+                    f"transition_coefficient_dim_{number}"
+                    for number in range(coefficients.ndim)
+                ),
             )
 
         return classifier, results
@@ -517,7 +618,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             position_info,
             position_variable_names,
         ) = ClusterlessDecodingV1.fetch_position_info(key)
-        classifier = ClusterlessDetector(**decoding_params)
+        # ``decoding_params`` is a reconstructed detector instance for params
+        # stored in the current format, or a kwargs dict for legacy rows.
+        classifier = (
+            decoding_params
+            if isinstance(decoding_params, ClusterlessDetector)
+            else ClusterlessDetector(**decoding_params)
+        )
 
         classifier.initialize_environments(
             position=position_info[position_variable_names].to_numpy(),
@@ -557,7 +664,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         min_time, max_time = _get_interval_range(key)
         position_info, position_variable_names = (
             PositionGroup & position_group_key
-        ).fetch_position_info(min_time=min_time, max_time=max_time)
+        ).fetch_position_info(
+            min_time=min_time, max_time=max_time, include_bracketing=True
+        )
 
         return position_info, position_variable_names
 
@@ -600,18 +709,14 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             edge_spacing=environment.edge_spacing,
         )
 
-        min_time, max_time = _get_interval_range(key)
-
-        # sort_index() for defensive programming - ensures chronological order
-        # before .loc[] slice. See: github.com/LorenFrankLab/spyglass/issues/1471
-        return (
-            pd.concat(
-                [linear_position_df.set_index(position_df.index), position_df],
-                axis=1,
-            )
-            .sort_index()
-            .loc[min_time:max_time]
-        )
+        # Preserve the already bounded fetch's original interpolation anchors.
+        # Sorting remains necessary for source epochs fetched out of order.
+        combined = pd.concat(
+            [linear_position_df.set_index(position_df.index), position_df],
+            axis=1,
+        ).sort_index()
+        combined.attrs.update(position_df.attrs)
+        return combined
 
     @classmethod
     def fetch_spike_data(cls, key, filter_by_interval=True):
@@ -759,53 +864,63 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             time_slice = slice(-np.inf, np.inf)
 
         classifier = self.fetch_model()
-        posterior = (
-            self.fetch_results()
-            .acausal_posterior.sel(time=time_slice)
-            .squeeze()
-            .unstack("state_bins")
-            .sum("state")
-        )
-
+        results = self.fetch_results().sel(time=time_slice)
+        posterior = results.acausal_posterior.unstack("state_bins").sum("state")
         if track_graph is None:
             track_graph = classifier.environments[0].track_graph
-
+        distance = np.full(results.sizes["time"], np.nan)
         if track_graph is not None:
-            linear_position_info = self.fetch_linear_position_info(
-                self.fetch1("KEY")
-            ).loc[time_slice]
-
-            orientation_name = self.get_orientation_col(linear_position_info)
-
-            traj_data = analysis.get_trajectory_data(
-                posterior=posterior,
-                track_graph=track_graph,
-                decoder=classifier,
-                actual_projected_position=linear_position_info[
-                    ["projected_x_position", "projected_y_position"]
-                ],
-                track_segment_id=linear_position_info["track_segment_id"],
-                actual_orientation=linear_position_info[orientation_name],
+            tracking = self.fetch_linear_position_info(self.fetch1("KEY"))
+            orientation = self.get_orientation_col(tracking)
+            columns = ["projected_x_position", "projected_y_position"]
+            aligned, valid = analysis.align_tracking_to_results(
+                tracking,
+                results,
+                position_columns=columns,
+                valid_position_intervals=declared_tracking_intervals(tracking),
+                categorical_columns=["track_segment_id"],
+                circular_columns=[orientation],
             )
-
-            return analysis.get_ahead_behind_distance(
-                classifier.environments[0].track_graph, *traj_data
-            )
+            valid &= np.isfinite(
+                aligned[columns + ["track_segment_id", orientation]].to_numpy(
+                    dtype=float
+                )
+            ).all(axis=1)
+            if np.any(valid):
+                trajectory = analysis.get_trajectory_data(
+                    posterior=posterior.isel(time=valid),
+                    track_graph=track_graph,
+                    decoder=classifier,
+                    actual_projected_position=aligned.loc[valid, columns],
+                    track_segment_id=aligned.loc[
+                        valid, "track_segment_id"
+                    ].astype(int),
+                    actual_orientation=aligned.loc[valid, orientation],
+                )
+                distance[valid] = analysis.get_ahead_behind_distance(
+                    track_graph, *trajectory
+                )
         else:
-            # `fetch_position_info` returns a tuple
-            position_info = self.fetch_position_info(self.fetch1("KEY"))[0].loc[
-                time_slice
-            ]
-            map_position = analysis.maximum_a_posteriori_estimate(posterior)
-
-            orientation_name = self.get_orientation_col(position_info)
-            position_variable_names = (
-                PositionGroup & self.fetch1("KEY")
-            ).fetch1("position_variables")
-
-            return analysis.get_ahead_behind_distance2D(
-                position_info[position_variable_names].to_numpy(),
-                position_info[orientation_name].to_numpy(),
-                map_position,
-                classifier.environments[0].track_graphDD,
+            tracking, columns = self.fetch_position_info(self.fetch1("KEY"))
+            orientation = self.get_orientation_col(tracking)
+            aligned, valid = analysis.align_tracking_to_results(
+                tracking,
+                results,
+                position_columns=columns,
+                valid_position_intervals=declared_tracking_intervals(tracking),
+                circular_columns=[orientation],
             )
+            valid &= np.isfinite(
+                aligned[columns + [orientation]].to_numpy(dtype=float)
+            ).all(axis=1)
+            if np.any(valid):
+                map_position = analysis.maximum_a_posteriori_estimate(
+                    posterior.isel(time=valid)
+                )
+                distance[valid] = analysis.get_ahead_behind_distance2D(
+                    aligned.loc[valid, columns].to_numpy(),
+                    aligned.loc[valid, orientation].to_numpy(),
+                    map_position,
+                    track_graph,
+                )
+        return distance

@@ -114,11 +114,29 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
         cls().insert(cls._default_contents(), skip_duplicates=True)
 
     def insert(self, rows, *args, **kwargs):
-        """Override insert to convert classes to dict before inserting"""
+        """Override insert to convert classes to dict before inserting.
+
+        A detector/classifier is serialized via ``get_params()`` (its public
+        constructor parameters) rather than ``vars()``. ``get_params()`` is the
+        stable serialization contract: it returns exactly the constructor
+        parameters and excludes version-specific derived internal attributes
+        that ``vars()`` may include (historically, e.g.,
+        ``_frozen_discrete_transition_rows_mask_``, since made a lazy property
+        upstream), which would otherwise be passed back into the constructor as
+        unexpected keyword arguments on fetch. The concrete class name is
+        recorded so that ``restore_classes`` can rebuild the exact subclass
+        (preserving subclass-only parameters such as NonLocal's
+        ``non_local_*_penalty``).
+        """
         converted = []
         for row in rows:  # build new rows: insert must not mutate the caller's
             params = row["decoding_params"]
-            if hasattr(params, "__dict__"):
+            if hasattr(params, "get_params"):
+                # non_local_detector models are sklearn-style estimators.
+                class_name = type(params).__name__
+                params = params.get_params(deep=False)
+                params["class_name"] = class_name
+            elif hasattr(params, "__dict__"):
                 params = vars(params)
             converted.append(
                 {**row, "decoding_params": convert_classes_to_dict(params)}
@@ -226,7 +244,11 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             )
 
     def fetch_position_info(
-        self, key: dict = None, min_time: float = None, max_time: float = None
+        self,
+        key: dict = None,
+        min_time: float = None,
+        max_time: float = None,
+        include_bracketing: bool = False,
     ) -> tuple[pd.DataFrame, list[str]]:
         """fetch position information for decoding
 
@@ -240,6 +262,12 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         max_time : float, optional
             restrict position information to times less than max_time,
             by default None
+
+        include_bracketing : bool, optional
+            Retain the nearest original sample on each side of the requested
+            range within each source epoch. Decoder calls use these samples as
+            interpolation anchors; no endpoint samples are synthesized.
+            Defaults to False, preserving exact slicing for other callers.
 
         Returns
         -------
@@ -275,13 +303,63 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             min_time = min([df.index.min() for df in position_info])
         if max_time is None:
             max_time = max([df.index.max() for df in position_info])
+        if include_bracketing:
+            bracketed = []
+            for frame in position_info:
+                frame = frame.sort_index()
+                if (
+                    frame.empty
+                    or frame.index[-1] < min_time
+                    or frame.index[0] > max_time
+                ):
+                    continue
+                times = frame.index.to_numpy()
+                first = max(
+                    0, np.searchsorted(times, min_time, side="left") - 1
+                )
+                last = min(
+                    len(frame),
+                    np.searchsorted(times, max_time, side="right") + 1,
+                )
+                bracketed.append(frame.iloc[first:last])
+            if not bracketed:
+                empty = pd.concat(position_info, axis=0).sort_index().iloc[:0]
+                empty.attrs["valid_position_intervals"] = []
+                return empty, position_variable_names
+            position_info = bracketed
+        tracking_intervals = np.asarray(
+            [
+                [
+                    (
+                        float(df.index.min())
+                        if include_bracketing
+                        else max(float(df.index.min()), min_time)
+                    ),
+                    (
+                        float(df.index.max())
+                        if include_bracketing
+                        else min(float(df.index.max()), max_time)
+                    ),
+                ]
+                for df in position_info
+                if max(float(df.index.min()), min_time)
+                < min(float(df.index.max()), max_time)
+            ],
+            dtype=float,
+        ).reshape(-1, 2)
+        tracking_intervals = tracking_intervals[
+            np.argsort(tracking_intervals[:, 0], kind="stable")
+        ]
         # sort_index() required: merge_ids may be fetched in non-chronological
         # order (e.g., alphabetically by UUID), causing .loc[min:max] to return
         # empty on unsorted index. See: github.com/LorenFrankLab/spyglass/issues/1471
-        position_info = (
-            pd.concat(position_info, axis=0).sort_index().loc[min_time:max_time]
-        )
+        position_info = pd.concat(position_info, axis=0).sort_index()
+        if not include_bracketing:
+            position_info = position_info.loc[min_time:max_time]
 
+        position_info.attrs["valid_position_intervals"] = (
+            tracking_intervals.tolist()
+        )
         return position_info, position_variable_names
 
     @staticmethod

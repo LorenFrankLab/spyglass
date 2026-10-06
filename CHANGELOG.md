@@ -10,6 +10,15 @@
 ```
 -->
 
+### Breaking Changes
+
+- Decoding uses explicit uniform time bins and rates in Hz with
+    `non-local-detector>=0.7.0,<0.8`. The model sampling frequency sets the
+    decode rate independently of tracking. Recompute existing models and
+    results; see
+    [the migration guide](docs/src/ForDevelopers/time_grid_migration.md) for
+    parameter and direct-call changes #1618
+
 ### Documentation
 
 - Add LFP artifact detection to the LFP notebook #1641
@@ -25,6 +34,12 @@
 - Add `prefer_download` custom config for stream-capable backends #1662
 
 ### Pipelines
+
+- Decoding
+
+    - Serialize constructor parameters and concrete model classes, preserving
+        algorithm settings when parameters are fetched. Upgrade legacy NonLocal
+        parameter rows without persisting fitted state #1618
 
 - Spike Sorting
 
