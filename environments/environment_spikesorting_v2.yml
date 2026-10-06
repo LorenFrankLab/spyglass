@@ -1,12 +1,10 @@
 # Isolated conda environment for the spikesorting v2 test suite.
 #
-# The v2 pipeline targets SpikeInterface 0.104 / Python 3.11, which is
-# incompatible with the SpikeInterface 0.99 baseline the rest of the repo
-# pins (see environments/environment.yml). CI keeps the two suites in
-# separate environments and runs v2 with `--ignore`d from the main suite
-# (.github/workflows/test-conda.yml: the `pytest-v2` job). This file is the
-# conda equivalent of that job's setup so the v2 suite can be reproduced
-# locally with conda.
+# The v2 pipeline targets the package-wide SpikeInterface 0.104 pin and
+# Python 3.11. CI runs v2 in the separate pytest-v2 job and excludes all
+# spikesorting/v0, v1 and v2 tests from the general test job. The v0/v1
+# population tests use the separate SI 0.99 legacy environment. This file
+# mirrors the pytest-v2 setup so that suite can be reproduced locally.
 #
 # 1. Create:   `mamba env create -f environments/environment_spikesorting_v2.yml`
 #    (run from the repo root; the env file installs the package editable
