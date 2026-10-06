@@ -75,10 +75,9 @@ from spyglass.spikesorting.v2.recording import Recording
 from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
+    _insert_parameter_rows,
     _validate_params,
-    reject_duplicate_parameter_content,
     split_leading_restrictions,
-    validate_lookup_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
@@ -159,20 +158,16 @@ class ArtifactDetectionParameters(
         # Validate every row (incl. ``insert_default``'s positional
         # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
         # validation or the params_schema_version drift check.
-        validated = validate_lookup_rows(
-            rows,
-            self.heading.names,
-            schema_for=lambda _row: ArtifactDetectionParamsSchema,
-            table_name="ArtifactDetectionParameters",
-        )
-        reject_duplicate_parameter_content(
+        _insert_parameter_rows(
             self,
-            validated,
+            rows,
+            insert_rows=super().insert,
+            schema_for=lambda _row: ArtifactDetectionParamsSchema,
             table_name="ArtifactDetectionParameters",
             name_attr="artifact_detection_params_name",
             allow_duplicate_params=allow_duplicate_params,
+            **kwargs,
         )
-        super().insert(validated, **kwargs)
 
     @classmethod
     def insert_default(cls):

@@ -409,6 +409,51 @@ class ImmutableParamsLookup:
         super().insert(rows, replace, *args, **kwargs)
 
 
+def _insert_parameter_rows(
+    table,
+    rows,
+    *,
+    insert_rows,
+    table_name: str,
+    name_attr: str,
+    schema_for=None,
+    per_row_hook=None,
+    validate_rows=None,
+    sorter_keyed: bool = False,
+    matcher_keyed: bool = False,
+    allow_duplicate_params: bool = False,
+    **kwargs,
+):
+    """Validate a parameter batch, reject duplicate content, then insert once.
+
+    ``insert_rows`` is the table override's bound ``super().insert`` so the
+    immutable-parameter guard and DataJoint insertion flags remain in its MRO.
+    Ordinary parameter tables supply ``schema_for`` and an optional row hook.
+    Sorter/matcher tables may instead supply ``validate_rows(rows, names)`` to
+    retain their specialized batch validation and error ordering.
+    """
+    if validate_rows is None:
+        validated = validate_lookup_rows(
+            rows,
+            table.heading.names,
+            schema_for=schema_for,
+            table_name=table_name,
+            per_row_hook=per_row_hook,
+        )
+    else:
+        validated = validate_rows(rows, table.heading.names)
+    reject_duplicate_parameter_content(
+        table,
+        validated,
+        table_name=table_name,
+        name_attr=name_attr,
+        sorter_keyed=sorter_keyed,
+        matcher_keyed=matcher_keyed,
+        allow_duplicate_params=allow_duplicate_params,
+    )
+    insert_rows(validated, **kwargs)
+
+
 # ``CurationSource`` and ``CurationLabel`` are defined in the stdlib-only
 # ``_enums`` module and re-exported at the top of this file; see the
 # import there for why they live outside ``utils``.

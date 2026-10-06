@@ -77,11 +77,10 @@ from spyglass.spikesorting.v2._staged_outputs import (
 from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
+    _insert_parameter_rows,
     _validate_params,
     _validate_reference_fields,
     assert_reference_not_member,
-    reject_duplicate_parameter_content,
-    validate_lookup_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
@@ -745,20 +744,16 @@ class PreprocessingParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         # Validate every row (incl. ``insert_default``'s positional
         # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
         # validation or the params_schema_version drift check.
-        validated = validate_lookup_rows(
-            rows,
-            self.heading.names,
-            schema_for=lambda _row: PreprocessingParamsSchema,
-            table_name="PreprocessingParameters",
-        )
-        reject_duplicate_parameter_content(
+        _insert_parameter_rows(
             self,
-            validated,
+            rows,
+            insert_rows=super().insert,
+            schema_for=lambda _row: PreprocessingParamsSchema,
             table_name="PreprocessingParameters",
             name_attr="preprocessing_params_name",
             allow_duplicate_params=allow_duplicate_params,
+            **kwargs,
         )
-        super().insert(validated, **kwargs)
 
     @classmethod
     def insert_default(cls):

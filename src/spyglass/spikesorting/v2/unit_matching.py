@@ -210,7 +210,7 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             _registered_matchers,
         )
         from spyglass.spikesorting.v2.utils import (
-            reject_duplicate_parameter_content,
+            _insert_parameter_rows,
             validate_lookup_rows,
         )
 
@@ -226,34 +226,37 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                 )
             return _get_matcher_schema(row["matcher"])
 
-        validated = validate_lookup_rows(
-            rows,
-            self.heading.names,
-            schema_for=schema_for,
-            table_name="MatcherParameters",
-        )
-        # The bundle ``seed`` is an identity-bearing params field and is the
-        # single authoritative seed. A ``random_seed`` in the separate
-        # job_kwargs blob would be a second, NON-identity seed that the bundle
-        # extractor must ignore -- so reject it at insert rather than silently
-        # dropping it, which would mislead a user into thinking it took effect.
-        for row in validated:
-            job_kwargs = row.get("job_kwargs")
-            if job_kwargs and "random_seed" in job_kwargs:
-                raise ValueError(
-                    "MatcherParameters.job_kwargs must not contain "
-                    "'random_seed': the waveform-bundle seed is the identity-"
-                    "bearing params 'seed' field. Set 'seed' in params instead."
-                )
-        reject_duplicate_parameter_content(
+        def validate_rows(batch, names):
+            validated = validate_lookup_rows(
+                batch,
+                names,
+                schema_for=schema_for,
+                table_name="MatcherParameters",
+            )
+            # Validate the whole batch before checking job seeds, preserving
+            # the registry/schema errors' precedence over this extra policy.
+            # The waveform-bundle params seed is the sole authoritative seed.
+            for row in validated:
+                job_kwargs = row.get("job_kwargs")
+                if job_kwargs and "random_seed" in job_kwargs:
+                    raise ValueError(
+                        "MatcherParameters.job_kwargs must not contain "
+                        "'random_seed': the waveform-bundle seed is the identity-"
+                        "bearing params 'seed' field. Set 'seed' in params instead."
+                    )
+            return validated
+
+        _insert_parameter_rows(
             self,
-            validated,
+            rows,
+            insert_rows=super().insert,
+            validate_rows=validate_rows,
             table_name="MatcherParameters",
             name_attr="matcher_params_name",
             matcher_keyed=True,
             allow_duplicate_params=allow_duplicate_params,
+            **kwargs,
         )
-        super().insert(validated, **kwargs)
 
     @classmethod
     def _default_rows(cls) -> list[dict]:

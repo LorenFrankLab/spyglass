@@ -101,12 +101,11 @@ from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     SourceResolution,
+    _insert_parameter_rows,
     find_orphaned_masters,
-    reject_duplicate_parameter_content,
     resolve_effective_seed,
     split_leading_restrictions,
     unit_brain_region_df,
-    validate_lookup_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
@@ -313,18 +312,19 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         ``reject_duplicate_parameter_content``.
         """
 
-        validated = _sorter_parameters.validate_sorter_rows(
-            rows, self.heading.names, self._NON_SI_SORTERS
-        )
-        reject_duplicate_parameter_content(
+        _insert_parameter_rows(
             self,
-            validated,
+            rows,
+            insert_rows=super().insert,
+            validate_rows=lambda batch, names: _sorter_parameters.validate_sorter_rows(
+                batch, names, self._NON_SI_SORTERS
+            ),
             table_name="SorterParameters",
             name_attr="sorter_params_name",
             sorter_keyed=True,
             allow_duplicate_params=allow_duplicate_params,
+            **kwargs,
         )
-        super().insert(validated, **kwargs)
 
     # The shipped rows are defined in
     # ``_recipe_catalog.sorter_default_contents`` (single source).
@@ -536,21 +536,17 @@ class AnalyzerWaveformParameters(
         guard (a second name for an existing blob); see
         ``reject_duplicate_parameter_content``.
         """
-        validated = validate_lookup_rows(
+        _insert_parameter_rows(
+            self,
             rows,
-            self.heading.names,
+            insert_rows=super().insert,
             schema_for=lambda _row: AnalyzerWaveformParamsSchema,
             table_name="AnalyzerWaveformParameters",
             per_row_hook=_reject_unsafe_waveform_params_name,
-        )
-        reject_duplicate_parameter_content(
-            self,
-            validated,
-            table_name="AnalyzerWaveformParameters",
             name_attr="waveform_params_name",
             allow_duplicate_params=allow_duplicate_params,
+            **kwargs,
         )
-        super().insert(validated, **kwargs)
 
     @classmethod
     def insert_default(cls):

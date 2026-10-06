@@ -74,9 +74,8 @@ from spyglass.spikesorting.v2.session_group import (
 from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
+    _insert_parameter_rows,
     find_orphaned_masters,
-    reject_duplicate_parameter_content,
-    validate_lookup_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
@@ -139,21 +138,17 @@ class MotionEstimationParameters(
                     "bearing params field 'noise_levels_seed'."
                 )
 
-        validated = validate_lookup_rows(
+        _insert_parameter_rows(
+            self,
             rows,
-            self.heading.names,
+            insert_rows=super().insert,
             schema_for=lambda _row: MotionEstimationParamsSchema,
             table_name="MotionEstimationParameters",
             per_row_hook=_resolve_and_check_job_kwargs,
-        )
-        reject_duplicate_parameter_content(
-            self,
-            validated,
-            table_name="MotionEstimationParameters",
             name_attr="motion_estimation_params_name",
             allow_duplicate_params=allow_duplicate_params,
+            **kwargs,
         )
-        super().insert(validated, **kwargs)
 
     @classmethod
     def insert_default(cls):
@@ -198,20 +193,16 @@ class MotionInterpolationParameters(
         ``allow_duplicate_params=True`` opts out of the duplicate-content
         guard; see ``reject_duplicate_parameter_content``.
         """
-        validated = validate_lookup_rows(
-            rows,
-            self.heading.names,
-            schema_for=lambda _row: MotionInterpolationParamsSchema,
-            table_name="MotionInterpolationParameters",
-        )
-        reject_duplicate_parameter_content(
+        _insert_parameter_rows(
             self,
-            validated,
+            rows,
+            insert_rows=super().insert,
+            schema_for=lambda _row: MotionInterpolationParamsSchema,
             table_name="MotionInterpolationParameters",
             name_attr="motion_interpolation_params_name",
             allow_duplicate_params=allow_duplicate_params,
+            **kwargs,
         )
-        super().insert(validated, **kwargs)
 
     @classmethod
     def insert_default(cls):
