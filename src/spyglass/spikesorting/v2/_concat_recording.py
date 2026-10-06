@@ -485,6 +485,41 @@ def electrode_signature_from_rows(
     )
 
 
+def _sampling_frequency_tolerance(reference, recording) -> float:
+    """Bound rate roundoff from explicit timestamps, without scanning the clock.
+
+    NWB readers infer the rate from the median of the first 1000 timestamp
+    differences. Subtracting two rounded timestamps can change that period
+    by one timestamp ULP; the corresponding reciprocal error grows with the
+    clock's absolute offset. Rate-based clocks need no such allowance. Cap
+    the combined uncertainty at one frame of drift over either recording.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._signal_math import _segment_times_at
+
+    uncertainty = 0.0
+    drift_limits = []
+    for candidate in (reference, recording):
+        fs = float(candidate.get_sampling_frequency())
+        n_samples = int(candidate.get_num_samples(segment_index=0))
+        if n_samples:
+            drift_limits.append(fs / n_samples)
+        if n_samples < 2 or not candidate.has_time_vector(segment_index=0):
+            continue
+        times = _segment_times_at(candidate, [0, min(n_samples, 1000) - 1])
+        precision = float(np.max(np.spacing(np.abs(times))))
+        period = 1.0 / fs
+        uncertainty += (
+            fs * precision / (period - precision)
+            if precision < period
+            else float("inf")
+        )
+    if drift_limits:
+        uncertainty = min(uncertainty, *drift_limits)
+    return max(1e-9, uncertainty)
+
+
 def assert_concat_compatible(recordings: list) -> None:
     """Reject member recordings that cannot be concatenated channel-for-channel.
 
@@ -578,11 +613,17 @@ def assert_concat_compatible(recordings: list) -> None:
                 "layout across sessions)."
             )
         fs = float(recording.get_sampling_frequency())
-        # Effectively exact (within float epsilon): a stitched timeline maps
-        # sample frames to spike times, so even a sub-Hz fs drift (e.g. 30000.0
-        # vs 30000.3) silently mis-times every spike. ``np.isclose``'s default
-        # rtol=1e-5 would accept that, so pin rtol=0 with a tiny atol.
-        if not np.isclose(fs, reference_fs, rtol=0, atol=1e-9):
+        # Cached NWBs carry explicit timestamps. SI's inferred rate varies
+        # with their float precision, so equal acquisition rates can reload
+        # slightly differently when the selected epochs start at different
+        # offsets. Allow only that numerical uncertainty, bounded to one
+        # frame of accumulated drift; rate-based clocks stay effectively exact.
+        tolerance = (
+            1e-9
+            if abs(fs - reference_fs) <= 1e-9
+            else _sampling_frequency_tolerance(reference, recording)
+        )
+        if not np.isclose(fs, reference_fs, rtol=0, atol=tolerance):
             raise ValueError(
                 f"build_concatenated_recording: member {index} sampling "
                 f"frequency {fs} differs from member 0's {reference_fs}; "
@@ -915,6 +956,18 @@ def build_concatenated_recording(recordings: list):
         flatten_planar_geometry,
     )
 
-    concatenated = concatenate_recordings(recordings, ignore_times=True)
+    # SI independently requires equal rates by default. The compatibility
+    # check above has already bounded any timestamp-inference roundoff, so
+    # permit exactly the accepted difference when stitching the members.
+    reference_fs = recordings[0].get_sampling_frequency()
+    sampling_frequency_max_diff = max(
+        abs(recording.get_sampling_frequency() - reference_fs)
+        for recording in recordings
+    )
+    concatenated = concatenate_recordings(
+        recordings,
+        ignore_times=True,
+        sampling_frequency_max_diff=sampling_frequency_max_diff,
+    )
     flatten_planar_geometry(concatenated)
     return concatenated

@@ -926,6 +926,207 @@ def test_resolve_snapshot_recordings_raises_on_member_content_drift(
 
 
 @pytest.mark.slow
+def test_concat_offset_epochs_populate_read_and_rebuild(
+    chronic_2_session_minirec,
+):
+    """Real selected epochs with unequal inferred rates survive the full cache path."""
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.common import AnalysisNwbfile, IntervalList
+    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+
+    fixture = chronic_2_session_minirec
+    owner = fixture["owner"]
+    source = fixture["same_day_members"][0]
+    nwb_file_name = source["nwb_file_name"]
+    group_key = {
+        "session_group_owner": owner,
+        "session_group_name": "concat_timestamp_roundoff",
+    }
+    intervals = [
+        ("concat roundoff first epoch", [0.0, 1.5], 0),
+        ("concat roundoff second epoch", [2.0, 3.5], 60_000),
+    ]
+    recording_keys, interval_keys, members = [], [], []
+    try:
+        for name, times, _ in intervals:
+            interval_key = {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": name,
+            }
+            IntervalList.insert1(
+                {
+                    **interval_key,
+                    "valid_times": np.asarray([times]),
+                    "pipeline": "concat_roundoff_test",
+                }
+            )
+            interval_keys.append(interval_key)
+            member = {
+                **source,
+                "interval_list_name": name,
+                "team_name": owner,
+            }
+            recording_key = RecordingSelection.insert_selection(
+                {
+                    **member,
+                    "preprocessing_params_name": fixture[
+                        "preprocessing_params_name"
+                    ],
+                }
+            )
+            recording_keys.append(recording_key)
+            Recording.populate(recording_key, reserve_jobs=False)
+            members.append(member)
+
+        recordings = [Recording().get_recording(key) for key in recording_keys]
+        rates = [recording.get_sampling_frequency() for recording in recordings]
+        assert (
+            abs(rates[0] - rates[1]) > 1e-9
+        ), "The persisted epoch clocks must exercise inferred-rate disagreement"
+        # The source fixture is rate-based at exactly 30 kHz. Both inclusive
+        # 1.5 s selections contain 45,001 frames, on these original clocks.
+        expected_member_times = [
+            np.arange(first, first + 45_001, dtype=np.float64) / 30_000
+            for _, _, first in intervals
+        ]
+        for recording, times in zip(recordings, expected_member_times):
+            assert recording.get_num_samples() == 45_001
+            np.testing.assert_array_equal(recording.get_times(), times)
+        expected_traces = np.concatenate(
+            [recording.get_traces() for recording in recordings]
+        )
+        expected_uv = np.concatenate(
+            [
+                recording.get_traces(return_in_uV=True)
+                for recording in recordings
+            ]
+        )
+
+        SessionGroup.create_group(
+            owner, group_key["session_group_name"], members
+        )
+        concat_key = select_unmasked_concat(
+            {
+                **group_key,
+                "preprocessing_params_name": fixture[
+                    "preprocessing_params_name"
+                ],
+            }
+        )
+        ConcatenatedRecording.populate(concat_key, reserve_jobs=False)
+        row = (ConcatenatedRecording & concat_key).fetch1()
+        assert int(row["n_samples"]) == 90_002
+        np.testing.assert_array_equal(
+            row["continuity_spans"], [[0, 45_001], [45_001, 90_002]]
+        )
+        np.testing.assert_array_equal(row["continuity_start_s"], [0, 2])
+        np.testing.assert_array_equal(row["continuity_end_s"], [1.5, 3.5])
+        indices, boundaries = (
+            ConcatenatedRecording.MemberBoundary & concat_key
+        ).fetch("member_index", "end_sample", order_by="member_index")
+        np.testing.assert_array_equal(indices, [0, 1])
+        np.testing.assert_array_equal(boundaries, [45_001, 90_002])
+        snapshot = (
+            ConcatenatedRecordingSelection.MemberSnapshot & concat_key
+        ).fetch("recording_id", order_by="member_index")
+        assert [str(recording_id) for recording_id in snapshot] == [
+            str(key["recording_id"]) for key in recording_keys
+        ]
+
+        def assert_cache(recording):
+            assert recording.get_num_segments() == 1
+            assert recording.get_num_samples() == 90_002
+            np.testing.assert_array_equal(
+                recording.get_traces(), expected_traces
+            )
+            np.testing.assert_array_equal(
+                recording.get_traces(return_in_uV=True), expected_uv
+            )
+            np.testing.assert_array_equal(
+                recording.channel_ids, recordings[0].channel_ids
+            )
+            np.testing.assert_array_equal(
+                recording.get_channel_locations(),
+                recordings[0].get_channel_locations(),
+            )
+            np.testing.assert_allclose(
+                recording.get_times(),
+                np.arange(90_002) / 30_000,
+                rtol=0,
+                atol=0.01 / 30_000,
+            )
+
+        assert_cache(ConcatenatedRecording().get_recording(concat_key))
+        # Exercise the persisted member mapping with boundary and final-frame
+        # spikes. Expected member keys and local frames come from the request.
+        sorting = si.NumpySorting.from_unit_dict(
+            [
+                {
+                    7: np.asarray([0, 45_000, 45_002, 90_001]),
+                    9: np.asarray([45_001]),
+                }
+            ],
+            sampling_frequency=30_000,
+        )
+        split = ConcatenatedRecording().split_sorting_by_session(
+            sorting, concat_key
+        )
+        expected_keys = [
+            (
+                nwb_file_name,
+                member["sort_group_id"],
+                member["interval_list_name"],
+                owner,
+            )
+            for member in members
+        ]
+        assert set(split) == set(expected_keys)
+        for key, frames, boundary_frames in zip(
+            expected_keys, ([0, 45_000], [1, 45_000]), ([], [0])
+        ):
+            np.testing.assert_array_equal(
+                split[key].get_unit_spike_train(7), frames
+            )
+            np.testing.assert_array_equal(
+                split[key].get_unit_spike_train(9), boundary_frames
+            )
+
+        cache_path = Path(
+            AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        )
+        cache_path.unlink()
+        assert_cache(ConcatenatedRecording().get_recording(concat_key))
+        assert cache_path.exists()
+        assert (ConcatenatedRecording & concat_key).fetch1(
+            "content_hash"
+        ) == row["content_hash"]
+        for key, times in zip(recording_keys, expected_member_times):
+            np.testing.assert_array_equal(
+                Recording().get_recording(key).get_times(), times
+            )
+    finally:
+        # Only this test's group, selections, and intervals are removed.
+        for key in (ConcatenatedRecordingSelection & group_key).fetch(
+            "KEY", as_dict=True
+        ):
+            (ConcatenatedRecording & key).super_delete(warn=False)
+            (ConcatenatedRecordingSelection & key).super_delete(warn=False)
+        (SessionGroup & group_key).super_delete(warn=False)
+        for key in recording_keys:
+            (Recording & key).super_delete(warn=False)
+            (RecordingSelection & key).super_delete(warn=False)
+        for key in interval_keys:
+            (IntervalList & key).super_delete(warn=False)
+
+
+@pytest.mark.slow
 def test_concatenated_recording_make_shape(same_day_group):
     """The materialized concat row carries the NWB pointers, channel count,
     summed duration, cumulative integer boundaries, and reads back as one
