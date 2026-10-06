@@ -28,8 +28,6 @@ from spyglass.spikesorting.v2.pipeline import (
     register_pipeline_preset,
 )
 
-pytestmark = pytest.mark.unit
-
 # tests/spikesorting/v2/ -> repo root is parents[3].
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _FEATURE_DOC = _REPO_ROOT / "docs" / "src" / "Features" / "SpikeSortingV2.md"
@@ -77,6 +75,7 @@ _COLUMNS = [
 ]
 
 
+@pytest.mark.unit
 def test_describe_pipeline_presets_lists_all():
     """One row per ``list_pipeline_presets()`` entry, sorted by name."""
     df = describe_pipeline_presets()
@@ -86,12 +85,14 @@ def test_describe_pipeline_presets_lists_all():
     assert df["pipeline_preset"].tolist() == sorted(list_pipeline_presets())
 
 
+@pytest.mark.unit
 def test_describe_pipeline_presets_columns():
     """Columns match the specified set, in order."""
     df = describe_pipeline_presets()
     assert list(df.columns) == _COLUMNS
 
 
+@pytest.mark.unit
 def test_describe_recommendation_status_defines_every_used_status():
     """The legend explains exactly the statuses the presets actually use.
 
@@ -117,6 +118,7 @@ def test_describe_recommendation_status_defines_every_used_status():
     assert legend_statuses == {"production", "alternative", "experimental"}
 
 
+@pytest.mark.unit
 def test_describe_pipeline_presets_threshold_units_clusterless():
     """The clusterless row's threshold units are µV, never the MAD ``σ``."""
     df = describe_pipeline_presets()
@@ -129,6 +131,7 @@ def test_describe_pipeline_presets_threshold_units_clusterless():
     assert "sigma" not in units.lower()
 
 
+@pytest.mark.unit
 def test_describe_pipeline_presets_no_db(monkeypatch):
     """``describe_pipeline_presets`` issues no database query (pure, DB-free).
 
@@ -146,6 +149,7 @@ def test_describe_pipeline_presets_no_db(monkeypatch):
     assert set(df["pipeline_preset"]) == set(list_pipeline_presets())
 
 
+@pytest.mark.unit
 def test_describe_pipeline_presets_matches_preset_objects():
     """Each row's static fields equal the backing ``_PipelinePreset`` attributes.
 
@@ -190,6 +194,7 @@ def test_describe_pipeline_presets_matches_preset_objects():
         assert row["notes"] == pipeline_preset.notes
 
 
+@pytest.mark.unit
 def test_container_ms4_pipeline_preset_registered():
     """The one containerized MS4 preset (Singularity, 30 kHz) is registered.
 
@@ -222,6 +227,7 @@ def test_container_ms4_pipeline_preset_registered():
     assert pipeline_mod._PIPELINE_PRESETS[default].sorter == "mountainsort5"
 
 
+@pytest.mark.unit
 def test_describe_presets_flags_ms4_recommended():
     """``describe_pipeline_presets`` distinguishes container vs local MS4 paths.
 
@@ -260,6 +266,7 @@ def test_describe_presets_flags_ms4_recommended():
     assert local_row["recommendation_status"] == "production"
 
 
+@pytest.mark.unit
 def test_describe_pipeline_presets_threshold_units_mountainsort():
     """Every MountainSort preset reports σ-of-whitened-signal units, not µV/MAD.
 
@@ -281,6 +288,7 @@ def test_describe_pipeline_presets_threshold_units_mountainsort():
         assert "µV" not in units
 
 
+@pytest.mark.unit
 def test_describe_pipeline_presets_builtins_populate_human_fields():
     """Every shipped pipeline preset populates the human-facing fields.
 
@@ -295,6 +303,7 @@ def test_describe_pipeline_presets_builtins_populate_human_fields():
             assert df.loc[name, col].strip(), f"{name}.{col} is blank"
 
 
+@pytest.mark.unit
 def test_docs_reference_canonical_npx_preset():
     """User docs/notebook discover the KS4/Neuropixels preset, not a placeholder.
 
@@ -323,6 +332,7 @@ def test_docs_reference_canonical_npx_preset():
     assert _PLACEHOLDER_NPX_PRESET not in notebook_text
 
 
+@pytest.mark.unit
 def test_describe_pipeline_preset_unknown_name_raises():
     """An unknown preset name raises before any DB read, pointing at discovery.
 
@@ -337,6 +347,7 @@ def test_describe_pipeline_preset_unknown_name_raises():
         describe_pipeline_preset("definitely_not_a_preset")
 
 
+@pytest.mark.db_unit
 @pytest.mark.database
 def test_describe_pipeline_preset_missing_row_points_to_initialize_defaults(
     dj_conn, monkeypatch
@@ -373,6 +384,7 @@ def _custom_spec() -> dict:
     return base.model_dump()
 
 
+@pytest.mark.unit
 def test_register_pipeline_preset_adds_to_registry(monkeypatch):
     """A registered preset appears in the catalog (no DB row check)."""
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
@@ -388,6 +400,7 @@ def test_register_pipeline_preset_adds_to_registry(monkeypatch):
     assert "lab_custom_2026_06" in list_pipeline_presets()
 
 
+@pytest.mark.unit
 def test_register_pipeline_preset_owns_a_validated_copy(monkeypatch):
     """The registry keeps its own validated model: mutating the caller's
     model afterwards does not change the registered recipe, and a model whose
@@ -417,6 +430,7 @@ def test_register_pipeline_preset_owns_a_validated_copy(monkeypatch):
     assert "lab_broken_2026_06" not in presets_mod._PIPELINE_PRESETS
 
 
+@pytest.mark.unit
 def test_register_pipeline_preset_rejects_duplicate():
     """Re-registering an existing name raises rather than overwriting."""
     existing = next(iter(_PIPELINE_PRESETS))
@@ -424,6 +438,7 @@ def test_register_pipeline_preset_rejects_duplicate():
         register_pipeline_preset(existing, _custom_spec(), validate_rows=False)
 
 
+@pytest.mark.unit
 def test_register_pipeline_preset_rejects_unknown_field(monkeypatch):
     """Pydantic extra=forbid rejects a typo'd preset field."""
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
@@ -438,6 +453,8 @@ def test_register_pipeline_preset_rejects_unknown_field(monkeypatch):
         register_pipeline_preset("lab_bad_2026_06", spec, validate_rows=False)
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_register_pipeline_preset_catches_missing_lookup_row(
     dj_conn, monkeypatch
 ):
@@ -459,6 +476,7 @@ def test_register_pipeline_preset_catches_missing_lookup_row(
         register_pipeline_preset("lab_missing_2026_06", spec)
 
 
+@pytest.mark.unit
 def test_register_pipeline_preset_rejects_bad_name(monkeypatch):
     """A non-string or blank name is rejected before touching the registry."""
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
@@ -534,6 +552,7 @@ def _stage_value(df, stage, key):
     return row.iloc[0]["value"]
 
 
+@pytest.mark.unit
 def test_clone_pipeline_preset_unknown_base_raises():
     """An unknown base preset raises before any DB read, pointing at discovery."""
     with pytest.raises(ValueError, match="unknown"):
@@ -542,6 +561,7 @@ def test_clone_pipeline_preset_unknown_base_raises():
         )
 
 
+@pytest.mark.unit
 def test_clone_pipeline_preset_rejects_duplicate_new_name():
     """A new_name already in the registry raises rather than overwriting."""
     existing = next(iter(_PIPELINE_PRESETS))
@@ -549,6 +569,7 @@ def test_clone_pipeline_preset_rejects_duplicate_new_name():
         clone_pipeline_preset(_CLONE_BASE, existing, detect_threshold=4.0)
 
 
+@pytest.mark.unit
 def test_clone_pipeline_preset_rejects_bad_new_name(monkeypatch):
     """A non-string or blank new_name is rejected before any DB work."""
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
@@ -563,6 +584,7 @@ def test_clone_pipeline_preset_rejects_bad_new_name(monkeypatch):
             clone_pipeline_preset(_CLONE_BASE, bad_name, detect_threshold=4.0)
 
 
+@pytest.mark.unit
 def test_clone_pipeline_preset_requires_at_least_one_override(monkeypatch):
     """Cloning with no overrides raises (use register_pipeline_preset for an alias)."""
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
@@ -576,6 +598,8 @@ def test_clone_pipeline_preset_requires_at_least_one_override(monkeypatch):
         clone_pipeline_preset(_CLONE_BASE, "lab_no_override_2026_06")
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_clone_pipeline_preset_flat_sorter_override_round_trips(
     dj_conn, clone_env
 ):
@@ -633,6 +657,8 @@ def test_clone_pipeline_preset_flat_sorter_override_round_trips(
     )
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_clone_pipeline_preset_nested_dotted_override_round_trips(
     dj_conn, clone_env
 ):
@@ -676,6 +702,8 @@ def test_clone_pipeline_preset_nested_dotted_override_round_trips(
     )
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_clone_pipeline_preset_unknown_override_key_raises(dj_conn, clone_env):
     """An override that matches no stage param raises and inserts nothing."""
     new_name = "lab_bad_key_2026_06"
@@ -695,6 +723,8 @@ def test_clone_pipeline_preset_unknown_override_key_raises(dj_conn, clone_env):
     assert not (SorterParameters & {"sorter_params_name": new_name})
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_clone_pipeline_preset_invalid_override_value_raises(
     dj_conn, clone_env
 ):
@@ -715,6 +745,8 @@ def test_clone_pipeline_preset_invalid_override_value_raises(
     assert not (SorterParameters & {"sorter_params_name": new_name})
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_clone_pipeline_preset_duplicate_content_under_new_name_raises(
     dj_conn, clone_env
 ):
@@ -741,6 +773,8 @@ def test_clone_pipeline_preset_duplicate_content_under_new_name_raises(
     assert new_name not in list_pipeline_presets()
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_clone_pipeline_preset_allow_duplicate_params_opts_in(
     dj_conn, clone_env
 ):
@@ -767,6 +801,8 @@ def test_clone_pipeline_preset_allow_duplicate_params_opts_in(
     )
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_clone_pipeline_preset_name_collision_different_content_raises(
     dj_conn, clone_env
 ):
@@ -801,6 +837,8 @@ def test_clone_pipeline_preset_name_collision_different_content_raises(
     assert new_name not in list_pipeline_presets()
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_clone_pipeline_preset_idempotent_rerun(dj_conn, clone_env):
     """Re-running a clone with identical overrides is a no-op, not a fork.
 
@@ -834,6 +872,7 @@ def test_clone_pipeline_preset_idempotent_rerun(dj_conn, clone_env):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_every_preset_declares_curation_params():
     """Every shipped preset names a quality-metric + auto-curation rule set.
 
@@ -874,6 +913,7 @@ def test_every_preset_declares_curation_params():
         ), name
 
 
+@pytest.mark.unit
 def test_concat_preset_is_registered_and_shaped():
     """The concat preset masks each member with the probe recipe's artifact
     detector and pins no motion recipe; the previous motion-pinned name is
@@ -900,6 +940,8 @@ def test_concat_preset_is_registered_and_shaped():
     )
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_run_v2_pipeline_concat_mode_accepts_single_session_preset(dj_conn):
     """Concat mode does not require a motion-pinned preset: the input fields
     set the mode, so a single-session preset reaches the concat preflight,
@@ -916,6 +958,7 @@ def test_run_v2_pipeline_concat_mode_accepts_single_session_preset(dj_conn):
         )
 
 
+@pytest.mark.unit
 def test_run_v2_pipeline_requires_exactly_one_input_mode():
     """run_v2_pipeline rejects missing / partial / mixed input modes DB-free.
 
@@ -968,6 +1011,7 @@ def test_run_v2_pipeline_requires_exactly_one_input_mode():
             run_v2_pipeline(**kwargs)
 
 
+@pytest.mark.unit
 def test_run_v2_pipeline_concat_fields_are_keyword_only():
     """Concat fields are keyword-only, preserving the positional order.
 
@@ -1001,6 +1045,7 @@ def test_run_v2_pipeline_concat_fields_are_keyword_only():
         assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
 
 
+@pytest.mark.unit
 def test_run_v2_pipeline_figpack_view_params_are_keyword_only():
     """FigPack view options are keyword-only, like the concat fields.
 
@@ -1019,6 +1064,7 @@ def test_run_v2_pipeline_figpack_view_params_are_keyword_only():
     assert params["figpack_label_options"].default is None
 
 
+@pytest.mark.unit
 def test_run_v2_pipeline_figpack_missing_packages_fails_fast(monkeypatch):
     """build_figpack_view=True without optional packages fails fast, DB-free.
 
@@ -1051,6 +1097,7 @@ def test_run_v2_pipeline_figpack_missing_packages_fails_fast(monkeypatch):
         )
 
 
+@pytest.mark.unit
 def test_run_v2_unit_match_signature_defaults():
     """run_v2_unit_match defaults the matcher to unitmatch_default + no choices.
 
@@ -1070,6 +1117,7 @@ def test_run_v2_unit_match_signature_defaults():
     assert params["session_group_name"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
+@pytest.mark.unit
 def test_run_v2_unit_match_requires_explicit_curation_choices():
     """run_v2_unit_match rejects a missing curation_choices DB-free.
 
@@ -1086,6 +1134,8 @@ def test_run_v2_unit_match_requires_explicit_curation_choices():
         )
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_run_v2_unit_match_unknown_matcher_raises(dj_conn):
     """An unknown matcher_params_name raises PipelineInputError before selection.
 
@@ -1109,6 +1159,7 @@ def test_run_v2_unit_match_unknown_matcher_raises(dj_conn):
         )
 
 
+@pytest.mark.unit
 def test_preset_model_artifact_optional_and_no_motion_field():
     """``_PipelinePreset`` makes the artifact recipe optional and forbids extras.
 
@@ -1153,6 +1204,8 @@ def _spec_with(**overrides) -> dict:
     return {**_custom_spec(), **overrides}
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_register_pipeline_preset_catches_missing_metric_row(
     dj_conn, monkeypatch
 ):
@@ -1174,6 +1227,8 @@ def test_register_pipeline_preset_catches_missing_metric_row(
         register_pipeline_preset("lab_missing_metric_2026_06", spec)
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_register_pipeline_preset_catches_missing_auto_curation_row(
     dj_conn, monkeypatch
 ):
@@ -1193,6 +1248,8 @@ def test_register_pipeline_preset_catches_missing_auto_curation_row(
         register_pipeline_preset("lab_missing_rules_2026_06", spec)
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_describe_pipeline_preset_surfaces_curation_names(dj_conn, clone_env):
     """The preset detail view surfaces the metric + auto-curation row names."""
     detail = describe_pipeline_preset(_CLONE_BASE)
@@ -1206,6 +1263,8 @@ def test_describe_pipeline_preset_surfaces_curation_names(dj_conn, clone_env):
     )
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_describe_pipeline_preset_unpacks_curation_values(dj_conn, clone_env):
     """The detail view unpacks the metric + auto-curation ROWS, not just names.
 
@@ -1234,6 +1293,8 @@ def test_describe_pipeline_preset_unpacks_curation_values(dj_conn, clone_env):
     assert all("->" in v for v in rule_rows["value"])
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_describe_pipeline_preset_artifact_none_skips_artifact(
     dj_conn, clone_env
 ):
@@ -1256,6 +1317,8 @@ def test_describe_pipeline_preset_artifact_none_skips_artifact(
     assert (detail["stage"] == "sorter").sum() > 0
 
 
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_clone_pipeline_preset_no_artifact_base(dj_conn, clone_env):
     """Cloning a no-artifact preset works and forks only the touched stage.
 

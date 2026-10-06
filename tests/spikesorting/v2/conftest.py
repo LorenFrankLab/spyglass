@@ -570,8 +570,11 @@ def planted_two_unit_sort(dj_conn):
         Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
         mp.undo()
-    if len(Sorting.Unit & sort_pk) < 2:
-        pytest.skip("planted sort did not yield >=2 units")
+    np.testing.assert_array_equal(
+        (Sorting.Unit & sort_pk).fetch("unit_id", order_by="unit_id"),
+        [0, 1],
+        err_msg="The deterministic two-unit sorter must populate both units",
+    )
     yield sort_pk
     _clear_curations_for(sort_pk)
     _clean_session_v2(session)
@@ -702,8 +705,11 @@ def planted_three_unit_sort(dj_conn):
         Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
         mp.undo()
-    if len(Sorting.Unit & sort_pk) < 3:
-        pytest.skip("planted sort did not yield >=3 units")
+    np.testing.assert_array_equal(
+        (Sorting.Unit & sort_pk).fetch("unit_id", order_by="unit_id"),
+        [0, 1, 2],
+        err_msg="The deterministic three-unit sorter must populate every unit",
+    )
     yield sort_pk
     _clear_curations_for(sort_pk)
     _clean_session_v2(session)

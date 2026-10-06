@@ -342,6 +342,7 @@ def test_require_fixtures_gate_still_exits_nonzero():
         },
         capture_output=True,
         text=True,
+        timeout=60,
     )
 
     out = proc.stdout + proc.stderr

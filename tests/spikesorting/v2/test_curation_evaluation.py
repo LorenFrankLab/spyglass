@@ -1829,8 +1829,9 @@ def planted_zero_unit_sort(dj_conn):
         Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
         mp.undo()
-    if int((Sorting & sort_pk).fetch1("n_units")) != 0:
-        pytest.skip("planted sort did not yield zero units")
+    assert (
+        int((Sorting & sort_pk).fetch1("n_units")) == 0
+    ), "planted sort did not yield zero units"
     yield sort_pk
     _clean_session_v2(session)
 

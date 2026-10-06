@@ -155,8 +155,9 @@ def _build_sort_on_group(sort_group_id, plant, nwb_file_name):
         Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
         mp.undo()
-    if not (Sorting & sort_pk):
-        pytest.skip("planted Sorting.populate produced no row")
+    assert (
+        Sorting & sort_pk
+    ), "deterministic planted Sorting.populate produced no row"
 
     cur_pk = CurationV2.insert_curation(sorting_key=sort_pk)
     merge_id = (SpikeSortingOutput.CurationV2 & cur_pk).fetch1("merge_id")

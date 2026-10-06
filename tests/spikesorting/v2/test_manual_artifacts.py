@@ -113,7 +113,7 @@ def test_manual_exclusions_enable_the_stage_without_mutating_the_preset():
     "automatic", [False, True], ids=["manual-only", "combined"]
 )
 def test_pipeline_runner_applies_manual_exclusions(
-    chronic_2_session_minirec, monkeypatch, concat, automatic
+    chronic_2_session_minirec, monkeypatch, request, concat, automatic
 ):
     """Public runner inputs reach the exact samples passed to the sorter."""
     from spikeinterface.core import NumpySorting
@@ -121,15 +121,60 @@ def test_pipeline_runner_applies_manual_exclusions(
     from spyglass.spikesorting.v2 import _pipeline_presets as presets
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
+        RecordingArtifactDetection,
         RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
     from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.session_group import SessionGroup
-    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     fixture = chronic_2_session_minirec
     name = f"manual_runner_{concat}_{automatic}"
+
+    def cleanup_case():
+        # Custom recipes must not become content twins in later lookup tests
+        # or collide on a repeat run. Remove only this case's dependent rows,
+        # leaving the module-scoped chronic Recording inputs available.
+        sorter_key = {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": name,
+        }
+        for key in (SortingSelection & sorter_key).fetch("KEY", as_dict=True):
+            clear_curations_for(key)
+            (Sorting & key).super_delete(warn=False)
+            (SortingSelection & key).super_delete(warn=False)
+        if concat:
+            group_key = {
+                "session_group_owner": fixture["owner"],
+                "session_group_name": name,
+            }
+            for key in (ConcatenatedRecordingSelection & group_key).fetch(
+                "KEY", as_dict=True
+            ):
+                (ConcatenatedRecording & key).super_delete(warn=False)
+                (ConcatenatedRecordingSelection & key).super_delete(warn=False)
+            (SessionGroup & group_key).super_delete(warn=False)
+        params_key = {"artifact_detection_params_name": name}
+        for key in (RecordingArtifactSelection & params_key).fetch(
+            "KEY", as_dict=True
+        ):
+            if RecordingArtifactDetection & key:
+                (RecordingArtifactDetection & key).delete(safemode=False)
+            (RecordingArtifactSelection & key).super_delete(warn=False)
+        (ArtifactDetectionParameters & params_key).super_delete(warn=False)
+        (SorterParameters & sorter_key).super_delete(warn=False)
+
+    request.addfinalizer(cleanup_case)
     recording_keys = fixture["recording_pks"][: 2 if concat else 1]
     recordings = [Recording().get_recording(key) for key in recording_keys]
     originals = [recording.get_traces() for recording in recordings]

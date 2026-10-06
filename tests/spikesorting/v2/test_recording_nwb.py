@@ -307,7 +307,13 @@ def xz_probe_session(dj_conn, tmp_path_factory):
         fixture_name="v2_xz_probe",
         probe_type=_SMALL_PROBE_TYPE,
     )
-    yield {"nwb_file_name": _ingest_synthetic_nwb(path)}
+    from tests.spikesorting.v2._ingest_helpers import _clean_session_v2
+
+    session = {"nwb_file_name": _ingest_synthetic_nwb(path)}
+    try:
+        yield session
+    finally:
+        _clean_session_v2(session)
 
 
 @pytest.fixture(scope="session")
@@ -326,7 +332,13 @@ def xz_roundtrip_session(dj_conn, tmp_path_factory):
         fixture_name="v2_xz_roundtrip",
         probe_type=_ROUNDTRIP_PROBE_TYPE,
     )
-    yield {"nwb_file_name": _ingest_synthetic_nwb(path)}
+    from tests.spikesorting.v2._ingest_helpers import _clean_session_v2
+
+    session = {"nwb_file_name": _ingest_synthetic_nwb(path)}
+    try:
+        yield session
+    finally:
+        _clean_session_v2(session)
 
 
 def _analysis_electrodes(analysis_file_name):

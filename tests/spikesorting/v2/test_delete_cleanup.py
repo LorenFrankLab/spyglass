@@ -120,8 +120,7 @@ def planted_sort(dj_conn):
         Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
         mp.undo()
-    if not (Sorting & sort_pk):
-        pytest.skip("planted Sorting.populate produced no row")
+    assert Sorting & sort_pk, "planted Sorting.populate produced no row"
     yield sort_pk
     _clean_session_v2(session)
 

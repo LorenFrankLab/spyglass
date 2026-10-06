@@ -39,6 +39,29 @@ def test_assert_safe_base_dir_rejects_out_of_bounds(tmp_path_factory):
         _test_env._assert_safe_base_dir("/var/log/spyglass_test")
 
 
+def test_assert_safe_base_dir_rejects_sibling_of_allowlisted_root(monkeypatch):
+    """A string prefix of an allowed directory does not make a path safe."""
+    from pathlib import Path
+
+    monkeypatch.setattr(
+        _test_env, "_repo_root", lambda: Path("/var/spyglass-bootstrap-test")
+    )
+    with pytest.raises(RuntimeError, match="permitted test locations"):
+        _test_env._assert_safe_base_dir(
+            "/var/spyglass-bootstrap-test/tests/_data_backup"
+        )
+
+
+def test_assert_safe_base_dir_rejects_symlink_escape(tmp_path):
+    """An allowed temporary path cannot redirect writes outside test storage."""
+    escaped = tmp_path / "escaped"
+    escaped.symlink_to(
+        "/var/spyglass-bootstrap-shared", target_is_directory=True
+    )
+    with pytest.raises(RuntimeError, match="permitted test locations"):
+        _test_env._assert_safe_base_dir(escaped)
+
+
 @pytest.mark.parametrize(
     "base_dir_factory, suffix_check",
     [

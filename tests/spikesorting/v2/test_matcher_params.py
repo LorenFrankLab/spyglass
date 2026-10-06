@@ -5,6 +5,22 @@ from __future__ import annotations
 import pytest
 
 
+@pytest.fixture
+def isolated_matcher_rows(dj_conn):
+    """Keep this module's fixed-name lookup writes repeatable on a retained DB."""
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
+
+    restriction = [
+        {"matcher_params_name": name}
+        for name in ("um_bad_seed", "um_ok_jobkwargs", "unitmatch_wide")
+    ]
+    (MatcherParameters & restriction).super_delete(warn=False)
+    try:
+        yield
+    finally:
+        (MatcherParameters & restriction).super_delete(warn=False)
+
+
 def test_unitmatch_schema_defaults_round_trip():
     from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
 
@@ -92,7 +108,7 @@ def test_bundle_compute_kwargs_seed_is_authoritative():
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_bundle_seed_override_rejected_at_insert():
+def test_bundle_seed_override_rejected_at_insert(isolated_matcher_rows):
     """A random_seed in the job_kwargs blob is a second, non-identity seed the
     bundle extractor must ignore, so it is rejected at insert rather than
     silently dropped (which would mislead the user). A job_kwargs blob without
@@ -126,7 +142,7 @@ def test_bundle_seed_override_rejected_at_insert():
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_named_bundle_params_stored_distinctly():
+def test_named_bundle_params_stored_distinctly(isolated_matcher_rows):
     """Two named MatcherParameters rows that differ only in a bundle field are
     stored as distinct, content-addressed identities (the bundle window is part
     of the named params blob, not a silent function default)."""
@@ -168,10 +184,10 @@ def test_bundle_params_reach_extract(monkeypatch):
     )
     from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
 
-    captured = {}
+    captured = []
 
     def fake_extract(session_dir, recording, sorting, **kwargs):
-        captured.update(kwargs)
+        captured.append((session_dir.name, kwargs))
         return []
 
     class _DummySorting:
@@ -213,13 +229,20 @@ def test_bundle_params_reach_extract(monkeypatch):
             "input_start_time": f"2026-01-0{index + 1}T00:00:00+00:00",
             "recordings": [{"nwb_file_name": f"day{index}.nwb"}],
             **files,
+            "statistics_spans": (
+                [[0, 30_000]] if index == 0 else [[1000, 26_000]]
+            ),
         }
         for index, unit_ids in enumerate([[1, 2], [3, 4]])
     ]
     unit_matching.UnitMatch._extract_and_match(
         input_plan, "unitmatch", params, {}
     )
-    assert captured["ms_before"] == 2.0
-    assert captured["seed"] == 4
-    assert captured["max_spikes_per_unit"] == 100
-    assert captured["statistics_spans"] == [[0, 30_000]]
+    assert [name for name, _ in captured] == ["input_0", "input_1"]
+    for (_, actual), expected_spans in zip(
+        captured, ([[0, 30_000]], [[1000, 26_000]]), strict=True
+    ):
+        assert actual["ms_before"] == actual["ms_after"] == 2.0
+        assert actual["seed"] == 4
+        assert actual["max_spikes_per_unit"] == 100
+        assert actual["statistics_spans"] == expected_spans

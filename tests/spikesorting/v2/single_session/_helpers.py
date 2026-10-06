@@ -7,6 +7,29 @@ any single module.
 """
 
 
+def fixture_nwb_path(stem):
+    """Resolve shared generated inputs from the v2 fixture package."""
+    from pathlib import Path
+
+    return Path(__file__).resolve().parents[1] / "fixtures" / f"{stem}.nwb"
+
+
+def validate_v1_baseline_case(meta, *, sorter, sort_group_id):
+    """A capture must belong to the matrix case its directory represents."""
+    actual_sorter = meta.get("sorter")
+    actual_group = meta.get("sort_group_id")
+    if (
+        actual_sorter != sorter
+        or type(actual_group) is not int
+        or actual_group != sort_group_id
+    ):
+        raise ValueError(
+            f"v1 baseline must describe sorter={sorter!r}, sort_group_id={sort_group_id}; "
+            f"got sorter={actual_sorter!r}, sort_group_id={actual_group!r}. "
+            "Recapture or move the baseline into the matching case directory."
+        )
+
+
 def _clear_curations(sorting_key):
     """Drop a sorting's CurationV2 rows + merge masters (shared helper)."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for

@@ -214,11 +214,14 @@ def _clean_session_v2(session_key):
         Dict containing at least ``nwb_file_name``. All v2 rows tied to
         this session are dropped.
     """
+    from spyglass.common import IntervalList
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
         SharedArtifactGroup,
+        SharedGroupArtifactDetection,
+        SharedGroupArtifactSelection,
     )
     from spyglass.spikesorting.v2.artifact_output import (
         ArtifactDetectionOutput,
@@ -236,6 +239,36 @@ def _clean_session_v2(session_key):
     # recording source is a ``RecordingSource`` XOR part FK'ing Recording, so the
     # master must go before Recording to satisfy the master-before-part rule.
     rec_keys = (RecordingSelection & session_key).fetch("KEY", as_dict=True)
+    split_artifact_keys = (
+        (
+            RecordingArtifactSelection
+            & [{"recording_id": r["recording_id"]} for r in rec_keys]
+        ).fetch("KEY", as_dict=True)
+        if rec_keys
+        else []
+    )
+    shared_groups = (SharedArtifactGroup & session_key).fetch(
+        "KEY", as_dict=True
+    )
+    shared_artifact_keys = (
+        (SharedGroupArtifactSelection & shared_groups).fetch(
+            "KEY", as_dict=True
+        )
+        if shared_groups
+        else []
+    )
+    # FreeTable cascades bypass each detection's delete override. Capture the
+    # exact IntervalList keys while the ownership parts still exist, including
+    # shared detections whose parts disappear with their group master.
+    owned_intervals = []
+    for owner, keys in (
+        (RecordingArtifactDetection.RemovedInterval, split_artifact_keys),
+        (SharedGroupArtifactDetection.RemovedInterval, shared_artifact_keys),
+    ):
+        if keys:
+            owned_intervals.extend(
+                (IntervalList & (owner & keys)).fetch("KEY", as_dict=True)
+            )
     if rec_keys:
         sorting_keys = (
             SortingSelection.RecordingSource
@@ -263,10 +296,6 @@ def _clean_session_v2(session_key):
         # RecordingSource part before its master; SortingSelection's
         # ArtifactDetectionSource part (which FKs the merge) is already gone
         # with the SortingSelection masters above.
-        split_artifact_keys = (
-            RecordingArtifactSelection
-            & [{"recording_id": r["recording_id"]} for r in rec_keys]
-        ).fetch("KEY", as_dict=True)
         if split_artifact_keys:
             art_merge_ids = (
                 ArtifactDetectionOutput.RecordingSource & split_artifact_keys
@@ -290,9 +319,6 @@ def _clean_session_v2(session_key):
     # cascade through the part-without-master constraint. Delete
     # master + Member explicitly (master first satisfies the
     # master-before-part rule).
-    shared_groups = (SharedArtifactGroup & session_key).fetch(
-        "KEY", as_dict=True
-    )
     if shared_groups:
         # force_masters=True: the cascade can reach a
         # ``SharedGroupArtifactSelection`` (which FKs ``SharedArtifactGroup``)
@@ -303,12 +329,21 @@ def _clean_session_v2(session_key):
             warn=False, force_masters=True
         )
 
-    # Step 5: now the cascade is unblocked -- Recording, SortGroupV2
-    # can be deleted normally. We super_delete each so a leftover
-    # IntervalList row from a prior aborted test is also picked up.
+    # Step 5: now the cascade is unblocked -- Recording and SortGroupV2
+    # can be deleted normally, followed by abandoned artifact intervals below.
     (Recording & rec_keys).super_delete(warn=False) if rec_keys else None
     (RecordingSelection & session_key).super_delete(warn=False)
     (SortGroupV2 & session_key).super_delete(warn=False)
+
+    # Another detection can still own a collected key (e.g. a repaired or
+    # directly inserted shared ownership row). Preserve both owner kinds and
+    # never cascade deletion outward from an IntervalList into surviving rows.
+    for interval_key in owned_intervals:
+        if (RecordingArtifactDetection.RemovedInterval & interval_key) or (
+            SharedGroupArtifactDetection.RemovedInterval & interval_key
+        ):
+            continue
+        (IntervalList & interval_key).delete_quick()
 
 
 def _synthetic_artifact_recording(offsets=None):

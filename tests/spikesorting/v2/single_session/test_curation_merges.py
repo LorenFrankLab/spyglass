@@ -6,7 +6,10 @@ import pytest
 
 from tests.spikesorting.v2._ingest_helpers import _clean_session_v2
 from tests.spikesorting.v2._sorter_stub import plant_sorter
-from tests.spikesorting.v2.single_session._helpers import _clear_curations
+from tests.spikesorting.v2.single_session._helpers import (
+    _clear_curations,
+    fixture_nwb_path,
+)
 
 
 @pytest.mark.slow
@@ -909,7 +912,6 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
     All MEArec fixtures keep the parent ``/units``
     empty, so this is the only exercise of the parent-units strip invariant.
     """
-    from pathlib import Path
 
     import numpy as np
     import pynwb
@@ -930,11 +932,7 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 
-    fixture = (
-        Path(__file__).resolve().parent
-        / "fixtures"
-        / "mearec_polymer_smoke.nwb"
-    )
+    fixture = fixture_nwb_path("mearec_polymer_smoke")
     if not fixture.exists():
         pytest.skip("smoke fixture not found")
 

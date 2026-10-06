@@ -5,6 +5,10 @@ from __future__ import annotations
 import pytest
 
 from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+from tests.spikesorting.v2.single_session._helpers import (
+    fixture_nwb_path,
+    validate_v1_baseline_case,
+)
 
 # ---------- 60s MEArec ground-truth correctness gate ----------------------
 
@@ -596,7 +600,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     # meta under SPIKESORTING_V2_BASELINE_ROOT, so the v2 test reads
     # from the v2 fixture directly and verifies sha256 against the
     # baseline meta below.
-    fixture_path = _Path(__file__).parent / "fixtures" / f"{fixture_stem}.nwb"
+    fixture_path = fixture_nwb_path(fixture_stem)
     if not fixture_path.exists():
         pytest.skip(
             f"NWB fixture {fixture_path} missing; generate via "
@@ -705,17 +709,10 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
             f"or the file is truncated. {regen_hint}"
         )
 
-    if meta["sorter"] != "clusterless_thresholder":
-        pytest.skip(
-            f"v1 baseline captured for sorter={meta['sorter']!r}; "
-            "this parity gate only implements the "
-            "clusterless_thresholder ±1-sample tolerance. "
-            "Regenerate the baseline with "
-            "--sorter clusterless_thresholder, or extend this "
-            "test for mountainsort/kilosort tolerance bands."
-        )
+    validate_v1_baseline_case(
+        meta, sorter="clusterless_thresholder", sort_group_id=sort_group_id
+    )
 
-    # Run v2 on the same (sort_group_id, interval_list_name, team).
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
@@ -1197,7 +1194,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
             pytest.fail(msg)
         pytest.skip(msg)
 
-    fixture_path = _Path(__file__).parent / "fixtures" / f"{fixture_stem}.nwb"
+    fixture_path = fixture_nwb_path(fixture_stem)
     if not fixture_path.exists():
         pytest.skip(
             f"NWB fixture {fixture_path} missing; generate via "
@@ -1255,15 +1252,10 @@ def test_v2_real_data_v1_parity_mountainsort4(
         v1_spike_times = pickle.load(fh)
     meta = json.loads(meta_json.read_text())
 
-    if meta.get("sorter") != "mountainsort4":
-        pytest.skip(
-            f"v1 baseline at {baseline_dir} was captured for "
-            f"sorter={meta.get('sorter')!r}; MS4 parity test refuses "
-            "to apply MS4-band contract against a non-MS4 baseline."
-        )
+    validate_v1_baseline_case(
+        meta, sorter="mountainsort4", sort_group_id=sort_group_id
+    )
 
-    # Set up v2 pipeline -- mirrors the clusterless test until the
-    # SorterParameters insert and the comparator.
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
@@ -2079,3 +2071,37 @@ def test_clusterless_thresholder_ground_truth(
             f"the planted population -- possible noise_levels / "
             f"threshold regression.{summary}"
         )
+
+
+@pytest.mark.unit
+def test_parity_fixture_locator_uses_shared_fixture_package():
+    """Moving the test module cannot turn available fixture inputs into skips."""
+    from pathlib import Path
+
+    import tests.spikesorting.v2.fixtures as fixture_package
+
+    roots = [Path(path).resolve() for path in fixture_package.__path__]
+    assert len(roots) == 1
+    assert (
+        fixture_nwb_path("mearec_polymer_smoke")
+        == roots[0] / "mearec_polymer_smoke.nwb"
+    )
+    assert (roots[0] / "fixtures_manifest.json").is_file()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("sorter", ["clusterless_thresholder", "mountainsort4"])
+@pytest.mark.parametrize(
+    "bad_field, bad_value",
+    [("sorter", "other"), ("sort_group_id", 0), ("sort_group_id", True)],
+)
+def test_v1_baseline_case_rejects_wrong_sorter_or_shank(
+    sorter, bad_field, bad_value
+):
+    meta = {"sorter": sorter, "sort_group_id": 1}
+    validate_v1_baseline_case(meta, sorter=sorter, sort_group_id=1)
+    meta[bad_field] = bad_value
+    with pytest.raises(
+        ValueError, match="v1 baseline must describe.*sort_group_id=1"
+    ):
+        validate_v1_baseline_case(meta, sorter=sorter, sort_group_id=1)
