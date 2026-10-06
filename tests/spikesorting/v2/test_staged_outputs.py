@@ -331,3 +331,154 @@ def test_wrapping_keeps_generator_make_and_signatures(tmp_path):
 
     # A subclass that does not redefine the methods is not wrapped twice.
     assert Child.make_compute is table_cls.make_compute
+
+
+@pytest.fixture
+def analysis_file_resolver(tmp_path, monkeypatch):
+    """Supply file paths without importing or declaring a DataJoint schema."""
+    import sys
+    from types import ModuleType
+
+    calls = []
+
+    class AnalysisNwbfile:
+        @staticmethod
+        def get_abs_path(name):
+            calls.append(name)
+            return str(tmp_path / name)
+
+    module = ModuleType("spyglass.common.common_nwbfile")
+    module.AnalysisNwbfile = AnalysisNwbfile
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    return AnalysisNwbfile, calls
+
+
+@pytest.mark.parametrize("present", [False, True])
+def test_staged_analysis_cleanup_is_idempotent(
+    tmp_path, analysis_file_resolver, present
+):
+    from spyglass.spikesorting.v2._staged_outputs import (
+        unlink_staged_analysis_file,
+    )
+
+    staged = tmp_path / "attempt.nwb"
+    if present:
+        staged.write_bytes(b"unregistered attempt")
+
+    unlink_staged_analysis_file(staged.name, context="writer failed")
+    unlink_staged_analysis_file(staged.name, context="writer failed")
+
+    assert not staged.exists()
+
+
+def test_partial_artifact_cleanup_preserves_canonical_file(
+    tmp_path, analysis_file_resolver, caplog
+):
+    """The recording-writer wrapper refuses canonical files before lookup."""
+    from spyglass.spikesorting.v2._recording_nwb import (
+        _remove_partial_artifact,
+    )
+
+    canonical = tmp_path / "canonical.nwb"
+    canonical.write_bytes(b"canonical artifact")
+
+    _remove_partial_artifact(canonical.name, canonical.name)
+
+    assert canonical.read_bytes() == b"canonical artifact"
+    assert analysis_file_resolver[1] == []
+    assert "Recording._write_nwb_artifact" in caplog.text
+    assert "refusing to unlink a canonical artifact" in caplog.text
+
+    partial = tmp_path / "partial.nwb"
+    partial.write_bytes(b"failed attempt")
+    _remove_partial_artifact(partial.name, None)
+    assert not partial.exists()
+
+
+def test_units_writer_failure_cleans_staged_file_without_recording_schema(
+    tmp_path, monkeypatch, analysis_file_resolver
+):
+    """A units writer's failure cleanup needs no recording table import."""
+    import builtins
+
+    from spyglass.spikesorting.v2 import _units_nwb
+
+    staged = tmp_path / "units.nwb"
+
+    def create(self, **kwargs):
+        staged.write_bytes(b"unregistered units")
+        return staged.name
+
+    monkeypatch.setattr(
+        analysis_file_resolver[0], "create", create, raising=False
+    )
+    original_error = RuntimeError("units write failed")
+
+    def fail_write(**kwargs):
+        assert staged.exists()
+        raise original_error
+
+    monkeypatch.setattr(_units_nwb, "_write_sorting_units_nwb_body", fail_write)
+    import_module = builtins.__import__
+
+    def refuse_recording(name, *args, **kwargs):
+        if name == "spyglass.spikesorting.v2.recording":
+            raise AssertionError("cleanup must not import the recording schema")
+        return import_module(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", refuse_recording)
+
+    with pytest.raises(RuntimeError, match="units write failed") as error:
+        _units_nwb.write_sorting_units_nwb(None, None, "parent.nwb")
+
+    assert error.value is original_error
+    assert not staged.exists()
+
+
+@pytest.mark.parametrize("failure", ["lookup", "unlink"])
+def test_analysis_cleanup_failure_preserves_populate_error(
+    tmp_path, monkeypatch, analysis_file_resolver, caplog, failure
+):
+    """Cleanup failure is logged while the populate's original error escapes."""
+    from spyglass.spikesorting.v2._staged_outputs import (
+        StagedOutputCleanupMixin,
+    )
+
+    cleanup_error = PermissionError(f"{failure} denied")
+    if failure == "lookup":
+
+        def deny_lookup(name):
+            raise cleanup_error
+
+        monkeypatch.setattr(
+            analysis_file_resolver[0], "get_abs_path", deny_lookup
+        )
+    else:
+        unlink = Path.unlink
+
+        def deny_unlink(path, *args, **kwargs):
+            if path == tmp_path / "a.nwb":
+                raise cleanup_error
+            return unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", deny_unlink)
+
+    original_error = RuntimeError("insert failed")
+    table_cls = _table_class(tmp_path, insert_error=original_error)
+    # Use the production cleanup path rather than this stand-in's normal
+    # direct unlink, so the failure exercises lazy resolution and logging.
+    table_cls._unlink_analysis_file = staticmethod(
+        StagedOutputCleanupMixin._unlink_analysis_file
+    )
+    table = table_cls()
+
+    with pytest.raises(RuntimeError, match="insert failed") as error:
+        _populate1(table, {"id": "a"})
+
+    assert error.value is original_error
+    assert (tmp_path / "a.nwb").exists()
+    assert not (tmp_path / "a.build").exists()
+    assert not (tmp_path / "a.bundle").exists()
+    assert "Table.populate" in caplog.text
+    assert "a.nwb" in caplog.text
+    assert f"{failure} denied" in caplog.text

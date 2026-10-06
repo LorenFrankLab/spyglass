@@ -289,28 +289,15 @@ def _remove_partial_artifact(
     file is removed. The unlink is best-effort -- a cleanup failure is logged,
     not raised, so it cannot mask the original error.
     """
-    import pathlib
+    from spyglass.spikesorting.v2._staged_outputs import (
+        unlink_staged_analysis_file,
+    )
 
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.utils import logger
-
-    if existing_analysis_file_name:
-        logger.error(
-            "Recording._write_nwb_artifact: in-place rebuild of canonical "
-            f"artifact {analysis_file_name!r} failed; leaving it in place "
-            "(refusing to unlink a canonical artifact on failure)."
-        )
-        return
-    try:
-        _abs = AnalysisNwbfile.get_abs_path(
-            analysis_file_name, from_schema=False
-        )
-        pathlib.Path(_abs).unlink(missing_ok=True)
-    except Exception as cleanup_exc:  # pragma: no cover -- defensive
-        logger.error(
-            "Recording._write_nwb_artifact: failed to clean up partial "
-            f"analysis file {analysis_file_name!r}: {cleanup_exc!r}"
-        )
+    unlink_staged_analysis_file(
+        analysis_file_name,
+        context="Recording._write_nwb_artifact",
+        existing_analysis_file_name=existing_analysis_file_name,
+    )
 
 
 # Probe-relative contact position columns of the NWB electrodes table. These

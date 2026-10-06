@@ -34,14 +34,15 @@ a failure after a successful commit (``jobs.complete``, line 452) from
 removing a committed row's files. Nor is a process killed between
 ``make_compute`` and ``make_insert``; its staging stays until swept.
 
-This module is DB-free; removing an ``AnalysisNwbfile`` imports its helper
-lazily.
+This module is DB-free at import; removing an ``AnalysisNwbfile`` imports its
+path resolver lazily.
 """
 
 from __future__ import annotations
 
 import functools
 import shutil
+from pathlib import Path
 from typing import Any, NamedTuple
 
 from spyglass.utils import logger
@@ -49,6 +50,39 @@ from spyglass.utils import logger
 #: Instance attribute holding one list of recorded outputs per active
 #: ``_populate1`` call (a stack, so a nested populate keeps its own list).
 _SCOPES_ATTR = "_staged_output_scopes"
+
+
+def unlink_staged_analysis_file(
+    analysis_file_name: str,
+    *,
+    context: str,
+    existing_analysis_file_name: str | None = None,
+) -> None:
+    """Discard a staged analysis file without masking the caller's failure.
+
+    Only files created by the failed attempt may be removed. An in-place
+    writer passes ``existing_analysis_file_name`` to identify a canonical
+    artifact, which is left untouched even if the write failed. Path lookup
+    and unlink failures are logged with the caller's ``context`` and never
+    raised. The AnalysisNwbfile dependency is loaded only on a cleanup call.
+    """
+    if existing_analysis_file_name:
+        logger.error(
+            f"{context}: in-place rebuild of canonical artifact "
+            f"{analysis_file_name!r} failed; leaving it in place "
+            "(refusing to unlink a canonical artifact on failure)."
+        )
+        return
+    try:
+        from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        Path(abs_path).unlink(missing_ok=True)
+    except Exception as cleanup_exc:  # noqa: BLE001 - preserve original failure
+        logger.error(
+            f"{context}: failed to clean up staged analysis file "
+            f"{analysis_file_name!r}: {cleanup_exc!r}"
+        )
 
 
 class StagedOutputs(NamedTuple):
@@ -176,8 +210,4 @@ class StagedOutputCleanupMixin:
     @staticmethod
     def _unlink_analysis_file(analysis_file_name: str, *, context: str):
         """Remove a staged, unregistered ``AnalysisNwbfile`` (best effort)."""
-        from spyglass.spikesorting.v2.recording import (
-            _unlink_staged_analysis_file,
-        )
-
-        _unlink_staged_analysis_file(analysis_file_name, context=context)
+        unlink_staged_analysis_file(analysis_file_name, context=context)

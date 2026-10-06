@@ -1096,14 +1096,11 @@ def _unlink_staged_analysis_file(
     never raised, so it cannot mask the original error. ``context`` names
     the calling method for the log line.
     """
-    try:
-        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        Path(abs_path).unlink(missing_ok=True)
-    except Exception as cleanup_exc:  # pragma: no cover -- defensive
-        logger.error(
-            f"{context}: failed to clean up staged analysis file "
-            f"{analysis_file_name!r}: {cleanup_exc!r}"
-        )
+    from spyglass.spikesorting.v2._staged_outputs import (
+        unlink_staged_analysis_file,
+    )
+
+    unlink_staged_analysis_file(analysis_file_name, context=context)
 
 
 @schema

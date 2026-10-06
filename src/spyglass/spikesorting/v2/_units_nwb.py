@@ -764,11 +764,11 @@ def write_sorting_units_nwb(
             source_provenance=source_provenance,
         )
     except Exception:
-        from spyglass.spikesorting.v2.recording import (
-            _unlink_staged_analysis_file,
+        from spyglass.spikesorting.v2._staged_outputs import (
+            unlink_staged_analysis_file,
         )
 
-        _unlink_staged_analysis_file(
+        unlink_staged_analysis_file(
             analysis_file_name, context="write_sorting_units_nwb"
         )
         raise
@@ -1026,11 +1026,11 @@ def write_curated_units_nwb(
             merge_group_rows=merge_group_rows,
         )
     except Exception:
-        from spyglass.spikesorting.v2.recording import (
-            _unlink_staged_analysis_file,
+        from spyglass.spikesorting.v2._staged_outputs import (
+            unlink_staged_analysis_file,
         )
 
-        _unlink_staged_analysis_file(
+        unlink_staged_analysis_file(
             analysis_file_name, context="write_curated_units_nwb"
         )
         raise
