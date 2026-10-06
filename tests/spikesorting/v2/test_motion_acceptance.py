@@ -12,6 +12,8 @@ the representative polymer-fixture run are opt-in:
   pytest temporary directory). A result already there that was produced
   from the same manifest bytes, at the same commit and with the same harness
   files is reused, so an interrupted run resumes.
+  Reuse also requires the current production Python source bytes, including
+  uncommitted edits, to match the result.
 
 A development manifest carries no gates, so its benchmark run asserts only
 structural facts and writes the metric evidence; a held-out manifest's gates
@@ -44,6 +46,11 @@ from tests.spikesorting.v2._motion_acceptance import (
     manifest_sha256,
     pooled_residual,
     result_is_reusable,
+)
+from tests.spikesorting.v2._motion_acceptance_reuse import (
+    production_source_fingerprint,
+    run_with_source_fingerprint,
+    source_result_is_reusable,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -788,6 +795,110 @@ def test_result_reuse_needs_same_manifest_commit_and_harness():
     assert not reusable({**result, "harness": unknown}, unknown)
 
 
+def test_production_fingerprint_includes_uncommitted_bytes_and_paths(tmp_path):
+    """Code edits, additions, removals and renames invalidate cached evidence."""
+    import hashlib
+
+    source = tmp_path / "source"
+    source.mkdir()
+    code = source / "motion.py"
+    code.write_bytes(b"old motion\n")
+    expected_files = {"motion.py": hashlib.sha256(b"old motion\n").hexdigest()}
+    expected = hashlib.sha256(
+        json.dumps(
+            expected_files, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    assert production_source_fingerprint(source) == expected
+    (source / "notes.txt").write_text("unrelated")
+    assert production_source_fingerprint(source) == expected
+    code.write_bytes(b"new motion\n")
+    edited = production_source_fingerprint(source)
+    assert edited != expected
+    code.rename(source / "renamed.py")
+    renamed = production_source_fingerprint(source)
+    assert renamed != edited
+    (source / "added.py").write_text("new code")
+    assert production_source_fingerprint(source) != renamed
+    (source / "added.py").unlink()
+    assert production_source_fingerprint(source) == renamed
+
+
+def test_result_reuse_needs_current_production_sources():
+    fingerprint = {"git_commit": "abc", "files": {"harness.py": "1"}}
+    result = {
+        "manifest_sha256": "manifest",
+        "harness": fingerprint,
+        "production_source_sha256": "before-edit",
+    }
+    kwargs = {"manifest_sha": "manifest", "fingerprint": fingerprint}
+    assert source_result_is_reusable(result, source_sha="before-edit", **kwargs)
+    assert not source_result_is_reusable(
+        result, source_sha="after-edit", **kwargs
+    )
+    old_result = {
+        key: value
+        for key, value in result.items()
+        if key != "production_source_sha256"
+    }
+    assert not source_result_is_reusable(
+        old_result, source_sha="before-edit", **kwargs
+    )
+    assert not source_result_is_reusable(
+        result,
+        source_sha="before-edit",
+        **{**kwargs, "manifest_sha": "changed"},
+    )
+
+
+@pytest.mark.parametrize("edit_during_run", [False, True])
+@pytest.mark.parametrize("command", ["case", "representative"])
+def test_benchmark_wrapper_stamps_only_stable_production_sources(
+    tmp_path, edit_during_run, command
+):
+    source = tmp_path / "src"
+    source.mkdir()
+    code = source / "motion.py"
+    code.write_text("original code")
+    output = tmp_path / "out"
+    output.mkdir()
+    if command == "case":
+        args = [
+            "case",
+            "--scenario",
+            "rigid",
+            "--seed",
+            "0",
+            "--recipe",
+            "dredge",
+            "--out",
+            str(output),
+        ]
+        result_path = output / "rigid__s0__dredge.json"
+    else:
+        args = ["representative", "--shank", "2", "--out", str(output)]
+        result_path = output / "representative_shank2.json"
+    calls = []
+
+    def runner(received):
+        calls.append(received)
+        result_path.write_text(json.dumps({"metric": 3.125}))
+        if edit_during_run:
+            code.write_text("changed during run")
+
+    if edit_during_run:
+        with pytest.raises(RuntimeError, match="changed during"):
+            run_with_source_fingerprint(args, runner, source_root=source)
+        assert json.loads(result_path.read_text()) == {"metric": 3.125}
+    else:
+        run_with_source_fingerprint(args, runner, source_root=source)
+        assert json.loads(result_path.read_text()) == {
+            "metric": 3.125,
+            "production_source_sha256": production_source_fingerprint(source),
+        }
+    assert calls == [args]
+
+
 # ---- opt-in benchmark -------------------------------------------------------
 
 
@@ -816,7 +927,7 @@ def benchmark_out(tmp_path_factory) -> Path:
 
 def _run_module(args: list[str]) -> None:
     completed = subprocess.run(
-        [sys.executable, "-m", "tests.spikesorting.v2._motion_acceptance_run"]
+        [sys.executable, "-m", "tests.spikesorting.v2._motion_acceptance_reuse"]
         + args,
         cwd=REPO_ROOT,
         capture_output=True,
@@ -830,8 +941,11 @@ def _result(out: Path, case, sha: str) -> dict | None:
     if not path.exists():
         return None
     result = json.loads(path.read_text())
-    reusable = result_is_reusable(
-        result, manifest_sha=sha, fingerprint=harness_fingerprint()
+    reusable = source_result_is_reusable(
+        result,
+        manifest_sha=sha,
+        fingerprint=harness_fingerprint(),
+        source_sha=production_source_fingerprint(),
     )
     return result if reusable else None
 
