@@ -120,6 +120,11 @@ or `log_export` positionally must pass them by keyword.
     inside a caller's open transaction, so the caller must roll back if it fails.
     A new
     `UnitAnnotationPositionalIdMigration` table records the migration.
+- V2 specific and global-median referencing require uniform finite channel
+    offsets and uniform finite positive gains across all contributing channels,
+    including a specific reference electrode. Unsupported calibration raises
+    before raw-count subtraction can silently change physical units. Filtered
+    recordings are checked after the filter has cleared their offsets.
 - An include-label filter on a curation whose units carry no labels now selects
     no units (previously every unit).
 - Firing-rate smoothing on `SpikeSortingOutput` and `SortedSpikesGroup` no

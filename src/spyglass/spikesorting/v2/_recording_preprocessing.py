@@ -188,6 +188,13 @@ def apply_spatial_preprocessing(
     -------
     tuple
         ``(recording, applied_steps)``.
+
+    Raises
+    ------
+    ValueError
+        If referencing would mix channels with unequal or non-finite current
+        gains/offsets, or non-positive gains. SI references raw counts, so
+        every contributing channel must share its calibration.
     """
     import numpy as np
     import spikeinterface.preprocessing as sip
@@ -243,7 +250,40 @@ def apply_spatial_preprocessing(
         recording = sip.interpolate_bad_channels(recording, to_interpolate)
     applied_steps["bad_channels"] = {"interpolated": to_interpolate}
 
-    # 2. Reference the filtered signal.
+    # 2. Reference the filtered signal. SI subtracts raw counts, then retains
+    # the parent gains/offsets. That represents physical-unit subtraction only
+    # when all contributing channels (including a specific reference) share
+    # their calibration. Check before dropping the reference or zeroing offsets,
+    # which would hide an unsupported input from the NWB writer's checks.
+    # Bandpass already zeroes offsets, so filtered recordings are checked against
+    # their current calibration rather than the discarded acquisition offsets.
+    if reference_mode in ("specific", "global_median"):
+        for property_name, label in (
+            ("gain_to_uV", "channel gains"),
+            ("offset_to_uV", "channel offsets"),
+        ):
+            values = recording.get_property(property_name)
+            if values is None:
+                continue
+            values = np.asarray(values)
+            positive_gain = property_name != "gain_to_uV" or np.all(values > 0)
+            if (
+                not np.all(np.isfinite(values))
+                or np.unique(values).size != 1
+                or not positive_gain
+            ):
+                requirement = (
+                    "uniform finite positive"
+                    if property_name == "gain_to_uV"
+                    else "uniform finite"
+                )
+                raise ValueError(
+                    f"apply_spatial_preprocessing: {reference_mode!r} reference "
+                    f"requires {requirement} {label} across every contributing "
+                    "channel, including any specific reference electrode; raw-count "
+                    "subtraction cannot preserve this per-channel calibration. "
+                    "Verify the recording's gain/offset metadata before referencing."
+                )
     if reference_mode == "specific":
         recording = sip.common_reference(
             recording,
@@ -273,8 +313,8 @@ def apply_spatial_preprocessing(
         # channel_offsets at the parent value; on the no_filter preset there is
         # no bandpass to remove DC, so the persisted ElectricalSeries offset
         # would double-count it on readback. Under referencing the per-channel
-        # constant DC cancels, so the offset describing the re-referenced signal
-        # is 0 -- matching what the bandpass path already produces.
+        # constant DC cancels after the uniform-calibration check above, so the
+        # re-referenced signal's offset is 0, as on the bandpass path.
         # set_channel_offsets mutates IN PLACE and returns None (SI 0.104.3):
         # a bare statement, NOT ``recording = ...``.
         recording.set_channel_offsets(0.0)

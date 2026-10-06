@@ -727,29 +727,26 @@ def test_recording_semantic_round_trip(xz_roundtrip_session, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 3. Known limitation: specific reference drops the per-channel calibration
+# 3. Specific reference preserves uniform calibration and rejects unequal offsets
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
 @pytest.mark.database
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "known limitation: a 'specific' reference subtracts RAW counts and "
-        "then zeroes the channel offsets, so with unequal per-channel offsets "
-        "and no bandpass to remove the DC the per-channel calibration "
-        "(offset_i - offset_ref) is lost before the writer's uniform-offset "
-        "guard can see it"
-    ),
+@pytest.mark.parametrize(
+    "offsets_uv,reject_calibration",
+    [((5.0, 44.0, 200.0), True), ((44.0, 44.0, 44.0), False)],
 )
-def test_specific_reference_physical_units_oracle(xz_probe_session):
+def test_specific_reference_physical_units_oracle(
+    xz_probe_session, offsets_uv, reject_calibration
+):
     """Reloaded microvolts must equal the reference subtraction done in
     PHYSICAL units, not in raw counts.
 
     The oracle is built from the raw counts and the per-channel calibration --
     ``(raw_i * gain_i + offset_i) - (raw_ref * gain_ref + offset_ref)`` -- not
-    from the preprocessed in-memory recording, which already carries the loss.
+    from the preprocessed in-memory recording. Unequal offsets are rejected
+    before preprocessing can erase the calibration mismatch.
     """
     import spikeinterface.core as si_core
 
@@ -769,9 +766,8 @@ def test_specific_reference_physical_units_oracle(xz_probe_session):
     nwb_file_name = xz_probe_session["nwb_file_name"]
     channel_ids = [3, 5, 9]  # rows 0, 2, 4; electrode 9 is the reference
     reference_electrode_id = 9
-    # Uniform gain (a single ElectricalSeries conversion can carry it) but
-    # UNEQUAL per-channel offsets, which it cannot.
-    offsets_uv = np.array([5.0, 44.0, 200.0])
+    # Uniform gain (a single ElectricalSeries conversion can carry it).
+    offsets_uv = np.array(offsets_uv)
     raw = np.random.default_rng(3).integers(
         -400, 400, size=(400, len(channel_ids)), dtype=np.int16
     )
@@ -786,20 +782,30 @@ def test_specific_reference_physical_units_oracle(xz_probe_session):
         np.array([[0.0, 0.0], [0.0, -30.0], [0.0, -60.0]])
     )
 
+    kept = [0, 1]  # electrodes 3 and 5; electrode 9 was the reference
+    oracle = (raw[:, kept] * _GAIN_UV_PER_COUNT + offsets_uv[kept]) - (
+        raw[:, [2]] * _GAIN_UV_PER_COUNT + offsets_uv[2]
+    )
+    params = PreprocessingParamsSchema.model_validate({"bandpass_filter": None})
+    if reject_calibration:
+        with pytest.raises(
+            ValueError, match="requires uniform finite channel offsets"
+        ):
+            apply_spatial_preprocessing(
+                recording,
+                reference_mode="specific",
+                reference_electrode_id=reference_electrode_id,
+                validated=params,
+            )
+        return
+
     referenced, _ = apply_spatial_preprocessing(
         recording,
         reference_mode="specific",
         reference_electrode_id=reference_electrode_id,
         # ``bandpass_filter=None``: no filter runs, so nothing removes the DC
         # the offsets describe.
-        validated=PreprocessingParamsSchema.model_validate(
-            {"bandpass_filter": None}
-        ),
-    )
-
-    kept = [0, 1]  # electrodes 3 and 5; electrode 9 was the reference
-    oracle = (raw[:, kept] * _GAIN_UV_PER_COUNT + offsets_uv[kept]) - (
-        raw[:, [2]] * _GAIN_UV_PER_COUNT + offsets_uv[2]
+        validated=params,
     )
 
     analysis_file_name, _, _ = Recording._write_nwb_artifact(
@@ -815,7 +821,7 @@ def test_specific_reference_physical_units_oracle(xz_probe_session):
         np.testing.assert_allclose(
             reloaded.get_traces(return_in_uV=True),
             oracle,
-            rtol=0.0,
+            rtol=2e-7,  # SI returns calibrated traces as float32.
             atol=1e-6,
         )
     finally:

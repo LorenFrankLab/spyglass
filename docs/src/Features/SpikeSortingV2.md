@@ -113,7 +113,13 @@ For import paths, see the [API map](./SpikeSortingV2_API.md#tables).
     y-z; including the `tetrode_12.5` repair) and persisted in the artifact's
     `rel_x`/`rel_y`/`rel_z` electrode rows; a sort group whose contacts still
     share a 2D position raises. `make` raises `RecordingTruncatedError` if the
-    raw timestamps do not span the requested interval.
+    raw timestamps do not span the requested interval. Specific and global-median
+    referencing require uniform finite channel offsets and uniform finite positive
+    gains across the contributing channels, including a specific reference
+    electrode. Referencing raises when calibration differs between channels:
+    subtracting raw counts would change the result in physical units. This check
+    uses the current preprocessing calibration; a bandpass filter already clears
+    offsets before the reference stage.
 - **`DriftEstimate`** -- per-`Recording` probe-motion QC estimate, populated on
     demand; never applied. See
     [Drift QC](#drift-qc-motion-estimate-never-applied).
