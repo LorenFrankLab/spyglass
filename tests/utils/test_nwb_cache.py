@@ -384,41 +384,40 @@ def test_config_rejects_out_of_range(SpyglassConfig, bad):
 # ── hybrid eviction (idle time + ref count) ───────────────────────────────────
 
 
-def test_acquire_increments_refcount(NWBFileCache):
+def test_acquire_and_release_set_held(NWBFileCache):
     cache = NWBFileCache()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
         cache["/a.nwb"] = (_make_io(), MagicMock())
-    assert cache._cache["/a.nwb"][3] == 0
+    assert cache._cache["/a.nwb"][3] is False
     cache.acquire("/a.nwb")
-    assert cache._cache["/a.nwb"][3] == 1
+    assert cache._cache["/a.nwb"][3] is True
     cache.release("/a.nwb")
-    assert cache._cache["/a.nwb"][3] == 0
+    assert cache._cache["/a.nwb"][3] is False
 
 
-def test_release_floors_at_zero(NWBFileCache):
+def test_release_without_acquire(NWBFileCache):
     cache = NWBFileCache()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
         cache["/a.nwb"] = (_make_io(), MagicMock())
     cache.release("/a.nwb")  # release without prior acquire
-    assert cache._cache["/a.nwb"][3] == 0
+    assert cache._cache["/a.nwb"][3] is False
 
 
 def test_release_clears_repeated_holds(NWBFileCache):
-    """One release clears every hold, so repeat fetches need one close."""
+    """Repeat fetches leave one hold, which one close releases."""
     cache = NWBFileCache()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
         cache["/a.nwb"] = (_make_io(), MagicMock())
 
     cache.acquire("/a.nwb")  # as two fetch_nwb() calls would
     cache.acquire("/a.nwb")
-    assert cache._cache["/a.nwb"][3] == 2
 
-    cache.release("/a.nwb")  # one close_nwb() releases both
-    assert cache._cache["/a.nwb"][3] == 0
+    cache.release("/a.nwb")  # one close_nwb() is enough
+    assert cache._cache["/a.nwb"][3] is False
 
 
-def test_released_evicted_before_active(NWBFileCache):
-    """A released (refcount=0) file is evicted before an active (refcount>0) one."""
+def test_unheld_closed_before_held(NWBFileCache):
+    """An unheld file is closed before a held one."""
     cache = NWBFileCache()
     io_a, io_b = _make_io(), _make_io()
 
@@ -429,7 +428,7 @@ def test_released_evicted_before_active(NWBFileCache):
         cache["/a.nwb"] = (io_a, MagicMock())
         cache["/b.nwb"] = (io_b, MagicMock())
 
-    cache.acquire("/b.nwb")  # protect /b; /a stays at refcount=0
+    cache.acquire("/b.nwb")  # protect /b; /a stays unheld
 
     mem_responses = [_fake_vm(0.5), _fake_vm(16)]
     with (
@@ -438,14 +437,14 @@ def test_released_evicted_before_active(NWBFileCache):
     ):
         cache["/c.nwb"] = (_make_io(), MagicMock())
 
-    io_a.close.assert_called_once()  # /a evicted (refcount=0)
-    io_b.close.assert_not_called()  # /b protected (refcount=1)
+    io_a.close.assert_called_once()  # /a closed, it was unheld
+    io_b.close.assert_not_called()  # /b protected by its hold
     assert "/a.nwb" not in cache
     assert "/b.nwb" in cache
 
 
-def test_tier3_eviction_warns(NWBFileCache):
-    """A warning is emitted when the only eviction candidate is an active file."""
+def test_held_close_warns(NWBFileCache):
+    """A warning is emitted when the only candidate is a held file."""
     cache = NWBFileCache()
     io_a = _make_io()
 
@@ -455,7 +454,7 @@ def test_tier3_eviction_warns(NWBFileCache):
     ):
         cache["/a.nwb"] = (io_a, MagicMock())
 
-    cache.acquire("/a.nwb")  # all files are now active
+    cache.acquire("/a.nwb")  # every file is now held
 
     mem_responses = [_fake_vm(0.5), _fake_vm(16)]
     with (
@@ -464,11 +463,11 @@ def test_tier3_eviction_warns(NWBFileCache):
         patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
         cache["/b.nwb"] = (_make_io(), MagicMock())
-        assert any("active" in w for w in _warn_texts(mock_warn))
+        assert any("still held" in w for w in _warn_texts(mock_warn))
 
 
-def test_close_all_warns_on_active(NWBFileCache):
-    """close_all emits a warning when files have outstanding holds."""
+def test_close_all_warns_on_held(NWBFileCache):
+    """close_all emits a warning when files are still held."""
     cache = NWBFileCache()
     io_a = _make_io()
 
@@ -479,10 +478,7 @@ def test_close_all_warns_on_active(NWBFileCache):
 
     with patch.object(NWBFileCache, "_warn_msg") as mock_warn:
         cache.close_all()
-        assert any(
-            "active" in w.lower() or "hold" in w.lower()
-            for w in _warn_texts(mock_warn)
-        )
+        assert any("still held" in w for w in _warn_texts(mock_warn))
 
     io_a.close.assert_called_once()
     assert len(cache) == 0

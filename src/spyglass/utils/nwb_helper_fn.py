@@ -27,11 +27,11 @@ class NWBFileCache(BaseMixin):
 
     Eviction priority when memory or file-descriptor limits are reached:
 
-    1. **Released files** — ``refcount == 0``; evict LRU among these first.
-    2. **Active files** — ``refcount > 0``; last resort. Warns once per
-       process, then counts further occurrences for a total at exit.
+    1. **Unheld files** — close the least recently used of these first.
+    2. **Held files** — last resort. Warns once per process, then counts
+       further occurrences for a total at exit.
 
-    Hold counts are managed by :class:`~spyglass.utils.mixins.fetch.FetchMixin`:
+    Holds are managed by :class:`~spyglass.utils.mixins.fetch.FetchMixin`:
     calling ``fetch_nwb()`` acquires each opened file; calling ``close_nwb()``
     on the same table instance releases them.
 
@@ -48,7 +48,7 @@ class NWBFileCache(BaseMixin):
     """
 
     def __init__(self):
-        # path → (io, nwbfile, last_used_monotonic, refcount)
+        # path → (io, nwbfile, last_used_monotonic, held)
         self._cache: dict = {}
         self._warned: set = set()  # one-shot warning keys, see _warn_once
         self._held_evictions = 0
@@ -60,16 +60,16 @@ class NWBFileCache(BaseMixin):
     def get(self, path, default=(None, None)):
         """Return (io, nwbfile) and update last-used, or *default*."""
         if path in self._cache:
-            io, nwbfile, _, rc = self._cache[path]
-            self._cache[path] = (io, nwbfile, time.monotonic(), rc)
+            io, nwbfile, _, held = self._cache[path]
+            self._cache[path] = (io, nwbfile, time.monotonic(), held)
             return io, nwbfile
         return default
 
     def __getitem__(self, path):
         if path not in self._cache:
             raise KeyError(path)
-        io, nwbfile, _, rc = self._cache[path]
-        self._cache[path] = (io, nwbfile, time.monotonic(), rc)
+        io, nwbfile, _, held = self._cache[path]
+        self._cache[path] = (io, nwbfile, time.monotonic(), held)
         return io, nwbfile
 
     def __setitem__(self, path, value):
@@ -79,7 +79,7 @@ class NWBFileCache(BaseMixin):
             old_io, _, _, _ = self._cache[path]
             old_io.close()
         self._evict_if_needed()
-        self._cache[path] = (io, nwbfile, time.monotonic(), 0)
+        self._cache[path] = (io, nwbfile, time.monotonic(), False)
 
     def __contains__(self, path):
         return path in self._cache
@@ -93,12 +93,12 @@ class NWBFileCache(BaseMixin):
 
     def close_all(self):
         """Close every open IO handle and clear the cache."""
-        active = [p for p, (_, _, _, rc) in self._cache.items() if rc > 0]
-        if active:
+        held = [p for p, (_, _, _, is_held) in self._cache.items() if is_held]
+        if held:
             self._warn_msg(
-                f"Closing {len(active)} NWB file(s) with active holds. "
-                "Lazy h5py reads from these files will fail: "
-                + ", ".join(active)
+                f"Closing {len(held)} NWB file(s) that are still held. "
+                "Pending lazy h5py reads from these will fail: "
+                + ", ".join(held)
             )
         for io, _, _, _ in self._cache.values():
             io.close()
@@ -106,16 +106,16 @@ class NWBFileCache(BaseMixin):
         self._report_held_evictions()
 
     def acquire(self, path):
-        """Increment the hold count, protecting the file from LRU eviction."""
+        """Hold a file, protecting it from being closed."""
         if path in self._cache:
-            io, nwb, last_used, rc = self._cache[path]
-            self._cache[path] = (io, nwb, last_used, rc + 1)
+            io, nwb, last_used, _ = self._cache[path]
+            self._cache[path] = (io, nwb, last_used, True)
 
     def release(self, path):
         """Clear the hold on a file, allowing it to be closed again."""
         if path in self._cache:
             io, nwb, last_used, _ = self._cache[path]
-            self._cache[path] = (io, nwb, last_used, 0)
+            self._cache[path] = (io, nwb, last_used, False)
 
     # ------------------------------------------------------------------
     # Memory helpers
@@ -150,17 +150,17 @@ class NWBFileCache(BaseMixin):
     def _evict_lru(self):
         if not self._cache:
             return
-        released = {p for p, (_, _, _, rc) in self._cache.items() if rc == 0}
-        if released:
-            candidates = released
+        unheld = {p for p, (_, _, _, held) in self._cache.items() if not held}
+        if unheld:
+            candidates = unheld
         else:
             candidates = set(self._cache.keys())
             self._held_evictions += 1
             self._warn_once(
                 "held_eviction",
-                "NWB cache must evict an active file under memory/fd pressure."
-                " Lazy h5py reads from the evicted file may fail."
-                " Call close_nwb() when finished with fetch_nwb(), or"
+                "NWB cache must close a file that is still held, under"
+                " memory/fd pressure. Pending lazy h5py reads from it may"
+                " fail. Call close_nwb() when finished with fetch_nwb(), or"
                 " close_nwb_files() to release everything.",
             )
         lru_path = min(candidates, key=lambda p: self._cache[p][2])
@@ -186,13 +186,13 @@ class NWBFileCache(BaseMixin):
         self._warn_msg(message)
 
     def _report_held_evictions(self):
-        """Log the running total of evicted held files, then reset."""
+        """Log the running total of held files closed, then reset."""
         if not self._held_evictions:
             return
         self._warn_msg(
-            f"Evicted {self._held_evictions} NWB file(s) still holding an"
-            " active reference. Call close_nwb() or close_nwb_files() at"
-            " points where reads are complete."
+            f"Closed {self._held_evictions} NWB file(s) that were still held."
+            " Call close_nwb() or close_nwb_files() at points where reads"
+            " are complete."
         )
         self._held_evictions = 0
         self._warned.discard("held_eviction")
