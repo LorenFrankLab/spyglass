@@ -10,6 +10,15 @@
 ```
 -->
 
+### Breaking Changes
+
+- Decoding uses explicit uniform time bins and rates in Hz with
+    `non-local-detector>=0.7.0,<0.8`. The model sampling frequency sets the
+    decode rate independently of tracking. Recompute existing models and
+    results; see
+    [the migration guide](docs/src/ForDevelopers/time_grid_migration.md) for
+    parameter and direct-call changes #1618
+
 ### Documentation
 
 - Add LFP artifact detection to the LFP notebook #1641
@@ -25,6 +34,12 @@
 - Add `prefer_download` custom config for stream-capable backends #1662
 
 ### Pipelines
+
+- Decoding
+
+    - Serialize constructor parameters and concrete model classes, preserving
+        algorithm settings when parameters are fetched. Upgrade legacy NonLocal
+        parameter rows without persisting fitted state #1618
 
 - Spike Sorting
 
@@ -362,13 +377,6 @@ for label, interval_data in results.groupby("interval_labels"):
         needs. Temporary, pending #1609 #1619
     - Fix `DecodingParameters.insert_default()`, which raised `AttributeError` on
         every call, and stop `insert` from mutating the caller's rows #1619
-    - Make `DecodingParameters` serialization robust to `non_local_detector`
-        model changes: serialize via `get_params()` (the public constructor
-        parameters) instead of `vars()`, so version-specific derived internals
-        are not stored and re-passed to the constructor, and reconstruct via the
-        stored model class so subclass-only parameters such as NonLocal's
-        `non_local_*_penalty` round-trip. Legacy rows remain readable. #1618
-
 
 - LFP
 
