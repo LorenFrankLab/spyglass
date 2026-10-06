@@ -57,21 +57,32 @@ def _fresh_unit_producing_selection(populated_sorting):
 
 
 def _record_lock_acquisitions(monkeypatch):
-    """Patch ``analyzer_cache_lock`` to record the sorting_ids it is called for.
+    """Record real acquisitions and whether a critical call is guarded."""
+    from contextlib import contextmanager
 
-    Returns the list of recorded ids. The wrapper delegates to the real
-    (memoized, reentrant) lock so the guarded operation still runs; every
-    canonical analyzer-cache reader/writer/deleter resolves the lock lazily, so
-    patching the source attribute is picked up by each call.
-    """
     from spyglass.spikesorting.v2 import _analyzer_cache
 
-    acquired: list[str] = []
+    class Acquisitions(list):
+        def __init__(self):
+            super().__init__()
+            self.depth = {}
+
+        def held(self, sorting_id):
+            return self.depth.get(str(sorting_id), 0) > 0
+
+    acquired = Acquisitions()
     real_lock = _analyzer_cache.analyzer_cache_lock
 
+    @contextmanager
     def _recording_lock(sorting_id, **kwargs):
-        acquired.append(str(sorting_id))
-        return real_lock(sorting_id, **kwargs)
+        sid = str(sorting_id)
+        with real_lock(sorting_id, **kwargs):
+            acquired.append(sid)
+            acquired.depth[sid] = acquired.depth.get(sid, 0) + 1
+            try:
+                yield
+            finally:
+                acquired.depth[sid] -= 1
 
     monkeypatch.setattr(_analyzer_cache, "analyzer_cache_lock", _recording_lock)
     return acquired
@@ -80,28 +91,51 @@ def _record_lock_acquisitions(monkeypatch):
 def test_load_path_acquires_lock(monkeypatch, tmp_path):
     """The analyzer read/rebuild core acquires the per-sort lock around a load,
     so the atomic-publish move-aside window is never observed by a reader."""
-    from spyglass.spikesorting.v2 import _analyzer_cache
+    import numpy as np
+    import spikeinterface as si
+
     from spyglass.spikesorting.v2._sorting_analyzer import (
+        BASE_ANALYZER_EXTENSIONS,
         _load_analyzer_folder_or_rebuild,
     )
 
-    acquired = _record_lock_acquisitions(monkeypatch)
     folder = tmp_path / "sidX__rec.analyzer"
-    folder.mkdir()
-    sentinel = object()
-    monkeypatch.setattr(
-        _analyzer_cache, "load_analyzer_folder", lambda f, **k: sentinel
+    recording = si.generate_recording(
+        durations=[1.0], num_channels=2, sampling_frequency=1000.0, seed=0
     )
+    sorting = si.NumpySorting.from_unit_dict(
+        {1: np.array([100, 200, 300])}, sampling_frequency=1000.0
+    )
+    analyzer = si.create_sorting_analyzer(
+        sorting, recording, format="binary_folder", folder=folder, sparse=False
+    )
+    analyzer.compute(
+        list(BASE_ANALYZER_EXTENSIONS), n_jobs=1, progress_bar=False
+    )
+    acquired = _record_lock_acquisitions(monkeypatch)
+    from spyglass.spikesorting.v2 import _analyzer_cache
+
+    real_load = _analyzer_cache.load_analyzer_folder
+
+    def guarded_load(*args, **kwargs):
+        assert acquired.held("sidX"), "load must run while the lock is held"
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(_analyzer_cache, "load_analyzer_folder", guarded_load)
+
+    def unexpected_rebuild():
+        raise AssertionError("A complete analyzer must not rebuild.")
 
     result = _load_analyzer_folder_or_rebuild(
         folder,
         rebuild=True,
         load_extensions=False,
-        rebuild_fn=lambda: None,
+        rebuild_fn=unexpected_rebuild,
         recipe_label="rec",
         sorting_id="sidX",
     )
-    assert result is sentinel
+    np.testing.assert_array_equal(result.unit_ids, [1])
+    assert set(result.extensions) == {"waveforms"}
     assert "sidX" in acquired, "the load path must acquire the analyzer lock"
 
 
@@ -131,11 +165,12 @@ def test_recompute_delete_acquires_lock(monkeypatch, tmp_path):
     # update path (which needs the real recompute table) is skipped -- this
     # test isolates the lock acquisition, not the bookkeeping.
     rmtree_calls = []
-    monkeypatch.setattr(
-        rc.shutil,
-        "rmtree",
-        lambda f, **k: rmtree_calls.append(str(f)),
-    )
+
+    def guarded_rmtree(folder, **kwargs):
+        assert acquired.held("sidY"), "delete must run while the lock is held"
+        rmtree_calls.append(str(folder))
+
+    monkeypatch.setattr(rc.shutil, "rmtree", guarded_rmtree)
 
     rc._delete_analyzer_folders(
         recompute_table=None,

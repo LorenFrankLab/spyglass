@@ -2867,3 +2867,110 @@ class TestPublicMergeIdValidation:
             )
         finally:
             (CurationV2 & child).delete(safemode=False)
+
+
+@pytest.mark.database
+@pytest.mark.integration
+@pytest.mark.stage
+def test_evaluation_populate_repairs_partially_built_canonical_analyzer(
+    evaluated_merge_parent,
+):
+    """A real table retry repairs an interrupted cache and preserves results."""
+    import shutil
+
+    import numpy as np
+
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        StagedAnalyzer,
+        analyzer_cache_lock,
+        analyzer_folder_storage_fingerprint,
+        copy_analyzer_folder,
+        load_analyzer_folder,
+    )
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        BASE_ANALYZER_EXTENSIONS,
+    )
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    selection, root = evaluated_merge_parent
+    sorting_key = {"sorting_id": root["sorting_id"]}
+    expected_metrics = CurationEvaluation.get_metrics(selection).copy(deep=True)
+    expected_hashes = (CurationEvaluation & selection).fetch1(
+        "source_analyzer_hashes"
+    )
+    source_sorting = Sorting().get_sorting(sorting_key)
+    expected_frames = {
+        int(unit_id): source_sorting.get_unit_spike_train(unit_id).copy()
+        for unit_id in source_sorting.unit_ids
+    }
+    original = Sorting().get_analyzer(sorting_key, rebuild=False)
+    folder = original.folder
+    expected_arrays = {
+        name: {
+            key: value.copy()
+            for key, value in original.get_extension(name).data.items()
+        }
+        for name in BASE_ANALYZER_EXTENSIONS
+    }
+
+    # The backup is a sibling, preserving relative recording paths when it is
+    # restored. Keep the shared planted sort's original cache even if a failed
+    # assertion interrupts the evaluation retry.
+    with StagedAnalyzer(folder) as backup:
+        cache_modified = False
+        with analyzer_cache_lock(root["sorting_id"]):
+            copy_analyzer_folder(original, backup.folder)
+        try:
+            (CurationEvaluation & selection).delete(safemode=False)
+            assert not (CurationEvaluation & selection)
+            assert CurationEvaluationSelection & selection
+            with analyzer_cache_lock(root["sorting_id"]):
+                cache_modified = True
+                for extension_folder in (folder / "extensions").iterdir():
+                    if extension_folder.name != "random_spikes":
+                        shutil.rmtree(extension_folder)
+                interrupted = load_analyzer_folder(folder)
+                assert interrupted.has_recording()
+                assert interrupted.get_saved_extension_names() == [
+                    "random_spikes"
+                ]
+
+            CurationEvaluation.populate(selection, reserve_jobs=False)
+            assert len(CurationEvaluation & selection) == 1
+            pd.testing.assert_frame_equal(
+                CurationEvaluation.get_metrics(selection), expected_metrics
+            )
+            assert (CurationEvaluation & selection).fetch1(
+                "source_analyzer_hashes"
+            ) == expected_hashes
+            # The reader forbids rebuilding: successful access proves populate
+            # itself repaired the cache, rather than the assertion healing it.
+            repaired = Sorting().get_analyzer(sorting_key, rebuild=False)
+            assert set(repaired.sorting.unit_ids) == set(expected_frames)
+            for unit_id, frames in expected_frames.items():
+                np.testing.assert_array_equal(
+                    repaired.sorting.get_unit_spike_train(unit_id), frames
+                )
+            for name, arrays in expected_arrays.items():
+                actual = repaired.get_extension(name).data
+                assert set(actual) == set(arrays)
+                for key, values in arrays.items():
+                    np.testing.assert_array_equal(actual[key], values)
+
+            evaluation_file = (CurationEvaluation & selection).fetch1(
+                "analysis_file_name"
+            )
+            fingerprint = analyzer_folder_storage_fingerprint(folder)
+            CurationEvaluation.populate(selection, reserve_jobs=False)
+            assert (CurationEvaluation & selection).fetch1(
+                "analysis_file_name"
+            ) == evaluation_file
+            assert analyzer_folder_storage_fingerprint(folder) == fingerprint
+        finally:
+            if cache_modified:
+                with analyzer_cache_lock(root["sorting_id"]):
+                    backup.publish()

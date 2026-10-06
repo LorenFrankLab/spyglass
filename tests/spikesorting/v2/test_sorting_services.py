@@ -250,25 +250,22 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
 ):
     """Default analyzer access removes an invalid cache folder and rebuilds it."""
 
+    import spikeinterface as si
+
     from spyglass.spikesorting.v2 import _analyzer_cache, _sorting_analyzer
 
     folder = tmp_path / "bad.analyzer"
     folder.mkdir()
-    rebuilt_marker = folder / "rebuilt"
-
-    class _LazyAnalyzer:
-        """Stand-in for a lazily loaded SI analyzer with saved extensions."""
-
-        def __init__(self):
-            self.loaded_extensions = []
-
-        def get_saved_extension_names(self):
-            return ["templates", "waveforms"]
-
-        def get_extension(self, name):
-            self.loaded_extensions.append(name)
-
-    loaded = _LazyAnalyzer()
+    traces = np.random.default_rng(0).normal(size=(10_000, 2)).astype("float32")
+    recording = _rec(traces)
+    recording.set_dummy_probe_from_locations(np.array([[0, 0], [0, 20]]))
+    recording = recording.save(
+        folder=tmp_path / "recording", n_jobs=1, progress_bar=False
+    )
+    sorting = si.NumpySorting.from_unit_dict(
+        {1: np.array([500, 1500])}, sampling_frequency=1000.0
+    )
+    rebuilds = []
 
     class _OneUnitSortingRelation:
         def __and__(self, key):
@@ -279,31 +276,39 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
             assert attrs == ("sorting_id", "n_units")
             return "s1", 1
 
-    def _load(_folder, **_kwargs):
-        if rebuilt_marker.exists():
-            return loaded
-        raise RuntimeError("not a valid analyzer folder")
-
     def _rebuild(_sorting_table, key, waveform_params_name=None):
         assert key == {"sorting_id": "s1"}
         assert waveform_params_name == "display"
         assert (
             not folder.exists()
         ), "invalid folder must be removed before rebuild"
-        folder.mkdir()
-        rebuilt_marker.write_text("ok")
+        rebuilds.append(True)
+        _sorting_analyzer.build_analyzer(
+            sorting,
+            recording,
+            key,
+            sorter_row={"job_kwargs": {}},
+            job_kwargs={"n_jobs": 1, "progress_bar": False, "random_seed": 0},
+            analyzer_folder=folder,
+            waveform_params={
+                "ms_before": 1.0,
+                "ms_after": 2.0,
+                "max_spikes_per_unit": 10,
+                "whiten": False,
+                "purpose": "display",
+                "sparsity": {"method": "dense"},
+            },
+        )
 
     monkeypatch.setattr(
         _analyzer_cache, "analyzer_path", lambda _sid, _recipe: folder
     )
     monkeypatch.setattr(_sorting_analyzer, "rebuild_analyzer_folder", _rebuild)
-    # The recipe-row validation queries AnalyzerWaveformParameters; this unit
-    # test mocks the rest of the load path, so stub it ("display" is a
-    # placeholder, not a real shipped recipe row).
+    # Only the DB recipe lookup and canonical source reconstruction are stubbed;
+    # folder loading, completeness validation and analyzer building are real.
     monkeypatch.setattr(
         _sorting_analyzer, "fetch_waveform_params", lambda name: {}
     )
-    monkeypatch.setattr(_analyzer_cache, "load_analyzer_folder", _load)
 
     analyzer = _sorting_analyzer.load_or_rebuild_analyzer(
         _OneUnitSortingRelation(),
@@ -311,8 +316,17 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
         waveform_params_name="display",
     )
 
-    assert analyzer is loaded
-    assert rebuilt_marker.exists()
+    assert rebuilds == [True]
+    np.testing.assert_array_equal(analyzer.unit_ids, [1])
+    snippets = np.stack([traces[499:502], traces[1499:1502]])
+    np.testing.assert_array_equal(
+        analyzer.get_extension("waveforms").get_waveforms_one_unit(1), snippets
+    )
+    np.testing.assert_array_equal(
+        analyzer.get_extension("templates").get_data()[0], snippets.mean(axis=0)
+    )
     # The default public load returns a mutable analyzer, so every saved
     # extension must be loaded (SI's save/select/merge copy only loaded ones).
-    assert loaded.loaded_extensions == ["templates", "waveforms"]
+    assert set(analyzer.extensions) == set(
+        _sorting_analyzer.BASE_ANALYZER_EXTENSIONS
+    )

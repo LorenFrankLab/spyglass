@@ -195,6 +195,7 @@ def _load_analyzer_folder_or_rebuild(
 
     def load():
         analyzer = load_analyzer_folder(folder)
+        _assert_complete_base_extensions(analyzer)
         return (
             load_analyzer_extensions(analyzer) if load_extensions else analyzer
         )
@@ -250,6 +251,57 @@ def _load_analyzer_folder_or_rebuild(
                 )
             rebuild_fn()
         return load()
+
+
+def _assert_complete_base_extensions(analyzer) -> None:
+    """Reject interrupted canonical builds without eagerly loading arrays.
+
+    SI lists an extension as saved as soon as ``params.json`` exists, before
+    computation finishes. Validate both its run status and required arrays so
+    a killed build cannot look like a usable cache. The mmap reads inspect
+    array headers without registering extensions or reading their payloads.
+    Low-level loaders still allow intentionally partial expert analyzers.
+    """
+    from spikeinterface.core.sortinganalyzer import get_extension_class
+
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        analyzer_extension_array,
+    )
+
+    missing = set(BASE_ANALYZER_EXTENSIONS) - set(
+        analyzer.get_saved_extension_names()
+    )
+    if missing:
+        raise ValueError(
+            f"Analyzer is missing required base extensions: {sorted(missing)}."
+        )
+    data_names = {
+        "random_spikes": ("random_spikes_indices",),
+        "noise_levels": ("noise_levels",),
+        "waveforms": ("waveforms",),
+    }
+    for name in BASE_ANALYZER_EXTENSIONS:
+        extension = get_extension_class(name)(analyzer)
+        extension.load_params()
+        extension.load_run_info()
+        if not (extension.run_info or {}).get("run_completed", False):
+            raise ValueError(f"Analyzer base extension {name!r} is incomplete.")
+        params = extension.params
+        if name == "templates":
+            names = tuple(
+                (
+                    operator
+                    if isinstance(operator, str)
+                    else f"{operator[0]}_{operator[1]}"
+                )
+                for operator in params["operators"]
+            )
+            if not names:
+                raise ValueError("Analyzer templates have no operators.")
+        else:
+            names = data_names[name]
+        for data_name in names:
+            analyzer_extension_array(analyzer, name, data_name)
 
 
 def load_or_rebuild_analyzer(
