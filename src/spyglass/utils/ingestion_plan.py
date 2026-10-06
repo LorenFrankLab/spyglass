@@ -373,6 +373,14 @@ REMEDIES = {
         "is described twice in the file."
     ),
     "value_too_long": "Shorten the value in the file, or widen the column.",
+    "extension_unmet": (
+        "This table needs an NWB extension the file does not declare. Convert "
+        "the file with that extension, or ingest without this table."
+    ),
+    "planner_miss": (
+        "The plan said these rows were insertable and they were not, which is "
+        "a gap in the planner rather than in the file. Please report it."
+    ),
     "divergence": (
         "The file disagrees with a row already stored. Apply the revision "
         "below, or correct the file to match."
