@@ -202,4 +202,5 @@ suite exercised native clusterless prediction/EM and sorted prediction through
 table population; its existing save/load fixtures remain mocked. Test-only
 Numba, pytest-env, and Mountainsort4 were installed for master's fixtures
 without changing production dependency constraints. Installation from the
-declared 0.7 package range still requires publication on PyPI and conda-forge.
+declared 0.7 package range still requires publication on PyPI and the configured
+`edeno` conda channel.
