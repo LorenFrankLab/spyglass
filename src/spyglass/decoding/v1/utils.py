@@ -3,6 +3,7 @@ import logging
 from typing import List
 
 import numpy as np
+import pandas as pd
 import numpy.typing as npt
 import xarray as xr
 from scipy.ndimage import label
@@ -207,3 +208,239 @@ def get_valid_kwargs(
     }
 
     return fit_kwargs, predict_kwargs
+
+
+def declared_tracking_intervals(position_info, decoding_kwargs=None):
+    """Keep declared epoch continuity instead of inferring it from camera gaps."""
+    kwargs = decoding_kwargs or {}
+    intervals = kwargs.get(
+        "valid_position_intervals",
+        position_info.attrs.get("valid_position_intervals"),
+    )
+    if intervals is None:
+        raise ValueError(
+            "Tracking continuity is required: retain PositionGroup epoch support "
+            "or pass decoding_kwargs['valid_position_intervals']."
+        )
+    intervals = np.asarray(intervals, dtype=float)
+    if (
+        intervals.ndim != 2
+        or intervals.shape[1] != 2
+        or not len(intervals)
+        or not np.isfinite(intervals).all()
+        or np.any(intervals[:, 0] >= intervals[:, 1])
+        or np.any(intervals[1:, 0] < intervals[:-1, 1])
+    ):
+        raise ValueError(
+            "Tracking intervals must be ordered and non-overlapping; resolve overlapping epochs upstream"
+        )
+    if np.any(np.diff(position_info.index.to_numpy(dtype=float)) <= 0):
+        raise ValueError(
+            "Resolve duplicate or unordered position timestamps upstream"
+        )
+    return intervals
+
+
+def prepare_decoder_grid(
+    classifier, position_info, position_columns, time_range, decoding_kwargs
+):
+    """Build uniform bins, measured support, and explicitly aligned covariates.
+
+    Training masks and environment/group labels retain their original rows.
+    A timestamped missing mask uses preceding-sample ownership. Transition
+    covariates may use original timestamps with declared interpolation kinds,
+    or already match the actual decode centers. Values during masked HMM gaps
+    must be supplied explicitly; tracking continuity does not fill those gaps.
+    """
+    from non_local_detector.analysis import align_tracking_to_results
+
+    edges = classifier.calculate_time_edges(time_range, trim=True)
+    centers = (edges[:-1] + edges[1:]) / 2
+    grid = xr.Dataset(
+        coords={
+            "time": centers,
+            "time_bin_start": ("time", edges[:-1]),
+            "time_bin_end": ("time", edges[1:]),
+        }
+    )
+    intervals = declared_tracking_intervals(position_info, decoding_kwargs)
+    _, supported = align_tracking_to_results(
+        position_info[position_columns],
+        grid,
+        position_columns=position_columns,
+        valid_position_intervals=intervals,
+    )
+    supplied_missing = decoding_kwargs.get("is_missing")
+    if isinstance(supplied_missing, pd.Series):
+        if np.array_equal(supplied_missing.index.to_numpy(), centers):
+            supplied_missing = supplied_missing.to_numpy()
+        elif np.array_equal(
+            supplied_missing.index.to_numpy(), position_info.index.to_numpy()
+        ):
+            tracking = position_info[position_columns].copy()
+            tracking["__missing__"] = supplied_missing.to_numpy()
+            aligned, _ = align_tracking_to_results(
+                tracking,
+                grid,
+                position_columns=position_columns,
+                valid_position_intervals=intervals,
+                categorical_columns=["__missing__"],
+            )
+            supplied_missing = (
+                aligned["__missing__"]
+                .where(aligned["__missing__"].notna(), True)
+                .to_numpy(dtype=bool)
+            )
+        else:
+            raise ValueError(
+                "Timestamped is_missing must match original tracking or actual decode centers"
+            )
+    if supplied_missing is None:
+        supplied_missing = np.zeros(len(centers), dtype=bool)
+    supplied_missing = np.asarray(supplied_missing, dtype=bool)
+    if supplied_missing.shape != centers.shape:
+        raise ValueError(
+            "is_missing needs one value per decode bin; use a timestamped Series to align an original tracking mask"
+        )
+    missing = ~supported | supplied_missing
+
+    covariates = decoding_kwargs.get("discrete_transition_covariate_data")
+    kinds = decoding_kwargs.get("discrete_transition_covariate_kinds", {})
+    if covariates is not None:
+        if isinstance(covariates, pd.DataFrame) and not np.array_equal(
+            covariates.index.to_numpy(), centers
+        ):
+            if not np.array_equal(
+                covariates.index.to_numpy(), position_info.index.to_numpy()
+            ):
+                raise ValueError(
+                    "Covariate DataFrame timestamps must match original tracking or actual decode centers"
+                )
+            if set(kinds) - set(covariates) or any(
+                kind not in {"continuous", "categorical", "circular"}
+                for kind in kinds.values()
+            ):
+                raise ValueError(
+                    "Declare existing covariate kinds as continuous, categorical, or circular"
+                )
+            tracking = position_info[position_columns].copy()
+            names = {column: f"__covariate__{column}" for column in covariates}
+            for column, renamed in names.items():
+                tracking[renamed] = covariates[column].to_numpy()
+            categorical = [
+                names[column]
+                for column in covariates
+                if kinds.get(column) == "categorical"
+                or (
+                    column not in kinds
+                    and (
+                        pd.api.types.is_bool_dtype(covariates[column])
+                        or not pd.api.types.is_numeric_dtype(covariates[column])
+                    )
+                )
+            ]
+            circular = [
+                names[column]
+                for column in covariates
+                if kinds.get(column) == "circular"
+            ]
+            aligned, _ = align_tracking_to_results(
+                tracking,
+                grid,
+                position_columns=position_columns,
+                valid_position_intervals=intervals,
+                categorical_columns=categorical,
+                circular_columns=circular,
+            )
+            covariates = aligned[list(names.values())].rename(
+                columns={value: key for key, value in names.items()}
+            )
+        values = (
+            covariates.values()
+            if isinstance(covariates, dict)
+            else (covariates[column].to_numpy() for column in covariates)
+        )
+        for value in values:
+            value = np.asarray(value)
+            if value.shape != centers.shape:
+                raise ValueError(
+                    "Transition covariates need one row per actual decode bin"
+                )
+            if pd.isna(value).any() or (
+                np.issubdtype(value.dtype, np.number)
+                and not np.isfinite(value).all()
+            ):
+                raise ValueError(
+                    "Transition covariates must be finite even in masked HMM gaps; supply explicitly grid-aligned covariates rather than interpolate across missing tracking"
+                )
+    return edges, missing, covariates
+
+
+def spikes_for_sequence(
+    spike_times,
+    edges,
+    *,
+    shared_stop=False,
+    shared_boundary=None,
+    spike_waveform_features=None,
+):
+    """Assign a shared sequence boundary once, preserving event/mark alignment."""
+    masks = [
+        (times >= edges[0])
+        & (times <= edges[-1])
+        & (
+            (
+                times
+                < (edges[-1] if shared_boundary is None else shared_boundary)
+            )
+            if shared_stop
+            else True
+        )
+        for times in spike_times
+    ]
+    times = [
+        np.asarray(events)[mask]
+        for events, mask in zip(spike_times, masks, strict=True)
+    ]
+    marks = (
+        None
+        if spike_waveform_features is None
+        else [
+            np.asarray(features)[mask]
+            for features, mask in zip(
+                spike_waveform_features, masks, strict=True
+            )
+        ]
+    )
+    return times, marks
+
+
+def _interval_bin_masks(edges, intervals):
+    """Yield whole-bin masks with O(n_bins) workspace and timestamp roundoff."""
+    intervals = np.asarray(intervals, dtype=float)
+    if (
+        intervals.ndim != 2
+        or intervals.shape[1] != 2
+        or not np.isfinite(intervals).all()
+    ):
+        raise ValueError("Intervals must contain finite start/stop pairs")
+    lower, upper = edges[:-1], edges[1:]
+    width_bound = np.diff(edges) * 0.01
+    for start, stop in intervals:
+        lower_tol = np.minimum(
+            4 * np.maximum(np.spacing(np.abs(lower)), np.spacing(abs(start))),
+            width_bound,
+        )
+        upper_tol = np.minimum(
+            4 * np.maximum(np.spacing(np.abs(upper)), np.spacing(abs(stop))),
+            width_bound,
+        )
+        yield (lower >= start - lower_tol) & (upper <= stop + upper_tol)
+
+
+def decoder_interval_labels(edges, intervals):
+    """Preserve requested interval identity independently of missing tracking."""
+    labels = np.full(len(edges) - 1, -1, dtype=np.intp)
+    for number, selected in enumerate(_interval_bin_masks(edges, intervals)):
+        labels[selected] = number
+    return labels

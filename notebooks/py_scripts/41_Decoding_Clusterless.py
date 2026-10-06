@@ -116,7 +116,7 @@ UnitWaveformFeaturesGroup.UnitFeatures & {
 #
 # We use the the `PositionOutput` table to figure out the `merge_id` associated with `nwb_file_name` to get the position data associated with the NWB file of interest. In this case, we only have one position to insert, but we could insert multiple positions if we wanted to decode from multiple sessions.
 #
-# Note that we can use the `upsample_rate` parameter to define the rate to which position data will be upsampled to to for decoding in Hz. This is useful if we want to decode at a finer time scale than the position data sampling frequency. In practice, a value of 500Hz is used in many analyses. Skipping or providing a null value for this parameter will default to using the position sampling rate.
+# Keep the original tracking timestamps for fitting the encoding model. The decoder creates a separate uniform clock using the model's `sampling_frequency`, which we set to 500 Hz below. `PositionGroup.upsample_rate` resamples tracking; it does not set the decode rate. Leave it unset here to preserve measured tracking support.
 #
 # You will also want to specify the name of the position variables if they are different from the default names. The default names are `position_x` and `position_y`.
 
@@ -134,7 +134,7 @@ sgp.v1.TrodesPosParams.insert1(
             "speed_smoothing_std_dev": 0.100,
             "orient_smoothing_std_dev": 0.001,
             "led1_is_front": 1,
-            "is_upsampled": 1,
+            "is_upsampled": 0,
             "upsampling_sampling_rate": 250,
             "upsampling_interpolation_method": "linear",
         },
@@ -171,7 +171,6 @@ PositionGroup().create_group(
     nwb_file_name=nwb_copy_file_name,
     group_name="test_group",
     keys=[{"pos_merge_id": merge_id} for merge_id in position_merge_ids],
-    upsample_rate=500,
 )
 
 PositionGroup & {
@@ -226,7 +225,9 @@ from spyglass.decoding.v1.core import DecodingParameters
 DecodingParameters.insert1(
     {
         "decoding_param_name": "contfrag_clusterless",
-        "decoding_params": ContFragClusterlessClassifier(),
+        "decoding_params": ContFragClusterlessClassifier(
+            sampling_frequency=500
+        ),
         "decoding_kwargs": dict(),
     },
     skip_duplicates=True,
@@ -235,14 +236,15 @@ DecodingParameters.insert1(
 DecodingParameters & {"decoding_param_name": "contfrag_clusterless"}
 # -
 
-# We can retrieve these parameters and rebuild the model like so:
+# Fetching parameters restores the concrete model class, including its sampling frequency and algorithm settings. We can inspect its constructor parameters like so:
 
 # +
 model_params = (
     DecodingParameters & {"decoding_param_name": "contfrag_clusterless"}
 ).fetch1()
 
-ContFragClusterlessClassifier(**model_params["decoding_params"])
+model = model_params["decoding_params"]
+model.get_params(deep=False)
 # -
 
 # ### 1D Decoding
@@ -256,6 +258,8 @@ from non_local_detector.environment import Environment
 # -
 
 # ## Decoding
+#
+# Each requested decoding interval is covered by complete uniform bins at the model's sampling frequency. Result `time` values label bin centers; `time_bin_start` and `time_bin_end` preserve the explicit boundaries used to count events. A bin without tracking support is marked missing rather than treated as observed silence. Rates and sorted-spike `no_spike_rate` are in Hz; cached models and results from the older per-bin API must be recomputed. See [the migration guide](../docs/src/ForDevelopers/time_grid_migration.md) for direct API calls and mask alignment.
 #
 # Now that we have grouped the data and defined the model parameters, we have finally set up the elements in tables that we need to decode the data. We now need to use the `ClusterlessDecodingSelection` to fully specify all the parameters and data that we want.
 #

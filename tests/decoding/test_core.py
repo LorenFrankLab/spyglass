@@ -117,6 +117,74 @@ def test_decode_param_fetch(decode_v1, decode_clusterless_params_insert):
     assert isinstance(env, Environment), "fetch failed to restore environment"
 
 
+@pytest.mark.database
+@pytest.mark.parametrize(
+    "class_name, algorithm_key, algorithm_params",
+    [
+        (
+            "ContFragClusterlessClassifier",
+            "clusterless_algorithm_params",
+            {"position_std": 7.5, "waveform_std": 12.5, "block_size": 4096},
+        ),
+        (
+            "NonLocalClusterlessDetector",
+            "clusterless_algorithm_params",
+            {"position_std": 7.5, "waveform_std": 12.5, "block_size": 4096},
+        ),
+        (
+            "ContFragSortedSpikesClassifier",
+            "sorted_spikes_algorithm_params",
+            {"position_std": 7.5, "block_size": 4096},
+        ),
+        (
+            "NonLocalSortedSpikesDetector",
+            "sorted_spikes_algorithm_params",
+            {"position_std": 7.5, "block_size": 4096},
+        ),
+    ],
+)
+def test_decoding_constructor_params_database_roundtrip(
+    decode_v1, class_name, algorithm_key, algorithm_params
+):
+    """Persist constructor settings without changing the caller's model."""
+    import non_local_detector as nld
+
+    model_cls = getattr(nld, class_name)
+    params = {"sampling_frequency": 500, algorithm_key: algorithm_params}
+    if class_name.startswith("NonLocal"):
+        params.update(
+            non_local_position_penalty=2.5,
+            non_local_penalty_std=0.75,
+        )
+    model = model_cls(**params)
+    model._synthetic_fitted_state_ = np.array([1.0, 2.0])
+    row = {
+        "decoding_param_name": f"test_constructor_roundtrip_{class_name}",
+        "decoding_params": model,
+        "decoding_kwargs": {"max_iter": 3},
+    }
+    table = decode_v1.core.DecodingParameters
+
+    table.insert1(row, skip_duplicates=True)
+    fetched = (
+        table & {"decoding_param_name": row["decoding_param_name"]}
+    ).fetch1()
+    restored = fetched["decoding_params"]
+
+    assert type(restored) is model_cls
+    restored_params = restored.get_params(deep=False)
+    assert restored_params["sampling_frequency"] == 500
+    assert restored_params[algorithm_key] == algorithm_params
+    for name in ("non_local_position_penalty", "non_local_penalty_std"):
+        if name in params:
+            assert restored_params[name] == params[name]
+    assert not hasattr(restored, "_synthetic_fitted_state_")
+    assert fetched["decoding_kwargs"] == {"max_iter": 3}
+    assert row["decoding_params"] is model
+    assert model.get_params(deep=False)[algorithm_key] == algorithm_params
+    np.testing.assert_array_equal(model._synthetic_fitted_state_, [1.0, 2.0])
+
+
 def test_null_pos_group(caplog, decode_v1, pop_pos_group):
     file, group = pop_pos_group.fetch1("nwb_file_name", "position_group_name")
     pop_pos_group.create_group(file, group, ["dummy_pos"])

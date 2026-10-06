@@ -57,7 +57,7 @@ dependencies = [
   "ndx-ophys-devices",
   "ndx-optogenetics==0.3.0",
   "ndx-pose",
-  "non-local-detector",
+  "non-local-detector>=0.7.0,<0.8",
   "numpy<2",                      # TODO(#1609): remove with SpikeInterface bump
   "opencv-python",
   "panel>=1.4",
