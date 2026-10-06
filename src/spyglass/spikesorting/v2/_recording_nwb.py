@@ -378,25 +378,11 @@ def _widen_position_column_to_float64(group, column) -> None:
     """
     import numpy as np
 
-    dataset = group[column]
-    if dataset.dtype == np.float64:
+    if group[column].dtype == np.float64:
         return
-    values = dataset[:].astype(np.float64)
-    attributes = dict(dataset.attrs)
-    layout = {
-        "chunks": dataset.chunks,
-        "compression": dataset.compression,
-        "compression_opts": dataset.compression_opts,
-        "shuffle": dataset.shuffle,
-        "fletcher32": dataset.fletcher32,
-        "maxshape": dataset.maxshape,
-    }
-    del group[column]
-    widened = group.create_dataset(
-        column, data=values, dtype=np.float64, **layout
-    )
-    for name, value in attributes.items():
-        widened.attrs[name] = value
+    from spyglass.utils.h5py_helper_fn import convert_dataset_type
+
+    convert_dataset_type(group, column, "float64")
 
 
 def _persist_channel_geometry(
