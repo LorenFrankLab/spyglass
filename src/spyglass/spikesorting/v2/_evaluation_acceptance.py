@@ -58,10 +58,10 @@ def resolve_accepted_merges(
     Never applies all suggested merges implicitly: the caller must pass an
     explicit ``merge_groups`` OR ``use_all_suggested_merges=True``.
 
-    CALLER-SUPPLIED ``merge_groups`` are returned VERBATIM (only coerced to
-    ints) -- they are NOT silently filtered, so a singleton/empty group
-    reaches ``CurationV2.insert_curation``'s >=2-member typo guard and
-    raises instead of degrading into a labels-only child. Only the PERSISTED
+    CALLER-SUPPLIED ``merge_groups`` retain their group structure and require
+    integer unit IDs, so a singleton/empty group reaches
+    ``CurationV2.insert_curation``'s >=2-member typo guard and raises instead
+    of degrading into a labels-only child. Only the PERSISTED
     suggestions (``use_all_suggested_merges``) are filtered to the real
     (>=2-member) groups, since the stored suggestion set is not a caller
     typo. All ids are in the evaluated curation's own unit namespace.
@@ -78,7 +78,12 @@ def resolve_accepted_merges(
             if len(group) >= 2
         ]
     if merge_groups is not None:
-        return [[int(u) for u in group] for group in merge_groups]
+        from spyglass.spikesorting.v2._lookup_validation import lossless_int
+
+        return [
+            [lossless_int(u, "merge group unit_id") for u in group]
+            for group in merge_groups
+        ]
     return []
 
 

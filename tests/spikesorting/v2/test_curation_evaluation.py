@@ -2741,3 +2741,129 @@ def test_acceptance_requires_populated_evaluation(
                 call()
     finally:
         clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.fixture(scope="module")
+def evaluated_merge_parent(planted_two_unit_sort):
+    """Populate one real evaluation for public acceptance validation cases."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        CurationEvaluation,
+        CurationEvaluationSelection,
+        QualityMetricParameters,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    QualityMetricParameters.insert_default()
+    AutoCurationRules.insert_default()
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(planted_two_unit_sort)
+        selection = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        CurationEvaluation.populate(selection, reserve_jobs=False)
+        yield selection, root
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.database
+@pytest.mark.integration
+@pytest.mark.stage
+class TestPublicMergeIdValidation:
+    @pytest.mark.parametrize(
+        "action",
+        ["accept_evaluation_outputs", "accept_merges", "preview_merges"],
+    )
+    @pytest.mark.parametrize(
+        "bad_id", [0.5, False], ids=["fractional", "boolean"]
+    )
+    def test_invalid_ids_leave_curations_and_artifacts_unchanged(
+        self, evaluated_merge_parent, action, bad_id
+    ):
+        from pathlib import Path
+
+        from spyglass.common import AnalysisNwbfile
+        from spyglass.settings import analysis_dir
+        from spyglass.spikesorting.v2.curation import CurationV2
+        from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+        selection, root = evaluated_merge_parent
+        restriction = {"sorting_id": root["sorting_id"]}
+        relations = [
+            CurationV2 & restriction,
+            CurationV2.Unit & restriction,
+            CurationV2.UnitLabel & restriction,
+            CurationV2.MergeGroup & restriction,
+            CurationV2.ParentMergeGroup & restriction,
+            AnalysisNwbfile(),
+        ]
+        before = [
+            relation.fetch("KEY", as_dict=True, order_by="KEY")
+            for relation in relations
+        ]
+        files_before = set(Path(analysis_dir).rglob("*.nwb"))
+        with pytest.raises(
+            ValueError, match="merge group unit_id must be an integer"
+        ):
+            getattr(CurationEvaluation(), action)(
+                selection, merge_groups=[[bad_id, 1]]
+            )
+        assert [
+            relation.fetch("KEY", as_dict=True, order_by="KEY")
+            for relation in relations
+        ] == before
+        assert set(Path(analysis_dir).rglob("*.nwb")) == files_before
+
+    @pytest.mark.parametrize(
+        "action",
+        ["accept_evaluation_outputs", "accept_merges", "preview_merges"],
+    )
+    def test_integer_ids_preserve_units_spikes_and_reuse(
+        self, evaluated_merge_parent, action
+    ):
+        import numpy as np
+
+        from spyglass.common import AnalysisNwbfile
+        from spyglass.spikesorting.v2.curation import CurationV2
+        from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+        selection, _root = evaluated_merge_parent
+        accept = getattr(CurationEvaluation(), action)
+        child = accept(selection, merge_groups=[[np.int64(0), 1]])
+        try:
+            sorting = CurationV2().get_sorting(child)
+            if action == "preview_merges":
+                assert sorting.get_unit_ids().tolist() == [0, 1]
+                np.testing.assert_array_equal(
+                    sorting.get_unit_spike_train(0),
+                    [500, 1500, 2500, 3500, 4500],
+                )
+                np.testing.assert_array_equal(
+                    sorting.get_unit_spike_train(1),
+                    [600, 1600, 2600, 3600, 4600],
+                )
+                assert not (CurationV2 & child).fetch1("merges_applied")
+            else:
+                assert sorting.get_unit_ids().tolist() == [2]
+                np.testing.assert_array_equal(
+                    sorting.get_unit_spike_train(2),
+                    [500, 600, 1500, 1600, 2500, 2600, 3500, 3600, 4500, 4600],
+                )
+                assert (CurationV2 & child).fetch1("merges_applied")
+            before_files = AnalysisNwbfile.fetch(
+                "KEY", as_dict=True, order_by="KEY"
+            )
+            assert accept(selection, merge_groups=[[0, np.int64(1)]]) == child
+            assert (
+                AnalysisNwbfile.fetch("KEY", as_dict=True, order_by="KEY")
+                == before_files
+            )
+        finally:
+            (CurationV2 & child).delete(safemode=False)
