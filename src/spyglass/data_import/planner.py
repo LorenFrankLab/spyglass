@@ -202,16 +202,15 @@ def plan_nwbfile(
     IngestionPlan
         Entries, problems, and the novelty verdict for the whole file.
     """
+    from spyglass import __version__ as version
     from spyglass.common.common_nwbfile import Nwbfile
 
     config = config or dict()
     nwb_key = {"nwb_file_name": nwb_file_name}
     registered = bool(Nwbfile & nwb_key)
 
-    # `IngestionPlanLog` declares columns for these and has always stored
-    # NULL: the only code that filled them sat behind the plan cache, which
-    # nothing enabled. See the open item in TASKS.md.
-    nwb_hash = config_hash = version = None
+    # Recorded as provenance
+    nwb_hash = config_hash = None
 
     if nwb_file is None:
         if not registered:
@@ -251,6 +250,8 @@ def plan_nwbfile(
     # Roughly 14x cheaper than parsing the same file, so it earns its place
     # even when nothing turns out to be reusable.
     hasher = _object_hasher(nwb_file_name, nwb_path, registered)
+    if hasher is not None:
+        nwb_hash = hasher.hash
 
     # Loaded once for the whole file, not per table: asking per table cost two
     # round trips each and made reuse slower than parsing. See `staged_plan`.
@@ -258,7 +259,9 @@ def plan_nwbfile(
     if not force_replan:
         from spyglass.common.common_usage import IngestionPlanLog
 
-        staged = IngestionPlanLog().staged_plan(nwb_file_name)
+        staged = IngestionPlanLog().staged_plan(
+            nwb_file_name, for_version=version
+        )
         if staged:
             declared = _declared_targets()
 
@@ -385,8 +388,9 @@ def _reused_plan(instance, staged: dict, hasher, targets: dict):
     object pay for a parse again.
 
     Returns None for any doubt -- no hasher, nothing staged for this table, a
-    digest that differs, a parse that did not finish cleanly, an undeclared
-    target. Reuse has to be provably safe, while re-parsing is only slow.
+    digest that differs, a parse that did not finish cleanly, a plan staged by
+    a different Spyglass version, an undeclared target. Reuse has to be
+    provably safe, while re-parsing is only slow.
 
     Parameters
     ----------
@@ -664,7 +668,13 @@ def _refuse(
     # so nothing is novel, so the count alone reads as "already ingested".
     # Closing the staging area on that would call a file complete that was
     # never read.
-    if plan.is_clean and plan.verdict == "no_op":
+    # A divergence means the file disagrees with something stored, which is a
+    # thing to record even when there is no row to write -- and the shortcut
+    # below marks every entry `exists` and clears its payload, which would
+    # discard the planned value the warning exists to let a reader act on.
+    diverges = any(p.code == "divergence" for p in plan.problems)
+
+    if plan.is_clean and plan.verdict == "no_op" and not diverges:
         # Nothing to do to the *data*; the staging area still needs closing.
         # Leaving it open would keep a payload for every entry that is
         # already stored, which is the one thing the log must not do.

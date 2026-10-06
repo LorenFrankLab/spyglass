@@ -100,8 +100,12 @@ def test_inserting_a_plan_closes_its_staging_area(common, mini_copy_name):
     """A stored entry keeps its hashes and loses its payload.
 
     The invariant from the design: no `entry_blob` is retained for an entry
-    that exists in its own table. Keeping it would make the log a second copy
-    of the data, which is the failure this whole shape exists to avoid.
+    that exists in its own table *and matches it*. Keeping it would make the
+    log a second copy of the data, which is the failure this whole shape
+    exists to avoid.
+
+    This file holds no divergence, so every entry here is in that case. The
+    one exception is pinned separately, below.
     """
     from spyglass.common.common_usage import IngestionPlanLog
     from spyglass.data_import.planner import insert_plan, plan_nwbfile
@@ -207,3 +211,64 @@ def test_restaging_replaces_the_table_rows(common, mini_copy_name, mini_insert):
     second = len(IngestionPlanLog.Table & key)
 
     assert first == second, f"Table rows accumulated: {first} -> {second}"
+
+
+def test_a_conflicting_entry_keeps_its_payload(
+    common, mini_copy_name, mini_insert, monkeypatch
+):
+    """The one entry that keeps its blob, and why it has to.
+
+    D7 made a divergence a warning rather than a prompt, which only works if
+    the reader can act on it afterwards: the planned value is the thing they
+    need, and re-deriving it means re-parsing the file. So a `conflict` row
+    keeps its payload where `exists` and `inserted` lose theirs.
+
+    Written because the invariant test above cannot see this case — the mini
+    file produces no divergence, so it asserted "no blob survives, states are
+    exists or inserted" and passed for want of a counter-example rather than
+    because the rule held.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.data_import.planner import insert_plan, plan_nwbfile
+    from spyglass.utils.ingestion_plan import PlannedEntries
+
+    target = common.SampleCount().full_table_name
+
+    def _changed(self, source, ctx):
+        entries = PlannedEntries()
+        entries.add(
+            self, [dict(ctx.base_key, sample_count_object_id="deadbeef" * 5)]
+        )
+        return entries
+
+    monkeypatch.setattr(
+        type(common.SampleCount()), "entries_for_row", _changed, raising=False
+    )
+
+    log = IngestionPlanLog()
+    log.clear(mini_copy_name)
+    plan = plan_nwbfile(mini_copy_name, force_replan=True)
+
+    assert any(
+        p.code == "divergence" and p.table == target for p in plan.problems
+    ), "Premise: SampleCount disagrees with the stored row"
+
+    key = log.stage(plan)
+    result = insert_plan(plan)
+
+    assert not result, f"A divergence must not block:\n{result}"
+
+    rows = (log.Entry & key).fetch(as_dict=True)
+    conflicts = [r for r in rows if r["state"] == "conflict"]
+    assert conflicts, "The disagreeing row must be staged as a conflict"
+    assert all(
+        r["entry_blob"] is not None for r in conflicts
+    ), "A conflict keeps the planned value, or the warning cannot be acted on"
+
+    others = [r for r in rows if r["state"] != "conflict"]
+    assert all(
+        r["entry_blob"] is None for r in others
+    ), "Everything else still loses its payload"
+    assert {r["state"] for r in others} <= {"exists", "inserted"}
+
+    log._clear(key)

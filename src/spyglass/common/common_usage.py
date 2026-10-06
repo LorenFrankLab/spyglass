@@ -190,20 +190,11 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         error_raw = NULL: blob
         """
 
-    # Per entry, and transient: blobs are cleared on success. Sized against
-    # the fattest single row seen in production (IntervalList.valid_times,
-    # 50 KB max), with headroom. Over the cap an entry is staged as hashes
-    # and a problem only, and marked so it is re-parsed rather than trusted:
-    # silent degradation would read as a cache hit.
+    # Per entry, and transient: blobs are cleared on success.
     _entry_blob_cap = 1 << 20  # 1 MiB
 
     def _clear(self, master_key: dict) -> None:
         """Remove a file's staged plan, parts before master.
-
-        One place that knows the part list, because `delete_quick` does not
-        cascade: every caller clearing a staged plan by hand had to name each
-        part, and adding one silently broke them with a foreign-key error from
-        the master delete. Assumes a surrounding transaction -- see `clear`.
 
         Parameters
         ----------
@@ -225,7 +216,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         with self._safe_context():
             self._clear({"nwb_file_name": nwb_file_name})
 
-    def staged_plan(self, nwb_file_name: str) -> dict:
+    def staged_plan(self, nwb_file_name: str, for_version=None) -> dict:
         """Return everything staged for a file, in two queries.
 
         Per-table reuse asks the same two questions of every table -- what was
@@ -239,6 +230,9 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         Parameters
         ----------
         nwb_file_name : str
+        for_version : str, optional
+            The Spyglass version about to do the planning. If updated,
+            invalidates previous plans and returns none.
 
         Returns
         -------
@@ -250,6 +244,17 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             so a caller cannot mistake it for reusable.
         """
         master_key = {"nwb_file_name": nwb_file_name}
+
+        if for_version is not None:
+            staged_version = (self & master_key).fetch("spyglass_version")
+            if len(staged_version) and staged_version[0] != for_version:
+                # Updated version means potentially updated ingestion code
+                logger.info(
+                    f"{nwb_file_name}: staged plan was built by "
+                    + f"{staged_version[0] or 'an unrecorded version'}, "
+                    + f"not {for_version}; re-planning from scratch."
+                )
+                return {}
 
         tables = (self.Table & master_key).fetch(as_dict=True)
         if not tables:

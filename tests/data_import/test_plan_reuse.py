@@ -157,3 +157,74 @@ def test_nothing_staged_means_parse(
     plan_nwbfile(mini_copy_name)
 
     assert parse_counter, "Nothing staged must mean everything parses"
+
+
+def test_a_plan_from_another_spyglass_version_is_not_reused(
+    common, mini_copy_name, staged, parse_counter
+):
+    """A code change invalidates a staged plan; the file alone cannot say so.
+
+    The read-set digests cover NWB objects, so they notice the *file*
+    changing and nothing else. Reuse fires precisely where a previous attempt
+    left an incomplete plan, which is precisely where a Spyglass-side fix has
+    just changed what a parse would produce -- so without this, a user whose
+    ingest was blocked by a bug, who upgrades and retries, is served the plan
+    the broken version built.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.data_import.planner import plan_nwbfile
+
+    log = IngestionPlanLog()
+    key = {"nwb_file_name": mini_copy_name}
+    assert log & key, "Premise: the fixture staged a plan"
+
+    # Asserted on the tables that planned something, never on "any parse at
+    # all": a table that found no source reads nothing and so always
+    # re-parses, and a bare `assert parse_counter` is satisfied by those nine
+    # whether the gate works or not. Sabotaging the gate proved exactly that.
+    productive = {
+        tp.table_name
+        for tp in plan_nwbfile(mini_copy_name, force_replan=True).table_plans
+        if tp.entry_count
+    }
+    assert productive, "Premise: the mini file fills some tables"
+
+    # Stand in for the upgrade, after the force_replan above restaged under
+    # the real version.
+    log.update1({**key, "spyglass_version": "0.0.0-not-this-one"})
+
+    parse_counter.clear()
+    plan = plan_nwbfile(mini_copy_name)
+
+    missed = productive - set(parse_counter)
+    assert not missed, (
+        "A plan staged by a different version must not be reused; reused "
+        + f"instead: {sorted(missed)}"
+    )
+    assert plan.entry_count > 0, "and the re-parse must still describe the file"
+
+
+def test_a_staged_plan_records_its_provenance(
+    common, mini_copy_name, mini_insert
+):
+    """The file hash and version are recorded, not left NULL.
+
+    Both columns existed from the start and were filled only by the plan
+    cache, which nothing enabled, so every staged plan carried NULL until the
+    version became a reuse gate. The hash costs nothing extra -- the read-set
+    index already computes it.
+    """
+    from spyglass import __version__
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.data_import.planner import plan_nwbfile
+
+    log = IngestionPlanLog()
+    log.clear(mini_copy_name)
+    log.stage(plan_nwbfile(mini_copy_name, force_replan=True))
+
+    row = (log & {"nwb_file_name": mini_copy_name}).fetch1()
+
+    assert row["spyglass_version"] == __version__
+    assert row["nwb_hash"], "The file hash is computed anyway; record it"
+
+    log.clear(mini_copy_name)
