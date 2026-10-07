@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 import multiprocessing
 import time
 import uuid
@@ -317,39 +316,146 @@ def test_open_curation_analyzer_yields_disk_backed_working_copy(
     assert not seen["folder"].parent.exists()
 
 
-def test_single_low_level_analyzer_builder():
-    """Evaluation and the interactive merged wrapper share build_analyzer."""
+@pytest.mark.parametrize("wants_pc", [False, True])
+def test_single_low_level_analyzer_builder(tmp_path, monkeypatch, wants_pc):
+    """Interactive and evaluation paths execute the same builder on curated units."""
+    import sys
+    from types import ModuleType, SimpleNamespace
+
+    from spyglass import settings
     from spyglass.spikesorting.v2 import _curation_analyzer as resolver
     from spyglass.spikesorting.v2 import _evaluation_analyzers
+    from spyglass.spikesorting.v2 import _sorting_analyzer
 
-    resolver_source = inspect.getsource(resolver.build_merged_analyzer)
-    metric_source = (
-        Path(__file__).parents[3]
-        / "src"
-        / "spyglass"
-        / "spikesorting"
-        / "v2"
-        / "metric_curation.py"
-    ).read_text()
-    start = metric_source.index("    def make_compute(")
-    end = metric_source.index("    def make_insert(", start)
-    make_compute_source = metric_source[start:end]
-    merged_path_source = inspect.getsource(
-        _evaluation_analyzers.evaluate_temporary_analyzers
+    sorting_id = uuid.uuid4()
+    key = {"sorting_id": sorting_id, "curation_id": 3}
+    recording, curated_sorting = object(), object()
+    sorter_row = {"job_kwargs": {"n_jobs": 1}}
+    spans = [{"start_frame": 0, "end_frame": 100}]
+    waveform_params = {"ms_before": 1.0, "ms_after": 2.0}
+    builds, saved, evaluations = [], {}, []
+
+    class Relation:
+        def __and__(self, restriction):
+            return self
+
+        def __bool__(self):
+            return True
+
+        def proj(self, *args):
+            return self
+
+        def fetch1(self):
+            return sorter_row
+
+    class Sorting:
+        def get_statistics_spans(self, restriction):
+            assert restriction == {"sorting_id": sorting_id}
+            return spans
+
+    def require_committed(restriction, **kwargs):
+        assert restriction == key
+
+    curation = ModuleType("spyglass.spikesorting.v2.curation")
+    curation.CurationV2 = SimpleNamespace(
+        Unit=Relation(),
+        assert_committed_curation=require_committed,
+        get_merged_sorting=lambda restriction: curated_sorting,
     )
-    evaluation_source = make_compute_source + inspect.getsource(
-        _evaluation_analyzers
+    sorting_module = ModuleType("spyglass.spikesorting.v2.sorting")
+    sorting_module.Sorting = Sorting
+    sorting_module.SortingSelection = Relation()
+    sorting_module.SorterParameters = Relation()
+    monkeypatch.setitem(sys.modules, curation.__name__, curation)
+    monkeypatch.setitem(sys.modules, sorting_module.__name__, sorting_module)
+    monkeypatch.setattr(settings, "temp_dir", str(tmp_path))
+    monkeypatch.setattr(
+        resolver,
+        "_resolve_curation_row",
+        lambda ref: {**key, "merges_applied": True},
     )
-    assert "build_analyzer(" in resolver_source
-    # make_compute's merged path builds its temporary analyzers with the same
-    # low-level builder.
+    monkeypatch.setattr(
+        resolver, "_resolve_recipe", lambda *args: {"params": waveform_params}
+    )
+    monkeypatch.setattr(
+        _sorting_analyzer,
+        "reconstruct_recording_and_sorting",
+        lambda *args: (recording, object()),
+    )
+
+    def build(sorting, source, compute_key, **kwargs):
+        assert sorting is curated_sorting
+        assert source is recording
+        assert compute_key == {"sorting_id": sorting_id}
+        assert kwargs["waveform_params"] == waveform_params
+        assert kwargs["statistics_spans"] == spans
+        folder = Path(kwargs["analyzer_folder"])
+        folder.mkdir()
+        analyzer = SimpleNamespace(has_recording=lambda: True)
+        saved[folder] = analyzer
+        builds.append(folder)
+        return analyzer
+
+    monkeypatch.setattr(_sorting_analyzer, "build_analyzer", build)
+    monkeypatch.setattr(
+        _sorting_analyzer, "ensure_extensions", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        resolver, "load_analyzer_folder", lambda folder: saved[Path(folder)]
+    )
+    interactive_folder = tmp_path / "interactive.analyzer"
     assert (
-        "_evaluation_analyzers.evaluate_temporary_analyzers"
-        in make_compute_source
+        resolver.build_merged_analyzer(
+            key, "recipe", analyzer_folder=interactive_folder
+        )
+        is saved[interactive_folder]
     )
-    assert "build_analyzer(" in merged_path_source
-    assert "_resolve_curation_analyzer" not in evaluation_source
-    assert "get_curation_analyzer" not in evaluation_source
+
+    from spyglass.spikesorting.v2 import _analyzer_cache, _metric_curation
+
+    monkeypatch.setattr(
+        _analyzer_cache,
+        "load_analyzer_folder",
+        lambda folder: saved[Path(folder)],
+    )
+    monkeypatch.setattr(
+        _evaluation_analyzers,
+        "read_stored_units",
+        lambda units: curated_sorting,
+    )
+    metrics, labels, merges = object(), {17: ["accept"]}, []
+
+    def evaluate(table, display, metric, **kwargs):
+        evaluations.append((display, metric))
+        return metrics, labels, merges
+
+    monkeypatch.setattr(_metric_curation, "evaluate_analyzers", evaluate)
+    result = _evaluation_analyzers.evaluate_temporary_analyzers(
+        object(),
+        recording,
+        sorting_inputs=SimpleNamespace(
+            sorting_id=sorting_id,
+            curated_units=object(),
+            expected_unit_ids=[17],
+        ),
+        analyzer_inputs=SimpleNamespace(
+            sorter_row=sorter_row,
+            analyzer_job_kwargs={"n_jobs": 1},
+            display_waveform_params=waveform_params,
+            metric_waveform_params=waveform_params,
+        ),
+        metric_inputs=object(),
+        wants_pc=wants_pc,
+        observation_metrics=object(),
+        statistics_spans=spans,
+    )
+    assert result == (metrics, labels, merges, None)
+    assert len(builds) == (3 if wants_pc else 2)
+    assert evaluations == [
+        (saved[builds[1]], saved[builds[2]] if wants_pc else None)
+    ]
+    assert interactive_folder.exists()
+    assert all(not folder.exists() for folder in builds[1:])
 
 
 @pytest.mark.slow

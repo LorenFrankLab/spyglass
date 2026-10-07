@@ -85,44 +85,125 @@ def test_visualization_facade_exports_expected_helpers():
 
 
 @pytest.mark.db_unit
-def test_table_delegates_call_facade_if_present(dj_conn):
-    """Optional table-class methods are thin one-line delegates to the facade.
+def test_table_delegates_call_facade_if_present(dj_conn, monkeypatch):
+    """Table entry points forward literal keys, options and return values."""
+    from types import SimpleNamespace
 
-    Each delegate, where present, calls the matching ``visualization`` function
-    and contains no ``spikeinterface`` import or duplicate key/analyzer routing
-    of its own.
-    """
     from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    delegates = {
-        Recording.plot_traces: "plot_recording_traces",
-        Recording.plot_probe_map: "plot_recording_probe_map",
-        Sorting.plot_summary: "plot_sorting_summary",
-        Sorting.plot_unit_summary: "plot_unit_summary",
-        Sorting.plot_waveforms: "plot_waveforms",
-        Sorting.plot_spikes_on_traces: "plot_spikes_on_traces",
-        Sorting.plot_unit_locations: "plot_unit_locations",
-        Sorting.export_si_report: "export_si_report",
-        Sorting.export_to_phy: "export_to_phy",
-        CurationEvaluation.plot_metrics: "plot_metrics",
-        CurationEvaluation.plot_si_quality_metrics: "plot_si_quality_metrics",
-        CurationEvaluation.plot_si_template_metrics: "plot_si_template_metrics",
-        CurationEvaluation.plot_suggested_merges: "plot_suggested_merges",
-    }
-    for method, facade_name in delegates.items():
-        source = inspect.getsource(method)
-        assert f"visualization.{facade_name}(" in source, (
-            f"{method.__qualname__} must delegate to "
-            f"visualization.{facade_name}"
-        )
-        assert (
-            "import spikeinterface" not in source
-        ), f"{method.__qualname__} must not import spikeinterface"
-        # No second routing implementation: delegates resolve nothing themselves.
-        assert "get_analyzer" not in source
-        assert "get_recording" not in source
+    key = {"sorting_id": "sort"}
+    root_key = {"sorting_id": "sort", "curation_id": 0}
+    calls = []
+    root_calls = []
+    result = object()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("delegate performed its own recording/analyzer lookup")
+
+    def root_curation(value):
+        root_calls.append(value)
+        return root_key
+
+    table = SimpleNamespace(
+        root_curation=root_curation,
+        get_analyzer=forbidden,
+        get_recording=forbidden,
+    )
+    delegates = [
+        (
+            Recording.plot_traces,
+            "plot_recording_traces",
+            (),
+            {"backend": "matplotlib"},
+        ),
+        (
+            Recording.plot_probe_map,
+            "plot_recording_probe_map",
+            (),
+            {"backend": "matplotlib"},
+        ),
+        (
+            Sorting.plot_summary,
+            "plot_sorting_summary",
+            (),
+            {"compute_missing": False, "backend": None},
+        ),
+        (
+            Sorting.plot_unit_summary,
+            "plot_unit_summary",
+            (17,),
+            {"compute_missing": False, "backend": "matplotlib"},
+        ),
+        (
+            Sorting.plot_waveforms,
+            "plot_waveforms",
+            (),
+            {"unit_ids": None, "backend": "matplotlib"},
+        ),
+        (
+            Sorting.plot_spikes_on_traces,
+            "plot_spikes_on_traces",
+            (),
+            {"compute_missing": False, "backend": "matplotlib"},
+        ),
+        (
+            Sorting.plot_unit_locations,
+            "plot_unit_locations",
+            (),
+            {"compute_missing": False, "backend": "matplotlib"},
+        ),
+        (
+            Sorting.export_si_report,
+            "export_si_report",
+            ("report",),
+            {"compute_missing": False},
+        ),
+        (Sorting.export_to_phy, "export_to_phy", ("phy",), {}),
+        (
+            CurationEvaluation.plot_metrics,
+            "plot_metrics",
+            (),
+            {"backend": "matplotlib"},
+        ),
+        (
+            CurationEvaluation.plot_si_quality_metrics,
+            "plot_si_quality_metrics",
+            (),
+            {"compute_missing": False, "backend": "matplotlib"},
+        ),
+        (
+            CurationEvaluation.plot_si_template_metrics,
+            "plot_si_template_metrics",
+            (),
+            {"compute_missing": False, "backend": "matplotlib"},
+        ),
+        (
+            CurationEvaluation.plot_suggested_merges,
+            "plot_suggested_merges",
+            (),
+            {"backend": "ipywidgets"},
+        ),
+    ]
+    for method, facade_name, extra_args, defaults in delegates:
+        calls.clear()
+        root_calls.clear()
+
+        def facade(*args, **kwargs):
+            calls.append((args, kwargs))
+            return result
+
+        monkeypatch.setattr(ssviz, facade_name, facade)
+        assert method(table, key, *extra_args, color="red") is result
+        is_sorting = method.__qualname__.startswith("Sorting.")
+        assert calls == [
+            (
+                (root_key if is_sorting else key, *extra_args),
+                {**defaults, "color": "red"},
+            )
+        ]
+        assert root_calls == ([key] if is_sorting else [])
 
 
 # --------------------------------------------------------------------------
