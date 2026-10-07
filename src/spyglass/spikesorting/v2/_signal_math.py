@@ -469,6 +469,12 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
     n_samples = int(n_samples)
     if spike_times.size == 0:
         return np.asarray([], dtype=np.int64)
+    if not np.all(np.isfinite(spike_times)):
+        raise ValueError(
+            f"Unit {unit_id} has non-finite (NaN/Inf) spike times; "
+            "absolute spike times must be finite seconds before mapping "
+            "them to recording samples."
+        )
     if recording_times.size != n_samples:
         raise ValueError(
             "_spike_times_to_frames: recording_times length "

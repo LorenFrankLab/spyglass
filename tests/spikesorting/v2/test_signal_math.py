@@ -80,6 +80,22 @@ def test_assert_artifact_frame_fraction_guards_pathological_overmasking():
     assert assert_artifact_frame_fraction(0, 0) is None
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_spike_times_to_frames_rejects_nonfinite_spike_times(bad):
+    """Malformed compatibility inputs must not become last-sample spikes."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._signal_math import _spike_times_to_frames
+
+    with pytest.raises(ValueError, match="Unit 7 has non-finite"):
+        _spike_times_to_frames(
+            np.arange(100) / 1000,
+            np.array([0.01, bad, 0.05]),
+            100,
+            7,
+        )
+
+
 def test_spike_times_to_frames_rejects_nonmonotonic_recording_times():
     """``_spike_times_to_frames`` searchsorts spike times into the recording
     timeline; a backward step there mis-maps every spike frame."""
