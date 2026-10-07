@@ -25,15 +25,6 @@ os.environ.setdefault("DISPLAY", ":0")
 # Disable all tqdm progress bars; they pollute test output.
 os.environ.setdefault("TQDM_DISABLE", "1")
 
-# Suppress ResourceWarning at the OS level so datajoint/hash.py unclosed-file
-# warnings don't bleed through even during GC finalisation.
-_existing = os.environ.get("PYTHONWARNINGS", "")
-_rw_filter = "ignore::ResourceWarning"
-if _rw_filter not in _existing:
-    os.environ["PYTHONWARNINGS"] = (
-        f"{_existing},{_rw_filter}" if _existing else _rw_filter
-    )
-
 # ---------------------------------------------------------------------------
 
 import sys
@@ -195,10 +186,11 @@ class _ModuleWarningsProxy:
         return getattr(warnings, name)
 
 
-# (1) Suppress MissingRequiredBuildWarning from hdmf objectmapper.
+# (1) Suppress only the old fixture's missing source_script_file_name warning.
 _hdmf_objectmapper.warnings = _ModuleWarningsProxy(
     lambda msg, *a, **kw: (
-        a
+        "source_script_file_name" in str(msg)
+        and a
         and isinstance(a[0], type)
         and issubclass(a[0], MissingRequiredBuildWarning)
     )
@@ -217,13 +209,13 @@ _sklearn_parallel.warnings = _ModuleWarningsProxy(
 #     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS,
 #     NO_DLC
 
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.simplefilter("ignore", category=ResourceWarning)
-warnings.simplefilter("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", module="tensorflow")
 
 warnings.filterwarnings(
-    "ignore", category=MissingRequiredBuildWarning, module="hdmf"
+    "ignore",
+    message=".*source_script_file_name.*",
+    category=MissingRequiredBuildWarning,
+    module="hdmf",
 )
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
@@ -260,9 +252,8 @@ warnings.filterwarnings(
 # numcodecs/__init__.py registers `atexit.register(blosc.destroy)` where
 # `blosc.destroy` is decorated with @deprecated (PyPI `deprecated` package).
 # This fires a DeprecationWarning at process exit.  We could filter it, but
-# ms4alg.py calls `warnings.resetwarnings()` during sorting — since pytest
-# runs with `-p no:warnings` (no catch_warnings restoration), that clears all
-# our filters and they are not restored before atexit fires.
+# ms4alg.py calls `warnings.resetwarnings()` during sorting; warning-filter
+# restoration during tests does not cover handlers that run at process exit.
 # Unregistering the atexit handler is cleaner: blosc._init() has already run,
 # and skipping _destroy() in the test process is harmless.
 try:

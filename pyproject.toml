@@ -248,7 +248,6 @@ addopts = [
   # "-v", # verbose output
   # "--sw", # stepwise: resume with next test after failure
   # "--pdb", # drop into debugger on failure
-  "-p no:warnings",
   # "--no-teardown",  # don't teardown the database after tests
   # "--quiet-spy",   # don't show logging from spyglass
   # "--no-dlc",      # don't run DLC tests
@@ -275,19 +274,16 @@ env = [
   "TF_CPP_MIN_LOG_LEVEL = 2",    # Disable TF warnings
 ]
 filterwarnings = [
-  "ignore::ResourceWarning:.*",
-  "ignore::DeprecationWarning:.*",
-  "ignore::UserWarning:.*",
-  "ignore::FutureWarning:.*",
-  # Custom categories MUST be fully qualified: pytest resolves a bare name
-  # against ``builtins`` (AttributeError otherwise). With the default
-  # ``-p no:warnings`` the warnings plugin never parses this list, but a
-  # developer who drops that flag to see warnings would hit the unresolved
-  # category at collection time -- so spell the import paths out.
-  "ignore::pandas.errors.PerformanceWarning:.*",
-  "ignore::hdmf.build.warnings.MissingRequiredBuildWarning:.*",
-  # DLC training ends by cancelling a TF enqueue thread; expected, not a bug
-  "ignore::pytest.PytestUnhandledThreadExceptionWarning",
+  # Keep new pipeline, dependency, NWB-validation and worker warnings visible.
+  # These messages are known compatibility noise from the legacy fixture and
+  # DataJoint's pkg_resources integration; suppress only their exact causes.
+  "default",
+  "ignore:pkg_resources is deprecated as an API:UserWarning:datajoint\\.plugin",
+  "ignore::pyparsing.PyparsingDeprecationWarning:datajoint\\.declare",
+  "ignore:Deprecated call to .*pkg_resources.declare_namespace:DeprecationWarning",
+  "ignore:The '(manufacturer|model_number|model_name)' field is deprecated:DeprecationWarning",
+  "ignore:.*traces_cached_seg.*:ResourceWarning",
+  "ignore:Implicitly cleaning up <TemporaryDirectory:ResourceWarning",
 ]
 markers = [
   # Speed-based markers (based on total time: setup + call + teardown)
