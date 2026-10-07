@@ -121,6 +121,52 @@ _LOAD_SCRIPT = _MAXRSS + textwrap.dedent("""
                       "n_samples": int(template.shape[0])}))
     """)
 
+_UNITMATCH_SCRIPT = _MAXRSS + textwrap.dedent("""
+    import json, sys
+    from pathlib import Path
+    from types import SimpleNamespace
+    import numpy as np
+    import spikeinterface as si
+    import spyglass.settings as settings
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    workdir = Path(sys.argv[1])
+    workdir.mkdir(parents=True, exist_ok=True)
+    settings.temp_dir = str(workdir)
+    saved = []
+    backend._require_unitmatch = lambda: SimpleNamespace(
+        extract_raw_data=SimpleNamespace(save_avg_waveforms=lambda *a, **k: None)
+    )
+    real_create = si.create_sorting_analyzer
+    def create(*args, **kwargs):
+        analyzer = real_create(*args, **kwargs)
+        compute = analyzer.compute
+        def measure(name, **params):
+            result = compute(name, **params)
+            if name == "waveforms":
+                waves = analyzer.get_extension(name).data["waveforms"]
+                saved.append((waves.nbytes, isinstance(waves, np.memmap)))
+            return result
+        analyzer.compute = measure
+        return analyzer
+    si.create_sorting_analyzer = create
+    rec, sort = si.generate_ground_truth_recording(
+        durations=[60.0], num_units=24, num_channels=32,
+        sampling_frequency=30000.0,
+        generate_sorting_kwargs=dict(firing_rates=25.0, refractory_period_ms=2.0),
+        seed=0,
+    )
+    base = maxrss()
+    backend.extract_unitmatch_bundle(
+        workdir / "bundle", rec, sort, max_spikes_per_unit=750,
+        job_kwargs={"n_jobs": 1, "progress_bar": False},
+    )
+    volume, is_memmap = saved[0]
+    print(json.dumps({"volume": int(volume), "is_memmap": is_memmap,
+                      "peak_delta": int(maxrss() - base),
+                      "scratch_remaining": bool(list(workdir.glob("unitmatch_waveforms_*")))}))
+    """)
+
 
 def _run(script: str, *args) -> dict:
     result = subprocess.run(
@@ -161,3 +207,18 @@ def test_analyzer_extraction_and_load_are_out_of_core(tmp_path):
     # Lazy load + one unit's read: a fraction of the volume (an eager load is
     # >= 1x).
     assert load["load_delta"] < 0.5 * volume, (load, volume)
+
+
+@pytest.mark.regression_gate
+@pytest.mark.slow
+def test_unitmatch_bundle_extraction_is_out_of_core(tmp_path):
+    """The production bundle path averages a mmap rather than copying its volume."""
+    if sys.platform.startswith("win"):
+        pytest.skip("ru_maxrss semantics differ on Windows")
+    result = _run(_UNITMATCH_SCRIPT, tmp_path / "unitmatch")
+    assert result["volume"] > 200 * 1024**2, result
+    assert result["is_memmap"] is True, result
+    assert result["scratch_remaining"] is False, result
+    # Dirty file-backed pages still contribute to RSS. The old memory format
+    # also copied the whole extraction volume and exceeded this bound.
+    assert result["peak_delta"] < 1.8 * result["volume"], result

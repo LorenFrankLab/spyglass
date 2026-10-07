@@ -485,6 +485,68 @@ def _good_unit_ids(session_dir) -> list[int]:
     return [int(u) for u in rows[1:, 0]]
 
 
+@pytest.mark.parametrize("fail_after_extraction", [False, True])
+def test_bundle_waveforms_use_mmap_and_scratch_is_reclaimed(
+    tmp_path, monkeypatch, saved_bundles, fail_after_extraction
+):
+    """Real extraction uses disk-backed waveforms and cleans failed attempts."""
+    import spikeinterface as si
+
+    from spyglass import settings
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    monkeypatch.setattr(settings, "temp_dir", str(scratch_root))
+    recording, sorting = _planted_session(
+        2.0,
+        {7: (_train(0.1, 2.0), _planted_template(0), None)},
+        noise_std=0,
+    )
+    real_create = si.create_sorting_analyzer
+    folders = []
+
+    def create(*args, **kwargs):
+        analyzer = real_create(*args, **kwargs)
+        folders.append(Path(analyzer.folder))
+        real_compute = analyzer.compute
+
+        def compute(name, **compute_kwargs):
+            result = real_compute(name, **compute_kwargs)
+            if name == "waveforms":
+                assert isinstance(
+                    analyzer.get_extension(name).data["waveforms"], np.memmap
+                )
+                if fail_after_extraction:
+                    raise RuntimeError("interrupted waveform extraction")
+            return result
+
+        monkeypatch.setattr(analyzer, "compute", compute)
+        return analyzer
+
+    monkeypatch.setattr(si, "create_sorting_analyzer", create)
+    destination = tmp_path / "bundle"
+    if fail_after_extraction:
+        with pytest.raises(RuntimeError, match="interrupted waveform"):
+            backend.extract_unitmatch_bundle(destination, recording, sorting)
+        assert destination not in saved_bundles
+        assert not destination.exists()
+    else:
+        assert (
+            backend.extract_unitmatch_bundle(destination, recording, sorting)
+            == []
+        )
+        halves = saved_bundles[destination]["waveforms"][0]
+        np.testing.assert_allclose(
+            halves[:, :, 0], _planted_template(0), atol=1e-6
+        )
+        np.testing.assert_allclose(
+            halves[:, :, 1], _planted_template(0), atol=1e-6
+        )
+    assert folders and all(not folder.exists() for folder in folders)
+    assert not list(scratch_root.iterdir())
+
+
 #: Unit 12 fires only in the first 30 s of a 60 s session; its amplitude ramps
 #: from 0.8x to 1.2x across its spikes so a temporal split is distinguishable
 #: from a random one. Units 7 and 3 fire throughout. Ids are sparse and not

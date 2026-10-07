@@ -312,53 +312,69 @@ def extract_unitmatch_bundle(
         sampling_sorting = _sorting_with_window_in_one_span(
             sorting, recording, statistics_spans, nbefore, nafter
         )
-    analyzer = si.create_sorting_analyzer(
-        sampling_sorting, recording, sparse=False
-    )
-    analyzer.compute(
-        "random_spikes",
-        method="uniform",
-        max_spikes_per_unit=2 * max_spikes_per_unit,
-        margin_size=max(nbefore, nafter),
-        seed=random_seed,
-    )
-    analyzer.compute(
-        "waveforms",
-        ms_before=ms_before,
-        ms_after=ms_after,
-        **compute_job_kwargs,
-    )
-    waveforms_ext = analyzer.get_extension("waveforms")
-    # Guard against SpikeInterface's ComputeWaveforms.nbefore/.nafter formula
-    # (analyzer_extension_core.py:172-177) drifting from the margin above.
-    if max(waveforms_ext.nbefore, waveforms_ext.nafter) > max(nbefore, nafter):
-        raise RuntimeError(
-            "extract_unitmatch_bundle: waveforms window "
-            f"({waveforms_ext.nbefore}, {waveforms_ext.nafter}) exceeds the "
-            f"random-spikes margin ({max(nbefore, nafter)})"
-        )
-    sampled = analyzer.get_extension("random_spikes").get_random_spikes()
+    # Dense waveform extraction must write to disk: SI's memory and zarr
+    # formats allocate the complete unit x spike x sample x channel volume.
+    # Only one unit's temporal halves enter RAM while averaging the mmap.
+    import tempfile
 
-    unit_ids = sorting.get_unit_ids()
-    keep, halves = [], []
-    for unit_index, unit_id in enumerate(unit_ids):
-        unit_spikes = sampled[sampled["unit_index"] == unit_index]
-        # Rows of get_waveforms_one_unit follow unit_spikes; put them in
-        # (segment, sample) order so half 0 precedes half 1 in time.
-        order = np.lexsort(
-            (unit_spikes["sample_index"], unit_spikes["segment_index"])
+    from spyglass.settings import temp_dir as spyglass_temp_dir
+
+    with tempfile.TemporaryDirectory(
+        prefix="unitmatch_waveforms_", dir=spyglass_temp_dir
+    ) as scratch:
+        analyzer = si.create_sorting_analyzer(
+            sampling_sorting,
+            recording,
+            sparse=False,
+            format="binary_folder",
+            folder=Path(scratch) / "waveforms.analyzer",
         )
-        wfs = waveforms_ext.get_waveforms_one_unit(unit_id)[order]
-        if wfs.shape[0] < 2:
-            continue
-        n_half = wfs.shape[0] // 2
-        halves.append(
-            np.stack(
-                [wfs[:n_half].mean(axis=0), wfs[n_half:].mean(axis=0)],
-                axis=-1,
+        analyzer.compute(
+            "random_spikes",
+            method="uniform",
+            max_spikes_per_unit=2 * max_spikes_per_unit,
+            margin_size=max(nbefore, nafter),
+            seed=random_seed,
+        )
+        analyzer.compute(
+            "waveforms",
+            ms_before=ms_before,
+            ms_after=ms_after,
+            **compute_job_kwargs,
+        )
+        waveforms_ext = analyzer.get_extension("waveforms")
+        # Guard against SpikeInterface's ComputeWaveforms.nbefore/.nafter formula
+        # (analyzer_extension_core.py:172-177) drifting from the margin above.
+        if max(waveforms_ext.nbefore, waveforms_ext.nafter) > max(
+            nbefore, nafter
+        ):
+            raise RuntimeError(
+                "extract_unitmatch_bundle: waveforms window "
+                f"({waveforms_ext.nbefore}, {waveforms_ext.nafter}) exceeds the "
+                f"random-spikes margin ({max(nbefore, nafter)})"
             )
-        )
-        keep.append(unit_index)
+        sampled = analyzer.get_extension("random_spikes").get_random_spikes()
+
+        unit_ids = sorting.get_unit_ids()
+        keep, halves = [], []
+        for unit_index, unit_id in enumerate(unit_ids):
+            unit_spikes = sampled[sampled["unit_index"] == unit_index]
+            # Rows of get_waveforms_one_unit follow unit_spikes; put them in
+            # (segment, sample) order so half 0 precedes half 1 in time.
+            order = np.lexsort(
+                (unit_spikes["sample_index"], unit_spikes["segment_index"])
+            )
+            wfs = waveforms_ext.get_waveforms_one_unit(unit_id)[order]
+            if wfs.shape[0] < 2:
+                continue
+            n_half = wfs.shape[0] // 2
+            halves.append(
+                np.stack(
+                    [wfs[:n_half].mean(axis=0), wfs[n_half:].mean(axis=0)],
+                    axis=-1,
+                )
+            )
+            keep.append(unit_index)
     keep = np.asarray(keep, dtype=np.intp)
     all_unit_ids = np.asarray(unit_ids, dtype=int)
     excluded = [int(u) for u in np.delete(all_unit_ids, keep)]
