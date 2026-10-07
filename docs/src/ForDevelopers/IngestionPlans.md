@@ -47,31 +47,35 @@ not been written yet.
 
 ## Ingesting from the plan
 
-`use_plan=True` checks the whole file first, then inserts what it checked:
+Ingestion checks the whole file first, then inserts what it checked:
 
 ```python
 from spyglass.data_import import insert_sessions
 
-plan = insert_sessions("minirec20230622.nwb", use_plan=True)[0]
+plan = insert_sessions("minirec20230622.nwb")[0]
 ```
 
-The difference from the default path is what happens when something is wrong.
-Inserting table by table, a file with one bad table still wrote every table
-before it, and you were left to work out how far it got. With a plan, a blocking
-problem means **nothing is written** — the file is as it was, the report names
-every problem at once, and a re-attempt skips whatever is already stored.
+A blocking problem means **nothing is written** — the file is as it was, the
+report names every problem at once, and a re-attempt skips whatever is already
+stored.
 
-`on_divergence` decides what to do when the file disagrees with a stored row:
-`interactive` (default) asks once for the run, `accept` keeps the stored values
-and inserts the rest, `raise` declines. `allow_partial=True` inserts the tables
-that planned cleanly even though others did not — off by default, so a
-half-ingested file is a choice rather than an accident.
+`allow_partial=True` inserts the tables that planned cleanly even though others
+did not. Off by default, so a half-ingested file is a choice rather than an
+accident.
 
-!!! note "Opt-in for now"
+### When the file disagrees with a stored row
 
-    The default remains the per-table path, which records failures in `InsertError`.
-    A future release makes planning the default and adds `ignore_errors=True` to
-    restore today's permissive behaviour.
+A planned entry whose primary key already exists with different values is a
+**divergence** — a re-ingested camera whose manufacturer reads `manufacturer-1`
+where the stored row says `manufacturer 1`.
+
+Nothing stops to ask. The stored value is kept, the rest of the file ingests,
+and the report names the row and the columns that differ along with the revision
+that would align them. Read it after the run; the plan is staged, so it is still
+there later.
+
+`on_divergence="raise"` declines the run instead, for a caller that wants a
+disagreement to be an error — a pipeline or a migration script.
 
 ## Planning a file directly
 
@@ -92,23 +96,23 @@ A plan with problems leads with the same verdict, then groups what it found by
 severity, worst first:
 
 ```text
-broken_.nwb: conflict — conflicts with what is already stored
+broken_.nwb: partial_new — 1 new entries
 
 New entries:
       1  `common`.`session`
 
-Hard (2):
+Disagrees with stored rows (1):
+  `common`.`subject` (1):
+    {'subject_id': '54321'} exists with different values for ['sex']
+      stored values: {'sex': 'M'}
+  -> The stored rows were kept. Edit the file to match, or update the rows,
+     if the file is right.
+
+Hard (1):
   [hard] `common`.`session`: missing_attribute: institution_name is required
          and absent (object abc-123)
       -> The NWB file does not supply a required column. Add it to the file,
          or declare it in the file's _spyglass_config.yaml.
-  [hard] `common`.`subject`: divergence: already stored with different values
-      -> The file disagrees with a row already stored. Apply the revision
-         below, or correct the file to match.
-
-Suggested revisions, to apply as-is:
-  # `common`.`subject`
-  {'sex': 'M'}
 
 Blocked by the above (1): `common`.`electrode`
 ```
@@ -117,18 +121,22 @@ Each problem names the NWB `object_id` where there is one, so you can find the
 thing in the file. Each *code* gets a one-line remedy, printed once per group
 rather than under every occurrence.
 
-`report(verbose=True)` also shows advisory problems, which are hidden by default
-so that what blocks you is not buried in what does not.
+Disagreements get their own section because they do not stop anything: the
+stored rows were kept and the rest of the file ingested. The verdict describes
+what the run did, so one disagreement does not retitle a file that was otherwise
+entirely new.
+
+`report(verbose=True)` adds notes about things that were resolved. Warnings are
+shown by default — a warning you have to ask for is not a warning.
 
 ### Verdicts
 
-| Verdict       | Meaning                                          |
-| ------------- | ------------------------------------------------ |
-| `fatal`       | The file could not be planned at all             |
-| `no_op`       | Everything in the file is already stored         |
-| `all_new`     | Nothing in the file is stored yet                |
-| `partial_new` | Some of it is stored; the rest is new            |
-| `conflict`    | The file disagrees with something already stored |
+| Verdict       | Meaning                                  |
+| ------------- | ---------------------------------------- |
+| `fatal`       | The file could not be planned at all     |
+| `no_op`       | Everything in the file is already stored |
+| `all_new`     | Nothing in the file is stored yet        |
+| `partial_new` | Some of it is stored; the rest is new    |
 
 `fatal` is answered before the others. A file that could not be read plans no
 entries, so counting them would say "nothing new" — which reads as *already
@@ -182,10 +190,10 @@ to avoid.
 
 ## Migrating from `InsertError`
 
-`InsertError` still exists and still holds the rows earlier versions wrote, so
-existing queries keep working — `fetch` warns once to say it is deprecated. It
-records one row per exception with no memory of what was already staged, which
-is what `IngestionPlanLog` replaces. A dry run records nothing there.
+`InsertError` still holds the rows earlier versions wrote, so existing queries
+keep working — `fetch` warns once to say it is deprecated. Nothing writes to it
+now. It recorded one row per exception with no memory of what was already
+staged, which is what `IngestionPlanLog` replaces.
 
 | Instead of                              | Use                                                  |
 | --------------------------------------- | ---------------------------------------------------- |

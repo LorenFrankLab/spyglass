@@ -382,8 +382,8 @@ REMEDIES = {
         "a gap in the planner rather than in the file. Please report it."
     ),
     "divergence": (
-        "The file disagrees with a row already stored. Apply the revision "
-        "below, or correct the file to match."
+        "The stored rows were kept. Edit the file to match, or update the "
+        "rows, if the file is right."
     ),
     "entry_too_large": (
         "Too large to stage, so it will be re-parsed rather than reused. "
@@ -618,10 +618,7 @@ class IngestionPlan:
                     lines.append(
                         f"      stored values: {problem.suggested_revision!r}"
                     )
-        lines.append(
-            "  -> The stored rows were kept. Edit the file to match, or "
-            + "update the rows, if the file is right."
-        )
+        lines.append(f"  -> {REMEDIES['divergence']}")
         return lines
 
     @property

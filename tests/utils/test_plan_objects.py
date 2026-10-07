@@ -231,3 +231,38 @@ def test_insert_from_nwbfile_still_returns_entries(
 
     assert isinstance(entries, dict), "Callers still receive a table->rows map"
     assert len(table & restr), "The entries should have been inserted"
+
+
+def test_jsonable_coerces_each_kind_it_claims_to():
+    """`_jsonable` is pinned here because nothing else exercises it.
+
+    Its only in-src caller went with the plan serializer, leaving it used by
+    development tooling alone -- so a change to it would break that tooling
+    silently rather than fail a test.
+    """
+    from datetime import datetime
+
+    import numpy as np
+
+    from spyglass.utils.ingestion_plan import _jsonable
+
+    assert _jsonable({"a": np.int64(1)}) == {"a": 1}, "walks a mapping"
+    assert _jsonable([np.float64(1.5), (2, 3)]) == [
+        1.5,
+        [2, 3],
+    ], "and a sequence"
+    assert _jsonable(np.array([1, 2])) == [1, 2], "an array becomes a list"
+    assert _jsonable(np.int64(7)) == 7, "a numpy scalar becomes a Python one"
+    assert _jsonable(datetime(2026, 1, 2, 3, 4, 5)) == "2026-01-02T03:04:05"
+    for passthrough in ("s", 1, 1.5, True, None):
+        assert _jsonable(passthrough) == passthrough
+
+    class Opaque:
+        def __repr__(self):
+            return "<opaque>"
+
+    assert _jsonable(Opaque()) == "<opaque>", "anything else stringifies"
+
+    import json
+
+    json.dumps(_jsonable({"k": [np.arange(3), datetime(2026, 1, 1)]}))
