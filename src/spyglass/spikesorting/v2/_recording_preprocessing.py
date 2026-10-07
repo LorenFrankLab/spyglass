@@ -12,7 +12,8 @@ The stack is split across the time restriction, and the caller applies it in
 this order:
 
 1. ``apply_temporal_preprocessing`` -- phase-shift, then bandpass -- on the
-   CONTINUOUS channel-sliced recording. Both steps have temporal support, and
+   channel-sliced recording, split at genuine acquisition timestamp gaps.
+   Both steps have temporal support, and
    SpikeInterface's lazy filter pulls its margin from the parent recording, so
    filtering after the restriction would ring at every artificial join between
    selected intervals.
@@ -33,6 +34,36 @@ formatting.
 from __future__ import annotations
 
 
+def _split_acquisition_spans(recording):
+    """Isolate real timestamp gaps before operations with temporal support."""
+    from itertools import pairwise
+
+    import numpy as np
+    from spikeinterface import append_recordings
+
+    from ._acquisition_spans import AcquisitionSpanRecording
+    from ._signal_math import base_intervals_and_gaps
+
+    spans = []
+    split = False
+    for index in range(recording.get_num_segments()):
+        segment = recording.select_segments([index])
+        if not segment.has_time_vector():
+            spans.append(segment)
+            continue
+        gaps = base_intervals_and_gaps(segment).gap_after
+        if not len(gaps):
+            spans.append(segment)
+            continue
+        split = True
+        edges = np.r_[0, gaps + 1, segment.get_num_samples()]
+        spans.extend(
+            AcquisitionSpanRecording(segment, start, stop)
+            for start, stop in pairwise(edges)
+        )
+    return append_recordings(spans) if split else recording
+
+
 def apply_temporal_preprocessing(recording, validated):
     """Apply the temporal preprocessing steps (phase-shift, then bandpass).
 
@@ -40,8 +71,9 @@ def apply_temporal_preprocessing(recording, validated):
     restriction. Both steps have temporal support: SpikeInterface's lazy
     filter pulls its margin from the parent recording, so filtering a
     concatenation of selected intervals would ring at every artificial join.
-    Filtering first and frame-slicing afterwards gives every retained sample
-    its true temporal context.
+    Genuine acquisition timestamp gaps are split into separate segments first,
+    so temporal margins cannot reach across missing data. Filtering each span
+    before selecting intervals gives every retained sample its true context.
 
     Optional ADC phase-shift runs FIRST, then the bandpass filter.
     Bandpass-before-reference (the spatial step, applied later by
@@ -86,6 +118,12 @@ def apply_temporal_preprocessing(recording, validated):
     from spyglass.utils import logger
 
     applied_steps: dict = {}
+
+    if (
+        validated.phase_shift is not None
+        or validated.bandpass_filter is not None
+    ):
+        recording = _split_acquisition_spans(recording)
 
     # 0. ADC phase-shift (multiplexed-ADC / Neuropixels) -- runs FIRST,
     #    before the bandpass. Valid only when the recording carries an

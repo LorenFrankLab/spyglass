@@ -76,6 +76,15 @@ class _FakeRecording:
         # dedicated above-Nyquist test uses a real low-rate NumpyRecording.
         return 30000.0
 
+    def get_num_segments(self):
+        return 1
+
+    def select_segments(self, indices):
+        return self
+
+    def has_time_vector(self):
+        return False
+
     def get_property(self, key):
         return self._properties.get(key)
 
@@ -283,7 +292,7 @@ def test_phase_shift_skipped_when_property_absent(monkeypatch, caplog):
     _patch_sip(monkeypatch, calls)
     rec = _FakeRecording([0, 1, 2, 3], calls)  # no properties
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="spyglass"):
         _out, applied_steps = _apply_preprocessing(
             rec, "none", None, _validated(phase_shift=100.0)
         )

@@ -920,12 +920,13 @@ def compute_recording_artifact(
     )
     sampling_frequency = float(recording.get_sampling_frequency())
 
-    # Channel-slice first, then filter the CONTINUOUS recording, and only
+    # Channel-slice first, then filter each continuous acquisition span, and only
     # then restrict in time. Restricting first would hand the lazy bandpass
     # a concatenation of the selected intervals, and its margin would be
     # read across the artificial joins -- so every interval edge, and a
     # short interval in its entirety, would be filter transient rather than
-    # signal. SpikeInterface's ``FrameSliceRecording`` of a filter pulls
+    # signal. Real timestamp gaps are split before filtering, so margins cannot
+    # cross missing acquisition data. A frame slice of a filter pulls
     # that margin from the continuous parent instead, so each retained
     # sample is filtered with its true temporal context. The spatial steps
     # are per-sample across channels, so they are unaffected by the joins
