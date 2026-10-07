@@ -39,6 +39,111 @@ tables, these can become out of sync. You can 'equalize' the database table
 lists and the set of files on disk by running `cleanup` method, which deletes
 any files not listed in the table from disk.
 
+## Fetching NWB data
+
+Any Spyglass table that links to an NWB file inherits `fetch_nwb()` from
+`FetchMixin`. It returns a list of dicts, one per row in the restriction, with
+NWB objects resolved from the file:
+
+```python
+nwb_data = (SomeTable & key).fetch_nwb()
+lfp = nwb_data[0]["lfp"]  # h5py.Dataset — not yet in RAM
+arr = lfp.data[:]  # data loaded here
+```
+
+### Memory management
+
+NWB files are backed by HDF5 and use *lazy loading*: objects like `lfp.data` are
+`h5py.Dataset` handles that do not read from disk until you slice them, as in
+`lfp.data[:]`. Spyglass keeps files open between calls to avoid reopening them,
+and closes the least recently used (LRU) files when either resource runs low:
+
+- **Free RAM**, below `min_free_gb` gigabytes or `min_free_pct` of total,
+    whichever is larger.
+- **File descriptors**, above `max_file_fraction` of the limit your OS places on
+    how many files one process may hold open at once. On Unix-based systems,
+    Spyglass counts **every** descriptor the process holds, not just its own NWB
+    files, because sockets, pipes, and GPU device handles draw on the same
+    budget. The default of `0.8` starts closing at roughly 820 files where the
+    OS limit is the common 1024. Windows has no equivalent limit to read, so
+    only the RAM check applies there.
+
+Set any of these under `custom.nwb_cache` in your `dj_local_conf.json`:
+
+```json
+{
+  "custom": {
+    "nwb_cache": {
+      "min_free_gb": 2.0,
+      "min_free_pct": 0.1,
+      "max_file_fraction": 0.8
+    }
+  }
+}
+```
+
+Call `close_nwb()` on the **same restriction** once all lazy reads are complete.
+This releases the cache's hold on those files, so Spyglass may close them when
+it needs room:
+
+```python
+restricted = SomeTable & key
+nwb_data = restricted.fetch_nwb()
+arr = nwb_data[0]["lfp"].data[:]  # read lazy handle into RAM first
+restricted.close_nwb()  # then release the hold
+```
+
+`close_nwb()` does not close the file immediately, but flags it as a good
+candidate once space is needed. Omitting it is safe, but the file then stays
+open until Spyglass needs the room for another.
+
+#### Releasing every file at once
+
+After your reads are complete, you can release everything in one call with
+`close_nwb_files()`:
+
+```python
+from spyglass.utils.nwb_helper_fn import close_nwb_files
+
+for session in sessions:
+    restricted = SomeTable & {"nwb_file_name": session}
+    analyze(restricted.fetch_nwb()[0]["lfp"].data[:])  # read into RAM
+    close_nwb_files()  # then release, before the next session
+```
+
+Unlike `close_nwb()`, this closes the files immediately. It warns if any file
+still has unfinished lazy reads, since those reads will fail once the file is
+closed.
+
+If low memory forces Spyglass to close a file you were still using, it warns
+once, then reports the total when files are closed or Python exits. Treat that
+total as a prompt to add `close_nwb_files()` calls, not as an error.
+
+#### Open file limits
+
+A long job can exhaust the OS limit on open files, which surfaces as
+`OSError: [Errno 24] Too many open files`. Two limits apply: the *soft* limit is
+the one in force, and the *hard* limit is the highest you may raise it to
+without an administrator.
+
+- Check them with `ulimit -n` (soft) and `ulimit -Hn` (hard).
+- `tmux` and `screen` sessions often start at 1024 even when the login shell is
+    higher. Check **inside** the session, not in the terminal you launched it
+    from.
+- Raise the soft limit for a shell with `ulimit -n 4096`, or from Python before
+    any files are opened:
+
+```python
+import resource
+
+_, hard = resource.getrlimit(resource.RLIMIT_NOFILE)  # returns (soft, hard)
+resource.setrlimit(resource.RLIMIT_NOFILE, (min(4096, hard), hard))
+```
+
+A warning that descriptors exceed the cache budget with no NWB files left to
+close means the pressure is coming from outside Spyglass. Closing NWB files
+cannot help there; raise the limit instead.
+
 ## Reading and writing recordings
 
 Recordings start out as an NWB file, which is opened as a

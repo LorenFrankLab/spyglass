@@ -1,12 +1,15 @@
 """NWB helper functions for finding processing modules and data interfaces."""
 
+import atexit
 import os
 import os.path
+import time
 from itertools import groupby
 from pathlib import Path
 from typing import List, Union
 
 import numpy as np
+import psutil
 import pynwb
 import yaml
 
@@ -16,10 +19,202 @@ from spyglass.utils.file_backends import (
     get_backends,
 )
 from spyglass.utils.logging import logger
+from spyglass.utils.mixins.base import BaseMixin
 
-# dict mapping file path to the `Opened` record returned by the backend that
-# read it: an NWBHDF5IO in read mode, its NWBFile, and whether it was streamed
-__open_nwb_files = dict()
+try:  # no RLIMIT_NOFILE on Windows
+    import resource
+except ImportError:  # pragma: no cover
+    resource = None
+
+
+class NWBFileCache(BaseMixin):
+    """LRU cache of open NWB files, closing them under resource pressure.
+
+    Maps file path to the ``Opened`` record returned by the backend that read
+    it (see :mod:`spyglass.utils.file_backends`), alongside the time it was
+    last used and whether a caller holds it.
+
+    Closing priority when memory or file-descriptor limits are reached:
+
+    1. **Unheld files** — close the least recently used of these first.
+    2. **Held files** — last resort. Warns once per process, then counts
+       further occurrences for a total at exit.
+
+    Holds are managed by :class:`~spyglass.utils.mixins.fetch.FetchMixin`:
+    calling ``fetch_nwb()`` acquires each opened file; calling ``close_nwb()``
+    on the same table instance releases them.
+
+    Thresholds checked before each insert:
+
+    - Free RAM below ``min_free_gb`` GB *or* ``min_free_pct`` × total RAM,
+      whichever is larger.
+    - Open descriptors held by this process ≥ ``max_file_fraction`` × OS fd
+      soft limit. The whole process is counted, not just the cache, so
+      descriptors opened elsewhere consume the same budget.
+
+    Thresholds come from :data:`spyglass.settings.NWB_CACHE_DEFAULTS`, which
+    ``custom.nwb_cache`` in ``dj_local_conf.json`` overrides.
+    """
+
+    def __init__(self):
+        # path → (opened, last_used_monotonic, held)
+        self._cache: dict = {}
+        self._warned: set = set()  # one-shot warning keys, see _warn_once
+        self._held_evictions = 0
+
+    # ------------------------------------------------------------------
+    # Public dict-compatible interface
+    # ------------------------------------------------------------------
+
+    def get(self, path, default=None):
+        """Return the ``Opened`` record and update last-used, or *default*."""
+        if path in self._cache:
+            opened, _, held = self._cache[path]
+            self._cache[path] = (opened, time.monotonic(), held)
+            return opened
+        return default
+
+    def __getitem__(self, path):
+        if path not in self._cache:
+            raise KeyError(path)
+        opened, _, held = self._cache[path]
+        self._cache[path] = (opened, time.monotonic(), held)
+        return opened
+
+    def __setitem__(self, path, opened):
+        """Add an ``Opened`` record, closing LRU files if resources are tight."""
+        if path in self._cache:
+            self._cache[path][0].io.close()
+        self._evict_if_needed()
+        self._cache[path] = (opened, time.monotonic(), False)
+
+    def __contains__(self, path):
+        return path in self._cache
+
+    def __iter__(self):
+        return iter(self._cache)
+
+    def __delitem__(self, path):
+        """Drop an entry without closing it, as ``del`` on a dict would."""
+        del self._cache[path]
+
+    def __len__(self):
+        return len(self._cache)
+
+    def values(self):
+        """Yield ``Opened`` records without updating last-used times."""
+        return (opened for opened, _, _ in self._cache.values())
+
+    def close_all(self):
+        """Close every open IO handle and clear the cache."""
+        held = [p for p, (_, _, is_held) in self._cache.items() if is_held]
+        if held:
+            self._warn_msg(
+                f"Closing {len(held)} NWB file(s) that are still held. "
+                "Pending lazy h5py reads from these will fail: "
+                + ", ".join(held)
+            )
+        for opened, _, _ in self._cache.values():
+            opened.io.close()
+        self._cache.clear()
+        self._report_held_evictions()
+
+    def acquire(self, path):
+        """Hold a file, protecting it from being closed."""
+        if path in self._cache:
+            opened, last_used, _ = self._cache[path]
+            self._cache[path] = (opened, last_used, True)
+
+    def release(self, path):
+        """Clear the hold on a file, allowing it to be closed again."""
+        if path in self._cache:
+            opened, last_used, _ = self._cache[path]
+            self._cache[path] = (opened, last_used, False)
+
+    # ------------------------------------------------------------------
+    # Memory helpers
+    # ------------------------------------------------------------------
+
+    def _free_ram_ok(self) -> bool:
+        from spyglass.settings import sg_config
+
+        vm = psutil.virtual_memory()
+        min_free_bytes = max(
+            sg_config.nwb_min_free_gb * 1e9,
+            sg_config.nwb_min_free_pct * vm.total,
+        )
+        return vm.available >= min_free_bytes
+
+    def _num_open_ok(self) -> bool:
+        if resource is None:  # no fd limit to compare against
+            return True
+        from spyglass.settings import sg_config
+
+        soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+        try:
+            # Counts descriptors held outside the cache -- sockets, pipes, GPU
+            # handles -- and files opened more than once via external links.
+            # A fresh Process() so forked workers count their own, not the
+            # parent's. POSIX-only; falls back to the cache's own size.
+            num_open = psutil.Process().num_fds()
+        except (AttributeError, NotImplementedError, psutil.Error, OSError):
+            num_open = len(self._cache)
+        return num_open < sg_config.nwb_max_file_fraction * soft_limit
+
+    def _evict_lru(self):
+        if not self._cache:
+            return
+        unheld = {p for p, (_, _, held) in self._cache.items() if not held}
+        if unheld:
+            candidates = unheld
+        else:
+            candidates = set(self._cache.keys())
+            self._held_evictions += 1
+            self._warn_once(
+                "held_eviction",
+                "NWB cache must close a file that is still held, under"
+                " memory/fd pressure. Pending lazy h5py reads from it may"
+                " fail. Call close_nwb() when finished with fetch_nwb(), or"
+                " close_nwb_files() to release everything.",
+            )
+        lru_path = min(candidates, key=lambda p: self._cache[p][1])
+        opened, _, _ = self._cache.pop(lru_path)
+        opened.io.close()
+        logger.debug(f"Closed LRU NWB file: {lru_path}")
+
+    def _evict_if_needed(self):
+        while self._cache and not (self._free_ram_ok() and self._num_open_ok()):
+            self._evict_lru()
+        if not self._cache and not self._num_open_ok():
+            self._warn_once(
+                "fd_pressure",
+                "Open file descriptors exceed the NWB cache budget with no NWB"
+                " files left to close. Raise the limit with `ulimit -n`.",
+            )
+
+    def _warn_once(self, key: str, message: str):
+        """Log *message* only the first time *key* is raised this process."""
+        if key in self._warned:
+            return
+        self._warned.add(key)
+        self._warn_msg(message)
+
+    def _report_held_evictions(self):
+        """Log the running total of held files closed, then reset."""
+        if not self._held_evictions:
+            return
+        self._warn_msg(
+            f"Closed {self._held_evictions} NWB file(s) that were still held."
+            " Call close_nwb() or close_nwb_files() at points where reads"
+            " are complete."
+        )
+        self._held_evictions = 0
+        self._warned.discard("held_eviction")
+
+
+__open_nwb_files = NWBFileCache()
+# Report held-file closures for jobs that never call close_nwb_files()
+atexit.register(__open_nwb_files._report_held_evictions)
 
 # dict mapping NWB file path to config after it is loaded once
 __configs = dict()
@@ -227,9 +422,17 @@ def get_config(nwb_file_path: str, calling_table: str = None) -> dict:
 
 def close_nwb_files():
     """Close all open NWB files."""
-    for opened in __open_nwb_files.values():
-        opened.io.close()
-    __open_nwb_files.clear()
+    __open_nwb_files.close_all()
+
+
+def _acquire_nwb_file(nwb_file_path: str) -> None:
+    """Hold a cached NWB file, protecting it. Internal use only."""
+    __open_nwb_files.acquire(nwb_file_path)
+
+
+def _release_nwb_file(nwb_file_path: str) -> None:
+    """Clear the hold on a cached NWB file. Internal use only."""
+    __open_nwb_files.release(nwb_file_path)
 
 
 def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):

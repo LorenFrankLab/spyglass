@@ -182,7 +182,8 @@ class LFPArtifactDetection(SpyglassMixin, dj.Computed):
         params = artifact_params["artifact_detection_algorithm_params"]
 
         # get LFP data
-        lfp_eseries = (LFPV1 & key).fetch_nwb()[0]["lfp"]
+        _lfp_query = LFPV1 & key
+        lfp_eseries = _lfp_query.fetch_nwb()[0]["lfp"]
         sampling_frequency = (LFPV1 & key).fetch("lfp_sampling_rate")[0]
         lfp_data = np.asarray(
             lfp_eseries.data[:, :],
@@ -226,6 +227,7 @@ class LFPArtifactDetection(SpyglassMixin, dj.Computed):
             timestamps=lfp_eseries.timestamps if is_diff else None,
             referencing=ref,
         )
+        _lfp_query.close_nwb()
 
         key.update(
             dict(

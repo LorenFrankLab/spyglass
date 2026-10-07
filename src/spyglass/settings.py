@@ -12,6 +12,13 @@ from spyglass.utils.logging import logger
 
 _UNSET = object()  # distinguishes "not supplied" from an explicit False
 
+# Thresholds for the open-NWB-file cache, set under custom.nwb_cache
+NWB_CACHE_DEFAULTS = {
+    "min_free_gb": 2.0,
+    "min_free_pct": 0.1,
+    "max_file_fraction": 0.8,
+}
+
 
 class SpyglassConfig:
     """Gets Spyglass dirs from dj.config or environment variables.
@@ -64,6 +71,37 @@ class SpyglassConfig:
 
         # Note: _schema_version field is informational only, not enforced
         return schema["directory_schema"]
+
+    @staticmethod
+    def _validated_nwb_cache(supplied: dict) -> dict:
+        """Merge supplied NWB cache thresholds over defaults, checking ranges.
+
+        Parameters
+        ----------
+        supplied : dict
+            Contents of ``custom.nwb_cache``. Unrecognized keys are ignored.
+
+        Returns
+        -------
+        dict
+            One float per key of ``NWB_CACHE_DEFAULTS``.
+
+        Raises
+        ------
+        ValueError
+            If a threshold falls outside its permitted range.
+        """
+        merged = {**NWB_CACHE_DEFAULTS, **supplied}
+        ret = {key: float(merged[key]) for key in NWB_CACHE_DEFAULTS}
+
+        if ret["min_free_gb"] < 0:
+            raise ValueError("nwb_cache min_free_gb must be >= 0")
+        if not 0 <= ret["min_free_pct"] <= 1:
+            raise ValueError("nwb_cache min_free_pct must be between 0 and 1")
+        if not 0 < ret["max_file_fraction"] <= 1:
+            raise ValueError("nwb_cache max_file_fraction must be in (0, 1]")
+
+        return ret
 
     def __init__(self, base_dir: str = None, **kwargs) -> None:
         """
@@ -125,6 +163,7 @@ class SpyglassConfig:
         # only the message (not an exception/traceback); recovery uses a new
         # SpyglassConfig object with an unambiguous lifecycle.
         self._mode_error: str | None = None
+        self._nwb_cache = dict(NWB_CACHE_DEFAULTS)
 
         # Load directory schema from JSON file (single source of truth)
         # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
@@ -282,6 +321,10 @@ class SpyglassConfig:
         # of an existing valid test config remain transactional.
         if test_mode and test_mode_is_bound and not self._config:
             self.load_failed = True
+
+        self._nwb_cache = self._validated_nwb_cache(
+            dj_custom.get("nwb_cache", {})
+        )
 
         resolved_base = (
             base_dir
@@ -863,6 +906,21 @@ class SpyglassConfig:
         """Moseq video directory as a string."""
         return self.config.get(self.dir_to_var("video", "moseq"))
 
+    @property
+    def nwb_min_free_gb(self) -> float:
+        """Minimum free system RAM in GB before NWB files are closed."""
+        return self._nwb_cache["min_free_gb"]
+
+    @property
+    def nwb_min_free_pct(self) -> float:
+        """Minimum free RAM as a fraction of total before files are closed."""
+        return self._nwb_cache["min_free_pct"]
+
+    @property
+    def nwb_max_file_fraction(self) -> float:
+        """Max fraction of the OS open-descriptor limit this process may use."""
+        return self._nwb_cache["max_file_fraction"]
+
 
 sg_config = SpyglassConfig()
 sg_config.load_config(on_startup=True)
@@ -905,3 +963,8 @@ else:
     dlc_output_dir = sg_config.dlc_output_dir
     moseq_project_dir = sg_config.moseq_project_dir
     moseq_video_dir = sg_config.moseq_video_dir
+
+# Defaults apply whether or not the config loaded
+nwb_min_free_gb = sg_config.nwb_min_free_gb
+nwb_min_free_pct = sg_config.nwb_min_free_pct
+nwb_max_file_fraction = sg_config.nwb_max_file_fraction

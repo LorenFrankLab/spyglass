@@ -321,6 +321,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add `--container-vol-dir` pytest option to store the test container's MySQL
     data on a chosen disk, and document it alongside the existing
     `--container-name`/`--container-port` options #1661
+- Active management of memory resources for open NWBs #1606
 
 ### Pipelines
 
