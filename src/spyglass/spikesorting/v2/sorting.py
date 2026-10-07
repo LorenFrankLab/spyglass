@@ -372,9 +372,8 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         even when the runtime/binary is absent, so ``available_sorters``
         is too lax). ``installed_sorters`` gates the row INSERT here -- a
         mild check that only decides whether to ship the default params
-        row. It is NOT proof a sort will run: the mountainsort4 wrapper
-        imports even when its ``ml_ms4alg`` backend is absent/broken, so
-        ``installed_sorters`` over-reports runnability.
+        row. It is NOT proof a sort will run: the mountainsort4 check only
+        locates the package without importing its compiled dependencies.
         ``preflight_v2_pipeline``'s ``sorter_runtime_available`` check is
         the actual runtime gate.
 

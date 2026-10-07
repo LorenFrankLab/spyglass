@@ -81,6 +81,14 @@ def _env_spikeinterface_spec(env_file: Path) -> str:
     raise AssertionError(f"no spikeinterface line found in {env_file}")
 
 
+def test_v2_extra_installs_native_mountainsort4():
+    """The supported v2 installation includes the real MS4 algorithm."""
+    requirements = _extra_requirements("spikesorting-v2")
+    assert str(requirements["mountainsort4"].specifier) == "==1.0.7"
+    assert "ml-ms4alg" not in requirements
+    assert "ml_ms4alg" not in requirements
+
+
 def test_base_numpy_floor_allows_numpy_1x():
     """The base numpy floor admits the 1.x line the numpy<2 pipelines
     (DeepLabCut 3.x, keypoint-moseq 0.6) need, while keeping the upper bound

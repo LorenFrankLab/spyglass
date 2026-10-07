@@ -215,7 +215,7 @@ def test_container_ms4_pipeline_preset_registered():
     assert "numpy>=2" in row["notes"]
     assert "Singularity" in row["notes"]
 
-    # No shipped preset is the default-switching kind: the default stays MS5.
+    # The container option does not replace the MS5 default.
     from spyglass.spikesorting.v2 import pipeline as pipeline_mod
     import inspect
 
@@ -232,8 +232,8 @@ def test_describe_presets_flags_ms4_recommended():
     """``describe_pipeline_presets`` distinguishes container vs local MS4 paths.
 
     The containerized polymer MS4 preset is surfaced as the recommended-science
-    MS4 path for modern (``numpy>=2``) hosts; the local polymer MS4 preset is
-    surfaced as the compatible-local-runtime (``numpy<2``) path. Both are flagged
+    MS4 option for modern (``numpy>=2``) hosts; the local polymer MS4 preset is
+    surfaced as a native runtime in the standard v2 environment. Both are flagged
     purely through the HUMAN-FACING fields (``recommendation_status`` /
     ``intended_use`` / ``notes``) -- the execution backend is not a preset column
     -- so a scientist reading the catalog can tell which MS4 path to reach for.
@@ -254,14 +254,13 @@ def test_describe_presets_flags_ms4_recommended():
     assert "modern host" in intended
     assert "numpy>=2" in container_row["notes"]
 
-    # The local MS4 preset is documented for compatible local runtimes: its
-    # notes call out the numpy<2 requirement, and it does NOT claim to be the
-    # recommended-science modern-host path (that distinction is the point).
-    assert "numpy<2" in local_row["notes"]
+    # The local MS4 runtime is included in the v2 installation.
+    assert "numpy>=2" in local_row["notes"]
+    assert "spikesorting-v2 extra" in local_row["notes"]
     assert "recommended-science" not in local_row["intended_use"].lower()
 
     # Both stay the production MS4 recipe (the tier is unchanged); the
-    # local-vs-container split is a runtime-host distinction, not a tier one.
+    # local-vs-container split is an execution choice, not a tier one.
     assert container_row["recommendation_status"] == "production"
     assert local_row["recommendation_status"] == "production"
 

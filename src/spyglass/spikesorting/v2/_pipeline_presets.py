@@ -127,8 +127,8 @@ RECOMMENDATION_STATUS_MEANINGS: dict[str, str] = {
     ),
     "alternative": (
         "A sound, working substitute for when the production recipe does not "
-        "fit -- e.g. MountainSort5 stands in for the production MountainSort4 "
-        "where MS4's ml_ms4alg numpy<2 pin is unavailable. Fine to use; just "
+        "fit -- e.g. MountainSort5 is an alternative to production MountainSort4. "
+        "Fine to use; just "
         "not the lab's first pick for that probe/region."
     ),
     "experimental": (
@@ -168,7 +168,7 @@ def describe_pipeline_presets() -> "pd.DataFrame":
     The ``recommendation_status`` column is one of ``production`` (Frank-lab
     validated -- the recommended default for its probe/region/rate),
     ``alternative`` (a sound substitute for when production does not fit, e.g.
-    MountainSort5 for MountainSort4 under ``numpy>=2``), or ``experimental``
+    MountainSort5 as an alternative to MountainSort4), or ``experimental``
     (runs but not yet validated -- verify the output before relying on it).
     Call :func:`describe_recommendation_status` for the full definitions.
 

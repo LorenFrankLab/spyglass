@@ -138,10 +138,9 @@ def test_no_legacy_schema_changes():
 def test_sorter_runtime_resolution():
     """SpikeInterface 0.104 is installed and ``mountainsort5`` is available.
 
-    Also records the MountainSort 4 (``mountainsort4``) status, which lives
-    outside the ``[test]`` extra. Whether MS4 is in ``installed_sorters()``
-    depends on the platform-specific Linux install; the test documents
-    whichever state the resolver produced so future runs can detect drift.
+    Also records the MountainSort 4 (``mountainsort4``) status. Both native
+    sorters are included in the ``spikesorting-v2`` extra; the standalone
+    runtime test exercises MS4's algorithm and compiled dependencies.
     """
     import spikeinterface as si
     import spikeinterface.sorters as sis
@@ -149,8 +148,7 @@ def test_sorter_runtime_resolution():
     assert Version(si.__version__) >= Version("0.104")
     installed = set(sis.installed_sorters())
     assert "mountainsort5" in installed, installed
-    # MS4 status (recorded; not gated): present on Linux installs with the
-    # separate runtime package, absent otherwise.
+    # MS4 is exercised by test_mountainsort4_runtime.py.
     print(
         f"mountainsort4 in installed_sorters(): "
         f"{'mountainsort4' in installed}"

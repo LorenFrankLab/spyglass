@@ -301,15 +301,18 @@ jobs:
         use-mamba: true
     - name: Verify the v2 environment (pip check + sorter runtime)
       # A clean, reproducible modern install must be consistent (pip check)
-      # AND able to run the default sorter, not merely import its wrapper:
-      # run MountainSort5 on two seconds of synthetic data. A wrapper without
-      # a runnable algorithm (e.g. mountainsort4 without ml_ms4alg) is not a sorter.
+      # AND able to run the sorters, not merely locate their packages:
+      # run the default MountainSort5 on synthetic data. Native
+      # MS4 is required by test_mountainsort4_runtime.py and the single-session
+      # MS4 pipeline test below; runtime failures must not become skips.
       run: |
         pip check
         python - <<'EOF'
         import spikeinterface as si
         import spikeinterface.sorters as sis
         assert "mountainsort5" in sis.installed_sorters(), sis.installed_sorters()
+        import mountainsort4
+        assert callable(mountainsort4.mountainsort4)
         rec = si.generate_recording(num_channels=4, durations=[2.0], sampling_frequency=30000.0)
         sorting = sis.run_sorter("mountainsort5", rec, folder="/tmp/ms5_smoke", remove_existing_folder=True, filter=False, whiten=True)
         print("mountainsort5 runtime ok:", sorting)

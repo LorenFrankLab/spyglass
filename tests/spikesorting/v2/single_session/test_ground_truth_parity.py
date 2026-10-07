@@ -1162,10 +1162,8 @@ def test_v2_real_data_v1_parity_mountainsort4(
     (v1v1 drift = 0 on both shanks → MS4 deterministic on v1; v2v2
     drift ≤ 1 unit / 0.74 Hz ≤ 3% of median_fr).
 
-    Env vars / SKIP semantics: same as :func:`test_v2_real_data_v1_parity`
-    plus a SKIP-env-unavailable when MS4 is not installed in v2's
-    sorter set (overridable to FAIL via
-    ``SPIKESORTING_V2_REQUIRE_MS4=1``).
+    Env vars / SKIP semantics: same as :func:`test_v2_real_data_v1_parity`.
+    Native MS4 is required by the v2 extra; a missing installation fails.
     """
     import json
     import os
@@ -1184,15 +1182,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
     # MS4 install gate (v2 side; v1 install is checked at capture time).
     import spikeinterface.sorters as ss
 
-    if "mountainsort4" not in ss.installed_sorters():
-        msg = (
-            "mountainsort4 not in spikeinterface.sorters.installed_sorters(); "
-            "skipping. Set SPIKESORTING_V2_REQUIRE_MS4=1 to make this a "
-            "hard fail."
-        )
-        if os.environ.get("SPIKESORTING_V2_REQUIRE_MS4") == "1":
-            pytest.fail(msg)
-        pytest.skip(msg)
+    assert "mountainsort4" in ss.installed_sorters()
 
     fixture_path = fixture_nwb_path(fixture_stem)
     if not fixture_path.exists():

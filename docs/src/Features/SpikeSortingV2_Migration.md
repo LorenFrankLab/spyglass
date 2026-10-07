@@ -39,15 +39,16 @@ downstream code keys off `merge_id` regardless of which produced the sort.
 | ---------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | Install          | `pip install -e ".[spikesorting-v2]"` (or `environments/environment_spikesorting_v2.yml`); SI 0.104.3, NumPy 2 | `environments/environment_spikesorting_legacy.yml`, SI 0.99, NumPy < 2       |
 | Runs             | v2 sort / review / curation / selection; **reads** v0/v1 outputs (`SpikeSortingOutput`, `SortedSpikesGroup`)   | v0/v1 populate / `MetricCuration` / `BurstPair` / `Waveforms`; MountainSort4 |
-| Sorters that run | MountainSort5 (default), Kilosort4 (with its GPU runtime installed), SpykingCircus2 / Tridesclous2             | MountainSort4 (`ml_ms4alg`) and the v1 sorter set                            |
+| Sorters that run | MountainSort4 (native or container), MountainSort5 (default), Kilosort4 (with its GPU runtime installed), SpykingCircus2 / Tridesclous2 | MountainSort4 and the v1 sorter set |
 | Check            | `pip check`; `preflight_v2_pipeline(...)` reports `sorter_installed` / `sorter_runtime_available`              | `pip check`; the v1 tutorials                                                |
 
 Both environments share the same MySQL database and the same `SPYGLASS_BASE_DIR`
-artifacts. The modern install does not include the `mountainsort4` package: it
-would install only a wrapper (the sorter *looks* installed) while the algorithm
-backend `ml_ms4alg` does not build on NumPy 2, so it could never run. Run MS4 in
-the legacy environment or through the containerized MS4 preset
-(`franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`).
+artifacts. The modern `spikesorting-v2` extra includes `mountainsort4==1.0.7`,
+which bundles the algorithm and runs natively on NumPy 2 through v2's scoped
+`spikeextractors` compatibility shim. Use the native MS4 preset
+(`franklab_probe_hippocampus_30khz_ms4_2026_06`) or the containerized variant
+(`franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`). The separate legacy
+environment is needed for producing new v0/v1 output, not for native MS4 in v2.
 
 The legacy environment file currently requires relaxing the SI/probeinterface pins in
 `pyproject.toml` before the environment build (see the comments at the top of

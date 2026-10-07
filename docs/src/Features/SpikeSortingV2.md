@@ -200,22 +200,24 @@ presets[presets["sorter_family"] == "kilosort4"]
 The shipped presets (all dated `_2026_06`):
 
 - `franklab_probe_hippocampus_30khz_ms5_2026_06` -- **default**, MountainSort5
-    (hippocampus 600 Hz high-pass, 30 kHz). It is the default because it runs
-    under the v2 `numpy>=2` baseline; its `recommendation_status` is
+    (hippocampus 600 Hz high-pass, 30 kHz). Its `recommendation_status` is
     `"alternative"`. `franklab_tetrode_hippocampus_30khz_ms5_2026_06` is the
     same recipe under a tetrode label (`probe_type` is informational; both
     resolve to the same parameter rows).
 - `franklab_probe_hippocampus_30khz_ms4_singularity_2026_06` -- the
-    recommended-science MountainSort4 path on `numpy>=2` hosts: MS4 runs in a
-    pinned Singularity container. Preflight gates it on
+    container execution option for the production MountainSort4 recipe: MS4
+    runs in a pinned Singularity container. Preflight gates it on
     `container_runtime_available` and never falls back to a local run. A Docker
     row (or other rates) is a user-inserted `SorterParameters` row using the
     same `execution_params` mechanism.
 - `franklab_tetrode_hippocampus_30khz_ms4_2026_06` and
     `franklab_probe_{hippocampus,cortex}_{30khz,20khz}_ms4_2026_06` --
-    production MountainSort4 by region (600/300 Hz high-pass) and rate. Local
-    execution **requires `numpy<2`** (MS4's `ml_ms4alg` backend); otherwise
-    preflight fails its `sorter_runtime_available` check.
+    production MountainSort4 by region (600/300 Hz high-pass) and rate. Native
+    execution is included in `spyglass-neuro[spikesorting-v2]` and supports the
+    standard NumPy-2 environment. The package bundles the algorithm; a separate
+    `ml_ms4alg` install is unnecessary. V2 handles the old `spikeextractors`
+    `np.Inf` alias during sorting, and preflight imports `mountainsort4` to
+    check its runtime dependencies.
 - `franklab_clusterless_2026_06` -- peak detection only (no clustering), for the
     clusterless decoding pipeline.
 - `franklab_neuropixels_ks4_2026_06` -- **experimental** Neuropixels Kilosort4
@@ -243,7 +245,7 @@ sample up to 20000 spikes per unit.
 - **`production`** -- Frank Lab validated and recommended; the default choice
     for its probe / target region / sampling rate.
 - **`alternative`** -- a sound substitute when the production recipe does not
-    fit (e.g. MountainSort5 where MS4's `numpy<2` backend is unavailable).
+    fit (e.g. MountainSort5 as an alternative to the MountainSort4 recipe).
 - **`experimental`** -- not yet validated on Frank Lab data; inspect the output
     before relying on it (e.g. multi-day concatenation, Neuropixels Kilosort4).
 

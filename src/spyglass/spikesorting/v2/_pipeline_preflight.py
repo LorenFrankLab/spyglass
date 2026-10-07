@@ -30,17 +30,12 @@ if TYPE_CHECKING:
     import pandas as pd
 
 
-# SpikeInterface's ``installed_sorters()`` reports a sorter as installed when
-# its thin wrapper imports, but some sorters call a separate algorithm backend
-# at run time that the wrapper does NOT import -- so the check over-reports. The
-# live example is ``mountainsort4``: its wrapper imports (so it appears in
-# ``installed_sorters()``), but the actual algorithm package ``ml_ms4alg`` is a
-# numpy<2-era build that no longer installs under the v2 ``numpy>=2`` baseline.
-# Map each such sorter to the backend module(s) preflight must additionally
-# verify, so a green ``sorter_installed`` cannot precede a sort-time
-# ``ModuleNotFoundError``.
+# SpikeInterface's MS4 installed check only calls find_spec, so it cannot
+# detect a present but broken package or its compiled dependencies. Import the
+# actual runtime as well. mountainsort4 bundles ms4alg; the separate historical
+# ml_ms4alg distribution is not used by SI 0.104's MS4 wrapper.
 _SORTER_RUNTIME_BACKENDS: dict[str, tuple[str, ...]] = {
-    "mountainsort4": ("ml_ms4alg",),
+    "mountainsort4": ("mountainsort4",),
 }
 
 # Relative tolerance for a recording's sampling rate against the rate a
@@ -218,14 +213,10 @@ def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
             "or the preset.",
         )
 
-    # sorter_runtime_available. installed_sorters() only checks that the SI
-    # wrapper imports; for sorters that call a SEPARATE algorithm backend at run
-    # time (see _SORTER_RUNTIME_BACKENDS) actually import that backend, so a
-    # green sorter_installed cannot precede a sort-time failure -- whether the
-    # backend is absent OR present-but-broken (e.g. a numpy<2-era ml_ms4alg
-    # under the numpy>=2 baseline raising at import). Only runs when
-    # sorter_installed passed: if the wrapper itself is missing, a second
-    # "backend missing" failure would be contradictory.
+    # Import the runtime, not just find_spec: installed packages can still
+    # fail to import because a compiled dependency is missing or incompatible.
+    # Only runs when sorter_installed passed to avoid duplicate missing-package
+    # failures.
     backend_modules = _SORTER_RUNTIME_BACKENDS.get(bundle.sorter, ())
     if sorter_installed_ok and backend_modules:
         import importlib
@@ -244,7 +235,8 @@ def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
             f"sorter {bundle.sorter!r} is listed as installed but its runtime "
             "backend(s) cannot be imported, so the sort would crash: "
             f"{'; '.join(broken_backends)}. Install/repair the backend "
-            "(mountainsort4 needs ml_ms4alg, which requires numpy<2), or pick a "
+            '(for MountainSort4, install "spyglass-neuro[spikesorting-v2]"), '
+            "or pick a "
             "preset whose sorter runs in this environment -- e.g. a MountainSort5 "
             "preset, or a containerized MountainSort4 preset whose runtime lives "
             "in the container.",
@@ -2367,8 +2359,8 @@ def _check_sorter_execution(
             )
             # Informational advisory (only when the container is actually
             # runnable, so it never sits next to a blocking runtime failure):
-            # the host can stay on numpy>=2 -- the sorter runtime (e.g. MS4's
-            # numpy<2-era ml_ms4alg) lives in the container, not on the host.
+            # the host can stay on numpy>=2 -- the sorter runtime lives in the
+            # container, not on the host.
             if runtime_ok:
                 warnings.append(
                     f"pipeline_preset {pipeline_preset!r} runs sorter "

@@ -180,7 +180,11 @@ for lane in base dlc moseq-cpu spikesorting-v2 spikesorting-v2-matching; do
       assert_pin "$lane" "$resolved" '^numpy==1\.' "the numpy 1.x line"
       assert_pin "$lane" "$resolved" '^mountainsort4==' "mountainsort4"
       ;;
-    spikesorting-v2 | spikesorting-v2-matching)
+    spikesorting-v2)
+      assert_pin "$lane" "$resolved" '^numpy==2\.' "the numpy 2.x line"
+      assert_pin "$lane" "$resolved" '^mountainsort4==1\.0\.7$' "the native MountainSort4 runtime"
+      ;;
+    spikesorting-v2-matching)
       assert_pin "$lane" "$resolved" '^numpy==2\.' "the numpy 2.x line"
       ;;
   esac

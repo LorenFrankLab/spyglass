@@ -1122,13 +1122,11 @@ def run_v2_pipeline(
         probe-labeled twin of the tetrode-labeled MS5 preset (both resolve to the
         same parameter rows -- ``probe_type`` is informational).
 
-        MountainSort4 is the scientifically-preferred polymer-probe recipe, but
-        its ``ml_ms4alg`` backend needs ``numpy<2``, so it is not the default.
-        Run it on a modern (``numpy>=2``) host via the containerized
+        MountainSort4 is the scientifically-preferred polymer-probe recipe.
+        Run it natively in the standard v2 ``numpy>=2`` environment via
+        ``franklab_probe_hippocampus_30khz_ms4_2026_06``, or use the
         ``franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`` preset
-        (the recommended-science MS4 path when Docker/Singularity is available),
-        or on a ``numpy<2`` host via the local
-        ``franklab_probe_hippocampus_30khz_ms4_2026_06`` preset; preflight fails
+        with Singularity/Apptainer. Preflight fails
         a selected-but-unrunnable MS4 path with an actionable message.
 
         Call ``describe_pipeline_presets()`` for a table of what each one does

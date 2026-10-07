@@ -1135,8 +1135,7 @@ def test_preflight_sorter_runtime_backend_missing(
 ):
     """A sorter whose runtime backend can't import fails sorter_runtime_available.
 
-    installed_sorters() only checks the thin SI wrapper; some sorters call a
-    separate backend at run time (mountainsort4 -> ml_ms4alg). Map the default
+    installed_sorters() can locate a runtime without importing it. Map the default
     sorter to a guaranteed-absent backend so the check fires deterministically,
     and confirm sorter_installed still passes -- proving this is a distinct,
     stricter gate, not a duplicate of sorter_installed.
@@ -1164,25 +1163,12 @@ def test_preflight_sorter_runtime_backend_missing(
 
 @pytest.mark.database
 def test_preflight_ms4_preset_gets_runtime_check(preflight_inputs):
-    """An MS4 preset is gated on its real ml_ms4alg backend (map wiring).
-
-    The mountainsort4 -> ml_ms4alg entry must actually be consulted: when the
-    mountainsort4 wrapper is installed, an MS4 preset gets a
-    sorter_runtime_available check whose result tracks whether ml_ms4alg
-    actually imports (not just find_spec -- a present-but-broken numpy<2 backend
-    must fail too). Under the v2 numpy>=2 baseline ml_ms4alg does not install,
-    so the check fails there; tolerate an environment that has it. The check is
-    gated on sorter_installed, so skip if the wrapper itself is absent.
-    """
-    import importlib
-
+    """A native MS4 preset checks its bundled algorithm in the v2 environment."""
+    import mountainsort4
     import spikeinterface.sorters as sis
 
-    if "mountainsort4" not in set(sis.installed_sorters()):
-        pytest.skip(
-            "mountainsort4 wrapper not installed; the runtime-backend check is "
-            "gated on the sorter_installed check passing."
-        )
+    assert "mountainsort4" in set(sis.installed_sorters())
+    assert callable(mountainsort4.mountainsort4)
 
     report = preflight_v2_pipeline(
         **{
@@ -1194,17 +1180,8 @@ def test_preflight_ms4_preset_gets_runtime_check(preflight_inputs):
         c for c in report.checks if c.name == "sorter_runtime_available"
     ]
 
-    def _importable(mod: str) -> bool:
-        try:
-            importlib.import_module(mod)
-            return True
-        except Exception:
-            return False
-
-    has_backend = _importable("ml_ms4alg")
-    assert rt_check.ok == has_backend
-    if not has_backend:
-        assert "ml_ms4alg" in rt_check.fix
+    assert rt_check.ok is True
+    assert report.ok, report.errors
 
 
 @pytest.mark.database

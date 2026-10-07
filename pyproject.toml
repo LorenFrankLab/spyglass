@@ -132,14 +132,10 @@ optional-dependencies.spikesorting-v2 = [
   # instance without re-initializing it (analyzer_cache_lock relies on that for
   # same-thread reentrancy).
   "filelock>=3.15",
-  # MountainSort4 is deliberately NOT a default v2 dependency: the
-  # ``mountainsort4`` package installs only the SI wrapper + isosplit5 (so the
-  # sorter LOOKS installed), while its actual algorithm backend ``ml_ms4alg``
-  # is a numpy<2-era package that does not install under the v2 numpy>=2
-  # baseline. A wrapper without a runnable algorithm is not a supported sorter.
-  # Run MS4 in the separate legacy environment
-  # (environments/environment_spikesorting_legacy.yml) or via the containerized
-  # MS4 preset; preflight's sorter_runtime_available check reports either way.
+  # MS4 bundles its algorithm and supports the v2 NumPy-2 stack through the
+  # dispatcher's scoped spikeextractors np.Inf compatibility shim. Pin the
+  # native runtime exercised by the real-sort regression test.
+  "mountainsort4==1.0.7",
   "mountainsort5>=0.5", # default v2 sorter; pulls isosplit6 + scikit-learn
   # This extra's torch>=2 + SI 0.104 runtime resolves on the numpy-2 line.
   "numpy>=2,<3",

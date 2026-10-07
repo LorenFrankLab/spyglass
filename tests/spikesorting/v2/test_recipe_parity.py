@@ -163,8 +163,8 @@ def test_default_pipeline_preset_is_probe_labeled_runnable_ms5(dj_conn):
 
     The shipped default is the PROBE-labeled MountainSort5 preset -- it matches
     the lab's polymer-probe default label while staying a sorter that runs out
-    of the box under the v2 ``numpy>=2`` baseline (MS4's ``ml_ms4alg`` backend
-    needs ``numpy<2``). It resolves to the SAME preprocessing / artifact /
+    of the box under the v2 ``numpy>=2`` baseline. Native MS4 is also supported.
+    It resolves to the SAME preprocessing / artifact /
     sorter parameter rows as the tetrode-labeled MS5 preset (``probe_type`` is
     informational), so this is a provenance-label change, not a scientific one.
     The recommendation_status taxonomy is unchanged (MS5 stays "alternative",

@@ -107,13 +107,19 @@ polymer probes, the lab production recipe is MountainSort4:
 
 | Recipe                                    | Runtime requirement                                     |
 | ----------------------------------------- | ------------------------------------------------------- |
-| Local MountainSort4 production preset     | MS4 backend in a compatible `numpy<2` environment       |
+| Local MountainSort4 production preset     | Standard v2 environment (`spikesorting-v2` extra)       |
 | Container MountainSort4 production preset | Singularity/Apptainer and the catalog's container image |
 | MountainSort5 alternative (below)         | Standard v2 environment                                 |
 
 Use `describe_pipeline_presets()` to match the region, sampling rate, and probe
 type and read each recipe's runtime notes. Selecting a preset never silently
 switches its sorter or backend.
+
+For native MS4, pass
+`pipeline_preset="franklab_probe_hippocampus_30khz_ms4_2026_06"` to
+`preflight_v2_pipeline()` and `run_v2_pipeline()`. The v2 extra includes
+MountainSort4 1.0.7; no legacy environment or separate `ml_ms4alg` install is
+needed.
 
 Pass `auto_curate=True` so the run doesn't stop at the uncurated root: it scores
 the sort with the preset's metric and rule rows and commits an **auto-labeled**

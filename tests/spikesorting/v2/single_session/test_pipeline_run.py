@@ -21,10 +21,8 @@ _FIGPACK_MISSING = (
 #
 # list_pipeline_presets enumeration, run_v2_pipeline idempotency (existing-root
 # short-circuit), and pipeline-preset -> run_summary wiring. The franklab MS4
-# pipeline preset is exercised end-to-end where MS4 is runnable (it ships in
-# installed_sorters() but its runtime is unavailable in the SI 0.104 image, so
-# that test self-skips); a runnable MS5 substitute pins the wiring
-# unconditionally.
+# pipeline preset is exercised end-to-end with its required native runtime;
+# the MS5 preset also pins the wiring and idempotency.
 # ===========================================================================
 
 
@@ -415,13 +413,8 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
     only exercises MS5. The clusterless preset uses a different
     sorter dispatch in ``Sorting._run_sorter`` (``detect_peaks``
     instead of ``run_sorter``), so it's a meaningfully distinct
-    orchestrator integration path. MS4 is the third shipped preset,
-    but the ``mountainsort4`` sorter package is not pinned in the
-    v2 environment (it's a soft optional), so testing it through
-    the orchestrator would couple the test to an optional install.
-    The MS4 preset's plumbing is exercised through the docstring
-    and validated whenever a user installs mountainsort4 and runs
-    the orchestrator.
+    orchestrator integration path. The native MS4 production preset has
+    its own end-to-end test below.
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -779,28 +772,18 @@ def test_run_v2_pipeline_pipeline_preset_wiring_to_run_summary(
 
 @pytest.mark.slow
 def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
-    """The franklab MS4 pipeline preset runs end-to-end where MS4 is runnable.
-
-    MS4 does not install on the NumPy 2 test image, so the test skips where
-    ``mountainsort4`` is absent from ``installed_sorters()``. Where it is
-    installed, its ``ml_ms4alg`` backend may still be unavailable; this
-    inspects the structured preflight report and self-skips ONLY when the sole
-    failed check is ``sorter_runtime_available`` (the ml_ms4alg backend gate)
-    -- any other preflight failure fails the test, so the narrow skip can't
-    mask a real regression. Where MS4 is runnable (preflight passes) it runs with
-    ``preflight=False`` and asserts the MS4 sorter wiring; a sort crash is a
-    test failure, not a skip.
-    """
+    """The native franklab MS4 production preset must run in the v2 environment."""
+    import numpy as np
     import spikeinterface.sorters as sis
 
+    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.pipeline import (
         preflight_v2_pipeline,
         run_v2_pipeline,
     )
-    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
-    if "mountainsort4" not in sis.installed_sorters():
-        pytest.skip("mountainsort4 is not installed")
+    assert "mountainsort4" in sis.installed_sorters()
 
     nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
         polymer_smoke_session
@@ -813,17 +796,8 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
         pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
     )
     try:
-        # Inspect the structured report so the skip is narrow: skip ONLY when the
-        # lone failure is the ml_ms4alg backend gate, never when an unrelated
-        # check also failed (that would hide a real regression).
         report = preflight_v2_pipeline(**inputs)
-        if not report.ok:
-            failed = {c.name for c in report.checks if not c.ok}
-            if failed == {"sorter_runtime_available"}:
-                pytest.skip(
-                    f"mountainsort4 ml_ms4alg backend unavailable: {report.errors}"
-                )
-            pytest.fail(f"unexpected preflight failure(s): {failed}")
+        assert report.ok, report.errors
 
         # MS4 is runnable here; preflight already passed, so skip re-running it.
         run_summary = run_v2_pipeline(**inputs, preflight=False)
@@ -832,6 +806,26 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
         ).fetch1()
         assert sel["sorter"] == "mountainsort4"
         assert sel["sorter_params_name"] == "franklab_30khz_ms4_2026_06"
+        assert run_summary["n_units"] > 0
+        sort_pk = {"sorting_id": run_summary["sorting_id"]}
+        sorting = Sorting().get_sorting(sort_pk)
+        assert sorting.get_num_units() == run_summary["n_units"]
+        analyzer = Sorting().get_analyzer(sort_pk, rebuild=False)
+        np.testing.assert_array_equal(
+            analyzer.sorting.unit_ids, sorting.unit_ids
+        )
+        # Simultaneous spikes from different units can have different tie
+        # ordering in SI's flattened vectors. Preserve every spike per unit.
+        for unit_id in sorting.unit_ids:
+            np.testing.assert_array_equal(
+                analyzer.sorting.get_unit_spike_train(unit_id),
+                sorting.get_unit_spike_train(unit_id),
+            )
+        assert analyzer.has_extension("waveforms")
+        assert CurationV2 & {
+            **sort_pk,
+            "curation_id": run_summary["root_curation_id"],
+        }
     finally:
         _clean_session_v2(polymer_smoke_session)
 

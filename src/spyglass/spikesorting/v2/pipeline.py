@@ -18,8 +18,8 @@ franklab production recipes -- the MountainSort4 family by target region
 MountainSort5 preset, and a clusterless preset. The ``run_v2_pipeline``
 default is the MountainSort5 hippocampus recipe
 ``franklab_probe_hippocampus_30khz_ms5_2026_06``: it runs under the v2
-``numpy>=2`` baseline, whereas MountainSort4's ``ml_ms4alg`` backend needs
-``numpy<2`` (see the MS4 preset notes). Call ``describe_pipeline_presets()``
+``numpy>=2`` baseline. Native MountainSort4 is also included in the v2 extra;
+select a local MS4 production preset to use it. Call ``describe_pipeline_presets()``
 for the catalog and ``list_pipeline_presets()`` for the names.
 
 The orchestrator is idempotent: re-running with the same inputs finds

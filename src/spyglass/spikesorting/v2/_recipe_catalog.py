@@ -62,11 +62,9 @@ MS4_20KHZ = "franklab_20khz_ms4_2026_06"
 MS5_30KHZ = "franklab_30khz_ms5_2026_06"
 KS4_NEUROPIXELS = "franklab_neuropixels_default"
 # Containerized MS4 (probe / polymer, 30 kHz): a first-class, reproducible
-# execution path for modern hosts. MS4's algorithm backend (ml_ms4alg) is a
-# numpy<2-era package that does not install under the v2 numpy>=2 baseline, so
-# this row runs the SAME scientific params as the local 30 kHz MS4 row inside a
-# pinned Singularity container -- the host stays on numpy>=2 while the MS4
-# runtime lives in the image. The local MS4 row and this containerized row are
+# execution option alongside the native NumPy-2 runtime. This row runs the
+# SAME scientific params as the local 30 kHz MS4 row inside a pinned Singularity
+# container. The local MS4 row and this containerized row are
 # DISTINCT named rows (different sorter_params_name); the container backend is
 # tracked provenance, not a runtime override.
 #
@@ -76,7 +74,7 @@ KS4_NEUROPIXELS = "franklab_neuropixels_default"
 #
 # Two DISTINCT version spaces, pinned independently for reproducibility:
 #   * the image TAG versions SpikeInterface's published ``mountainsort4-base``
-#     image by its baked ml_ms4alg algorithm runtime (Docker Hub tags are
+#     image by its baked MountainSort4 algorithm runtime (Docker Hub tags are
 #     1.0.x, NOT SpikeInterface release numbers); and
 #   * ``MS4_CONTAINER_SI_VERSION`` pins the SpikeInterface that
 #     ``installation_mode="pypi"`` pip-installs INTO that image at run time.
@@ -635,12 +633,10 @@ _MS4_NOTES = (
     "MountainSort4 detect_threshold is a multiple of the standard deviation "
     "of the ZCA-whitened signal (~3), not an absolute voltage and not a MAD "
     "multiplier. MS4 oversplits and does not track drift, so merge curation "
-    "is expected (Kilosort is the Neuropixels-density alternative). Runtime "
-    "note: MS4's algorithm backend (ml_ms4alg) is a numpy<2-era package that "
-    "does not install under the v2 numpy>=2 baseline, so these presets need a "
-    "numpy<2 environment; the shipped run_v2_pipeline default is the "
-    "MountainSort5 recipe, which runs as-is (preflight reports this via the "
-    "sorter_runtime_available check)."
+    "is expected (Kilosort is the Neuropixels-density alternative). Native "
+    "MountainSort4 is included in the spikesorting-v2 extra and runs under "
+    "numpy>=2 through v2's spikeextractors compatibility shim. Preflight "
+    "imports mountainsort4 to check its runtime dependencies."
 )
 
 
@@ -673,8 +669,8 @@ def _franklab_ms4_singularity_spec() -> dict:
 
     Reuses the probe-hippocampus-30 kHz MS4 spec (same preproc / artifact /
     scientific sorter params), then points the sorter row at the containerized
-    Singularity row and rewrites the notes/intended-use for the modern-host
-    (numpy>=2) container path. The execution backend itself is NOT carried on the
+    Singularity row and rewrites the notes/intended-use for the container path.
+    The execution backend itself is NOT carried on the
     preset -- it is read from the referenced ``SorterParameters.execution_params``
     row (the single source of truth); ``describe_pipeline_preset(name)`` surfaces
     it. ``recommendation_status`` stays ``"production"`` (the recommended-science
@@ -685,20 +681,19 @@ def _franklab_ms4_singularity_spec() -> dict:
         sorter_params_name=MS4_SINGULARITY_30KHZ,
         intended_use=(
             "Frank-lab hippocampal polymer probes at 30 kHz, MountainSort4 run "
-            "inside a pinned Singularity container -- the recommended-science MS4 "
-            "path on modern hosts where MS4's ml_ms4alg backend cannot run "
-            "locally under the v2 numpy>=2 baseline."
+            "inside a pinned Singularity container -- a container execution "
+            "option for the recommended-science MS4 recipe on modern hosts."
         ),
         notes=(
             "MountainSort4 detect_threshold is a multiple of the standard "
             "deviation of the ZCA-whitened signal (~3), not an absolute voltage "
             "and not a MAD multiplier. MS4 oversplits and does not track drift, "
-            "so merge curation is expected. This containerized variant runs MS4's "
-            f"ml_ms4alg backend inside the pinned Singularity image "
+            "so merge curation is expected. This containerized variant runs "
+            f"MountainSort4 inside the pinned Singularity image "
             f"{MS4_CONTAINER_IMAGE} with container-side SpikeInterface pinned to "
             f"{MS4_CONTAINER_SI_VERSION} (installation_mode='pypi'), so the host "
-            "can stay on the v2 numpy>=2 baseline -- the local MS4 presets need "
-            "numpy<2, this one does not. Preflight checks Singularity runtime "
+            "can stay on the v2 numpy>=2 baseline. Native MS4 also supports "
+            "numpy>=2. Preflight checks Singularity runtime "
             "availability and never silently falls back to local execution. "
             "run_v2_pipeline's default remains MountainSort5."
         ),
@@ -710,8 +705,8 @@ def _franklab_ms4_singularity_spec() -> dict:
 # region + rate), so the tetrode- and probe-labeled MS5 presets resolve to the
 # SAME preprocessing / artifact / sorter parameter rows; only the provenance
 # label differs. The probe-labeled one is run_v2_pipeline's default -- it matches
-# the lab's polymer-probe default while staying a runnable MS5 (numpy>=2),
-# leaving MS4 the scientifically-preferred recipe via the containerized path.
+# the lab's polymer-probe default. MS4 production presets are available through
+# both native and container execution.
 MS5_TETRODE_HIPPOCAMPUS_30KHZ = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
 MS5_PROBE_HIPPOCAMPUS_30KHZ = "franklab_probe_hippocampus_30khz_ms5_2026_06"
 # The shipped run_v2_pipeline / preflight default (single source of truth).
@@ -721,13 +716,11 @@ _MS5_NOTES = (
     "MountainSort5 detect_threshold is a multiple of the standard "
     "deviation of the whitened signal (~5.5, more conservative than "
     "MS4's 3) -- the same sigma scale, not a MAD multiplier. MS5 is the "
-    "shipped run_v2_pipeline default because it runs under numpy>=2; "
-    "MS4 is the Frank-lab production recipe but its ml_ms4alg backend "
-    "needs numpy<2. recommendation_status stays 'alternative' (MS5 has "
-    "no attested probe usage); the function default is a separate, "
-    "runnability-driven choice. The tetrode- and probe-labeled MS5 "
-    "presets resolve to the same parameter rows (probe_type is "
-    "informational)."
+    "shipped run_v2_pipeline default. MS4 is the Frank-lab production recipe "
+    "and also runs natively under numpy>=2. recommendation_status stays "
+    "'alternative' (MS5 has no attested probe usage); the function default "
+    "is a separate choice. The tetrode- and probe-labeled MS5 presets resolve "
+    "to the same parameter rows (probe_type is informational)."
 )
 
 
@@ -744,12 +737,11 @@ def _franklab_ms5_spec(probe_type: str) -> dict:
     if probe_type == "probe":
         intended_use = (
             "Frank-lab hippocampal probes at 30 kHz, MountainSort5 -- the "
-            "shipped run_v2_pipeline default because it runs under the v2 "
-            "numpy>=2 baseline. The scientifically-preferred polymer-probe "
-            "recipe is MountainSort4: on modern numpy>=2 hosts with "
-            "Docker/Singularity use the containerized "
-            f"{MS4_SINGULARITY_30KHZ}, or on numpy<2 hosts the local "
-            "franklab_probe_hippocampus_30khz_ms4_2026_06."
+            "shipped run_v2_pipeline default. The scientifically-preferred "
+            "polymer-probe recipe is MountainSort4: use the native "
+            "franklab_probe_hippocampus_30khz_ms4_2026_06 preset in the standard "
+            "v2 environment, or the containerized "
+            f"{MS4_SINGULARITY_30KHZ} with Singularity/Apptainer."
         )
     else:
         intended_use = (
