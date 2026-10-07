@@ -259,7 +259,7 @@ def test_matlab_sorters_require_explicit_container_backend(monkeypatch):
 
 @pytest.mark.usefixtures("dj_conn")
 def test_run_si_sorter_passes_container_kwargs(monkeypatch):
-    """Container execution rows pass the right SI run_sorter container kwargs.
+    """Container execution rows pass the right verified-runner kwargs.
 
     A Singularity row for a MATLAB sorter passes ``singularity_image=<image>`` +
     the container-install controls, AND strips the container-incompatible
@@ -272,9 +272,16 @@ def test_run_si_sorter_passes_container_kwargs(monkeypatch):
     import spikeinterface as si
     import spikeinterface.sorters as sis
 
+    from spyglass.spikesorting.v2 import _container_sorting
     from spyglass.spikesorting.v2.sorting import Sorting
 
     captured: dict = {}
+
+    monkeypatch.setattr(
+        _container_sorting,
+        "run_sorter_container",
+        lambda **k: captured.update(k) or _tiny_numpy_sorting(),
+    )
     monkeypatch.setattr(
         sis,
         "run_sorter",
@@ -362,9 +369,15 @@ def test_run_si_sorter_keeps_job_kwargs_out_of_sorter_params(monkeypatch):
     import spikeinterface as si
     import spikeinterface.sorters as sis
 
+    from spyglass.spikesorting.v2 import _container_sorting
     from spyglass.spikesorting.v2.sorting import Sorting
 
     captured: dict = {}
+    monkeypatch.setattr(
+        _container_sorting,
+        "run_sorter_container",
+        lambda **k: captured.update(k) or _tiny_numpy_sorting(),
+    )
     monkeypatch.setattr(
         sis,
         "run_sorter",

@@ -221,6 +221,24 @@ def sorter_distribution_version(sorter: str) -> str | None:
         return None
 
 
+def sort_runtime_versions(sorting, sorter, execution_params=None):
+    """Producing runtime versions; container runs never fall back to the host."""
+    import spikeinterface as si
+
+    from ._container_sorting import RUNTIME_ANNOTATION
+
+    if is_container_backend(execution_params):
+        runtime = sorting.get_annotation(RUNTIME_ANNOTATION)
+        if not isinstance(runtime, dict) or not runtime.get(
+            "spikeinterface_version"
+        ):
+            raise RuntimeError(
+                "Container sorting has no producing-runtime provenance."
+            )
+        return runtime["spikeinterface_version"], runtime.get("sorter_version")
+    return si.__version__, sorter_distribution_version(sorter)
+
+
 def unit_semantics_for_sorter(sorter: str) -> str:
     """Return the unit semantics a sorter produces.
 
@@ -744,8 +762,9 @@ def run_si_sorter(
     ``pinned_whiten``), so artifact-masked zeros never enter it.
 
     Container execution: the ``execution_params`` row selects the backend.
-    A container backend passes the pinned image and install controls
-    (``build_run_sorter_container_kwargs``). MATLAB-backed sorters must
+    A container backend passes the pinned image and install controls to the
+    verified container runner, which checks the pin and records the producing
+    versions inside the sorter process. MATLAB-backed sorters must
     select a container backend (a local row raises), and
     ``MATLAB_SORTER_STRIP_KWARGS`` are stripped when one runs in a
     container.
@@ -861,7 +880,14 @@ def run_si_sorter(
         )
         effective_params = config.si_sorter_params
         try:
-            raw_sorting = sis.run_sorter(**run_kwargs, **effective_params)
+            if is_container_backend(execution_params):
+                from ._container_sorting import run_sorter_container
+
+                raw_sorting = run_sorter_container(
+                    **run_kwargs, **effective_params
+                )
+            else:
+                raw_sorting = sis.run_sorter(**run_kwargs, **effective_params)
             # The returned sorting reads from sorter_temp_dir, which the
             # finally below deletes; copy the spike trains into memory first.
             # with_metadata=True keeps unit properties (SI 0.104.3 defaults to

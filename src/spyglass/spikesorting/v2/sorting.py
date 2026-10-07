@@ -52,7 +52,7 @@ from spyglass.spikesorting.v2._sorting_dispatch import (
     remove_excess_spikes,
     run_clusterless_thresholder,
     run_si_sorter,
-    sorter_distribution_version,
+    sort_runtime_versions,
 )
 from spyglass.spikesorting.v2 import (
     _analyzer_cache,
@@ -230,9 +230,11 @@ class SortingComputed(NamedTuple):
         The random seed the sort actually used (``resolve_effective_seed``),
         recorded as secondary provenance -- NOT identity.
     spikeinterface_version : str
-        ``spikeinterface.__version__`` at sort time (secondary provenance).
+        Producing runtime's ``spikeinterface.__version__`` (host for local
+        execution, container for Docker/Singularity; secondary provenance).
     sorter_version : str or None
-        Installed distribution version of the sorter package, or ``None`` for
+        Producing sorter version (container sorter reports its runtime version;
+        local execution uses the installed distribution). ``None`` for local
         in-process / SI-internal sorters (secondary provenance).
     unit_rows : list of dict
         The ``Sorting.Unit`` rows built ONCE in ``make_compute`` (peak channel /
@@ -1106,8 +1108,8 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     time_of_sort: datetime    # wall-clock time the sort was populated
     -> AnalyzerWaveformParameters.proj(display_waveform_params_name="waveform_params_name")
     effective_random_seed=null: int     # seed actually used (resolve_effective_seed); provenance, NOT identity
-    spikeinterface_version: varchar(32) # spikeinterface.__version__ at sort time
-    sorter_version=null: varchar(64)    # sorter package distribution version, NULL for in-process sorters
+    spikeinterface_version: varchar(32) # producing runtime's spikeinterface.__version__
+    sorter_version=null: varchar(64)    # producing sorter version, NULL when no separate local distribution
     """
     # ``display_waveform_params_name`` is a secondary FK to
     # ``AnalyzerWaveformParameters``: it records which DISPLAY recipe produced
@@ -1353,9 +1355,6 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 sorter, sorter_params
             ),
         )
-        spikeinterface_version = si.__version__
-        sorter_version = sorter_distribution_version(sorter)
-
         sorting_obj = self._run_sorter(
             sorter=sorter,
             sorter_params=sorter_params,
@@ -1364,6 +1363,9 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             job_kwargs=job_kwargs,
             execution_params=execution_params,
             statistics_spans=statistics_spans,
+        )
+        spikeinterface_version, sorter_version = sort_runtime_versions(
+            sorting_obj, sorter, execution_params
         )
         sorting_obj = self._remove_excess_spikes(sorting_obj, recording)
 
@@ -1431,6 +1433,7 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 "effective_random_seed": effective_random_seed,
                 "spikeinterface_version": spikeinterface_version,
                 "sorter_version": sorter_version,
+                "analyzer_spikeinterface_version": si.__version__,
                 STATISTICS_SPANS_FIELD: [
                     [int(a), int(b)] for a, b in statistics_spans
                 ],
