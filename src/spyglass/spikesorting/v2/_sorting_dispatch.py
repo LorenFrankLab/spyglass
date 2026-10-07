@@ -800,7 +800,6 @@ def run_si_sorter(
     import os
     import tempfile
 
-    import numpy as np
     import spikeinterface as si
     import spikeinterface.sorters as sis
 
@@ -826,60 +825,48 @@ def run_si_sorter(
         prefix=f"sort_{sorting_id}_",
         dir=spyglass_temp_dir,
     )
-    patched_numpy_inf = False
     try:
         # A container process may run as a different uid; a local run keeps
         # TemporaryDirectory's 0o700.
         if is_container_backend(execution_params):
             os.chmod(sorter_temp_dir.name, 0o777)
 
-        # spikeextractors 0.9.11 (pulled in by SI's MS4 wrapper) references
-        # ``numpy.Inf``, removed in numpy 2. Restore the alias only for this
-        # call (the ``finally`` deletes it) so later ``hasattr(np, "Inf")``
-        # probes (some scipy versions) see the same numpy as at import.
-        # TODO: drop once spikeextractors stops referencing the alias.
-        if sorter.lower() == "mountainsort4" and not hasattr(np, "Inf"):
-            np.Inf = np.inf
-            patched_numpy_inf = True
+        from ._si_compat import sorter_runtime_state
 
-        if config.external_whiten:
-            # Seeded covariance (default 0, override via the row's
-            # ``job_kwargs["random_seed"]``): three seeded MS4 runs gave
-            # identical (n_units, median_fr); four unseeded runs gave four
-            # different results. ``config.si_sorter_params`` already carries
-            # ``whiten=False``.
-            recording = pinned_whiten(
-                recording,
-                random_seed=config.random_seed,
-                spans=statistics_spans,
+        with sorter_runtime_state(sorter, config.job_kwargs):
+            if config.external_whiten:
+                # Seeded covariance (default 0, override via the row's
+                # ``job_kwargs["random_seed"]``): three seeded MS4 runs gave
+                # identical (n_units, median_fr); four unseeded runs gave four
+                # different results. ``config.si_sorter_params`` already carries
+                # ``whiten=False``.
+                recording = pinned_whiten(
+                    recording,
+                    random_seed=config.random_seed,
+                    spans=statistics_spans,
+                )
+
+            # Job kwargs reach run_sorter through SI's global state. Splatting them
+            # into run_sorter would route them into ``**sorter_params``, which
+            # MS4/MS5/KS4 reject (``Invalid parameters: [...]``).
+            # ``resolve_sort_config`` already removed ``random_seed``, which
+            # ``set_global_job_kwargs`` rejects.
+            # A CHILD output folder makes SI's container runner write its
+            # fixed-name ``in_container_*`` files into the per-sort (chmod-ed)
+            # temp dir, not the shared ``spyglass_temp_dir`` where parallel
+            # container populates would overwrite each other's files.
+            output_folder = os.path.join(sorter_temp_dir.name, "sorter_output")
+            run_kwargs = dict(
+                sorter_name=sorter,
+                recording=recording,
+                folder=output_folder,
+                remove_existing_folder=True,
+                # Empty for local. The reserved-key rule keeps these out of the
+                # scientific params, so they cannot collide with
+                # **effective_params.
+                **container_kwargs,
             )
-
-        # Job kwargs reach run_sorter through SI's global state. Splatting them
-        # into run_sorter would route them into ``**sorter_params``, which
-        # MS4/MS5/KS4 reject (``Invalid parameters: [...]``).
-        # ``resolve_sort_config`` already removed ``random_seed``, which
-        # ``set_global_job_kwargs`` rejects.
-        sj_kwargs = dict(config.job_kwargs)
-        previous_global = dict(si.get_global_job_kwargs())
-        if sj_kwargs:
-            si.set_global_job_kwargs(**sj_kwargs)
-        # A CHILD output folder makes SI's container runner write its
-        # fixed-name ``in_container_*`` files into the per-sort (chmod-ed)
-        # temp dir, not the shared ``spyglass_temp_dir`` where parallel
-        # container populates would overwrite each other's files.
-        output_folder = os.path.join(sorter_temp_dir.name, "sorter_output")
-        run_kwargs = dict(
-            sorter_name=sorter,
-            recording=recording,
-            folder=output_folder,
-            remove_existing_folder=True,
-            # Empty for local. The reserved-key rule keeps these out of the
-            # scientific params, so they cannot collide with
-            # **effective_params.
-            **container_kwargs,
-        )
-        effective_params = config.si_sorter_params
-        try:
+            effective_params = config.si_sorter_params
             if is_container_backend(execution_params):
                 from ._container_sorting import run_sorter_container
 
@@ -896,25 +883,7 @@ def run_si_sorter(
             return si.NumpySorting.from_sorting(
                 raw_sorting, with_metadata=True, copy_spike_vector=True
             )
-        finally:
-            if sj_kwargs:
-                # ``set_global_job_kwargs`` updates rather than replaces, so a
-                # key absent from the prior global (e.g. chunk_size) would
-                # leak into later populates: reset, then re-apply. A restore
-                # failure is logged so it cannot mask a sort exception.
-                try:
-                    si.reset_global_job_kwargs()
-                    si.set_global_job_kwargs(**previous_global)
-                except Exception as restore_exc:
-                    logger.warning(
-                        "Sorting._run_si_sorter: failed to restore SI "
-                        f"global job kwargs to {previous_global!r}: "
-                        f"{restore_exc!r}. Original sort exception (if "
-                        "any) preserved."
-                    )
     finally:
-        if patched_numpy_inf and hasattr(np, "Inf"):
-            del np.Inf
         # Explicit cleanup (not garbage collection) is predictable in pool
         # workers; a cleanup failure (e.g. a stale network-FS lock) is logged
         # so it cannot replace the sort's own exception.

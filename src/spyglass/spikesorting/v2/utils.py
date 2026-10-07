@@ -751,7 +751,9 @@ def _ambient_job_kwargs() -> dict:
     (which needs the ambient layer in isolation to attribute a seed) cannot
     drift.
     """
-    merged = dict(si.get_global_job_kwargs())
+    from spyglass.spikesorting.v2._si_compat import get_global_job_kwargs
+
+    merged = get_global_job_kwargs()
     custom = dj.config.get("custom", {}) or {}
     merged.update(custom.get("spikesorting_v2_job_kwargs", {}) or {})
     return merged
