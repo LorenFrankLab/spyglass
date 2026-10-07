@@ -27,9 +27,12 @@ SHARED_MODULES = [
 # Privileges granted to `dj_user` on shared schema prefixes: everything
 # except CREATE, so only an admin can declare new shared tables. See issue
 # #1065. Order matches MySQL's own ordering in `SHOW GRANTS` output.
+# TRIGGER is load-bearing: AnalysisNwbfile.cleanup() blocks inserts by
+# creating triggers on every registered analysis table, `common_nwbfile`
+# among them, so dropping it makes cleanup fail for a regular user.
 SHARED_PRIVILEGES = (
     "SELECT, INSERT, UPDATE, DELETE, DROP, REFERENCES, INDEX, ALTER, "
-    "LOCK TABLES"
+    "LOCK TABLES, TRIGGER"
 )
 GRANT_ALL = "GRANT ALL PRIVILEGES ON "
 GRANT_SHARED = f"GRANT {SHARED_PRIVILEGES} ON "

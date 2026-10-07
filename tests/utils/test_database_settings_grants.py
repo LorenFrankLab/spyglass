@@ -19,6 +19,7 @@ SHARED_PRIVS = [
     "INDEX",
     "ALTER",
     "LOCK TABLES",
+    "TRIGGER",
 ]
 
 
@@ -78,6 +79,20 @@ def test_user_role_shared_grants_list_privileges(user_role_sql, shared_modules):
     expect = ", ".join(SHARED_PRIVS)
     for line in grants:
         assert line.startswith(f"GRANT {expect} ON "), f"Unexpected: {line}"
+
+
+def test_shared_grants_allow_analysis_cleanup(user_role_sql, shared_modules):
+    """`AnalysisNwbfile.cleanup()` needs TRIGGER on the common prefix.
+
+    Cleanup calls ``AnalysisRegistry.block_new_inserts()``, which creates a
+    ``BEFORE INSERT`` trigger on every registered analysis table -- and
+    ``common_nwbfile.analysis_nwbfile`` is registered.
+    """
+    common = [mod for mod in shared_modules if mod.startswith("common")]
+    assert common, "No common prefix among the shared modules"
+
+    for line in _shared_grants(user_role_sql, common):
+        assert "TRIGGER" in line, f"cleanup cannot block inserts: {line}"
 
 
 def test_user_role_keeps_global_select(user_role_sql):

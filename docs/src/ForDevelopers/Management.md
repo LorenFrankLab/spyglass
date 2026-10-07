@@ -51,9 +51,13 @@ or the user's own prefix will raise a warning.
 
 On shared prefixes, the `dj_user` role is granted every privilege *except*
 `CREATE`, namely `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP`,
-`INDEX`, `REFERENCES`, and `LOCK TABLES`. Regular users can therefore add, edit,
-and remove data in shared schemas, but **declaring a new table in a shared
-schema requires an admin**.
+`INDEX`, `REFERENCES`, `LOCK TABLES`, and `TRIGGER`. Regular users can therefore
+add, edit, and remove data in shared schemas, but **declaring a new table in a
+shared schema requires an admin**.
+
+`TRIGGER` is included so regular users can still run
+`AnalysisNwbfile().cleanup()`, which blocks concurrent inserts by creating
+triggers on the registered analysis tables.
 
 If a user runs code that declares a table not yet present in a shared schema,
 MySQL will reject it with an access-denied error. An admin should import the
