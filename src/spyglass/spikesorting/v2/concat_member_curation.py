@@ -514,8 +514,8 @@ class ConcatMemberCuration(
                     "the conserved member split."
                 )
         except Exception:
-            from spyglass.spikesorting.v2.recording import (
-                _unlink_staged_analysis_file,
+            from spyglass.spikesorting.v2._staged_outputs import (
+                unlink_staged_analysis_file as _unlink_staged_analysis_file,
             )
 
             _unlink_staged_analysis_file(

@@ -405,7 +405,11 @@ def silence_frame_ranges(recording, frame_ranges):
     # pickle, which round-trips correctly. (No public setter exists; the private
     # ``_serializability`` flag is the supported mechanism. The proper fix is
     # upstream in SpikeInterface.)
-    masked._serializability["json"] = False
+    from spyglass.spikesorting.v2._si_storage import (
+        use_pickle_recording_serialization,
+    )
+
+    use_pickle_recording_serialization(masked)
     return masked
 
 

@@ -14,6 +14,19 @@ from typing import NamedTuple
 import pytest
 
 
+def test_staged_tables_refuse_unverified_datajoint_lifecycle(monkeypatch):
+    from spyglass.spikesorting.v2 import _dj_compat
+    from spyglass.spikesorting.v2._staged_outputs import (
+        StagedOutputCleanupMixin,
+    )
+
+    monkeypatch.setattr(_dj_compat, "version", lambda name: "0.15.0")
+    with pytest.raises(RuntimeError, match="require DataJoint 0.14.9"):
+
+        class UnsupportedTable(StagedOutputCleanupMixin):
+            pass
+
+
 class _Connection:
     """Transaction bookkeeping DataJoint's ``_populate1`` calls."""
 

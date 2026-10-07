@@ -19,7 +19,9 @@ import pytest
 
 # Service modules that MUST be importable without the DataJoint DB layer.
 _DB_FREE_SERVICE_MODULES = [
+    "_acquisition_spans",
     "_analyzer_cache",
+    "_container_sorting",
     "_artifact_compute",
     "_artifact_intervals",
     "_artifact_naming",
@@ -34,6 +36,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_curation_routing",
     "_curation_transforms",
     "_db_locking",
+    "_dj_compat",
     "_enums",
     "_evaluation_acceptance",
     "_evaluation_analyzers",
@@ -72,6 +75,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_recording_nwb",
     "_recording_preprocessing",
     "_recording_restriction",
+    "_recording_types",
     "_reference_resolution",
     "_review_delivery",
     "_review_inspection",
@@ -86,6 +90,8 @@ _DB_FREE_SERVICE_MODULES = [
     "_shared_artifact_group",
     "_signal_math",
     "_si_metric_patches",
+    "_si_compat",
+    "_si_storage",
     "_sort_group_insert",
     "_sort_group_planning",
     "_sorter_parameters",
@@ -226,6 +232,7 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "preflight",
         "build_figpack_view",
         "figpack_label_options",
+        "manual_excluded_times",
         "motion_mode",
         "motion_correction_params_name",
         "motion_estimate_id",
@@ -243,6 +250,7 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "auto_curate",
         "preflight",
         "continue_on_error",
+        "manual_excluded_times",
         "motion_mode",
         "motion_correction_params_name",
     }

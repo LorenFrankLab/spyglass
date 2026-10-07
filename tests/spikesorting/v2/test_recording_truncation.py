@@ -132,6 +132,9 @@ def test_truncation_tolerance_scales_with_interval_count():
     tolerance must accept that legitimate slop while still flagging a
     genuine packet drop. Deterministic (no populate) guard for the policy.
     """
+    from spyglass.spikesorting.v2._recording_restriction import (
+        truncation_tolerance,
+    )
     from spyglass.spikesorting.v2.recording import Recording
 
     fs = 30000.0
@@ -139,7 +142,7 @@ def test_truncation_tolerance_scales_with_interval_count():
     fixed_slack = 1.5 * T  # an interval-count-blind tolerance, for contrast
 
     for n in (1, 2, 3, 5, 10, 20):
-        tol = Recording._truncation_tolerance(n, fs)
+        tol = truncation_tolerance(n, fs)
         # Pin the exact coefficient so a silent change of 1.5 -> e.g. 1.2 is
         # caught, not just the inequality bounds below. Use the SAME
         # operation order as production ((n+1.5)/fs, not *T) for bit-equality.
@@ -184,6 +187,9 @@ def test_make_insert_raises_on_genuine_truncation():
     populate.
     """
     from spyglass.spikesorting.v2.exceptions import RecordingTruncatedError
+    from spyglass.spikesorting.v2._recording_restriction import (
+        truncation_tolerance,
+    )
     from spyglass.spikesorting.v2.recording import Recording
 
     fs = 30000.0
@@ -192,7 +198,7 @@ def test_make_insert_raises_on_genuine_truncation():
     n_intended_intervals = 1
     # The shortfall must exceed the (n + 1.5)/fs grid tolerance to fire; a
     # 5.0 s shortfall dwarfs the sub-millisecond tolerance.
-    tolerance = Recording._truncation_tolerance(n_intended_intervals, fs)
+    tolerance = truncation_tolerance(n_intended_intervals, fs)
     assert (expected_saved_total - (saved_end - saved_start)) > tolerance
 
     with pytest.raises(RecordingTruncatedError) as excinfo:

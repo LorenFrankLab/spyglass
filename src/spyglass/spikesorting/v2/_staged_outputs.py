@@ -45,6 +45,7 @@ import shutil
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from spyglass.spikesorting.v2._dj_compat import require_staged_populate_support
 from spyglass.utils import logger
 
 #: Instance attribute holding one list of recorded outputs per active
@@ -149,6 +150,7 @@ class StagedOutputCleanupMixin:
     """
 
     def __init_subclass__(cls, **kwargs):
+        require_staged_populate_support()
         super().__init_subclass__(**kwargs)
         for name, wrap in (
             ("make_compute", _recording_compute),

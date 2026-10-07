@@ -6,10 +6,9 @@ so humans, IDEs, and code-generation agents can inspect the pipeline input /
 result shapes without importing DataJoint schema modules or opening a database
 connection.
 
-``NotRequired`` is imported from ``typing_extensions`` rather than ``typing``:
-``typing.NotRequired`` exists only on Python 3.11+, and this package supports
-3.10. ``typing_extensions`` (a transitive dependency of pydantic / datajoint)
-back-ports the identical object, so the runtime metadata below is unchanged.
+``TypedDict`` and ``NotRequired`` come from ``typing_extensions`` so the runtime
+metadata agrees on every supported Python version. Python 3.10's stdlib
+``TypedDict`` cannot recognize the backported ``NotRequired`` wrapper.
 
 Annotations are deliberately NOT postponed (no ``from __future__ import
 annotations``): with stringized annotations a ``TypedDict`` cannot see the
@@ -18,10 +17,17 @@ annotations``): with stringized annotations a ``TypedDict`` cannot see the
 and codegen inspect -- would be wrong.
 """
 
-from typing import Any, Literal, NamedTuple, TypeAlias, TypedDict
+from typing import (
+    Any,
+    Literal,
+    Mapping,
+    NamedTuple,
+    Sequence,
+    TypeAlias,
+)
 from uuid import UUID
 
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 StageStatus: TypeAlias = Literal["computed", "reused", "skipped"]
 PipelineOutcome: TypeAlias = Literal["ok", "failed"]
@@ -59,6 +65,11 @@ class RunV2PipelineInputs(TypedDict, total=False):
     preflight: bool
     build_figpack_view: bool
     figpack_label_options: list[str] | None
+    manual_excluded_times: (
+        Sequence[Sequence[float]]
+        | Mapping[int, Sequence[Sequence[float]]]
+        | None
+    )
     motion_mode: MotionMode
     motion_correction_params_name: str | None
     motion_estimate_id: UUID | str | None
@@ -84,6 +95,7 @@ class RunV2PipelineSessionInputs(
     auto_curate: bool
     preflight: bool
     continue_on_error: bool
+    manual_excluded_times: Sequence[Sequence[float]] | None
     motion_mode: MotionMode
     motion_correction_params_name: str | None
 

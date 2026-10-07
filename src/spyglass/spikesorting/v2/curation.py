@@ -40,7 +40,9 @@ from spyglass.spikesorting.v2._curation_transforms import (
     validate_curation_label_rows,
 )
 from spyglass.spikesorting.v2._units_nwb import write_curated_units_nwb
-from spyglass.spikesorting.v2.recording import _unlink_staged_analysis_file
+from spyglass.spikesorting.v2._staged_outputs import (
+    unlink_staged_analysis_file as _unlink_staged_analysis_file,
+)
 from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 from spyglass.spikesorting.v2.utils import (
     CurationLabel,

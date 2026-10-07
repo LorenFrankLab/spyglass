@@ -1277,7 +1277,11 @@ class EstimationClockRecording(BaseRecording):
                 recording._recording_segments[0], clock
             )
         )
-        self._serializability["json"] = False
+        from spyglass.spikesorting.v2._si_storage import (
+            use_pickle_recording_serialization,
+        )
+
+        use_pickle_recording_serialization(self)
         self._kwargs = {
             "recording": recording,
             "clock": {

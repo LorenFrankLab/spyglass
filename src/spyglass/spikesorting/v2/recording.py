@@ -49,8 +49,15 @@ from spyglass.spikesorting.v2._recording_geometry import (
     fetch_interior_bad_channel_ids,
 )
 from spyglass.spikesorting.v2._recording_nwb import (
+    _ELECTRICAL_SERIES_NAME,
+    _ELECTRICAL_SERIES_PATH,
     StoredTraces,
     write_nwb_artifact,
+)
+from spyglass.spikesorting.v2._recording_types import (
+    RecordingArtifactResult,
+    RecordingComputed,
+    RecordingFetched,
 )
 from spyglass.spikesorting.v2._selection_identity import (
     recording_input_hash,
@@ -72,7 +79,7 @@ from spyglass.spikesorting.v2._sort_group_planning import (
 )
 from spyglass.spikesorting.v2._staged_outputs import (
     StagedOutputCleanupMixin,
-    StagedOutputs,
+    unlink_staged_analysis_file as _unlink_staged_analysis_file,
 )
 from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
@@ -991,113 +998,6 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         )
 
 
-_ELECTRICAL_SERIES_NAME = "ProcessedElectricalSeries"
-_ELECTRICAL_SERIES_PATH = f"acquisition/{_ELECTRICAL_SERIES_NAME}"
-
-
-class RecordingFetched(NamedTuple):
-    """DB-side inputs gathered by :meth:`Recording.make_fetch`.
-
-    Tri-part dispatch unpacks this positionally into ``make_compute``;
-    fields are listed in the order they appear in the compute
-    signature.
-
-    Attributes
-    ----------
-    sort_valid_times : numpy.ndarray
-        Requested sort interval ``valid_times``, shape
-        ``(n_intervals, 2)`` in seconds.
-    raw_valid_times : numpy.ndarray
-        Raw data ``valid_times``, shape ``(n_intervals, 2)`` in seconds.
-    raw_object_id : str
-        NWB object id of the session's raw acquisition ElectricalSeries
-        (``Raw.raw_object_id``); pins the compute step to the exact raw
-        source the selection lineage points at.
-    raw_path : str
-        Absolute path of the session's raw NWB (``Nwbfile.get_abs_path``).
-    """
-
-    sel: dict
-    channel_ids: list
-    reference_mode: str
-    reference_electrode_id: int | None
-    sort_valid_times: np.ndarray
-    raw_valid_times: np.ndarray
-    preprocessing_params: PreprocessingParamsSchema
-    preprocessing_job_kwargs: dict | None
-    probe_types: tuple
-    electrode_group_names: tuple
-    bad_channel_ids: tuple
-    raw_object_id: str
-    raw_path: str
-
-
-class RecordingComputed(NamedTuple):
-    """Outputs of :meth:`Recording.make_compute`.
-
-    Unpacked positionally into ``make_insert``.
-    """
-
-    analysis_file_name: str
-    object_id: str
-    content_hash: str
-    saved_start: float
-    saved_end: float
-    sampling_frequency: float
-    n_channels: int
-    duration_s: float
-    sel: dict
-    sort_valid_times: np.ndarray
-    expected_saved_total: float
-    n_intended_intervals: int
-
-    def staged_outputs(self) -> StagedOutputs:
-        """The staged analysis file ``make_insert`` registers."""
-        return StagedOutputs(analysis_file_names=(self.analysis_file_name,))
-
-
-class RecordingArtifactResult(NamedTuple):
-    """Outputs of :meth:`Recording._compute_recording_artifact`.
-
-    Internal helper result -- NOT a tri-part contract object, so it is never
-    splatted into ``make_*``. ``make_compute`` reads these fields by name to
-    build :class:`RecordingComputed`, and ``_rebuild_nwb_artifact`` reads only
-    ``content_hash``. Typed/named so the eight values are not threaded through
-    brittle positional unpacking. Field order intentionally matches
-    ``RecordingComputed``'s first eight fields (pinned by
-    ``test_recording_artifact_result_field_contract``) so the by-name transfer
-    stays order-independent and a future positional splat would still bind
-    correctly.
-    """
-
-    analysis_file_name: str
-    object_id: str
-    content_hash: str
-    saved_start: float
-    saved_end: float
-    sampling_frequency: float
-    n_channels: int
-    duration_s: float
-
-
-def _unlink_staged_analysis_file(
-    analysis_file_name: str, *, context: str
-) -> None:
-    """Best-effort removal of an orphaned staged ``AnalysisNwbfile``.
-
-    Failure paths write the artifact to disk before (or instead of) its
-    DataJoint row landing; this unlinks that orphan so the cleanup tooling
-    does not have to chase it. Best-effort: a cleanup failure is logged,
-    never raised, so it cannot mask the original error. ``context`` names
-    the calling method for the log line.
-    """
-    from spyglass.spikesorting.v2._staged_outputs import (
-        unlink_staged_analysis_file,
-    )
-
-    unlink_staged_analysis_file(analysis_file_name, context=context)
-
-
 @schema
 class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     """Preprocessed recording materialized NWB-resident in AnalysisNwbfile.
@@ -1338,21 +1238,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             n_intended_intervals=expectation.n_intended_intervals,
         )
 
-    @staticmethod
-    def _truncation_tolerance(
-        n_intended_intervals: int, sampling_frequency: float
-    ) -> float:
-        """Sample-grid tolerance for the ``make_insert`` truncation guard.
-
-        Thin delegator to
-        :func:`._recording_restriction.truncation_tolerance`; kept as a
-        ``Recording`` staticmethod because ``make_insert`` calls
-        ``self._truncation_tolerance(...)`` and
-        ``test_truncation_tolerance_scales_with_interval_count`` calls
-        ``Recording._truncation_tolerance`` directly.
-        """
-        return truncation_tolerance(n_intended_intervals, sampling_frequency)
-
     def make_insert(
         self,
         key,
@@ -1445,7 +1330,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         # inter-chunk gaps and intentionally dropped sub-min_segment_length
         # slivers are not flagged. ``duration_s`` is the persisted span
         # (``saved_end - saved_start``).
-        tolerance = self._truncation_tolerance(
+        tolerance = truncation_tolerance(
             n_intended_intervals, sampling_frequency
         )
         missing = expected_saved_total - duration_s
@@ -1583,11 +1468,11 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         Shared by ``make_compute`` and ``_rebuild_nwb_artifact``; the pipeline
         is :func:`._recording_nwb.compute_recording_artifact`. A classmethod
         so ``RecordingArtifactRecompute.make_compute`` can run it without a
-        table instance (constructing one queries the DB). Tests patch it, so
-        it stays a class attribute.
+        table instance (constructing one queries the DB). The writer is an
+        explicit dependency of the service.
         """
         return _recording_nwb.compute_recording_artifact(
-            cls,
+            writer=cls._write_nwb_artifact,
             raw_path=raw_path,
             raw_object_id=raw_object_id,
             nwb_file_name=nwb_file_name,
@@ -1617,15 +1502,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> tuple[str, str, str]:
         """Write the preprocessed recording into an ``AnalysisNwbfile``.
 
-        Thin delegator to
-        :func:`._recording_nwb.write_nwb_artifact`; kept as a
-        ``Recording`` staticmethod because
-        :func:`._recording_nwb.compute_recording_artifact` calls it through
-        the class and the v2 tests both
-        monkeypatch ``Recording._write_nwb_artifact`` (the staged-file
-        cleanup probe) and call it directly (the heterogeneous-gain +
-        electrode-table-region guards). The streamed (chunk-iterator) NWB
-        write and the post-write content-fingerprint hashing
+        The streamed (chunk-iterator) NWB write and the post-write
+        content-fingerprint hashing
         (:func:`._recording_fingerprint.recording_content_fingerprint`) live
         in the service module. Returns ``(analysis_file_name,
         electrical_series_object_id, content_hash)``.

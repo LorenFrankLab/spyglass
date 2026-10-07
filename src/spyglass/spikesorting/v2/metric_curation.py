@@ -70,7 +70,9 @@ from spyglass.spikesorting.v2.exceptions import (
     UnsupportedDirectInsertError,
     ZeroUnitAnalyzerError,
 )
-from spyglass.spikesorting.v2.recording import _unlink_staged_analysis_file
+from spyglass.spikesorting.v2._staged_outputs import (
+    unlink_staged_analysis_file as _unlink_staged_analysis_file,
+)
 from spyglass.spikesorting.v2.sorting import (
     AnalyzerWaveformParameters,
     Sorting,

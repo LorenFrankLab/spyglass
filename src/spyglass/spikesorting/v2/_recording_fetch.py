@@ -15,8 +15,6 @@ function.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
@@ -29,8 +27,7 @@ from spyglass.spikesorting.v2._selection_identity import (
 )
 from spyglass.spikesorting.v2.utils import _validate_reference_fields
 
-if TYPE_CHECKING:
-    from spyglass.spikesorting.v2.recording import RecordingFetched
+from spyglass.spikesorting.v2._recording_types import RecordingFetched
 
 
 def fetch_recording_inputs(key: dict) -> RecordingFetched:
@@ -59,7 +56,6 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
     from spyglass.common.common_nwbfile import Nwbfile
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
-        RecordingFetched,
         RecordingSelection,
         SortGroupV2,
     )

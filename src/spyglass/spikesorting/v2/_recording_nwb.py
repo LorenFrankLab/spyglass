@@ -23,8 +23,8 @@ compute), and the file row is registered by the caller inside its DataJoint
 transaction, so this write path stays a thin file-write service.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import: all SpikeInterface / numpy / pynwb / spyglass
-dependencies are imported lazily inside the function. ``write_nwb_artifact``
+connection at import. SpikeInterface and NWB I/O dependencies are imported
+inside the functions that use them. ``write_nwb_artifact``
 touches the DB / DataJoint at CALL time via lazy imports (``AnalysisNwbfile``
 path resolution + file create); ``rebuild_nwb_artifact`` also reads the
 ``Recording`` row and re-runs its ``make_fetch``,
@@ -32,10 +32,9 @@ path resolution + file create); ``rebuild_nwb_artifact`` also reads the
 the ``ConcatenatedRecording`` / ``MotionCorrectedRecording`` row and re-run its
 ``make_fetch`` / ``make_compute``, and
 ``clear_recompute_deleted_flag`` updates ``RecordingArtifactRecompute``.
-``write_nwb_artifact`` and ``compute_recording_artifact`` lazily import names
-from ``recording`` (the ``_ELECTRICAL_SERIES_NAME`` constant, the
-``RecordingArtifactResult`` carrier, the staged-file cleanup helper) at call
-time -- by then ``recording`` is fully imported, so there is no import cycle.
+Recording carrier types and staged-file cleanup live in DB-free modules.
+The writer receives its dependencies explicitly and never imports its
+owning table module.
 
 STAGING IS THE ONE DB ACCESS A TRI-PART ``make_compute`` MAY KEEP. Its inputs
 belong in ``make_fetch``, whose result DataJoint re-checks inside the insert
@@ -52,13 +51,20 @@ registered only in ``make_insert``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Callable, NamedTuple
 
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2._params.preprocessing import (
         PreprocessingParamsSchema,
     )
-    from spyglass.spikesorting.v2.recording import RecordingArtifactResult
+
+from spyglass.spikesorting.v2._recording_types import RecordingArtifactResult
+from spyglass.spikesorting.v2._staged_outputs import (
+    unlink_staged_analysis_file as _unlink_staged_analysis_file,
+)
+
+_ELECTRICAL_SERIES_NAME = "ProcessedElectricalSeries"
+_ELECTRICAL_SERIES_PATH = f"acquisition/{_ELECTRICAL_SERIES_NAME}"
 
 
 class StoredTraces(NamedTuple):
@@ -104,7 +110,9 @@ def read_recording_nwb(
         load_time_vector=load_time_vector,
         use_pynwb=True,
     )
-    recording._kwargs["use_pynwb"] = True
+    from spyglass.spikesorting.v2._si_storage import retain_pynwb_reader
+
+    retain_pynwb_reader(recording)
     return recording
 
 
@@ -574,7 +582,6 @@ def write_nwb_artifact(
     from spyglass.spikesorting.v2._recording_fingerprint import (
         recording_content_fingerprint,
     )
-    from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_NAME
     from spyglass.utils import logger
 
     # ``AnalysisNwbfile().create`` writes a stub file to disk
@@ -778,7 +785,6 @@ def recording_provenance_table(
 
 
 def compute_recording_artifact(
-    table_cls,
     *,
     raw_path: str,
     raw_object_id: str,
@@ -795,6 +801,7 @@ def compute_recording_artifact(
     bad_channel_ids: tuple = (),
     existing_analysis_file_name: str | None = None,
     provenance_tables=None,
+    writer: Callable | None = None,
 ) -> RecordingArtifactResult:
     """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
 
@@ -814,10 +821,9 @@ def compute_recording_artifact(
 
     Parameters
     ----------
-    table_cls : type
-        The ``Recording`` class. The file is staged through its
-        ``_write_nwb_artifact``, called on the class so a patched writer
-        takes effect.
+    writer : callable, optional
+        Artifact writer with the ``write_nwb_artifact`` signature. Defaults
+        to that service; the table can supply its configured writer.
     raw_path : str
         Absolute path to the raw NWB file to read.
     raw_object_id : str
@@ -898,10 +904,6 @@ def compute_recording_artifact(
     from spyglass.spikesorting.v2._recording_restriction import (
         restrict_recording,
         select_sort_group_channels,
-    )
-    from spyglass.spikesorting.v2.recording import (
-        RecordingArtifactResult,
-        _unlink_staged_analysis_file,
     )
     from spyglass.spikesorting.v2.utils import _get_recording_timestamps
     from spyglass.utils.nwb_helper_fn import raw_eseries_path_and_timestamp_mode
@@ -1002,7 +1004,7 @@ def compute_recording_artifact(
             analysis_file_name,
             object_id,
             content_hash,
-        ) = table_cls._write_nwb_artifact(
+        ) = (write_nwb_artifact if writer is None else writer)(
             recording=recording,
             nwb_file_name=nwb_file_name,
             existing_analysis_file_name=existing_analysis_file_name,
@@ -1228,9 +1230,6 @@ def rebuild_motion_corrected_artifact(table, key) -> None:
     from spyglass.spikesorting.v2.exceptions import (
         RecordingContentDriftError,
     )
-    from spyglass.spikesorting.v2.recording import (
-        _unlink_staged_analysis_file,
-    )
     from spyglass.utils import logger
 
     row = (table & key).fetch1()
@@ -1375,9 +1374,6 @@ def rebuild_concat_nwb_artifact(table, key) -> None:
     )
     from spyglass.spikesorting.v2.exceptions import (
         RecordingContentDriftError,
-    )
-    from spyglass.spikesorting.v2.recording import (
-        _unlink_staged_analysis_file,
     )
     from spyglass.utils import logger
 

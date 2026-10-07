@@ -124,6 +124,9 @@ optional-dependencies.moseq-gpu = [
   "keypoint-moseq>=0.6",
 ]
 optional-dependencies.spikesorting-v2 = [
+  # Staged-output cleanup extends AutoPopulate._populate1. Keep the v2 lane
+  # on the lifecycle exercised by its transaction/rollback regression tests.
+  "datajoint==0.14.9",
   # Cross-process locks for the shared analyzer cache
   # (_analyzer_cache.analyzer_cache_lock) and the recording, concat and motion
   # cache rebuilds.
@@ -148,6 +151,9 @@ optional-dependencies.spikesorting-v2 = [
   "torch>=2",
 ]
 optional-dependencies.spikesorting-v2-matching = [
+  # This extension can be installed independently; its v2 tables use the same
+  # staged populate lifecycle as the main runtime extra.
+  "datajoint==0.14.9",
   # cross-session unit tracking. Pinned to the 3.2.6/3.2.7 line, the last
   # release that declares ``numpy<3.0,>=2.0`` so its METADATA coexists with the
   # v2 numpy>=2 baseline (``uv pip check`` is clean against SI 0.104 + numpy 2).
@@ -164,6 +170,7 @@ optional-dependencies.spikesorting-v2-matching = [
   "numpy>=2,<3",
 ]
 optional-dependencies.spikesorting-v2-curation = [
+  "datajoint==0.14.9", # existing v2 sorts use the staged populate lifecycle
   "filelock", # atomic draft revision checks across review-server processes
   # Pinned FigPack view/context APIs used by the Spyglass review extension.
   # Re-verify the browser edit/save/import journey before changing these pins.

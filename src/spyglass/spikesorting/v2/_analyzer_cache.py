@@ -266,9 +266,7 @@ def load_analyzer_folder(folder, *, recording=None):
     -------
     spikeinterface.SortingAnalyzer
     """
-    import numpy as np
     import spikeinterface as si
-    from spikeinterface.core.sortinganalyzer import get_extension_class
 
     folder = Path(folder)
     analyzer = si.SortingAnalyzer.load(
@@ -284,21 +282,13 @@ def load_analyzer_folder(folder, *, recording=None):
         raise ValueError(f"Analyzer recording could not be loaded: {folder}")
     # Keep derivative save/select/merge operations on the same pickle contract
     # as build_analyzer. SI does not persist this flag when loading an extractor.
-    analyzer.recording._serializability["json"] = False
-    if "waveforms" not in analyzer.get_saved_extension_names():
-        return analyzer
-    extension = get_extension_class("waveforms")(analyzer)
-    extension.load_params()
-    extension.load_run_info()
-    run_info = extension.run_info
-    data_file = extension._get_binary_extension_folder() / "waveforms.npy"
-    if (
-        run_info is not None and not run_info.get("run_completed", False)
-    ) or not data_file.is_file():
-        # Mirror SI: an incomplete / dataless extension is "not computed".
-        return analyzer
-    extension.data["waveforms"] = np.load(data_file, mmap_mode="r")
-    analyzer.extensions["waveforms"] = extension
+    from spyglass.spikesorting.v2._si_storage import (
+        attach_memmapped_waveforms,
+        use_pickle_recording_serialization,
+    )
+
+    use_pickle_recording_serialization(analyzer.recording)
+    attach_memmapped_waveforms(analyzer)
     return analyzer
 
 
