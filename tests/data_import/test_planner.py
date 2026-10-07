@@ -143,8 +143,16 @@ def test_planned_parents_satisfy_their_children(
     """An entry whose parent is planned in the same pass is not a failure.
 
     Several tables emit their parent's rows alongside their own -- the
-    IntervalList pattern. Those parents are not in the database yet, so the
-    check has to consider the plan as well as the database.
+    IntervalList pattern -- and those parents are not in the database yet, so
+    the check has to consider the plan as well as the database.
+
+    A smoke check only, and worth saying why: this file is already ingested,
+    so its IntervalList rows exist and the foreign-key check resolves against
+    them whatever order the plan is in. The ordering this guards is only
+    observable when those parents are novel, which is the clean-database
+    golden-run comparison -- where exactly this bug did surface, as 18
+    missing_parent problems naming parents the plan held two entries later.
+    Forcing an adverse order here does not reproduce it; that was tried.
     """
     plan = plan_nwbfile(mini_copy_name)
 
