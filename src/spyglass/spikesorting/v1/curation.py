@@ -278,9 +278,9 @@ class CurationV1(SpyglassMixin, dj.Manual):
             restriction on CuratedSpikeSorting table
         all_electrodes : bool, optional
             If False (default), return one representative electrode per sort
-            group, preserving historical behavior. If True, return every
-            electrode belonging to each sort group, so a multi-electrode sort
-            group is described by all of its electrodes.
+            group. If True, return every electrode belonging to each sort
+            group, so a multi-electrode sort group is described by all of its
+            electrodes.
 
         Returns
         -------

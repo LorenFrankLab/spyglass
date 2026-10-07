@@ -195,9 +195,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             currently supported)
         all_electrodes : bool, optional
             If False (default), return one representative electrode per sort
-            group, preserving historical behavior. If True, return every
-            electrode belonging to each sort group. Passed through to the
-            source table's ``get_sort_group_info``.
+            group. If True, return every electrode belonging to each sort
+            group. Passed through to the source table's
+            ``get_sort_group_info``.
 
         Returns
         -------

@@ -1326,8 +1326,8 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
             restriction on CuratedSpikeSorting table
         all_electrodes : bool, optional
             If False (default), return one representative electrode per sort
-            group, preserving historical behavior. If True, return every
-            electrode belonging to each sort group.
+            group. If True, return every electrode belonging to each sort
+            group.
 
         Returns
         -------
