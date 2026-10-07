@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from types import SimpleNamespace
+
+import pytest
 
 
 def test_unconfigure_tolerates_unbound_server():
@@ -125,14 +126,6 @@ def test_data_downloader_downloads_lazily_on_wait_for(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 
 
-class _FakeItem:
-    def __init__(self, fixturenames, module_file=None):
-        self.fixturenames = fixturenames
-        self.module = (
-            SimpleNamespace(__file__=str(module_file)) if module_file else None
-        )
-
-
 def test_eager_fetch_names_empty_for_pure_helper_run(monkeypatch):
     """With neither env var set, session start downloads nothing eagerly.
 
@@ -178,33 +171,51 @@ def test_eager_fetch_names_ignores_unknown_required(monkeypatch):
     assert _eager_fetch_names() == []
 
 
-def test_item_consumes_smoke_fixture_only_for_real_consumers(tmp_path):
-    """The lazy smoke fetch must fire only for tests that actually ingest it.
+def test_smoke_fixture_fetches_missing_verified_artifact(tmp_path, monkeypatch):
+    """The explicit dependency downloads before a consumer's existence check."""
+    import hashlib
 
-    Not for a DB test that merely declares tables (``dj_conn`` but no fixture
-    reference), and not for a pure-helper test that just names the fixture in an
-    assertion (a reference but no ``dj_conn``). Both would otherwise pull a 55MB
-    download they never use.
-    """
-    from tests.spikesorting.v2.conftest import _item_consumes_smoke_fixture
+    from tests.spikesorting.v2.conftest import smoke_nwb
+    from tests.spikesorting.v2.fixtures import _fetch
 
-    consumer_mod = tmp_path / "consumer_mod.py"
-    consumer_mod.write_text('_FIXTURE_NAME = "mearec_polymer_smoke"\n')
-    bare_mod = tmp_path / "bare_mod.py"
-    bare_mod.write_text("# synthetic-only DB test; declares tables\n")
-
-    # Depends on a shared smoke-ingesting fixture -> consumer, module aside.
-    assert _item_consumes_smoke_fixture(
-        _FakeItem(["populated_sorting"], bare_mod)
+    payload = b"canonical smoke fixture"
+    expected = tmp_path / "mearec_polymer_smoke.nwb"
+    monkeypatch.setattr(_fetch, "_THIS_DIR", tmp_path)
+    monkeypatch.setattr(
+        _fetch,
+        "_manifest_nwb_sha256",
+        lambda name: hashlib.sha256(payload).hexdigest(),
     )
-    # dj_conn AND the module references the fixture -> consumer.
-    assert _item_consumes_smoke_fixture(_FakeItem(["dj_conn"], consumer_mod))
-    # dj_conn but the module never references it (table-declaration-only) -> not.
-    assert not _item_consumes_smoke_fixture(_FakeItem(["dj_conn"], bare_mod))
-    # References the fixture but no dj_conn (pure-helper) -> not.
-    assert not _item_consumes_smoke_fixture(
-        _FakeItem(["tmp_path"], consumer_mod)
+    monkeypatch.setattr(
+        _fetch, "_download_http", lambda url, path: path.write_bytes(payload)
     )
+    assert not expected.exists()
+    assert smoke_nwb.__wrapped__() == expected
+    assert expected.read_bytes() == payload
+
+
+def test_smoke_fixture_download_failure_is_an_error(tmp_path, monkeypatch):
+    """A missing required input cannot silently skip a targeted regression."""
+    from tests.spikesorting.v2.conftest import smoke_nwb
+    from tests.spikesorting.v2.fixtures import _fetch
+
+    monkeypatch.setattr(_fetch, "_THIS_DIR", tmp_path)
+    monkeypatch.setitem(_fetch.FIXTURE_URLS, "mearec_polymer_smoke", None)
+    with pytest.raises(_fetch.FixtureFetchError, match="no download URL"):
+        smoke_nwb.__wrapped__()
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    ["populated_sorting", "planted_two_unit_sort", "planted_three_unit_sort"],
+)
+def test_shared_sort_fixtures_require_smoke_nwb(request, fixture_name):
+    """Pytest schedules the download even when the test names no NWB path."""
+    fixture_defs = request._fixturemanager.getfixturedefs(
+        fixture_name, request.node
+    )
+    assert fixture_defs
+    assert "smoke_nwb" in fixture_defs[-1].argnames
 
 
 def test_require_fixtures_gate_ignores_stale_ingested_copies(
@@ -334,7 +345,7 @@ def test_require_fixtures_gate_still_exits_nonzero():
             "no:cacheprovider",
             "--no-cov",
             "-o",
-            "addopts=-p no:warnings",
+            "addopts=",
         ],
         env={
             **_clean_env(),
@@ -385,8 +396,12 @@ def test_filterwarnings_categories_are_resolvable():
     """
     import builtins
     import importlib
-    import tomllib
     from pathlib import Path
+
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib
 
     repo_root = Path(__file__).resolve().parents[3]
     config = tomllib.loads((repo_root / "pyproject.toml").read_text())

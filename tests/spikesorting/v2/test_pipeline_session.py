@@ -704,7 +704,7 @@ def test_resolve_no_sort_groups(dj_conn):
 
 
 @pytest.fixture(scope="module")
-def session_inputs(dj_conn):
+def session_inputs(dj_conn, smoke_nwb):
     """Ingest + configure the smoke fixture (defaults + team + sort groups).
 
     Distinct ``nwb_file_name`` so this module's rows never collide with the

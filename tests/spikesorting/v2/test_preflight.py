@@ -580,7 +580,7 @@ def test_motion_setup_states_mode_recipe_preset_border_and_status(concat):
 
 
 @pytest.fixture(scope="module")
-def preflight_session(dj_conn):
+def preflight_session(dj_conn, smoke_nwb):
     """Ingest the smoke fixture under a preflight-isolated session name.
 
     Module-scoped: NWB ingestion is the heaviest setup. Ingested under a

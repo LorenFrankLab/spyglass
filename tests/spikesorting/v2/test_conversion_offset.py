@@ -141,7 +141,7 @@ def test_no_filter_no_reference_preserves_offset():
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_offset_round_trips_through_populate(dj_conn, monkeypatch):
+def test_offset_round_trips_through_populate(dj_conn, monkeypatch, smoke_nwb):
     """Recording.make passes the resolver's offset to the ElectricalSeries and
     get_recording reads it back -- the WIRING, not just the resolver logic.
 

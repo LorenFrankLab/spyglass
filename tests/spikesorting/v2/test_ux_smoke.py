@@ -92,7 +92,7 @@ _SORT_GROUP_COLUMNS = [
 
 
 @pytest.fixture(scope="module")
-def ux_session(dj_conn):
+def ux_session(dj_conn, smoke_nwb):
     """Ingest the smoke fixture under a UX-isolated session and clean it.
 
     Distinct ``dest_name`` so this session's rows never collide with the

@@ -33,7 +33,7 @@ def _noise(analyzer) -> np.ndarray:
 
 
 @pytest.fixture(scope="module")
-def masked_planted_sort(dj_conn):
+def masked_planted_sort(dj_conn, smoke_nwb):
     """A two-unit planted sort on the smoke recording with ~10% masked.
 
     A manual artifact exclusion over ``[1.8, 2.2)`` s (of 4 s) is masked at

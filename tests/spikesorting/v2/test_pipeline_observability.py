@@ -65,7 +65,7 @@ def _configure_inputs(nwb_file_name: str) -> dict:
 
 
 @pytest.fixture(scope="module")
-def obs_session(dj_conn):
+def obs_session(dj_conn, smoke_nwb):
     """Ingest the smoke fixture under an observability-isolated session."""
     if not _FIXTURE_PATH.exists():
         pytest.skip(

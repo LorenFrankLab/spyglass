@@ -46,7 +46,7 @@ _NEUROPIXELS_60S_PATH = (
 
 
 @pytest.fixture(scope="session")
-def polymer_smoke_session(dj_conn):
+def polymer_smoke_session(dj_conn, smoke_nwb):
     """Ingest the MEArec polymer smoke fixture and yield its session key.
 
     Session-scoped because NWB ingestion is the heaviest setup step

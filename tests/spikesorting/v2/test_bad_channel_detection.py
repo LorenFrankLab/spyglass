@@ -143,7 +143,7 @@ _FIXTURE_PATH = (
 
 
 @pytest.fixture(scope="module")
-def badchan_session(dj_conn):
+def badchan_session(dj_conn, smoke_nwb):
     """Ingest the smoke fixture under a name unique to this module.
 
     A distinct ``nwb_file_name`` keeps this module's ``Electrode.bad_channel``

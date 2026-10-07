@@ -35,7 +35,7 @@ _SETUP = {
 
 
 @pytest.fixture(scope="module")
-def ingested_recording(dj_conn):
+def ingested_recording(dj_conn, smoke_nwb):
     """Ingest the smoke fixture + a Recording + a no-detect artifact detection.
 
     Module-scoped so the ingest runs once; individual tests build their own

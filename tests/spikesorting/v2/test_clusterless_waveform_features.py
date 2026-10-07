@@ -57,7 +57,7 @@ _AMP_PARAM = "v2_wave_amplitude"
 
 
 @pytest.fixture(scope="module")
-def wave_session(dj_conn):
+def wave_session(dj_conn, smoke_nwb):
     """Ingest the MEArec polymer smoke fixture (fast clusterless cases)."""
     from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 

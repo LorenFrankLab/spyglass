@@ -40,7 +40,7 @@ _TEAM = "v2_export_team"
 
 
 @pytest.fixture(scope="module")
-def export_smoke_session(dj_conn):
+def export_smoke_session(dj_conn, smoke_nwb):
     """Ingest the MEArec polymer smoke fixture for this module."""
     if not _FIXTURE_PATH.exists():
         pytest.skip(f"Fixture {_FIXTURE_PATH.name} not found.")

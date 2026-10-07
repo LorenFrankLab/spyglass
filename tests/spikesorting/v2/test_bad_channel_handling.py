@@ -345,7 +345,7 @@ _INTERP_PARAMS = "bad_channel_interpolate_test"
 
 
 @pytest.fixture(scope="module")
-def handling_session(dj_conn):
+def handling_session(dj_conn, smoke_nwb):
     """Ingest the smoke fixture under a name unique to this module and ensure an
     ``interpolate`` preprocessing-params row exists."""
     if not _FIXTURE_PATH.exists():

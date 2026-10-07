@@ -61,7 +61,7 @@ def _build_units_nwb(dst: Path) -> Path:
 
 
 @pytest.fixture(scope="module")
-def two_source_output(populated_sorting, dj_conn, tmp_path_factory):
+def two_source_output(populated_sorting, dj_conn, tmp_path_factory, smoke_nwb):
     """A SpikeSortingOutput holding one CurationV2 row and one
     ImportedSpikeSorting row (two distinct source part types).
 

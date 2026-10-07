@@ -143,7 +143,7 @@ def _notebook_params(nwb_file_name, sort_group_id):
 
 
 @pytest.mark.slow
-def test_single_session_notebook_runs(dj_conn):
+def test_single_session_notebook_runs(dj_conn, smoke_nwb):
     """``10_Spike_SortingV2`` (the lean first-sort path) runs end-to-end.
 
     Exercises the published first-sort walkthrough on one fixture: setup,
@@ -178,7 +178,7 @@ def test_single_session_notebook_runs(dj_conn):
 
 
 @pytest.mark.slow
-def test_curation_notebook_runs(dj_conn):
+def test_curation_notebook_runs(dj_conn, smoke_nwb):
     """``10_Spike_SortingV2_Curation`` runs end-to-end on the smoke session.
 
     Self-contained: it sets up, sorts to a root curation, starts the FigPack
@@ -215,7 +215,7 @@ def test_curation_notebook_runs(dj_conn):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("subset", [False, True], ids=["all-groups", "subset"])
-def test_presets_notebook_runs(dj_conn, subset, monkeypatch):
+def test_presets_notebook_runs(dj_conn, subset, monkeypatch, smoke_nwb):
     """``10_Spike_SortingV2_Presets`` runs end-to-end on the smoke session.
 
     Self-contained: setup, then customize a preset (clone + register) and sort
@@ -370,7 +370,7 @@ class _NotebookFixtureMatcher:
 
 
 @pytest.mark.slow
-def test_cross_session_notebook_runs(dj_conn):
+def test_cross_session_notebook_runs(dj_conn, smoke_nwb):
     """``10_Spike_SortingV2_CrossSession`` runs all three workflows.
 
     Ingests the polymer smoke fixture three times (identical, same-day

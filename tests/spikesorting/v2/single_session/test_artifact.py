@@ -1609,7 +1609,9 @@ def test_shared_artifact_group_multi_member_union(
 
 
 @pytest.mark.slow
-def test_recording_artifact_detection_raises_on_raw_nan(dj_conn, tmp_path):
+def test_recording_artifact_detection_raises_on_raw_nan(
+    dj_conn, tmp_path, smoke_nwb
+):
     """One raw NaN sample makes ``RecordingArtifactDetection.populate`` raise.
 
     The corruption is written where it can really arise -- the raw

@@ -91,7 +91,7 @@ def _insert_transient_threshold_params():
 
 
 @pytest.fixture(scope="module")
-def artifact_e2e_session(dj_conn):
+def artifact_e2e_session(dj_conn, smoke_nwb):
     """Ingest the smoke fixture under a unique session name + a populated
     Recording on sort group 0. Cleans the session on setup and teardown."""
     from tests.spikesorting.v2._ingest_helpers import (
@@ -554,7 +554,7 @@ def _insert_artifact_params(name, *, n_jobs):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_parallel_artifact_detection_matches_serial(dj_conn):
+def test_parallel_artifact_detection_matches_serial(dj_conn, smoke_nwb):
     from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
     )

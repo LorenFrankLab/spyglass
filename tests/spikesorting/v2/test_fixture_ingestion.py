@@ -20,7 +20,7 @@ _FIXTURE_PATH = (
 
 
 @pytest.fixture(scope="module")
-def mearec_smoke_ingested(dj_conn):
+def mearec_smoke_ingested(dj_conn, smoke_nwb):
     """Ingest the generated MEArec smoke fixture into the isolated DB.
 
     The ground-truth units live in a sidecar

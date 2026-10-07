@@ -165,7 +165,7 @@ def _build_sort_on_group(sort_group_id, plant, nwb_file_name):
 
 
 @pytest.fixture(scope="module")
-def two_v2_merge_ids(dj_conn):
+def two_v2_merge_ids(dj_conn, smoke_nwb):
     """Two distinguishable v2 merge_ids on one session.
 
     Sort A: sort group 0, 2 planted units (early spikes).

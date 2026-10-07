@@ -119,9 +119,21 @@ def _isolate_si_metric_defaults():
         yield
 
 
-# The per-PR smoke fixture. Fetched lazily -- only when a collected test needs
-# the database (see ``pytest_collection_modifyitems``), never unconditionally.
+# The per-PR smoke fixture. Only consumers that request ``smoke_nwb`` fetch it.
 _SMOKE_FIXTURE = "mearec_polymer_smoke"
+
+
+@pytest.fixture(scope="session")
+def smoke_nwb():
+    """Ensure the canonical smoke NWB before any consuming fixture runs.
+
+    An unavailable or corrupt download is a setup failure, so a targeted
+    regression run cannot turn green by skipping its required input.
+    Pure-helper tests never request this fixture and never download it.
+    """
+    from tests.spikesorting.v2.fixtures._fetch import ensure_fixture
+
+    return ensure_fixture(_SMOKE_FIXTURE, required=True)
 
 
 def _eager_fetch_names():
@@ -130,11 +142,8 @@ def _eager_fetch_names():
     Only fixtures the required-fixture check will require (so they are present
     when that check runs below) -- plus every fixture when
     ``SPYGLASS_V2_FETCH_FULL=1``, an explicit developer opt-in. The per-PR smoke
-    fixture is deliberately NOT in this set: a run that collects no database
-    test (a pure-helper unit run) needs no fixture, so fetching one
-    unconditionally here starts a spurious download. The smoke fixture is
-    fetched lazily at collection time for runs that do need the DB (see
-    ``pytest_collection_modifyitems``).
+    fixture is deliberately NOT in this set: a pure-helper unit run needs no
+    fixture. Smoke consumers request the session-scoped ``smoke_nwb`` fixture.
     """
     import os
 
@@ -144,45 +153,6 @@ def _eager_fetch_names():
         return list(FIXTURE_URLS)
     required = os.environ.get("SPYGLASS_V2_REQUIRE_FIXTURES", "").split()
     return [n for n in required if n in FIXTURE_URLS]
-
-
-# Shared fixtures (defined below) that ingest the smoke NWB; a test using one is
-# a consumer even when its own module never names the fixture.
-_SMOKE_CONSUMING_FIXTURES = frozenset(
-    {"populated_sorting", "populated_sorting_with_curation"}
-)
-
-_MODULE_SOURCE_CACHE: dict[str, str] = {}
-
-
-def _module_references_smoke(item):
-    """True if the collected item's test module mentions the smoke fixture
-    anywhere in its source (module-level ``_FIXTURE_PATH`` constant or an
-    in-function ``copy_and_insert_nwb`` path). Cheap, cached per module file."""
-    path = getattr(getattr(item, "module", None), "__file__", None)
-    if not path:
-        return False
-    if path not in _MODULE_SOURCE_CACHE:
-        try:
-            _MODULE_SOURCE_CACHE[path] = Path(path).read_text()
-        except OSError:
-            _MODULE_SOURCE_CACHE[path] = ""
-    return _SMOKE_FIXTURE in _MODULE_SOURCE_CACHE[path]
-
-
-def _item_consumes_smoke_fixture(item):
-    """True only if a collected item actually ingests the smoke MEArec fixture.
-
-    A consumer either depends on a shared smoke-ingesting fixture, or requests
-    ``dj_conn`` *and* references the fixture in its module source. Requiring both
-    signals keeps two non-consumers out: a DB test that only declares tables
-    (``dj_conn`` but no fixture reference) and a pure-helper test that merely
-    names the fixture in an assertion (a reference but no ``dj_conn``). Neither
-    should trigger a 55MB download."""
-    fixtures = set(getattr(item, "fixturenames", ()))
-    if fixtures & _SMOKE_CONSUMING_FIXTURES:
-        return True
-    return "dj_conn" in fixtures and _module_references_smoke(item)
 
 
 def _missing_required_fixtures(required):
@@ -273,9 +243,8 @@ def pytest_sessionstart(session):
 
     Downloads the required set (``SPYGLASS_V2_REQUIRE_FIXTURES``, or every
     fixture under ``SPYGLASS_V2_FETCH_FULL=1``) and checks it is present. The
-    per-PR smoke fixture is fetched lazily at collection time instead (see
-    ``pytest_collection_modifyitems``), so a pure-helper run -- which collects no
-    DB test -- starts no download. ``ensure_fixture`` is a no-op when the file is
+    per-PR smoke fixture is fetched by explicit fixture dependencies, so a
+    pure-helper run starts no download. ``ensure_fixture`` is a no-op when the file is
     already present (e.g. generated locally) or when no URL is configured.
     """
     import os
@@ -307,32 +276,6 @@ def pytest_sessionstart(session):
         pytest.exit(_missing_fixtures_message(missing), returncode=1)
 
 
-def pytest_collection_modifyitems(session, config, items):
-    """Fetch the per-PR smoke fixture lazily -- only when the collected tests
-    actually need the database.
-
-    Runs after collection, where the collected ``items`` (and their fixture
-    closures) are known, so only a run that actually ingests the fixture fetches
-    it -- a pure-helper unit run, or a DB run that just declares tables, triggers
-    no download. ``ensure_fixture`` is a no-op when the file is already present,
-    so this only reaches the network when the smoke fixture is genuinely missing
-    and a collected test will consume it.
-    """
-    import warnings
-
-    from tests.spikesorting.v2.fixtures._fetch import (
-        FixtureFetchError,
-        ensure_fixture,
-    )
-
-    if not any(_item_consumes_smoke_fixture(item) for item in items):
-        return
-    try:
-        ensure_fixture(_SMOKE_FIXTURE, required=False)
-    except FixtureFetchError as exc:
-        warnings.warn(f"[v2 fixtures] could not fetch {_SMOKE_FIXTURE}: {exc}")
-
-
 # Same fixture the lazy fetch above produces; named once so the two can't drift.
 _DOWNSTREAM_FIXTURE_NAME = _SMOKE_FIXTURE
 _DOWNSTREAM_FIXTURE_PATH = (
@@ -343,7 +286,7 @@ _DOWNSTREAM_FIXTURE_PATH = (
 
 
 @pytest.fixture(scope="package")
-def populated_sorting(dj_conn):
+def populated_sorting(dj_conn, smoke_nwb):
     """Populate Recording -> ArtifactDetection -> Sorting for the smoke
     fixture. Package-scoped so the heavy populate is paid once and shared
     across ``test_downstream_consumers.py`` and ``test_integrity.py``.
@@ -468,7 +411,7 @@ _PREVIEW_FIXTURE_PATH = (
 
 
 @pytest.fixture(scope="package")
-def planted_two_unit_sort(dj_conn):
+def planted_two_unit_sort(dj_conn, smoke_nwb):
     """A populated Sorting with two planted units (so a merge group exists).
 
     Shared in conftest (rather than a single test module) so the merge-aware
@@ -581,7 +524,7 @@ def planted_two_unit_sort(dj_conn):
 
 
 @pytest.fixture(scope="package")
-def planted_three_unit_sort(dj_conn):
+def planted_three_unit_sort(dj_conn, smoke_nwb):
     """A populated Sorting with three planted units (0, 1, 2).
 
     The merged-parent composition tests need a parent curation that keeps at

@@ -903,7 +903,9 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
+def test_v2_sorting_nwb_excludes_parent_units(
+    dj_conn, tmp_path, monkeypatch, smoke_nwb
+):
     """The v2 Sorting analysis NWB contains ONLY the v2 sorted units, never
     the raw NWB's parent ``/units`` table. Plant a non-empty
     ``/units`` on a copy of the fixture, run Recording->Artifact->Sorting with

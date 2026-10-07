@@ -1731,7 +1731,7 @@ def test_make_compute_reads_units_without_sample_frames_without_the_db(
 
 
 @pytest.fixture(scope="package")
-def planted_zero_unit_sort(dj_conn):
+def planted_zero_unit_sort(dj_conn, smoke_nwb):
     """A populated Sorting with ZERO units (an empty planted sorting).
 
     Mirrors ``planted_two_unit_sort`` but the planted sorter stand-in
