@@ -160,6 +160,7 @@ def test_legacy_noise_inventory_is_explicitly_unverifiable():
     )
 
     pinned = {
+        "extension_content_hash_version": 2,
         "extension_content_hashes": {"noise_levels": "abc"},
         "base_extension_seed_modes": {"noise_levels": 0},
     }
@@ -193,7 +194,11 @@ def test_analyzer_inventory_detects_rebuilt_and_legacy_storage():
         {"extension_content_hashes": {"templates": "abc"}}, "current"
     )
     assert not analyzer_inventory_storage_changed(
-        {"storage_fingerprint": "current"}, "current"
+        {
+            "storage_fingerprint": "current",
+            "extension_content_hash_version": 2,
+        },
+        "current",
     )
     assert analyzer_inventory_storage_changed(
         {"storage_fingerprint": "previous"}, "current"
@@ -213,7 +218,10 @@ def test_reclaimed_analyzer_folder_is_not_a_changed_generation():
         analyzer_inventory_refresh_needed,
     )
 
-    manifest = {"storage_fingerprint": "verified"}
+    manifest = {
+        "storage_fingerprint": "verified",
+        "extension_content_hash_version": 2,
+    }
     assert not analyzer_inventory_refresh_needed(manifest, None, reclaimed=True)
     assert analyzer_inventory_refresh_needed(manifest, None, reclaimed=False)
     # A reclaimed row whose folder came BACK with different bytes still needs
@@ -250,6 +258,7 @@ def test_analyzer_role_hashes_covers_display_and_metric():
     import numpy as np
 
     from spyglass.spikesorting.v2._recompute import (
+        ANALYZER_CONTENT_HASH_PREFIX,
         analyzer_role_hashes,
         combined_hash,
         hash_extension_data,
@@ -274,8 +283,9 @@ def test_analyzer_role_hashes_covers_display_and_metric():
     # No metric analyzer (no PC metrics) -> display only.
     display_only = analyzer_role_hashes(display)
     assert set(display_only) == {"display"}
-    assert display_only["display"] == combined_hash(
-        hash_extension_data(display)
+    assert display_only["display"] == (
+        ANALYZER_CONTENT_HASH_PREFIX
+        + combined_hash(hash_extension_data(display))
     )
 
     # PC/NN evaluation -> both analyzers captured, with distinct hashes.
@@ -1534,6 +1544,36 @@ def test_analyzer_recompute_round_trip(
     with analyzer_cache_lock(populated_sorting["sorting_id"]):
         shutil.copytree(folder, backup)
     try:
+        version_key = {
+            "sorting_id": populated_sorting["sorting_id"],
+            "waveform_params_name": CORTEX_DISPLAY_WAVEFORMS,
+        }
+        manifest = (rc.SortingAnalyzerVersions & version_key).fetch1(
+            "analyzer_manifest"
+        )
+        legacy = dict(manifest)
+        legacy.pop("extension_content_hash_version")
+        rc.SortingAnalyzerVersions.update1(
+            {**version_key, "analyzer_manifest": legacy}
+        )
+        try:
+            with pytest.raises(
+                ValueError, match="current array-content hashes"
+            ):
+                rc.SortingAnalyzerRecompute().delete_files(
+                    populated_sorting,
+                    dry_run=False,
+                    force_stale_env=True,
+                    days_since_creation=0,
+                )
+            assert folder.exists()
+            assert not (
+                rc.SortingAnalyzerRecompute & populated_sorting & "deleted=1"
+            )
+        finally:
+            rc.SortingAnalyzerVersions.update1(
+                {**version_key, "analyzer_manifest": manifest}
+            )
         removed = rc.SortingAnalyzerRecompute().delete_files(
             populated_sorting, dry_run=False, days_since_creation=0
         )

@@ -88,6 +88,33 @@ def _record_lock_acquisitions(monkeypatch):
     return acquired
 
 
+def _current_analyzer_inventory(monkeypatch, recompute, artifact):
+    """Supply the inventory prerequisite without bypassing the delete guard."""
+    from spyglass.spikesorting.v2._recompute import (
+        ANALYZER_CONTENT_HASH_PREFIX,
+        ANALYZER_CONTENT_HASH_VERSION,
+    )
+
+    manifest = {
+        "extension_content_hash_version": ANALYZER_CONTENT_HASH_VERSION,
+        "extension_content_hashes": {
+            "noise_levels": ANALYZER_CONTENT_HASH_PREFIX + "a" * 64,
+        },
+        "base_extension_seed_modes": {"noise_levels": 0},
+    }
+
+    class Inventory:
+        def __and__(self, restriction):
+            assert restriction == artifact
+            return self
+
+        def fetch1(self, attribute):
+            assert attribute == "analyzer_manifest"
+            return manifest
+
+    monkeypatch.setattr(recompute, "SortingAnalyzerVersions", Inventory())
+
+
 def test_load_path_acquires_lock(monkeypatch, tmp_path):
     """The analyzer read/rebuild core acquires the per-sort lock around a load,
     so the atomic-publish move-aside window is never observed by a reader."""
@@ -148,13 +175,17 @@ def test_recompute_delete_acquires_lock(monkeypatch, tmp_path):
     importing ``recompute`` activates the common schema, so a live connection
     (``dj_conn``) is required.
     """
+    import uuid
+
     from spyglass.spikesorting.v2 import recompute as rc
 
     acquired = _record_lock_acquisitions(monkeypatch)
-    folder = tmp_path / "sidY__rec.analyzer"
+    sorting_id = uuid.uuid4()
+    folder = tmp_path / f"{sorting_id}__rec.analyzer"
     folder.mkdir()
 
-    artifact = {"sorting_id": "sidY", "waveform_params_name": "rec"}
+    artifact = {"sorting_id": sorting_id, "waveform_params_name": "rec"}
+    _current_analyzer_inventory(monkeypatch, rc, artifact)
     monkeypatch.setattr(
         rc,
         "_authorize_artifacts_for_deletion",
@@ -167,7 +198,9 @@ def test_recompute_delete_acquires_lock(monkeypatch, tmp_path):
     rmtree_calls = []
 
     def guarded_rmtree(folder, **kwargs):
-        assert acquired.held("sidY"), "delete must run while the lock is held"
+        assert acquired.held(
+            sorting_id
+        ), "delete must run while the lock is held"
         rmtree_calls.append(str(folder))
 
     monkeypatch.setattr(rc.shutil, "rmtree", guarded_rmtree)
@@ -182,7 +215,9 @@ def test_recompute_delete_acquires_lock(monkeypatch, tmp_path):
         artifact_pk="sorting_id",
     )
     assert rmtree_calls == [str(folder)]
-    assert "sidY" in acquired, "the recompute delete must acquire the lock"
+    assert (
+        str(sorting_id) in acquired
+    ), "the recompute delete must acquire the lock"
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -195,11 +230,15 @@ def test_recompute_extension_deletion_policy(monkeypatch, tmp_path):
     The authorize/age helpers are patched (logically DB-free), but importing
     ``recompute`` activates the common schema, so ``dj_conn`` is required.
     """
+    import uuid
+
     from spyglass.spikesorting.v2 import recompute as rc
 
-    folder = tmp_path / "sidZ__rec.analyzer"
+    sorting_id = uuid.uuid4()
+    folder = tmp_path / f"{sorting_id}__rec.analyzer"
     folder.mkdir()
-    artifact = {"sorting_id": "sidZ", "waveform_params_name": "rec"}
+    artifact = {"sorting_id": sorting_id, "waveform_params_name": "rec"}
+    _current_analyzer_inventory(monkeypatch, rc, artifact)
     monkeypatch.setattr(
         rc,
         "_authorize_artifacts_for_deletion",

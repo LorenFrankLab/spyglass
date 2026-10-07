@@ -252,7 +252,10 @@ def detect_stale_source(table_cls, key) -> dict:
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._recompute import analyzer_hash_for_role
+    from spyglass.spikesorting.v2._recompute import (
+        analyzer_content_hash_is_current,
+        analyzer_hash_for_role,
+    )
     from spyglass.spikesorting.v2.exceptions import (
         AnalyzerFolderInvalidError,
         AnalyzerFolderMissingError,
@@ -288,6 +291,12 @@ def detect_stale_source(table_cls, key) -> dict:
             "metric": sel["metric_waveform_params_name"],
         }
         for role, stored in stored_hashes.items():
+            legacy_hash = not analyzer_content_hash_is_current(stored)
+            if legacy_hash:
+                # Byte-only legacy digests cannot prove array shape/dtype
+                # agreement. Keep the old snapshot readable, but require a
+                # fresh evaluation before claiming its source is current.
+                reasons.append(f"source_analyzer_hash_format:{role}")
             try:
                 analyzer = Sorting().get_analyzer(
                     sort_key,
@@ -306,7 +315,7 @@ def detect_stale_source(table_cls, key) -> dict:
                 continue
             current = analyzer_hash_for_role(analyzer, role)
             current_hashes[role] = current
-            if current != stored:
+            if not legacy_hash and current != stored:
                 reasons.append(f"source_analyzer_hash:{role}")
 
     return {

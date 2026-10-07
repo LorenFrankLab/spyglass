@@ -37,6 +37,7 @@ from spyglass.spikesorting.v2._analyzer_cache import (
     analyzer_folder_storage_fingerprint,
 )
 from spyglass.spikesorting.v2._recompute import (
+    ANALYZER_CONTENT_HASH_VERSION,
     ANALYZER_RECOMPUTE_EXTENSIONS,
     analyzer_inventory_refresh_needed,
     analyzer_recompute_unverifiable_reason,
@@ -1076,6 +1077,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
             # waveforms, which carry no seed).
             content_hashes = hash_extension_data(analyzer)
             manifest = {
+                "extension_content_hash_version": ANALYZER_CONTENT_HASH_VERSION,
                 "extension_content_hashes": content_hashes,
                 "base_extension_seed_modes": analyzer_seed_modes(analyzer),
                 "storage_fingerprint": analyzer_folder_storage_fingerprint(
@@ -1803,6 +1805,19 @@ def _delete_analyzer_folders(
         force_stale_env=force_stale_env,
         artifact_pk=artifact_pk,
     )
+    # An old matched verdict used byte-only hashes. Refuse all affected
+    # artifacts before removing anything, even under force_stale_env: that
+    # override concerns environments, not an unverifiable content format.
+    for artifact, _ in authorized:
+        manifest = (SortingAnalyzerVersions & artifact).fetch1(
+            "analyzer_manifest"
+        )
+        reason = analyzer_recompute_unverifiable_reason(manifest)
+        if reason:
+            raise ValueError(
+                "Analyzer reclamation requires current array-content hashes: "
+                f"{reason}. Refresh the inventory and recompute before deletion."
+            )
     deleted = []
     for artifact, authorizing_rows in authorized:
         if _too_recent_or_unknown(authorizing_rows, cutoff):

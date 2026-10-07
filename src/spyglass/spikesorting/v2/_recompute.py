@@ -16,8 +16,71 @@ hashed alongside random_spikes / templates / waveforms.
 from __future__ import annotations
 
 import hashlib
+import json
 
 import numpy as np
+
+# Persist the format on each digest. Earlier hashes concatenated raw array
+# bytes, omitting shapes/dtypes; they cannot establish the stronger contract.
+ANALYZER_CONTENT_HASH_VERSION = 2
+ANALYZER_CONTENT_HASH_PREFIX = f"array-v{ANALYZER_CONTENT_HASH_VERSION}:"
+_HASH_CHUNK_BYTES = 1024 * 1024
+
+
+def analyzer_content_hash_is_current(value) -> bool:
+    """Whether a persisted digest uses the current array-content format."""
+    return isinstance(value, str) and value.startswith(
+        ANALYZER_CONTENT_HASH_PREFIX
+    )
+
+
+def _copy_named_fields(destination, source) -> None:
+    """Copy structured values without copying unspecified alignment bytes."""
+    if source.dtype.names is None:
+        np.copyto(destination, source, casting="equiv")
+        return
+    for name in source.dtype.names:
+        # Indexing a subarray field exposes its additional dimensions, so the
+        # same recursion also handles nested records inside subarrays.
+        _copy_named_fields(destination[name], source[name])
+
+
+def _hash_array(digest, array, *, rounding: int) -> None:
+    """Hash array interpretation and C-order values in bounded buffers."""
+    array = np.asarray(array)
+    if array.dtype.hasobject:
+        raise TypeError("Analyzer content hashes require non-object arrays.")
+    dtype = array.dtype.newbyteorder("<")
+    header = json.dumps(
+        {"shape": array.shape, "dtype": np.lib.format.dtype_to_descr(dtype)},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    digest.update(len(header).to_bytes(8, "big"))
+    digest.update(header)
+    # nditer buffers C-order slices, including strided and non-native-endian
+    # inputs, without flattening or converting a whole memmapped waveform.
+    chunks = np.nditer(
+        array,
+        flags=["external_loop", "buffered", "zerosize_ok"],
+        op_flags=["readonly"],
+        op_dtypes=[dtype],
+        casting="equiv",
+        order="C",
+        buffersize=max(1, _HASH_CHUNK_BYTES // max(1, dtype.itemsize)),
+    )
+    for chunk in chunks:
+        if dtype.names is not None:
+            # Padding is storage, not content: copying a complete structured
+            # record can preserve uninitialized bytes. Zero only this bounded
+            # chunk, then recursively copy its named scientific fields.
+            normalized = np.zeros(chunk.shape, dtype=dtype)
+            _copy_named_fields(normalized, chunk)
+            chunk = normalized
+        elif dtype.kind == "f":
+            chunk = np.round(chunk, rounding)
+        digest.update(memoryview(np.ascontiguousarray(chunk)).cast("B"))
+
 
 # Sort-time analyzer extensions hashed for the recompute comparison. All are
 # either seed-pinned (random_spikes via its seed, noise_levels via its
@@ -37,10 +100,11 @@ def hash_extension_data(
 ) -> dict[str, str]:
     """Return ``{extension_name: content_hash}`` for an analyzer's extensions.
 
-    Hashes the extension DATA (``get_extension(name).get_data()``), rounding
-    float arrays to ``rounding`` decimals, NOT the on-disk files (which carry
-    volatile provenance metadata). Only ``extensions`` that are present are
-    hashed.
+    Hashes extension data with shapes, canonical little-endian dtypes and
+    array boundaries. Floats are rounded to ``rounding`` decimals. Streaming
+    buffers bound extra memory independently of waveform volume. Returned
+    digests carry a format tag; legacy byte-only hashes are explicitly stale.
+    Only extensions that are present are hashed.
     """
     hashes: dict[str, str] = {}
     for name in extensions:
@@ -48,13 +112,13 @@ def hash_extension_data(
             continue
         data = analyzer.get_extension(name).get_data()
         arrays = data if isinstance(data, (tuple, list)) else [data]
-        digest = hashlib.md5()
+        digest = hashlib.sha256()
+        digest.update(ANALYZER_CONTENT_HASH_PREFIX.encode())
+        digest.update(int(rounding).to_bytes(8, "big", signed=True))
+        digest.update(len(arrays).to_bytes(8, "big"))
         for array in arrays:
-            array = np.asarray(array)
-            if array.dtype.kind == "f":
-                array = np.round(array, rounding)
-            digest.update(np.ascontiguousarray(array).tobytes())
-        hashes[name] = digest.hexdigest()
+            _hash_array(digest, array, rounding=rounding)
+        hashes[name] = ANALYZER_CONTENT_HASH_PREFIX + digest.hexdigest()
     return hashes
 
 
@@ -121,6 +185,13 @@ def analyzer_recompute_unverifiable_reason(manifest) -> str | None:
             "legacy/unverifiable analyzer inventory: stored noise_levels "
             "has no deterministic seed provenance"
         )
+    if manifest.get("extension_content_hash_version") != (
+        ANALYZER_CONTENT_HASH_VERSION
+    ):
+        return (
+            "legacy/unverifiable analyzer inventory: array-content hashes "
+            "do not record shapes and canonical dtypes; refresh the inventory"
+        )
     return None
 
 
@@ -140,6 +211,12 @@ def analyzer_inventory_storage_changed(
     return (
         "storage_fingerprint" not in manifest
         or manifest["storage_fingerprint"] != current_fingerprint
+        or (
+            bool(manifest)
+            and current_fingerprint is not None
+            and manifest.get("extension_content_hash_version")
+            != ANALYZER_CONTENT_HASH_VERSION
+        )
     )
 
 
@@ -225,7 +302,7 @@ def analyzer_hash_for_role(analyzer, role: str) -> str:
     The per-role primitive behind :func:`analyzer_role_hashes` and the
     stale-check re-hash, so both compute a role's hash identically.
     """
-    return combined_hash(
+    return ANALYZER_CONTENT_HASH_PREFIX + combined_hash(
         hash_extension_data(analyzer, extensions=_ROLE_HASH_EXTENSIONS[role])
     )
 

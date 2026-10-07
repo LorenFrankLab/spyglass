@@ -386,6 +386,22 @@ def test_curation_evaluation_records_source_provenance(
     # Same environment -> not stale.
     assert CurationEvaluation.detect_stale_source(sel)["stale"] is False
 
+    # Legacy byte-only digests remain readable, but cannot establish current
+    # shape/dtype provenance even when the running SI version is unchanged.
+    expected_metrics = CurationEvaluation.get_metrics(sel)
+    CurationEvaluation.update1(
+        {**sel, "source_analyzer_hashes": {"display": "a" * 64}}
+    )
+    try:
+        legacy = CurationEvaluation.detect_stale_source(sel)
+        assert legacy["stale"] is True
+        assert legacy["reasons"] == ["source_analyzer_hash_format:display"]
+        assert CurationEvaluation.get_metrics(sel).equals(expected_metrics)
+    finally:
+        CurationEvaluation.update1(
+            {**sel, "source_analyzer_hashes": row["source_analyzer_hashes"]}
+        )
+
     # A SpikeInterface-version drift is flagged.
     monkeypatch.setattr(si, "__version__", "0.0.0-test")
     version_drift = CurationEvaluation.detect_stale_source(sel)

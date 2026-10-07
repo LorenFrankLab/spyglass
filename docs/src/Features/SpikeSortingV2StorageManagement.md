@@ -36,6 +36,17 @@ its precision is fixed by the fingerprint's `TRACE_ROUNDING` /
 `TIMESTAMP_ROUNDING` constants; `rounding` applies only to the analyzer
 extension comparison.
 
+Analyzer extension hashes use the version-tagged `array-v2` format: array
+shapes, dtypes, and boundaries are hashed with canonical little-endian values.
+Hashing streams bounded buffers, including for memory-mapped waveforms.
+Inventories from the earlier byte-only format are refreshed when their folder
+is present; a new recompute verdict is required before reclamation. Their audit
+is retained when the folder was already reclaimed. Existing evaluation
+snapshots remain readable, but `detect_stale_source()` reports
+`source_analyzer_hash_format:<role>` until they are reevaluated.
+Evaluation calls reuse existing rows, so recreate the affected evaluation
+result before repopulating it.
+
 ## Workflow
 
 ```python
