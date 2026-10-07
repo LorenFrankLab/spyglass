@@ -170,6 +170,35 @@ def test_apply_label_rules_partial_missing_fail_labels_only_missing_unit():
     }
 
 
+@pytest.mark.parametrize("ambient_level", ["ERROR", "CRITICAL"])
+def test_metric_warning_capture_restores_configured_threshold(
+    caplog, ambient_level
+):
+    """A warning oracle must capture Spyglass without changing quiet policy."""
+    import logging
+
+    from spyglass.spikesorting.v2._metric_curation import (
+        _is_finite_metric_value,
+    )
+    from spyglass.utils import logger
+
+    previous_level = logger.level
+    try:
+        logger.setLevel(ambient_level)
+        configured_level = logger.level
+        with caplog.at_level("WARNING", logger="spyglass"):
+            assert _is_finite_metric_value("not-a-number") is False
+        assert logger.level == configured_level
+        assert any(
+            record.name == "spyglass"
+            and record.levelno == logging.WARNING
+            and "metric" in record.getMessage().lower()
+            for record in caplog.records
+        )
+    finally:
+        logger.setLevel(previous_level)
+
+
 def test_is_finite_metric_value_warns_on_non_numeric(caplog):
     """A genuinely non-numeric metric cell (an SI shape/dtype drift) is filtered
     AND logged -- the swallow must be visible, unlike a legitimate NaN which is
@@ -178,7 +207,7 @@ def test_is_finite_metric_value_warns_on_non_numeric(caplog):
         _is_finite_metric_value,
     )
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="spyglass"):
         result = _is_finite_metric_value("not-a-number")
     assert result is False
     assert any(
@@ -192,7 +221,7 @@ def test_is_finite_metric_value_nan_filtered_silently(caplog):
         _is_finite_metric_value,
     )
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="spyglass"):
         result = _is_finite_metric_value(np.nan)
     assert result is False
     assert not caplog.records
@@ -444,7 +473,7 @@ def test_apply_label_rules_pass_is_silent_for_partial_missing(caplog):
     metrics = pd.DataFrame({"snr": [np.nan, 0.5, 5.0]}, index=[1, 2, 3])
     rules = [_rule(0, "snr", "<", 1.0, "noise")]
     rules[0]["missing_policy"] = "pass"
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="spyglass"):
         labels = apply_label_rules(metrics, rules)
     assert labels == {2: ["noise"]}
     assert not caplog.records, "partial low-spike NaN skip must stay silent"
@@ -461,7 +490,7 @@ def test_apply_label_rules_pass_warns_when_rule_is_wholly_inert(caplog):
     metrics = pd.DataFrame({"nn_noise_overlap": [np.nan, np.nan]}, index=[4, 5])
     rules = [_rule(0, "nn_noise_overlap", ">", 0.1, "noise")]
     rules[0]["missing_policy"] = "pass"
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="spyglass"):
         assert apply_label_rules(metrics, rules) == {}
     assert any(
         "nn_noise_overlap" in record.getMessage() for record in caplog.records
@@ -715,7 +744,7 @@ def test_apply_label_rules_fail_policy_all_missing_warns(caplog):
     metrics = pd.DataFrame({"nn_noise_overlap": [np.nan, np.nan]}, index=[4, 5])
     rules = [_rule(0, "nn_noise_overlap", ">", 0.1, "noise")]
     rules[0]["missing_policy"] = "fail"
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="spyglass"):
         labels = apply_label_rules(metrics, rules)
     assert labels == {4: ["noise"], 5: ["noise"]}
     assert any(
@@ -838,7 +867,7 @@ def test_si_metric_error_on_rule_column_raises():
 def test_si_metric_errors_off_rule_columns_are_logged_not_raised(caplog):
     """Unreferenced failures are logged; other warnings are re-emitted."""
     with (
-        caplog.at_level("WARNING"),
+        caplog.at_level("WARNING", logger="spyglass"),
         warnings.catch_warnings(record=True) as reemitted,
     ):
         warnings.simplefilter("always")
@@ -865,7 +894,7 @@ def test_escalate_si_metric_errors_raises_even_when_warnings_are_ignored():
 def test_escalate_si_metric_errors_keeps_the_original_error(caplog):
     """If the block raises, its error propagates; warnings are not lost."""
     with (
-        caplog.at_level("WARNING"),
+        caplog.at_level("WARNING", logger="spyglass"),
         warnings.catch_warnings(record=True) as reemitted,
     ):
         warnings.simplefilter("always")

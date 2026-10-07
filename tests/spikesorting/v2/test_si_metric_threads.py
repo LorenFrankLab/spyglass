@@ -267,7 +267,7 @@ def test_concurrent_si_warning_capture_is_attributed_to_its_own_evaluation(
         finally:
             b_done.set()
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="spyglass"):
         outcome = _run_threads({"A": run_a, "B": run_b})
 
     failure_logs = [

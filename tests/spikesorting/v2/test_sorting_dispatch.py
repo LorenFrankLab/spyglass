@@ -144,7 +144,7 @@ def test_sorter_tempdir_cleanup_does_not_mask_sort_exception(
     rec = sc.generate_recording(
         num_channels=4, durations=[0.5], sampling_frequency=30000.0
     )
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="spyglass"):
         # tridesclous2: non-MS4 (no np.Inf patch), non-MATLAB sorter.
         with pytest.raises(_SortBoom):
             Sorting._run_si_sorter(
@@ -637,7 +637,7 @@ def test_remove_excess_spikes_drops_empty_units(caplog):
         samples_list=[samples], labels_list=[labels], sampling_frequency=fs
     )
 
-    with caplog.at_level("INFO"):
+    with caplog.at_level("INFO", logger="spyglass"):
         out = remove_excess_spikes(sorting, rec)
 
     assert list(out.unit_ids) == [3, 12], (

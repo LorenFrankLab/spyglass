@@ -1364,7 +1364,7 @@ def test_span_without_peaks_is_reported_not_fatal(caplog):
     second_start_s = (n - 5) / 3e4 + 1.0
     clock = _clock_for([(0, n - 5), (n - 5, n)], [0.0, second_start_s])
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.WARNING, logger="spyglass"):
         motion, diagnostics = _estimate(recording, clock=clock)
 
     assert diagnostics.peaks_per_continuity_span[0] > 0

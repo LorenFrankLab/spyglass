@@ -36,7 +36,7 @@ def _assert_tetrode_gate_noop(
         sampling_frequency=30_000.0,
     )
     before = rec.get_channel_locations().copy()
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.INFO, logger="spyglass"):
         result = maybe_apply_tetrode_geometry(
             rec, probe_types, electrode_group_names, channel_ids
         )

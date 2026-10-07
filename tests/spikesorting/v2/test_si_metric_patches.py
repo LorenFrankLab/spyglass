@@ -236,7 +236,7 @@ def test_nn_noise_cluster_warns_when_no_span_fits_a_snippet(caplog):
     )
 
     recording, _, _, _ = _masked_frame_indexed_recording()
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="spyglass"):
         with noise_cluster_spans([(0, 50), (100, 180)]):
             with pytest.raises(ValueError, match="no span admits"):
                 _draw_noise_cluster(

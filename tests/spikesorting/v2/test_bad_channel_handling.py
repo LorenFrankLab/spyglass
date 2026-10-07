@@ -112,6 +112,19 @@ class _FakeRecording:
         # Nyquist guard in apply_temporal_preprocessing is a no-op here.
         return 30000.0
 
+    def get_num_segments(self):
+        return 1
+
+    def select_segments(self, indices):
+        if indices != [0]:
+            raise IndexError("The test recording has only segment 0")
+        return self
+
+    def has_time_vector(self):
+        # These routing oracles use a continuous, uniformly sampled segment.
+        # The real acquisition-span gate must run before temporal operations.
+        return False
+
     def get_property(self, key):
         return None
 

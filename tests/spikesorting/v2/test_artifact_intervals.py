@@ -353,7 +353,7 @@ def test_detect_artifacts_warns_when_min_length_drops_all_valid_time(caplog):
     rec = _rec(traces, fs=fs)
     params = _artifact_params(min_length_s=1.0)  # amplitude_threshold_uv=1000
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="spyglass"):
         vt = detect_artifacts(rec, params, context=" for unit-test")
     assert vt.shape == (0, 2)
     assert any("no valid time" in r.message.lower() for r in caplog.records), (
@@ -403,7 +403,7 @@ def test_detect_artifacts_warns_zscore_inert_on_single_channel(caplog):
     params = _artifact_params(
         amplitude_threshold_uv=1000.0, zscore_threshold=3.0
     )
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="spyglass"):
         detect_artifacts(rec, params)
     assert any("inert" in r.message.lower() for r in caplog.records)
 
@@ -419,7 +419,7 @@ def test_detect_artifacts_warns_proportion_rounds_to_all_channels(caplog):
     params = _artifact_params(
         proportion_above_threshold=0.7, amplitude_threshold_uv=1000.0
     )
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="spyglass"):
         detect_artifacts(rec, params)
     assert any(
         "all" in r.message.lower() and "channel" in r.message.lower()
@@ -437,7 +437,7 @@ def test_detect_artifacts_no_proportion_warning_on_tetrode(caplog):
     params = _artifact_params(
         proportion_above_threshold=0.7, amplitude_threshold_uv=1000.0
     )
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="spyglass"):
         detect_artifacts(rec, params)
     assert not any("rounds up" in r.message.lower() for r in caplog.records)
 
