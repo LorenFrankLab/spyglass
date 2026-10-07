@@ -772,7 +772,7 @@ def test_run_v2_pipeline_pipeline_preset_wiring_to_run_summary(
 
 @pytest.mark.slow
 def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
-    """The native franklab MS4 production preset must run in the v2 environment."""
+    """Omitting the preset runs native hippocampus MS4 through persistence."""
     import numpy as np
     import spikeinterface.sorters as sis
 
@@ -793,11 +793,14 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name=team_name,
-        pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
     )
     try:
         report = preflight_v2_pipeline(**inputs)
         assert report.ok, report.errors
+        assert (
+            report.resolved_pipeline_preset
+            == "franklab_probe_hippocampus_30khz_ms4_2026_06"
+        )
 
         # MS4 is runnable here; preflight already passed, so skip re-running it.
         run_summary = run_v2_pipeline(**inputs, preflight=False)

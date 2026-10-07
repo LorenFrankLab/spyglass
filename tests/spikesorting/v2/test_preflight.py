@@ -653,11 +653,11 @@ def test_preflight_all_pass(preflight_inputs):
     assert "sorter_params_valid" in {c.name for c in report.checks}
     config = report.effective_config
     assert config is not None
-    assert config["sorter"] == "mountainsort5"
+    assert config["sorter"] == "mountainsort4"
     assert config["external_whiten"] is True
     assert config["si_sorter_params"]["whiten"] is False
     assert config["execution_backend"] == "local"
-    rows = (SorterParameters & {"sorter": "mountainsort5"}).fetch(as_dict=True)
+    rows = (SorterParameters & {"sorter": "mountainsort4"}).fetch(as_dict=True)
     matching = [
         r
         for r in rows
@@ -1042,10 +1042,10 @@ def test_preflight_sorter_not_installed(preflight_inputs, monkeypatch):
     monkeypatch.setattr(
         sis,
         "installed_sorters",
-        lambda: sorted(real_installed - {"mountainsort5"}),
+        lambda: sorted(real_installed - {"mountainsort4"}),
     )
 
-    report = preflight_v2_pipeline(**preflight_inputs)  # default = ms5
+    report = preflight_v2_pipeline(**preflight_inputs)  # default = native ms4
     (sorter_check,) = [c for c in report.checks if c.name == "sorter_installed"]
     assert sorter_check.ok is False
     assert "installed_sorters()" in sorter_check.fix
@@ -1143,7 +1143,7 @@ def test_preflight_sorter_runtime_backend_missing(
     from spyglass.spikesorting.v2 import pipeline as pl
 
     default_sorter = pl._PIPELINE_PRESETS[
-        "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+        "franklab_probe_hippocampus_30khz_ms4_2026_06"
     ].sorter
     monkeypatch.setattr(
         "spyglass.spikesorting.v2._pipeline_preflight._SORTER_RUNTIME_BACKENDS",

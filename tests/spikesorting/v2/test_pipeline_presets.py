@@ -203,7 +203,7 @@ def test_container_ms4_pipeline_preset_registered():
     execution columns. The preset names the containerized sorter row, stays
     ``recommendation_status="production"`` (the recommended-science MS4 path),
     and its notes describe the modern-host (numpy>=2) container path; the
-    function default remains MountainSort5.
+    function default uses native MountainSort4.
     """
     name = "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
     df = describe_pipeline_presets().set_index("pipeline_preset")
@@ -215,7 +215,7 @@ def test_container_ms4_pipeline_preset_registered():
     assert "numpy>=2" in row["notes"]
     assert "Singularity" in row["notes"]
 
-    # The container option does not replace the MS5 default.
+    # The container option does not replace the native hippocampus default.
     from spyglass.spikesorting.v2 import pipeline as pipeline_mod
     import inspect
 
@@ -224,7 +224,8 @@ def test_container_ms4_pipeline_preset_registered():
         .parameters["pipeline_preset"]
         .default
     )
-    assert pipeline_mod._PIPELINE_PRESETS[default].sorter == "mountainsort5"
+    assert default == "franklab_probe_hippocampus_30khz_ms4_2026_06"
+    assert pipeline_mod._PIPELINE_PRESETS[default].sorter == "mountainsort4"
 
 
 @pytest.mark.unit

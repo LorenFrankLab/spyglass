@@ -98,7 +98,7 @@ concat_group_name = "day1_blocks"
 # Motion correction is independent of concatenation and off by default: pass
 # motion_mode / motion_correction_params_name to run_v2_pipeline to estimate or
 # apply it, the same way for a single-session or a concat preset.
-concat_preset = "franklab_concat_hippocampus_30khz_ms5_2026_09"
+concat_preset = "franklab_probe_hippocampus_30khz_ms4_2026_06"
 
 # Part B — sessions to sort INDEPENDENTLY and match, typically across days (same
 # animal + probe). The match group allows multiple days.
@@ -115,7 +115,7 @@ match_members = [
     },
 ]
 match_group_name = "day1_to_day2"
-single_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
+single_preset = "franklab_probe_hippocampus_30khz_ms4_2026_06"
 # The matcher backend + its parameters. The default uses UnitMatchPy; see
 # describe_pipeline_presets()'s sibling MatcherParameters for the shipped rows.
 matcher_params_name = "unitmatch_default"

@@ -54,7 +54,7 @@ dj.config["display.limit"] = 12
 nwb_file_name = "your_session.nwb"  # replace with your ingested session
 team_name = "my_team"
 interval_list_name = "raw data valid times"
-pipeline_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
+pipeline_preset = "franklab_probe_hippocampus_30khz_ms4_2026_06"
 review_profile = "franklab_hippocampus_2026_09_17"
 # Keep run-all/headless execution safe. Set True interactively when ready.
 open_review_in_browser = False

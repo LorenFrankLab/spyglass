@@ -302,7 +302,7 @@ jobs:
     - name: Verify the v2 environment (pip check + sorter runtime)
       # A clean, reproducible modern install must be consistent (pip check)
       # AND able to run the sorters, not merely locate their packages:
-      # run the default MountainSort5 on synthetic data. Native
+      # smoke the MountainSort5 alternative on synthetic data. Default native
       # MS4 is required by test_mountainsort4_runtime.py and the single-session
       # MS4 pipeline test below; runtime failures must not become skips.
       run: |

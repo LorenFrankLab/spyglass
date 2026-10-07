@@ -19,7 +19,7 @@ cross-session notebook's match (Part B) runs only in the matching lane -- the cr
 stands in a lightweight fixture matcher there and exercises Part A (concat)
 everywhere.
 
-Heavy (real MountainSort5 sorts + curation-evaluation PCA), hence
+Heavy (real MountainSort4 sorts + curation-evaluation PCA), hence
 ``@pytest.mark.slow``.
 """
 
@@ -137,7 +137,7 @@ def _notebook_params(nwb_file_name, sort_group_id):
         "nwb_file_name": nwb_file_name,
         "team_name": "notebook_exec_team",
         "interval_list_name": "raw data valid times",
-        "pipeline_preset": "franklab_probe_hippocampus_30khz_ms5_2026_06",
+        "pipeline_preset": "franklab_probe_hippocampus_30khz_ms4_2026_06",
         "sort_group_id": sort_group_id,
     }
 
@@ -253,7 +253,7 @@ def test_presets_notebook_runs(dj_conn, subset, monkeypatch):
         parameters,
     )
     # The clone is registered, and the whole-session sweep returns per-group rows.
-    assert "my_lab_ms5_lower_threshold" in namespace["list_pipeline_presets"]()
+    assert "my_lab_ms4_lower_threshold" in namespace["list_pipeline_presets"]()
     assert isinstance(namespace["session_results"], list)
     assert namespace["session_results"]
     expected_ids = (
@@ -428,10 +428,10 @@ def test_cross_session_notebook_runs(dj_conn):
         "session_group_owner": "notebook_xsession_team",
         "same_day_members": members[:2],
         "concat_group_name": "notebook_concat",
-        "concat_preset": "franklab_concat_hippocampus_30khz_ms5_2026_09",
+        "concat_preset": "franklab_probe_hippocampus_30khz_ms4_2026_06",
         "match_members": [members[0], members[2]],
         "match_group_name": "notebook_match",
-        "single_preset": "franklab_probe_hippocampus_30khz_ms5_2026_06",
+        "single_preset": "franklab_probe_hippocampus_30khz_ms4_2026_06",
         "run_concat": True,
         "run_unit_match": unitmatch_available,
     }

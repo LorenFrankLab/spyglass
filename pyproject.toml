@@ -136,7 +136,7 @@ optional-dependencies.spikesorting-v2 = [
   # dispatcher's scoped spikeextractors np.Inf compatibility shim. Pin the
   # native runtime exercised by the real-sort regression test.
   "mountainsort4==1.0.7",
-  "mountainsort5>=0.5", # default v2 sorter; pulls isosplit6 + scikit-learn
+  "mountainsort5>=0.5", # v2 alternative; pulls isosplit6 + scikit-learn
   # This extra's torch>=2 + SI 0.104 runtime resolves on the numpy-2 line.
   "numpy>=2,<3",
   # Drift/motion QC: DriftEstimate's default preset

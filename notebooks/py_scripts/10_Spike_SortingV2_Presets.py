@@ -54,7 +54,7 @@ dj.config["display.limit"] = 12
 nwb_file_name = "your_session.nwb"  # replace with your ingested session
 team_name = "my_team"
 interval_list_name = "raw data valid times"
-pipeline_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
+pipeline_preset = "franklab_probe_hippocampus_30khz_ms4_2026_06"
 references = None  # inherit stored references; review before creating groups
 # None sorts every group; set an explicit subset such as [0, 2] if needed.
 sort_group_ids = None
@@ -147,14 +147,14 @@ sort_groups
 # use, and (a known footgun) the units of the detection threshold — so you can
 # choose one without reading the module source.
 
-# The default is the runnable MS5 alternative, not an automatic choice of
-# the lab's preferred scientific recipe. For hippocampal polymer probes:
+# Native MountainSort4 is the default hippocampus production recipe.
+# For hippocampal polymer probes:
 #
 # | Choice | Recommendation | Runtime requirement |
 # | --- | --- | --- |
-# | MountainSort4, local | Lab production recipe | MS4 backend in a compatible `numpy<2` environment |
+# | MountainSort4, local | Lab production recipe; notebook default | Standard v2 environment |
 # | MountainSort4, container | Same production recipe on a modern host | Singularity/Apptainer and the catalog's container image |
-# | MountainSort5 | Alternative; notebook default | Standard v2 environment |
+# | MountainSort5 | Alternative | Standard v2 environment |
 #
 # Match the catalog's region, sampling rate and probe metadata to your
 # recording. `production` means lab-recommended, `alternative` is a supported
@@ -176,18 +176,18 @@ describe_pipeline_preset(pipeline_preset)
 # `clone_pipeline_preset` derives a new preset from an existing one by tuning a single
 # knob: pass the parameter you want to change as a keyword and it builds only the
 # new parameter rows that differ, reusing the base preset's rows for every
-# untouched stage. Here we lower the MountainSort5 detection threshold (a common
+# untouched stage. Here we lower the MountainSort4 detection threshold (a common
 # tweak for low-amplitude units). The clone is then selectable by name like any
 # shipping preset — set `pipeline_preset` to it to use it below. (Registering a
 # name that already exists raises, so each cell is guarded to be safe to re-run.)
 
-if "my_lab_ms5_lower_threshold" not in list_pipeline_presets():
+if "my_lab_ms4_lower_threshold" not in list_pipeline_presets():
     clone_pipeline_preset(
         pipeline_preset,
-        "my_lab_ms5_lower_threshold",
-        detect_threshold=5.0,
+        "my_lab_ms4_lower_threshold",
+        detect_threshold=2.5,
     )
-describe_pipeline_preset("my_lab_ms5_lower_threshold")
+describe_pipeline_preset("my_lab_ms4_lower_threshold")
 
 # For a fully custom pipeline — a different sorter, or a stage combination no
 # shipping preset covers — `register_pipeline_preset(name, {...})` adds a preset from the

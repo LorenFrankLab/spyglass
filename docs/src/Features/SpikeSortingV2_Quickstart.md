@@ -102,14 +102,14 @@ elif sort_group_id not in available_sort_group_ids:
 
 ## 2. Choose a recipe, inspect the plan, then sort
 
-The notebook default is the supported MountainSort5 alternative. For hippocampal
-polymer probes, the lab production recipe is MountainSort4:
+The pipeline and notebook default is native MountainSort4, the lab production
+recipe for hippocampus:
 
 | Recipe                                    | Runtime requirement                                     |
 | ----------------------------------------- | ------------------------------------------------------- |
 | Local MountainSort4 production preset     | Standard v2 environment (`spikesorting-v2` extra)       |
 | Container MountainSort4 production preset | Singularity/Apptainer and the catalog's container image |
-| MountainSort5 alternative (below)         | Standard v2 environment                                 |
+| MountainSort5 alternative                | Standard v2 environment                                 |
 
 Use `describe_pipeline_presets()` to match the region, sampling rate, and probe
 type and read each recipe's runtime notes. Selecting a preset never silently
@@ -126,7 +126,7 @@ the sort with the preset's metric and rule rows and commits an **auto-labeled**
 child curation in the same call. For the preset below the rules are
 `franklab_default_auto_curation_2026_09` (`nn_noise_overlap > 0.1` → `noise`,
 `isi_violation > 0.02` → `reject`); call
-`describe_pipeline_preset("franklab_probe_hippocampus_30khz_ms5_2026_06")` to
+`describe_pipeline_preset("franklab_probe_hippocampus_30khz_ms4_2026_06")` to
 inspect them before running.
 
 ```python
@@ -135,7 +135,7 @@ run_kwargs = dict(
     sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms4_2026_06",
     auto_curate=True,
 )
 report = preflight_v2_pipeline(**run_kwargs)
@@ -297,7 +297,7 @@ For a concatenated (multi-member) sort the receipt holds one per-member group
 
 ## Supported workloads: what changes
 
-- **Tetrodes**: `franklab_tetrode_hippocampus_30khz_ms5_2026_06` (the same
+- **Tetrodes**: `franklab_tetrode_hippocampus_30khz_ms4_2026_06` (the same
     parameter rows as the probe preset; `probe_type` is informational). The
     analyzer sparsity default (radius 100 µm) is effectively dense on a tetrode.
 - **Polymer probes / drift**: sort same-day sessions together with the concat

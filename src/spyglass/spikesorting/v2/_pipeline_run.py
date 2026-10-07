@@ -1117,9 +1117,9 @@ def run_v2_pipeline(
         to each member.
     pipeline_preset
         Pipeline-preset name from ``_PIPELINE_PRESETS``. The default is
-        ``franklab_probe_hippocampus_30khz_ms5_2026_06`` (MountainSort5),
+        ``franklab_probe_hippocampus_30khz_ms4_2026_06`` (MountainSort4),
         which runs under the v2 ``numpy>=2`` baseline out of the box; it is the
-        probe-labeled twin of the tetrode-labeled MS5 preset (both resolve to the
+        probe-labeled twin of the tetrode-labeled MS4 preset (both resolve to the
         same parameter rows -- ``probe_type`` is informational).
 
         MountainSort4 is the scientifically-preferred polymer-probe recipe.

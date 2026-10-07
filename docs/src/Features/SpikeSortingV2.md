@@ -199,11 +199,13 @@ presets[presets["sorter_family"] == "kilosort4"]
 
 The shipped presets (all dated `_2026_06`):
 
-- `franklab_probe_hippocampus_30khz_ms5_2026_06` -- **default**, MountainSort5
-    (hippocampus 600 Hz high-pass, 30 kHz). Its `recommendation_status` is
-    `"alternative"`. `franklab_tetrode_hippocampus_30khz_ms5_2026_06` is the
-    same recipe under a tetrode label (`probe_type` is informational; both
-    resolve to the same parameter rows).
+- `franklab_probe_hippocampus_30khz_ms4_2026_06` -- **default**, native
+    MountainSort4 (hippocampus 600 Hz high-pass, 30 kHz), with
+    `recommendation_status="production"`. The tetrode-labeled MS4 preset uses
+    the same parameter rows (`probe_type` is informational).
+- `franklab_probe_hippocampus_30khz_ms5_2026_06` -- MountainSort5
+    alternative for the same region and rate, with
+    `recommendation_status="alternative"`.
 - `franklab_probe_hippocampus_30khz_ms4_singularity_2026_06` -- the
     container execution option for the production MountainSort4 recipe: MS4
     runs in a pinned Singularity container. Preflight gates it on
@@ -306,7 +308,7 @@ run_kwargs = dict(
     sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms4_2026_06",
 )
 report = preflight_v2_pipeline(**run_kwargs)
 print(report.summary())  # blockers, warnings, stages to compute/reuse
@@ -1170,7 +1172,7 @@ source = dict(
     sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms4_2026_06",
 )
 
 # Concat: pass concat_session_group_owner / concat_session_group_name instead.

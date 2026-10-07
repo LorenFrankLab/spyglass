@@ -39,7 +39,7 @@ downstream code keys off `merge_id` regardless of which produced the sort.
 | ---------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | Install          | `pip install -e ".[spikesorting-v2]"` (or `environments/environment_spikesorting_v2.yml`); SI 0.104.3, NumPy 2 | `environments/environment_spikesorting_legacy.yml`, SI 0.99, NumPy < 2       |
 | Runs             | v2 sort / review / curation / selection; **reads** v0/v1 outputs (`SpikeSortingOutput`, `SortedSpikesGroup`)   | v0/v1 populate / `MetricCuration` / `BurstPair` / `Waveforms`; MountainSort4 |
-| Sorters that run | MountainSort4 (native or container), MountainSort5 (default), Kilosort4 (with its GPU runtime installed), SpykingCircus2 / Tridesclous2 | MountainSort4 and the v1 sorter set |
+| Sorters that run | MountainSort4 (hippocampus default; native or container), MountainSort5 (alternative), Kilosort4 (with its GPU runtime installed), SpykingCircus2 / Tridesclous2 | MountainSort4 and the v1 sorter set |
 | Check            | `pip check`; `preflight_v2_pipeline(...)` reports `sorter_installed` / `sorter_runtime_available`              | `pip check`; the v1 tutorials                                                |
 
 Both environments share the same MySQL database and the same `SPYGLASS_BASE_DIR`

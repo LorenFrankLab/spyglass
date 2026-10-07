@@ -674,7 +674,7 @@ def _franklab_ms4_singularity_spec() -> dict:
     preset -- it is read from the referenced ``SorterParameters.execution_params``
     row (the single source of truth); ``describe_pipeline_preset(name)`` surfaces
     it. ``recommendation_status`` stays ``"production"`` (the recommended-science
-    MS4 path on modern hosts); ``run_v2_pipeline``'s default remains MountainSort5.
+    MS4 path on modern hosts); ``run_v2_pipeline`` defaults to native MS4.
     """
     spec = _franklab_ms4_spec("probe", "hippocampus", 30000)
     spec.update(
@@ -695,7 +695,7 @@ def _franklab_ms4_singularity_spec() -> dict:
             "can stay on the v2 numpy>=2 baseline. Native MS4 also supports "
             "numpy>=2. Preflight checks Singularity runtime "
             "availability and never silently falls back to local execution. "
-            "run_v2_pipeline's default remains MountainSort5."
+            "run_v2_pipeline defaults to the native MS4 production recipe."
         ),
     )
     return spec
@@ -704,23 +704,21 @@ def _franklab_ms4_singularity_spec() -> dict:
 # MS5 hippocampus-30 kHz presets. probe_type is informational (the recipe is
 # region + rate), so the tetrode- and probe-labeled MS5 presets resolve to the
 # SAME preprocessing / artifact / sorter parameter rows; only the provenance
-# label differs. The probe-labeled one is run_v2_pipeline's default -- it matches
-# the lab's polymer-probe default. MS4 production presets are available through
-# both native and container execution.
+# label differs. These are alternatives to the native MS4 hippocampus default.
 MS5_TETRODE_HIPPOCAMPUS_30KHZ = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
 MS5_PROBE_HIPPOCAMPUS_30KHZ = "franklab_probe_hippocampus_30khz_ms5_2026_06"
 # The shipped run_v2_pipeline / preflight default (single source of truth).
-DEFAULT_PIPELINE_PRESET = MS5_PROBE_HIPPOCAMPUS_30KHZ
+DEFAULT_PIPELINE_PRESET = "franklab_probe_hippocampus_30khz_ms4_2026_06"
 
 _MS5_NOTES = (
     "MountainSort5 detect_threshold is a multiple of the standard "
     "deviation of the whitened signal (~5.5, more conservative than "
-    "MS4's 3) -- the same sigma scale, not a MAD multiplier. MS5 is the "
-    "shipped run_v2_pipeline default. MS4 is the Frank-lab production recipe "
-    "and also runs natively under numpy>=2. recommendation_status stays "
-    "'alternative' (MS5 has no attested probe usage); the function default "
-    "is a separate choice. The tetrode- and probe-labeled MS5 presets resolve "
-    "to the same parameter rows (probe_type is informational)."
+    "MS4's 3) -- the same sigma scale, not a MAD multiplier. MS5 is an "
+    "alternative to the default MountainSort4 hippocampus production recipe. "
+    "Both run natively under numpy>=2. recommendation_status is 'alternative' "
+    "(MS5 has no attested probe usage). The tetrode- and probe-labeled MS5 "
+    "presets resolve to the same parameter rows (probe_type is "
+    "informational)."
 )
 
 
@@ -729,16 +727,13 @@ def _franklab_ms5_spec(probe_type: str) -> dict:
 
     The tetrode- and probe-labeled MS5 presets differ only in ``probe_type`` and
     their ``intended_use`` text -- they bundle the identical preprocessing /
-    artifact / sorter rows, so this single builder keeps them from drifting. Only
-    the probe-labeled row calls itself the ``run_v2_pipeline`` default; the
-    tetrode-labeled row describes itself as the same recipe under a tetrode label
-    so ``describe_pipeline_presets()`` does not advertise two defaults.
+    artifact / sorter rows, so this single builder keeps them from drifting.
+    Both are alternatives to the native MS4 hippocampus default.
     """
     if probe_type == "probe":
         intended_use = (
-            "Frank-lab hippocampal probes at 30 kHz, MountainSort5 -- the "
-            "shipped run_v2_pipeline default. The scientifically-preferred "
-            "polymer-probe recipe is MountainSort4: use the native "
+            "Frank-lab hippocampal probes at 30 kHz, MountainSort5 alternative. "
+            "The default hippocampus recipe is MountainSort4: use the native "
             "franklab_probe_hippocampus_30khz_ms4_2026_06 preset in the standard "
             "v2 environment, or the containerized "
             f"{MS4_SINGULARITY_30KHZ} with Singularity/Apptainer."
@@ -746,7 +741,7 @@ def _franklab_ms5_spec(probe_type: str) -> dict:
     else:
         intended_use = (
             f"Frank-lab hippocampal {probe_type}s at 30 kHz, MountainSort5 -- "
-            "the same recipe as the probe-labeled run_v2_pipeline default "
+            "the same alternative recipe as the probe-labeled "
             f"{MS5_PROBE_HIPPOCAMPUS_30KHZ} under a tetrode label (probe_type "
             "is informational; both resolve to the same parameter rows)."
         )
@@ -791,8 +786,7 @@ def pipeline_preset_specs() -> dict[str, dict]:
         "franklab_probe_cortex_20khz_ms4_2026_06": _franklab_ms4_spec(
             "probe", "cortex", 20000
         ),
-        # Tetrode- and probe-labeled MS5 resolve to the SAME parameter rows; the
-        # probe-labeled one is run_v2_pipeline's default (see _franklab_ms5_spec).
+        # Tetrode- and probe-labeled MS5 alternatives use the same parameter rows.
         MS5_TETRODE_HIPPOCAMPUS_30KHZ: _franklab_ms5_spec("tetrode"),
         MS5_PROBE_HIPPOCAMPUS_30KHZ: _franklab_ms5_spec("probe"),
         "franklab_clusterless_2026_06": dict(
@@ -888,7 +882,7 @@ def pipeline_preset_specs() -> dict[str, dict]:
             notes=(
                 "Detect and mask artifacts per member before concatenation. "
                 "Otherwise the same MS5 "
-                "hippocampus recipe as the single-session default; MS5 runs "
+                "hippocampus recipe as the single-session MS5 alternative; MS5 runs "
                 "under the v2 numpy>=2 baseline. Run it via run_v2_pipeline's "
                 "concat mode (concat_session_group_owner / "
                 "concat_session_group_name). Marked experimental: validate the "

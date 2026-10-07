@@ -66,12 +66,11 @@ dj.config["display.limit"] = 12  # cap rows in table reprs
 #
 # Point the notebook at the session you ingested with `insert_sessions`. A
 # full-session sort uses the `"raw data valid times"` interval and the default
-# MountainSort5 pipeline preset (`franklab_probe_hippocampus_30khz_ms5_2026_06`):
-# it runs under the `numpy>=2` baseline out of the box. MountainSort4 is the
-# scientifically-preferred polymer-probe recipe but needs `numpy<2`, so run it
-# via the containerized `franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`
-# preset on modern (`numpy>=2`) hosts with Singularity/Apptainer, or the local
-# `franklab_probe_hippocampus_30khz_ms4_2026_06` preset on `numpy<2` hosts.
+# native MountainSort4 hippocampus production preset
+# (`franklab_probe_hippocampus_30khz_ms4_2026_06`). MS4 is included in the v2
+# extra and runs under the `numpy>=2` baseline. A container execution option is
+# available through `franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`
+# with Singularity/Apptainer.
 # Change `pipeline_preset` to any name from `describe_pipeline_presets()` below
 # (e.g. a cortex or 20 kHz preset).
 #
@@ -86,7 +85,7 @@ dj.config["display.limit"] = 12  # cap rows in table reprs
 nwb_file_name = "your_session.nwb"  # replace with your ingested session
 team_name = "my_team"
 interval_list_name = "raw data valid times"
-pipeline_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
+pipeline_preset = "franklab_probe_hippocampus_30khz_ms4_2026_06"
 references = None  # inherit stored references; review before creating groups
 # Sort group (shank) to sort. None auto-picks only when the session has exactly
 # one sort group; otherwise set it deliberately after reviewing step 2.
@@ -188,14 +187,14 @@ sort_group_id
 # use, and (a known footgun) the units of the detection threshold — so you can
 # choose one without reading the module source.
 
-# The default is the runnable MS5 alternative, not an automatic choice of
-# the lab's preferred scientific recipe. For hippocampal polymer probes:
+# Native MountainSort4 is the default hippocampus production recipe.
+# For hippocampal polymer probes:
 #
 # | Choice | Recommendation | Runtime requirement |
 # | --- | --- | --- |
-# | MountainSort4, local | Lab production recipe | MS4 backend in a compatible `numpy<2` environment |
+# | MountainSort4, local | Lab production recipe; notebook default | Standard v2 environment |
 # | MountainSort4, container | Same production recipe on a modern host | Singularity/Apptainer and the catalog's container image |
-# | MountainSort5 | Alternative; notebook default | Standard v2 environment |
+# | MountainSort5 | Alternative | Standard v2 environment |
 #
 # Match the catalog's region, sampling rate and probe metadata to your
 # recording. `production` means lab-recommended, `alternative` is a supported
