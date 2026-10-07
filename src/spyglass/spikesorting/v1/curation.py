@@ -9,6 +9,10 @@ import spikeinterface.extractors as se
 
 from spyglass.common import BrainRegion, Electrode
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting._merge_groups import (
+    _merge_dict_to_list,
+    _union_intersecting_lists,
+)
 from spyglass.spikesorting.v1.recording import (
     SortGroup,
     SpikeSortingRecording,
@@ -431,29 +435,6 @@ def _write_sorting_to_nwb_with_curation(
     return analysis_nwb_file, units_object_id
 
 
-def _union_intersecting_lists(lists):
-    result = []
-
-    while lists:
-        first, *rest = lists
-        first = set(first)
-
-        merged = True
-        while merged:
-            merged = False
-            for idx, other in enumerate(rest):
-                if first.intersection(other):
-                    first.update(other)
-                    del rest[idx]
-                    merged = True
-                    break
-
-        result.append(list(first))
-        lists = rest
-
-    return result
-
-
 def _list_to_merge_dict(
     merge_group_list: List[List], all_unit_ids: List
 ) -> dict:
@@ -492,35 +473,3 @@ def _list_to_merge_dict(
                 )
 
     return merge_dict
-
-
-def _reverse_associations(assoc_dict):
-    return [
-        [key] + values if values else [key]
-        for key, values in assoc_dict.items()
-    ]
-
-
-def _merge_dict_to_list(merge_groups: dict) -> List:
-    """Converts dict of merge groups to list of merge groups.
-    Undoes `_list_to_merge_dict`.
-
-    Parameters
-    ----------
-    merge_dict : dict
-        dict of merge groups;
-        keys are unit IDs and values are the units to be merged
-
-    Returns
-    -------
-    merge_group_list : list of list
-        list of merge groups (list of unit IDs to be merged)
-
-    Example
-    -------
-    {1: [2, 3], 4: [5]} -> [[1, 2, 3], [4, 5]]
-    """
-    units_to_merge = _union_intersecting_lists(
-        _reverse_associations(merge_groups)
-    )
-    return [lst for lst in units_to_merge if len(lst) >= 2]

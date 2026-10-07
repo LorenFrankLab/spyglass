@@ -1,0 +1,1833 @@
+"""Preprocessed recording materialization for spike sorting.
+
+Tables:
+    SortGroupV2          -- per-session electrode grouping.
+    PreprocessingParameters -- Pydantic-validated preprocessing blob.
+    RecordingSelection   -- one row per (raw, sort group, interval, params).
+    Recording            -- materialized preprocessed recording (NWB-resident).
+    DriftEstimate        -- per-Recording probe-motion QC estimate (never
+                            applied to the traces; populated on demand).
+
+``insert1`` on the Lookup tables Pydantic-validates the ``params`` blob.
+``SortGroupV2.set_group_by_*`` constructors,
+``RecordingSelection.insert_selection``, and ``Recording.make`` /
+``get_recording`` are the entry points. The recording write applies bandpass
+filtering + common-reference referencing (no whitening; that is deferred
+to the sort stage so motion correction never sees whitened data).
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING, NamedTuple
+
+import datajoint as dj
+import numpy as np
+
+from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
+from spyglass.common.common_ephys import Electrode, Raw  # noqa: F401
+from spyglass.common.common_nwbfile import (
+    AnalysisNwbfile,
+    Nwbfile,
+)  # noqa: F401
+from spyglass.spikesorting.v2._motion import (
+    motion_from_storage_dict,
+    motion_max_abs_displacement_um,
+    motion_n_temporal_bins,
+    motion_to_storage_dict,
+)
+from spyglass.spikesorting.v2._params.preprocessing import (
+    PREPROCESSING_SCHEMA_VERSION,
+    PreprocessingParamsSchema,
+)
+from spyglass.spikesorting.v2 import (
+    _recording_fetch,
+    _recording_nwb,
+    _sort_group_insert,
+)
+from spyglass.spikesorting.v2._recording_geometry import (
+    fetch_interior_bad_channel_ids,
+)
+from spyglass.spikesorting.v2._recording_nwb import (
+    StoredTraces,
+    write_nwb_artifact,
+)
+from spyglass.spikesorting.v2._selection_identity import (
+    recording_input_hash,
+)
+from spyglass.spikesorting.v2._recording_restriction import (
+    compute_recording_save_expectation,
+    truncation_tolerance,
+)
+from spyglass.spikesorting.v2._recipe_catalog import (
+    preprocessing_default_contents,
+)
+from spyglass.spikesorting.v2._sort_group_planning import (
+    _SortGroupPlan,
+    _build_sort_group_rows,
+    _electrode_group_sort_key,
+    _plan_sort_groups_by_column,
+    _plan_sort_groups_by_shank,
+    _reference_electrode_group,
+)
+from spyglass.spikesorting.v2._staged_outputs import (
+    StagedOutputCleanupMixin,
+    StagedOutputs,
+)
+from spyglass.spikesorting.v2.utils import (
+    ImmutableParamsLookup,
+    SelectionMasterInsertGuard,
+    _insert_parameter_rows,
+    _validate_params,
+    _validate_reference_fields,
+    assert_reference_not_member,
+)
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+
+if TYPE_CHECKING:
+    import spikeinterface as si
+
+schema = dj.schema("spikesorting_v2_recording")
+
+
+class DeletionPreview(NamedTuple):
+    """Read-only summary of what ``SortGroupV2.set_group_by_*`` would delete.
+
+    Returned by :meth:`SortGroupV2.preview_existing_entries`. The
+    ``set_group_by_*`` helpers do not return it -- when called with
+    ``delete_existing_entries=True, confirm=False`` they embed the same
+    preview in the ``ValueError`` they raise. Wraps the dry-run output of
+    ``SpyglassMixin.cautious_delete`` so callers can inspect cascade impact
+    before committing to a destructive overwrite.
+
+    Attributes
+    ----------
+    nwb_file_name
+        The session whose ``SortGroupV2`` rows would be deleted.
+    sort_group_rows
+        Number of ``SortGroupV2`` master rows that would be deleted.
+    electrode_rows
+        Number of ``SortGroupV2.SortGroupElectrode`` part rows that
+        would be deleted.
+    cascade_summary
+        Tuple of ``(IntervalList rows touched, raw externals, analysis
+        externals)`` as returned by ``cautious_delete(dry_run=True)``.
+        Use this to spot downstream Recording / Sorting / CurationV2
+        rows that would also vanish via cascade.
+    cross_team_downstream
+        Tuple of per-team dicts (``team_name``, ``recording_selection_rows``,
+        ``sorting_rows``, ``curation_rows``) enumerating the downstream rows
+        each team owns that this overwrite would cascade-delete. Sort groups in
+        one session can belong to different teams, so an overwrite can delete
+        *another* team's downstream rows; this surfaces that blast radius. It
+        does not block (in v2, ``team_name`` is a provenance tag, not
+        access enforcement) -- the operator reviews it before confirming.
+    """
+
+    nwb_file_name: str
+    sort_group_rows: int
+    electrode_rows: int
+    cascade_summary: tuple
+    cross_team_downstream: tuple
+
+
+@schema
+class SortGroupV2(SpyglassMixin, dj.Manual):
+    """Electrode groupings used for spike sorting.
+
+    A sort group is one tetrode, one shank, or any other contiguous
+    subset of channels processed together. The master row stores the
+    group's Session FK and reference electrode; the part table
+    enumerates the Electrode FKs that make up the group.
+
+    Public constructors:
+        ``set_group_by_shank``                    -- shank-based grouping.
+        ``set_group_by_electrode_table_column``   -- arbitrary-column grouping.
+
+    Both honor an inspect-before-destroy contract: by default they
+    refuse to overwrite existing sort groups for a session. Callers
+    must either supply non-overlapping ``sort_group_ids`` or opt in
+    explicitly to a cautious delete via
+    ``delete_existing_entries=True, confirm=True`` (after reviewing
+    the ``DeletionPreview``). This prevents a rerun of
+    ``set_group_by_shank`` from silently dropping and re-creating sort
+    groups, which would cascade deletes through every downstream Sorting
+    and Curation row without warning.
+    """
+
+    definition = """
+    -> Session
+    sort_group_id: int
+    ---
+    reference_mode = 'none': varchar(32)
+    reference_electrode_id = null: int
+    """
+    # ``reference_mode`` is validated against the ``ReferenceMode`` Literal
+    # in ``insert1`` / ``insert`` (varchar, not a MySQL enum -- the mode set
+    # may grow; see ``ReferenceMode``). ``reference_electrode_id`` is
+    # non-null iff ``reference_mode == 'specific'``. v1's ``SortGroup``
+    # instead stores a single ``sort_reference_electrode_id`` int whose magic
+    # sentinels (-1 none, -2 global median, >=0 specific) conflate mode with
+    # channel id.
+
+    class SortGroupElectrode(SpyglassMixinPart):
+        """Electrodes belonging to one sort group."""
+
+        definition = """
+        -> master
+        -> Electrode
+        """
+
+        def insert(self, rows, **kwargs):
+            """Insert members, rejecting the group's own 'specific' reference.
+
+            The reference electrode is subtracted then dropped from the
+            recording, so a reference that is also a member would silently sort
+            one channel short. Recording.make already rejects this via
+            assert_reference_not_member; catch it here, at group construction
+            (the manual-insert path -- set_group_by_shank enforces it too),
+            instead of deferring to a late, opaque populate failure.
+            """
+            rows = [dict(r) for r in rows]
+            self._assert_no_reference_member(rows)
+            super().insert(rows, **kwargs)
+
+        def insert1(self, row, **kwargs):
+            row = dict(row)
+            self._assert_no_reference_member([row])
+            super().insert1(row, **kwargs)
+
+        @staticmethod
+        def _assert_no_reference_member(rows):
+            # One master fetch per (session, sort_group), not per row.
+            by_group: dict = {}
+            for r in rows:
+                by_group.setdefault(
+                    (r["nwb_file_name"], int(r["sort_group_id"])), set()
+                ).add(int(r["electrode_id"]))
+            for (nwb_file_name, sort_group_id), ids in by_group.items():
+                master = (
+                    SortGroupV2
+                    & {
+                        "nwb_file_name": nwb_file_name,
+                        "sort_group_id": sort_group_id,
+                    }
+                ).fetch(
+                    "reference_mode", "reference_electrode_id", as_dict=True
+                )
+                if not master:
+                    continue  # missing master -> the FK surfaces it
+                ref_mode = master[0]["reference_mode"]
+                ref_id = master[0]["reference_electrode_id"]
+                if (
+                    ref_mode == "specific"
+                    and ref_id is not None
+                    and int(ref_id) in ids
+                ):
+                    raise ValueError(
+                        f"SortGroupV2 sort_group_id={sort_group_id} for "
+                        f"{nwb_file_name!r}: electrode {int(ref_id)} is the "
+                        "group's 'specific' reference and cannot also be a "
+                        "member -- the reference is subtracted then dropped, so "
+                        "the sort would run one channel short. Use a "
+                        "cross-group reference electrode."
+                    )
+
+    def insert1(self, row, **kwargs):
+        """Insert one row after validating its reference fields."""
+        _validate_reference_fields(dict(row))
+        super().insert1(row, **kwargs)
+
+    def insert(self, rows, **kwargs):
+        """Insert rows after validating each row's reference fields."""
+        rows = [dict(r) for r in rows]
+        for r in rows:
+            _validate_reference_fields(r)
+        super().insert(rows, **kwargs)
+
+    def update1(self, row):
+        """Validate the MERGED reference state before an in-place edit.
+
+        A reference change is ALLOWED: it mints a distinct recording via the
+        ``recording_input_hash`` folded into ``recording_id``, and re-populating
+        an old ``recording_id`` raises ``RecordingInputDriftError`` rather than
+        serving stale bytes. But the RESULTING state must stay valid: validate the merged
+        (current row + update payload) reference fields, and for a final
+        ``'specific'`` mode reject a reference electrode that is also a group
+        member. ``insert1`` and the part table enforce these at insert; without
+        this override an ``update1`` could persist an invalid ``reference_mode``,
+        a missing/stale ``reference_electrode_id``, or a ``'specific'`` reference
+        that is a member -- state the hash would then content-address and that
+        would only fail late in ``Recording.make_fetch``.
+        """
+        row = dict(row)
+        pk = {k: row[k] for k in self.primary_key}
+        merged = {**(self & pk).fetch1(), **row}
+        _validate_reference_fields(merged)
+        if merged.get("reference_mode") == "specific":
+            assert_reference_not_member(
+                merged["reference_mode"],
+                merged["reference_electrode_id"],
+                (self.SortGroupElectrode & pk).fetch("electrode_id"),
+            )
+        super().update1(row)
+
+    # ---- Existing-entry safety ------------------------------------------
+
+    @classmethod
+    def preview_existing_entries(cls, nwb_file_name: str) -> DeletionPreview:
+        """Read-only preview of what overwriting this session would delete.
+
+        Mirrors the preview that ``set_group_by_*`` would produce when
+        called with ``delete_existing_entries=True, confirm=False``,
+        but without any destructive intent.
+        """
+        existing = cls & {"nwb_file_name": nwb_file_name}
+        sort_group_count = len(existing)
+        sort_group_electrode_count = len(
+            cls.SortGroupElectrode & {"nwb_file_name": nwb_file_name}
+        )
+        cascade = (
+            existing.cautious_delete(dry_run=True) if sort_group_count else None
+        )
+        return DeletionPreview(
+            nwb_file_name=nwb_file_name,
+            sort_group_rows=sort_group_count,
+            electrode_rows=sort_group_electrode_count,
+            cascade_summary=cascade,
+            cross_team_downstream=_sort_group_insert.cross_team_downstream(
+                nwb_file_name
+            ),
+        )
+
+    # ---- Constructors ----------------------------------------------------
+
+    @classmethod
+    def set_group_by_shank(
+        cls,
+        nwb_file_name: str,
+        omit_ref_electrode_group: bool = False,
+        omit_unitrode: bool = True,
+        references: dict | None = None,
+        reference_mode: str | None = None,
+        reference_electrode_id: int | None = None,
+        sort_group_ids: list[int] | None = None,
+        delete_existing_entries: bool = False,
+        confirm: bool = False,
+        *,
+        omit_bad_channels: bool = True,
+    ) -> list[dict]:
+        """Auto-group electrodes by probe shank.
+
+        Tetrodes (one shank per probe) yield one sort group per
+        electrode group. Polymer probes (multiple shanks per probe)
+        yield one sort group per shank. Bad channels are omitted by default.
+
+        Referencing is resolved **per sort group**. By default each group
+        inherits its members' configured reference
+        (``Electrode.original_reference_electrode``), mapped to a
+        ``reference_mode`` via the sentinels: ``-1`` / ``None`` ->
+        ``"none"``, ``-2`` -> ``"global_median"``, ``>= 0`` ->
+        ``"specific"`` (that electrode).
+
+        Parameters
+        ----------
+        nwb_file_name
+            Session whose electrodes should be grouped.
+        omit_ref_electrode_group
+            If True, an electrode group is skipped when one of its sort
+            groups resolves to a ``"specific"`` reference electrode that
+            lives in that same electrode group.
+        omit_unitrode
+            If True, sort groups with only one channel after filtering
+            are skipped (a unitrode usually means a broken shank).
+        omit_bad_channels
+            If True (default), electrodes flagged ``bad_channel='True'`` are
+            excluded before grouping. Pass False only for diagnostic grouping;
+            preprocessing still handles bad channels according to its own
+            ``bad_channel_handling`` parameter.
+        references
+            Optional per-group reference override, keyed by
+            ``electrode_group_name``. The value is
+            a reference electrode id / sentinel applied to every sort group in
+            that electrode group, bypassing config inheritance. Every
+            electrode group that produces a sort group must be a key, else a
+            ``ValueError`` names the missing key. Mutually exclusive with
+            ``reference_mode``.
+        reference_mode
+            Optional call-wide override forcing one mode
+            (``"none"`` / ``"global_median"`` / ``"specific"``) on **every**
+            sort group this call creates, bypassing config inheritance.
+            ``None`` (the default) inherits per group. Mutually exclusive with
+            ``references``.
+        reference_electrode_id
+            Electrode id subtracted when ``reference_mode == "specific"``;
+            must be None for the other modes. Only meaningful alongside an
+            explicit ``reference_mode``.
+        sort_group_ids
+            Optional custom sort-group IDs. If None, the next available
+            integers starting from ``max(existing) + 1`` are used so
+            additive inserts never collide with prior rows on rerun.
+        delete_existing_entries
+            See class docstring. Default False.
+        confirm
+            Required with ``delete_existing_entries=True`` after
+            reviewing the deletion preview.
+
+        Raises
+        ------
+        ValueError
+            If ``references`` and ``reference_mode`` are both supplied; if a
+            ``references`` mapping omits an electrode group that produces a
+            sort group; if a group's members carry mixed configured references
+            and no override resolves them; if a resolved ``"specific"``
+            reference electrode does not exist in the session (or its owning
+            electrode group is ambiguous); or if it is itself a member of the
+            sort group it would reference (it would be subtracted then dropped,
+            silently shrinking the group -- use ``omit_ref_electrode_group`` or
+            a cross-group reference instead).
+        """
+        # Reference resolution inputs. Three mutually-constrained paths:
+        #   * default (references is None, reference_mode is None): auto-derive
+        #     each group's reference from its members' configured
+        #     original_reference_electrode.
+        #   * references mapping: per-group explicit reference id / sentinel,
+        #     keyed by electrode_group_name.
+        #   * call-wide override (reference_mode[/reference_electrode_id]):
+        #     force one mode on every group this call creates.
+        if references is not None and reference_mode is not None:
+            raise ValueError(
+                "set_group_by_shank: pass either a per-group `references` "
+                "mapping or a call-wide `reference_mode` override, not both."
+            )
+        override_pair: tuple[str, int | None] | None = None
+        if reference_mode is not None:
+            _validate_reference_fields(
+                {
+                    "reference_mode": reference_mode,
+                    "reference_electrode_id": reference_electrode_id,
+                }
+            )
+            override_pair = (reference_mode, reference_electrode_id)
+        elif reference_electrode_id is not None:
+            raise ValueError(
+                "set_group_by_shank: reference_electrode_id is only "
+                "meaningful with an explicit reference_mode='specific'. Pass "
+                "reference_mode='specific' too, or use a `references` mapping."
+            )
+
+        electrodes = (Electrode() & {"nwb_file_name": nwb_file_name}).fetch()
+        if omit_bad_channels:
+            electrodes = electrodes[electrodes["bad_channel"] == "False"]
+        if len(electrodes) == 0:
+            raise ValueError(
+                f"SortGroupV2.set_group_by_shank: no electrodes found for "
+                f"{nwb_file_name!r}"
+                + (
+                    " (or all flagged bad_channel='True')"
+                    if omit_bad_channels
+                    else ""
+                )
+                + ". "
+                "Check Electrode population and the bad_channel column."
+            )
+        # The reference electrode itself may be a bad channel (and so absent
+        # from the filtered set above); fetch the full electrode set so
+        # omit_ref_electrode_group can still find which group it belongs to.
+        all_electrodes = (
+            Electrode() & {"nwb_file_name": nwb_file_name}
+        ).fetch()
+
+        proposed, skipped = _plan_sort_groups_by_shank(
+            electrodes,
+            all_electrodes,
+            nwb_file_name,
+            omit_ref_electrode_group=omit_ref_electrode_group,
+            omit_unitrode=omit_unitrode,
+            references=references,
+            override_pair=override_pair,
+        )
+
+        # Pick sort_group_ids. Auto-allocation is only safe on a fresh
+        # session; on rerun the caller must opt in via explicit
+        # sort_group_ids or delete_existing_entries=True (enforced in
+        # ``_sort_group_insert.handle_existing``).
+        explicit_sort_group_ids = sort_group_ids is not None
+        if sort_group_ids is None:
+            sort_group_ids = _sort_group_insert.next_sort_group_ids(
+                cls, nwb_file_name, len(proposed)
+            )
+        elif len(sort_group_ids) != len(proposed):
+            raise ValueError(
+                f"set_group_by_shank: sort_group_ids has length "
+                f"{len(sort_group_ids)} but {len(proposed)} sort groups "
+                f"were derived from shank metadata. Lengths must match."
+            )
+
+        _sort_group_insert.handle_existing(
+            cls,
+            nwb_file_name=nwb_file_name,
+            new_sort_group_ids=sort_group_ids,
+            explicit_sort_group_ids=explicit_sort_group_ids,
+            delete_existing_entries=delete_existing_entries,
+            confirm=confirm,
+        )
+
+        plans = [
+            _SortGroupPlan(
+                sort_group_id=sort_group_id,
+                reference_mode=resolved_mode,
+                reference_electrode_id=resolved_ref_id,
+                electrodes=[
+                    (e_group, electrode_id) for electrode_id in electrode_ids
+                ],
+            )
+            for (
+                e_group,
+                electrode_ids,
+                resolved_mode,
+                resolved_ref_id,
+            ), sort_group_id in zip(proposed, sort_group_ids)
+        ]
+        master_rows, part_rows = _build_sort_group_rows(nwb_file_name, plans)
+        cls._insert_sort_group_rows(master_rows, part_rows)
+
+        # Surface the skips as a consolidated summary (not only buried
+        # per-group warnings) and return them so a caller can inspect
+        # what was dropped rather than silently trusting "success".
+        if skipped:
+            logger.warning(
+                f"set_group_by_shank: created {len(proposed)} sort "
+                f"group(s) for {nwb_file_name!r}; SKIPPED {len(skipped)} "
+                f"({skipped}). Set omit_unitrode=False / "
+                "omit_ref_electrode_group=False to include them."
+            )
+        return skipped
+
+    @classmethod
+    def set_group_by_electrode_table_column(
+        cls,
+        nwb_file_name: str,
+        electrode_column: str,
+        value_groups: list[list],
+        sort_group_ids: list[int] | None = None,
+        reference_mode: str | None = None,
+        reference_electrode_id: int | None = None,
+        omit_bad_channels: bool = True,
+        omit_unitrode: bool = True,
+        delete_existing_entries: bool = False,
+        confirm: bool = False,
+    ) -> list[dict]:
+        """Group electrodes by any column on the Electrode table.
+
+        Generalizes ``set_group_by_shank`` for labs whose grouping is
+        keyed off non-shank metadata (e.g. Berke Lab grouping by
+        ``intan_channel_number``). Each entry in ``value_groups`` is a list
+        of values to match against ``electrode_column``; electrodes matching any
+        value in a sublist form one sort group.
+
+        Like ``set_group_by_shank``, referencing is resolved **per sort
+        group**: by default each group inherits its members' configured
+        reference (``Electrode.original_reference_electrode``), mapped to a
+        ``reference_mode`` via the sentinels (``-1`` / ``None``
+        -> ``"none"``, ``-2`` -> ``"global_median"``, ``>= 0`` ->
+        ``"specific"``). A per-group ``references`` mapping is intentionally
+        **not** offered here (unlike ``set_group_by_shank``); use the call-wide
+        ``reference_mode`` override or build per-group rows manually.
+
+        Parameters
+        ----------
+        electrode_column
+            Name of the column in the Electrode table to group by.
+            Special aliases ``"index"`` / ``"id"`` / ``"idx"`` /
+            ``"electrode_id"`` group by ``electrode_id`` directly.
+        value_groups
+            Each sublist specifies the column values to include in one
+            sort group.
+        sort_group_ids
+            Optional explicit IDs, same length as ``value_groups``. Defaults
+            to the next available integers.
+        reference_mode
+            Optional call-wide override forcing one mode
+            (``"none"`` / ``"global_median"`` / ``"specific"``) on **every**
+            sort group this call creates, bypassing config inheritance.
+            ``None`` (the default) inherits per group.
+        reference_electrode_id
+            Electrode id subtracted when ``reference_mode == "specific"``;
+            must be None for the other modes. Only meaningful alongside an
+            explicit ``reference_mode``.
+        omit_bad_channels, omit_unitrode
+            ``omit_bad_channels`` excludes electrodes flagged
+            ``bad_channel='True'`` before grouping; ``omit_unitrode`` skips
+            groups with one channel after filtering. Both default to True.
+        delete_existing_entries, confirm
+            See class docstring.
+
+        Raises
+        ------
+        ValueError
+            If ``electrode_column`` is not a valid Electrode-table column,
+            listing the valid choices; if any ``value_groups`` sublist ends up empty
+            after filtering and ``omit_unitrode=True`` would still leave the
+            group empty; if a group's members carry mixed configured
+            references and no override resolves them; if a resolved
+            ``"specific"`` reference electrode does not exist in the session
+            (or its owning electrode group is ambiguous); or if it is itself a
+            member of the sort group it would reference.
+        """
+        if reference_mode is not None:
+            _validate_reference_fields(
+                {
+                    "reference_mode": reference_mode,
+                    "reference_electrode_id": reference_electrode_id,
+                }
+            )
+            override_pair = (reference_mode, reference_electrode_id)
+        elif reference_electrode_id is not None:
+            raise ValueError(
+                "set_group_by_electrode_table_column: reference_electrode_id "
+                "is only meaningful with an explicit reference_mode="
+                "'specific'. Pass reference_mode='specific' too."
+            )
+        else:
+            override_pair = None
+
+        electrodes = (Electrode() & {"nwb_file_name": nwb_file_name}).fetch()
+        if len(electrodes) == 0:
+            raise ValueError(
+                f"set_group_by_electrode_table_column: no electrodes "
+                f"found for {nwb_file_name!r}."
+            )
+        # Keep the FULL set (before bad-channel filtering) so a resolved
+        # "specific" reference is validated against every session electrode --
+        # a valid reference may itself be a bad channel.
+        all_electrodes = electrodes
+
+        column_aliases = {"index", "id", "idx", "electrode_id"}
+        resolved_column = (
+            "electrode_id"
+            if electrode_column in column_aliases
+            else electrode_column
+        )
+        if resolved_column not in electrodes.dtype.names:
+            valid = sorted(electrodes.dtype.names)
+            raise ValueError(
+                "set_group_by_electrode_table_column: electrode_column "
+                f"{electrode_column!r} "
+                f"is not on the Electrode table for {nwb_file_name!r}. "
+                f"Valid columns: {valid}."
+            )
+
+        if omit_bad_channels:
+            mask = electrodes["bad_channel"] == "False"
+            electrodes = electrodes[mask]
+
+        explicit_sort_group_ids = sort_group_ids is not None
+        if sort_group_ids is None:
+            sort_group_ids = _sort_group_insert.next_sort_group_ids(
+                cls, nwb_file_name, len(value_groups)
+            )
+        elif len(sort_group_ids) != len(value_groups):
+            raise ValueError(
+                f"set_group_by_electrode_table_column: sort_group_ids has "
+                f"length {len(sort_group_ids)} but {len(value_groups)} groups "
+                f"were requested. Lengths must match."
+            )
+
+        proposed, skipped = _plan_sort_groups_by_column(
+            electrodes,
+            all_electrodes,
+            nwb_file_name,
+            electrode_column,
+            resolved_column,
+            groups=value_groups,
+            sort_group_ids=sort_group_ids,
+            omit_unitrode=omit_unitrode,
+            override_pair=override_pair,
+        )
+
+        _sort_group_insert.handle_existing(
+            cls,
+            nwb_file_name=nwb_file_name,
+            new_sort_group_ids=[sg for sg, *_ in proposed],
+            explicit_sort_group_ids=explicit_sort_group_ids,
+            delete_existing_entries=delete_existing_entries,
+            confirm=confirm,
+        )
+
+        plans = [
+            _SortGroupPlan(
+                sort_group_id=sort_group_id,
+                reference_mode=resolved_mode,
+                reference_electrode_id=resolved_ref_id,
+                electrodes=[
+                    (row["electrode_group_name"], row["electrode_id"])
+                    for row in group_electrodes
+                ],
+            )
+            for (
+                sort_group_id,
+                group_electrodes,
+                resolved_mode,
+                resolved_ref_id,
+            ) in proposed
+        ]
+        master_rows, part_rows = _build_sort_group_rows(nwb_file_name, plans)
+        cls._insert_sort_group_rows(master_rows, part_rows)
+
+        if skipped:
+            logger.warning(
+                f"set_group_by_electrode_table_column: created "
+                f"{len(proposed)} sort group(s) for {nwb_file_name!r}; "
+                f"SKIPPED {len(skipped)} ({skipped}). Set "
+                "omit_unitrode=False to include them."
+            )
+        return skipped
+
+    @classmethod
+    def _insert_sort_group_rows(cls, master_rows, part_rows) -> None:
+        """Insert SortGroupV2 master + SortGroupElectrode part rows.
+
+        Wrap master + part inserts in one transaction so a part-insert
+        failure (e.g., FK violation on a stale Electrode row) rolls back
+        the master rows too. ``_safe_context()`` is a no-op when the
+        caller is already inside a transaction (populate cascade,
+        post-cautious_delete state), avoiding the nested-transaction error
+        DataJoint would otherwise raise.
+        """
+        with cls._safe_context():
+            cls.insert(master_rows)
+            cls.SortGroupElectrode.insert(part_rows)
+
+
+@schema
+class PreprocessingParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
+    """Phase-shift + bandpass + bad-channel + reference parameters.
+
+    Whitening is NOT a recording-stage parameter: MS4/MS5 whiten via their
+    ``SorterParameters`` row and the metric analyzer via
+    ``AnalyzerWaveformParameters``. The ``params`` blob is validated by
+    :class:`PreprocessingParamsSchema`.
+    ``insert_default`` bulk-inserts the v2 default presets.
+    """
+
+    definition = f"""
+    preprocessing_params_name: varchar(128)
+    ---
+    params: blob
+    params_schema_version={PREPROCESSING_SCHEMA_VERSION}: int
+    job_kwargs=null: blob
+    """
+
+    # Row-level ``params_schema_version`` must equal the inner
+    # ``PreprocessingParamsSchema.schema_version``. The DataJoint
+    # column default tracks the schema version so a custom row that omits
+    # the column is tagged with the current schema version, not a
+    # mismatched one. The shipped rows are defined in
+    # ``_recipe_catalog.preprocessing_default_contents`` (single source).
+    _DEFAULT_CONTENTS: tuple = preprocessing_default_contents()
+
+    def insert1(self, row, allow_duplicate_params=False, **kwargs):
+        """Insert one row through the validated bulk ``insert`` path."""
+        # Delegate to ``insert`` so one validated path serves both.
+        self.insert(
+            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
+        )
+
+    def insert(self, rows, allow_duplicate_params=False, **kwargs):
+        """Insert rows after Pydantic-validating each params blob.
+
+        ``allow_duplicate_params=True`` opts out of the duplicate-content
+        guard (a second name for an existing blob); see
+        ``reject_duplicate_parameter_content``.
+        """
+        # Validate every row (incl. ``insert_default``'s positional
+        # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
+        # validation or the params_schema_version drift check.
+        _insert_parameter_rows(
+            self,
+            rows,
+            insert_rows=super().insert,
+            schema_for=lambda _row: PreprocessingParamsSchema,
+            table_name="PreprocessingParameters",
+            name_attr="preprocessing_params_name",
+            allow_duplicate_params=allow_duplicate_params,
+            **kwargs,
+        )
+
+    @classmethod
+    def insert_default(cls):
+        """Insert v2 default preprocessing presets if missing."""
+        cls.insert(cls._DEFAULT_CONTENTS, skip_duplicates=True)
+
+
+def resolve_recording_input_hash(
+    nwb_file_name: str,
+    sort_group_id: int,
+    preprocessing_params_name: str,
+) -> str:
+    """Resolve + content-address a recording's live construction inputs.
+
+    Reads the SAME live inputs ``Recording.make_fetch`` builds the recording
+    from -- the sort group's electrode membership and reference, and (on the
+    ``interpolate`` bad-channel path) the resolved interior bad-channel set --
+    and returns their :func:`recording_input_hash`. Shared by
+    ``RecordingSelection.insert_selection`` and ``preflight_v2_pipeline`` so both
+    derive the identical ``recording_id``, and re-run by ``make_fetch`` to reject
+    a drift. Deliberately kept in lock-step with ``make_fetch``'s reads: a
+    divergence would mint an id ``make_fetch`` then rejects as a false drift,
+    which ``test_recording_input_hash_matches_make_fetch`` guards against.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        The raw NWB file.
+    sort_group_id : int
+        The sort group whose membership + reference are read.
+    preprocessing_params_name : str
+        Selects the ``PreprocessingParameters`` row whose
+        ``bad_channel_handling`` decides whether the interpolate bad-channel set
+        enters the content.
+
+    Returns
+    -------
+    str
+        The 64-char sha256 hex digest of the resolved inputs.
+    """
+    sort_group_key = {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": int(sort_group_id),
+    }
+    channel_ids = sorted(
+        (SortGroupV2.SortGroupElectrode & sort_group_key).fetch("electrode_id"),
+        key=int,
+    )
+    reference_mode, reference_electrode_id = (
+        SortGroupV2 & sort_group_key
+    ).fetch1("reference_mode", "reference_electrode_id")
+    preprocessing_params = PreprocessingParamsSchema.model_validate(
+        (
+            PreprocessingParameters
+            & {"preprocessing_params_name": preprocessing_params_name}
+        ).fetch1("params")
+    )
+    interpolated_bad_channel_ids: tuple = ()
+    if preprocessing_params.bad_channel_handling == "interpolate":
+        interpolated_bad_channel_ids = fetch_interior_bad_channel_ids(
+            nwb_file_name, channel_ids
+        )
+    return recording_input_hash(
+        electrode_ids=channel_ids,
+        reference_mode=str(reference_mode),
+        reference_electrode_id=(
+            None
+            if reference_electrode_id is None
+            else int(reference_electrode_id)
+        ),
+        interpolated_bad_channel_ids=interpolated_bad_channel_ids,
+    )
+
+
+@schema
+class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
+    """One row per (raw, sort group, interval, preprocessing params, team).
+
+    UUID-keyed so downstream FKs (``Recording``, ``SortingSelection``)
+    are single-column. ``insert_selection`` follows the v2 find-existing-
+    or-insert convention: it always returns a single PK-only dict, whether
+    the row already existed or was just inserted.
+    """
+
+    definition = """
+    recording_id: uuid
+    ---
+    -> Raw
+    -> SortGroupV2
+    -> IntervalList
+    -> PreprocessingParameters
+    -> LabTeam
+    recording_input_hash = null : char(64)  # sha256 of resolved construction inputs, folded into recording_id and verified at make_fetch
+    """
+
+    @classmethod
+    def insert_selection(cls, key: dict) -> dict:
+        """Find-existing-or-insert; returns a single PK-only dict.
+
+        The logical identity of a ``RecordingSelection`` row is its full
+        FK set (Raw, SortGroupV2, IntervalList, PreprocessingParameters,
+        LabTeam); the UUID PK is content-addressed -- derived client-side
+        from that identity (see step 1) so the same selection always maps
+        to the same ``recording_id`` -- and is what the downstream pipeline
+        keys off. The helper:
+
+        1. Derives a deterministic ``recording_id`` from the logical
+           identity (the non-UUID FK fields) so the same selection always
+           maps to the same UUID.
+        2. Returns the matching PK if the row already exists.
+        3. Inserts a new row keyed by the deterministic UUID otherwise; if
+           a concurrent caller wins the race, the duplicate-PK insert is
+           caught and the existing row is returned.
+        4. Raises ``DuplicateSelectionError`` if ANY existing row for this
+           logical identity has a non-deterministic ``recording_id`` (a raw
+           ``dj.insert`` bypass or a legacy non-content-addressed row) -- even a
+           single one -- an integrity bug, not user error.
+
+        Parameters
+        ----------
+        key
+            Dict containing all FK fields. ``recording_id`` is derived from
+            the logical identity; if supplied it must equal the
+            deterministic id (else ``ValueError``).
+
+        Returns
+        -------
+        dict
+            ``{"recording_id": <uuid>}`` -- never a list, never the full
+            row.
+        """
+        from spyglass.spikesorting.v2._selection_identity import (
+            recording_identity_payload,
+        )
+        from spyglass.spikesorting.v2._selection_plan import (
+            build_recording_selection_plan,
+        )
+        from spyglass.spikesorting.v2.utils import (
+            _ensure_lookup_row_exists,
+        )
+
+        # Validate the FK set up front (clean errors before any DB read).
+        identity = recording_identity_payload(key)
+        # Translate a missing PreprocessingParameters row into the curated
+        # "insert_default()" message BEFORE resolving the input hash: the
+        # resolver fetch1's that row's params, so a missing row would otherwise
+        # surface as a raw empty-fetch error and mask this actionable message.
+        _ensure_lookup_row_exists(
+            PreprocessingParameters,
+            {
+                "preprocessing_params_name": identity[
+                    "preprocessing_params_name"
+                ]
+            },
+            helper_name="RecordingSelection.insert_selection",
+            insert_default_path="PreprocessingParameters.insert_default()",
+        )
+        # Resolve the content-addressed input hash from the live sort-group
+        # inputs (membership + reference + interpolate bad-channels) so a changed
+        # input set mints a new recording_id rather than aliasing this one.
+        input_hash = resolve_recording_input_hash(
+            identity["nwb_file_name"],
+            identity["sort_group_id"],
+            identity["preprocessing_params_name"],
+        )
+        # Pure half: derive the deterministic recording_id and shape the row.
+        plan = build_recording_selection_plan(
+            key, recording_input_hash=input_hash
+        )
+
+        existing = cls._find_existing_pk(
+            plan.master_restriction, plan.recording_id
+        )
+        if existing is not None:
+            return existing
+
+        new_key = plan.master_row
+        try:
+            # allow_direct_insert: this helper IS the validation boundary.
+            cls.insert1(new_key, allow_direct_insert=True)
+        except dj.errors.DuplicateError:
+            # Lost a concurrent race: another caller inserted the same
+            # deterministic recording_id first. Refetch and return it.
+            logger.debug(
+                "RecordingSelection.insert_selection: lost deterministic-id "
+                "race on %s; returning the existing row.",
+                plan.recording_id,
+            )
+            existing = cls._find_existing_pk(
+                plan.master_restriction, plan.recording_id
+            )
+            if existing is None:
+                raise
+            return existing
+        return {k: new_key[k] for k in cls.primary_key}
+
+    @classmethod
+    def _find_existing_pk(
+        cls, keys_minus_uuid: dict, deterministic_id
+    ) -> dict | None:
+        """Return the canonical PK for this logical selection, or None.
+
+        Looks up rows by the logical-identity (non-UUID) fields and splits
+        them by primary key:
+
+        * the row at ``deterministic_id`` is the canonical, content-
+          addressed selection -> return ``{"recording_id": ...}``;
+        * ANY row with a different ``recording_id`` is non-deterministic
+          (a raw ``insert`` bypass or a legacy non-content-addressed row) and
+          violates the content-addressed-identity invariant -> raise
+          ``DuplicateSelectionError`` so it is reset rather than silently
+          returned or ``[0]``-indexed.
+
+        Used by ``insert_selection`` for both the pre-insert lookup and
+        the post-duplicate-key refetch.
+        """
+        from spyglass.spikesorting.v2._selection_identity import (
+            existing_selection_pk,
+        )
+
+        existing = list((cls & keys_minus_uuid).fetch("recording_id"))
+        return existing_selection_pk(
+            existing,
+            deterministic_id,
+            pk_field="recording_id",
+            bypass_message=lambda bypassed: (
+                f"RecordingSelection has {len(existing)} duplicate "
+                f"selection row(s) for logical identity {keys_minus_uuid} "
+                f"whose recording_id is not the deterministic id "
+                f"{deterministic_id}: {bypassed}. This is a "
+                "non-deterministic selection row (a raw insert or a "
+                "legacy non-content-addressed row); drop it and re-insert "
+                "via insert_selection."
+            ),
+        )
+
+
+_ELECTRICAL_SERIES_NAME = "ProcessedElectricalSeries"
+_ELECTRICAL_SERIES_PATH = f"acquisition/{_ELECTRICAL_SERIES_NAME}"
+
+
+class RecordingFetched(NamedTuple):
+    """DB-side inputs gathered by :meth:`Recording.make_fetch`.
+
+    Tri-part dispatch unpacks this positionally into ``make_compute``;
+    fields are listed in the order they appear in the compute
+    signature.
+
+    Attributes
+    ----------
+    sort_valid_times : numpy.ndarray
+        Requested sort interval ``valid_times``, shape
+        ``(n_intervals, 2)`` in seconds.
+    raw_valid_times : numpy.ndarray
+        Raw data ``valid_times``, shape ``(n_intervals, 2)`` in seconds.
+    raw_object_id : str
+        NWB object id of the session's raw acquisition ElectricalSeries
+        (``Raw.raw_object_id``); pins the compute step to the exact raw
+        source the selection lineage points at.
+    raw_path : str
+        Absolute path of the session's raw NWB (``Nwbfile.get_abs_path``).
+    """
+
+    sel: dict
+    channel_ids: list
+    reference_mode: str
+    reference_electrode_id: int | None
+    sort_valid_times: np.ndarray
+    raw_valid_times: np.ndarray
+    preprocessing_params: PreprocessingParamsSchema
+    preprocessing_job_kwargs: dict | None
+    probe_types: tuple
+    electrode_group_names: tuple
+    bad_channel_ids: tuple
+    raw_object_id: str
+    raw_path: str
+
+
+class RecordingComputed(NamedTuple):
+    """Outputs of :meth:`Recording.make_compute`.
+
+    Unpacked positionally into ``make_insert``.
+    """
+
+    analysis_file_name: str
+    object_id: str
+    content_hash: str
+    saved_start: float
+    saved_end: float
+    sampling_frequency: float
+    n_channels: int
+    duration_s: float
+    sel: dict
+    sort_valid_times: np.ndarray
+    expected_saved_total: float
+    n_intended_intervals: int
+
+    def staged_outputs(self) -> StagedOutputs:
+        """The staged analysis file ``make_insert`` registers."""
+        return StagedOutputs(analysis_file_names=(self.analysis_file_name,))
+
+
+class RecordingArtifactResult(NamedTuple):
+    """Outputs of :meth:`Recording._compute_recording_artifact`.
+
+    Internal helper result -- NOT a tri-part contract object, so it is never
+    splatted into ``make_*``. ``make_compute`` reads these fields by name to
+    build :class:`RecordingComputed`, and ``_rebuild_nwb_artifact`` reads only
+    ``content_hash``. Typed/named so the eight values are not threaded through
+    brittle positional unpacking. Field order intentionally matches
+    ``RecordingComputed``'s first eight fields (pinned by
+    ``test_recording_artifact_result_field_contract``) so the by-name transfer
+    stays order-independent and a future positional splat would still bind
+    correctly.
+    """
+
+    analysis_file_name: str
+    object_id: str
+    content_hash: str
+    saved_start: float
+    saved_end: float
+    sampling_frequency: float
+    n_channels: int
+    duration_s: float
+
+
+def _unlink_staged_analysis_file(
+    analysis_file_name: str, *, context: str
+) -> None:
+    """Best-effort removal of an orphaned staged ``AnalysisNwbfile``.
+
+    Failure paths write the artifact to disk before (or instead of) its
+    DataJoint row landing; this unlinks that orphan so the cleanup tooling
+    does not have to chase it. Best-effort: a cleanup failure is logged,
+    never raised, so it cannot mask the original error. ``context`` names
+    the calling method for the log line.
+    """
+    from spyglass.spikesorting.v2._staged_outputs import (
+        unlink_staged_analysis_file,
+    )
+
+    unlink_staged_analysis_file(analysis_file_name, context=context)
+
+
+@schema
+class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
+    """Preprocessed recording materialized NWB-resident in AnalysisNwbfile.
+
+    The preprocessed ``ElectricalSeries`` lives inside an
+    ``AnalysisNwbfile`` (the canonical artifact). No binary sidecar -- the
+    in-NWB ``ElectricalSeries`` is the sole cached artifact.
+
+    ``make()`` loads the raw NWB and prepares the recording in this order:
+
+    1. select the sort group's channels (``select_sort_group_channels``);
+    2. reduce the 3D contact positions to the plane that keeps every
+       contact distinct (``normalize_channel_locations``) -- before any
+       probe exists, since a probe freezes the locations;
+    3. ``apply_temporal_preprocessing`` (phase shift, bandpass) on the
+       CONTINUOUS source, so each filter's margin is drawn from real
+       neighboring samples;
+    4. restrict to the requested interval (``restrict_recording``) -- after
+       filtering, so an interval edge is signal rather than filter transient;
+    5. ``apply_spatial_preprocessing`` (bad-channel interpolation or
+       removal, then referencing) -- per-sample across channels, so the
+       interval joins cannot affect it;
+    6. ``maybe_apply_tetrode_geometry``, which spreads a legacy
+       four-channel ``tetrode_12.5`` group whose stored positions are
+       degenerate onto the 12.5 um square;
+    7. ``assert_unique_contact_positions``, so the EFFECTIVE geometry -- what
+       SpikeInterface will build a probe from -- is checked last: distinct
+       positions, and a plane rather than still-3D locations (a dropped
+       ``specific`` reference channel can leave the group unnormalized), so
+       the compute fails here rather than inside the write.
+
+    Whitening is deferred to the sorter for the sorters that need it. It then
+    streams one ``ElectricalSeries`` into a fresh
+    ``AnalysisNwbfile``, validates the saved timestamp range covers the
+    requested ``IntervalList.valid_times``, and records a representation-blind
+    content fingerprint of the persisted file (``content_hash``; see
+    ``_recording_fingerprint``) so a content-identical rebuild can be
+    verified. The populate body is split into ``make_fetch`` /
+    ``make_compute`` / ``make_insert`` so the long-running write does
+    not hold a DB transaction. ``get_recording`` exposes the cached
+    artifact and rebuilds on disk if missing, without deleting the
+    DataJoint row.
+    """
+
+    definition = """
+    -> RecordingSelection
+    ---
+    -> AnalysisNwbfile
+    electrical_series_path: varchar(255)
+    object_id: varchar(72)
+    n_channels: int
+    sampling_frequency: float
+    duration_s: float
+    content_hash: char(64)
+    """
+
+    # ``_parallel_make = True`` lets Spyglass's ``PopulateMixin`` populate in
+    # parallel via a non-daemon process pool. The inherited generator
+    # ``AutoPopulate.make`` is left in place so DataJoint routes through the
+    # tri-part ``make_fetch`` / ``make_compute`` / ``make_insert`` methods.
+    _parallel_make = True
+
+    def make_fetch(self, key):
+        """Read every DB input the compute step needs (no SI / NWB I/O).
+
+        The returned value is suitable for DataJoint's tri-part dispatch
+        contract: deterministic byte representations across two
+        successive fetches so the framework's DeepHash integrity
+        check inside the transaction does not raise.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Recording`` row.
+
+        Returns
+        -------
+        RecordingFetched
+            DB-side inputs unpacked positionally into ``make_compute``.
+        """
+        return _recording_fetch.fetch_recording_inputs(key)
+
+    def make_compute(
+        self,
+        key,
+        sel,
+        channel_ids,
+        reference_mode,
+        reference_electrode_id,
+        sort_valid_times,
+        raw_valid_times,
+        preprocessing_params,
+        preprocessing_job_kwargs,
+        probe_types,
+        electrode_group_names,
+        bad_channel_ids,
+        raw_object_id,
+        raw_path,
+    ) -> RecordingComputed:
+        """Run the preprocessing + streaming write outside any DB transaction.
+
+        The long write (often many minutes) holds no DB lock. Reads only the
+        inputs ``make_fetch`` resolved (the raw NWB path included); the one
+        DB access left is staging the output file (see
+        :mod:`._recording_nwb`). The preprocessing and write are shared with
+        ``_rebuild_nwb_artifact`` via ``_compute_recording_artifact``; this
+        method adds the over-request warning and the save expectation that
+        ``make_insert`` checks.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Recording`` row.
+        sel : dict
+            The fetched ``RecordingSelection`` row.
+        channel_ids : list
+            Sorted electrode ids for the sort group.
+        reference_mode : str
+            Referencing mode (e.g. ``'none'``, ``'specific'``).
+        reference_electrode_id : int or None
+            Reference electrode id; non-``None`` only for ``'specific'``.
+        sort_valid_times : numpy.ndarray
+            Requested sort interval ``valid_times``, shape
+            ``(n_intervals, 2)`` in seconds.
+        raw_valid_times : numpy.ndarray
+            Raw data ``valid_times``, shape ``(n_intervals, 2)`` in
+            seconds.
+        preprocessing_params : PreprocessingParamsSchema
+            Validated preprocessing parameters.
+        preprocessing_job_kwargs : dict or None
+            Per-row SpikeInterface job kwargs blob.
+        probe_types : tuple
+            Per-channel ``probe_type`` for the sort group.
+        electrode_group_names : tuple
+            Per-channel ``electrode_group_name`` for the sort group.
+        bad_channel_ids : tuple
+            Interior bad channels to re-include on the ``interpolate``
+            path; empty for ``remove``.
+        raw_object_id : str
+            NWB object id of the raw acquisition ElectricalSeries
+            (``Raw.raw_object_id``); selects the raw source to read.
+        raw_path : str
+            Absolute path of the session's raw NWB, resolved in
+            ``make_fetch``.
+
+        Returns
+        -------
+        RecordingComputed
+            Computed artifact metadata unpacked into ``make_insert``.
+        """
+        # The streaming write uses HDMF's chunked iterator, not SI job_kwargs,
+        # so the resolved dict is unused; the call keeps this stage's
+        # resolution path wired like every other compute stage (tests patch
+        # ``_resolved_job_kwargs`` to confirm it).
+        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+
+        _resolved_job_kwargs(preprocessing_job_kwargs)
+
+        artifact = self._compute_recording_artifact(
+            raw_path=raw_path,
+            raw_object_id=raw_object_id,
+            nwb_file_name=sel["nwb_file_name"],
+            interval_list_name=sel["interval_list_name"],
+            channel_ids=channel_ids,
+            reference_mode=reference_mode,
+            reference_electrode_id=reference_electrode_id,
+            sort_valid_times=sort_valid_times,
+            raw_valid_times=raw_valid_times,
+            preprocessing_params=preprocessing_params,
+            probe_types=probe_types,
+            electrode_group_names=electrode_group_names,
+            bad_channel_ids=bad_channel_ids,
+            provenance_tables=_recording_nwb.recording_provenance_table(
+                recording_id=sel["recording_id"],
+                raw_object_id=raw_object_id,
+                preprocessing_params_name=sel["preprocessing_params_name"],
+                sort_group_id=sel["sort_group_id"],
+                reference_mode=reference_mode,
+                bad_channel_handling=preprocessing_params.bad_channel_handling,
+            ),
+        )
+
+        # The duration we INTENDED to save: the sort interval intersected
+        # with the raw valid times AND filtered by ``min_segment_length`` --
+        # the SAME filtering ``restrict_recording`` applies to build the
+        # recording. ``Interval`` opens a DB connection on import, so the
+        # intersect stays here; the pure duration / over-request arithmetic
+        # (compared against the saved duration by the ``make_insert`` truncation
+        # guard, so intentionally-dropped slivers are not mis-flagged) lives in
+        # ``compute_recording_save_expectation``.
+        from spyglass.common.common_interval import Interval
+
+        intended_intervals = (
+            Interval(sort_valid_times)
+            .intersect(
+                Interval(raw_valid_times),
+                min_length=preprocessing_params.min_segment_length,
+            )
+            .times
+        )
+        expectation = compute_recording_save_expectation(
+            intended_intervals,
+            sort_valid_times,
+            preprocessing_params.min_segment_length,
+        )
+
+        # A sort interval that runs PAST the raw recording's coverage is clipped
+        # to what exists (the intersect above) rather than erroring -- but the
+        # clip must be surfaced, not silent (#1585). ``over_request`` is the
+        # min_segment_length-filtered REQUEST minus the raw-clipped expectation;
+        # inter-segment gaps and sub-min_segment slivers cancel out (excluded
+        # from both sides), so it fires only on a genuine request-past-coverage.
+        # ``make_insert`` still raises RecordingTruncatedError for TRUE
+        # truncation (saved < expectation, i.e. dropped packets), which this
+        # warning does not mask.
+        if expectation.over_request > 1.5 / artifact.sampling_frequency:
+            logger.warning(
+                f"Recording.make: IntervalList {sel['interval_list_name']!r} in "
+                f"{sel['nwb_file_name']!r} requests "
+                f"{expectation.requested_saved_total:.6f}s but the raw recording "
+                f"covers only {expectation.expected_saved_total:.6f}s after "
+                f"min_segment_length filtering; clipping to raw coverage "
+                f"({expectation.over_request:.6f}s past the recording dropped)."
+            )
+
+        return RecordingComputed(
+            analysis_file_name=artifact.analysis_file_name,
+            object_id=artifact.object_id,
+            content_hash=artifact.content_hash,
+            saved_start=artifact.saved_start,
+            saved_end=artifact.saved_end,
+            sampling_frequency=artifact.sampling_frequency,
+            n_channels=artifact.n_channels,
+            duration_s=artifact.duration_s,
+            sel=sel,
+            sort_valid_times=sort_valid_times,
+            expected_saved_total=expectation.expected_saved_total,
+            n_intended_intervals=expectation.n_intended_intervals,
+        )
+
+    @staticmethod
+    def _truncation_tolerance(
+        n_intended_intervals: int, sampling_frequency: float
+    ) -> float:
+        """Sample-grid tolerance for the ``make_insert`` truncation guard.
+
+        Thin delegator to
+        :func:`._recording_restriction.truncation_tolerance`; kept as a
+        ``Recording`` staticmethod because ``make_insert`` calls
+        ``self._truncation_tolerance(...)`` and
+        ``test_truncation_tolerance_scales_with_interval_count`` calls
+        ``Recording._truncation_tolerance`` directly.
+        """
+        return truncation_tolerance(n_intended_intervals, sampling_frequency)
+
+    def make_insert(
+        self,
+        key,
+        analysis_file_name,
+        object_id,
+        content_hash,
+        saved_start,
+        saved_end,
+        sampling_frequency,
+        n_channels,
+        duration_s,
+        sel,
+        sort_valid_times,
+        expected_saved_total,
+        n_intended_intervals,
+    ):
+        """Run the truncation check and atomically register the artifact.
+
+        The check compares the saved duration with the intended one (the
+        sort interval intersected with the raw valid times, after
+        ``min_segment_length`` filtering), so it fires on dropped packets or
+        interval misalignment; a request past the raw coverage was already
+        clipped with a warning in ``make_compute``. Tolerance is
+        ``(n_intended_intervals + 1.5)`` sample intervals: the +1.5 covers
+        the off-by-one NWB boundary (``last_ts = (N-1)/fs``, not ``N/fs``),
+        and the per-interval term absorbs the independent sample-grid
+        snapping of each consolidated interval, which otherwise accumulates
+        across disjoint epochs and spuriously trips a fixed 1.5-sample slack.
+
+        The ``_safe_context()`` wrap is a no-op inside ``populate()``'s
+        transaction and keeps the ``AnalysisNwbfile`` registration and the
+        row insert atomic on a direct call. Removing a failed attempt's
+        staged file (a truncation refusal included) is
+        ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
+        call leaves that to its caller.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Recording`` row.
+        analysis_file_name : str
+            Name of the staged ``AnalysisNwbfile`` to register.
+        object_id : str
+            Object id of the persisted ``ElectricalSeries``.
+        content_hash : str
+            Representation-blind content fingerprint of the persisted
+            recording (``combined_hash`` of the traces / timestamps /
+            geometry / metadata components; see ``_recording_fingerprint``),
+            reproducible across a content-identical rebuild.
+        saved_start : float
+            First persisted timestamp, in seconds.
+        saved_end : float
+            Last persisted timestamp, in seconds.
+        sampling_frequency : float
+            Sampling rate of the recording, in Hz.
+        n_channels : int
+            Number of channels in the persisted recording.
+        duration_s : float
+            Persisted recording duration, in seconds.
+        sel : dict
+            The fetched ``RecordingSelection`` row.
+        sort_valid_times : numpy.ndarray
+            Requested sort interval ``valid_times``, shape
+            ``(n_intervals, 2)`` in seconds.
+        expected_saved_total : float
+            Intended saved duration after ``min_segment_length``
+            filtering, in seconds.
+        n_intended_intervals : int
+            Number of consolidated intended intervals; scales the
+            truncation tolerance.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        RecordingTruncatedError
+            If the saved duration falls short of ``expected_saved_total``
+            by more than the sample-grid tolerance.
+        """
+        from spyglass.spikesorting.v2.exceptions import (
+            RecordingTruncatedError,
+        )
+
+        nwb_file_name = sel["nwb_file_name"]
+        interval_list_name = sel["interval_list_name"]
+
+        # Compare with the intended duration, not the requested chunks, so
+        # inter-chunk gaps and intentionally dropped sub-min_segment_length
+        # slivers are not flagged. ``duration_s`` is the persisted span
+        # (``saved_end - saved_start``).
+        tolerance = self._truncation_tolerance(
+            n_intended_intervals, sampling_frequency
+        )
+        missing = expected_saved_total - duration_s
+        if missing > tolerance:
+            raise RecordingTruncatedError(
+                "Recording.make wrote a shorter recording than expected. "
+                f"After min_segment_length filtering, IntervalList "
+                f"{interval_list_name!r} in {nwb_file_name!r} should yield "
+                f"{expected_saved_total:.6f}s across "
+                f"{len(sort_valid_times)} requested chunk(s); saved "
+                f"{duration_s:.6f}s (range {saved_start} -> {saved_end}). "
+                f"Missing: {missing:.6f}s. Check the raw NWB for dropped "
+                "packets or interval misalignment."
+            )
+
+        with self._safe_context():
+            AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+            self.insert1(
+                {
+                    **key,
+                    "analysis_file_name": analysis_file_name,
+                    "electrical_series_path": _ELECTRICAL_SERIES_PATH,
+                    "object_id": object_id,
+                    "n_channels": n_channels,
+                    "sampling_frequency": sampling_frequency,
+                    "duration_s": duration_s,
+                    "content_hash": content_hash,
+                }
+            )
+
+    # ---- Public accessors ------------------------------------------------
+
+    def get_recording(self, key: dict) -> "si.BaseRecording":
+        """Return the preprocessed SpikeInterface recording.
+
+        Rebuilds the NWB artifact on demand if missing; the DataJoint
+        row is never deleted by this path -- the content_hash on the row
+        is the source of truth for re-verification.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Recording`` row.
+
+        Returns
+        -------
+        si.BaseRecording
+            The preprocessed (bandpass-filtered, common-referenced)
+            recording, annotated ``is_filtered=True``.
+        """
+        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
+
+        return read_stored_traces(self.resolve_stored_traces(key))
+
+    def resolve_stored_traces(self, key: dict) -> StoredTraces:
+        """Resolve the cached artifact for a read that needs no DB.
+
+        The DB half of :meth:`get_recording`: fetches the row and rebuilds a
+        missing file (the same self-heal). A tri-part ``make_fetch`` calls
+        this and its ``make_compute`` opens the result with
+        ``_recording_nwb.read_stored_traces``.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Recording`` row.
+
+        Returns
+        -------
+        StoredTraces
+            The present file's absolute path, the stored
+            ``electrical_series_path`` and the row's ``content_hash``.
+        """
+        from spyglass.spikesorting.v2._recording_nwb import stored_traces
+
+        return stored_traces(type(self), key, (self & key).fetch1())
+
+    # ---- visualization delegates (see v2.visualization facade) -----------
+
+    def plot_traces(self, key, *, backend="matplotlib", **kwargs):
+        """Delegate to ``visualization.plot_recording_traces`` for this key.
+
+        A local-discoverability one-liner; the SI-widget routing over the saved
+        preprocessed recording lives in the ``v2.visualization`` facade, which
+        the notebook/docs teach as the primary surface.
+        """
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_recording_traces(
+            key, backend=backend, **kwargs
+        )
+
+    def plot_probe_map(self, key, *, backend="matplotlib", **kwargs):
+        """Delegate to ``visualization.plot_recording_probe_map`` for this key."""
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_recording_probe_map(
+            key, backend=backend, **kwargs
+        )
+
+    def _rebuild_nwb_artifact(self, key) -> None:
+        """Rebuild a missing recording artifact -- locked, atomic, reconciled.
+
+        The rebuild is :func:`._recording_nwb.rebuild_nwb_artifact`; it calls
+        ``make_fetch`` and ``_compute_recording_artifact`` on this instance.
+        :func:`._recording_nwb.ensure_artifact_file` calls this method on every
+        trace-artifact table, and tests patch it, so it stays on the class.
+        """
+        return _recording_nwb.rebuild_nwb_artifact(self, key)
+
+    # ---- Implementation helpers -----------------------------------------
+
+    @classmethod
+    def _compute_recording_artifact(
+        cls,
+        *,
+        raw_path: str,
+        raw_object_id: str,
+        nwb_file_name: str,
+        interval_list_name: str,
+        channel_ids: list,
+        reference_mode: str,
+        reference_electrode_id: int | None,
+        sort_valid_times,
+        raw_valid_times,
+        preprocessing_params: PreprocessingParamsSchema,
+        probe_types: tuple,
+        electrode_group_names: tuple,
+        bad_channel_ids: tuple = (),
+        existing_analysis_file_name: str | None = None,
+        provenance_tables=None,
+    ) -> RecordingArtifactResult:
+        """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
+
+        Shared by ``make_compute`` and ``_rebuild_nwb_artifact``; the pipeline
+        is :func:`._recording_nwb.compute_recording_artifact`. A classmethod
+        so ``RecordingArtifactRecompute.make_compute`` can run it without a
+        table instance (constructing one queries the DB). Tests patch it, so
+        it stays a class attribute.
+        """
+        return _recording_nwb.compute_recording_artifact(
+            cls,
+            raw_path=raw_path,
+            raw_object_id=raw_object_id,
+            nwb_file_name=nwb_file_name,
+            interval_list_name=interval_list_name,
+            channel_ids=channel_ids,
+            reference_mode=reference_mode,
+            reference_electrode_id=reference_electrode_id,
+            sort_valid_times=sort_valid_times,
+            raw_valid_times=raw_valid_times,
+            preprocessing_params=preprocessing_params,
+            probe_types=probe_types,
+            electrode_group_names=electrode_group_names,
+            bad_channel_ids=bad_channel_ids,
+            existing_analysis_file_name=existing_analysis_file_name,
+            provenance_tables=provenance_tables,
+        )
+
+    @staticmethod
+    def _write_nwb_artifact(
+        recording,
+        nwb_file_name: str,
+        existing_analysis_file_name: str | None = None,
+        timestamps_override=None,
+        *,
+        filtering_description: str,
+        provenance_tables=None,
+    ) -> tuple[str, str, str]:
+        """Write the preprocessed recording into an ``AnalysisNwbfile``.
+
+        Thin delegator to
+        :func:`._recording_nwb.write_nwb_artifact`; kept as a
+        ``Recording`` staticmethod because
+        :func:`._recording_nwb.compute_recording_artifact` calls it through
+        the class and the v2 tests both
+        monkeypatch ``Recording._write_nwb_artifact`` (the staged-file
+        cleanup probe) and call it directly (the heterogeneous-gain +
+        electrode-table-region guards). The streamed (chunk-iterator) NWB
+        write and the post-write content-fingerprint hashing
+        (:func:`._recording_fingerprint.recording_content_fingerprint`) live
+        in the service module. Returns ``(analysis_file_name,
+        electrical_series_object_id, content_hash)``.
+        """
+        return write_nwb_artifact(
+            recording,
+            nwb_file_name,
+            existing_analysis_file_name,
+            timestamps_override,
+            filtering_description=filtering_description,
+            provenance_tables=provenance_tables,
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Drift / motion QC -- estimate probe motion and store it, never apply it.
+# --------------------------------------------------------------------------- #
+
+
+class DriftFetched(NamedTuple):
+    """``make_fetch`` output for :class:`DriftEstimate`.
+
+    Gathered with no trace/SI I/O except the self-heal rebuild of a missing
+    recording file.
+
+    Attributes
+    ----------
+    preset : str
+        The ``compute_motion`` preset.
+    traces : StoredTraces
+        The recording's cached artifact, resolved (and rebuilt if missing).
+        Its ``content_hash`` puts the recording row under DataJoint's
+        fetch-integrity check.
+    """
+
+    preset: str
+    traces: StoredTraces
+
+
+class DriftComputed(NamedTuple):
+    """``make_compute`` output for :class:`DriftEstimate`."""
+
+    preset: str
+    max_abs_displacement_um: float
+    n_temporal_bins: int
+    motion: dict
+
+
+@schema
+class DriftEstimate(SpyglassMixin, dj.Computed):
+    """Probe-motion estimate for a ``Recording`` -- QC only, never applied.
+
+    Estimates drift on the cached preprocessed recording with
+    SpikeInterface's ``compute_motion`` and stores the displacement field
+    plus a one-number severity summary. **Nothing in the pipeline consumes
+    this for correction.** It exists so high-drift sessions can be
+    flagged/queried (``max_abs_displacement_um``) without changing any sort
+    output. To correct motion, use the optional motion stage instead
+    (``motion_mode`` on ``run_v2_pipeline``; ``MotionEstimate`` /
+    ``MotionCorrectedRecording`` in :mod:`.motion`).
+
+    Populated **on demand**: a ``dj.Computed`` table fills only when the user
+    calls ``DriftEstimate.populate(recording_key)``, so the expensive
+    estimation never runs eagerly alongside ``Recording``.
+
+    Columns
+    -------
+    motion_preset : varchar
+        The ``compute_motion`` preset used (stored for provenance; the
+        module default is ``_DEFAULT_PRESET``). A single default is used --
+        there is deliberately no parameters Lookup.
+    max_abs_displacement_um : float
+        ``max(|displacement|)`` over all segments / temporal bins / spatial
+        windows -- the drift-severity summary (>= 0; ~0 on a drift-free
+        recording). A non-finite estimate raises at populate rather than
+        being stored, so a stored value is always finite.
+    n_temporal_bins : int
+        Total number of temporal bins in the estimate.
+    motion : longblob
+        The serialized ``Motion`` (see
+        :func:`._motion.motion_to_storage_dict` for the exact keys); rehydrate
+        with :meth:`get_motion`.
+
+    Notes
+    -----
+    The default preset (``dredge_fast``) requires ``torch`` (installed by the
+    ``spikesorting-v2`` extra). ``compute_motion`` consumes the recording's
+    channel locations to localize peaks, so the upstream ``Recording`` must
+    carry probe geometry (it does -- ``get_recording`` returns a recording
+    whose ``get_channel_locations()`` comes from the probe's relative
+    contact coordinates).
+    """
+
+    definition = """
+    -> Recording
+    ---
+    motion_preset: varchar(64)
+    max_abs_displacement_um: float
+    n_temporal_bins: int
+    motion: longblob
+    """
+
+    # ``_parallel_make = True`` + the tri-part ``make_fetch`` /
+    # ``make_compute`` / ``make_insert`` split mirror ``Recording`` so the
+    # long ``compute_motion`` call runs OUTSIDE the DB transaction (and so
+    # multiple recordings can be estimated in parallel). The inherited
+    # ``AutoPopulate.make`` generator is left in place so DataJoint routes
+    # through tri-part dispatch.
+    _parallel_make = True
+    _DEFAULT_PRESET = "dredge_fast"
+
+    def make_fetch(self, key) -> DriftFetched:
+        """Return the preset and the resolved recording artifact.
+
+        No SpikeInterface or NWB I/O except the self-heal rebuild of a
+        missing recording file (``Recording``'s own verified rebuild). The
+        carrier holds strings only, so the tri-part contract's two
+        ``make_fetch`` calls stay DeepHash-stable (the second finds the file
+        the first rebuilt).
+        """
+        return DriftFetched(
+            preset=self._DEFAULT_PRESET,
+            traces=Recording().resolve_stored_traces(key),
+        )
+
+    def make_compute(self, key, preset, traces) -> DriftComputed:
+        """Run ``compute_motion`` outside any DB transaction; no DB access.
+
+        Reads the cached preprocessed recording ``make_fetch`` resolved,
+        estimates motion with the given preset, and flattens the resulting
+        ``Motion`` to a storable dict plus the summary metrics. The
+        long-running step (peak detect + localize + estimate) returns before
+        the framework opens its commit transaction, so it never holds a DB
+        lock.
+        """
+        import spikeinterface.preprocessing as sip
+
+        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
+
+        recording = read_stored_traces(traces)
+        # The NWB reader keeps the timestamps as a lazy HDF5 dataset, and
+        # DREDge maps every peak frame to time with one fancy index
+        # (sortingcomponents/motion/dredge.py:227), which h5py refuses when two
+        # peaks share a frame. Load the same timestamps into memory (8 bytes
+        # per sample) so the estimate stays on the recording's real clock,
+        # acquisition gaps included.
+        if recording.has_time_vector():
+            recording.set_times(
+                np.asarray(recording.get_times()), with_warning=False
+            )
+        motion = sip.compute_motion(recording, preset=preset)
+        max_abs_displacement_um = motion_max_abs_displacement_um(motion)
+        if not np.isfinite(max_abs_displacement_um):
+            # compute_motion(raise_error=True, its default) raises on a hard
+            # failure, but a numerically degenerate-but-completed estimate can
+            # still yield non-finite displacement. Refuse to store an unusable
+            # QC metric -- a NaN summary would also slip past a
+            # ``max_abs_displacement_um > x`` filter, so the worst case would
+            # silently go unflagged.
+            raise ValueError(
+                f"DriftEstimate: compute_motion(preset={preset!r}) produced a "
+                f"non-finite max displacement ({max_abs_displacement_um}) for "
+                f"{key}; refusing to store an unusable drift-QC metric."
+            )
+        return DriftComputed(
+            preset=preset,
+            max_abs_displacement_um=max_abs_displacement_um,
+            n_temporal_bins=motion_n_temporal_bins(motion),
+            motion=motion_to_storage_dict(motion),
+        )
+
+    def make_insert(
+        self, key, preset, max_abs_displacement_um, n_temporal_bins, motion
+    ) -> None:
+        """Insert the single QC row inside the framework transaction."""
+        self.insert1(
+            {
+                **key,
+                "motion_preset": preset,
+                "max_abs_displacement_um": max_abs_displacement_um,
+                "n_temporal_bins": n_temporal_bins,
+                "motion": motion,
+            }
+        )
+
+    # ---- Public accessors ------------------------------------------------
+
+    def get_motion(self, key: dict):
+        """Rehydrate the stored estimate into a SpikeInterface ``Motion``.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``DriftEstimate`` row.
+
+        Returns
+        -------
+        spikeinterface.core.motion.Motion
+            The motion object as ``compute_motion`` produced it (displacement
+            list, temporal/spatial bins, direction). Use this for plotting /
+            inspection so QC code does not re-derive the blob shape from
+            :func:`._motion.motion_to_storage_dict`.
+        """
+        blob = (self & key).fetch1("motion")
+        return motion_from_storage_dict(blob)

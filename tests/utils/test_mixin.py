@@ -177,6 +177,57 @@ def test_mixin_del_orphans(dj_conn, Mixin, MixinChild):
     assert post_del == 0, "Delete orphans not working."
 
 
+def test_mixin_del_orphans_with_shared_secondary_attr(schema_test):
+    """A child sharing a secondary attribute with its parent is matched on
+    the other shared attributes instead of raising."""
+    from spyglass.utils import SpyglassMixin
+
+    class SharedParent(SpyglassMixin, dj.Lookup):
+        definition = """
+        id : int
+        ---
+        label : int
+        """
+        contents = [(0, 5), (1, 5)]
+
+    class SharedChild(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> SharedParent
+        ---
+        label : int
+        """
+        contents = [(0, 7)]
+
+    schema_test(SharedParent)
+    schema_test(SharedChild)
+    orphans = SharedParent().delete_orphans(dry_run=True)
+    assert orphans.fetch("id").tolist() == [1]
+
+
+def test_mixin_del_orphans_renamed_foreign_key(schema_test):
+    """A child that renames the foreign key still protects every parent row
+    sharing its other attributes, as subtracting the whole child table did."""
+    from spyglass.utils import SpyglassMixin
+
+    class RenamedParent(SpyglassMixin, dj.Lookup):
+        definition = """
+        group_id : int
+        name : varchar(8)
+        """
+        contents = [(0, "x"), (0, "y"), (1, "z")]
+
+    class RenamedChild(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> RenamedParent.proj(other_name="name")
+        """
+        contents = [(0, "x")]
+
+    schema_test(RenamedParent)
+    schema_test(RenamedChild)
+    orphans = RenamedParent().delete_orphans(dry_run=True)
+    assert orphans.fetch(as_dict=True) == [{"group_id": 1, "name": "z"}]
+
+
 def test_test_mode_property_uses_settings(schema_test, Mixin):
     """Test that _test_mode property uses spyglass.settings.config.
 

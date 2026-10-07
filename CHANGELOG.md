@@ -2,21 +2,197 @@
 
 ## [0.6.1] (Unreleased)
 
-<!--
 ### Release Notes
 
+Running draft to be removed immediately prior to release. When altering tables,
+import all foreign key references.
+
+This release moves Spyglass to SpikeInterface 0.104 and NumPy 2 and adds the
+Spike Sorting v2 pipeline (#1609). To upgrade:
+
+- Recreate your conda environment (or reinstall the package). The NumPy, SciPy,
+    SpikeInterface, probeinterface, JAX and `non-local-detector` pins all
+    change; see Infrastructure below.
+- To produce new v0/v1 spike-sorting output, also keep a second environment
+    built from `environments/environment_spikesorting_legacy.yml` (follow steps
+    1-3 in its header). Both environments use the same database. See
+    [Two environments, one database](Features/SpikeSortingV2_Migration.md#two-environments-one-database).
+- Audit existing `UnitAnnotation` rows and run the migration below once before
+    reading or writing annotations that used positional unit ids.
+- If you used Spike Sorting v2 on a development database before this release,
+    follow
+    [Upgrading a preproduction v2 database](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database),
+    or start from a fresh database.
+
 ```python
-# Add alter commands here
+# UnitAnnotation.unit_id now stores the NWB unit id instead of the unit's
+# position in the spike-times list. Audit before reading or writing old rows:
+from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
+
+UnitAnnotation.audit_positional_unit_ids()  # inspect candidates
+UnitAnnotation.migrate_positional_unit_ids(dry_run=False)  # apply once
+
+# Databases created before 0.6.0 also need these 0.6.0 alters, which the 0.6.0
+# release notes did not include. Skip any you have already run.
+from spyglass.common.common_filter import FirFilterParameters
+from spyglass.decoding.v1.core import DecodingParameters
+from spyglass.position.v1.position_dlc_project import DLCProject
+from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
+
+FirFilterParameters().alter()  # #1464
+DecodingParameters().alter()  # #1463
+DLCProject().alter()  # #1534
+UnitSelectionParams().alter()  # #1670; only needed to use unit_criteria
+
+from spyglass.spikesorting.v0.spikesorting_recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
+
+from spyglass.spikesorting.v1.recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
 ```
--->
+
+### Breaking Changes
+
+#### SpikeInterface 0.104 and NumPy 2 (#1609)
+
+Spyglass now pins `spikeinterface==0.104.3` (was `>=0.99.1,<0.100`) and allows
+NumPy 2. Existing v0/v1 rows, and their saved recordings, sortings and
+binary-folder waveforms, stay readable under the new pin, including through
+`SpikeSortingOutput` and `SortedSpikesGroup`.
+
+These v0/v1 entry points raise `RuntimeError` under SpikeInterface 0.104 and
+must be run in the legacy environment:
+
+- v0 `ArtifactDetection`, `Waveforms`, `QualityMetrics` and `BurstPair` populate
+- v1 `ArtifactDetection`, `MetricCuration` and `BurstPair` populate, and
+    `MetricCuration.get_waveforms` when it has to extract waveforms
+- clusterless `UnitMarks` (decoding v0) and `UnitWaveformFeatures` (decoding v1)
+    for v0/v1 sorts
+- loading a Zarr-format waveform folder
+
+MountainSort4 also needs the legacy environment: its `ml_ms4alg` backend does
+not run on NumPy 2. The `spike_location` waveform feature is now v2-only and
+raises `NotImplementedError` for v0/v1 sorts in either environment. For v0/v1
+sorts it never produced per-unit values: each unit received the locations of
+every unit's spikes, so the features did not align with the unit's spike times.
+v0/v1 `UnitWaveformFeatures` selections need a features row without it (such as
+`amplitude`).
+
+#### Spike-sorting recordings read the raw `ElectricalSeries` by name (#1609)
+
+v0, v1 and v2 recordings now open the raw acquisition `ElectricalSeries` by name
+(`e-series`, `electricalseries`, `ephys` or `electrophysiology`, the names `Raw`
+ingestion uses) rather than letting SpikeInterface pick one. SpikeInterface
+0.104 will not guess when a file also stores LFP. A file with no matching
+series, or more than one, raises `ValueError`.
+
+#### `Merge.fetch_nwb` refuses restrictions that span sources (#1609)
+
+`fetch_nwb` on any merge table now raises `ValueError` when the restriction
+matches more than one source part, instead of returning a mixed list. Pass
+`multi_source=True` to fetch across sources deliberately. The unused
+`disable_warning` parameter is removed, so calls that passed `return_merge_ids`
+or `log_export` positionally must pass them by keyword.
+
+#### Spike-sorting analysis results can change (#1609)
+
+- `SortedSpikesGroup.fetch_spike_data` and `get_spike_indicator` with
+    `return_unit_ids=True` report the NWB units-table id rather than the unit's
+    position. Values change for sorts whose unit ids are not `0..n-1`, such as
+    v1 curations made with `apply_merge=True`.
+- `UnitAnnotation.unit_id` stores the NWB unit id. Reads and `add_annotation`
+    refuse an unmarked merge whose NWB unit ids differ from their positions
+    until its annotations are audited and migrated. `add_annotation` now runs
+    inside a caller's open transaction, so the caller must roll back if it fails.
+    A new
+    `UnitAnnotationPositionalIdMigration` table records the migration.
+- V2 specific and global-median referencing require uniform finite channel
+    offsets and uniform finite positive gains across all contributing channels,
+    including a specific reference electrode. Unsupported calibration raises
+    before raw-count subtraction can silently change physical units. Filtered
+    recordings are checked after the filter has cleared their offsets.
+- An include-label filter on a curation whose units carry no labels now selects
+    no units (previously every unit).
+- Firing-rate smoothing on `SpikeSortingOutput` and `SortedSpikesGroup` no
+    longer runs across gaps in the time axis.
+- `SortedSpikesDecodingV1` combines a user-supplied
+    `decoding_kwargs["is_missing"]` with the missingness derived from the
+    decoding intervals. Previously a supplied `is_missing` replaced the interval
+    mask, so time outside the decoding intervals was decoded. For populations
+    that include v2 sorts, encoding and decoding are also restricted to the time
+    every unit was observed; when no observed training time remains it raises
+    `ValueError`. Results record the intervals used in
+    `spyglass_observation_intervals`, `spyglass_encoding_intervals` and
+    `spyglass_decoding_intervals` attributes.
+- Clusterless amplitude marks (v0 `UnitMarks`, v1 `UnitWaveformFeatures`) and
+    v0/v1 `BurstPair` peak amplitudes are read at the spike-aligned sample
+    rather than the waveform midpoint. Values change for waveform parameters
+    whose `ms_before` and `ms_after` differ.
+- `MuaEventsV1` smooths, normalizes and detects events within each contiguous
+    observed run, and numbers events uniquely in time order. Results change for
+    intervals with more than one valid-time segment.
 
 ### Documentation
 
+- Add Spike Sorting v2 documentation: a quickstart, a user guide, a v1 to v2
+    migration guide, a storage-management page, and the tutorial notebooks
+    `10_Spike_SortingV2`, `10_Spike_SortingV2_Curation`,
+    `10_Spike_SortingV2_Presets` and `10_Spike_SortingV2_CrossSession` #1609
 - Add LFP artifact detection to the LFP notebook #1641
 - Add File Backends developer page #1662
 
 ### Infrastructure
 
+- Update dependency pins: `numpy>=1.26,<3` (was `<2`), `scipy>=1.13` (was
+    `<1.13`), `spikeinterface==0.104.3`, `probeinterface>=0.3.2` (was `<0.3`),
+    `jax<0.10` (was `<0.7.2`), `non-local-detector==0.6.9`,
+    `ripple-detection>=1.7`, `deeplabcut[tf]>=3.0`, `keypoint-moseq>=0.6`;
+    declare `networkx`, `numba` and `pydantic>=2`; drop the `panel>=1.4` pin,
+    which Spyglass does not import and which blocked `keypoint-moseq` 0.6 (it
+    pins `panel==0.14.4`) #1609
+- `environment.yml` and `environment_min.yml` move to NumPy 2 and `scipy>=1.13`;
+    `environment.yml` installs `torch>=2` from pip instead of conda
+    `pytorch<1.12` and no longer installs `mountainsort4`, which does not run on
+    NumPy 2. The DLC and MoSeq environments stay on NumPy < 2 and drop their
+    conda `pytorch` and `jax` pins #1609
+- Add `environments/environment_spikesorting_v2.yml` and
+    `environments/environment_spikesorting_legacy.yml` #1609
+- Add optional extras `spikesorting-v2` (MountainSort5, torch),
+    `spikesorting-v2-matching` (UnitMatchPy), `spikesorting-v2-curation`
+    (FigPack browser review, ipywidgets), and the test-only
+    `spikesorting-v2-curation-test` and `spikesorting-v2-validation` #1609
+- The `spikesorting-v2` extra requires `filelock>=3.15`: earlier releases reset
+    a reused singleton lock's counter, so the v2 analyzer cache's nested acquire
+    deadlocks #1609
+- `Nwbfile.get_abs_path` and `AnalysisNwbfile.create` reject a file name that is
+    not a bare file name (a path separator, `..`, or an absolute path) #1609
+- Creating an analysis NWB file no longer fails where `conda` is unavailable;
+    the environment record says so instead #1609
+- Orphan checks (`delete_orphans`, `AnalysisNwbfile.get_orphans` and `cleanup`,
+    `IntervalList.cleanup`) no longer raise when a child table shares a
+    secondary attribute with the parent, as v2's `ConcatMemberCuration` does;
+    which rows count as orphans is otherwise unchanged. Add
+    `spyglass.utils.dj_helper_fn.get_child_references` #1609
+- `spyglass.utils.nwb_helper_fn.get_raw_eseries_path` accepts `object_id=`; add
+    `raw_eseries_path_and_timestamp_mode` #1609
+- Add `spyglass.utils.nwb_hash.get_namespace_versions`, shared by v1 and v2
+    recompute and file namespace capture #1609
+- Run spike-sorting tests in separate CI jobs: `pytest-legacy` (SpikeInterface
+    0.99, v0/v1) and a sharded `pytest-v2` (SpikeInterface 0.104) #1609
 - Prevent errors during update for dandi standard from propagating to other
     files #1677
 - Refactor `get_nwb_file` fallbacks into a pluggable `FileBackend` protocol
@@ -26,6 +202,21 @@
 
 ### Pipelines
 
+- Common
+
+    - Re-populating `Export` removes superseded `Export.File` rows, keeping rows
+        still referenced downstream #1609
+    - Export cascades no longer abort on a table that holds both sides of a
+        renamed foreign key (regression from #1610) #1609
+    - `AnalysisFileIssues` skips a recompute-deleted file only while it is missing
+        from disk, so a rebuilt file is checked again #1609
+
+- Decoding
+
+    - `UnitWaveformFeatures` accepts v2 sorts, with amplitudes in µV. v0/v1
+        amplitudes are raw counts, so do not mix v0/v1 and v2 marks in one decoder
+        #1609
+
 - Spike Sorting
 
     - Store `hash` on `SpikeSortingRecording` insert, and fix the `Path`/`str`
@@ -34,6 +225,39 @@
         written before this have a null hash; a recompute of one warns and is
         accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
         #1662
+    - Add Spike Sorting v2 (`spyglass.spikesorting.v2`). `run_v2_pipeline` runs
+        preprocessing, artifact detection, sorting and curation from a named
+        preset and registers the result in `SpikeSortingOutput`. It adds
+        MountainSort5 as the default sorter (Kilosort4, SpykingCircus2 and
+        Tridesclous2 also supported), content-addressed parameters and selections,
+        hash-verified recompute, same-day concatenate-and-sort, optional
+        experimental motion correction, browser-based review with FigPack, and
+        cross-session unit tracking with UnitMatch. See the Spike Sorting v2 docs
+        #1609
+    - `SpikeSortingOutput` gains `CurationV2` and `ConcatMemberCuration` parts,
+        declared when the v2 module imports; if it cannot import, a warning names
+        the cause and the parts are omitted. `get_restricted_merge_ids` now
+        defaults to every available source, including v2 #1609
+    - `get_spike_indicator` gains keyword-only `return_validity` on
+        `SpikeSortingOutput` and `SortedSpikesGroup`, and
+        `SpikeSortingOutput.get_spike_indicator` gains `return_unit_ids`
+        (`SortedSpikesGroup` already had it). For v2 sorts, spike-indicator and
+        firing-rate bins outside observed time are NaN. Add
+        `SpikeSortingOutput.get_observation_intervals` and
+        `get_spike_times_by_unit`; `get_spike_times` warns when a restriction
+        spans sources #1609
+    - Add `SortedSpikesGroup.UnitSelection`, which records each group's selected
+        units at creation, and `create_group(unit_selections=...)` #1609
+    - Group or merge firing rate over zero units returns an `(n_time, 0)` array
+        instead of raising #1609
+    - v1 recompute compares only the NWB namespaces a recording embeds, so an
+        unused optional extension no longer blocks every recording #1609
+    - v1 `show_available_metrics` skips metrics the installed SpikeInterface does
+        not provide #1609
+    - `Merge.fetch_nwb` warns when a parent-attribute restriction skips a source
+        #1609
+    - Deprecate `calculate_isi_violation(isi_threshold_s=...)` in favor of
+        `isi_threshold_ms` (the value was always milliseconds) #1609
 
 ## [0.6.0] (Sep 1st 2026)
 

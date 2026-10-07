@@ -839,6 +839,18 @@ class SpyglassConfig:
             self._config["prefer_download"] = self._prefer_download
 
     @property
+    def figpack_api_key(self) -> "str | None":
+        """API key for publishing hosted figpack.org figures.
+
+        Read from `dj.config['custom']['figpack_api_key']`, falling back to the
+        `FIGPACK_API_KEY` environment variable that FigPack's own tools use.
+        None when neither is set.
+        """
+        return dj.config.get("custom", {}).get(
+            "figpack_api_key"
+        ) or os.environ.get("FIGPACK_API_KEY")
+
+    @property
     def dlc_project_dir(self) -> str:
         """DLC project directory as a string."""
         return self.config.get(self.dir_to_var("project", "dlc"))

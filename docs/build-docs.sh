@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run this script from repo root to serve site: > bash ./docs/build-docs.sh serve
 # Then, navigate to localhost:8000/ to inspect site, then ctrl+c to exit
-# For auto-reload during dev, use `mkdocs serve -f ./docs/mkdocs.yaml`
+# For auto-reload during dev, use `mkdocs serve -f ./docs/mkdocs.yml`
 
 # Top-level repo files (CHANGELOG, LICENSE, QUICKSTART, notebooks, and
 # notebook-images) are surfaced under docs/src/ via committed symlinks, so no
@@ -37,7 +37,7 @@ check_format() {
 # Check if the MAJOR_VERSION not defined or does not meet format criteria
 if [ -z "$MAJOR_VERSION" ] || ! check_format "$MAJOR_VERSION"; then
   full_version=$(git describe --tags --abbrev=0)
-  export MAJOR_VERSION="${version_string:0:3}"
+  export MAJOR_VERSION="${full_version:0:3}"
 fi
 if ! check_format "$MAJOR_VERSION"; then
   export MAJOR_VERSION="dev" # Fallback to dev if still not valid

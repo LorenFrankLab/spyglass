@@ -406,8 +406,15 @@ class DockerMySQLManager:
                 logline = f"Container {self.container_name} (exited)"
 
             if remove:
-                self.container.remove()
-                logline += " and removed"
+                # ``v=True`` also removes the container's ANONYMOUS volumes.
+                # The datajoint/mysql image declares ``VOLUME /var/lib/mysql``,
+                # so a run WITHOUT a ``vol_dir`` bind mount (the default)
+                # creates a ~4 GB anonymous volume per container; without this
+                # every suite run leaks one until the Docker partition fills.
+                # A bind mount is not a managed volume, so ``vol_dir`` runs are
+                # unaffected and are still cleared by ``_clear_vol_dir``.
+                self.container.remove(v=True)
+                logline += " and removed (with volumes)"
 
             print(f"{logline}.")
 

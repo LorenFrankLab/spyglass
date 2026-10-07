@@ -63,6 +63,17 @@ from .data_downloader import DataDownloader
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
+# Module-level default so `pytest_unconfigure` never references an unbound name.
+# `pytest_configure` sets TEARDOWN early but binds SERVER late (after building
+# the Docker MySQL manager). If configure raises in between -- e.g. Docker is
+# unavailable, so `DockerMySQLManager(...)` raises before the assignment -- pytest
+# still runs `pytest_unconfigure` from `wrap_session`'s finally. Without this
+# default the teardown's `SERVER.stop()` raises `NameError: name 'SERVER' is not
+# defined`, a second traceback that buries the real configuration error. The
+# default + the `SERVER is not None` guard in `pytest_unconfigure` surface the
+# real error instead.
+SERVER = None
+
 
 # ---------- Fix ResourceWarning from datajoint.hash.uuid_from_file -----------
 # Patch uuid_from_file to properly close file handles (upstream opens without
@@ -339,6 +350,30 @@ def pytest_addoption(parser):
         default=None,
         dest="container_port",
         help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
+    )
+    parser.addoption(  # opt-in for the slow real-chronic memory/runtime test
+        "--run-chronic",
+        action="store_true",
+        dest="run_chronic",
+        default=False,
+        help=(
+            "Run the slow real-chronic-dataset memory/runtime test for "
+            "spike-sorting v2 concatenation. Requires a real dataset via the "
+            "SPIKESORTING_V2_CHRONIC_TEST_PATH env var; skipped by default."
+        ),
+    )
+    parser.addoption(  # opt-in for the v2 end-to-end acceptance probes
+        "--run-acceptance",
+        action="store_true",
+        dest="run_acceptance",
+        default=False,
+        help=(
+            "Run the spike-sorting v2 end-to-end acceptance probes "
+            "(tests marked `acceptance`, in tests/spikesorting/v2/acceptance). "
+            "Requires the MEArec tetrode and smoke fixtures, the "
+            "spikesorting-v2-curation extras and a Chromium for Playwright; "
+            "skipped by default."
+        ),
     )
     parser.addoption(  # Keeps MySQL data off a potentially small root disk
         "--container-vol-dir",
@@ -717,8 +752,12 @@ def no_dlc(request):
     yield NO_DLC
 
 
+# String condition (evaluated lazily in pytest's namespace, where
+# ``pytest_configure`` sets ``pytest.NO_DLC``). A ``lambda`` here would be a
+# truthy callable that ``skipif`` never calls, so every DLC test skipped
+# unconditionally regardless of ``--no-dlc``.
 skip_if_no_dlc = pytest.mark.skipif(
-    condition=lambda: getattr(pytest, "NO_DLC", False),
+    "getattr(pytest, 'NO_DLC', False)",
     reason="Skipping DLC-dependent tests.",
 )
 

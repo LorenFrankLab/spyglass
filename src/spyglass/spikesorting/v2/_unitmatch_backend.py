@@ -1,0 +1,670 @@
+"""UnitMatch cross-session matcher backend.
+
+Concrete :class:`~spyglass.spikesorting.v2.matcher_protocol.MatcherProtocol`
+implementation wrapping `UnitMatchPy <https://github.com/EnnyvanBeest/UnitMatch>`_.
+
+Two roles live here:
+
+- :func:`extract_unitmatch_bundle` -- the *wrapper* helper that turns a curated
+  SpikeInterface sorting + recording into a UnitMatch directory bundle (dense
+  per-unit cross-validation-half templates + channel positions + good-unit
+  labels). ``UnitMatch._extract_and_match`` (run from
+  ``UnitMatch.make_compute``) calls this once per matching input; it reads the
+  traces the input's sorter read but writes only the self-contained bundle.
+- :class:`UnitMatchBackend.match` -- the *matcher*: it reads the prepared bundle
+  directories and runs the UnitMatch inference, returning cross-session pairs.
+  It never touches a recording, a ``SortingAnalyzer``, or a Spyglass key.
+
+UnitMatchPy is an optional dependency (``pip install -e
+".[spikesorting-v2-matching]"``); the import is guarded so a missing install --
+or a Tk-less top-level ``import UnitMatchPy`` -- raises a clear, actionable error
+rather than a cryptic one. UnitMatchPy 3.2.7's metric path is numpy-2 broken
+(``param_functions.get_avg_waveform_per_tp`` calls ``np.arange`` with 1-element
+``np.argwhere`` endpoints, which numpy>=2 rejects and UnitMatch's bare ``except``
+silently swallows -- corrupting the waveform trajectory), so the guard installs
+a numpy-2 ``arange`` shim scoped to its ``param_functions`` module.
+"""
+
+from __future__ import annotations
+
+import functools
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+
+from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
+from spyglass.spikesorting.v2._signal_math import (
+    frames_with_window_in_one_span,
+)
+from spyglass.spikesorting.v2.matcher_protocol import (
+    MatchPair,
+    SessionMatcherInput,
+    is_registered,
+    register_matcher,
+)
+
+_INSTALL_HINT = (
+    "UnitMatchPy is required for cross-session matching. Install it with "
+    '`pip install -e ".[spikesorting-v2-matching]"` (UnitMatchPy>=3.2.6,<3.2.8 '
+    "+ mat73). If the import fails on `_tkinter`, the top-level "
+    "`import UnitMatchPy` is loading its Tk GUI; run in a Tk-enabled "
+    "environment."
+)
+
+
+class _ArangeProxy:
+    """numpy proxy that coerces 1-element-array ``arange`` endpoints to scalars.
+
+    UnitMatchPy 3.2.7's ``param_functions.get_avg_waveform_per_tp`` calls
+    ``np.arange`` with ``np.argwhere`` endpoints (1-element arrays). numpy<2
+    accepted those as scalars; numpy>=2 raises ``TypeError``, which UnitMatch's
+    bare ``except`` swallows and silently corrupts the waveform trajectory.
+    Coercing the endpoints (a no-op for true scalars) restores numpy<2 behavior
+    without editing the installed package.
+    """
+
+    def arange(self, start, stop=None, *args, **kwargs):
+        start = start.item() if getattr(start, "size", None) == 1 else start
+        if stop is not None:
+            stop = stop.item() if getattr(stop, "size", None) == 1 else stop
+            return np.arange(start, stop, *args, **kwargs)
+        return np.arange(start, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(np, name)
+
+
+@functools.lru_cache(maxsize=1)
+def _require_unitmatch() -> SimpleNamespace:
+    """Import the UnitMatchPy submodules + install the numpy-2 shim (cached).
+
+    Returns a namespace of the submodules used by the backend. Raises
+    ``ImportError`` with an actionable install hint if UnitMatchPy is absent or
+    its top-level (GUI) import fails.
+    """
+    try:
+        import UnitMatchPy.assign_unique_id as assign_unique_id
+        import UnitMatchPy.bayes_functions as bayes_functions
+        import UnitMatchPy.default_params as default_params
+        import UnitMatchPy.extract_raw_data as extract_raw_data
+        import UnitMatchPy.overlord as overlord
+        import UnitMatchPy.param_functions as param_functions
+        import UnitMatchPy.utils as utils
+    except ImportError as exc:  # missing package or Tk-less GUI import
+        raise ImportError(_INSTALL_HINT) from exc
+
+    # numpy-2 compatibility shim (idempotent; only swaps once).
+    if not isinstance(param_functions.np, _ArangeProxy):
+        param_functions.np = _ArangeProxy()
+
+    return SimpleNamespace(
+        assign_unique_id=assign_unique_id,
+        bayes_functions=bayes_functions,
+        default_params=default_params,
+        extract_raw_data=extract_raw_data,
+        overlord=overlord,
+        param_functions=param_functions,
+        utils=utils,
+    )
+
+
+def _bundle_compute_kwargs(
+    seed: int, job_kwargs: dict | None
+) -> tuple[int, dict]:
+    """Resolve the bundle random seed + the SI ``compute`` job kwargs.
+
+    The bundle ``seed`` is authoritative: a stray ``random_seed`` in
+    ``job_kwargs`` (an ambient ``dj.config`` seed, or a value leaked from a
+    params blob) is stripped and IGNORED -- it never overrides ``seed``. Letting
+    it win would make the stored, identity-bearing ``seed`` disagree with the
+    seed actually used. ``random_seed`` is also not a valid
+    ``SortingAnalyzer.compute`` kwarg (SI raises "please remove
+    {'random_seed'}"), so stripping it is required regardless.
+    """
+    compute_job_kwargs = dict(job_kwargs or {})
+    compute_job_kwargs.pop("random_seed", None)
+    return seed, compute_job_kwargs
+
+
+class NoMatchableUnitsError(ValueError):
+    """No unit of a session can enter a UnitMatch bundle.
+
+    Raised by :func:`extract_unitmatch_bundle` when every unit has fewer than
+    two sampled spikes with full waveform support, so no unit has two
+    cross-validation halves.
+    """
+
+
+def _sorting_with_window_in_one_span(
+    sorting, recording, spans, nbefore: int, nafter: int
+):
+    """``sorting`` keeping only the spikes whose window lies in one span.
+
+    Every unit id is kept, including a unit left with no spike. The spike
+    vector keeps SpikeInterface's order (``to_spike_vector``), so each unit's
+    remaining spikes are in the same relative order as before.
+    """
+    from spikeinterface.core import NumpySorting
+
+    if sorting.get_num_segments() != 1 or recording.get_num_segments() != 1:
+        raise ValueError(
+            "extract_unitmatch_bundle: statistics_spans are single-segment "
+            f"frame ranges, but the sorting has {sorting.get_num_segments()} "
+            f"and the recording {recording.get_num_segments()} segments."
+        )
+    n_samples = int(recording.get_num_samples(segment_index=0))
+    ends = np.asarray(spans, dtype=np.int64).reshape(-1, 2)[:, 1]
+    last_end = int(ends.max(initial=0))
+    if last_end > n_samples:
+        raise ValueError(
+            "extract_unitmatch_bundle: statistics_spans end at frame "
+            f"{last_end}, past the recording's {n_samples} frames; the spans "
+            "do not describe this recording."
+        )
+    spikes = sorting.to_spike_vector()
+    kept = frames_with_window_in_one_span(
+        spikes["sample_index"], spans, n_before=nbefore, n_after=nafter
+    )
+    return NumpySorting(
+        spikes[kept], sorting.get_sampling_frequency(), sorting.unit_ids
+    )
+
+
+def extract_unitmatch_bundle(
+    session_dir,
+    recording,
+    sorting,
+    *,
+    ms_before: float = 1.5,
+    ms_after: float = 1.5,
+    max_spikes_per_unit: int = 100,
+    seed: int = 0,
+    job_kwargs: dict | None = None,
+    statistics_spans=None,
+) -> list[int]:
+    """Write a UnitMatch directory bundle for one curated session.
+
+    UnitMatch needs a dense per-unit average waveform of shape
+    ``(spike_width, n_channels, 2)`` -- two cross-validation halves across ALL
+    channels. The v2 canonical analyzer is sparse, so this re-extracts from one
+    dense (``sparse=False``) analyzer on the whole session. Up to
+    ``2 * max_spikes_per_unit`` spikes are drawn per unit, only from spikes at
+    least ``max(nbefore, nafter)`` samples from a segment border (SpikeInterface
+    zero-fills the waveform of a spike whose window crosses a border, so every
+    sampled spike has full waveform support). With ``statistics_spans``, a
+    spike is drawn only if its whole window ``[s - nbefore, s + nafter)`` also
+    lies inside one span, so no sampled waveform runs across a concatenation
+    join, an acquisition gap or an artifact exclusion, which a single segment
+    can hold. Each unit's sampled waveforms are
+    put in spike-time order and split per unit: half 0 averages the first
+    ``n // 2`` and half 1 the rest (an odd spike goes to half 1, as in
+    UnitMatchPy's own extraction). A unit that fires in only part of the
+    session therefore still gets two halves built from its own spikes. A unit
+    with fewer than two sampled spikes has no two halves; it is left out of the
+    bundle and its id returned. A *symmetric* waveform window keeps the trough
+    at the centre sample, matching UnitMatch's ``peak_loc = spike_width // 2``
+    assumption.
+
+    Parameters
+    ----------
+    session_dir : path-like
+        Output directory; created if absent. Receives ``RawWaveforms/`` plus
+        ``channel_positions.npy`` and ``cluster_group.tsv``, all for the kept
+        units only.
+    recording, sorting : spikeinterface objects
+        The curated recording + sorting for this session. Unit ids must be
+        int-castable.
+    ms_before, ms_after : float
+        Symmetric waveform window (default 1.5/1.5 ms).
+    max_spikes_per_unit : int
+        Random-spike cap per unit per half (default 100): up to twice this
+        many spikes are drawn per unit and split in spike-time order.
+    seed : int
+        Random-spikes seed for determinism (default 0).
+    job_kwargs : dict or None
+        SpikeInterface job kwargs (``n_jobs`` / ``chunk_duration`` / ...) splatted
+        into the ``waveforms`` compute call. ``UnitMatch`` resolves these from
+        ``MatcherParameters.job_kwargs``; ``None`` uses the SpikeInterface
+        defaults.
+    statistics_spans : sequence of (int, int) or None
+        Sorted, non-overlapping half-open frame spans ``[start, end)`` of the
+        single-segment recording that each lie between two joins, gaps or
+        artifact exclusions (the sort's ``Sorting.get_statistics_spans``).
+        Spikes whose waveform window is not inside one span are removed
+        before sampling. ``None`` applies only the segment-border margin.
+
+    Returns
+    -------
+    list of int
+        Ids of the units left out of the bundle (fewer than two sampled spikes
+        with full waveform support, inside one span when ``statistics_spans``
+        is given), in the sorting's unit order. Empty when every unit is
+        kept.
+
+    Raises
+    ------
+    NoMatchableUnitsError
+        Every unit was left out. Raised before anything is written to
+        ``session_dir``.
+    RuntimeError
+        A kept unit's half is exactly all-zero over every sample and channel
+        (a waveform-extraction invariant violation).
+    ValueError
+        The recording's channel positions are not 2D, or ``statistics_spans``
+        are malformed, end past the recording, or are given for a
+        multi-segment recording or sorting.
+    """
+    # Keep this public service boundary as strict as MatcherParameters.insert:
+    # UnitMatch locates the trough at the geometric midpoint.
+    validated = UnitMatchParamsSchema(
+        ms_before=ms_before,
+        ms_after=ms_after,
+        max_spikes_per_unit=max_spikes_per_unit,
+        seed=seed,
+    )
+    ms_before = validated.ms_before
+    ms_after = validated.ms_after
+    max_spikes_per_unit = validated.max_spikes_per_unit
+    seed = validated.seed
+
+    import spikeinterface as si
+
+    um = _require_unitmatch()
+    session_dir = Path(session_dir)
+    random_seed, compute_job_kwargs = _bundle_compute_kwargs(seed, job_kwargs)
+
+    # The UnitMatch matcher contract requires 2D channel positions. Spyglass
+    # stores 3D electrode geometry (z typically 0); project the probe to 2D --
+    # the same projection the analyzer build uses -- so the recording handed to
+    # the dense analyzer and the saved ``channel_positions.npy`` are
+    # consistently 2D. (SI's ``get_channel_locations`` defaults to ``axes="xy"``
+    # and so already drops z, but project + guard explicitly so the 2D contract
+    # does not silently depend on that default.) Validate up front so a bad
+    # geometry fails before the expensive dense analyzer build.
+    probe = recording.get_probe()
+    if probe.ndim == 3:
+        recording = recording.set_probe(probe.to_2d())
+    channel_positions = recording.get_channel_locations()
+    n_channels = recording.get_num_channels()
+    if channel_positions.shape != (n_channels, 2):
+        raise ValueError(
+            "extract_unitmatch_bundle: channel_positions have shape "
+            f"{channel_positions.shape}, expected (n_channels, 2) = "
+            f"({n_channels}, 2). The UnitMatch matcher requires 2D channel "
+            "geometry; a non-2D probe cannot be fed to the matcher."
+        )
+
+    # The waveforms extension's window in samples (same formula as
+    # ComputeWaveforms.nbefore / .nafter). Spikes closer than this to a segment
+    # border are never drawn, so no sampled waveform is zero-filled. The
+    # analyzer runs at the recording's rate (SpikeInterface adopts it when the
+    # sorting's rate differs by rounding), so the window is known before the
+    # analyzer exists.
+    fs = recording.get_sampling_frequency()
+    nbefore = int(ms_before * fs / 1000.0)
+    nafter = int(ms_after * fs / 1000.0)
+    sampling_sorting = sorting
+    if statistics_spans is not None:
+        # Remove, before sampling, every spike whose window leaves its span;
+        # random_spikes then draws uniformly from the rest exactly as it
+        # would from a sorting that only ever had those spikes.
+        sampling_sorting = _sorting_with_window_in_one_span(
+            sorting, recording, statistics_spans, nbefore, nafter
+        )
+    analyzer = si.create_sorting_analyzer(
+        sampling_sorting, recording, sparse=False
+    )
+    analyzer.compute(
+        "random_spikes",
+        method="uniform",
+        max_spikes_per_unit=2 * max_spikes_per_unit,
+        margin_size=max(nbefore, nafter),
+        seed=random_seed,
+    )
+    analyzer.compute(
+        "waveforms",
+        ms_before=ms_before,
+        ms_after=ms_after,
+        **compute_job_kwargs,
+    )
+    waveforms_ext = analyzer.get_extension("waveforms")
+    # Guard against SpikeInterface's ComputeWaveforms.nbefore/.nafter formula
+    # (analyzer_extension_core.py:172-177) drifting from the margin above.
+    if max(waveforms_ext.nbefore, waveforms_ext.nafter) > max(nbefore, nafter):
+        raise RuntimeError(
+            "extract_unitmatch_bundle: waveforms window "
+            f"({waveforms_ext.nbefore}, {waveforms_ext.nafter}) exceeds the "
+            f"random-spikes margin ({max(nbefore, nafter)})"
+        )
+    sampled = analyzer.get_extension("random_spikes").get_random_spikes()
+
+    unit_ids = sorting.get_unit_ids()
+    keep, halves = [], []
+    for unit_index, unit_id in enumerate(unit_ids):
+        unit_spikes = sampled[sampled["unit_index"] == unit_index]
+        # Rows of get_waveforms_one_unit follow unit_spikes; put them in
+        # (segment, sample) order so half 0 precedes half 1 in time.
+        order = np.lexsort(
+            (unit_spikes["sample_index"], unit_spikes["segment_index"])
+        )
+        wfs = waveforms_ext.get_waveforms_one_unit(unit_id)[order]
+        if wfs.shape[0] < 2:
+            continue
+        n_half = wfs.shape[0] // 2
+        halves.append(
+            np.stack(
+                [wfs[:n_half].mean(axis=0), wfs[n_half:].mean(axis=0)],
+                axis=-1,
+            )
+        )
+        keep.append(unit_index)
+    keep = np.asarray(keep, dtype=np.intp)
+    all_unit_ids = np.asarray(unit_ids, dtype=int)
+    excluded = [int(u) for u in np.delete(all_unit_ids, keep)]
+    if keep.size == 0:
+        support = (
+            f"at least {max(nbefore, nafter)} samples from a segment border"
+        )
+        if statistics_spans is not None:
+            support += " and a window inside one statistics span"
+        raise NoMatchableUnitsError(
+            f"extract_unitmatch_bundle: no unit of the session bundled at "
+            f"{session_dir} can be matched -- every unit had fewer than two "
+            f"sampled spikes with full waveform support ({support}), so none "
+            "has two cross-validation halves."
+        )
+
+    # (n_kept, spike_width, n_channels, 2)
+    avg_waves = np.stack(halves).astype(np.float64)
+    kept_unit_ids = all_unit_ids[keep]
+    zero_half = np.all(avg_waves == 0, axis=(1, 2))  # (n_kept, 2)
+    if zero_half.any():
+        offending = ", ".join(
+            f"unit {kept_unit_ids[i]} half {k}"
+            for i, k in zip(*np.nonzero(zero_half))
+        )
+        raise RuntimeError(
+            "extract_unitmatch_bundle: all-zero cross-validation half for "
+            f"{offending}. Every sampled spike has full waveform support, so "
+            "the traces are exactly zero (on every channel) around that "
+            "half's spikes; check the recording feeding this session."
+        )
+
+    session_dir.mkdir(parents=True, exist_ok=True)
+    np.save(session_dir / "channel_positions.npy", channel_positions)
+    um.extract_raw_data.save_avg_waveforms(
+        avg_waves,
+        str(session_dir),
+        kept_unit_ids,
+        kept_unit_ids,
+        extract_good_units_only=False,
+    )
+    rows = [np.array(("cluster_id", "group"))] + [
+        np.array((str(i), "good")) for i in kept_unit_ids
+    ]
+    np.savetxt(
+        session_dir / "cluster_group.tsv",
+        np.vstack(rows),
+        fmt=["%s", "%s"],
+        delimiter="\t",
+    )
+    return excluded
+
+
+def assert_consistent_channel_geometry(named_positions) -> None:
+    """Reject sessions that do not share one probe geometry.
+
+    UnitMatch derives geometry from the FIRST session's channel positions and
+    runs per-channel loops that require every session to share that geometry;
+    cross-probe / cross-day geometry matching is not supported. This pure check
+    raises a clear ``ValueError`` on the first session whose positions differ
+    (by shape or value) from the first session's. Shared by the backend
+    ``match()`` (after bundle extraction) and ``UnitMatchSelection.insert_selection``
+    (a preflight BEFORE the expensive dense bundle extraction), so both reject a
+    geometry mismatch the same way.
+
+    Parameters
+    ----------
+    named_positions : sequence of (label, ndarray)
+        Ordered ``(session_label, channel_positions)`` pairs. Fewer than two
+        sessions trivially passes (nothing to compare against).
+
+    Raises
+    ------
+    ValueError
+        On the first session whose channel-position array differs from the
+        first session's (shape mismatch or not ``np.allclose``).
+    """
+    named_positions = list(named_positions)
+    if len(named_positions) < 2:
+        return
+    ref_label, ref_positions = named_positions[0]
+    ref_positions = np.asarray(ref_positions)
+    for label, positions in named_positions[1:]:
+        positions = np.asarray(positions)
+        if positions.shape != ref_positions.shape or not np.allclose(
+            positions, ref_positions
+        ):
+            raise ValueError(
+                "UnitMatch requires all sessions to share one probe geometry "
+                "(cross-probe / cross-day geometry matching is not supported), "
+                f"but session {label} has channel positions {positions.shape} "
+                f"that differ from session {ref_label}'s {ref_positions.shape}. "
+                "Group only sessions recorded on the same probe."
+            )
+
+
+class UnitMatchBackend:
+    """The ``unitmatch`` cross-session matcher backend."""
+
+    name = "unitmatch"
+
+    @staticmethod
+    def backend_version() -> str | None:
+        """Installed ``unitmatchpy`` distribution version, or ``None`` if absent.
+
+        The producing-library provenance the ``UnitMatch`` table records. Kept on
+        the backend (single source of truth) so the table does not hardcode the
+        package name; ``None`` rather than a guess when the package is missing.
+        """
+        import importlib.metadata
+
+        try:
+            return importlib.metadata.version("unitmatchpy")
+        except importlib.metadata.PackageNotFoundError:
+            return None
+
+    def match(
+        self,
+        session_inputs: list[SessionMatcherInput],
+        params: dict,
+    ) -> list[MatchPair]:
+        """Run UnitMatch over the prepared per-input bundles.
+
+        Returns ``[]`` for the degenerate single-session case without importing
+        or calling UnitMatch.
+        """
+        if len(session_inputs) < 2:
+            return []
+
+        um = _require_unitmatch()
+        param = um.default_params.get_default_param()
+        match_threshold = float(
+            params.get("match_threshold", param["match_threshold"])
+        )
+        param["match_threshold"] = match_threshold
+
+        # UnitMatch assumes ONE probe across the group: it derives geometry from
+        # the first session's channel positions and runs per-channel loops that
+        # require every session to share that geometry. Cross-probe matching is
+        # not supported, so reject mismatched geometry up front with a clear
+        # error rather than letting UnitMatch fail deep in a shape mismatch. The same
+        # check runs as a preflight in UnitMatchSelection.insert_selection (before
+        # bundle extraction); this is the post-extraction backstop.
+        assert_consistent_channel_geometry(
+            [
+                (s.curation_key, np.load(s.channel_positions_path))
+                for s in session_inputs
+            ]
+        )
+        raw_positions = np.load(session_inputs[0].channel_positions_path)
+
+        session_dirs = [str(s.waveform_dir) for s in session_inputs]
+        param["KS_dirs"] = session_dirs
+        wave_paths, label_paths, channel_pos = um.utils.paths_from_KS(
+            session_dirs
+        )
+        # get_probe_geometry needs the raw 2-D positions (paths_from_KS prepends
+        # a ones column that would collapse the shanks to one).
+        param = um.utils.get_probe_geometry(raw_positions, param)
+
+        (
+            waveform,
+            session_id,
+            session_switch,
+            within_session,
+            good_units,
+            param,
+        ) = um.utils.load_good_waveforms(
+            wave_paths, label_paths, param, good_units_only=True
+        )
+        # load_good_waveforms silently DROPS a session whose bundle fails to
+        # load (it does not raise). If that happened, the compact session
+        # indexes below would attribute one session's units to another
+        # session's Spyglass key -- fail loudly instead.
+        if len(good_units) != len(session_inputs):
+            raise RuntimeError(
+                f"UnitMatch loaded {len(good_units)} session(s) but "
+                f"{len(session_inputs)} were provided; a session bundle failed "
+                "to load (UnitMatchPy drops it silently), so units cannot be "
+                "attributed to the correct session. Check each session bundle's "
+                "RawWaveforms/ and cluster_group.tsv."
+            )
+        # No good units across the loaded sessions -> no pairs. Return early
+        # before the prior-probability computation below, which divides by
+        # ``n_units ** 2``. The table layer never reaches this (make_fetch
+        # rejects an empty matchable set), but this backend is a public
+        # MatcherProtocol implementation and must not assume that precondition.
+        if param["n_units"] == 0:
+            return []
+        clus_info = {
+            "good_units": good_units,
+            "session_switch": session_switch,
+            "session_id": session_id,
+            "original_ids": np.concatenate(good_units),
+        }
+        extracted = um.overlord.extract_parameters(
+            waveform, channel_pos, clus_info, param
+        )
+        total_score, candidate_pairs, scores_to_include, predictors = (
+            um.overlord.extract_metric_scores(
+                extracted, session_switch, within_session, param, niter=2
+            )
+        )
+        prior_match = 1 - (param["n_expected_matches"] / param["n_units"] ** 2)
+        priors = np.array((prior_match, 1 - prior_match))
+        labels = candidate_pairs.astype(int)
+        cond = np.unique(labels)
+        kernels = um.bayes_functions.get_parameter_kernels(
+            scores_to_include, labels, cond, param, add_one=1
+        )
+        probability = um.bayes_functions.apply_naive_bayes(
+            kernels, priors, predictors, param, cond
+        )
+        prob_matrix = probability[:, 1].reshape(
+            param["n_units"], param["n_units"]
+        )
+
+        return self._pairs_from_matrix(
+            prob_matrix,
+            session_switch,
+            clus_info["original_ids"],
+            session_inputs,
+            match_threshold,
+        )
+
+    @staticmethod
+    def _pairs_from_matrix(
+        prob_matrix,
+        session_switch,
+        original_ids,
+        session_inputs,
+        match_threshold,
+    ) -> list[MatchPair]:
+        """Unflatten the probability matrix into cross-session MatchPairs.
+
+        UnitMatch's probability matrix is asymmetric (one entry per directed
+        cross-validation comparison). Following UnitMatch's own grouping
+        (``assign_unique_id``), a pair is emitted only when BOTH directions
+        ``prob_matrix[i, j]`` and ``prob_matrix[j, i]`` clear the threshold, and
+        the reported ``match_probability`` is their mean -- so a one-sided /
+        borderline match that UnitMatch would reject is dropped, and the
+        probability is orientation-independent.
+
+        Side A is the session that appears first in ``session_inputs`` (the
+        caller owns that ordering); the ``i < j`` loop with the within-session
+        skip emits each unordered cross-session pair exactly once, so reversed
+        duplicates cannot both appear.
+        """
+        boundaries = np.asarray(session_switch).ravel()
+        n = prob_matrix.shape[0]
+        if n == 0:
+            return []
+        prob = np.asarray(prob_matrix, dtype=float)
+
+        # Build the survivor mask in NumPy rather than looping over every
+        # (i, j): a pair survives iff i < j (each unordered pair once), the two
+        # units are in different sessions, and BOTH directed probabilities clear
+        # the threshold (``min(p_ij, p_ji) > threshold``). Then loop only over
+        # the surviving matches to construct MatchPairs.
+        session_ids = (
+            np.searchsorted(boundaries, np.arange(n), side="right") - 1
+        )
+        upper = np.triu(np.ones((n, n), dtype=bool), k=1)
+        cross_session = session_ids[:, None] != session_ids[None, :]
+        both_pass = (prob > match_threshold) & (prob.T > match_threshold)
+        mask = upper & cross_session & both_pass
+        mean_prob = (prob + prob.T) / 2.0  # symmetric, orientation-independent
+
+        def unit_of(stacked_index) -> int:
+            return int(np.asarray(original_ids[stacked_index]).item())
+
+        pairs: list[MatchPair] = []
+        # np.argwhere yields (i, j) in row-major (i then j) order, so each
+        # unordered cross-session pair appears once, side A = the earlier
+        # session block (i < j).
+        for i, j in np.argwhere(mask):
+            key_a = session_inputs[int(session_ids[i])].curation_key
+            key_b = session_inputs[int(session_ids[j])].curation_key
+            pairs.append(
+                MatchPair(
+                    session_a_sorting_id=str(key_a["sorting_id"]),
+                    session_a_curation_id=int(key_a["curation_id"]),
+                    unit_a_id=unit_of(i),
+                    session_b_sorting_id=str(key_b["sorting_id"]),
+                    session_b_curation_id=int(key_b["curation_id"]),
+                    unit_b_id=unit_of(j),
+                    match_probability=float(mean_prob[i, j]),
+                )
+            )
+        return pairs
+
+
+def register() -> None:
+    """Install the UnitMatch backend + schema if ``"unitmatch"`` is missing.
+
+    Called at import for the usual side-effect path, and re-callable by
+    ``matcher_protocol.register_default_matchers`` so the registry self-heals
+    if it was cleared (e.g. by a test fixture). Fill-only: whatever is
+    already registered under the name -- the built-in instance, or a
+    deliberate ``register_matcher(..., replace=True)`` swap -- is kept, so
+    lookups return one stable object and never raise a collision against
+    an explicit replacement.
+    """
+    if is_registered(UnitMatchBackend.name):
+        return
+    register_matcher(UnitMatchBackend(), UnitMatchParamsSchema)
+
+
+register()

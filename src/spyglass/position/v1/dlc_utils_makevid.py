@@ -326,7 +326,7 @@ class VideoMaker:
             return [c, c + 30 * func(orient)]
 
         if np.all(np.isnan(orient)):
-            return ([np.NaN], [np.NaN])
+            return ([np.nan], [np.nan])
         else:
             x, y = self._get_centroid_data(pos_ind)
             return (orient_list(x), orient_list(y, axis="y"))
@@ -351,9 +351,9 @@ class VideoMaker:
         pos_ind = np.where(self.video_frame_inds == frame_ind)[0]
 
         if len(pos_ind) == 0:
-            self.centroid_position_dot.set_offsets((np.NaN, np.NaN))
+            self.centroid_position_dot.set_offsets((np.nan, np.nan))
             for bodypart in self.centroid_plot_objs.keys():
-                self.centroid_plot_objs[bodypart].set_offsets((np.NaN, np.NaN))
+                self.centroid_plot_objs[bodypart].set_offsets((np.nan, np.nan))
             empty_array = np.array([], dtype=float)
             self.orientation_line.set_data(empty_array, empty_array)
             self.title.set_text(f"time = {0:3.4f}s\n frame = {frame_ind}")

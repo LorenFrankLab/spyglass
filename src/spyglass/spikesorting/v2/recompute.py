@@ -1,0 +1,1858 @@
+"""Recompute verification + safe storage reclamation for v2 artifacts.
+
+Ports v1's ``RecordingRecompute`` pattern to v2's ``Recording`` artifact and
+its ``SortingAnalyzer`` folder. Each trio inventories an artifact's
+dependencies (``*Versions``), plans a recompute attempt under a labeled
+``UserEnvironment`` (``*RecomputeSelection``), then regenerates and compares
+content hashes (``*Recompute``) so the original is deleted only after a
+verified, current-environment match.
+
+Comparison uses reproducible CONTENT (preprocessed ``ElectricalSeries`` traces
+for recordings; deterministic analyzer extension data for analyzers) -- the same
+reproducible content the recording ``content_hash`` captures, never a volatile
+whole-file digest (see ``_recompute`` / ``_recording_fingerprint`` for why).
+``rounding`` sets the float precision of the analyzer comparison.
+
+``delete_files()`` is current-environment-aware: a ``matched=1`` row from a
+different ``UserEnvironment`` does NOT authorize deletion (it raises
+``StaleEnvMatchedError`` unless ``force_stale_env=True``), because a recompute
+that succeeded under an older SpikeInterface pin is not evidence the current
+environment can regenerate the artifact.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import shutil
+import tempfile
+from pathlib import Path
+from typing import NamedTuple, Optional
+
+import datajoint as dj
+
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_user import UserEnvironment
+from spyglass.spikesorting.v2._analyzer_cache import (
+    analyzer_cache_lock,
+    analyzer_folder_storage_fingerprint,
+)
+from spyglass.spikesorting.v2._recompute import (
+    ANALYZER_RECOMPUTE_EXTENSIONS,
+    analyzer_inventory_refresh_needed,
+    analyzer_recompute_unverifiable_reason,
+    analyzer_seed_modes,
+    combined_hash,
+    compare_hash_dicts,
+    current_env_namespaces,
+    current_nwb_namespaces,
+    env_matches,
+    hash_extension_data,
+)
+from spyglass.spikesorting.v2._recording_fingerprint import (
+    TRACE_ROUNDING,
+    recording_content_fingerprint,
+)
+from spyglass.spikesorting.v2.exceptions import (
+    AnalyzerFolderInvalidError,
+    AnalyzerFolderMissingError,
+    StaleEnvMatchedError,
+)
+from spyglass.spikesorting.v2.recording import (
+    _ELECTRICAL_SERIES_PATH,
+    Recording,
+    RecordingSelection,
+)
+from spyglass.spikesorting.v2.sorting import (
+    AnalyzerWaveformParameters,
+    Sorting,
+)
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.dj_helper_fn import bytes_to_human_readable
+
+schema = dj.schema("spikesorting_v2_recompute")
+
+_ZERO_HASH = "0" * 64
+# Explicit "analyzer folder absent" inventory sentinel, distinct from
+# _ZERO_HASH (a legitimately zero-unit sort with no analyzer). Non-hex
+# characters guarantee it never collides with a real sha256 content hash.
+_MISSING_HASH = "MISSING_ANALYZER_FOLDER".ljust(64, "0")
+
+
+def _current_env_id() -> Optional[str]:
+    """Return the current ``UserEnvironment`` env_id (inserting if needed)."""
+    return UserEnvironment().this_env.get("env_id")
+
+
+# ---------------------------------------------------------------------
+# Shared tri-part dispatch carriers + helpers for the recompute QC tables
+# ---------------------------------------------------------------------
+
+
+class RecomputeFetched(NamedTuple):
+    """DB inputs for a recompute table's ``make_compute``.
+
+    No regeneration I/O, except the self-heal rebuild of a missing traces file
+    while resolving ``regen_inputs``.
+
+    ``parent_key`` carries its UUID PK (``recording_id`` / ``sorting_id``) as a
+    str. ``regen_inputs`` is the table's regeneration inputs, resolved only
+    when the row is neither ``xfail`` nor ``unverifiable`` (``None``
+    otherwise); it keeps fetched UUIDs as ``uuid.UUID`` (e.g.
+    ``AnalyzerRegenInputs.sorting_id``, the effective traces' keys), which
+    DataJoint's DeepHash hashes by value, so both fetches still agree.
+    """
+
+    parent_key: dict
+    rounding: int
+    xfail_reason: Optional[str]
+    unverifiable_reason: Optional[str]
+    regen_inputs: Optional[tuple]
+
+
+class FetchFailure(NamedTuple):
+    """A regeneration input ``make_fetch`` could not resolve.
+
+    A regeneration failure is a recorded ``'error'`` outcome (``matched=0``),
+    not a failed populate. Resolving an input in ``make_fetch`` keeps that:
+    the failure's message is carried in place of the input, and
+    :func:`_resolved` raises it in ``make_compute`` where the input is used,
+    so ``_recompute_compute`` records the same ``err_msg`` at the same point
+    of the regeneration as when compute resolved the input itself.
+
+    DataJoint runs ``make_fetch`` twice and refuses the insert if the two
+    results differ, so the carried message must be the same on both fetches.
+    A self-heal rebuild that failed on the first fetch is attempted again on
+    the second, inside the insert transaction. A message that differs between
+    the two (one naming a random temp file, say) surfaces as DataJoint's
+    integrity error and no row is recorded.
+
+    Attributes
+    ----------
+    message : str
+        ``str()`` of the exception the resolution raised.
+    """
+
+    message: str
+
+
+def _resolve_or_failure(resolve, *, what, parent_key):
+    """Return ``resolve()``, or a :class:`FetchFailure` if it raises.
+
+    The traceback is logged here, where the original exception is caught;
+    ``make_compute`` only re-raises its message.
+    """
+    try:
+        return resolve()
+    except Exception as err:  # noqa: BLE001 - recorded as the 'error' outcome
+        logger.error(
+            f"{what} could not resolve its regeneration inputs for "
+            f"{parent_key}; recording matched=0 (retryable).",
+            exc_info=True,
+        )
+        return FetchFailure(str(err))
+
+
+def _resolved(value):
+    """Return a fetched regeneration input, raising a carried failure."""
+    if isinstance(value, FetchFailure):
+        raise RuntimeError(value.message)
+    return value
+
+
+class RecomputeComputed(NamedTuple):
+    """``make_compute`` -> ``make_insert`` carrier for the recompute tables.
+
+    ``outcome`` is ``'xfail'`` | ``'unverifiable'`` | ``'error'`` |
+    ``'compare'``. A regeneration failure is a VALID ``matched=0`` outcome
+    (``'error'``) encoded here rather than raised, so ``make_insert`` still
+    records the QC result instead of the populate aborting. Legacy analyzer
+    provenance that cannot support a meaningful deterministic comparison is
+    ``'unverifiable'``. ``stored_hashes`` / ``new_hashes`` are empty except on
+    ``'compare'``.
+    """
+
+    outcome: str
+    err_msg: Optional[str]
+    stored_hashes: dict
+    new_hashes: dict
+    parent_key: dict
+
+
+class RecordingRegenInputs(NamedTuple):
+    """What ``RecordingArtifactRecompute.make_compute`` regenerates from.
+
+    Attributes
+    ----------
+    current : StoredTraces or FetchFailure
+        The canonical artifact, rebuilt first if it was missing (the
+        ``Recording.get_recording`` self-heal).
+    recording : RecordingFetched, FetchFailure or None
+        ``Recording.make_fetch`` of the parent, for the fresh rebuild;
+        ``None`` when ``current`` failed (the rebuild inputs were never read).
+    """
+
+    current: object
+    recording: object
+
+
+class AnalyzerRecipe(NamedTuple):
+    """A validated analyzer recipe: its cache folder and params blob."""
+
+    analyzer_folder: str
+    waveform_params: dict
+
+
+class AnalyzerRegenSource(NamedTuple):
+    """The canonical recording, sorting and sorter row an analyzer rebuilds from.
+
+    Attributes
+    ----------
+    recording : CanonicalRecording
+        The sort's artifact-masked effective traces (file rebuilt if missing).
+    units : StoredUnits
+        The sort's units NWB (its statistics spans are read from it too).
+    sorter_row : dict
+        The sort's ``SorterParameters`` row.
+    """
+
+    recording: object
+    units: object
+    sorter_row: dict
+
+
+class AnalyzerRegenInputs(NamedTuple):
+    """What ``SortingAnalyzerRecompute.make_compute`` regenerates from.
+
+    Attributes
+    ----------
+    sorting_id : uuid.UUID
+        The sort, as stored (named in the no-rebuild loader's errors). Kept a
+        ``uuid.UUID``: DeepHash hashes it by value.
+    waveform_params_name : str
+        The recipe verified.
+    recipe : AnalyzerRecipe, FetchFailure or None
+        The validated recipe; ``None`` for a zero-unit sort, which has no
+        analyzer (nothing else is resolved).
+    source : AnalyzerRegenSource, FetchFailure or None
+        ``None`` when the stored folder was absent at fetch (compute reports
+        it missing without reading a source, so no traces file is rebuilt)
+        or an earlier input is missing.
+    """
+
+    sorting_id: object
+    waveform_params_name: str
+    recipe: object
+    source: object
+
+
+class RecordingVersionsFetched(NamedTuple):
+    """DB inputs for ``RecordingArtifactVersions.make_compute`` (no file I/O)."""
+
+    analysis_file_name: str
+    content_hash: str
+
+
+class RecordingVersionsComputed(NamedTuple):
+    """``make_compute`` -> ``make_insert`` for ``RecordingArtifactVersions``."""
+
+    nwb_deps: Optional[dict]
+    content_hash: str
+
+
+class AnalyzerVersionsFetched(NamedTuple):
+    """DB inputs for ``SortingAnalyzerVersions.make_compute``.
+
+    The heavy analyzer load + hash is deferred to ``make_compute`` (off the
+    framework transaction), which reads only these.
+
+    Attributes
+    ----------
+    n_units : int
+        The sort's unit count; ``0`` means no analyzer exists.
+    analyzer_folder : str
+        The (sort, recipe) analyzer cache folder.
+    """
+
+    n_units: int
+    analyzer_folder: str
+
+
+class AnalyzerVersionsComputed(NamedTuple):
+    """``make_compute`` -> ``make_insert`` for ``SortingAnalyzerVersions``."""
+
+    si_deps: dict
+    analyzer_manifest: dict
+    analyzer_hash: str
+
+
+def _recompute_compute(
+    parent_key,
+    xfail_reason,
+    unverifiable_reason,
+    *,
+    regen,
+    what,
+) -> RecomputeComputed:
+    """Shared off-transaction compute for the recompute QC tables.
+
+    Branches the four outcomes, all of which end in an INSERT: ``xfail``
+    (explicit skip), ``unverifiable`` (legacy provenance cannot support a
+    deterministic comparison), ``error`` (a caught regeneration failure ->
+    ``matched=0``, retryable), and ``compare`` (a real hash comparison). ``regen`` is a no-arg callable returning
+    ``(stored_hashes, new_hashes)``.
+    """
+    if xfail_reason:
+        return RecomputeComputed(
+            outcome="xfail",
+            err_msg=f"xfail: {xfail_reason}"[:255],
+            stored_hashes={},
+            new_hashes={},
+            parent_key=parent_key,
+        )
+    if unverifiable_reason:
+        return RecomputeComputed(
+            outcome="unverifiable",
+            err_msg=str(unverifiable_reason)[:255],
+            stored_hashes={},
+            new_hashes={},
+            parent_key=parent_key,
+        )
+    try:
+        stored_hashes, new_hashes = regen()
+    except Exception as err:  # noqa: BLE001 - record the failure, retryable
+        # A regeneration failure (SI pin mismatch, missing probe info, ...) is a
+        # legitimate matched=0 outcome for this QC table. Log the full traceback
+        # first so a masked code defect / disk error is still debuggable -- the
+        # err_msg column truncates to 255 chars.
+        logger.error(
+            f"{what} regeneration failed for {parent_key}; matched=0 "
+            "(retryable).",
+            exc_info=True,
+        )
+        return RecomputeComputed(
+            outcome="error",
+            err_msg=str(err)[:255],
+            stored_hashes={},
+            new_hashes={},
+            parent_key=parent_key,
+        )
+    return RecomputeComputed(
+        outcome="compare",
+        err_msg=None,
+        stored_hashes=stored_hashes,
+        new_hashes=new_hashes,
+        parent_key=parent_key,
+    )
+
+
+def _insert_recompute_outcome(
+    table, key, outcome, err_msg, stored_hashes, new_hashes, created_at
+):
+    """Shared ``make_insert`` body: write the QC result atomically.
+
+    ``compare`` routes through :func:`_insert_comparison` (master + Name/Hash
+    diff rows); ``xfail`` / ``unverifiable`` / ``error`` insert a single
+    ``matched=0`` master row.
+    ``_safe_context()`` no-ops inside the framework transaction but keeps a
+    direct (non-populate) call atomic.
+    """
+
+    with table._safe_context():
+        if outcome == "compare":
+            _insert_comparison(
+                table, key, stored_hashes, new_hashes, created_at
+            )
+        else:  # non-comparison outcome: one matched=0 row, no diff parts
+            table.insert1(
+                {
+                    **key,
+                    "matched": False,
+                    "err_msg": err_msg,
+                    "created_at": created_at,
+                }
+            )
+
+
+class _RecomputeSelectionMixin:
+    """``remove_matched`` for the ``*RecomputeSelection`` tables.
+
+    Subclasses set ``_versions_table`` (the ``*Versions`` table whose primary
+    key identifies an artifact) and ``_recompute_table_name`` (the name of the
+    ``*Recompute`` table in this module, declared after the selection).
+    """
+
+    _versions_table: type
+    _recompute_table_name: str
+
+    @classmethod
+    def remove_matched(cls, restriction=True, *, dry_run: bool = True) -> int:
+        """Remove redundant selection rows for already-verified artifacts.
+
+        Mirrors v1 ``remove_matched``: drop selections that target an artifact
+        with a matched recompute (in ANY env) but are NOT themselves the
+        matched attempt. A redundant selection MAY carry a dependent recompute
+        row -- a FAILED (matched=0) attempt in one env while the artifact
+        matched in another -- so this uses cautious ``delete`` (not
+        ``delete_quick``), which cascades that failed child rather than hitting
+        the Recompute->Selection FK. Selections whose own recompute matched are
+        kept; they are the verification record. Returns the redundant count.
+        """
+        matched = globals()[cls._recompute_table_name] & "matched=1"
+        artifact_pk = cls._versions_table.primary_key
+        matched_artifacts = (dj.U(*artifact_pk) & matched).fetch(
+            "KEY", as_dict=True
+        )
+        redundant = (cls & restriction & matched_artifacts) - matched.proj()
+        # Materialize the redundant PKs before deleting: ``redundant`` is built
+        # by antijoining the Recompute table, so a cascading delete on it
+        # directly would reference the child table in its own FROM clause
+        # (MySQL error 1093). Restricting by concrete fetched keys avoids that
+        # while still cascading the failed (matched=0) child rows.
+        redundant_keys = redundant.fetch("KEY")
+        count = len(redundant_keys)
+        if dry_run or count == 0:
+            logger.info(
+                f"remove_matched: {count} redundant rows (dry_run={dry_run})."
+            )
+            return count
+        (cls & redundant_keys).delete(safemode=False)
+        return count
+
+
+class _RecomputeMixin:
+    """``recheck`` for the ``*Recompute`` tables."""
+
+    def recheck(self, key) -> bool:
+        """Rerun the comparison for one row (after env/file changes).
+
+        Uses cautious ``delete`` (not ``delete_quick``) so the row's
+        ``Name`` / ``Hash`` diff part rows cascade and the team-permission
+        guard applies; ``safemode=False`` skips the prompt for this
+        programmatic recheck. Then re-populates.
+        """
+        (self & key).delete(safemode=False)
+        self.populate(key, reserve_jobs=False)
+        return bool((self & key & "matched=1"))
+
+
+# =====================================================================
+# Recording artifact recompute
+# =====================================================================
+
+
+@schema
+class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
+    """Dependency + content inventory for a ``Recording`` artifact."""
+
+    definition = """
+    -> Recording
+    ---
+    nwb_deps=null: blob       # pynwb namespace versions embedded in the file
+    content_hash: char(64)      # stored Recording.content_hash (provenance)
+    """
+
+    # Tri-part: the namespace read opens the analysis NWB; keep that file I/O
+    # OUTSIDE the framework transaction (make_compute) rather than in a
+    # monolithic make holding row locks.
+    _parallel_make = True
+
+    def make_fetch(self, key) -> RecordingVersionsFetched:
+        """Read the artifact's file name + stored content_hash (no file I/O)."""
+        analysis_file_name, content_hash = (Recording & key).fetch1(
+            "analysis_file_name", "content_hash"
+        )
+        return RecordingVersionsFetched(
+            analysis_file_name=str(analysis_file_name),
+            content_hash=str(content_hash),
+        )
+
+    def make_compute(
+        self, key, analysis_file_name, content_hash
+    ) -> RecordingVersionsComputed:
+        """Read embedded pynwb namespace versions off the transaction."""
+        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        nwb_deps = (
+            current_nwb_namespaces(abs_path)
+            if Path(abs_path).exists()
+            else None
+        )
+        return RecordingVersionsComputed(
+            nwb_deps=nwb_deps, content_hash=content_hash
+        )
+
+    def make_insert(self, key, nwb_deps, content_hash):
+        """Insert the inventory row."""
+        self.insert1(
+            {**key, "nwb_deps": nwb_deps, "content_hash": content_hash}
+        )
+
+    def this_env(self) -> dj.expression.QueryExpression:
+        """Restrict to artifacts reproducible in the current environment.
+
+        The v2 analog of v1 ``RecordingRecomputeVersions.this_env``: an artifact
+        is eligible only when every pynwb namespace it and the live environment
+        have in common agrees on version (so a re-preprocess writes
+        namespace-comparable output). Reads the live catalog once, then keeps the
+        rows whose inventoried ``nwb_deps`` are compatible (see
+        :func:`~spyglass.spikesorting.v2._recompute.env_matches`). Operates on
+        ``self`` (restrict first to scope the scan).
+        """
+        env_deps = current_env_namespaces()
+        pk = self.primary_key
+        compatible = [
+            {field: row[field] for field in pk}
+            for row in self.fetch(as_dict=True)
+            if env_matches(row["nwb_deps"], env_deps)
+        ]
+        return self & compatible
+
+
+@schema
+class RecordingArtifactRecomputeSelection(
+    _RecomputeSelectionMixin, SpyglassMixin, dj.Manual
+):
+    """Plan a recording recompute attempt under a labeled environment."""
+
+    _versions_table = RecordingArtifactVersions
+    _recompute_table_name = "RecordingArtifactRecompute"
+
+    definition = """
+    -> RecordingArtifactVersions
+    -> UserEnvironment
+    ---
+    logged_at_creation=0: bool
+    xfail_reason=NULL: varchar(127)
+    """
+
+    @classmethod
+    def attempt_all(
+        cls,
+        restriction=True,
+        *,
+        limit: Optional[int] = None,
+        force_attempt: bool = False,
+        check_xfail: bool = True,
+    ) -> None:
+        """Insert a recompute attempt for every eligible artifact (current env).
+
+        The v2 analog of v1 ``RecordingRecomputeSelection.attempt_all``: bulk
+        plan attempts for all (or restricted) ``RecordingArtifactVersions``
+        rows under the current ``UserEnvironment``.
+
+        By default only **env-compatible** artifacts are planned: an artifact is
+        skipped unless every pynwb namespace its file and the current
+        environment share agrees on version (mirrors v1's ``this_env`` gate).
+        This avoids scheduling attempts that cannot reproduce the artifact in
+        the current environment. ``force_attempt=True`` overrides the gate for a
+        deliberate audit. Each planned artifact is also screened for known
+        structural impossibilities (missing probe info, PyNWB-API / NWB-spec
+        incompatibility); a match is recorded in ``xfail_reason`` so the
+        recompute short-circuits to ``matched=0`` instead of wasting a regen
+        (set ``check_xfail=False`` to skip the screen).
+
+        There is no per-attempt ``rounding`` knob: the recording identity is the
+        content fingerprint, whose precision is the fixed ``TRACE_ROUNDING`` /
+        ``TIMESTAMP_ROUNDING`` constants. A per-attempt rounding would hash
+        differently from the stored ``content_hash`` and spuriously never match.
+
+        Parameters
+        ----------
+        restriction : dict, str, or list, optional
+            Restriction on ``RecordingArtifactVersions``. Default all.
+        limit : int, optional
+            Plan at most this many artifacts, drawn at RANDOM from the eligible
+            set (``dj.condition.Top(order_by="RAND()")``). For large
+            retrospective audits where attempting every artifact is too costly;
+            a random sample exercises a diverse spread. Default None (all).
+        force_attempt : bool, optional
+            Plan even env-incompatible artifacts (skip the compatibility gate).
+            Default False.
+        check_xfail : bool, optional
+            Screen each artifact for known structural impossibilities and record
+            the reason in ``xfail_reason``. Default True.
+        """
+        env_id = _current_env_id()
+        if not env_id:
+            logger.warning(
+                "No UserEnvironment available; cannot plan recompute attempts."
+            )
+            return
+        versions = RecordingArtifactVersions()
+        eligible = versions if force_attempt else versions.this_env()
+        source = eligible & restriction
+        if limit:
+            source = source & dj.condition.Top(limit=limit, order_by="RAND()")
+        rows = []
+        for version_key in source.fetch("KEY", as_dict=True):
+            xfail_reason = None
+            if check_xfail:
+                _is_xfail, xfail_reason = cls._check_xfail(version_key)
+            rows.append(
+                {**version_key, "env_id": env_id, "xfail_reason": xfail_reason}
+            )
+        cls.insert(rows, skip_duplicates=True)
+
+    @classmethod
+    def _check_xfail(
+        cls,
+        key: dict,
+        *,
+        skip_probe: bool = True,
+        skip_pynwb_api: bool = True,
+        skip_nwb_spec: bool = True,
+    ) -> tuple[bool, Optional[str]]:
+        """Detect known STRUCTURAL impossibilities for one recording.
+
+        Ports v1 ``RecordingRecomputeSelection._check_xfail`` and is kept
+        deliberately NARROW -- it flags only impossibilities a recompute can
+        never overcome (missing probe info, a PyNWB-API or NWB-spec
+        incompatibility), so a flagged artifact is scheduled-but-marked rather
+        than re-attempted. It is **not** a general skip mechanism: anything not
+        matching these patterns returns ``(False, None)`` and is attempted
+        normally.
+
+        Recognition has two cheap (no file I/O) layers: prior ``matched=0``
+        recompute runs whose ``err_msg`` names the pattern, and -- for probe
+        info -- a direct ``Electrode * Probe`` presence query. (PyNWB-API /
+        NWB-spec incompatibilities are recognized only from a prior failure's
+        message; unlike v1 there is no proactive SpikeInterface re-read here, so
+        planning stays I/O-free and the ``limit`` throttle is meaningful.)
+
+        Parameters
+        ----------
+        key : dict
+            A key carrying ``recording_id`` (e.g. a ``RecordingArtifactVersions``
+            primary key).
+        skip_probe, skip_pynwb_api, skip_nwb_spec : bool, optional
+            Enable each xfail pattern. All default True.
+
+        Returns
+        -------
+        tuple[bool, str | None]
+            ``(is_xfail, reason)``; ``reason`` is one of ``"missing_probe_info"``,
+            ``"pynwb_api_incompatible"``, ``"nwb_spec_incompatible"``, or None.
+        """
+        rec_key = {"recording_id": key["recording_id"]}
+        prev_runs = RecordingArtifactRecompute & rec_key & "matched=0"
+
+        if skip_probe:
+            # v2 surfaces absent probe metadata as "no probe geometry" /
+            # "have no probe geometry" (see _recording_geometry /
+            # _recording_preprocessing) -- match that, not v1's "probe info".
+            if bool(prev_runs & 'err_msg LIKE "%probe geometry%"'):
+                return True, "missing_probe_info"
+            try:  # proactive: is probe metadata on record for this recording?
+                nwb_file_name = (RecordingSelection & rec_key).fetch1(
+                    "nwb_file_name"
+                )
+                if _recording_missing_probe_info(nwb_file_name):
+                    return True, "missing_probe_info"
+            except Exception as exc:  # noqa: BLE001 - can't check -> don't flag
+                logger.warning(
+                    f"Unable to check probe info for {rec_key}; attempting "
+                    f"normally: {exc!r}"
+                )
+
+        if skip_pynwb_api and bool(
+            prev_runs & 'err_msg LIKE "%unexpected keyword%dtype%"'
+        ):
+            return True, "pynwb_api_incompatible"
+
+        if skip_nwb_spec and bool(
+            prev_runs & 'err_msg LIKE "%No spec%namespace%"'
+        ):
+            return True, "nwb_spec_incompatible"
+
+        return False, None
+
+
+@schema
+class RecordingArtifactRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
+    """Regenerate a recording artifact and compare trace content hashes."""
+
+    definition = """
+    -> RecordingArtifactRecomputeSelection
+    ---
+    matched: bool
+    err_msg=NULL: varchar(255)
+    created_at=NULL: datetime
+    deleted=0: bool
+    """
+
+    class Name(SpyglassMixinPart):
+        definition = """
+        -> master
+        name: varchar(255)
+        missing_from: enum('old', 'new')
+        """
+
+    class Hash(SpyglassMixinPart):
+        definition = """
+        -> master
+        name: varchar(255)
+        """
+
+    @property
+    def with_names(self):
+        """Join recompute rows to their artifact ``analysis_file_name``."""
+        return self * Recording.proj("analysis_file_name")
+
+    def get_parent_key(self, key) -> dict:
+        """Return the upstream ``Recording`` key for a recompute row.
+
+        Projects to the ``recording_id`` PK rather than joining ``Recording``
+        directly -- both tables carry a ``content_hash`` secondary attr, which
+        would otherwise trigger a join on a dependent attribute.
+        """
+        recording_id = (RecordingArtifactVersions & key).fetch1("recording_id")
+        return {"recording_id": recording_id}
+
+    # Tri-part dispatch: the trace regeneration (re-preprocess to a fresh NWB +
+    # hash) is the long step and stays OUTSIDE the framework transaction
+    # (mirroring Recording / Sorting). A regen failure is encoded as the 'error'
+    # outcome (matched=0), not raised, so the QC row is still recorded.
+    _parallel_make = True
+
+    def make_fetch(self, key) -> RecomputeFetched:
+        """Read the recompute inputs (no regeneration I/O except the
+        self-heal rebuild of a missing artifact).
+
+        Unless the row is ``xfail``, resolves the canonical artifact (rebuilt
+        if missing) and ``Recording.make_fetch`` for the fresh rebuild; a
+        failure is carried as a :class:`FetchFailure` and recorded as the
+        ``'error'`` outcome.
+
+        There is no per-attempt ``rounding`` -- the content fingerprint's
+        precision is fixed (``TRACE_ROUNDING`` / ``TIMESTAMP_ROUNDING``). The
+        shared ``RecomputeFetched.rounding`` field carries ``TRACE_ROUNDING`` for
+        carrier shape only; the recording compute path ignores it.
+        """
+        xfail_reason = (RecordingArtifactRecomputeSelection & key).fetch1(
+            "xfail_reason"
+        )
+        parent = self.get_parent_key(key)
+        # str the recording_id UUID for a DeepHash-stable carrier.
+        parent_key = {"recording_id": str(parent["recording_id"])}
+        return RecomputeFetched(
+            parent_key=parent_key,
+            rounding=TRACE_ROUNDING,
+            xfail_reason=xfail_reason,
+            unverifiable_reason=None,
+            regen_inputs=(
+                None
+                if xfail_reason
+                else _resolve_recording_regen_inputs(parent_key)
+            ),
+        )
+
+    def make_compute(
+        self,
+        key,
+        parent_key,
+        rounding,
+        xfail_reason,
+        unverifiable_reason,
+        regen_inputs,
+    ) -> RecomputeComputed:
+        """Fingerprint the current file + a fresh rebuild, off the transaction.
+
+        ``stored_hashes`` is the CURRENT on-disk file's fingerprint components
+        (``make_fetch`` self-healed a missing file) and ``new_hashes`` is an
+        independent FRESH temp rebuild's components. ``make_insert`` anchors
+        ``matched`` on ``combined_hash(new) == Recording.content_hash``
+        (recoverability) and reports the current-vs-fresh component diff.
+        Reads only ``regen_inputs``; the one DB access left is staging the
+        fresh rebuild (see :mod:`._recording_nwb`).
+        """
+        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
+
+        def _regen():
+            # Open the canonical file (healed in make_fetch, which failed
+            # closed on drift) as get_recording does, and fingerprint it;
+            # fingerprint a fresh, independent temp rebuild for the match
+            # authority.
+            current_traces = _resolved(regen_inputs.current)
+            read_stored_traces(current_traces)
+            current = recording_content_fingerprint(
+                current_traces.abs_path,
+                electrical_series_path=_ELECTRICAL_SERIES_PATH,
+            )
+            fresh = _recompute_recording_fingerprint(
+                _resolved(regen_inputs.recording)
+            )
+            return current, fresh
+
+        return _recompute_compute(
+            parent_key,
+            xfail_reason,
+            unverifiable_reason,
+            regen=_regen,
+            what="RecordingArtifactRecompute",
+        )
+
+    def make_insert(
+        self, key, outcome, err_msg, stored_hashes, new_hashes, parent_key
+    ):
+        """Record the QC result; ``matched`` anchors on ``content_hash``.
+
+        ``created_at`` is the artifact file mtime, read here (not in
+        ``make_fetch``) because the mtime is non-deterministic across the
+        framework's two ``make_fetch`` calls and would trip the DeepHash
+        integrity check.
+
+        ``matched`` is ``combined_hash(new_hashes) == Recording.content_hash``
+        -- the same invariant ``_rebuild_nwb_artifact`` enforces, so a
+        ``matched`` recompute authorizes a delete the rebuild can honor -- NOT
+        the current-vs-fresh dict diff. The diff parts still report which
+        component drifted.
+        """
+        created_at = _artifact_created_at(parent_key)
+        if outcome != "compare":
+            _insert_recompute_outcome(
+                self, key, outcome, err_msg, {}, {}, created_at
+            )
+            return
+        content_hash = (Recording & parent_key).fetch1("content_hash")
+        _insert_recording_comparison(
+            self, key, stored_hashes, new_hashes, content_hash, created_at
+        )
+
+    def get_disk_space(self, restriction=True) -> str:
+        """Report reclaimable disk for matched, not-yet-deleted artifacts."""
+        return _reclaimable_disk(self.with_names & restriction)
+
+    def update_secondary(self, restriction=True) -> None:
+        """Backfill ``created_at`` from the artifact file mtime."""
+        for key in (self & restriction).fetch("KEY", as_dict=True):
+            self.update1(
+                {
+                    **key,
+                    "created_at": _artifact_created_at(
+                        self.get_parent_key(key)
+                    ),
+                }
+            )
+
+    def delete_files(
+        self,
+        restriction=True,
+        *,
+        dry_run: bool = True,
+        force_stale_env: bool = False,
+        days_since_creation: int = 7,
+    ) -> list:
+        """Delete recording artifacts verified in the CURRENT environment.
+
+        Refuses ``matched=0`` rows and, by default, refuses rows matched only
+        in a stale ``UserEnvironment`` (raises ``StaleEnvMatchedError``). The
+        regeneratable artifact (the preprocessed ``AnalysisNwbfile``) is removed
+        and ``deleted`` set; ``Recording.get_recording`` rebuilds it on demand.
+        """
+        _assert_nonnegative_age(days_since_creation)
+        return _delete_files(
+            self,
+            Recording,
+            restriction,
+            dry_run=dry_run,
+            force_stale_env=force_stale_env,
+            days_since_creation=days_since_creation,
+            file_attr="analysis_file_name",
+            path_fn=AnalysisNwbfile.get_abs_path,
+            artifact_pk=Recording.primary_key,
+        )
+
+
+def _recording_missing_probe_info(nwb_file_name: str) -> bool:
+    """Whether no ``Electrode * Probe`` rows are on record for ``nwb_file_name``.
+
+    A structural impossibility for recompute: the rebuild needs probe geometry,
+    so an empty join (probe metadata never ingested, or stripped) means the
+    artifact can never be regenerated. Mirrors v1's probe-presence check.
+    """
+    from spyglass.common.common_device import Probe
+    from spyglass.common.common_ephys import Electrode
+
+    return not bool(Electrode * Probe & {"nwb_file_name": nwb_file_name})
+
+
+def _resolve_recording_regen_inputs(parent_key: dict) -> RecordingRegenInputs:
+    """Resolve what a recording recompute regenerates from (DB, self-heal).
+
+    In the order compute used them: the canonical artifact (rebuilt if
+    missing), then ``Recording.make_fetch`` for the fresh rebuild. A failure
+    stops the resolution and is carried as a :class:`FetchFailure`.
+    """
+    what = "RecordingArtifactRecompute"
+    current = _resolve_or_failure(
+        lambda: Recording().resolve_stored_traces(parent_key),
+        what=what,
+        parent_key=parent_key,
+    )
+    if isinstance(current, FetchFailure):
+        return RecordingRegenInputs(current=current, recording=None)
+    return RecordingRegenInputs(
+        current=current,
+        recording=_resolve_or_failure(
+            lambda: Recording().make_fetch(parent_key),
+            what=what,
+            parent_key=parent_key,
+        ),
+    )
+
+
+def _recompute_recording_fingerprint(fetched) -> dict:
+    """Recompute a recording to a fresh (unregistered) temp file and return its
+    content-fingerprint component dict.
+
+    ``fetched`` is ``Recording.make_fetch`` of the recording
+    (``RecordingFetched``). The fresh temp is unlinked on success, mismatch,
+    and error -- it never enters the canonical slot.
+    """
+    result = Recording._compute_recording_artifact(
+        raw_path=fetched.raw_path,
+        raw_object_id=fetched.raw_object_id,
+        nwb_file_name=fetched.sel["nwb_file_name"],
+        interval_list_name=fetched.sel["interval_list_name"],
+        channel_ids=fetched.channel_ids,
+        reference_mode=fetched.reference_mode,
+        reference_electrode_id=fetched.reference_electrode_id,
+        sort_valid_times=fetched.sort_valid_times,
+        raw_valid_times=fetched.raw_valid_times,
+        preprocessing_params=fetched.preprocessing_params,
+        probe_types=fetched.probe_types,
+        electrode_group_names=fetched.electrode_group_names,
+        bad_channel_ids=fetched.bad_channel_ids,
+        existing_analysis_file_name=None,  # fresh, unregistered temp file
+    )
+    fresh_abs = AnalysisNwbfile.get_abs_path(result.analysis_file_name)
+    try:
+        return recording_content_fingerprint(
+            fresh_abs, electrical_series_path=_ELECTRICAL_SERIES_PATH
+        )
+    finally:
+        Path(fresh_abs).unlink(missing_ok=True)
+
+
+def _insert_recording_comparison(
+    table, key, current, fresh, content_hash, created_at
+):
+    """Insert a recording recompute outcome with a content-anchored ``matched``.
+
+    ``matched = combined_hash(fresh) == content_hash`` -- the FRESH rebuild
+    reproducing the row identity (recoverability), the same invariant
+    ``Recording._rebuild_nwb_artifact`` enforces -- NOT the current-vs-fresh
+    dict diff. The ``Name`` / ``Hash`` diff parts still report which fingerprint
+    component differs between the current served file and the fresh rebuild
+    (non-determinism / current-file drift), so an operator can localize a
+    problem even on a matched row.
+    """
+
+    matched = combined_hash(fresh) == content_hash
+    with table._safe_context():
+        _insert_comparison(
+            table, key, current, fresh, created_at, matched=matched
+        )
+
+
+# =====================================================================
+# SortingAnalyzer recompute
+# =====================================================================
+
+
+@schema
+class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
+    """Dependency + content inventory for a ``Sorting``'s analyzer folders.
+
+    One row per (sort, analyzer recipe): a sort's stored DISPLAY recipe plus
+    any whitened METRIC recipe a ``CurationEvaluationSelection`` references. The
+    whitened and unwhitened analyzers for one ``sorting_id`` are inventoried
+    (and recomputed) independently, keyed by ``waveform_params_name`` -- their
+    folders are ``{sorting_id}__{waveform_params_name}.analyzer`` and never
+    collide.
+    """
+
+    definition = """
+    -> Sorting
+    -> AnalyzerWaveformParameters.proj(waveform_params_name="waveform_params_name")
+    ---
+    si_deps=null: blob          # spikeinterface version, etc.
+    analyzer_manifest=null: blob # extension_content_hashes + base_extension_seed_modes
+    analyzer_hash: char(64)
+    """
+
+    @property
+    def key_source(self):
+        """The (sort, recipe) pairs that have an analyzer folder.
+
+        Every sort's stored display recipe, unioned with every metric recipe a
+        curation selection references (the only way a whitened analyzer comes
+        into existence). A sort with no curation has just its one display row.
+        """
+        from spyglass.spikesorting.v2.metric_curation import (
+            CurationEvaluationSelection,
+        )
+
+        # All (sort, recipe) pairs, restricted to those actually in use: a
+        # sort's stored display recipe OR a metric recipe a PC-requesting
+        # curation evaluation references. An OR-list semijoin on the clean
+        # (sorting_id, waveform_params_name) cross product -- not a union of
+        # dj.U aggregations, whose headings cannot be joined (DataJoint
+        # Union.create -> heading.join KeyError).
+        all_pairs = (AnalyzerWaveformParameters * Sorting).proj()
+        is_display = Sorting.proj(
+            waveform_params_name="display_waveform_params_name"
+        )
+        # pc_requesting() is the single source of "which metric recipes were
+        # actually built" (shared with the orphan-folder audit). Project to
+        # (sorting_id, waveform_params_name); sorting_id is carried explicitly
+        # because it is a SECONDARY (CurationV2) FK attr, not the selection's
+        # uuid PK -- a bare proj() would drop it and the semijoin would match on
+        # waveform_params_name alone (leaking a recipe onto every sort).
+        is_metric = CurationEvaluationSelection.pc_requesting().proj(
+            "sorting_id", waveform_params_name="metric_waveform_params_name"
+        )
+        return all_pairs & [is_display, is_metric]
+
+    # Tri-part: loading the analyzer folder + hashing its full extension arrays
+    # is the heavy step and must stay OUTSIDE the framework transaction
+    # (make_compute), not hold row locks in a monolithic make. make_fetch reads
+    # the sort's unit count, validates the recipe and resolves the folder.
+    _parallel_make = True
+
+    def make_fetch(self, key) -> AnalyzerVersionsFetched:
+        """Read the unit count and resolve the analyzer folder.
+
+        Validates the recipe (:func:`_validated_analyzer_recipe`) for a sort
+        with units before any folder is read.
+        """
+        sorting_id = key["sorting_id"]
+        name = key["waveform_params_name"]
+        n_units = int((Sorting & {"sorting_id": sorting_id}).fetch1("n_units"))
+        analyzer_folder = (
+            _validated_analyzer_recipe(sorting_id, name).analyzer_folder
+            if n_units > 0
+            else str(_analyzer_folder(sorting_id, name))
+        )
+        return AnalyzerVersionsFetched(
+            n_units=n_units, analyzer_folder=analyzer_folder
+        )
+
+    def make_compute(
+        self, key, n_units, analyzer_folder
+    ) -> AnalyzerVersionsComputed:
+        """Load the analyzer + hash its extensions off the transaction.
+
+        Uses the NO-REBUILD loader: an absent analyzer folder is inventoried as
+        an explicit MISSING state (``_MISSING_HASH``) rather than silently
+        rebuilt and hashed as if present -- so the inventory distinguishes a
+        reclaimed/missing analyzer from a legitimately zero-unit one
+        (``_ZERO_HASH``), and reclaimed disk is not re-materialized just to
+        record a hash. No DB access: reads only the folder ``make_fetch``
+        resolved.
+        """
+        import spikeinterface as si
+
+        from spyglass.spikesorting.v2._sorting_analyzer import (
+            load_analyzer_folder_no_rebuild,
+        )
+
+        si_deps = {"spikeinterface": si.__version__}
+        if n_units == 0:
+            # SI cannot build an analyzer over zero units, so there is nothing
+            # to hash: an empty manifest and the zero-unit hash.
+            return AnalyzerVersionsComputed(
+                si_deps=si_deps, analyzer_manifest={}, analyzer_hash=_ZERO_HASH
+            )
+        try:
+            analyzer = load_analyzer_folder_no_rebuild(
+                Path(analyzer_folder),
+                recipe_label=key["waveform_params_name"],
+                sorting_id=key["sorting_id"],
+            )
+            # The content hashes drive the recompute identity (analyzer_hash);
+            # the seed modes are SECONDARY provenance recorded alongside them, so
+            # the manifest does not silently imply a pinned seed for an unseeded
+            # base extension (e.g. the intrinsically deterministic templates /
+            # waveforms, which carry no seed).
+            content_hashes = hash_extension_data(analyzer)
+            manifest = {
+                "extension_content_hashes": content_hashes,
+                "base_extension_seed_modes": analyzer_seed_modes(analyzer),
+                "storage_fingerprint": analyzer_folder_storage_fingerprint(
+                    analyzer_folder
+                ),
+            }
+        except AnalyzerFolderInvalidError as exc:
+            logger.warning(
+                "SortingAnalyzerVersions: analyzer folder invalid for "
+                f"sorting_id={key['sorting_id']}, "
+                f"recipe={key['waveform_params_name']}; inventorying as MISSING "
+                f"(not rebuilding). Error: {exc}"
+            )
+            return AnalyzerVersionsComputed(
+                si_deps=si_deps,
+                analyzer_manifest={},
+                analyzer_hash=_MISSING_HASH,
+            )
+        except AnalyzerFolderMissingError:
+            logger.warning(
+                "SortingAnalyzerVersions: analyzer folder missing for "
+                f"sorting_id={key['sorting_id']}, "
+                f"recipe={key['waveform_params_name']}; inventorying as MISSING "
+                "(not rebuilding)."
+            )
+            return AnalyzerVersionsComputed(
+                si_deps=si_deps,
+                analyzer_manifest={},
+                analyzer_hash=_MISSING_HASH,
+            )
+        return AnalyzerVersionsComputed(
+            si_deps=si_deps,
+            analyzer_manifest=manifest,
+            analyzer_hash=(
+                combined_hash(content_hashes) if content_hashes else _ZERO_HASH
+            ),
+        )
+
+    def make_insert(self, key, si_deps, analyzer_manifest, analyzer_hash):
+        """Insert the analyzer inventory row."""
+        self.insert1(
+            {
+                **key,
+                "si_deps": si_deps,
+                "analyzer_manifest": analyzer_manifest,
+                "analyzer_hash": analyzer_hash,
+            }
+        )
+
+    @classmethod
+    def refresh_changed_folders(cls, restriction=True) -> int:
+        """Refresh inventories whose analyzer-folder generation changed.
+
+        This catches canonical folders rebuilt by DB-free workers as well as
+        legacy inventory rows created before storage fingerprints existed.
+        Dependent selections/verdicts are removed because they describe the
+        prior generation, then the current folder is inventoried immediately.
+        """
+        refreshed = 0
+        for row in (cls & restriction).fetch(as_dict=True):
+            key = {field: row[field] for field in cls.primary_key}
+            folder = _analyzer_folder(
+                key["sorting_id"], key["waveform_params_name"]
+            )
+            # A folder freed by ``delete_files`` is absent ON PURPOSE; its
+            # ``deleted=1`` rows are the reclamation audit and cascade away if
+            # this invalidates the inventory.
+            reclaimed = bool(SortingAnalyzerRecompute & key & "deleted=1")
+            with analyzer_cache_lock(key["sorting_id"]):
+                current = (
+                    analyzer_folder_storage_fingerprint(folder)
+                    if folder.exists()
+                    else None
+                )
+                if not analyzer_inventory_refresh_needed(
+                    row.get("analyzer_manifest"), current, reclaimed=reclaimed
+                ):
+                    continue
+                invalidate_sorting_analyzer_inventory(
+                    key["sorting_id"], key["waveform_params_name"]
+                )
+                repopulate_sorting_analyzer_inventory(
+                    key["sorting_id"], key["waveform_params_name"]
+                )
+            refreshed += 1
+        return refreshed
+
+
+@schema
+class SortingAnalyzerRecomputeSelection(
+    _RecomputeSelectionMixin, SpyglassMixin, dj.Manual
+):
+    """Plan an analyzer recompute attempt under a labeled environment."""
+
+    _versions_table = SortingAnalyzerVersions
+    _recompute_table_name = "SortingAnalyzerRecompute"
+
+    definition = """
+    -> SortingAnalyzerVersions
+    -> UserEnvironment
+    rounding=4: int
+    ---
+    logged_at_creation=0: bool
+    xfail_reason=NULL: varchar(127)
+    """
+
+    @classmethod
+    def attempt_all(cls, restriction=True, *, rounding: int = 4) -> None:
+        """Insert an analyzer recompute attempt for every eligible sort."""
+        if rounding < 0:
+            raise ValueError(
+                f"rounding must be a non-negative np.round precision; "
+                f"got {rounding}."
+            )
+        env_id = _current_env_id()
+        if not env_id:
+            logger.warning(
+                "No UserEnvironment available; cannot plan recompute attempts."
+            )
+            return
+        SortingAnalyzerVersions.refresh_changed_folders(restriction)
+        rows = [
+            {**version_key, "env_id": env_id, "rounding": rounding}
+            for version_key in (SortingAnalyzerVersions & restriction).fetch(
+                "KEY", as_dict=True
+            )
+        ]
+        cls.insert(rows, skip_duplicates=True)
+
+
+@schema
+class SortingAnalyzerRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
+    """Regenerate an analyzer folder and compare extension content hashes.
+
+    Legacy inventories without deterministic ``noise_levels`` provenance are
+    recorded as explicitly unverifiable instead of producing a misleading hash
+    mismatch against the current seed-pinned rebuild.
+    """
+
+    definition = """
+    -> SortingAnalyzerRecomputeSelection
+    ---
+    matched: bool
+    err_msg=NULL: varchar(255)
+    created_at=NULL: datetime
+    deleted=0: bool
+    """
+
+    class Name(SpyglassMixinPart):
+        definition = """
+        -> master
+        name: varchar(255)
+        missing_from: enum('old', 'new')
+        """
+
+    class Hash(SpyglassMixinPart):
+        definition = """
+        -> master
+        name: varchar(255)
+        """
+
+    @property
+    def with_names(self):
+        """Join recompute rows to the upstream ``sorting_id``."""
+        return self * Sorting.proj()
+
+    def get_parent_key(self, key) -> dict:
+        """Return the upstream ``Sorting`` key for a recompute row."""
+        sorting_id = (SortingAnalyzerVersions & key).fetch1("sorting_id")
+        return {"sorting_id": sorting_id}
+
+    # Tri-part dispatch: the analyzer-folder regeneration + extension hashing is
+    # the long step and stays OUTSIDE the framework transaction. A regen failure
+    # is encoded as the 'error' outcome (matched=0), not raised.
+    _parallel_make = True
+
+    def make_fetch(self, key) -> RecomputeFetched:
+        """Read the recompute inputs (no regeneration I/O except the
+        self-heal rebuild of a missing traces file).
+
+        Unless the row is ``xfail`` or ``unverifiable``, resolves the recipe
+        and, when the stored folder exists, the canonical recording, units
+        and sorter row the fresh analyzer is built from (see
+        :func:`_resolve_analyzer_regen_inputs`); a failure is carried as a
+        :class:`FetchFailure` and recorded as the ``'error'`` outcome.
+        """
+        rounding, xfail_reason = (
+            SortingAnalyzerRecomputeSelection & key
+        ).fetch1("rounding", "xfail_reason")
+        manifest = (SortingAnalyzerVersions & key).fetch1("analyzer_manifest")
+        unverifiable_reason = analyzer_recompute_unverifiable_reason(manifest)
+        parent = self.get_parent_key(key)
+        # str the sorting_id UUID for a DeepHash-stable carrier.
+        parent_key = {"sorting_id": str(parent["sorting_id"])}
+        return RecomputeFetched(
+            parent_key=parent_key,
+            rounding=int(rounding),
+            xfail_reason=xfail_reason,
+            unverifiable_reason=unverifiable_reason,
+            regen_inputs=(
+                None
+                if xfail_reason or unverifiable_reason
+                else _resolve_analyzer_regen_inputs(
+                    parent_key, key["waveform_params_name"]
+                )
+            ),
+        )
+
+    def make_compute(
+        self,
+        key,
+        parent_key,
+        rounding,
+        xfail_reason,
+        unverifiable_reason,
+        regen_inputs,
+    ) -> RecomputeComputed:
+        """Regenerate the analyzer folder + hash extensions off the transaction.
+
+        Reads only ``regen_inputs``; no DB access.
+        """
+        return _recompute_compute(
+            parent_key,
+            xfail_reason,
+            unverifiable_reason,
+            regen=lambda: _recompute_analyzer_hashes(regen_inputs, rounding),
+            what="SortingAnalyzerRecompute",
+        )
+
+    def make_insert(
+        self, key, outcome, err_msg, stored_hashes, new_hashes, parent_key
+    ):
+        """Record the QC result (created_at = populate time for analyzers)."""
+        _insert_recompute_outcome(
+            self,
+            key,
+            outcome,
+            err_msg,
+            stored_hashes,
+            new_hashes,
+            dt.datetime.now(),
+        )
+
+    def get_disk_space(self, restriction=True) -> str:
+        """Report reclaimable disk for matched, not-yet-deleted analyzers.
+
+        Only ``matched=1`` analyzers are deletable by ``delete_files``, so only
+        those are reclaimable; one folder is counted once even across multiple
+        env rows.
+        """
+        total = 0
+        reclaimable = self & restriction & "matched=1 AND deleted=0"
+        # Each (sorting_id, recipe) is a distinct analyzer folder; count each
+        # once across env rows.
+        for sid, name in {
+            (key["sorting_id"], key["waveform_params_name"])
+            for key in reclaimable.fetch("KEY", as_dict=True)
+        }:
+            folder = _analyzer_folder(sid, name)
+            if folder.exists():
+                total += sum(
+                    f.stat().st_size for f in folder.rglob("*") if f.is_file()
+                )
+        return f"Total: {bytes_to_human_readable(total)}"
+
+    def update_secondary(self, restriction=True) -> None:
+        """Backfill ``created_at`` (analyzer folders use populate time)."""
+        for key in (self & restriction).fetch("KEY", as_dict=True):
+            self.update1({**key, "created_at": dt.datetime.now()})
+
+    def delete_files(
+        self,
+        restriction=True,
+        *,
+        dry_run: bool = True,
+        force_stale_env: bool = False,
+        days_since_creation: int = 7,
+    ) -> list:
+        """Delete analyzer folders verified in the CURRENT environment.
+
+        Same current-environment gate as the recording recompute. The deleted
+        analyzer folder is regeneratable via ``Sorting.get_analyzer``.
+        """
+        _assert_nonnegative_age(days_since_creation)
+        return _delete_analyzer_folders(
+            self,
+            restriction,
+            dry_run=dry_run,
+            force_stale_env=force_stale_env,
+            days_since_creation=days_since_creation,
+            folder_fn=_analyzer_folder,
+            artifact_pk=SortingAnalyzerVersions.primary_key,
+        )
+
+
+def _analyzer_folder(sorting_id, waveform_params_name):
+    """Return the analyzer cache folder for a (sort, recipe).
+
+    Recompute inventories one folder per (sort, recipe); the folder-size
+    accounting and delete target resolve the explicit ``waveform_params_name``
+    (display or whitened metric), keyed ``{sorting_id}__{name}.analyzer``.
+    """
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+
+    return analyzer_path(sorting_id, waveform_params_name)
+
+
+def _validated_analyzer_recipe(
+    sorting_id, waveform_params_name: str
+) -> AnalyzerRecipe:
+    """Validate a sort's analyzer recipe and resolve its cache folder.
+
+    Checks the name is path-safe and names a tracked
+    ``AnalyzerWaveformParameters`` row, as ``Sorting.get_analyzer`` does,
+    before any folder is read.
+    """
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        assert_path_safe_waveform_params_name,
+    )
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        fetch_waveform_params,
+    )
+
+    assert_path_safe_waveform_params_name(waveform_params_name)
+    return AnalyzerRecipe(
+        analyzer_folder=str(_analyzer_folder(sorting_id, waveform_params_name)),
+        waveform_params=fetch_waveform_params(waveform_params_name),
+    )
+
+
+def invalidate_sorting_analyzer_inventory(
+    sorting_id, waveform_params_name
+) -> bool:
+    """Remove an inventory and verdicts tied to a folder being rebuilt.
+
+    The inventory row describes one concrete on-disk generation. Keeping it
+    across a rebuild would leave old ``unverifiable`` or comparison results
+    attached to newly generated bytes. Return whether a row existed so the
+    rebuild path can restore the inventory after publishing (or after a failed
+    atomic publish that retained the old folder).
+    """
+    restriction = {
+        "sorting_id": sorting_id,
+        "waveform_params_name": waveform_params_name,
+    }
+    inventory = SortingAnalyzerVersions & restriction
+    if not inventory:
+        return False
+    # Delete the selection explicitly so all environment-specific recompute
+    # results cascade before their now-obsolete inventory parent is removed.
+    selections = SortingAnalyzerRecomputeSelection & restriction
+    if selections:
+        selections.delete(safemode=False)
+    inventory.delete(safemode=False)
+    return True
+
+
+def repopulate_sorting_analyzer_inventory(
+    sorting_id, waveform_params_name
+) -> None:
+    """Inventory a freshly published analyzer generation immediately."""
+    SortingAnalyzerVersions.populate(
+        {
+            "sorting_id": sorting_id,
+            "waveform_params_name": waveform_params_name,
+        },
+        reserve_jobs=False,
+    )
+
+
+def _resolve_analyzer_regen_inputs(
+    sort_key: dict, waveform_params_name: str
+) -> AnalyzerRegenInputs:
+    """Resolve what an analyzer recompute regenerates from (DB, self-heal).
+
+    In the order :func:`_recompute_analyzer_hashes` uses them: the unit
+    count (a zero-unit sort has nothing to verify), the recipe (path-safe
+    name, tracked params row), then -- only when the stored folder exists,
+    since compute otherwise reports it missing before reading a source --
+    the canonical recording (traces rebuilt if missing), the units NWB and
+    the sorter row. A failure stops the resolution and is carried as a
+    :class:`FetchFailure`.
+    """
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        resolve_canonical_recording,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        SortingSelection,
+    )
+
+    what = "SortingAnalyzerRecompute"
+    sorting_id, n_units = (Sorting & sort_key).fetch1("sorting_id", "n_units")
+    if int(n_units) == 0:
+        return AnalyzerRegenInputs(
+            sorting_id, waveform_params_name, recipe=None, source=None
+        )
+
+    def _source():
+        canonical = resolve_canonical_recording(sort_key)
+        return AnalyzerRegenSource(
+            recording=canonical,
+            units=SortingSelection.resolve_stored_units(
+                (Sorting & sort_key).fetch1("analysis_file_name"),
+                canonical.source,
+                canonical.abs_path,
+            ),
+            sorter_row=(
+                SorterParameters
+                & (
+                    (SortingSelection & sort_key).proj(
+                        "sorter", "sorter_params_name"
+                    )
+                )
+            ).fetch1(),
+        )
+
+    recipe = _resolve_or_failure(
+        lambda: _validated_analyzer_recipe(sorting_id, waveform_params_name),
+        what=what,
+        parent_key=sort_key,
+    )
+    source = None
+    if (
+        not isinstance(recipe, FetchFailure)
+        and Path(recipe.analyzer_folder).exists()
+    ):
+        source = _resolve_or_failure(_source, what=what, parent_key=sort_key)
+    return AnalyzerRegenInputs(
+        sorting_id, waveform_params_name, recipe=recipe, source=source
+    )
+
+
+def _recompute_analyzer_hashes(inputs: AnalyzerRegenInputs, rounding: int):
+    """Hash a recipe's stored analyzer and a fresh temp rebuild; no DB access.
+
+    ``inputs.waveform_params_name`` selects which recipe to verify (display
+    or whitened metric); the rebuild uses that recipe's params, so the fresh
+    analyzer is byte-comparable to the cached one for the SAME recipe.
+    """
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        build_analyzer,
+        load_analyzer_folder_no_rebuild,
+        read_canonical_recording,
+    )
+    from spyglass.spikesorting.v2._units_nwb import (
+        read_sorting_statistics_spans,
+        read_stored_units,
+    )
+
+    if inputs.recipe is None:
+        return {}, {}  # zero-unit: nothing to verify -> trivially matched
+    recipe = _resolved(inputs.recipe)
+    # NO-REBUILD: an absent stored analyzer must NOT be self-healed here --
+    # rebuilding it would compare a fresh build to another fresh build and
+    # report a tautological match, authorizing deletion of a folder that was
+    # reconstructed for the audit. Instead AnalyzerFolderMissingError
+    # propagates to _recompute_compute, which records matched=0 (the audit
+    # cannot verify reproducibility against an original that is gone).
+    stored = load_analyzer_folder_no_rebuild(
+        Path(recipe.analyzer_folder),
+        recipe_label=inputs.waveform_params_name,
+        sorting_id=inputs.sorting_id,
+    )
+    stored_hashes = hash_extension_data(stored, rounding=rounding)
+
+    if inputs.source is None:
+        # make_fetch found no stored folder and resolved no source; one has
+        # appeared since.
+        raise RuntimeError(
+            "SortingAnalyzerRecompute: the analyzer folder "
+            f"{recipe.analyzer_folder} was absent when the inputs were "
+            "fetched and present at compute; recheck the row to verify it."
+        )
+    source = _resolved(inputs.source)
+    # Source sorting + recording from the CANONICAL units NWB + recording (the
+    # shared resolver), NOT a self-healing analyzer load. This (a) never rebuilds
+    # the DISPLAY analyzer cache as a side effect -- so verifying a metric
+    # analyzer while the display folder is reclaimed still produces a real
+    # comparison (and never re-materializes a large display folder during the
+    # audit) -- and (b) reconstructs the SAME artifact-masked, unwhitened
+    # recording build_analyzer starts from (it 2D-projects + whitens per recipe,
+    # so a whitened metric analyzer is not double-whitened). The sorting is
+    # recipe-independent. (make_fetch can still rebuild a reclaimed RECORDING
+    # cache, through the recording's own self-heal.)
+    recording = read_canonical_recording(source.recording)
+    sorting = read_stored_units(source.units)
+
+    from spyglass.settings import temp_dir as spyglass_temp_dir
+
+    with tempfile.TemporaryDirectory(
+        prefix="v2_analyzer_recompute_",
+        dir=spyglass_temp_dir,
+        ignore_cleanup_errors=True,
+    ) as tmp:
+        # Rebuild from the SAME sorting + recording with build_analyzer's exact
+        # seed/param logic, to a temp folder, so the comparison is a genuine
+        # regeneration rather than the stored folder compared to itself. Build
+        # only the extensions this verify hashes (ANALYZER_RECOMPUTE_EXTENSIONS)
+        # -- every one is seed-pinned, noise_levels included, so the rebuild is
+        # content-identical.
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            ANALYZER_FOLDER_SUFFIX,
+            load_analyzer_folder,
+        )
+
+        fresh_folder = Path(tmp) / f"analyzer{ANALYZER_FOLDER_SUFFIX}"
+        build_analyzer(
+            sorting,
+            recording,
+            {"sorting_id": str(inputs.sorting_id)},
+            sorter_row=source.sorter_row,
+            analyzer_folder=fresh_folder,
+            waveform_params=recipe.waveform_params,
+            extensions=ANALYZER_RECOMPUTE_EXTENSIONS,
+            # The sort's persisted spans, so noise_levels regenerates from the
+            # same samples as the stored build it is compared against.
+            statistics_spans=read_sorting_statistics_spans(
+                source.units.abs_path, sorting_id=inputs.sorting_id
+            ),
+        )
+        fresh = load_analyzer_folder(fresh_folder)
+        new_hashes = hash_extension_data(fresh, rounding=rounding)
+    return stored_hashes, new_hashes
+
+
+# =====================================================================
+# Shared helpers
+# =====================================================================
+
+
+def _artifact_created_at(rec_key: dict):
+    """Return the recording artifact file mtime (now() if missing)."""
+    fname = (Recording & rec_key).fetch1("analysis_file_name")
+    abs_path = Path(AnalysisNwbfile.get_abs_path(fname))
+    if not abs_path.exists():
+        return dt.datetime.now()
+    return dt.datetime.fromtimestamp(abs_path.stat().st_mtime)
+
+
+def _insert_comparison(
+    table, key, stored_hashes, new_hashes, created_at, *, matched=None
+):
+    """Insert the master row plus Name/Hash diff part rows.
+
+    ``matched`` defaults to the two hash dicts being equal.
+    """
+    dicts_match, missing_old, missing_new, differing = compare_hash_dicts(
+        stored_hashes, new_hashes
+    )
+    if matched is None:
+        matched = dicts_match
+    table.insert1({**key, "matched": matched, "created_at": created_at})
+    name_rows = [
+        {**key, "name": n, "missing_from": "old"} for n in missing_old
+    ] + [{**key, "name": n, "missing_from": "new"} for n in missing_new]
+    if name_rows:
+        table.Name().insert(name_rows)
+    if differing:
+        table.Hash().insert([{**key, "name": n} for n in differing])
+
+
+def _authorize_artifacts_for_deletion(
+    recompute_table, restriction, *, force_stale_env, artifact_pk
+):
+    """Return ``(authorized, matched_query)`` for deletion.
+
+    ``authorized`` is a list of ``(artifact_key, authorizing_rows)`` tuples.
+    Authorization is at the ARTIFACT level, not per recompute row: an artifact
+    (one ``recording_id`` / ``sorting_id``) is authorized when it has a
+    ``matched=1``, not-yet-deleted recompute row in the CURRENT
+    ``UserEnvironment``. An artifact whose matched rows are ALL in stale envs
+    raises ``StaleEnvMatchedError`` (unless ``force_stale_env``, which
+    authorizes it with an audit log line). Keying on the artifact -- rather than
+    the full recompute row including ``env_id`` -- means a stale-env row never
+    blocks an artifact that also has a current-env match.
+
+    ``authorizing_rows`` is the subset of rows that grant the authorization
+    (the current-env rows when present, else the stale rows under
+    ``force_stale_env``). The age gate is applied to ONLY these rows, so a
+    stale/recent sibling row never blocks an otherwise-authorized artifact.
+    """
+    current_env = _current_env_id()
+    matched = recompute_table & restriction & "matched=1 AND deleted=0"
+    authorized = []
+    for artifact in (dj.U(*artifact_pk) & matched).fetch("KEY", as_dict=True):
+        artifact_rows = matched & artifact
+        current_rows = artifact_rows & {"env_id": current_env}
+        if current_rows:
+            authorized.append((artifact, current_rows))
+            continue
+        stale = sorted(set(artifact_rows.fetch("env_id")))
+        if force_stale_env:
+            logger.warning(
+                f"force_stale_env=True: {artifact} authorized by stale-env "
+                f"matches {stale} (current env {current_env!r} has no match). "
+                "Audit-logged."
+            )
+            authorized.append((artifact, artifact_rows))
+        else:
+            raise StaleEnvMatchedError(
+                f"No matched recompute in current env {current_env!r} for "
+                f"{artifact}. Stale-env matches: {stale}. Rerun the recompute "
+                "under the current environment, or pass force_stale_env=True "
+                "(audit-logged)."
+            )
+    return authorized, matched
+
+
+def _assert_nonnegative_age(days_since_creation: int) -> None:
+    """Reject a negative ``days_since_creation`` at the deletion entry points.
+
+    A negative value moves the age floor into the *future*, so every artifact
+    -- including ones created seconds ago -- would read as old enough to delete.
+    """
+    if days_since_creation < 0:
+        raise ValueError(
+            "days_since_creation must be >= 0; a negative value moves the age "
+            f"floor into the future (got {days_since_creation})."
+        )
+
+
+def _recent_cutoff(days_since_creation: int):
+    return dt.datetime.now() - dt.timedelta(days=days_since_creation)
+
+
+def _too_recent_or_unknown(matched_rows, cutoff) -> bool:
+    """True if any matched row's ``created_at`` is NULL or newer than cutoff.
+
+    A destructive op should not proceed on an unknown (NULL) or too-recent age.
+    """
+    return any(
+        created_at is None or created_at > cutoff
+        for created_at in matched_rows.fetch("created_at")
+    )
+
+
+def _delete_files(
+    recompute_table,
+    parent_table,
+    restriction,
+    *,
+    dry_run,
+    force_stale_env,
+    days_since_creation,
+    file_attr,
+    path_fn,
+    artifact_pk,
+):
+    """Artifact-level recording delete gate: current-env match + age, unlink once.
+
+    The unlink + ``deleted=1`` update for each artifact runs under
+    ``recording_artifact_lock(recording_id)`` so a reclamation can never
+    interleave with a concurrent ``get_recording`` rebuild of the same recording
+    -- no unlink racing a write, no reader seeing a half-state.
+    """
+    from spyglass.spikesorting.v2._recording_fingerprint import (
+        recording_artifact_lock,
+    )
+
+    cutoff = _recent_cutoff(days_since_creation)
+    authorized, matched = _authorize_artifacts_for_deletion(
+        recompute_table,
+        restriction,
+        force_stale_env=force_stale_env,
+        artifact_pk=artifact_pk,
+    )
+    deleted = []
+    for artifact, authorizing_rows in authorized:
+        # Age-gate the AUTHORIZING rows only -- a stale/recent sibling row must
+        # not block an artifact a valid current-env row authorizes.
+        if _too_recent_or_unknown(authorizing_rows, cutoff):
+            continue
+        fname = (parent_table & artifact).fetch1(file_attr)
+        abs_path = Path(path_fn(fname))
+        if dry_run:
+            deleted.append(str(abs_path))
+            continue
+        # Serialize against a concurrent rebuild of THIS recording.
+        with recording_artifact_lock(artifact["recording_id"]):
+            abs_path.unlink(missing_ok=True)
+            if abs_path.exists():
+                logger.warning(
+                    f"delete_files: file not removed: {abs_path}; leaving "
+                    "deleted=0 so a later cleanup retries."
+                )
+                continue
+            # Mark every matched row for this artifact deleted, only after the
+            # file is gone (the file is per-artifact; the flag is per row).
+            for key in (matched & artifact).fetch("KEY", as_dict=True):
+                recompute_table.update1({**key, "deleted": 1})
+        deleted.append(str(abs_path))
+    return deleted
+
+
+def _delete_analyzer_folders(
+    recompute_table,
+    restriction,
+    *,
+    dry_run,
+    force_stale_env,
+    days_since_creation,
+    folder_fn,
+    artifact_pk,
+):
+    """Artifact-level analyzer delete gate: current-env match + age, rmtree once.
+
+    Deletion policy: the reproducibility audit hashes only the
+    ``ANALYZER_RECOMPUTE_EXTENSIONS`` (random_spikes / templates / waveforms),
+    but this removes the WHOLE analyzer folder -- including derived
+    curation/visualization extensions it never hashed (amplitudes,
+    correlograms, principal_components, quality_metrics). That is intentional:
+    the analyzer folder is regeneratable scratch (a valid ``Sorting`` row keeps
+    its FK-guaranteed upstream recording, so ``get_analyzer`` rebuilds the whole
+    folder on the next read), so reclaiming the full folder -- not just the
+    hashed extensions -- is the correct, simplest behavior. Each full-folder
+    deletion is logged so the over-deletion is explicit, never silent.
+    """
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_lock
+
+    cutoff = _recent_cutoff(days_since_creation)
+    authorized, matched = _authorize_artifacts_for_deletion(
+        recompute_table,
+        restriction,
+        force_stale_env=force_stale_env,
+        artifact_pk=artifact_pk,
+    )
+    deleted = []
+    for artifact, authorizing_rows in authorized:
+        if _too_recent_or_unknown(authorizing_rows, cutoff):
+            continue
+        folder = Path(
+            folder_fn(artifact["sorting_id"], artifact["waveform_params_name"])
+        )
+        if dry_run:
+            deleted.append(str(folder))
+            continue
+        # Reclaim the folder UNDER the per-sort lock so a concurrent reader /
+        # rebuild of the same sort never races the rmtree.
+        with analyzer_cache_lock(artifact["sorting_id"]):
+            logger.info(
+                "delete_files: removing the FULL analyzer folder "
+                f"{folder} -- this drops ALL extensions, including the derived "
+                "curation/visualization extensions the audit does not hash "
+                "(amplitudes, correlograms, principal_components, "
+                "quality_metrics), not just random_spikes/templates/waveforms. "
+                "The analyzer cache is regeneratable scratch, rebuilt in full "
+                "by the next get_analyzer."
+            )
+            shutil.rmtree(folder, ignore_errors=True)
+            if folder.exists():
+                # Do NOT mark deleted -- the folder is still on disk; leaving
+                # deleted=0 lets a later cleanup retry rather than silently
+                # suppressing it.
+                logger.warning(
+                    f"delete_files: analyzer folder not removed: {folder}; "
+                    "leaving deleted=0 so a later cleanup retries."
+                )
+                continue
+            for key in (matched & artifact).fetch("KEY", as_dict=True):
+                recompute_table.update1({**key, "deleted": 1})
+            deleted.append(str(folder))
+    return deleted
+
+
+def _reclaimable_disk(query) -> str:
+    """Sum on-disk bytes of matched (reclaimable), not-yet-deleted artifacts.
+
+    Dedupes by ``analysis_file_name`` so an artifact with multiple matched env
+    rows is counted once (the file is per-artifact, not per recompute row).
+    """
+    total = 0
+    file_names = set(
+        (query & "matched=1 AND deleted=0").fetch("analysis_file_name")
+    )
+    for file_name in file_names:
+        abs_path = Path(AnalysisNwbfile.get_abs_path(file_name))
+        if abs_path.exists():
+            total += abs_path.stat().st_size
+    return f"Total: {bytes_to_human_readable(total)}"
