@@ -205,50 +205,15 @@ jobs:
     # DB-free + light-DB tests AND any file not routed above. The two heavy
     # separate-env lanes (matching, figpack) each run in ONE shard (see their
     # ``if:`` guards below) so the matrix does not triple them. Adding a new
-    # HEAVY (full-sort) test file? Add it to the ``integration`` shard's paths
-    # AND to the ``unit`` shard's --ignore list.
+    # HEAVY (full-sort) test file? Add it once to INTEGRATION_MODULES in
+    # tests/spikesorting/v2/scripts/run_ci_shard.py.
     strategy:
       fail-fast: false
       matrix:
         shard:
           - name: single-session
-            paths: tests/spikesorting/v2/single_session
           - name: integration
-            paths: >-
-              tests/spikesorting/v2/test_unitmatch.py
-              tests/spikesorting/v2/test_unit_match_generation.py
-              tests/spikesorting/v2/test_unitmatch_concat.py
-              tests/spikesorting/v2/test_session_group_concat.py
-              tests/spikesorting/v2/test_recompute.py
-              tests/spikesorting/v2/test_curation_evaluation.py
-              tests/spikesorting/v2/test_analyzer_lifecycle.py
-              tests/spikesorting/v2/test_pipeline_session.py
-              tests/spikesorting/v2/test_downstream_consumers.py
-              tests/spikesorting/v2/test_clusterless_waveform_features.py
-              tests/spikesorting/v2/test_fixture_ingestion.py
-              tests/spikesorting/v2/test_brain_region_attribution.py
-              tests/spikesorting/v2/test_recording_nwb.py
-              tests/spikesorting/v2/test_motion_correction.py
-              tests/spikesorting/v2/test_motion_consumers.py
           - name: unit
-            paths: >-
-              tests/spikesorting/v2
-              --ignore=tests/spikesorting/v2/single_session
-              --ignore=tests/spikesorting/v2/test_unitmatch.py
-              --ignore=tests/spikesorting/v2/test_unit_match_generation.py
-              --ignore=tests/spikesorting/v2/test_unitmatch_concat.py
-              --ignore=tests/spikesorting/v2/test_session_group_concat.py
-              --ignore=tests/spikesorting/v2/test_recompute.py
-              --ignore=tests/spikesorting/v2/test_curation_evaluation.py
-              --ignore=tests/spikesorting/v2/test_analyzer_lifecycle.py
-              --ignore=tests/spikesorting/v2/test_pipeline_session.py
-              --ignore=tests/spikesorting/v2/test_downstream_consumers.py
-              --ignore=tests/spikesorting/v2/test_clusterless_waveform_features.py
-              --ignore=tests/spikesorting/v2/test_fixture_ingestion.py
-              --ignore=tests/spikesorting/v2/test_brain_region_attribution.py
-              --ignore=tests/spikesorting/v2/test_recording_nwb.py
-              --ignore=tests/spikesorting/v2/test_motion_correction.py
-              --ignore=tests/spikesorting/v2/test_motion_consumers.py
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -456,7 +421,8 @@ jobs:
       run: |
         # Each pytest invocation writes a distinct XML report: later runs in
         # the matching/curation environments replace .coverage, not this XML.
-        pytest ${{ matrix.shard.paths }} --no-docker --no-dlc -q \
+        python tests/spikesorting/v2/scripts/run_ci_shard.py \
+          ${{ matrix.shard.name }} --no-docker --no-dlc -q \
           --cov-config=tests/.coveragerc \
           --cov-report=xml:coverage-v2-${{ matrix.shard.name }}.xml
     - name: Upload v2 shard coverage to Codecov
@@ -718,6 +684,48 @@ jobs:
         disable_search: true
         flags: spikesorting-v2-acceptance
         name: Spike sorting v2 acceptance
+
+  v2-supported-python:
+    # The full v2 suite uses Python 3.11. Exercise supported endpoints too,
+    # without MySQL, validation extras or downloaded NWB fixtures.
+    name: v2 Python ${{ matrix.python-version }} smoke
+    if: |-
+      github.event_name != 'pull_request' ||
+      github.event.action != 'closed' ||
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: pip
+    - name: Install v2 runtime and focused test dependencies
+      run: |
+        # Hosted runners use CPU only. Preinstall that wheel so the runtime
+        # extra's torch>=2 requirement reuses it without pulling CUDA packages.
+        python -m pip install "torch>=2" \
+          --index-url https://download.pytorch.org/whl/cpu
+        python -m pip install ".[spikesorting-v2]" pytest pytest-env tomli
+        python -m pip check
+    - name: Check public and scientific contracts without the DB harness
+      run: |
+        python -m pytest --noconftest -o addopts='' -q \
+          tests/spikesorting/v2/test_dependency_contract.py \
+          tests/spikesorting/v2/test_pipeline_facade.py \
+          tests/spikesorting/v2/test_service_import_contracts.py::test_pipeline_type_contracts_are_reexported_from_facade \
+          tests/spikesorting/v2/test_params_validation.py::test_preprocessing_non_default_blob_round_trips \
+          tests/spikesorting/v2/test_preprocessing_order.py \
+          tests/spikesorting/v2/test_signal_math.py \
+          tests/spikesorting/v2/test_mountainsort4_runtime.py
+    - name: Exercise the installed v2 sorter runtime
+      run: python tests/spikesorting/v2/scripts/smoke_supported_python.py
 
   pytest-legacy:
     # Legacy (v0/v1) spike-sorting tests run under SpikeInterface 0.99,

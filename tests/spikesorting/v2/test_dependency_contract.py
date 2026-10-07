@@ -28,8 +28,12 @@ Three coupled invariants live here:
 """
 
 import re
-import tomllib
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 from packaging.requirements import Requirement
 
@@ -87,6 +91,30 @@ def test_v2_extra_installs_native_mountainsort4():
     assert str(requirements["mountainsort4"].specifier) == "==1.0.7"
     assert "ml-ms4alg" not in requirements
     assert "ml_ms4alg" not in requirements
+
+
+def test_v2_extra_pins_exercised_datajoint_lifecycle():
+    """Every independently installable runtime extra selects the tested release."""
+    for extra in (
+        "spikesorting-v2",
+        "spikesorting-v2-matching",
+        "spikesorting-v2-curation",
+    ):
+        requirements = _extra_requirements(extra)
+        assert str(requirements["datajoint"].specifier) == "==0.14.9", extra
+
+
+def test_v2_runtime_extras_declare_reentrant_analyzer_locks():
+    """Standalone extensions need the same FileLock singleton behavior."""
+    for extra in (
+        "spikesorting-v2",
+        "spikesorting-v2-matching",
+        "spikesorting-v2-curation",
+    ):
+        requirements = _extra_requirements(extra)
+        filelock = requirements["filelock"].specifier
+        assert filelock.contains("3.15.0"), extra
+        assert not filelock.contains("3.14.0"), extra
 
 
 def test_base_numpy_floor_allows_numpy_1x():
