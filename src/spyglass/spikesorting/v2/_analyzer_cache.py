@@ -48,6 +48,8 @@ import os
 import re
 import shutil
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -510,6 +512,62 @@ def analyzer_cache_lock(sorting_id):
     return FileLock(
         str(root / f"{sorting_id}.analyzer.lock"), is_singleton=True
     )
+
+
+_POPULATING_SORTING_IDS: ContextVar[tuple[str, ...]] = ContextVar(
+    "analyzer_populating_sorting_ids", default=()
+)
+
+
+@contextmanager
+def analyzer_population(sorting_id):
+    """Keep a sort's publication lock until the framework commits or rolls back.
+
+    Canonical analyzer folders are published before DataJoint commits the
+    Sorting row. An orphan sweep must wait for that transaction to finish
+    before rechecking references. Context-local ownership also distinguishes
+    the framework's transaction from an unsupported direct ``make_insert``
+    inside a caller's transaction, whose eventual commit we cannot observe.
+    """
+    sid = str(sorting_id)
+    with analyzer_cache_lock(sid):
+        token = _POPULATING_SORTING_IDS.set(
+            (*_POPULATING_SORTING_IDS.get(), sid)
+        )
+        try:
+            yield
+        finally:
+            _POPULATING_SORTING_IDS.reset(token)
+
+
+def analyzer_population_active(sorting_id) -> bool:
+    """Whether this execution context owns the sort's framework transaction."""
+    return str(sorting_id) in _POPULATING_SORTING_IDS.get()
+
+
+class AnalyzerPublicationMixin:
+    """Keep Sorting's analyzer lock around the framework's full populate call."""
+
+    def _populate1(self, key, jobs, *args, **kwargs):
+        with analyzer_population(key["sorting_id"]):
+            return super()._populate1(key, jobs, *args, **kwargs)
+
+
+@contextmanager
+def analyzer_publication_transaction(table, sorting_id):
+    """Protect an insert's own commit, or join its protected populate scope."""
+    if table.connection.in_transaction and not analyzer_population_active(
+        sorting_id
+    ):
+        import datajoint as dj
+
+        raise dj.errors.DataJointError(
+            "Sorting.make_insert cannot publish inside a caller-owned "
+            "database transaction. Use populate(), or call make_insert "
+            "outside a transaction so its analyzer lock covers COMMIT."
+        )
+    with analyzer_cache_lock(sorting_id), table._safe_context():
+        yield
 
 
 def _publish_sibling(canonical_folder, kind: str) -> Path:
@@ -1041,6 +1099,12 @@ def find_orphaned_analyzer_folders(
 
     from spyglass.utils import logger
 
+    if not dry_run and table_cls.connection.in_transaction:
+        raise dj.errors.DataJointError(
+            "Analyzer orphan cleanup must run outside a database transaction "
+            "so its locked ownership recheck sees newly committed Sorting rows."
+        )
+
     # One collector owns references for BOTH cache kinds. Keeping this out
     # of the filesystem loop prevents a new curation cache from being
     # accidentally classified as garbage by a raw-sort-only sweep.
@@ -1123,15 +1187,29 @@ def find_orphaned_analyzer_folders(
         deleted_staging = cleanup_analyzer_staging(
             sorting_id, dry_run=False, candidates=staging
         )
+        deleted_folders = []
         for folder in disk_side:
             identity = analyzer_cache_folder_identity(Path(folder).name)
             if identity is None:  # pragma: no cover - classified above
                 continue
             with analyzer_cache_lock(identity.sorting_id):
-                shutil.rmtree(folder, ignore_errors=False)
+                # A folder may have acquired a committed owner since the
+                # initial scan or while the operator reviewed the prompt.
+                # Sorting holds this lock through COMMIT/rollback, so this
+                # fresh read cannot mistake an in-flight publication for an
+                # orphan. Existing transactions are refused above because
+                # their repeatable-read snapshot could hide that commit.
+                live = collect_analyzer_cache_references(
+                    table_cls & {"sorting_id": identity.sorting_id}
+                )["referenced_paths"]
+                if folder in live or derivative_base_path(folder) in live:
+                    continue
+                if Path(folder).exists():
+                    shutil.rmtree(folder, ignore_errors=False)
+                    deleted_folders.append(folder)
         logger.info(
             "Sorting.find_orphaned_analyzer_folders: deleted "
-            f"{len(disk_side)} disk-side orphan folder(s) and "
+            f"{len(deleted_folders)} disk-side orphan folder(s) and "
             f"{len(deleted_staging)} abandoned staging folder(s)."
         )
     else:

@@ -1086,7 +1086,12 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
 
 @schema
-class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
+class Sorting(
+    _analyzer_cache.AnalyzerPublicationMixin,
+    StagedOutputCleanupMixin,
+    SpyglassMixin,
+    dj.Computed,
+):
     """Sorted units NWB + SortingAnalyzer folder.
 
     ``make()`` resolves the source recording, applies sorter-owned
@@ -1495,6 +1500,10 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         a failed attempt's staged NWB is ``StagedOutputCleanupMixin``'s job
         during ``populate()``; a direct call leaves that to its caller.
         Previously published caches are never deleted by a losing attempt.
+        The publication lock covers the framework's commit via
+        ``AnalyzerPublicationMixin``; a direct call holds it through its own
+        transaction. Direct calls inside a caller-owned transaction are refused
+        because this method cannot keep that lock until the later commit.
 
         Parameters
         ----------
@@ -1524,8 +1533,12 @@ class Sorting(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         -------
         None
         """
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_publication_transaction,
+        )
+
         try:
-            with self._safe_context():
+            with analyzer_publication_transaction(self, key["sorting_id"]):
                 self._insert_sorting_rows_transaction(
                     key=key,
                     sorting_obj=sorting_obj,
