@@ -4,6 +4,10 @@
 not be applied to the master table. These tests pin down the replacement
 behavior, which mirrors ``datajoint.user_tables.Part.delete``: a part-only
 delete is refused unless ``force=True`` is passed.
+
+The forced path routes to ``Table.delete(force_parts=True)`` rather than
+``dj.Part.delete``, so it accepts the normal delete options and still runs the
+Spyglass permission check.
 """
 
 import datajoint as dj
@@ -34,7 +38,7 @@ def part_schema(dj_conn, teardown):
     schema.activate(SCHEMA_NAME, connection=dj_conn)
 
     prev_safemode = dj.config.get("safemode", True)
-    dj.config["safemode"] = False  # part-only deletes cannot forward safemode
+    dj.config["safemode"] = False  # master-promoted deletes would prompt
 
     yield DeleteMaster
 
@@ -139,6 +143,49 @@ def test_force_deletes_part_only(populated):
 
     (part & "item_id = 1").delete(force=True)
 
+    assert len(part) == 2, "Part entries not deleted with force"
+    assert len(master) == 2, "Master entries deleted with force"
+
+
+def test_force_forwards_delete_options(populated, monkeypatch):
+    """``force=True`` accepts the normal delete options, e.g. ``safemode``.
+
+    The forced path used to reach ``dj.Part.delete``, which takes only
+    ``force``, so any other option raised ``TypeError`` and callers could not
+    override global safemode for this one operation.
+    """
+    import datajoint.table
+
+    master, part = populated
+
+    def no_prompt(*args, **kwargs):  # pragma: no cover - the regression itself
+        pytest.fail("safemode=False did not reach Table.delete")
+
+    monkeypatch.setattr(datajoint.table, "user_choice", no_prompt)
+    monkeypatch.setitem(dj.config, "safemode", True)
+
+    (part & {"item_id": 1}).delete(force=True, safemode=False)
+
+    assert len(part) == 2, "Part entries not deleted with force"
+    assert len(master) == 2, "Master entries deleted with force"
+
+
+def test_force_keeps_permission_check(populated, monkeypatch):
+    """Stepping past ``dj.Part.delete`` keeps the Spyglass permission check."""
+    from spyglass.utils.dj_mixin import SpyglassMixinPart
+
+    master, part = populated
+    checked = []
+    monkeypatch.setattr(
+        SpyglassMixinPart,
+        "_check_delete_permission",
+        lambda self: checked.append(1),
+        raising=False,
+    )
+
+    (part & {"item_id": 1}).delete(force=True)
+
+    assert checked, "force=True skipped the permission check"
     assert len(part) == 2, "Part entries not deleted with force"
     assert len(master) == 2, "Master entries deleted with force"
 

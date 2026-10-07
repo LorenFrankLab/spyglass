@@ -171,13 +171,11 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
         ----------
         force : bool, optional
             If True, delete only the matching entries of this part table,
-            leaving the master untouched. Mirrors
-            ``dj.Part.delete(force=True)``, which calls
-            ``Table.delete(force_parts=True)``. As in DataJoint, this path
-            deletes only from the part table (it does not promote the restriction
-            to the master). Default False.
+            leaving the master untouched and skipping promotion of the
+            restriction. Default False.
         *args, **kwargs : Any
-            Passed to the master's delete when ``force`` is False.
+            Delete options, e.g. ``safemode``. Passed to the master's delete
+            when ``force`` is False, and to ``Table.delete`` when it is True.
 
         Raises
         ------
@@ -185,8 +183,12 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
             If ``force`` is False and the restriction cannot be applied to the
             master table.
         """
-        if force:  # part-only delete, mirroring dj.Part.delete(force=True)
-            return super().delete(*args, force=True, **kwargs)
+        if force:
+            # dj.Part.delete accepts only `force` and forwards nothing, so
+            # reaching it through super() would reject safemode and friends.
+            if not kwargs.pop("force_permission", False):
+                self._check_delete_permission()
+            return dj.Table.delete(self, *args, force_parts=True, **kwargs)
 
         restriction = self.restriction or True  # for (tbl & restr).delete()
         master_name = dj.utils.get_master(self.full_table_name)
