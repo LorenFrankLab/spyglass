@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 from spyglass.common.common_behav import VideoFile
-from spyglass.settings import pose_output_dir, pose_video_dir, raw_dir
+from spyglass.settings import pose_output_dir, pose_video_dir
 from spyglass.utils.logging import logger, stream_handler
 
 
@@ -235,8 +235,6 @@ def get_video_info(key):
     timestamps : np.array
         timestamps of the video
     """
-    import pynwb
-
     vf_key = {k: val for k, val in key.items() if k in VideoFile.heading}
     video_query = VideoFile & vf_key
 
@@ -251,23 +249,23 @@ def get_video_info(key):
         logger.warning(f"Found {len(video_query)} videos for {vf_key}")
         return None, None, None, None
 
-    video_info = video_query.fetch1()
-    nwb_path = f"{raw_dir}/{video_info['nwb_file_name']}"
+    # VideoFile only ingests ImageSeries, so the stored object id resolves
+    # to the video's ImageSeries.
+    nwb_video = video_query.fetch_nwb()[0]["video_file"]
 
-    with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
-        nwb_file = in_out.read()
-        nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
-        try:
-            video_filepath = VideoFile.get_abs_path(vf_key)
-        except FileNotFoundError as e:
-            logger.warning(f"Video file not found, skipping: {e}")
-            return None, None, None, None
-        video_dir = os.path.dirname(video_filepath) + "/"
-        video_filename = video_filepath.split(video_dir)[-1]
-        meters_per_pixel = nwb_video.device.meters_per_pixel
-        timestamps = np.asarray(nwb_video.timestamps)
+    try:
+        video_filepath = VideoFile.get_abs_path(vf_key)
+    except FileNotFoundError as e:
+        logger.warning(f"Video file not found, skipping: {e}")
+        return None, None, None, None
 
-    return video_dir, video_filename, meters_per_pixel, timestamps
+    video_dir = os.path.dirname(video_filepath) + "/"
+    return (
+        video_dir,
+        video_filepath.split(video_dir)[-1],
+        nwb_video.device.meters_per_pixel,
+        np.asarray(nwb_video.timestamps),
+    )
 
 
 def find_mp4(
