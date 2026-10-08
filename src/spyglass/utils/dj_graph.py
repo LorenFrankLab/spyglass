@@ -358,7 +358,7 @@ class AbstractGraph(ABC):
         # dict/list → condition (fallback)
         return make_condition(ft, r, set())
 
-    def _warn_if_trivially_true(self, table, restriction) -> None:
+    def _log_if_trivially_true(self, table, restriction) -> None:
         """Log that a shared table is being restricted to all of its rows.
 
         Parameters
@@ -406,7 +406,7 @@ class AbstractGraph(ABC):
         """
         ft = self._get_ft(table)
         restriction = self._coerce_to_condition(ft, restriction)
-        self._warn_if_trivially_true(table, restriction)
+        self._log_if_trivially_true(table, restriction)
         existing = self._get_restr(table)
 
         if (not existing) or replace:

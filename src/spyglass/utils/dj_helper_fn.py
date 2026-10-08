@@ -18,7 +18,8 @@ from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 # Restrictions that match every row of their table. `make_condition` returns
-TRIVIALLY_TRUE_FORMS = frozenset({"true", "1"})
+# the bool for an unrestricted query; the export log stores it as "true" or "1"
+TRIVIALLY_TRUE_FORMS = frozenset({"true", "1"})  # Parens stripped before this
 
 
 def is_trivially_true(restriction: Any) -> bool:
