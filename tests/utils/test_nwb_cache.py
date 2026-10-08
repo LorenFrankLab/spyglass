@@ -71,6 +71,26 @@ def _opened(io=None, streamed=False):
     return Opened(io=io or _make_io(), nwbfile=MagicMock(), streamed=streamed)
 
 
+def _write_nwb(path):
+    """Write a small NWB file with a 10-sample TimeSeries. Return its path."""
+    from datetime import datetime, timezone
+
+    import numpy as np
+    import pynwb
+
+    nwbf = pynwb.NWBFile(
+        session_description="nwb cache test",
+        identifier=path.stem,
+        session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    )
+    nwbf.add_acquisition(
+        pynwb.TimeSeries(name="ts", data=np.arange(10.0), unit="m", rate=1.0)
+    )
+    with pynwb.NWBHDF5IO(str(path), "w") as io:
+        io.write(nwbf)
+    return str(path)
+
+
 def _warn_texts(mock_warn):
     """Return the messages passed to a patched ``_warn_msg``.
 
@@ -189,6 +209,56 @@ def test_eviction_on_low_memory(NWBFileCache):
     io_a.close.assert_called_once()
     assert "/a.nwb" not in cache
     assert "/b.nwb" in cache
+
+
+def test_low_ram_closes_one_unheld_per_check(NWBFileCache):
+    """Low RAM closes a single unheld file, not the whole cache.
+
+    Closing an NWB file returns almost nothing to the OS, so a loop that ran
+    until free RAM recovered would drain the cache on every insert.
+    """
+    cache = NWBFileCache()
+    io_a, io_b = _make_io(), _make_io()
+    with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
+        cache["/a.nwb"] = _opened(io_a)
+        time.sleep(0.01)
+        cache["/b.nwb"] = _opened(io_b)
+
+    # RAM stays low for the whole insert; only the LRU unheld file closes
+    with patch(
+        "psutil.virtual_memory", return_value=_fake_vm(40, total_gb=512)
+    ):
+        cache["/c.nwb"] = _opened()
+
+    io_a.close.assert_called_once()  # LRU of the unheld
+    io_b.close.assert_not_called()  # cache not drained
+    assert set(cache) == {"/b.nwb", "/c.nwb"}
+
+
+def test_low_ram_keeps_held_file_readable(NWBFileCache, nwb_mod, tmp_path):
+    """Low RAM never closes a held file, so its lazy reads still work.
+
+    Mirrors the reviewer's repro: 40 GB free of 512 GB total is under the 10%
+    default, and the first file is held when the second opens.
+    """
+    cache = NWBFileCache()
+    path_a = _write_nwb(tmp_path / "a_.nwb")
+    path_b = _write_nwb(tmp_path / "b_.nwb")
+
+    try:
+        with patch.dict(vars(nwb_mod), {"__open_nwb_files": cache}):
+            lazy = nwb_mod.get_nwb_file(path_a).acquisition["ts"].data
+            nwb_mod._acquire_nwb_file(path_a)
+            with patch(
+                "psutil.virtual_memory",
+                return_value=_fake_vm(40, total_gb=512),
+            ):
+                nwb_mod.get_nwb_file(path_b)
+
+        assert path_a in cache  # held, so low RAM left it open
+        assert lazy[:3].tolist() == [0.0, 1.0, 2.0]
+    finally:
+        cache.close_all()
 
 
 def test_lru_eviction_order(NWBFileCache):
@@ -463,27 +533,56 @@ def test_unheld_closed_before_held(NWBFileCache):
     assert "/b.nwb" in cache
 
 
-def test_held_close_warns(NWBFileCache):
-    """A warning is emitted when the only candidate is a held file."""
+def test_held_close_warns_under_fd_pressure(NWBFileCache):
+    """Descriptor pressure closes a held file as a last resort, and warns.
+
+    Only this path may close a held file; low RAM never does.
+    """
     cache = NWBFileCache()
     io_a = _make_io()
 
     with (
         patch("psutil.virtual_memory", return_value=_fake_vm(16)),
-        patch("resource.getrlimit", return_value=(1024, 4096)),
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=_fake_proc(10)),
     ):
         cache["/a.nwb"] = _opened(io_a)
 
     cache.acquire("/a.nwb")  # every file is now held
 
-    mem_responses = [_fake_vm(0.5), _fake_vm(16)]
     with (
-        patch("psutil.virtual_memory", side_effect=mem_responses),
-        patch("resource.getrlimit", return_value=(1024, 4096)),
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=_fake_proc([1020, 800, 800])),
         patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
         cache["/b.nwb"] = _opened()
         assert any("still held" in w for w in _warn_texts(mock_warn))
+
+    io_a.close.assert_called_once()
+    assert cache._held_evictions == 1
+
+
+def test_low_ram_never_closes_held_file(NWBFileCache):
+    """With only held files, low RAM closes nothing and does not warn."""
+    cache = NWBFileCache()
+    io_a = _make_io()
+
+    with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
+        cache["/a.nwb"] = _opened(io_a)
+
+    cache.acquire("/a.nwb")
+
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(40, total_gb=512)),
+        patch.object(NWBFileCache, "_warn_msg") as mock_warn,
+    ):
+        cache["/b.nwb"] = _opened()
+
+    io_a.close.assert_not_called()
+    mock_warn.assert_not_called()
+    assert cache._held_evictions == 0
+    assert set(cache) == {"/a.nwb", "/b.nwb"}
 
 
 def test_close_all_warns_on_held(NWBFileCache):
@@ -508,7 +607,7 @@ def test_close_all_warns_on_held(NWBFileCache):
 
 
 def test_held_eviction_warns_once(NWBFileCache):
-    """Repeat evictions of held files are counted, not re-warned."""
+    """Repeat closes of held files are counted, not re-warned."""
     cache = NWBFileCache()
 
     with (
@@ -520,13 +619,13 @@ def test_held_eviction_warns_once(NWBFileCache):
             cache[path] = _opened()
             cache.acquire(path)
 
-    # Each insert finds only held files to evict. RAM reads low, then OK, so
-    # one file is evicted per insert and the cache never empties.
-    low_then_ok = [_fake_vm(0.5), _fake_vm(16)] * 3
+    # Each insert finds only held files to close. Descriptors read over the
+    # budget then under, so one file closes per insert and the cache persists.
+    over_then_under = [1020, 800] * 3
     with (
-        patch("psutil.virtual_memory", side_effect=low_then_ok),
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
         patch("resource.getrlimit", return_value=(1024, 1024)),
-        patch("psutil.Process", return_value=_fake_proc(10)),
+        patch("psutil.Process", return_value=_fake_proc(over_then_under)),
         patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
         for path in ("/c.nwb", "/d.nwb", "/e.nwb"):
@@ -534,7 +633,7 @@ def test_held_eviction_warns_once(NWBFileCache):
             cache.acquire(path)
         warnings = _warn_texts(mock_warn)
 
-    assert len(warnings) == 1  # one warning for three evictions
+    assert len(warnings) == 1  # one warning for three closes
     assert cache._held_evictions == 3
 
 

@@ -34,23 +34,22 @@ class NWBFileCache(BaseMixin):
     it (see :mod:`spyglass.utils.file_backends`), alongside the time it was
     last used and whether a caller holds it.
 
-    Closing priority when memory or file-descriptor limits are reached:
-
-    1. **Unheld files** — close the least recently used of these first.
-    2. **Held files** — last resort. Warns once per process, then counts
-       further occurrences for a total at exit.
-
     Holds are managed by :class:`~spyglass.utils.mixins.fetch.FetchMixin`:
     calling ``fetch_nwb()`` acquires each opened file; calling ``close_nwb()``
     on the same table instance releases them.
 
-    Thresholds checked before each insert:
+    Two limits are checked before each insert, descriptors first, and they are
+    not enforced with equal force:
 
-    - Free RAM below ``min_free_gb`` GB *or* ``min_free_pct`` × total RAM,
-      whichever is larger.
-    - Open descriptors held by this process ≥ ``max_file_fraction`` × OS fd
-      soft limit. The whole process is counted, not just the cache, so
-      descriptors opened elsewhere consume the same budget.
+    - **Open descriptors** at or above ``max_file_fraction`` × the
+      ``RLIMIT_NOFILE`` soft limit. The whole process is counted, not just the
+      cache, so sockets and device handles consume the same budget. Files are
+      closed, least recently used first, until the process is back inside the
+      budget — a held file too, as a last resort, because the alternative is
+      the next open raising ``EMFILE``.
+    - **Free RAM** below ``min_free_gb`` GB *or* ``min_free_pct`` × total RAM,
+      whichever is larger. At most one unheld file is closed per check, and
+      never a held one.
 
     Thresholds come from :data:`spyglass.settings.NWB_CACHE_DEFAULTS`, which
     ``custom.nwb_cache`` in ``dj_local_conf.json`` overrides.
@@ -161,36 +160,61 @@ class NWBFileCache(BaseMixin):
             num_open = len(self._cache)
         return num_open < sg_config.nwb_max_file_fraction * soft_limit
 
-    def _evict_lru(self):
-        if not self._cache:
+    def _unheld(self) -> set:
+        """Return the paths no caller is holding."""
+        return {p for p, (_, _, held) in self._cache.items() if not held}
+
+    def _close_lru(self, candidates: set) -> None:
+        """Close the least recently used of *candidates*."""
+        if not candidates:
             return
-        unheld = {p for p, (_, _, held) in self._cache.items() if not held}
-        if unheld:
-            candidates = unheld
-        else:
-            candidates = set(self._cache.keys())
-            self._held_evictions += 1
-            self._warn_once(
-                "held_eviction",
-                "NWB cache must close a file that is still held, under"
-                " memory/fd pressure. Pending lazy h5py reads from it may"
-                " fail. Call close_nwb() when finished with fetch_nwb(), or"
-                " close_nwb_files() to release everything.",
-            )
         lru_path = min(candidates, key=lambda p: self._cache[p][1])
         opened, _, _ = self._cache.pop(lru_path)
         opened.io.close()
         logger.debug(f"Closed LRU NWB file: {lru_path}")
 
-    def _evict_if_needed(self):
-        while self._cache and not (self._free_ram_ok() and self._num_open_ok()):
-            self._evict_lru()
+    def _make_fd_room(self) -> None:
+        """Close files until this process is inside the descriptor budget.
+
+        Loops, and closes a held file as a last resort: exceeding the limit
+        means the next open raises ``EMFILE``, which is worse than a failed
+        lazy read.
+        """
+        while self._cache and not self._num_open_ok():
+            candidates = self._unheld()
+            if not candidates:
+                candidates = set(self._cache)
+                self._held_evictions += 1
+                self._warn_once(
+                    "held_eviction",
+                    "NWB cache must close a file that is still held to stay"
+                    " within the open file limit. Pending lazy h5py reads from"
+                    " it may fail. Call close_nwb() when finished with"
+                    " fetch_nwb(), or close_nwb_files() to release everything.",
+                )
+            self._close_lru(candidates)
         if not self._cache and not self._num_open_ok():
             self._warn_once(
                 "fd_pressure",
                 "Open file descriptors exceed the NWB cache budget with no NWB"
                 " files left to close. Raise the limit with `ulimit -n`.",
             )
+
+    def _make_ram_room(self) -> None:
+        """Close one unheld file if free RAM is low.
+
+        One per check and never a held file. Closing an NWB file returns
+        almost nothing to the OS, so looping until free RAM recovers would
+        empty the cache on every insert whenever other data occupies the RAM.
+        """
+        if self._free_ram_ok():
+            return
+        self._close_lru(self._unheld())
+
+    def _evict_if_needed(self) -> None:
+        """Make room before an insert: descriptors first, then RAM."""
+        self._make_fd_room()
+        self._make_ram_room()
 
     def _warn_once(self, key: str, message: str):
         """Log *message* only the first time *key* is raised this process."""
