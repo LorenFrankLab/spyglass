@@ -377,20 +377,10 @@ def plan_nwbfile(
 def _reused_plan(instance, staged: dict, hasher, targets: dict):
     """Return a TablePlan rebuilt from storage, or None to parse.
 
-    Per-table reuse (D8): re-run a table's ingestion only if an NWB object
-    *that table read* changed. The last attempt recorded which objects it read
-    and a digest over them; re-hashing the same set now and comparing answers
-    whether anything it depends on moved. Equal means the rows it planned still
-    describe the file.
-
-    This is what makes the expected workflow cheap. A user reads a report,
-    fixes one thing, and re-attempts: only the tables that read the edited
-    object pay for a parse again.
-
-    Returns None for any doubt -- no hasher, nothing staged for this table, a
-    digest that differs, a parse that did not finish cleanly, a plan staged by
-    a different Spyglass version, an undeclared target. Reuse has to be
-    provably safe, while re-parsing is only slow.
+    Reusable when the objects this table read are unchanged: the last attempt
+    recorded them and a digest over them, so re-hashing the same set answers
+    it. Returns None for any doubt -- reuse has to be provably safe, while
+    re-parsing is only slow.
 
     Parameters
     ----------
@@ -582,7 +572,7 @@ def insert_plan(
         Default False: a plan with blocking problems inserts nothing, so a
         half-ingested file is a choice rather than an accident.
     on_divergence : str, optional
-        What to do when the file disagrees with a stored row (D7).
+        What to do when the file disagrees with a stored row.
         `report` keeps the stored rows, warns, and inserts everything else;
         `raise` declines the run and logs the report. Default `report`.
         Nothing prompts, and neither value raises an exception: `raise`
@@ -685,7 +675,7 @@ def _refuse(
         return plan
 
     # A divergence is `soft`, so it never reaches `blocking`; the only thing
-    # left to decide is whether a caller asked for it to be an error (D7).
+    # left to decide is whether a caller asked for it to be an error.
     if on_divergence == "raise" and any(
         problem.code == "divergence" for problem in plan.problems
     ):
@@ -724,7 +714,7 @@ def _write_plan(plan: IngestionPlan):
     inserted, existing, conflicting, misses = [], [], [], []
 
     # Which stored rows the file disagreed with, so they stage as `conflict`
-    # keeping their planned value rather than as `exists` losing it (D7).
+    # keeping their planned value rather than as `exists` losing it.
     # Built from the plan: the planner already compared every row.
     diverged = set()
     for problem in plan.problems:

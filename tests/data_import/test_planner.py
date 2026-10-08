@@ -274,7 +274,7 @@ def test_a_divergence_is_reported_without_changing_the_verdict(
     """A disagreement is a warning; the verdict still says what will happen.
 
     It used to answer `conflict` ahead of counting novelty, so one trivial
-    mismatch headlined a file that was otherwise entirely new (D7).
+    mismatch headlined a file that was otherwise entirely new.
     """
 
     def _changed(self, source, ctx):
@@ -315,7 +315,7 @@ def test_report_leads_with_the_verdict(clean_plan):
     assert "no_op" in report or "already ingested" in report.lower()
 
 
-# --- divergence policy (D7) -------------------------------------------------
+# --- divergence policy --------------------------------------------------
 # A divergence is the file disagreeing with a row already stored. The policy
 # decides what a *real* run does about it; a dry run only ever records it.
 

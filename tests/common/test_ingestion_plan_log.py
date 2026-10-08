@@ -218,7 +218,7 @@ def test_a_conflicting_entry_keeps_its_payload(
 ):
     """The one entry that keeps its blob, and why it has to.
 
-    D7 made a divergence a warning rather than a prompt, which only works if
+    A divergence is a warning rather than a prompt, which only works if
     the reader can act on it afterwards: the planned value is the thing they
     need, and re-deriving it means re-parsing the file. So a `conflict` row
     keeps its payload where `exists` and `inserted` lose theirs.

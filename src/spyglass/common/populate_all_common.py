@@ -332,7 +332,7 @@ def populate_all_common(
     on_divergence : str, optional
         What to do when the file disagrees with a stored row: `report`
         keeps the stored rows, warns, and inserts the rest; `raise` declines.
-        Default `report`. Nothing prompts (D7).
+        Default `report`. Nothing prompts.
     allow_partial : bool, optional
         Insert the tables that planned cleanly even though others did not.
         Default False: a blocking problem inserts nothing, so a half-ingested

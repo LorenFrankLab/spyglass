@@ -95,7 +95,7 @@ def insert_sessions(
     on_divergence : str, optional
         What to do when the file disagrees with a stored row: `report`
         keeps the stored rows, warns, and inserts the rest; `raise` declines.
-        Default `report`. Nothing prompts (D7).
+        Default `report`. Nothing prompts.
 
     Returns
     -------

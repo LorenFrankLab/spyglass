@@ -68,7 +68,7 @@ def test_the_verdict_leads(plan_types):
     """The first line answers 'what happened', before any detail.
 
     A divergence no longer decides it: the verdict says what the run will do,
-    and a disagreement about one stored row does not stop the rest (D7).
+    and a disagreement about one stored row does not stop the rest.
     """
     report = _broken(plan_types).report(log=False)
     first = report.splitlines()[0]
@@ -105,7 +105,7 @@ def test_a_divergence_revision_is_pasteable(plan_types):
     """A suggested revision should be usable without retyping it.
 
     It renders inside the divergence section now, and in the *default*
-    report: a warning the reader has to ask for is not a warning (D7).
+    report: a warning the reader has to ask for is not a warning.
     """
     report = _broken(plan_types).report(log=False)
 

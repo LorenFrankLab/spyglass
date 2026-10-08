@@ -264,26 +264,16 @@ class NwbfileHasher:
     def _index_external_links(self) -> None:
         """Add externally-linked objects to the index, keyed on the target.
 
-        `visititems` follows hard links only, so an object stored in another
-        file is never traversed and never hashed. In an NWB copy that is
-        exactly where the bulk of the data lives: `acquisition/e-series` and
-        `processing/analog` are links into the raw file, read by `Raw` and
-        `SensorData`. Their `object_id`s were therefore absent from the index,
-        and `read_set_digest` scored an absent id as the constant `"missing"` --
-        so those tables' read-sets could never change and their parses looked
-        reusable however much the raw data moved.
+        Needed because `visititems` follows hard links only, and in an NWB copy
+        the bulk of the data is an external link into the raw file.
 
-        The digest here is the *link target's identity*: which file, which path
-        inside it, and that file's size and mtime. Deliberately not the target's
-        contents -- the raw file is ~20x the copy, and this runs on every plan.
-        What it detects: the target being replaced, resized, or written to at
-        all (any write moves mtime). What it cannot: an edit that preserves
-        size and mtime exactly, which needs deliberate effort to produce.
+        The digest is the target's *identity* -- file, path, size, mtime -- not
+        its contents, which would mean hashing a file ~20x the copy on every
+        plan. So it detects replacement, resizing, or any write, but not an
+        edit that preserves size and mtime exactly.
 
-        Touches `self.objs` only, never `self.hashed`. The file-level hash is
-        stored as provenance and compared across runs, so it must stay
-        byte-identical; this fixes the index that reuse consults, and nothing
-        else.
+        Writes `self.objs` only, never `self.hashed`: the file-level hash is
+        stored provenance and must stay byte-identical.
         """
         found = {}
 

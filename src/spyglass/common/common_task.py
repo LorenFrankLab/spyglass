@@ -76,9 +76,7 @@ class Task(SpyglassMixin, dj.Manual):
                 inserts.append(task_dict)  # only append novel tasks
                 continue
             existing = query.fetch1()
-            # Keep the stored task and report. This used to prompt per
-            # attribute and raise on a decline, aborting the whole file over
-            # one mismatched task field; see D7.
+            # Keep the stored task and report.
             if differing := sorted(
                 key
                 for key in set(task_dict).union(existing)

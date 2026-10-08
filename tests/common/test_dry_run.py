@@ -1,7 +1,7 @@
 """Dry runs: report what a file would insert, and insert none of it.
 
-The flag is opt-in. The default path is unchanged, so these tests are as much
-about what a dry run leaves alone as about what it reports.
+As much about what a dry run leaves alone as about what it reports: the
+writes it must not make are the half that cannot be seen in its return value.
 """
 
 import pytest
@@ -84,7 +84,7 @@ def test_dry_run_does_not_insert_what_it_reports_as_new(
 def test_dry_run_writes_to_no_data_table(
     common, mini_copy_name, missing_leaf, counts
 ):
-    """The invariant the whole design rests on (D2).
+    """The invariant the whole design rests on.
 
     A dry run touches log tables only. Asserted across every watched table
     rather than the one a bug would most likely hit -- and with work

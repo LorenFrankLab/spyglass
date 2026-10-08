@@ -57,19 +57,13 @@ class IngestionMixin(BaseMixin):
 
     Notes
     -----
-    Ingestion runs once per file, and a table may cache file-level state on
-    itself while it runs -- a camera map, an epoch lookup, an enumerator.
-    Such state is the table's own, and **the table is responsible for
-    resetting it in `before_parse`**. Three reasons this is not optional: a
-    class-level `dict()` or counter is shared by every instance, so mutating it
-    writes through to the class; `populate` loops files on a single instance,
-    so nothing else will clear it between files; and **planning and inserting
-    share `_parse` but not `insert_from_nwbfile`**, so a reset placed in the
-    latter never runs for a plan. Three tables reset there and each carried a
-    previous run's answers into the next -- `VideoFile`'s epoch map,
-    `TaskEpoch`'s interval cache, `ImportedLFP`'s planned group names. Names
-    cannot collide across tables -- each is a separate class -- so a table need
-    only answer for its own.
+    A table caching file-level state on itself -- a camera map, an epoch
+    lookup, a counter -- must reset it in **`before_parse`**, not in
+    `insert_from_nwbfile`: planning and inserting share `_parse` but not
+    `insert_from_nwbfile`, so a reset placed there never runs for a plan.
+    `populate` also loops files on one instance, and a class-level `dict()`
+    is shared by every instance. Three tables got this wrong and each served
+    a previous file's answers.
     """
 
     _expected_duplicates = False  # If True, rows to be shared across sessions
@@ -1056,7 +1050,7 @@ class IngestionMixin(BaseMixin):
         # with rows half-written, holding a lock open on an answer nobody was
         # there to give -- and raising on a declined answer aborted a whole
         # file over one mismatched attribute. Plan the file to get this as a
-        # report instead; see D7.
+        # report instead.
         if differing := sorted(
             key
             for key in set(adj_new_key).union(existing)

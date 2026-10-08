@@ -191,7 +191,7 @@ def test_raise_err_raises_after_the_whole_file_is_checked(
 def test_the_default_path_inserts_from_a_plan(
     common, mini_copy_name, mini_insert
 ):
-    """D4 is flipped: plan-then-insert is what a caller gets by default.
+    """Plan-then-insert is what a caller gets by default.
 
     Pinned because the return type is the visible half of the contract --
     callers testing the result switch from "None means it worked" to "falsy

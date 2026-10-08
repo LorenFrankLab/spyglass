@@ -114,25 +114,17 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     class Entry(SpyglassMixinPart):
         """One prospective row, with the two hashes that classify it.
 
-        `key_hash` is the entry's identity, so a re-plan updates the row it
-        already has rather than appending a duplicate -- which is what lets
-        a second attempt stage N+M where the first staged N.
+        Two hashes, not one: `key_hash` is identity and `blob_hash` is
+        content, and same-key-different-blob is a divergence rather than
+        novelty. One hash cannot tell those apart.
 
-        `blob_hash` covers the whole serialized entry, so change detection
-        needs no byte-comparison of arrays, datetimes or nested dicts.
+        `table_name` is a plain string, **not** a foreign key -- a prospective
+        entry routinely names a table whose rows do not exist yet.
 
-        Two hashes because they answer different questions. Same key, same
-        blob: already staged, unchanged. Same key, different blob:
-        divergence, not novelty. One hash cannot tell those apart.
-
-        `table_name` is a plain string, not a foreign key: prospective
-        entries routinely name tables whose rows do not exist yet.
-
-        `owner_table` is the table whose parse produced the row, which is not
-        the same question as where the row is going. `IntervalList` receives
-        rows from four different tables on the mini file alone, so "which
-        entries did this table plan last time" cannot be answered from
-        `table_name`, and that question is what makes a parse reusable.
+        `owner_table` is the table whose parse produced the row, which is a
+        different question from where the row is going: `IntervalList`
+        receives rows from four owners on the mini file alone, so it cannot
+        be derived from `table_name`.
         """
 
         definition = """
@@ -151,18 +143,12 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     class Table(SpyglassMixinPart):
         """One table's share of a plan, and whether its parse can be reused.
 
-        `read_set_digest` covers the NWB objects that table actually read. Equal
-        digest, same inputs: nothing it depends on changed, so the entries
-        staged last time still describe the file and the parse need not run
-        again. This is what makes a re-attempt cheap after the user edits one
-        thing -- the tables that read the edited object re-parse, the rest do
-        not.
+        `read_set_digest` covers the NWB objects that table actually read, so
+        an equal digest means nothing it depends on moved. NULL means
+        *unknown*, never "unchanged": a file that could not be hashed must
+        re-parse rather than silently reuse.
 
-        NULL digest means *unknown*, never "unchanged": a file that could not be
-        hashed must re-parse rather than silently reuse.
-
-        `table_name` is a plain string for the same reason as on `Entry` -- a
-        plan names tables whose rows do not exist yet.
+        `table_name` is a plain string, for the same reason as on `Entry`.
         """
 
         definition = """
@@ -428,7 +414,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             `conflict` and **keeping** their payload -- the one exception to
             the rule above, because the planned value is the thing a reader
             needs in order to act on the warning, and re-deriving it means
-            re-parsing the file (D7).
+            re-parsing the file.
         complete : bool, optional
             Whether every entry is now stored, closing the plan. Default
             False.

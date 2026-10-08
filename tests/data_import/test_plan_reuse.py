@@ -1,4 +1,4 @@
-"""Per-table plan reuse: re-parse only what changed (D8).
+"""Per-table plan reuse: re-parse only what changed.
 
 The workflow this exists for is ingest → read the report → edit the file → try
 again. Between attempts the file changes, so a whole-file cache key is useless;
