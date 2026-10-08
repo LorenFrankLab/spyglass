@@ -377,7 +377,9 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         frozen. The selection id is deterministic over the matcher params and
         the hash of the frozen inputs, so listing the same inputs in another
         order returns the same selection. A new selection also runs the
-        electrode-space warning and the channel-geometry preflight.
+        electrode-space warning and the selected backend's optional geometry
+        preflight. UnitMatch requires identical channel geometry; other
+        backends own their geometry requirements.
 
         Parameters
         ----------
@@ -407,7 +409,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             concatenation froze or is gone (chained from the
             ``ConcatMemberDriftError`` / ``MissingRecordingForConcatError``),
             a multi-day concatenation input, a ``SessionGroup`` that does
-            not exist, or a channel-geometry mismatch across inputs.
+            not exist, or geometry the selected backend does not support.
         SameSessionMatchError
             If two inputs share a recording session.
         DuplicateSelectionError
@@ -534,31 +536,36 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         bundles from) and returns its ``get_channel_locations()`` array. For a
         sort of a motion-corrected recording that is the corrected recording's
         effective geometry, without any channels ``remove_channels`` dropped;
-        for a concatenation it is the concatenation's own geometry. Inputs are
-        compared as they are, never padded, reordered or trimmed to agree. A
+        for a concatenation it is the concatenation's own geometry. This
+        accessor never pads, reorders or trims positions; the backend owns
+        any comparison or remapping policy. A
         thin seam so the geometry preflight is unit-testable by patching this
         rather than building a full SpikeInterface recording.
         """
         return CurationV2.get_recording(curation_key).get_channel_locations()
 
     @classmethod
-    def _assert_members_share_geometry(cls, choices_by_input) -> None:
-        """Reject a cross-probe / cross-day geometry mismatch across inputs.
+    def _validate_matcher_geometry(
+        cls, choices_by_input, matcher_name: str, params: dict
+    ) -> None:
+        """Run the selected backend's optional geometry preflight.
 
-        Loads each pinned input's curated-recording channel positions (cheap
-        metadata) and runs the same shared-probe check the matcher backend runs
-        post-extraction -- here as a preflight, so a mismatch fails at selection
-        time rather than deep in ``UnitMatch.make``'s dense bundle extraction.
+        Only a backend with ``validate_geometry`` loads the pinned inputs'
+        effective channel positions. The backend owns its geometry policy;
+        UnitMatch rejects differing shapes or positions before extraction.
         ``choices_by_input`` maps a label (the ``input_index``) to
         ``(sorting_id, curation_id)``. A single input skips (nothing to
         compare against).
         """
         if len(choices_by_input) < 2:
             return
-        from spyglass.spikesorting.v2._unitmatch_backend import (
-            assert_consistent_channel_geometry,
+        from spyglass.spikesorting.v2.matcher_protocol import (
+            get_geometry_validator,
         )
 
+        validator = get_geometry_validator(matcher_name)
+        if validator is None:
+            return
         named_positions = [
             (
                 f"input_{label}",
@@ -571,7 +578,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             )
             for label in sorted(choices_by_input)
         ]
-        assert_consistent_channel_geometry(named_positions)
+        validator.validate_geometry(named_positions, params)
 
     @classmethod
     def _member_electrode_signature(cls, sorting_id):

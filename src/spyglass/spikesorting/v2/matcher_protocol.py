@@ -12,6 +12,7 @@ the DataJoint tables:
 - :class:`MatchPair` -- one cross-session match, keyed by
   ``(sorting_id, curation_id, unit_id)`` on each side.
 - :class:`MatcherProtocol` -- the ``match(session_inputs, params)`` contract.
+- :class:`MatcherGeometryValidator` -- optional backend geometry preflight.
 - :class:`MatcherInputPreparer` -- the independent preparation contract, from
   resolved :class:`MatcherInputSource` to :class:`PreparedMatcherInput`.
 - :func:`register_matcher` / :func:`get_matcher` -- the name -> backend +
@@ -125,6 +126,26 @@ class MatcherInputPreparer(Protocol):
 
 
 @runtime_checkable
+class MatcherGeometryValidator(Protocol):
+    """Optional geometry requirements owned by a matcher backend.
+
+    Selection calls this before inserting a new multi-input selection. Arrays
+    are the effective channel positions of the curated recordings, in input
+    order; labels identify inputs for errors. The validated matcher parameters
+    allow a backend to choose its own geometry policy. Raise ``ValueError``
+    for unsupported geometry. No table or recording objects are passed.
+
+    Backends without this hook impose no selection-time geometry requirement.
+    Inference must also validate the actual prepared geometry it consumes;
+    input preparation may transform it after this preflight.
+    """
+
+    def validate_geometry(
+        self, named_positions: list[tuple[Any, Any]], params: dict
+    ) -> None: ...
+
+
+@runtime_checkable
 class MatcherProtocol(Protocol):
     """Structural interface every cross-session matcher backend implements.
 
@@ -198,6 +219,8 @@ def register_matcher(
     ----------
     matcher : MatcherProtocol
         A backend with a ``name`` attribute and a ``match`` method.
+        May also implement :class:`MatcherGeometryValidator`; otherwise
+        selection does not read or compare its inputs' channel positions.
     schema : type
         The Pydantic model validating that matcher's ``MatcherParameters``
         ``params`` blob.
@@ -231,6 +254,11 @@ def register_matcher(
         raise TypeError(
             f"{matcher!r} does not satisfy MatcherProtocol (needs a `name` "
             "attribute and a callable `match(session_inputs, params)` method)."
+        )
+    geometry_validator = getattr(matcher, "validate_geometry", None)
+    if geometry_validator is not None and not callable(geometry_validator):
+        raise TypeError(
+            "validate_geometry must be callable when supplied by a matcher backend."
         )
     preparer_supplied = input_preparer is not None
     if input_preparer is None:
@@ -350,6 +378,16 @@ def get_input_preparer(name: str) -> MatcherInputPreparer:
     """Return the preparer registered with the named matcher."""
     get_matcher(name)
     return _PREPARER_REGISTRY[name]
+
+
+def get_geometry_validator(name: str) -> MatcherGeometryValidator | None:
+    """Return the backend's optional geometry preflight, without adding policy."""
+    matcher = get_matcher(name)
+    if isinstance(matcher, MatcherGeometryValidator) and callable(
+        getattr(matcher, "validate_geometry", None)
+    ):
+        return matcher
+    return None
 
 
 def _get_matcher_schema(name: str) -> type:

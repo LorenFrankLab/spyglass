@@ -71,6 +71,63 @@ def test_register_matcher_rejects_non_conforming_object(clean_registry):
         mp.register_matcher(object(), DummySchema)
 
 
+def test_geometry_validation_is_optional(clean_registry):
+    mp = clean_registry
+    matcher = _dummy_matcher(mp)
+    mp.register_matcher(matcher, DummySchema)
+    assert isinstance(matcher, mp.MatcherProtocol)
+    assert mp.get_geometry_validator("dummy") is None
+
+
+def test_geometry_validation_belongs_to_the_registered_backend(clean_registry):
+    mp = clean_registry
+    matcher = _dummy_matcher(mp)
+    received = []
+
+    def validate_geometry(named_positions, params):
+        received.append((named_positions, params))
+        if not params["allow_remapping"]:
+            raise ValueError("This configuration requires remapping")
+
+    matcher.validate_geometry = validate_geometry
+    mp.register_matcher(matcher, DummySchema)
+    validator = mp.get_geometry_validator("dummy")
+    assert validator is matcher
+    positions = [("input_0", [[0, 0]]), ("input_1", [[0, 0], [0, 20]])]
+    params = {"allow_remapping": True}
+    validator.validate_geometry(positions, params)
+    assert received == [(positions, params)]
+    with pytest.raises(ValueError, match="requires remapping"):
+        validator.validate_geometry(positions, {"allow_remapping": False})
+
+
+def test_register_rejects_noncallable_geometry_validation(clean_registry):
+    mp = clean_registry
+    matcher = _dummy_matcher(mp)
+    matcher.validate_geometry = True
+    with pytest.raises(TypeError, match="validate_geometry must be callable"):
+        mp.register_matcher(matcher, DummySchema)
+    assert not mp.is_registered("dummy")
+
+
+def test_unitmatch_geometry_validation_needs_no_inference_library(
+    clean_registry, monkeypatch
+):
+    from spyglass.spikesorting.v2 import _unitmatch_backend
+
+    def unexpected_import():
+        raise AssertionError("Geometry preflight imported UnitMatchPy")
+
+    monkeypatch.setattr(
+        _unitmatch_backend, "_require_unitmatch", unexpected_import
+    )
+    validator = clean_registry.get_geometry_validator("unitmatch")
+    matching = [("input_0", [[0, 0], [0, 20]]), ("input_1", [[0, 0], [0, 20]])]
+    validator.validate_geometry(matching, {})
+    with pytest.raises(ValueError, match="probe geometry"):
+        validator.validate_geometry([matching[0], ("input_1", [[0, 0]])], {})
+
+
 def test_input_preparer_registration_preserves_existing_strategy(
     clean_registry,
 ):

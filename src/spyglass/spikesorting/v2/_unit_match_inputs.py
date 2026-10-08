@@ -60,8 +60,8 @@ def insert_inputs(
 
     The body of ``UnitMatchSelection.insert_inputs`` (see its docstring for
     the inputs, ordering and errors). ``table_cls`` is the
-    ``UnitMatchSelection`` class; ``_find_existing_pk`` and the electrode and
-    geometry preflights are called on it.
+    ``UnitMatchSelection`` class; ``_find_existing_pk``, the electrode-space
+    warning and the backend geometry preflight are called on it.
 
     Duplicate-key recovery has no savepoint: it relies on the deterministic
     primary key colliding on the master insert, the transaction's first
@@ -79,6 +79,7 @@ def insert_inputs(
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.session_group import SessionGroup
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
 
     curations = list(curations)
     requested = _normalize_input_curations(curations)
@@ -165,15 +166,18 @@ def insert_inputs(
     # Preflight NOW, at selection time, before UnitMatch.make's expensive
     # dense bundle extraction: warn if inputs map to different electrode
     # identities (advisory -- group names / ids are not lab-stable), and
-    # HARD-reject a cross-day / cross-probe geometry mismatch. Only on the
-    # new-insert path (an idempotent re-call of an already-validated
+    # let the selected backend enforce its own geometry requirements. Only
+    # on the new-insert path (an idempotent re-call of an already-validated
     # selection skips the I/O).
     choices_by_input = {
         item["input_index"]: (item["sorting_id"], item["curation_id"])
         for item in ordered
     }
     table_cls._warn_on_divergent_electrode_space(choices_by_input)
-    table_cls._assert_members_share_geometry(choices_by_input)
+    matcher_name, params = (
+        MatcherParameters & {"matcher_params_name": matcher_params_name}
+    ).fetch1("matcher", "params")
+    table_cls._validate_matcher_geometry(choices_by_input, matcher_name, params)
 
     master_row = {**identity, "unitmatch_id": unitmatch_id}
     if group_key is not None:

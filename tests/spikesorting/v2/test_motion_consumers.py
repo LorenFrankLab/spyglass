@@ -502,18 +502,20 @@ def test_all_consumers_resolve_selected_correction(
         row["channel_locations"],
     )
     corrected_choice = (sort["sorting_id"], root["curation_id"])
-    UnitMatchSelection._assert_members_share_geometry(
-        {0: corrected_choice, 1: corrected_choice}
+    UnitMatchSelection._validate_matcher_geometry(
+        {0: corrected_choice, 1: corrected_choice}, "unitmatch", {}
     )
     with pytest.raises(ValueError, match="probe geometry"):
-        UnitMatchSelection._assert_members_share_geometry(
+        UnitMatchSelection._validate_matcher_geometry(
             {
                 0: corrected_choice,
                 1: (
                     uncorrected_root["sorting_id"],
                     uncorrected_root["curation_id"],
                 ),
-            }
+            },
+            "unitmatch",
+            {},
         )
 
     bundle_inputs = {}

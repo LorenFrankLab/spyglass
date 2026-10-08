@@ -197,6 +197,11 @@ class UnitMatchBackend:
     name = "unitmatch"
 
     @staticmethod
+    def validate_geometry(named_positions, params) -> None:
+        """Require one shared probe geometry before selecting or matching inputs."""
+        assert_consistent_channel_geometry(named_positions)
+
+    @staticmethod
     def backend_version() -> str | None:
         """Installed ``unitmatchpy`` distribution version, or ``None`` if absent.
 
@@ -238,11 +243,12 @@ class UnitMatchBackend:
         # error rather than letting UnitMatch fail deep in a shape mismatch. The same
         # check runs as a preflight in UnitMatchSelection.insert_selection (before
         # bundle extraction); this is the post-extraction backstop.
-        assert_consistent_channel_geometry(
+        self.validate_geometry(
             [
                 (s.curation_key, np.load(s.channel_positions_path))
                 for s in session_inputs
-            ]
+            ],
+            params,
         )
         raw_positions = np.load(session_inputs[0].channel_positions_path)
 

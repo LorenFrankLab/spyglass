@@ -1549,8 +1549,8 @@ to `insert_selection` is provenance only, not a foreign key. A run of one input
 writes the frozen matchable-unit universe and an empty `Pair` table without
 calling the matcher.
 
-**Chronic electrode-space contract.** UnitMatch **rejects** a channel-geometry
-mismatch across inputs and **warns** when electrode identity
+**Chronic electrode-space contract.** The built-in UnitMatch backend **rejects**
+a channel-geometry mismatch across inputs. The pipeline **warns** when electrode identity
 (`(electrode_group_name, electrode_id, brain_region)`) differs, since ingestion
 naming is not guaranteed stable across labs. Keep a stable electrode-group name
 across sessions of one implant; a genuine probe mix-up also shows as poor
@@ -1580,6 +1580,17 @@ Omitting `input_preparer` uses the shared dense split-half waveform layout, whic
 requires SpikeInterface and NumPy but does not import UnitMatchPy. Supply a
 preparer when a backend needs another layout. Register a distinct matcher name
 when changing the preparation or inference contract for persisted parameters.
+
+Geometry requirements belong to the backend. It can implement
+`validate_geometry(named_positions, params)` to check the effective channel
+positions before a new multi-input selection is inserted. The positions are
+passed with input labels in chronological order, together with the validated
+matcher parameters. Raise `ValueError` for unsupported geometry. UnitMatch uses
+this hook to require identical probe geometry and checks the prepared geometry
+again during inference. A backend without the hook does not trigger geometry
+reads or comparisons during selection. It remains responsible for validating
+the prepared inputs it consumes. Frozen-input identity, session-overlap checks,
+and pair validation apply to every backend.
 
 The recommended path is **plan-then-run**: pin curations by a named curation
 strategy, review the plan, then run. Group-based planning uses a `SessionGroup`

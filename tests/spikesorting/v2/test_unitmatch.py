@@ -3193,6 +3193,57 @@ def test_geometry_preflight_fails_before_extraction(
         )
 
 
+@pytest.mark.parametrize("has_validator", [False, True])
+def test_selection_geometry_dispatches_without_global_policy(
+    dj_conn, monkeypatch, has_validator
+):
+    from pydantic import BaseModel
+
+    from spyglass.spikesorting.v2 import matcher_protocol as protocol
+    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+
+    calls = []
+    positions = {1: [[0, 0]], 2: [[0, 0], [0, 20]]}
+
+    class Backend:
+        name = "geometry_dispatch_fixture"
+
+        def match(self, inputs, params):
+            raise AssertionError("Preflight must not run inference")
+
+    backend = Backend()
+    if has_validator:
+        backend.validate_geometry = lambda named, params: calls.append(
+            (named, params)
+        )
+
+    # Isolate registry state without changing the built-in backend entry.
+    monkeypatch.setitem(protocol._MATCHER_REGISTRY, backend.name, backend)
+    monkeypatch.setitem(protocol._SCHEMA_REGISTRY, backend.name, BaseModel)
+
+    def read_positions(key):
+        if not has_validator:
+            raise AssertionError(
+                "Backend without geometry validation read geometry"
+            )
+        return positions[key["sorting_id"]]
+
+    monkeypatch.setattr(
+        UnitMatchSelection,
+        "_member_channel_positions",
+        staticmethod(read_positions),
+    )
+    params = {"allow_remapping": True}
+    UnitMatchSelection._validate_matcher_geometry(
+        {1: (2, 0), 0: (1, 0)}, backend.name, params
+    )
+    assert calls == (
+        [([("input_0", positions[1]), ("input_1", positions[2])], params)]
+        if has_validator
+        else []
+    )
+
+
 @pytest.mark.slow
 def test_unitmatch_nwb_self_describes(two_session_curated_group):
     """The UnitMatch NWB is interpretable standalone.

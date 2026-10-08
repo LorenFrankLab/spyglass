@@ -1086,13 +1086,16 @@ def test_frozen_frames_and_order_are_verified_at_make(
         _drop(pk)
 
 
-def test_insert_inputs_rejects_concat_and_single_with_different_geometry(
-    daily_concat_match_inputs, monkeypatch
+@pytest.mark.parametrize("matcher", ["unitmatch", "geometry_agnostic_fixture"])
+def test_insert_inputs_geometry_is_backend_owned(
+    daily_concat_match_inputs, monkeypatch, matcher
 ):
     """insert_inputs compares a concatenation input's channel geometry with a
     single-recording input's as they are: a sort of session c's tetrode with
     one channel left out does not share the day-1 concatenation's geometry,
-    so the selection is refused before any row is written."""
+    so UnitMatch refuses the selection. A backend without a geometry validator
+    accepts the same real inputs without imposing UnitMatch's geometry policy.
+    No inference runs during either selection."""
     import functools
 
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -1102,11 +1105,47 @@ def test_insert_inputs_rejects_concat_and_single_with_different_geometry(
         SortGroupV2,
     )
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        UnitMatchSelection,
+    )
     from tests.spikesorting.v2._motion_db_helpers import drop_pipeline_sorts
     from tests.spikesorting.v2.conftest import _plant_spread_unit
 
     fx = daily_concat_match_inputs
+    matcher_params_name = "unitmatch_default"
+    if matcher != "unitmatch":
+        from pydantic import BaseModel, ConfigDict
+
+        from spyglass.spikesorting.v2 import matcher_protocol as protocol
+
+        class Backend:
+            name = matcher
+
+            def match(self, inputs, params):
+                raise AssertionError("Selecting inputs must not run inference")
+
+        class Params(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+            schema_version: int = 1
+
+        for registry in (
+            "_MATCHER_REGISTRY",
+            "_SCHEMA_REGISTRY",
+            "_PREPARER_REGISTRY",
+        ):
+            monkeypatch.setattr(
+                protocol, registry, dict(getattr(protocol, registry))
+            )
+        protocol.register_matcher(Backend(), Params)
+        matcher_params_name = "test_geometry_agnostic"
+        MatcherParameters.insert1(
+            {
+                "matcher_params_name": matcher_params_name,
+                "matcher": matcher,
+                "params": {},
+            }
+        )
     cur = fx["curations"]
     c_first = (RecordingSelection & fx["recording_keys"]["c_first"]).fetch1()
     full_group = {
@@ -1134,6 +1173,7 @@ def test_insert_inputs_rejects_concat_and_single_with_different_geometry(
         [{**row, **subset_group} for row in electrodes[:-1]]
     )
     sort_key = None
+    selection = None
     try:
         recording_key = RecordingSelection.insert_selection(
             {
@@ -1171,16 +1211,32 @@ def test_insert_inputs_rejects_concat_and_single_with_different_geometry(
         assert len(subset_positions) == 3
 
         n_selections = len(UnitMatchSelection())
-        with pytest.raises(ValueError, match="probe geometry"):
-            UnitMatchSelection.insert_inputs(
-                [subset, cur["concat_day1"]], "unitmatch_default"
+        if matcher == "unitmatch":
+            with pytest.raises(ValueError, match="probe geometry"):
+                UnitMatchSelection.insert_inputs(
+                    [subset, cur["concat_day1"]], matcher_params_name
+                )
+            assert len(UnitMatchSelection()) == n_selections
+        else:
+            selection = UnitMatchSelection.insert_inputs(
+                [subset, cur["concat_day1"]], matcher_params_name
             )
-        assert len(UnitMatchSelection()) == n_selections
+            assert len(UnitMatchSelection()) == n_selections + 1
+            assert len(UnitMatchSelection.Input & selection) == 2
+            assert (UnitMatchSelection & selection).fetch1(
+                "matcher_params_name"
+            ) == matcher_params_name
     finally:
+        if selection is not None:
+            _drop(selection)
         if sort_key is not None:
             drop_pipeline_sorts([sort_key["sorting_id"]])
         (RecordingSelection & subset_group).super_delete(warn=False)
         (SortGroupV2 & subset_group).super_delete(warn=False)
+        if matcher != "unitmatch":
+            (
+                MatcherParameters & {"matcher_params_name": matcher_params_name}
+            ).delete_quick()
 
 
 def test_named_sort_plan_runs_without_a_group(
