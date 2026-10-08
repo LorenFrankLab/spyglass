@@ -440,7 +440,11 @@ def test_units_writer_failure_cleans_staged_file_without_recording_schema(
     monkeypatch.setattr(builtins, "__import__", refuse_recording)
 
     with pytest.raises(RuntimeError, match="units write failed") as error:
-        _units_nwb.write_sorting_units_nwb(None, None, "parent.nwb")
+        from tests.spikesorting.v2._provenance_helpers import sorting_provenance
+
+        _units_nwb.write_sorting_units_nwb(
+            None, None, "parent.nwb", source_provenance=sorting_provenance()
+        )
 
     assert error.value is original_error
     assert not staged.exists()

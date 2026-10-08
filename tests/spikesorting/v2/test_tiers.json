@@ -726,12 +726,6 @@
     "test_preprocessing_schema.py": {
       "tier": "unit"
     },
-    "test_preproduction_migration.py": {
-      "tier": "db_unit",
-      "overrides": {
-        "test_documented_upgrade_preserves_retained_data": "stage"
-      }
-    },
     "test_preview_merge_warning.py": {
       "tier": "stage"
     },

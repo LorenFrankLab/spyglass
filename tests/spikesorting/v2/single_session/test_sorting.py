@@ -1526,10 +1526,16 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
         & {"recording_id": populated_recording["recording_id"]}
     ).fetch1("nwb_file_name")
 
+    from tests.spikesorting.v2._provenance_helpers import sorting_provenance
+
     analysis_file_name, units_object_id = Sorting._write_units_nwb(
         sorting=empty_sorting,
         recording=recording,
         nwb_file_name=nwb_file_name,
+        source_provenance=sorting_provenance(
+            recording_id=str(populated_recording["recording_id"]),
+            statistics_spans=[[0, recording.get_num_frames()]],
+        ),
     )
     try:
         # Object id is defined (the guard initialized an empty

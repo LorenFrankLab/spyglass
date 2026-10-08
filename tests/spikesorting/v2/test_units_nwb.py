@@ -1,6 +1,6 @@
 """Tests for the ``_units_nwb`` units-NWB build / read helpers.
 
-Covers the lazy abs-time merge (``build_lazy_merged_sorting``), the pure
+Covers lazy absolute-time deduplication with stored sample frames, the pure
 spike-times dataframe builders, and the pynwb readback path. All of these
 are DB-free: the compute operates on numpy / SpikeInterface objects and
 the readback goes through pynwb against a temp NWB file -- no DataJoint.
@@ -17,20 +17,20 @@ def _unit_train(sorting, unit_id):
 
 
 # Shared frame grid for the lazy-merge cases: 100 samples at 1 kHz
-# (0.000 .. 0.099 s). The gap case overrides ``timestamps``.
+# (0.000 .. 0.099 s). The gap case supplies its own absolute times.
 _FS = 1000.0
 _TS = np.arange(100, dtype=float) / _FS
 
 
-def _lazy_merge(abs_times, units_to_merge, timestamps=_TS):
+def _lazy_merge(abs_times, sample_indices, units_to_merge):
     from spyglass.spikesorting.v2._storage.units_nwb import (
-        build_lazy_merged_sorting,
+        build_lazy_merged_sorting_from_samples,
     )
 
-    return build_lazy_merged_sorting(
+    return build_lazy_merged_sorting_from_samples(
         abs_times,
+        sample_indices,
         units_to_merge=units_to_merge,
-        timestamps=timestamps,
         fs=_FS,
         delta_s=0.4e-3,
     )
@@ -40,9 +40,7 @@ def test_build_lazy_merged_sorting_assigns_fresh_id_and_keeps_non_merged():
     """Non-merged units pass through; the merge group gets ``max(id)+1``.
 
     A merge group whose contributors are farther apart than ``delta_s``
-    keeps BOTH spikes; the non-merged unit's frames are the plain
-    ``searchsorted`` mapping of its own abs times (identical to
-    ``numpysorting_from_abs_times`` / ``get_sorting``).
+    keeps BOTH spikes; the non-merged unit retains its stored sample frames.
     """
     merged = _lazy_merge(
         {
@@ -50,6 +48,7 @@ def test_build_lazy_merged_sorting_assigns_fresh_id_and_keeps_non_merged():
             1: _TS[[30]],
             2: _TS[[31]],  # 1 ms from unit 1 -> > delta, both kept
         },
+        {0: [10, 20], 1: [30], 2: [31]},
         [[1, 2]],
     )
     assert sorted(int(u) for u in merged.get_unit_ids()) == [0, 3]
@@ -65,6 +64,7 @@ def test_build_lazy_merged_sorting_dedups_coincident_cross_unit_spikes():
             1: _TS[[30]],
             2: _TS[[30]],  # exactly coincident, different unit -> dedup
         },
+        {1: [30], 2: [30]},
         [[1, 2]],
     )
     assert sorted(int(u) for u in merged.get_unit_ids()) == [3]
@@ -91,8 +91,8 @@ def test_build_lazy_merged_sorting_absolute_time_dedup_respects_gaps():
             1: gap_ts[[49]],  # last sample of chunk 1 (0.049 s)
             2: gap_ts[[50]],  # first sample of chunk 2 (10.000 s)
         },
+        {1: [49], 2: [50]},
         [[1, 2]],
-        timestamps=gap_ts,
     )
     # Frame-adjacent but seconds apart -> both kept.
     assert _unit_train(merged, 3) == [49, 50]
@@ -102,6 +102,7 @@ def test_build_lazy_merged_sorting_fresh_ids_in_group_order():
     """Multiple groups get consecutive ``max(id)+1`` ids in input order."""
     merged = _lazy_merge(
         {5: _TS[[10]], 2: _TS[[12]], 8: _TS[[14]], 3: _TS[[16]]},
+        {5: [10], 2: [12], 8: [14], 3: [16]},
         [[5, 2], [8, 3]],
     )
     # next_id = max(5,2,8,3)+1 = 9; groups assigned in units_to_merge order.
@@ -194,7 +195,9 @@ def _write_units_nwb(path, unit_spike_times):
         io.write(nwbfile)
 
 
-def _write_units_nwb_with_samples(path, rows):
+def _write_units_nwb_with_samples(
+    path, rows, *, obs_intervals=((0.0, 1000.0),)
+):
     """Write ``[(unit_id, spike_times, sample_indices), ...]``."""
     from datetime import datetime, timezone
 
@@ -220,6 +223,7 @@ def _write_units_nwb_with_samples(path, rows):
             id=unit_id,
             spike_times=list(spike_times),
             spike_sample_index=np.asarray(sample_indices, dtype=np.int64),
+            obs_intervals=obs_intervals,
         )
     with pynwb.NWBHDF5IO(path=str(path), mode="w") as io:
         io.write(nwbfile)
@@ -231,7 +235,9 @@ def test_read_units_abs_spike_times_populated(tmp_path):
     )
 
     p = tmp_path / "units.nwb"
-    _write_units_nwb(p, [[0.1, 0.2, 0.3], [1.5]])
+    _write_units_nwb_with_samples(
+        p, [(0, [0.1, 0.2, 0.3], [100, 200, 300]), (1, [1.5], [1500])]
+    )
     out = read_units_abs_spike_times(str(p))
     assert set(out) == {0, 1}
     np.testing.assert_allclose(out[0], [0.1, 0.2, 0.3])
@@ -273,59 +279,19 @@ def test_read_units_spike_sample_indices_missing_column(tmp_path):
         read_units_spike_sample_indices,
     )
 
-    p = tmp_path / "legacy_units.nwb"
+    p = tmp_path / "incomplete_units.nwb"
     _write_units_nwb(p, [[0.1, 0.2]])
-    assert read_units_spike_sample_indices(str(p)) is None
+    with pytest.raises(ValueError, match="missing required columns"):
+        read_units_spike_sample_indices(str(p))
 
 
 # A source clock with a 100 s wall-clock gap between frames 49 and 50, and
 # spikes on both sides of it: an affine ``t_start + i / fs`` inverse lands the
-# post-gap spikes on the wrong frames, so only a timestamp lookup (or the
-# stored frames) recovers them.
+# post-gap spikes on the wrong frames. Stored frames preserve the source clock.
 _GAP_TIMESTAMPS = np.concatenate(
     [100.0 + np.arange(50) / _FS, 200.0 + np.arange(50) / _FS]
 )
 _GAP_FRAMES = {4: [3, 49, 50, 77], 9: [60]}
-
-
-def _write_legacy_units_nwb(path, frames_by_unit, timestamps):
-    """Units NWB with absolute spike times only (no sample-frame column)."""
-    from datetime import datetime, timezone
-
-    import pynwb
-
-    nwbfile = pynwb.NWBFile(
-        session_description="test",
-        identifier="test-legacy-units-nwb",
-        session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
-    )
-    for unit_id, frames in frames_by_unit.items():
-        nwbfile.add_unit(id=unit_id, spike_times=list(timestamps[frames]))
-    with pynwb.NWBHDF5IO(path=str(path), mode="w") as io:
-        io.write(nwbfile)
-
-
-def _write_series_timestamps_nwb(path, timestamps):
-    """An NWB whose ``acquisition/series`` carries ``timestamps``."""
-    from datetime import datetime, timezone
-
-    import pynwb
-
-    nwbfile = pynwb.NWBFile(
-        session_description="test",
-        identifier="test-series-timestamps",
-        session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
-    )
-    nwbfile.add_acquisition(
-        pynwb.TimeSeries(
-            name="series",
-            data=np.zeros((timestamps.size, 1)),
-            unit="V",
-            timestamps=timestamps,
-        )
-    )
-    with pynwb.NWBHDF5IO(path=str(path), mode="w") as io:
-        io.write(nwbfile)
 
 
 def _trains(sorting):
@@ -335,118 +301,129 @@ def _trains(sorting):
     }
 
 
-def test_stored_units_readback_recovers_frames_in_both_file_layouts(tmp_path):
-    """Both units-file layouts read back the known frames across a clock gap.
-
-    A file without stored sample frames maps its absolute spike times onto
-    the source series' timestamps; a file with them never reads the source
-    (its path is ``None`` here, so reading it would raise).
-    """
+def test_stored_units_readback_preserves_frames_across_clock_gap(tmp_path):
+    """Stored source frames survive a wall-clock gap without a recording file."""
     from spyglass.spikesorting.v2._storage.units_nwb import (
         StoredUnits,
         read_stored_units,
     )
 
-    source = tmp_path / "source.nwb"
-    _write_series_timestamps_nwb(source, _GAP_TIMESTAMPS)
-    legacy = tmp_path / "legacy_units.nwb"
-    _write_legacy_units_nwb(legacy, _GAP_FRAMES, _GAP_TIMESTAMPS)
-    with_samples = tmp_path / "units_with_samples.nwb"
+    path = tmp_path / "units.nwb"
     _write_units_nwb_with_samples(
-        with_samples,
+        path,
         [
             (unit_id, _GAP_TIMESTAMPS[frames], frames)
             for unit_id, frames in _GAP_FRAMES.items()
         ],
+        obs_intervals=[[100.0, 100.049], [200.0, 200.049]],
     )
-
-    from_timestamps = read_stored_units(
-        StoredUnits(str(legacy), _FS, str(source), "acquisition/series")
-    )
-    from_samples = read_stored_units(
-        StoredUnits(str(with_samples), _FS, None, "acquisition/series")
-    )
-
-    assert _trains(from_timestamps) == _GAP_FRAMES
-    assert _trains(from_samples) == _GAP_FRAMES
-    assert from_timestamps.get_sampling_frequency() == _FS
-    assert from_samples.get_sampling_frequency() == _FS
+    sorting = read_stored_units(StoredUnits(str(path), _FS))
+    assert _trains(sorting) == _GAP_FRAMES
+    assert sorting.get_sampling_frequency() == _FS
 
 
-def test_units_readback_reads_source_timestamps_only_without_sample_frames(
-    tmp_path,
+@pytest.mark.parametrize(
+    "missing_column", ["spike_sample_index", "obs_intervals"]
+)
+@pytest.mark.parametrize(
+    "reader_name",
+    [
+        "read_units_abs_spike_times",
+        "read_units_spike_sample_indices",
+        "read_units_abs_times_and_sample_indices",
+        "sorting_from_units_nwb",
+        "read_stored_units",
+    ],
+)
+def test_populated_units_readers_reject_incomplete_format(
+    tmp_path, missing_column, reader_name
 ):
-    """The timestamps callback runs only for a file without sample frames,
-    and ``units_nwb_stores_sample_indices`` predicts which branch runs."""
+    """Every v2 reader fails closed even when it requests another column."""
+    from datetime import datetime, timezone
+
+    import pynwb
+
+    from spyglass.spikesorting.v2._storage import units_nwb
+
+    path = tmp_path / "incomplete.nwb"
+    nwbf = pynwb.NWBFile(
+        session_description="test",
+        identifier="incomplete-v2-units",
+        session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    )
+    kwargs = {"spike_times": [0.001, 0.005]}
+    if missing_column != "spike_sample_index":
+        nwbf.add_unit_column("spike_sample_index", "source frames", index=True)
+        kwargs["spike_sample_index"] = np.array([1, 5], dtype=np.int64)
+    if missing_column != "obs_intervals":
+        kwargs["obs_intervals"] = [[0.0, 0.010]]
+    nwbf.add_unit(**kwargs)
+    with pynwb.NWBHDF5IO(str(path), "w") as io:
+        io.write(nwbf)
+
+    reader = getattr(units_nwb, reader_name)
+    with pytest.raises(ValueError, match=missing_column):
+        if reader_name == "sorting_from_units_nwb":
+            reader(str(path), _FS)
+        elif reader_name == "read_stored_units":
+            reader(units_nwb.StoredUnits(str(path), _FS))
+        else:
+            reader(str(path))
+
+
+@pytest.mark.parametrize("explicit_units", [False, True])
+def test_units_sorting_readback_preserves_empty_outputs(
+    tmp_path, explicit_units
+):
+    """Both an absent and an explicitly empty Units table remain readable."""
+    from datetime import datetime, timezone
+
+    import pynwb
+
     from spyglass.spikesorting.v2._storage.units_nwb import (
         sorting_from_units_nwb,
-        units_nwb_stores_sample_indices,
     )
 
-    legacy = tmp_path / "legacy_units.nwb"
-    _write_legacy_units_nwb(legacy, _GAP_FRAMES, _GAP_TIMESTAMPS)
-    with_samples = tmp_path / "units_with_samples.nwb"
-    _write_units_nwb_with_samples(
-        with_samples,
-        [
-            (unit_id, _GAP_TIMESTAMPS[frames], frames)
-            for unit_id, frames in _GAP_FRAMES.items()
-        ],
+    path = tmp_path / "empty.nwb"
+    nwbf = pynwb.NWBFile(
+        session_description="test",
+        identifier="empty-v2-units",
+        session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
     )
-    no_units = tmp_path / "no_units.nwb"
-    _write_units_nwb(no_units, [])
-
-    reads = []
-
-    def read_timestamps():
-        reads.append(1)
-        return _GAP_TIMESTAMPS
-
-    expected_reads = {legacy: 1, with_samples: 0, no_units: 0}
-    for path, n_reads in expected_reads.items():
-        reads.clear()
-        sorting = sorting_from_units_nwb(str(path), _FS, read_timestamps)
-        assert len(reads) == n_reads, path.name
-        assert units_nwb_stores_sample_indices(str(path)) == (n_reads == 0)
-        assert _trains(sorting) == ({} if path == no_units else _GAP_FRAMES)
+    if explicit_units:
+        nwbf.units = pynwb.misc.Units(name="units", description="zero units")
+    with pynwb.NWBHDF5IO(str(path), "w") as io:
+        io.write(nwbf)
+    sorting = sorting_from_units_nwb(str(path), _FS)
+    assert _trains(sorting) == {}
+    assert sorting.get_sampling_frequency() == _FS
 
 
 def test_read_units_abs_times_and_sample_indices_matches_single_readers(
     tmp_path,
 ):
     """The single-open combined reader returns exactly what the two
-    single-column readers return -- with the sample column, without it, and for
-    an empty Units table."""
+    single-column readers return for populated and empty current tables."""
     from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_spike_times,
         read_units_abs_times_and_sample_indices,
         read_units_spike_sample_indices,
     )
 
-    # (a) with the sample_sample_index column
+    # Populated current-format table.
     p_full = tmp_path / "with_samples.nwb"
     _write_units_nwb_with_samples(
         p_full, [(4, [0.1, 0.2, 0.3], [10, 20, 30]), (9, [], [])]
     )
-    abs_c, samp_c, _obs_c = read_units_abs_times_and_sample_indices(str(p_full))
+    abs_c, samp_c, obs_c = read_units_abs_times_and_sample_indices(str(p_full))
     abs_s = read_units_abs_spike_times(str(p_full))
     samp_s = read_units_spike_sample_indices(str(p_full))
     assert set(abs_c) == set(abs_s)
     assert all(np.array_equal(abs_c[u], abs_s[u]) for u in abs_s)
     assert all(np.array_equal(samp_c[u], samp_s[u]) for u in samp_s)
+    assert all(np.array_equal(obs_c[u], [[0.0, 1000.0]]) for u in obs_c)
 
-    # (b) legacy file without the column -> sample_indices is None
-    p_legacy = tmp_path / "legacy.nwb"
-    _write_units_nwb(p_legacy, [[0.1, 0.2]])
-    abs_l, samp_l, _obs_l = read_units_abs_times_and_sample_indices(
-        str(p_legacy)
-    )
-    assert samp_l is None
-    assert np.array_equal(
-        abs_l[0], read_units_abs_spike_times(str(p_legacy))[0]
-    )
-
-    # (c) empty Units table -> ({}, {}, {})
+    # Empty Units table -> ({}, {}, {}).
     p_empty = tmp_path / "empty.nwb"
     _write_units_nwb(p_empty, [])
     assert read_units_abs_times_and_sample_indices(str(p_empty)) == (
@@ -643,6 +620,193 @@ def test_base_intervals_from_recording_detects_gaps():
     assert rec.time_slice_calls == []
 
 
+@pytest.fixture
+def units_file_resolver(tmp_path, monkeypatch):
+    """Resolve staged files locally without declaring a DataJoint schema."""
+    import sys
+    from types import ModuleType
+
+    class AnalysisNwbfile:
+        @staticmethod
+        def get_abs_path(name):
+            return str(tmp_path / name)
+
+    module = ModuleType("spyglass.common.common_nwbfile")
+    module.AnalysisNwbfile = AnalysisNwbfile
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    return tmp_path
+
+
+@pytest.mark.parametrize("output", ["zero_units", "populated", "empty_train"])
+def test_sorting_writer_preserves_gap_windows_and_stored_frames(
+    units_file_resolver, output
+):
+    """No-artifact exports retain source frames and omit wall-clock gaps."""
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._storage.provenance import (
+        SORTING_PROVENANCE,
+        read_provenance_values,
+    )
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        _write_sorting_units_nwb_body,
+        read_units_abs_times_and_sample_indices,
+    )
+    from tests.spikesorting.v2._provenance_helpers import sorting_provenance
+
+    path = units_file_resolver / "sort.nwb"
+    _write_units_nwb(path, [])
+    times = np.concatenate([np.arange(5) / _FS, 10.0 + np.arange(4) / _FS])
+    rec = _FakeRecording(times)
+    frames = (
+        {}
+        if output == "zero_units"
+        else {
+            4: np.array(
+                [] if output == "empty_train" else [2, 5, 8], dtype=np.int64
+            )
+        }
+    )
+    sorting = si.NumpySorting.from_unit_dict(frames, sampling_frequency=_FS)
+    provenance = sorting_provenance(statistics_spans=[[0, 5], [5, 9]])
+    _write_sorting_units_nwb_body(
+        analysis_file_name=path.name,
+        sorting=sorting,
+        recording=rec,
+        obs_intervals=None,
+        source_provenance=provenance,
+    )
+    abs_times, samples, obs = read_units_abs_times_and_sample_indices(path)
+    if output != "zero_units":
+        np.testing.assert_array_equal(
+            samples[4], [] if output == "empty_train" else [2, 5, 8]
+        )
+        np.testing.assert_allclose(
+            abs_times[4],
+            [] if output == "empty_train" else [0.002, 10.0, 10.003],
+        )
+        np.testing.assert_allclose(obs[4], [[0.0, 0.004], [10.0, 10.003]])
+    else:
+        assert (abs_times, samples, obs) == ({}, {}, {})
+    stored = read_provenance_values(path, SORTING_PROVENANCE)
+    assert stored["sorting_id"] == provenance["sorting_id"]
+    assert stored["statistics_spans"] == [[0, 5], [5, 9]]
+
+
+@pytest.mark.parametrize(
+    "mode", ["applied", "preview", "zero_units", "empty_trains"]
+)
+def test_curated_writer_preserves_current_format_and_merge_science(
+    units_file_resolver, mode
+):
+    """Applied/preview merges and empty outputs retain current format semantics."""
+    from spyglass.spikesorting.v2._storage.provenance import (
+        CURATION_PROVENANCE,
+        read_provenance_values,
+    )
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        _write_curated_units_nwb_body,
+        read_units_abs_times_and_sample_indices,
+    )
+    from tests.spikesorting.v2._provenance_helpers import curation_header
+
+    path = units_file_resolver / "curated.nwb"
+    _write_units_nwb(path, [])
+    abs_times = {
+        0: np.array([0.001, 0.005]),
+        1: np.array([0.0011, 0.008]),
+        2: np.array([]),
+    }
+    frames = {
+        0: np.array([1, 5]),
+        1: np.array([2, 8]),
+        2: np.array([], dtype=np.int64),
+    }
+    obs = {
+        0: np.array([[0.0, 0.005], [0.007, 0.009]]),
+        1: np.array([[0.0, 0.009]]),
+        2: np.array([[0.0, 0.009]]),
+    }
+    kept = {2: [2], 3: [0, 1]}
+    applied = mode != "preview"
+    if mode == "zero_units":
+        kept = {}
+    elif mode == "empty_trains":
+        abs_times = {uid: np.array([]) for uid in abs_times}
+        frames = {uid: np.array([], dtype=np.int64) for uid in frames}
+    header = curation_header(merges_applied=applied)
+    result = _write_curated_units_nwb_body(
+        analysis_file_name=path.name,
+        nwb_file_name="source.nwb",
+        kept_unit_to_contributors=kept,
+        apply_merge=applied,
+        labels={},
+        abs_times_by_uid=abs_times,
+        sample_indices_by_uid=frames,
+        obs_intervals_by_uid=obs,
+        curation_header=header,
+    )
+    actual_times, actual_frames, actual_obs = (
+        read_units_abs_times_and_sample_indices(path)
+    )
+    if mode == "zero_units":
+        assert (actual_times, actual_frames, actual_obs) == ({}, {}, {})
+        assert result[3] == {}
+    elif mode == "preview":
+        for uid in abs_times:
+            np.testing.assert_array_equal(actual_times[uid], abs_times[uid])
+            np.testing.assert_array_equal(actual_frames[uid], frames[uid])
+            np.testing.assert_array_equal(actual_obs[uid], obs[uid])
+        assert result[3] == {0: 2, 1: 2, 2: 0}
+    else:
+        assert set(actual_frames) == {2, 3}
+        np.testing.assert_array_equal(actual_frames[2], [])
+        np.testing.assert_array_equal(
+            actual_frames[3], [] if mode == "empty_trains" else [1, 5, 8]
+        )
+        np.testing.assert_array_equal(
+            actual_times[3],
+            [] if mode == "empty_trains" else [0.001, 0.005, 0.008],
+        )
+        np.testing.assert_array_equal(
+            actual_obs[3], [[0.0, 0.005], [0.007, 0.009]]
+        )
+        assert result[3] == {2: 0, 3: 0 if mode == "empty_trains" else 3}
+    assert (
+        read_provenance_values(path, CURATION_PROVENANCE)["curation_uuid"]
+        == header["curation_uuid"]
+    )
+
+
+@pytest.mark.parametrize(
+    "missing_mapping", ["sample_indices_by_uid", "obs_intervals_by_uid"]
+)
+def test_curated_writer_rejects_missing_current_columns_before_db_import(
+    missing_mapping,
+):
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        _write_curated_units_nwb_body,
+    )
+    from tests.spikesorting.v2._provenance_helpers import curation_header
+
+    kwargs = dict(
+        analysis_file_name="unused.nwb",
+        nwb_file_name="source.nwb",
+        kept_unit_to_contributors={0: [0]},
+        apply_merge=True,
+        labels={},
+        abs_times_by_uid={0: np.array([0.001])},
+        sample_indices_by_uid={0: np.array([1])},
+        obs_intervals_by_uid={0: np.array([[0.0, 0.01]])},
+        curation_header=curation_header(merges_applied=True),
+    )
+    kwargs[missing_mapping] = None
+    with pytest.raises(
+        ValueError, match="require sample indices and observation intervals"
+    ):
+        _write_curated_units_nwb_body(**kwargs)
+
+
 def _write_sorting_provenance_nwb(path, provenance):
     """Write a minimal units NWB, adding the sorting provenance scratch
     table only when ``provenance`` is not ``None``."""
@@ -741,8 +905,13 @@ def test_write_sorting_units_nwb_unlinks_staged_file_on_failure(
     monkeypatch.setattr(_units_nwb, "_write_sorting_units_nwb_body", _boom)
 
     with pytest.raises(RuntimeError, match="simulated units-NWB write failure"):
+        from ._provenance_helpers import sorting_provenance
+
         _units_nwb.write_sorting_units_nwb(
-            sorting=None, recording=None, nwb_file_name=nwb_file_name
+            sorting=None,
+            recording=None,
+            nwb_file_name=nwb_file_name,
+            source_provenance=sorting_provenance(),
         )
 
     # The staged orphan was unlinked by the writer's except block.

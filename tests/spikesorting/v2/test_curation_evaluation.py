@@ -1683,27 +1683,23 @@ def test_make_compute_reads_fetched_traces_and_only_stages_output(
 @pytest.mark.slow
 @pytest.mark.integration
 @pytest.mark.parametrize("curation_kind", ["root", "merged"])
-def test_make_compute_reads_units_without_sample_frames_without_the_db(
+def test_make_compute_rejects_incomplete_units_without_the_db(
     planted_two_unit_sort,
     curation_evaluation_defaults,
     monkeypatch,
     curation_kind,
+    tmp_path,
 ):
-    """An older units file (no stored sample frames) is read back in
-    ``make_compute`` from the source timestamps ``make_fetch`` resolved, with
-    no DB access, on both the cached-analyzer (root) and the merged path.
+    """Root and merged compute reject real malformed Units without DB access."""
+    from datetime import datetime, timezone
 
-    The older layout is simulated by making the sample-frame reader report
-    the column absent, which is exactly what it returns for such a file.
-    """
-    from spyglass.spikesorting.v2._storage import units_nwb as _units_nwb
+    import numpy as np
+    import pynwb
+
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
         CurationEvaluationSelection,
-    )
-    from spyglass.spikesorting.v2.recording import (
-        _unlink_staged_analysis_file,
     )
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
     from tests.spikesorting.v2._tripart_helpers import forbid_db_queries
@@ -1729,17 +1725,47 @@ def test_make_compute_reads_units_without_sample_frames_without_the_db(
             }
         )
         table = CurationEvaluation()
-        monkeypatch.setattr(
-            _units_nwb, "read_units_spike_sample_indices", lambda path: None
-        )
         fetched = table.make_fetch(sel)
+        invalid_path = tmp_path / "incomplete_units.nwb"
+        nwbf = pynwb.NWBFile(
+            session_description="incomplete v2 units",
+            identifier="incomplete",
+            session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        )
+        sorting_inputs = fetched.sorting_inputs
+        # Retain the actual curated events and observation masks so exposure
+        # validation succeeds before readback reaches the missing frame column.
+        with pynwb.NWBHDF5IO(
+            sorting_inputs.curated_units.abs_path, "r", load_namespaces=True
+        ) as io:
+            units = io.read().units
+            for index, unit_id in enumerate(units.id[:]):
+                nwbf.add_unit(
+                    id=int(unit_id),
+                    spike_times=np.asarray(
+                        units["spike_times"][index], dtype=float
+                    ),
+                    obs_intervals=np.asarray(
+                        units["obs_intervals"][index], dtype=float
+                    ),
+                )
+        with pynwb.NWBHDF5IO(str(invalid_path), "w") as io:
+            io.write(nwbf)
+        fetched = fetched._replace(
+            sorting_inputs=sorting_inputs._replace(
+                raw_units=sorting_inputs.raw_units._replace(
+                    abs_path=str(invalid_path)
+                ),
+                curated_units=sorting_inputs.curated_units._replace(
+                    abs_path=str(invalid_path)
+                ),
+            )
+        )
         with forbid_db_queries(
             monkeypatch, "CurationEvaluation.make_compute", allow_staging=True
         ):
-            computed = table.make_compute(sel, *fetched)
-        _unlink_staged_analysis_file(
-            computed.analysis_file_name, context="test"
-        )
+            with pytest.raises(ValueError, match="spike_sample_index"):
+                table.make_compute(sel, *fetched)
     finally:
         clear_curations_for(planted_two_unit_sort)
 

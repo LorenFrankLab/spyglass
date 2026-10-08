@@ -81,9 +81,7 @@ from spyglass.spikesorting.v2._storage.units_nwb import (
     empty_spike_times_dataframe,
     read_units_abs_spike_times,
     read_sorting_statistics_spans,
-    recording_timestamps,
     sorting_from_units_nwb,
-    units_nwb_stores_sample_indices,
     write_sorting_units_nwb,
 )
 from spyglass.spikesorting.v2.artifact_output import (
@@ -975,51 +973,21 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     def resolve_stored_units(
         units_analysis_file_name: str,
         source: EffectiveSource,
-        traces_abs_path: str,
     ) -> StoredUnits:
-        """Resolve a sort's or curation's units NWB for a DB-free readback.
+        """Resolve a v2 Units file and its source sampling rate for readback.
 
-        Takes the same inputs ``Sorting.get_sorting`` and
-        ``CurationV2.get_sorting`` take: the units file, and the sampling rate
-        and timestamps of the sort's lineage source row (a motion-corrected
-        recording keeps its source's frames). When the effective traces are
-        that row, its already-resolved path is reused. Otherwise (a
-        motion-corrected sort) the source row's file is resolved only when
-        the units file has no stored sample frames, since only then are its
-        timestamps read.
-
-        Parameters
-        ----------
-        units_analysis_file_name : str
-            The ``Sorting`` or ``CurationV2`` row's ``analysis_file_name``.
-        source : EffectiveSource
-            The sort's :meth:`resolve_effective_source`.
-        traces_abs_path : str
-            The effective traces' file, from :meth:`ensure_effective_traces`.
-
-        Returns
-        -------
-        StoredUnits
-            For :func:`._units_nwb.read_stored_units`.
+        Stored sample frames make recording artifacts unnecessary. A corrected
+        recording preserves its lineage source's frames and sampling rate.
         """
         lineage, traces = source
-        units_abs_path = AnalysisNwbfile.get_abs_path(units_analysis_file_name)
-        if traces.kind == lineage.kind:
-            recording_row, recording_abs_path = traces.row, traces_abs_path
-        else:
-            recording_row = (_TRACE_TABLES[lineage.kind] & lineage.key).fetch1()
-            recording_abs_path = (
-                None
-                if units_nwb_stores_sample_indices(units_abs_path)
-                else AnalysisNwbfile.get_abs_path(
-                    recording_row["analysis_file_name"]
-                )
-            )
+        recording_row = (
+            traces.row
+            if traces.kind == lineage.kind
+            else (_TRACE_TABLES[lineage.kind] & lineage.key).fetch1()
+        )
         return StoredUnits(
-            abs_path=units_abs_path,
+            abs_path=AnalysisNwbfile.get_abs_path(units_analysis_file_name),
             sampling_frequency=float(recording_row["sampling_frequency"]),
-            timestamps_abs_path=recording_abs_path,
-            timestamps_series_path=recording_row["electrical_series_path"],
         )
 
     @staticmethod
@@ -1429,7 +1397,12 @@ class Sorting(
                 else None
             )
             source_provenance = {
-                "recording_id": recording_id,
+                "sorting_id": str(key["sorting_id"]),
+                "recording_id": (
+                    source.key["recording_id"]
+                    if source.kind == "recording"
+                    else None
+                ),
                 "concat_recording_id": concat_recording_id,
                 "sorter": sorter_row["sorter"],
                 "sorter_params_name": sorter_row["sorter_params_name"],
@@ -1570,7 +1543,7 @@ class Sorting(
         nwb_file_name,
         obs_intervals,
         unit_metadata=None,
-        source_provenance=None,
+        source_provenance,
     ):
         """Stage the units NWB; return ``(analysis_file_name, units_object_id)``.
 
@@ -1644,9 +1617,8 @@ class Sorting(
         Spike times are persisted by ``_write_units_nwb`` in two forms:
         absolute ``spike_times`` for NWB interoperability, and Spyglass's
         ``spike_sample_index`` sidecar for efficient frame-based readback.
-        Files with that column reconstruct directly from it; older/manual
-        files without it fall back to an absolute-time search against the
-        recording timestamps.
+        Readback uses the stored sample frames directly. Populated v2 Units
+        tables require sample frames and observation intervals.
 
         Returns a ``NumpySorting`` (segment frame indices, ``t_start=0``),
         so ``get_unit_spike_train(uid)`` yields the original recording
@@ -1682,13 +1654,8 @@ class Sorting(
 
         row = (self & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-        # Resolve the recording row backing this sort's absolute-time readback:
-        # a single-recording sort reads its Recording row, a concat-backed sort
-        # reads its ConcatenatedRecording row. Both carry analysis_file_name /
-        # electrical_series_path / sampling_frequency, which is all the
-        # absolute-time -> frame mapping below needs. A motion-corrected
-        # recording keeps its source's frames and timestamps, so the source
-        # row serves a corrected sort too.
+        # Resolve the source sampling rate. A motion-corrected recording keeps
+        # its source's frames and rate, so the same row serves a corrected sort.
         source = SortingSelection.resolve_source(key)
         if source.kind == "recording":
             rec_row = (
@@ -1714,9 +1681,7 @@ class Sorting(
         if as_dataframe:
             abs_times = read_units_abs_spike_times(abs_path)
             return abs_spike_times_dataframe(abs_times)
-        return sorting_from_units_nwb(
-            abs_path, fs, lambda: recording_timestamps(rec_row)
-        )
+        return sorting_from_units_nwb(abs_path, fs)
 
     def get_statistics_spans(self, key: dict) -> list[tuple[int, int]]:
         """Return the statistics spans persisted with a sort.
@@ -2394,7 +2359,7 @@ class Sorting(
         obs_intervals=None,
         *,
         unit_metadata=None,
-        source_provenance=None,
+        source_provenance,
     ):
         """Write a fresh AnalysisNwbfile containing only the v2 Units table.
 

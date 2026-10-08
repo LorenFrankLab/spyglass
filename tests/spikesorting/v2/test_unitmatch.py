@@ -1730,69 +1730,27 @@ def test_unitmatch_records_backend_version(two_session_curated_group):
     assert provenance["preparer"]["version"] == provenance["spyglass_version"]
 
 
-@pytest.mark.serial
-def test_matcher_provenance_upgrade_preserves_existing_runs(
-    two_session_curated_group, tmp_path
-):
-    """Run the documented nullable-column upgrade against a retained match."""
-    import re
-    from pathlib import Path
-
-    import datajoint as dj
-
+def test_matcher_provenance_is_required_for_new_runs(two_session_curated_group):
+    """A newly populated run has complete metadata and a non-null DB column."""
+    from spyglass.spikesorting.v2._matching.provenance import (
+        validate_matcher_provenance,
+    )
     from spyglass.spikesorting.v2.unit_matching import (
         UnitMatch,
         UnitMatchSelection,
     )
-    from tests.spikesorting.v2.test_preproduction_migration import (
-        _column_ddl,
-        _restore_column_snapshot,
-        _run_script,
-    )
 
-    grp = two_session_curated_group
+    group = two_session_curated_group
     key = UnitMatchSelection.insert_selection(
-        grp["owner"],
-        grp["solo_name"],
+        group["owner"],
+        group["solo_name"],
         "unitmatch_default",
-        {0: grp["choices"][0]},
+        {0: group["choices"][0]},
     )
     UnitMatch.populate(key, reserve_jobs=False)
-    before = UnitMatch.fetch(as_dict=True)
-    column = "matcher_provenance"
-    definitions = {column: _column_ddl(UnitMatch, column)}
-    snapshot = UnitMatch.proj(column).fetch(as_dict=True)
-    config_file = tmp_path / "test-db.json"
-    dj.config.save(str(config_file))
-    config_file.chmod(0o600)
-    document = (
-        Path(__file__).resolve().parents[3]
-        / "docs/src/Features/SpikeSortingV2_Migration.md"
-    ).read_text()
-    section = document.split("### Adding matcher producer provenance", 1)[1]
-    code = re.search(r"```python\n(.*?)\n```", section, re.DOTALL).group(1)
-    code = code.replace(".alter(context=", ".alter(prompt=False, context=")
-    script = tmp_path / "upgrade.py"
-    script.write_text(
-        f"import datajoint as dj\ndj.config.load({str(config_file)!r})\n" + code
-    )
-    try:
-        UnitMatch.connection.query(
-            f"ALTER TABLE {UnitMatch.full_table_name} DROP COLUMN `{column}`"
-        )
-        for _ in range(2):
-            result = _run_script(script)
-            assert result.returncode == 0, result.stdout + result.stderr
-        upgraded = dj.FreeTable(dj.conn(), UnitMatch.full_table_name).fetch(
-            as_dict=True
-        )
-        assert all(row[column] is None for row in upgraded)
-        assert [
-            {k: v for k, v in row.items() if k != column} for row in upgraded
-        ] == [{k: v for k, v in row.items() if k != column} for row in before]
-    finally:
-        config_file.unlink(missing_ok=True)
-        _restore_column_snapshot(UnitMatch, definitions, snapshot)
+    row = (UnitMatch & key).fetch1()
+    validate_matcher_provenance(row["matcher_provenance"])
+    assert not UnitMatch.heading.attributes["matcher_provenance"].nullable
 
 
 @pytest.mark.slow

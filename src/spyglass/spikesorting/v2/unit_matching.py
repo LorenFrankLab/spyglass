@@ -702,7 +702,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     spikeinterface_version: varchar(32)     # spikeinterface.__version__ at match time
     matcher_backend: varchar(255)           # resolved backend module path (plugin paths can be long)
     matcher_backend_version=null: varchar(64)  # backend package version, NULL if absent
-    matcher_provenance=null: blob            # producer classes, versions and asset fingerprints; NULL for older runs
+    matcher_provenance: blob                 # required producer classes, versions and asset fingerprints
     """
 
     class Pair(SpyglassMixinPart):
@@ -1113,6 +1113,11 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         call leaves that to its caller.
         """
         from spyglass.spikesorting.v2._storage.matches_nwb import read_pairs
+        from spyglass.spikesorting.v2._matching.provenance import (
+            validate_matcher_provenance,
+        )
+
+        validate_matcher_provenance(matcher_provenance)
 
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         # Use an explicit raise (not assert -- assert is stripped under

@@ -19,12 +19,20 @@ import pytest
 
 def _write_units_nwb(path, specs, *, with_obs=True):
     """Write a units NWB. ``specs`` is ``[(id, spike_times, obs_intervals)]``;
-    ``with_obs=False`` omits the obs_intervals column (legacy file)."""
+    ``with_obs=False`` writes an invalid v2 table to test strict readback."""
     from pynwb import NWBFile, NWBHDF5IO
 
     nwbf = NWBFile("s", "i", datetime.datetime.now(datetime.timezone.utc))
+    if specs:
+        nwbf.add_unit_column("spike_sample_index", "source frames", index=True)
     for uid, st, obs in specs:
-        kwargs = {"spike_times": st, "id": uid}
+        kwargs = {
+            "spike_times": st,
+            "id": uid,
+            "spike_sample_index": np.rint(np.asarray(st) * 1000).astype(
+                np.int64
+            ),
+        }
         if with_obs:
             kwargs["obs_intervals"] = obs
         nwbf.add_unit(**kwargs)
@@ -81,8 +89,6 @@ def test_curated_obs_intervals_merge_rule():
     np.testing.assert_array_equal(
         _curated_obs_intervals(1, [1], False, obs), obs[1]
     )
-    # Legacy source (no obs column) -> None (no obs written).
-    assert _curated_obs_intervals(0, [0, 1], True, None) is None
 
 
 # ---------- reader returns obs ----------------------------------------------
@@ -100,11 +106,11 @@ def test_reader_returns_obs_intervals(tmp_path):
     np.testing.assert_array_equal(obs[0], [[0.0, 1.0]])
     np.testing.assert_array_equal(obs[1], [[0.0, 0.5]])
 
-    # A legacy file without the obs column -> obs is None.
-    p_legacy = tmp_path / "noobs.nwb"
-    _write_units_nwb(p_legacy, [(0, [0.1], None)], with_obs=False)
-    _abs2, _samp2, obs2 = read_units_abs_times_and_sample_indices(str(p_legacy))
-    assert obs2 is None
+    # A populated v2 file without observation intervals fails closed.
+    p_incomplete = tmp_path / "noobs.nwb"
+    _write_units_nwb(p_incomplete, [(0, [0.1], None)], with_obs=False)
+    with pytest.raises(ValueError, match="obs_intervals"):
+        read_units_abs_times_and_sample_indices(str(p_incomplete))
 
 
 # ---------- DB integration: curated export carries obs ----------------------

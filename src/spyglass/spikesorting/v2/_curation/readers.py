@@ -2,8 +2,7 @@
 
 :func:`get_sorting` and :func:`get_merged_sorting` are the bodies of
 ``CurationV2.get_sorting`` / ``get_merged_sorting``: they read a curation's
-curated-units NWB against its upstream recording's sampling rate and
-timestamps (:func:`load_curation_recording_meta`, :func:`upstream_recording_row`)
+curated-units NWB using stored sample frames and the upstream sampling rate (:func:`load_curation_recording_meta`, :func:`upstream_recording_row`)
 and, for an unapplied proposed merge, rebuild the merged sorting lazily.
 ``table_cls`` is ``CurationV2``.
 
@@ -18,12 +17,10 @@ from typing import TYPE_CHECKING
 from spyglass.spikesorting.v2._core.signal_math import _MERGE_DEDUP_DELTA_MS
 from spyglass.spikesorting.v2._storage.units_nwb import (
     abs_spike_times_dataframe,
-    build_lazy_merged_sorting,
     build_lazy_merged_sorting_from_samples,
     empty_spike_times_dataframe,
     read_units_abs_spike_times,
     read_units_abs_times_and_sample_indices,
-    recording_timestamps,
     sorting_from_units_nwb,
 )
 
@@ -43,7 +40,7 @@ def get_sorting(
 
     from spyglass.utils import logger
 
-    row, recording_row, fs, abs_path = load_curation_recording_meta(
+    row, _recording_row, fs, abs_path = load_curation_recording_meta(
         table_cls, key
     )
 
@@ -83,9 +80,7 @@ def get_sorting(
         return df
 
     if not as_dataframe:
-        return sorting_from_units_nwb(
-            abs_path, fs, lambda: recording_timestamps(recording_row)
-        )
+        return sorting_from_units_nwb(abs_path, fs)
 
     abs_times = read_units_abs_spike_times(abs_path)
     # Reuse the shared spike-times DataFrame builder (the same one
@@ -120,32 +115,22 @@ def get_merged_sorting(table_cls, key: dict) -> si.BaseSorting:
 
     # Read the curated units NWB once, then rebuild the merged sorting via
     # the pure compute core. v2-written units NWBs carry stored sample
-    # frames and avoid the recording timeline; older/manual files fall
-    # back to the full timestamp-vector mapping. Calling get_sorting here
+    # frames and avoid the recording timeline. Calling get_sorting here
     # would re-open the units NWB and emit a spurious "merges NOT applied"
     # warning -- we ARE applying them. The merge is deduplicated in ABSOLUTE time
     # (gap-correct on disjoint recordings); see the helper docstrings.
-    _row, recording_row, fs, abs_path = load_curation_recording_meta(
+    _row, _recording_row, fs, abs_path = load_curation_recording_meta(
         table_cls, key
     )
     # Both columns are needed (dedup is in absolute time, frames are reused
-    # when present) -- read them from a single NWB open.
+    # directly) -- read them from a single NWB open.
     abs_times, sample_indices, _obs = read_units_abs_times_and_sample_indices(
         abs_path
     )
-    if sample_indices is not None:
-        return build_lazy_merged_sorting_from_samples(
-            abs_times,
-            sample_indices,
-            units_to_merge,
-            fs,
-            delta_s=_MERGE_DEDUP_DELTA_MS / 1000.0,
-        )
-    timestamps = recording_timestamps(recording_row)
-    return build_lazy_merged_sorting(
+    return build_lazy_merged_sorting_from_samples(
         abs_times,
+        sample_indices,
         units_to_merge,
-        timestamps,
         fs,
         delta_s=_MERGE_DEDUP_DELTA_MS / 1000.0,
     )

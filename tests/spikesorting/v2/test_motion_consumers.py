@@ -229,21 +229,6 @@ def _trains(sorting):
     }
 
 
-def _without_sample_frames(patch):
-    """Make every units file read back as the older layout (no stored sample
-    frames): the sample-frame reader and the layout check both report the
-    column absent, as they do for such a file."""
-    from spyglass.spikesorting.v2._storage import units_nwb as _units_nwb
-    from spyglass.spikesorting.v2 import sorting as sorting_module
-
-    patch.setattr(
-        _units_nwb, "read_units_spike_sample_indices", lambda path: None
-    )
-    patch.setattr(
-        sorting_module, "units_nwb_stores_sample_indices", lambda path: False
-    )
-
-
 def _units_readbacks(sort_key, curation, selection):
     """Spike trains from every units readback of a sort and its curation.
 
@@ -550,35 +535,22 @@ def test_all_consumers_resolve_selected_correction(
     )
 
 
-@pytest.mark.parametrize("sample_frames", [True, False])
 def test_units_readback_of_corrected_and_uncorrected_sorts(
     corrected_sorts,
     fresh_curations,
     curation_evaluation_defaults,
-    monkeypatch,
-    sample_frames,
 ):
-    """Every units readback of either sort returns the planted frames, from
-    stored sample frames and from absolute times alike.
-
-    Without sample frames the absolute times are mapped onto the LINEAGE
-    recording's timestamps (the corrected recording keeps its source's
-    frames), so the evaluation resolves the source recording's file for
-    both sorts. With sample frames a corrected sort's source file is not
-    resolved at all.
-    """
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    """Every units reader returns planted frames for corrected and raw traces."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluationSelection,
     )
+
     from spyglass.spikesorting.v2.recording import Recording
 
-    if not sample_frames:
-        _without_sample_frames(monkeypatch)
-    source_path = AnalysisNwbfile.get_abs_path(
+    source_rate = float(
         (Recording & corrected_sorts["recording_key"]).fetch1(
-            "analysis_file_name"
+            "sampling_frequency"
         )
     )
     for which in ("uncorrected_sort", "corrected_sort"):
@@ -600,10 +572,8 @@ def test_units_readback_of_corrected_and_uncorrected_sorts(
         for reader, train in trains.items():
             assert train == expected, f"{which}: {reader}"
         for stored in units:
-            if sample_frames and which == "corrected_sort":
-                assert stored.timestamps_abs_path is None
-            else:
-                assert stored.timestamps_abs_path == source_path, which
+            assert stored.sampling_frequency == source_rate
+            assert stored.abs_path.endswith(".nwb")
 
 
 def test_curation_manifest_identity_changes_with_the_correction(
@@ -966,22 +936,14 @@ def test_corrected_concat_sort_end_to_end(
         )
         assert provenance["recording_content_hash"] == row["content_hash"]
 
-        # Units readback: both units-file layouts agree across every reader,
-        # and the older layout maps onto the concatenation's timestamps.
-        concat_path = AnalysisNwbfile.get_abs_path(
-            concat_row["analysis_file_name"]
-        )
+        # Stored frames agree across every reader of a corrected concatenation.
         trains, units = _units_readbacks(sort_key, root, selection)
         expected = trains["Sorting.get_sorting"]
         assert expected and any(expected.values())
         assert all(train == expected for train in trains.values()), trains
-        assert all(stored.timestamps_abs_path is None for stored in units)
-        with monkeypatch.context() as patch:
-            _without_sample_frames(patch)
-            trains, units = _units_readbacks(sort_key, root, selection)
-        assert all(train == expected for train in trains.values()), trains
         assert all(
-            stored.timestamps_abs_path == concat_path for stored in units
+            stored.sampling_frequency == concat_row["sampling_frequency"]
+            for stored in units
         )
     finally:
         drop_pipeline_sorts([sort_key["sorting_id"]])

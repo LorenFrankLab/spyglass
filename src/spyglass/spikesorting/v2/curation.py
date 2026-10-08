@@ -922,7 +922,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         labels: dict,
         unit_rows: list[dict],
         source_units_abs_path: str | None = None,
-        curation_header: dict | None = None,
+        *,
+        curation_header: dict,
         merge_group_rows: list[dict] | None = None,
     ) -> tuple[str, str, str]:
         """Stage the curated-units NWB and reconcile per-unit ``n_spikes``.
@@ -2107,7 +2108,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         ``CurationV2.MergeGroup`` are applied lazily here without
         re-running the sort. The lazy merge deduplicates in absolute
         spike time so disjoint-recording wall-clock gaps are respected, then
-        reuses stored ``spike_sample_index`` frames when available.
+        reuses the required stored ``spike_sample_index`` frames.
 
         When the curation was created with ``apply_merge=True`` the base
         sorting is ALREADY merged (contributors absorbed at insert), so

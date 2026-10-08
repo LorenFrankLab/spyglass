@@ -1485,7 +1485,6 @@ def _resolve_analyzer_regen_inputs(
             units=SortingSelection.resolve_stored_units(
                 (Sorting & sort_key).fetch1("analysis_file_name"),
                 canonical.source,
-                canonical.abs_path,
             ),
             sorter_row=sorter_row,
             job_kwargs=job_kwargs,

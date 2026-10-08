@@ -2,8 +2,7 @@
 
 These functions are the units-NWB IO core behind ``Sorting`` and
 ``CurationV2``: reading a units NWB's stored ABSOLUTE spike times,
-reading the Spyglass-side sample-frame column, falling back to
-absolute-time -> frame mapping for older/manual files, writing the
+reading the required sample-frame and observation-window columns, writing the
 pre-curation sorting-units NWB (``write_sorting_units_nwb``), and writing
 the post-curation curated-units NWB (``write_curated_units_nwb``). Most take
 already-resolved paths / SpikeInterface objects / fetched row dicts and do
@@ -14,7 +13,7 @@ fetches) before writing, so ``CurationV2.insert_curation`` stays a thin
 orchestrator. ``Sorting`` and ``CurationV2`` share the readback helpers here.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import: like ``_analyzer_cache``, the only DataJoint
+connection at import: like ``_storage.analyzer_cache``, the only DataJoint
 dependency (``AnalysisNwbfile`` for path resolution / file creation) is
 imported lazily at call time. The IO itself is pynwb against the
 filesystem, not the database.
@@ -49,9 +48,9 @@ def read_units_columns(abs_path, columns, *, unit_ids=None) -> tuple:
     -------
     tuple
         One ``{unit_id (int): np.ndarray}`` per entry of ``columns``, in order.
-        Every entry is ``{}`` for an empty or absent Units table. An entry is
-        ``None`` when the table lacks that optional column (an older or
-        hand-written file); ``spike_times`` is required, so its absence raises.
+        Every entry is ``{}`` for an empty or absent Units table. A populated
+        v2 table must contain spike times, sample frames, and observation
+        intervals; missing columns raise ``ValueError``.
     """
     import numpy as np
     import pynwb
@@ -62,6 +61,13 @@ def read_units_columns(abs_path, columns, *, unit_ids=None) -> tuple:
         units = nwbf.units
         if units is None or len(units) == 0:
             return tuple({} for _ in columns)
+        required = {"spike_times", SPIKE_SAMPLE_INDEX_COLUMN, "obs_intervals"}
+        missing = sorted(required.difference(units.colnames))
+        if missing:
+            raise ValueError(
+                f"Invalid v2 Units NWB {str(abs_path)!r}: populated Units table "
+                f"is missing required columns {missing}."
+            )
         rows = [
             (row_ind, int(uid))
             for row_ind, uid in enumerate(np.asarray(units.id[:], dtype=int))
@@ -69,9 +75,6 @@ def read_units_columns(abs_path, columns, *, unit_ids=None) -> tuple:
         ]
         out = []
         for column in columns:
-            if column != "spike_times" and column not in units.colnames:
-                out.append(None)
-                continue
             data = units[column]
             dtype = np.int64 if column == SPIKE_SAMPLE_INDEX_COLUMN else float
             out.append(
@@ -93,14 +96,12 @@ def read_units_abs_spike_times(abs_path) -> dict:
     return read_units_columns(abs_path, ("spike_times",))[0]
 
 
-def read_units_spike_sample_indices(abs_path) -> dict | None:
-    """Return ``{unit_id: spike_sample_index}`` or ``None`` if absent.
+def read_units_spike_sample_indices(abs_path) -> dict:
+    """Return ``{unit_id: spike_sample_index}`` from a current v2 Units NWB.
 
-    v2-written units NWBs store sample frames alongside absolute ``spike_times`` so
-    Spyglass readback can reconstruct ``NumpySorting`` objects without reading
-    the upstream recording's full timestamp vector. ``None`` is the compatibility
-    signal for older/manual units NWBs that lack the column; callers then fall
-    back to absolute-time mapping. ``{}`` for an empty/absent Units table.
+    Stored sample frames reconstruct ``NumpySorting`` objects without reading
+    the upstream recording's full timestamp vector. Populated tables require
+    sample frames and observation intervals; empty/absent tables return ``{}``.
     """
     return read_units_columns(abs_path, (SPIKE_SAMPLE_INDEX_COLUMN,))[0]
 
@@ -181,193 +182,31 @@ def numpysorting_from_sample_indices(sample_indices, fs):
     return si.NumpySorting.from_unit_dict([units_dict], sampling_frequency=fs)
 
 
-def numpysorting_from_abs_times(abs_times, recording_row, fs):
-    """Build a ``NumpySorting`` from absolute spike times.
+def sorting_from_units_nwb(abs_path, sampling_frequency):
+    """Read a current v2 Units NWB using its stored source-recording frames.
 
-    Maps each unit's absolute spike times to recording frame indices
-    with ``np.searchsorted`` against the recording's (possibly
-    gap-preserving) timestamps. Searching the actual timestamp vector
-    is correct across wall-clock gaps, where an affine ``t_start + i/fs``
-    inverse would land on the wrong frame.
-
-    Parameters
-    ----------
-    abs_times : dict[int, np.ndarray]
-        ``{unit_id: absolute spike times (seconds)}`` for each unit.
-    recording_row : dict
-        The upstream Recording row, used to read the persisted
-        timestamp vector via :func:`recording_timestamps`.
-    fs : float
-        Sampling frequency of the recording, in Hz.
-
-    Returns
-    -------
-    si.NumpySorting
-        A sorting whose per-unit spike trains are frame indices into
-        the recording.
+    Shared by Sorting, CurationV2, ConcatMemberCuration, and tri-part compute
+    readers. Performs no DB access or source-recording timestamp reads.
     """
-    return numpysorting_from_timestamps(
-        abs_times, recording_timestamps(recording_row), fs
-    )
-
-
-def numpysorting_from_timestamps(abs_times, recording_times, fs):
-    """Build a ``NumpySorting`` from absolute spike times and a timestamp vector.
-
-    The DB-free half of :func:`numpysorting_from_abs_times`, for callers that
-    read the recording's timestamps already.
-
-    Parameters
-    ----------
-    abs_times : dict[int, np.ndarray]
-        ``{unit_id: absolute spike times (seconds)}`` for each unit.
-    recording_times : np.ndarray, shape (n_samples,)
-        The recording's wall-clock timestamps, in seconds.
-    fs : float
-        Sampling frequency of the recording, in Hz.
-
-    Returns
-    -------
-    si.NumpySorting
-        A sorting whose per-unit spike trains are frame indices into
-        the recording.
-    """
-    import spikeinterface as si
-
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _spike_times_to_frames,
-    )
-
-    n_samples = int(recording_times.size)
-    units_dict = {
-        uid: _spike_times_to_frames(recording_times, st, n_samples, uid)
-        for uid, st in abs_times.items()
-    }
-    return si.NumpySorting.from_unit_dict([units_dict], sampling_frequency=fs)
-
-
-def units_nwb_stores_sample_indices(abs_path) -> bool:
-    """Whether a units NWB reads back from its stored sample frames.
-
-    The decision :func:`sorting_from_units_nwb` makes, without reading any
-    spike data: ``False`` only for a populated Units table without the
-    ``spike_sample_index`` column (an older or hand-written file), whose
-    readback maps absolute spike times onto the source recording's
-    timestamps. An empty or absent Units table reads back as an empty
-    sorting, which needs no timestamps either.
-
-    Parameters
-    ----------
-    abs_path : str or pathlib.Path
-        Absolute path to the units NWB file.
-
-    Returns
-    -------
-    bool
-    """
-    import pynwb
-
-    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
-        units = io.read().units
-        return (
-            units is None
-            or len(units) == 0
-            or SPIKE_SAMPLE_INDEX_COLUMN in units.colnames
-        )
-
-
-def sorting_from_units_nwb(abs_path, sampling_frequency, read_timestamps):
-    """Read a units NWB back as a ``NumpySorting`` of source-recording frames.
-
-    The one units readback behind ``Sorting.get_sorting``,
-    ``CurationV2.get_sorting``, ``ConcatMemberCuration.get_sorting`` and
-    :func:`read_stored_units`: the stored
-    sample frames when the file has them, otherwise the absolute spike times
-    mapped onto the source recording's timestamps with
-    :func:`numpysorting_from_timestamps`. Performs no DB access itself.
-
-    Parameters
-    ----------
-    abs_path : str or pathlib.Path
-        Absolute path to a sort's or a curation's units NWB.
-    sampling_frequency : float
-        The sort's source recording rate, in Hz.
-    read_timestamps : Callable[[], np.ndarray]
-        Returns the source recording's timestamps, shape ``(n_samples,)`` in
-        seconds. Called only for a file without stored sample frames, so a
-        caller may resolve the recording lazily.
-
-    Returns
-    -------
-    si.NumpySorting
-        Per-unit spike trains as frame indices into the source recording.
-    """
-    sample_indices = read_units_spike_sample_indices(abs_path)
-    if sample_indices is not None:
-        return numpysorting_from_sample_indices(
-            sample_indices, sampling_frequency
-        )
-    return numpysorting_from_timestamps(
-        read_units_abs_spike_times(abs_path),
-        read_timestamps(),
-        sampling_frequency,
+    return numpysorting_from_sample_indices(
+        read_units_spike_sample_indices(abs_path), sampling_frequency
     )
 
 
 class StoredUnits(NamedTuple):
-    """A units NWB resolved for a sorting readback that needs no DB.
+    """A Units NWB path and source rate for DB-free frame readback.
 
-    A tri-part ``make_fetch`` builds it with
-    ``SortingSelection.resolve_stored_units`` and ``make_compute`` reads it
-    with :func:`read_stored_units`. Strings, a float and ``None`` only, so
-    DataJoint's hash of the fetched inputs is the same on both of its
-    fetches.
-
-    Attributes
-    ----------
-    abs_path : str
-        Absolute path of the units NWB (a sort's or a curation's).
-    sampling_frequency : float
-        The sort's source recording rate, in Hz: its ``Recording`` or
-        ``ConcatenatedRecording`` row, as ``Sorting.get_sorting`` reads it.
-    timestamps_abs_path : str or None
-        Absolute path of that source recording's artifact, read only for a
-        units NWB without the ``spike_sample_index`` column. ``None`` when
-        the file has the column and the source recording is not the file
-        the sort's traces were already resolved to (a motion-corrected
-        sort), so that file is never resolved or checksummed for nothing.
-    timestamps_series_path : str
-        The source row's ``electrical_series_path``.
+    Tri-part ``make_fetch`` resolves these scalar inputs and ``make_compute``
+    reads them with :func:`read_stored_units`.
     """
 
     abs_path: str
     sampling_frequency: float
-    timestamps_abs_path: str | None
-    timestamps_series_path: str
 
 
 def read_stored_units(units: StoredUnits):
-    """Open resolved stored units as a ``NumpySorting``; no DB access.
-
-    :func:`sorting_from_units_nwb` over a :class:`StoredUnits`, reading the
-    source timestamps from its resolved artifact.
-
-    Parameters
-    ----------
-    units : StoredUnits
-
-    Returns
-    -------
-    si.NumpySorting
-        Per-unit spike trains as frame indices into the source recording.
-    """
-    return sorting_from_units_nwb(
-        units.abs_path,
-        units.sampling_frequency,
-        lambda: read_series_timestamps(
-            units.timestamps_abs_path, units.timestamps_series_path
-        ),
-    )
+    """Open resolved stored sample frames as a ``NumpySorting``; no DB access."""
+    return sorting_from_units_nwb(units.abs_path, units.sampling_frequency)
 
 
 def build_lazy_merged_sorting_from_samples(
@@ -400,79 +239,6 @@ def build_lazy_merged_sorting_from_samples(
         units_dict[next_id] = frames
         next_id += 1
     return numpysorting_from_sample_indices(units_dict, fs)
-
-
-def build_lazy_merged_sorting(
-    abs_times, units_to_merge, timestamps, fs, *, delta_s
-):
-    """Reconstruct the lazily-merged ``NumpySorting`` from absolute times.
-
-    Pure compute (no DB, no NWB IO) -- the merge-aware sibling of
-    ``numpysorting_from_abs_times``. Applies a curation's PROPOSED merges
-    (an ``apply_merge=False`` preview) without re-running the sort, in
-    ABSOLUTE time so disjoint-recording wall-clock gaps are respected: the
-    units NWB frames are contiguous across an excluded gap, so a frame-space
-    dedup would wrongly drop a chunk-1-last / chunk-2-first pair that is
-    seconds apart in real time.
-
-    Parameters
-    ----------
-    abs_times : dict[int, np.ndarray]
-        ``{unit_id: absolute spike times (seconds)}`` for every original
-        unit (as read from the curated units NWB).
-    units_to_merge : list[list[int]]
-        Each inner list is a merge group's contributor unit ids; only
-        multi-contributor groups (``len > 1``) belong here -- the caller
-        filters the 1-element self-entries out.
-    timestamps : np.ndarray
-        The recording's (possibly gap-preserving) wall-clock timestamps.
-    fs : float
-        Sampling frequency of the recording.
-    delta_s : float
-        Coincidence window (seconds) for cross-unit duplicate removal.
-
-    Returns
-    -------
-    si.NumpySorting
-        Non-merged units keep their own abs times mapped to frames
-        (identical to ``numpysorting_from_abs_times`` / ``get_sorting``);
-        each merge group is abs-time-deduped with
-        ``_dedup_merged_spike_times`` (the SAME helper the
-        ``apply_merge=True`` staged path uses, so the previewed train is
-        identical to the stored one) and assigned a fresh
-        ``max(unit_ids) + 1`` id in ``units_to_merge`` order (matching SI
-        ``MergeUnitsSorting``'s id assignment).
-    """
-    import numpy as np
-    import spikeinterface as si
-
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _dedup_merged_spike_times,
-        _spike_times_to_frames,
-    )
-
-    n_samples = int(np.asarray(timestamps).size)
-    merged_members = {int(u) for g in units_to_merge for u in g}
-    units_dict: dict = {}
-    # Non-merged units: map their own absolute times to frames (the same
-    # mapping numpysorting_from_abs_times / get_sorting applies).
-    for uid, st in abs_times.items():
-        if int(uid) not in merged_members:
-            units_dict[int(uid)] = _spike_times_to_frames(
-                timestamps, np.asarray(st), n_samples, int(uid)
-            )
-    # Each merge group -> abs-time-deduped train mapped to frames, under a
-    # fresh ``max(unit_ids) + 1`` id (in units_to_merge order).
-    next_id = max(int(u) for u in abs_times) + 1
-    for contribs in units_to_merge:
-        deduped_abs = _dedup_merged_spike_times(
-            [np.asarray(abs_times[int(u)]) for u in contribs], delta_s
-        )
-        units_dict[next_id] = _spike_times_to_frames(
-            timestamps, deduped_abs, n_samples, next_id
-        )
-        next_id += 1
-    return si.NumpySorting.from_unit_dict([units_dict], sampling_frequency=fs)
 
 
 def _dedup_merged_spike_times_and_frames(times_list, frames_list, delta_s):
@@ -720,6 +486,30 @@ def read_sorting_statistics_spans(
     return [(int(a), int(b)) for a, b in values[STATISTICS_SPANS_FIELD]]
 
 
+def _add_sample_frame_column(nwbf, frame_trains):
+    """Write aligned ragged frames, including units whose trains are all empty.
+
+    Adding the typed column after unit rows avoids HDMF extending an empty
+    ndarray into a two-dimensional array while appending empty unit trains.
+    """
+    import numpy as np
+
+    nwbf.add_unit_column(
+        name=SPIKE_SAMPLE_INDEX_COLUMN,
+        description=(
+            "Sample indices into the sorted recording, aligned with absolute "
+            "spike_times for frame-based readback without the full timestamp vector."
+        ),
+        data=frame_trains,
+        index=True,
+    )
+    # HDMF correctly builds zero-length ragged rows from the list of trains;
+    # make its flattened target explicitly numeric even when every row is empty.
+    nwbf.units[SPIKE_SAMPLE_INDEX_COLUMN].target.transform(
+        lambda frames: np.asarray(frames, dtype=np.int64)
+    )
+
+
 def write_sorting_units_nwb(
     sorting,
     recording,
@@ -727,7 +517,7 @@ def write_sorting_units_nwb(
     obs_intervals=None,
     *,
     unit_metadata=None,
-    source_provenance=None,
+    source_provenance,
 ):
     """Write a fresh AnalysisNwbfile containing only the v2 Units table.
 
@@ -742,12 +532,17 @@ def write_sorting_units_nwb(
 
     Every unit row carries ``obs_intervals`` (the artifact-
     removed valid-time window the sort observed) and a
-    ``curation_label`` placeholder list (``["uncurated"]``), so
+    ``curation_label`` placeholder (``"uncurated"``), so
     external readers that grep for either column on a pre-curation
-    NWB find them. ``obs_intervals`` defaults to the recording's full
-    timestamp envelope when no artifact mask was applied
+    NWB find them. ``obs_intervals`` defaults to the recording's contiguous
+    observation windows when no artifact mask was applied
     (``obs_intervals=None``).
     """
+    from spyglass.spikesorting.v2._storage.provenance import (
+        validate_sorting_provenance,
+    )
+
+    validate_sorting_provenance(source_provenance)
     from spyglass.common.common_nwbfile import AnalysisNwbfile
 
     analysis_file_name = AnalysisNwbfile().create(
@@ -785,7 +580,7 @@ def _write_sorting_units_nwb_body(
     recording,
     obs_intervals,
     unit_metadata=None,
-    source_provenance=None,
+    source_provenance,
 ):
     """Fill the staged sort-units ``AnalysisNwbfile`` (no cleanup on failure).
 
@@ -796,12 +591,19 @@ def _write_sorting_units_nwb_body(
     ``unit_metadata`` (``{unit_id: {peak_amplitude_uv, peak_electrode_id,
     n_spikes, brain_region}}``) adds the matching per-unit columns -- the SAME
     values used for ``Sorting.Unit`` (computed once). ``source_provenance``
-    (from :mod:`._nwb_provenance`) is embedded as a scratch header so the file
+    (from :mod:`._storage.provenance`) is embedded as a scratch header so the file
     is interpretable without the DB.
     """
     import numpy as np
     import pynwb
 
+    from spyglass.spikesorting.v2._storage.provenance import (
+        SORTING_PROVENANCE,
+        build_provenance_table,
+        validate_sorting_provenance,
+    )
+
+    validate_sorting_provenance(source_provenance)
     from spyglass.common.common_nwbfile import AnalysisNwbfile
 
     analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
@@ -859,16 +661,6 @@ def _write_sorting_units_nwb_body(
                     "by CurationV2.insert_curation."
                 ),
             )
-            nwbf.add_unit_column(
-                name=SPIKE_SAMPLE_INDEX_COLUMN,
-                description=(
-                    "Sample indices into the sorted recording, one array per "
-                    "unit. Stored alongside absolute spike_times so Spyglass "
-                    "can reconstruct frame-based NumpySorting objects without "
-                    "reading the full recording timestamp vector."
-                ),
-                index=True,
-            )
             if unit_metadata is not None:
                 # Per-unit metadata mirroring Sorting.Unit (computed once),
                 # so an NWB-only reader has peak channel / amplitude / count /
@@ -885,14 +677,12 @@ def _write_sorting_units_nwb_body(
                     nwbf.add_unit_column(name=name, description=desc)
         for unit_id in sorting.unit_ids:
             unit_id = int(unit_id)
-            spike_indices = sample_indices_by_unit[unit_id]
             spike_times = spike_times_by_unit[unit_id]
             unit_kwargs = dict(
                 spike_times=spike_times,
                 id=unit_id,
                 obs_intervals=obs_intervals_arr,
                 curation_label="uncurated",
-                spike_sample_index=spike_indices,
             )
             if unit_metadata is not None:
                 meta = unit_metadata[unit_id]
@@ -903,6 +693,11 @@ def _write_sorting_units_nwb_body(
                     brain_region=str(meta["brain_region"] or ""),
                 )
             nwbf.add_unit(**unit_kwargs)
+        if len(sorting.unit_ids) > 0:
+            _add_sample_frame_column(
+                nwbf,
+                [sample_indices_by_unit[int(uid)] for uid in sorting.unit_ids],
+            )
         # pynwb leaves ``nwbf.units = None`` if no add_unit() was
         # called, so a zero-unit sort would crash on .object_id.
         # Initialize an empty Units table explicitly.
@@ -912,15 +707,9 @@ def _write_sorting_units_nwb_body(
                 description="Empty units table (sorter found zero units).",
             )
         units_object_id = nwbf.units.object_id
-        if source_provenance is not None:
-            from spyglass.spikesorting.v2._storage.provenance import (
-                SORTING_PROVENANCE,
-                build_provenance_table,
-            )
-
-            nwbf.add_scratch(
-                build_provenance_table(SORTING_PROVENANCE, source_provenance)
-            )
+        nwbf.add_scratch(
+            build_provenance_table(SORTING_PROVENANCE, source_provenance)
+        )
         io.write(nwbf)
 
     # The AnalysisNwbfile DB-row registration (.add) is deliberately
@@ -937,7 +726,7 @@ def write_curated_units_nwb(
     labels: dict,
     *,
     source_units_abs_path: str | None = None,
-    curation_header: dict | None = None,
+    curation_header: dict,
     merge_group_rows: list[dict] | None = None,
 ) -> tuple[str, str, str, dict]:
     """Write the curated-units NWB.
@@ -971,6 +760,11 @@ def write_curated_units_nwb(
     ``CurationV2.MergeGroup`` and is reconstructed by
     ``get_merged_sorting`` on demand.
     """
+    from spyglass.spikesorting.v2._storage.provenance import (
+        validate_curation_header,
+    )
+
+    validate_curation_header(curation_header)
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2.sorting import Sorting
 
@@ -1043,17 +837,14 @@ def write_curated_units_nwb(
 def _curated_obs_intervals(
     kept_uid, contribs, apply_merge, obs_intervals_by_uid
 ):
-    """Per-unit ``obs_intervals`` for one curated/kept unit, or ``None``.
+    """Per-unit ``obs_intervals`` for one curated/kept unit.
 
-    ``None`` when the source NWB carried no ``obs_intervals`` column (legacy).
     A merged unit (``apply_merge`` with >1 contributor) gets the INTERSECTION of
     its contributors' windows -- the conservative choice, so a unit is reported
     observed only where EVERY contributor was observed; in practice every unit of
     one sort shares the same window, so the intersection equals that shared
     window. A singleton / preview unit keeps its own window.
     """
-    if obs_intervals_by_uid is None:
-        return None
     from spyglass.spikesorting.v2._core.signal_math import (
         intersect_interval_sets,
     )
@@ -1075,7 +866,7 @@ def _write_curated_units_nwb_body(
     abs_times_by_uid,
     sample_indices_by_uid,
     obs_intervals_by_uid,
-    curation_header=None,
+    curation_header,
     merge_group_rows=None,
 ):
     """Fill the staged curated-units ``AnalysisNwbfile`` (no cleanup on error).
@@ -1083,19 +874,25 @@ def _write_curated_units_nwb_body(
     Separate from :func:`write_curated_units_nwb` so its staged-file cleanup-on-
     error wrapper stays a thin try/except. Returns ``(analysis_file_name,
     units_object_id, nwb_file_name, n_spikes_by_uid)``. ``obs_intervals_by_uid``
-    (``{unit_id: (n, 2) array}`` or ``None`` for a legacy source) carries the
+    (``{unit_id: (n, 2) array}``) carries the
     per-unit observation window forward for consumers that explicitly use
     valid observation time. SI quality metrics do not automatically use it.
     """
     import numpy as np
     import pynwb
 
+    from spyglass.spikesorting.v2._storage.provenance import (
+        validate_curation_header,
+    )
+
+    validate_curation_header(curation_header)
+    if sample_indices_by_uid is None or obs_intervals_by_uid is None:
+        raise ValueError(
+            "Curated v2 Units require sample indices and observation intervals."
+        )
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._core.enums import CurationLabel
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _MERGE_DEDUP_DELTA_MS,
-        _dedup_merged_spike_times,
-    )
+    from spyglass.spikesorting.v2._core.signal_math import _MERGE_DEDUP_DELTA_MS
 
     analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
 
@@ -1129,30 +926,16 @@ def _write_curated_units_nwb_body(
                     # spike). Uses the same dedup as the lazy
                     # get_merged_sorting, so the stored
                     # (apply_merge=True) train equals the previewed one.
-                    if sample_indices_by_uid is not None:
-                        spike_times, spike_indices = (
-                            _dedup_merged_spike_times_and_frames(
-                                [abs_times_by_uid[int(u)] for u in contribs],
-                                [
-                                    sample_indices_by_uid[int(u)]
-                                    for u in contribs
-                                ],
-                                _MERGE_DEDUP_DELTA_MS / 1000.0,
-                            )
-                        )
-                    else:
-                        spike_times = _dedup_merged_spike_times(
+                    spike_times, spike_indices = (
+                        _dedup_merged_spike_times_and_frames(
                             [abs_times_by_uid[int(u)] for u in contribs],
+                            [sample_indices_by_uid[int(u)] for u in contribs],
                             _MERGE_DEDUP_DELTA_MS / 1000.0,
                         )
-                        spike_indices = None
+                    )
                 else:
                     spike_times = abs_times_by_uid[int(kept_uid)]
-                    spike_indices = (
-                        None
-                        if sample_indices_by_uid is None
-                        else sample_indices_by_uid[int(kept_uid)]
-                    )
+                    spike_indices = sample_indices_by_uid[int(kept_uid)]
                 obs = _curated_obs_intervals(
                     kept_uid, contribs, apply_merge, obs_intervals_by_uid
                 )
@@ -1164,11 +947,7 @@ def _write_curated_units_nwb_body(
                 (
                     int(uid),
                     abs_times_by_uid[int(uid)],
-                    (
-                        None
-                        if sample_indices_by_uid is None
-                        else sample_indices_by_uid[int(uid)]
-                    ),
+                    sample_indices_by_uid[int(uid)],
                     _curated_obs_intervals(
                         uid, [uid], apply_merge, obs_intervals_by_uid
                     ),
@@ -1201,24 +980,6 @@ def _write_curated_units_nwb_body(
             # dtype from. Pre-declaring the column and passing labels
             # per ``add_unit`` makes pynwb fail dtype inference when
             # all labels happen to be empty (the no-labels case).
-            if sample_indices_by_uid is not None:
-                nwbf.add_unit_column(
-                    name=SPIKE_SAMPLE_INDEX_COLUMN,
-                    description=(
-                        "Sample indices into the curated recording, one array "
-                        "per unit. Mirrors spike_times for Spyglass frame-based "
-                        "readback without reading the full timestamp vector."
-                    ),
-                    index=True,
-                    # A concat member can retain units while every local
-                    # train is empty. HDMF needs an explicit numeric dtype
-                    # then; keep list-backed accumulation for nonempty data.
-                    data=(
-                        []
-                        if any(len(spec[2]) for spec in write_specs)
-                        else np.empty(0, dtype=np.int64)
-                    ),
-                )
             all_labels: list[list[str]] = []
             for unit_id, spike_times, spike_indices, obs in write_specs:
                 lbl_list = labels.get(int(unit_id), [])
@@ -1228,20 +989,12 @@ def _write_curated_units_nwb_body(
                     "spike_times": np.asarray(spike_times, dtype=np.float64),
                     "id": int(unit_id),
                 }
-                if sample_indices_by_uid is not None:
-                    unit_kwargs[SPIKE_SAMPLE_INDEX_COLUMN] = np.asarray(
-                        spike_indices, dtype=np.int64
-                    )
                 # Carry the per-unit observation window forward so a
                 # curated export retains its valid observation time. Consumers
                 # must explicitly use these intervals in duration calculations.
-                # Omitted only for a legacy source NWB that had no obs_intervals
-                # column (obs is None).
-                if obs is not None:
-                    unit_kwargs["obs_intervals"] = np.asarray(
-                        obs, dtype=np.float64
-                    )
+                unit_kwargs["obs_intervals"] = np.asarray(obs, dtype=np.float64)
                 nwbf.add_unit(**unit_kwargs)
+            _add_sample_frame_column(nwbf, [spec[2] for spec in write_specs])
             # Only add the column when at least one unit
             # carries a non-empty label list. pynwb's dtype
             # inference fails on an all-empty list-of-lists
@@ -1285,10 +1038,9 @@ def _write_curated_units_nwb_body(
             build_provenance_table,
         )
 
-        if curation_header is not None:
-            nwbf.add_scratch(
-                build_provenance_table(CURATION_PROVENANCE, curation_header)
-            )
+        nwbf.add_scratch(
+            build_provenance_table(CURATION_PROVENANCE, curation_header)
+        )
         contributors_by_kept: dict[int, list[int]] = defaultdict(list)
         for row in merge_group_rows or ():
             contributors_by_kept[int(row["unit_id"])].append(

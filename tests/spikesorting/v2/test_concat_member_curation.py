@@ -148,6 +148,13 @@ def test_member_rows_preserve_units_spikes_labels_and_wall_clock(
         read_units_abs_times_and_sample_indices,
         recording_timestamps,
     )
+    from spyglass.spikesorting.v2._storage.provenance import (
+        CURATION_PROVENANCE,
+        SORTING_PROVENANCE,
+        read_provenance_values,
+        validate_curation_header,
+        validate_sorting_provenance,
+    )
     from spyglass.spikesorting.v2.concat_member_curation import (
         ConcatMemberCuration,
     )
@@ -156,6 +163,7 @@ def test_member_rows_preserve_units_spikes_labels_and_wall_clock(
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
     )
+    from spyglass.spikesorting.v2.sorting import Sorting
 
     ctx = concat_member_curation
     curation_key = ctx["curation_key"]
@@ -165,8 +173,19 @@ def test_member_rows_preserve_units_spikes_labels_and_wall_clock(
 
     curated = CurationV2.get_sorting(curation_key)
     parent_labels = CurationV2._labels_by_unit(curation_key)
+    parent_uuid = str((CurationV2 & curation_key).fetch1("curation_uuid"))
     assert len(parent_labels) == 1
     expected_unit_ids = {int(unit_id) for unit_id in curated.unit_ids}
+
+    sorting_path = AnalysisNwbfile.get_abs_path(
+        (Sorting & ctx["sorting_key"]).fetch1("analysis_file_name")
+    )
+    source_header = read_provenance_values(sorting_path, SORTING_PROVENANCE)
+    validate_sorting_provenance(source_header)
+    assert source_header["recording_id"] is None
+    assert source_header["concat_recording_id"] == str(
+        ctx["concat_key"]["concat_recording_id"]
+    )
 
     snapshots = (
         ConcatenatedRecordingSelection.MemberSnapshot & ctx["concat_key"]
@@ -196,6 +215,10 @@ def test_member_rows_preserve_units_spikes_labels_and_wall_clock(
             member_counts[unit_id] += len(actual_frames)
 
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        header = read_provenance_values(abs_path, CURATION_PROVENANCE)
+        validate_curation_header(header)
+        assert header["curation_uuid"] == parent_uuid
+        assert header["member_index"] == int(row["member_index"])
         abs_times, sample_indices, _obs = (
             read_units_abs_times_and_sample_indices(abs_path)
         )

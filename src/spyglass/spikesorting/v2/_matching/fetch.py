@@ -324,7 +324,6 @@ def _member_match_files(curation_key: dict) -> dict:
         "units": SortingSelection.resolve_stored_units(
             (CurationV2 & curation_key).fetch1("analysis_file_name"),
             sorting_input.source,
-            sorting_input.abs_path,
         ),
         "statistics_spans": [
             [int(start), int(end)]
@@ -339,9 +338,7 @@ def _input_stored_units(curation_key: dict):
     For an input that extracts no bundle (a single-input selection): the
     curated units file stores each spike's sort frame
     (``spike_sample_index``), so the traces file is neither rebuilt nor
-    checksummed. Only a units file without stored frames (an older file)
-    needs the source recording's timestamps, which are then resolved as
-    ``CurationV2.get_sorting`` resolves them.
+    checksummed.
 
     Parameters
     ----------
@@ -353,10 +350,6 @@ def _input_stored_units(curation_key: dict):
     StoredUnits
         For :func:`._units_nwb.read_stored_units`.
     """
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._storage.units_nwb import (
-        units_nwb_stores_sample_indices,
-    )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -364,13 +357,5 @@ def _input_stored_units(curation_key: dict):
         {"sorting_id": curation_key["sorting_id"]}
     )
     units_file = (CurationV2 & curation_key).fetch1("analysis_file_name")
-    traces_abs_path = (
-        None
-        if units_nwb_stores_sample_indices(
-            AnalysisNwbfile.get_abs_path(units_file)
-        )
-        else SortingSelection.ensure_effective_traces(source.traces)
-    )
-    return SortingSelection.resolve_stored_units(
-        units_file, source, traces_abs_path
-    )
+
+    return SortingSelection.resolve_stored_units(units_file, source)

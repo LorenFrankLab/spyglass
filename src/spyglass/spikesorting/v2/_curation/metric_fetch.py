@@ -137,20 +137,15 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
             caller="CurationEvaluation.make_fetch",
         )
 
-    # Units readback: stored sample frames, or (older units files) the
-    # absolute spike times mapped onto the LINEAGE source row's
-    # timestamps, whose file is resolved here so compute reads it
-    # without the DB.
+    # Units readback uses stored sample frames and the lineage source rate.
     raw_units = SortingSelection.resolve_stored_units(
         (Sorting & sorting_key).fetch1("analysis_file_name"),
         effective_source,
-        traces_abs_path,
     )
     raw_n_units = int((Sorting & sorting_key).fetch1("n_units"))
     curated_units = SortingSelection.resolve_stored_units(
         (CurationV2 & curation_key).fetch1("analysis_file_name"),
         effective_source,
-        traces_abs_path,
     )
     expected_unit_ids = sorted(
         int(u) for u in (CurationV2.Unit & curation_key).fetch("unit_id")

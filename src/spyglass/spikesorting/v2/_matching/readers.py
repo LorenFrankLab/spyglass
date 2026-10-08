@@ -615,14 +615,6 @@ def get_member_spike_times(table, tracked_unit_key) -> "pd.DataFrame":
         if source_kind == "recording":
             times_per_recording = [abs_times[unit_id]]
         else:
-            if sample_indices is None:
-                raise ValueError(
-                    "TrackedUnit.get_member_spike_times: the curated "
-                    f"concatenation units NWB of {curation_key} has no "
-                    "spike_sample_index column, so its synthetic times "
-                    "cannot be mapped back to member frames. Recreate the "
-                    "curation with CurationV2.insert_curation."
-                )
             local_frames = split_spike_frames_by_spans(
                 {unit_id: sample_indices[unit_id]},
                 [

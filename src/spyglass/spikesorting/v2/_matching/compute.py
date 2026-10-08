@@ -256,7 +256,7 @@ def unit_match_provenance_tables(
     matcher_backend,
     matcher_backend_version,
     spikeinterface_version,
-    matcher_provenance=None,
+    matcher_provenance,
 ) -> list:
     """Provenance tables that make a run's pairs NWB self-describing.
 
@@ -276,7 +276,7 @@ def unit_match_provenance_tables(
         The ``MatcherParameters`` row.
     matcher_backend, matcher_backend_version, spikeinterface_version : str
         Producer provenance (``matcher_backend_version`` may be None).
-    matcher_provenance : dict or None
+    matcher_provenance : dict
         Both producer class names, versions and optional asset fingerprints.
 
     Returns
@@ -294,6 +294,11 @@ def unit_match_provenance_tables(
         build_provenance_table,
     )
 
+    from spyglass.spikesorting.v2._matching.provenance import (
+        validate_matcher_provenance,
+    )
+
+    validate_matcher_provenance(matcher_provenance)
     return [
         build_provenance_table(
             UNITMATCH_PROVENANCE,

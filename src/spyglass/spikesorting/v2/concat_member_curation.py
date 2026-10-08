@@ -23,7 +23,6 @@ from spyglass.spikesorting.v2._storage.units_nwb import (
     _write_curated_units_nwb_body,
     read_series_timestamps,
     read_units_spike_sample_indices,
-    recording_timestamps,
     sorting_from_units_nwb,
 )
 from spyglass.spikesorting.v2.curation import CurationV2
@@ -423,6 +422,7 @@ class ConcatMemberCuration(
             curation_header={
                 "sorting_id": str(curation_row["sorting_id"]),
                 "curation_id": int(curation_row["curation_id"]),
+                "curation_uuid": str(curation_row["curation_uuid"]),
                 "parent_curation_id": int(curation_row["parent_curation_id"]),
                 "curation_source": str(curation_row["curation_source"]),
                 "merges_applied": bool(curation_row["merges_applied"]),
@@ -454,13 +454,6 @@ class ConcatMemberCuration(
         here if staging fails.
         """
         sample_indices = read_units_spike_sample_indices(curated_abs_path)
-        if sample_indices is None:
-            raise ValueError(
-                "ConcatMemberCuration.make: the curated concatenated Units "
-                "table has no spike_sample_index sidecar, so its synthetic "
-                "times cannot be mapped safely back to member frames. Recreate "
-                "the curation with CurationV2.insert_curation."
-            )
 
         # This performs the conservation assertion across ALL members before
         # selecting the requested one. Do not replace it with a one-member
@@ -691,7 +684,6 @@ class ConcatMemberCuration(
         return sorting_from_units_nwb(
             AnalysisNwbfile.get_abs_path(row["analysis_file_name"]),
             float(recording_row["sampling_frequency"]),
-            lambda: recording_timestamps(recording_row),
         )
 
     @classmethod

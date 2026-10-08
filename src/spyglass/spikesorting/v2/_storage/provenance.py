@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Mapping
+from numbers import Integral
 
 import numpy as np
 import pynwb
@@ -119,6 +121,161 @@ _NUMPY_FOR_PYTYPE = {
     float: np.float64,
     bool: np.bool_,
 }
+
+
+def _require_provenance_fields(values, fields, *, context):
+    if not isinstance(values, Mapping):
+        raise ValueError(f"{context} must be a mapping with required fields.")
+    missing = sorted(set(fields) - values.keys())
+    if missing:
+        raise ValueError(f"{context} is missing required fields: {missing}.")
+
+
+def _require_provenance_uuid(value, *, field, context):
+    try:
+        uuid.UUID(str(value))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError(f"{context}.{field} must be a UUID.") from exc
+
+
+def validate_sorting_provenance(values: Mapping) -> None:
+    """Require a self-describing current sort header before staging a file.
+
+    Unknown external package versions and an absent artifact-detection pass
+    remain explicit null values. The sort and exactly one recording source
+    always have concrete identities.
+    """
+    context = "sorting provenance"
+    _require_provenance_fields(
+        values,
+        (
+            "sorting_id",
+            "recording_id",
+            "concat_recording_id",
+            "sorter",
+            "sorter_params_name",
+            "sorter_params",
+            "execution_params",
+            "artifact_detection_id",
+            "display_waveform_params_name",
+            "effective_random_seed",
+            "spikeinterface_version",
+            "sorter_version",
+            "analyzer_spikeinterface_version",
+            "statistics_spans",
+        ),
+        context=context,
+    )
+    _require_provenance_uuid(
+        values["sorting_id"], field="sorting_id", context=context
+    )
+    sources = [
+        name
+        for name in ("recording_id", "concat_recording_id")
+        if values[name] is not None
+    ]
+    if len(sources) != 1:
+        raise ValueError(f"{context} requires exactly one recording source.")
+    _require_provenance_uuid(
+        values[sources[0]], field=sources[0], context=context
+    )
+    if values["artifact_detection_id"] is not None:
+        _require_provenance_uuid(
+            values["artifact_detection_id"],
+            field="artifact_detection_id",
+            context=context,
+        )
+    for field in (
+        "sorter",
+        "sorter_params_name",
+        "display_waveform_params_name",
+        "spikeinterface_version",
+        "analyzer_spikeinterface_version",
+    ):
+        if not isinstance(values[field], str) or not values[field].strip():
+            raise ValueError(f"{context}.{field} must be a nonempty string.")
+    for field in ("sorter_params", "execution_params"):
+        if not isinstance(values[field], Mapping):
+            raise ValueError(f"{context}.{field} must be a mapping.")
+    sorter_version = values["sorter_version"]
+    if sorter_version is not None and (
+        not isinstance(sorter_version, str) or not sorter_version.strip()
+    ):
+        raise ValueError(f"{context}.sorter_version must be a string or None.")
+    seed = values["effective_random_seed"]
+    if seed is not None and (
+        isinstance(seed, bool) or not isinstance(seed, Integral)
+    ):
+        raise ValueError(
+            f"{context}.effective_random_seed must be an integer or None."
+        )
+    if not isinstance(values["statistics_spans"], (list, tuple, np.ndarray)):
+        raise ValueError(
+            f"{context}.statistics_spans must contain frame intervals."
+        )
+    spans = values["statistics_spans"]
+    if isinstance(spans, np.ndarray) and spans.ndim == 0:
+        raise ValueError(
+            f"{context}.statistics_spans must contain frame intervals."
+        )
+    previous_end = 0
+    for span in spans:
+        if (
+            not isinstance(span, (list, tuple, np.ndarray))
+            or (isinstance(span, np.ndarray) and span.ndim != 1)
+            or len(span) != 2
+            or any(
+                isinstance(value, bool) or not isinstance(value, Integral)
+                for value in span
+            )
+            or span[0] < previous_end
+            or span[1] <= span[0]
+        ):
+            raise ValueError(
+                f"{context}.statistics_spans requires ordered, nonoverlapping integer frame intervals."
+            )
+        previous_end = span[1]
+
+
+def validate_curation_header(values: Mapping) -> None:
+    """Require the curation generation on regular and member-unit exports."""
+    context = "curation provenance"
+    _require_provenance_fields(
+        values,
+        (
+            "sorting_id",
+            "curation_id",
+            "curation_uuid",
+            "parent_curation_id",
+            "curation_source",
+            "merges_applied",
+            "description",
+        ),
+        context=context,
+    )
+    for field in ("sorting_id", "curation_uuid"):
+        _require_provenance_uuid(values[field], field=field, context=context)
+    for field, minimum in (("curation_id", 0), ("parent_curation_id", -1)):
+        value = values[field]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, Integral)
+            or value < minimum
+        ):
+            raise ValueError(
+                f"{context}.{field} must be an integer >= {minimum}."
+            )
+    if (
+        not isinstance(values["curation_source"], str)
+        or not values["curation_source"].strip()
+    ):
+        raise ValueError(
+            f"{context}.curation_source must be a nonempty string."
+        )
+    if not isinstance(values["merges_applied"], (bool, np.bool_)):
+        raise ValueError(f"{context}.merges_applied must be a boolean.")
+    if not isinstance(values["description"], str):
+        raise ValueError(f"{context}.description must be a string.")
 
 
 def _json_default(value):
