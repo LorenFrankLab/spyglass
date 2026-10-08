@@ -94,7 +94,7 @@ def install_fixture_pairer(
 
     By default bundle extraction is stubbed and the matcher emits every listed
     ``(unit_a, unit_b)`` pair. With ``read_bundles=True`` the real
-    ``extract_unitmatch_bundle`` runs, the matcher reads each session's bundle
+    shared waveform extraction runs, the matcher reads each session's bundle
     ``cluster_group.tsv`` (appending its unit ids to ``seen_unit_ids``), and it
     emits only the listed pairs whose units are both in the bundles -- so the
     pairs follow what the bundles contain, as UnitMatchPy's loader does.
@@ -106,10 +106,12 @@ def install_fixture_pairer(
     """
     from pydantic import BaseModel, ConfigDict, Field
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend
     from spyglass.spikesorting.v2 import matcher_protocol as mp
-    from spyglass.spikesorting.v2.matcher_protocol import MatchPair
-    from spyglass.spikesorting.v2.matcher_protocol import register_matcher
+    from spyglass.spikesorting.v2._waveform_bundles import WaveformInputPreparer
+    from spyglass.spikesorting.v2.matcher_protocol import (
+        MatchPair,
+        register_matcher,
+    )
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
 
     class _FixtureMatcherParams(BaseModel):
@@ -181,14 +183,19 @@ def install_fixture_pairer(
             seen_unit_ids.append([int(u) for u in sorting.get_unit_ids()])
         return []
 
+    preparer = WaveformInputPreparer()
     if not read_bundles:
-        monkeypatch.setattr(
-            _unitmatch_backend, "extract_unitmatch_bundle", _noop_extract
-        )
+        monkeypatch.setattr(preparer, "extract", _noop_extract)
 
-    saved = (dict(mp._MATCHER_REGISTRY), dict(mp._SCHEMA_REGISTRY))
-    register_matcher(_FixturePairer(), _FixtureMatcherParams)
+    saved = (
+        dict(mp._MATCHER_REGISTRY),
+        dict(mp._SCHEMA_REGISTRY),
+        dict(mp._PREPARER_REGISTRY),
+    )
     try:
+        register_matcher(
+            _FixturePairer(), _FixtureMatcherParams, input_preparer=preparer
+        )
         MatcherParameters().insert1(
             {
                 "matcher_params_name": matcher_params_name,
@@ -207,8 +214,10 @@ def restore_matcher_registry(saved_registry) -> None:
     """Undo a test-only matcher registration."""
     from spyglass.spikesorting.v2 import matcher_protocol as mp
 
-    saved_matchers, saved_schemas = saved_registry
+    saved_matchers, saved_schemas, saved_preparers = saved_registry
     mp._MATCHER_REGISTRY.clear()
     mp._MATCHER_REGISTRY.update(saved_matchers)
     mp._SCHEMA_REGISTRY.clear()
     mp._SCHEMA_REGISTRY.update(saved_schemas)
+    mp._PREPARER_REGISTRY.clear()
+    mp._PREPARER_REGISTRY.update(saved_preparers)

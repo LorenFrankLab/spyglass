@@ -734,8 +734,8 @@ def test_concat_inputs_match_and_track_in_chronological_order(
     day 1, and the tracked unit resolves to all four original recordings."""
     from spyglass.common import Session
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _unitmatch_backend
     from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.matcher_protocol import get_input_preparer
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
         TrackedUnit,
@@ -772,7 +772,7 @@ def test_concat_inputs_match_and_track_in_chronological_order(
         fed=matcher_fed,
     )
     monkeypatch.setattr(
-        _unitmatch_backend, "extract_unitmatch_bundle", _record_extraction
+        get_input_preparer("daily_concat_pairer"), "extract", _record_extraction
     )
     pk = None
     try:
@@ -2171,7 +2171,6 @@ def test_daily_bundle_uses_corrected_parent_and_valid_support(
     from spikeinterface.core import analyzer_extension_core
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _unitmatch_backend
     from spyglass.spikesorting.v2._artifact_intervals import (
         read_recording_artifact_valid_times,
     )
@@ -2180,6 +2179,7 @@ def test_daily_bundle_uses_corrected_parent_and_valid_support(
         read_persisted_traces,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.matcher_protocol import get_input_preparer
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from spyglass.spikesorting.v2.unit_matching import (
@@ -2198,7 +2198,6 @@ def test_daily_bundle_uses_corrected_parent_and_valid_support(
         ).fetch1("end_sample")
     )
 
-    real_extract = _unitmatch_backend.extract_unitmatch_bundle
     extracted = {}
 
     def _keep_bundle(session_dir, recording, sorting, **kwargs):
@@ -2227,9 +2226,9 @@ def test_daily_bundle_uses_corrected_parent_and_valid_support(
         pairs=[],
         read_bundles=True,
     )
-    monkeypatch.setattr(
-        _unitmatch_backend, "extract_unitmatch_bundle", _keep_bundle
-    )
+    preparer = get_input_preparer("span_edge_pairer")
+    real_extract = preparer.extract
+    monkeypatch.setattr(preparer, "extract", _keep_bundle)
     monkeypatch.setattr(
         analyzer_extension_core, "random_spikes_selection", _record_draw
     )
