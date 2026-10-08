@@ -24,6 +24,71 @@ pytest --cov=spyglass --cov-report term-missing
 pytest --no-teardown -v
 ```
 
+### Spike sorting v2
+
+Use the isolated helper tier for a dependable database-free development run:
+
+```bash
+pytest tests/spikesorting/v2 --v2-tier unit --no-cov \
+  -m "not slow and not very_slow and not regenerate"
+```
+
+This command starts no Docker server, fetches no datasets, and rejects
+DataJoint connections and queries during collection and execution. Small
+synthetic recordings and temporary files are allowed. Drop the speed filter to
+run all isolated helper tests. On macOS, add `-p no:xvfb` if pytest-xvfb is
+installed; its virtual display requires Linux's Xvfb executable.
+
+Every collected v2 test has exactly one effective tier:
+
+| Tier | Dependency and behavior |
+| --- | --- |
+| `unit` | Isolated helpers; no database, downloaded datasets, browser, or native sorting run. |
+| `db_unit` | Database metadata, lookups and schema checks without v2 stage computation. |
+| `stage` | A materialized stage, native sorter, browser, or local server; database access when needed. |
+| `pipeline` | The complete sorting chain or session orchestration, including fixtures that already built it. |
+| `regression_gate` | Heavy scientific fixtures, memory, lifecycle acceptance and regeneration gates. |
+
+Run another tier with `--v2-tier stage`, for example. These dependency tiers are
+independent of speed markers; database tiers use the normal Docker/database
+setup. The CI workload shard named `unit` includes light database work to
+balance runtime. It is **not** the isolated `unit` tier. CI continues to run all
+three workload shards, with matching and browser extras in separate lanes.
+
+Architecture checks require canonical owner imports and docstring-only private
+package initializers. Current recording dictionary and pickle round trips must
+preserve independently expected traces and timestamps; library-version adapters
+for SpikeInterface and DataJoint remain separately tested. See the
+[architecture map](../docs/src/ForDevelopers/SpikeSortingV2Architecture.md).
+
+The motion acceptance manifests pin benchmark runner/helper files. The
+canonical import migration preserves their scientific AST and refreshes hashes
+that were already stale. A pin's `git_commit` identifies the checkout base;
+`files` identifies exact working-tree bytes, including uncommitted edits. The
+original `279a520` reference remains historical provenance. The refresh changes
+no seeds, thresholds or gates and provides no new acceptance run or evidence
+that historical gates pass the current harness.
+
+Reviewed module defaults, function overrides and fixture minimums live in
+[`spikesorting/v2/test_tiers.json`](spikesorting/v2/test_tiers.json). Collection
+checks assignments against pytest's resolved fixture graph, including fixture
+overrides. Adding a new unclassified module or a database-dependent fixture
+fails collection. Add its assignment, or declare an explicit tier on a new
+module/test. A test added to an existing module inherits its reviewed default;
+if it introduces a higher-tier fixture, collection fails until its tier is
+updated. Named overrides use `ClassName::test_name` for class methods and omit
+parameter IDs. Use an override when lowering a module default for a pure test.
+
+Lint rules live in `pyproject.toml` and are shared by local pre-commit and CI.
+The initial type-checking gate covers pipeline value types, recording value
+types and the matcher protocol:
+
+```bash
+python -m pip install ruff==0.14.13 mypy==2.3.1
+ruff check .
+mypy --config-file=pyproject.toml
+```
+
 ______________________________________________________________________
 
 ## Test Markers
@@ -82,8 +147,11 @@ ______________________________________________________________________
 
 ## Fixture System
 
-The test suite uses session-scoped fixtures for efficiency. All fixtures are
-defined in `tests/conftest.py`.
+The test suite uses session-scoped fixtures for expensive shared setup and
+function-scoped fixtures for mutable state. Repository fixtures live in
+`tests/conftest.py`; domain and suite fixtures live in their nearest
+`conftest.py`, including `tests/spikesorting/v2/conftest.py` and
+`tests/spikesorting/v2/single_session/conftest.py`.
 
 ### Core Data Fixtures
 
@@ -129,6 +197,8 @@ maintaining coverage.
 2. **Spike Sorting External Calls**
 
     - Mocks: Spikeinterface operations, detector computations
+    - V2 tests isolate external boundaries explicitly; pipeline, persistence,
+        transaction and browser tests exercise real operations where relevant.
 
 ### Using Mocked Fixtures
 
@@ -184,7 +254,7 @@ To facilitate headless testing of various Qt-based tools as well as Tensorflow,
 `pyproject.toml` includes environment variables:
 
 - `QT_QPA_PLATFORM`: Set to `offscreen` to prevent the need for a display
-- `TF_ENABLE_ONEDNN_OPTS`: Set to `1` to enable Tensorflow optimizations
+- `TF_ENABLE_ONEDNN_OPTS`: Set to `0` to disable approximate Tensorflow operations
 - `TF_CPP_MIN_LOG_LEVEL`: Set to `2` to suppress Tensorflow warnings
 
 ______________________________________________________________________

@@ -11,7 +11,7 @@ the [Quickstart](./SpikeSortingV2_Quickstart.md), the full
 
 - **Supported:** the names listed on this page, imported from the paths shown,
     and the public (no leading underscore) methods of the listed table classes.
-- **Internal:** every module whose name starts with an underscore
+- **Internal:** underscore-prefixed packages and their submodules
     (`spyglass.spikesorting.v2._*`). These carry no stability guarantee and may
     change without notice; import their supported names from the public paths
     below (for example, the `pipeline` facade re-exports the orchestration
@@ -20,6 +20,10 @@ the [Quickstart](./SpikeSortingV2_Quickstart.md), the full
     classes in the table modules: they carry data between a table's
     `make_fetch`, `make_compute`, and `make_insert` steps and are not called
     directly.
+    Implementations live in private domain packages directly under `v2`, such
+    as `_recording`, `_sorting`, and `_review`, with short module names inside
+    each package. Parameter models live under `_params`; see the
+    [developer architecture map](../ForDevelopers/SpikeSortingV2Architecture.md).
 - **Where to start:** most work needs only the package root, the `pipeline`
     facade, and the curation/review handles. Reach for the table classes when
     you need to query results or compose a stage by hand.
@@ -132,7 +136,7 @@ two reference classes without importing the annotation tables.
 | `select_units_for_analysis`                                           | `spyglass.spikesorting.v2.pipeline`        | The supported handoff: apply a label policy to a curation and build the `SortedSpikesGroup` downstream analyses read. Returns a `UnitSelectionReceipt`. |
 | `UnitSelectionReceipt`, `SelectedGroup`, `V2_UNIT_SELECTION_POLICIES` | `spyglass.spikesorting.v2.pipeline`        | The handoff receipt (`describe`, `fetch_spike_data`, `group_key`), one created group, and the shipped policies.                                         |
 | `SpikeSortingOutput`                                                  | `spyglass.spikesorting.spikesorting_merge` | The merge table v2 curations register on: `get_spike_times`, `get_recording`, `get_sorting`, `get_unit_brain_regions`, ...                              |
-| `get_spike_sorting_v2_merge_ids`                                      | `spyglass.spikesorting.v2.utils`           | Resolve the merge ids of v2 curations matching a restriction.                                                                                           |
+| `get_spike_sorting_v2_merge_ids`                                      | `spyglass.spikesorting.v2.curation_api`     | Resolve the merge ids of v2 curations matching a restriction.                                                                                           |
 
 ## Other helpers
 
@@ -169,6 +173,6 @@ with `attempt_all` instead. Parameter tables provide `insert_default()`. See
 artifact-detection tables; `SortingSelection` resolves it for you, so user code
 does not need it.
 
-The remaining public names in the table modules and in `utils` -- insert guards,
+The remaining public names in the table modules -- insert guards,
 integrity audits, and helpers the tables call while computing -- support the
 tables themselves and are not entry points.

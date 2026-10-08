@@ -806,8 +806,6 @@ child = save_manual_curation(
 `FigPackCuration.save_curation_from_uri(uri, parent_curation_key)` verifies the
 figure's embedded `curation_uuid` before writing a child; identity-less figures
 fail closed.
-`import_legacy_figpack_curation(..., asserted_parent=..., confirm_unverified_identity=True)`
-is only for a parent the operator verified independently.
 
 #### Metric and rule semantics
 
@@ -824,7 +822,7 @@ is only for a parent the operator verified independently.
     it leaves on purpose): `error` raises, `fail` applies the rule's label, and
     `pass` leaves the unit unlabelled by that rule. These are Spyglass
     semantics, not SI's `nan_policy`. The expected-NaN conditions per column are
-    in `expected_missing_units` (`spyglass.spikesorting.v2._metric_curation`):
+    in `expected_missing_units` (`spyglass.spikesorting.v2._curation.metrics`):
     `nn_isolation` / `nn_noise_overlap` below `nn_advanced`'s `min_spikes` or
     `min_fr`; `presence_ratio` for a recording shorter than one bin or a unit
     with no spikes; `amplitude_cutoff` below
@@ -1581,9 +1579,6 @@ Prepared files live through inference and are then removed, including on failure
 and must validate the layout/version it consumes. The shared preparer declares
 `split_half_waveforms` version 1, which UnitMatch requires together with geometry.
 Other preparers can declare feature or spike-train layouts and omit geometry.
-The original positional constructor and the `waveform_dir` /
-`channel_positions_path` attributes remain compatibility aliases for
-`bundle_dir` / `geometry_path`.
 Omitting `input_preparer` uses the shared dense split-half waveform layout, which
 requires SpikeInterface and NumPy but does not import UnitMatchPy. Supply a
 preparer when a backend needs another layout. Register a distinct matcher name
@@ -1846,7 +1841,7 @@ unsupported; Phy export is for inspection only.
 | Curation summary (the curated result)           | `CurationV2.summarize_curation(auto_summary.auto_labeled_curation.as_key())` (`auto_summary.root_curation.as_key()` inspects the uncurated root)          |
 | Unit-level plots / exports of an exact curation | `ssviz.plot_waveforms(curation, unit_ids=[...])`, `ssviz.export_to_phy(curation, folder)`                                                                 |
 | Analyzer/debug internals                        | `Sorting().get_analyzer({"sorting_id": run_summary["sorting_id"]})` (raw sort); `open_curation_analyzer(curation, recipe)` for a disk-backed working copy |
-| v2 merge ids for a restriction                  | `get_spike_sorting_v2_merge_ids(restriction)` (`spyglass.spikesorting.v2.utils`)                                                                          |
+| v2 merge ids for a restriction                  | `get_spike_sorting_v2_merge_ids(restriction)` (`spyglass.spikesorting.v2.curation_api`)                                                                    |
 
 `SpikeSortingOutput.get_restricted_merge_ids` includes v2 by default. With an
 explicit `sources=` list the v2 resolver is strict: an unknown restriction key

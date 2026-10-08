@@ -615,7 +615,7 @@ for metric definitions, bin validity, and decoder restrictions.
     used a bare UUID string). Use the helper instead of string-munging:
 
     ```python
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2._artifacts.naming import (
         artifact_detection_interval_list_name,
         parse_artifact_detection_interval_list_name,
     )

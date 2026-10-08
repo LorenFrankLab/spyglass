@@ -104,6 +104,7 @@ nav:
     - Classes: ForDevelopers/Classes.md
     - Understanding a Schema: ForDevelopers/Schema.md
     - Custom Pipelines: ForDevelopers/CustomPipelines.md
+    - Spike Sorting v2 Architecture: ForDevelopers/SpikeSortingV2Architecture.md
     - Using NWB: ForDevelopers/UsingNWB.md
     - File Backends: ForDevelopers/FileBackends.md
     - Ingestion Mapping: ForDevelopers/ingestion_mapping.md
