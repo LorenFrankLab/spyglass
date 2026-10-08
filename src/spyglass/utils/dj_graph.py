@@ -321,7 +321,9 @@ class AbstractGraph(ABC):
             one, else a derived table.
         """
         if all(isinstance(r, str) for r in restr_list):
-            return make_condition(ft, list(restr_list), set())
+            # Joined directly: `make_condition` doubles each `%`, and using the
+            # result as a restriction doubles it again, so `a%b` matches nothing
+            return "(" + ") OR (".join(restr_list) + ")"
         return AbstractGraph._coerce_to_condition(ft, ft & restr_list)
 
     def _get_restr_list(self, table):
@@ -676,8 +678,9 @@ class AbstractGraph(ABC):
                 # 0.1 != its own decimal literal. `Decimal` is not a `Real`
                 if isinstance(value, Real) and not isinstance(value, Integral):
                     return True
-                # `prep_value` escapes `%` and `\` in a string, not `"`
-                if isinstance(value, str) and '"' in value:
+                # `prep_value` leaves `"` unescaped, and doubles `%` where a
+                # later use as a restriction doubles it again
+                if isinstance(value, str) and ('"' in value or "%" in value):
                     return True
                 if isinstance(value, (bytes, bytearray)):
                     return True  # rendered as a python repr, not SQL

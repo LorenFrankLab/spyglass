@@ -485,6 +485,8 @@ def test_flatten_respects_row_cap(RestrGraph, graph_tables):
         ([{"a": 0.1}], True, "float literal need not compare equal"),
         ([{"a": 1}, {"a": 2.5}], True, "float in a later key"),
         ([{"a": 'has"quote'}], True, "double quote ends the literal early"),
+        ([{"a": "50%"}], True, "percent is escaped twice over"),
+        ([{"a": 1}, {"a": "a%b"}], True, "percent in a later key"),
         ([{"a": b"bytes"}], True, "bytes render as a python repr"),
         ([{"a": True}], False, "bools are integral"),
         ([{"a": None}], False, "None becomes IS NULL"),
@@ -504,10 +506,11 @@ def test_keys_unsafe_to_literalize(AbstractGraph, keys, expect, msg):
 def test_flatten_keeps_unsafe_string_relational(
     RestrGraph, AbstractGraph, quoted_key_tables
 ):
-    """A key holding a double quote must not be restated as a literal.
+    """A key holding a `"` or a `%` must not be restated as a literal.
 
-    `prep_value` escapes `%` and `\\` but not `"`, so the literal ends early
-    and the condition no longer parses.
+    `prep_value` leaves `"` unescaped, so the literal ends early and the
+    condition no longer parses; it doubles `%`, which a later use as a
+    restriction doubles again, so the literal stops matching.
     """
     parent = quoted_key_tables["DqParent"]
     child = quoted_key_tables["DqChild"]
@@ -533,7 +536,7 @@ def test_flatten_keeps_unsafe_string_relational(
         got, str
     ), f"Unsafe key was inlined as a literal: {got}"
     assert (
-        len(graph._get_ft(parent.full_table_name, with_restr=True)) == 2
+        len(graph._get_ft(parent.full_table_name, with_restr=True)) == 3
     ), "Declining to flatten changed which rows the cascade reached."
 
     assert_cascade_parity(AbstractGraph, build, "quoted key")
@@ -595,6 +598,27 @@ def test_merged_string_restrs_stay_strings(RestrGraph, graph_tables):
 
     assert isinstance(got, str), f"Union of conditions nested, got {type(got)}"
     assert len(Parent & got) == 2, "Union of conditions lost rows."
+
+
+def test_merged_restrs_keep_percent(RestrGraph, quoted_key_tables):
+    """A `%` in a merged condition must survive as one `%`.
+
+    The merged string is itself used as a restriction, so combining with
+    `make_condition` would double the `%` a second time and the row would stop
+    matching.
+    """
+    Parent = quoted_key_tables["DqParent"]
+    graph = RestrGraph(seed_table=Parent, verbose=False)
+
+    graph._set_restr(Parent.full_table_name, "dq_name = 'has%pct'")
+    graph._set_restr(Parent.full_table_name, "dq_name = 'plain'")
+    got = graph._get_restr(Parent.full_table_name)
+
+    assert "%%" not in got, f"Percent escaped inside the merged union: {got}"
+    assert set((Parent & got).fetch("dq_name")) == {
+        "has%pct",
+        "plain",
+    }, f"Merged union lost the percent row: {got}"
 
 
 def test_union_drops_empty_restrs(RestrGraph, graph_tables):

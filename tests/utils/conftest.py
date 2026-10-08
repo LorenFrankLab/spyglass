@@ -402,11 +402,11 @@ def nullable_link_tables(SpyglassMixin, dj_conn):
 
 @pytest.fixture(scope="function")
 def quoted_key_tables(SpyglassMixin, dj_conn):
-    """Parent whose primary key holds a double quote, plus a child.
+    """Parent whose primary keys hold a `"` and a `%`, plus a child.
 
-    `prep_value` wraps a string in double quotes while escaping only `%` and
-    `\\`, so restating such a key as a literal condition ends the literal
-    early and the condition no longer parses. Cascading up from the child
+    Neither survives being restated as a literal condition: `prep_value`
+    leaves `"` unescaped, ending the literal early, and doubles `%` where a
+    later use as a restriction doubles it again. Cascading up from the child
     derives the parent's restriction as a query expression, which is where
     flattening would otherwise try to restate it.
     """
@@ -419,7 +419,7 @@ def quoted_key_tables(SpyglassMixin, dj_conn):
         ---
         dq_parent_attr: int
         """
-        contents = [("plain", 1), ('has"quote', 2)]
+        contents = [("plain", 1), ('has"quote', 2), ("has%pct", 3)]
 
     @schema
     class DqChild(SpyglassMixin, dj.Lookup):
@@ -429,7 +429,11 @@ def quoted_key_tables(SpyglassMixin, dj_conn):
         ---
         dq_child_attr: int
         """
-        contents = [("plain", 0, 10), ('has"quote', 1, 11)]
+        contents = [
+            ("plain", 0, 10),
+            ('has"quote', 1, 11),
+            ("has%pct", 2, 12),
+        ]
 
     yield {"DqParent": DqParent(), "DqChild": DqChild()}
 
