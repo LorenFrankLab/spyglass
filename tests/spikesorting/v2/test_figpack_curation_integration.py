@@ -408,10 +408,10 @@ def test_verified_save_refuses_reused_numeric_curation_id(
         clear_curations_for(planted_two_unit_sort)
 
 
-def test_identityless_legacy_import_has_one_explicit_escape(
+def test_identityless_figure_is_rejected_without_creating_a_child(
     planted_two_unit_sort, tmp_path
 ):
-    """Verified save fails closed; the separately named legacy API opts in."""
+    """An annotation-only figure cannot attach edits to an asserted parent."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     from spyglass.spikesorting.v2._review.annotations import (
@@ -428,27 +428,20 @@ def test_identityless_legacy_import_has_one_explicit_escape(
         unit_id = int(
             sorted((Sorting.Unit & planted_two_unit_sort).fetch("unit_id"))[0]
         )
-        bundle = tmp_path / "legacy-figure"
+        bundle = tmp_path / "identityless-figure"
         bundle.mkdir()
         (bundle / "annotations.json").write_text(
             json.dumps(
                 labels_and_merges_to_annotations({unit_id: ["noise"]}, [])
             )
         )
-        with pytest.raises(FigPackIdentityError):
-            FigPackCuration.save_curation_from_uri(str(bundle), root)
-        with pytest.raises(FigPackIdentityError):
-            FigPackCuration.import_legacy_figpack_curation(
-                str(bundle), asserted_parent=root
-            )
-        child = FigPackCuration.import_legacy_figpack_curation(
-            str(bundle),
-            asserted_parent=root,
-            confirm_unverified_identity=True,
-        )
-        assert (CurationV2.UnitLabel & child).fetch1("curation_label") == (
-            "noise"
-        )
+        before = len(CurationV2 & planted_two_unit_sort)
+        for allow_empty in (False, True):
+            with pytest.raises(FigPackIdentityError, match="no verifiable"):
+                FigPackCuration.save_curation_from_uri(
+                    str(bundle), root, allow_empty=allow_empty
+                )
+        assert len(CurationV2 & planted_two_unit_sort) == before
     finally:
         clear_curations_for(planted_two_unit_sort)
 

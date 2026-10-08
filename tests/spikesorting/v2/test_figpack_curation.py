@@ -25,6 +25,7 @@ from spyglass.spikesorting.v2._review.annotations import (
 )
 
 _SORTING_ID = "11111111-2222-3333-4444-555555555555"
+_CURATION_UUID = "22222222-3333-4444-5555-666666666666"
 
 
 @pytest.mark.parametrize("bad_id", [1.9, 1.0, True, False])
@@ -38,6 +39,7 @@ def _hash(**overrides):
     base = dict(
         sorting_id=_SORTING_ID,
         curation_id=0,
+        curation_uuid=_CURATION_UUID,
         label_options=["accept", "mua", "noise"],
         displayed_unit_properties=None,
         upload=False,
@@ -79,9 +81,29 @@ def test_config_hash_sensitive_to_every_field():
     )
 
 
-def test_review_config_packs_without_changing_expert_storage_shape():
-    """Review snapshots share the blob while legacy expert lists stay lists."""
-    assert pack_display_config(["x", "y"]) == ["x", "y"]
+def test_config_hash_requires_a_curation_generation():
+    with pytest.raises(TypeError, match="curation_uuid"):
+        figpack_config_hash(
+            sorting_id=_SORTING_ID,
+            curation_id=0,
+            label_options=[],
+            displayed_unit_properties=None,
+            upload=False,
+            ephemeral=False,
+        )
+    with pytest.raises(ValueError, match="curation_uuid"):
+        _hash(curation_uuid=None)
+
+
+@pytest.mark.parametrize("properties", [None, [], ["x", "y"]])
+def test_expert_config_uses_the_current_display_mapping(properties):
+    packed = pack_display_config(properties)
+    assert packed == {"properties": properties, "review": None}
+    assert unpack_display_config(packed) == (properties, None)
+
+
+def test_guided_config_uses_the_current_display_mapping():
+    """Review snapshots use the same shape and preserve their JSON content."""
     packed = pack_display_config(
         ["snr"], {"profile_hash": "abc", "spec": ("minimal", "none")}
     )
@@ -91,6 +113,24 @@ def test_review_config_packs_without_changing_expert_storage_shape():
         "profile_hash": "abc",
         "spec": ["minimal", "none"],
     }
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        None,
+        [],
+        ["snr"],
+        {"properties": None},
+        {"review": None},
+        {"properties": None, "review": {}, "extra": True},
+        {"properties": None, "review": []},
+        {"properties": ("snr",), "review": None},
+    ],
+)
+def test_display_config_rejects_noncurrent_or_malformed_storage(stored):
+    with pytest.raises(TypeError):
+        unpack_display_config(stored)
 
 
 def test_annotations_hash_is_logical_not_json_spacing():

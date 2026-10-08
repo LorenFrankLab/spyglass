@@ -201,9 +201,8 @@ def _load_figure_config(uri: str) -> dict:
     except FigPackRetrievalError as exc:
         raise FigPackIdentityError(
             "FigPack figure has no verifiable Spyglass curation identity. "
-            "Use import_legacy_figpack_curation(..., "
-            "confirm_unverified_identity=True) only after independently "
-            "confirming its parent."
+            "Rebuild the figure from a current curation before importing "
+            "its annotations."
         ) from exc
 
 
@@ -1152,67 +1151,3 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             allow_custom_labels=allow_custom_labels,
             label_policy=label_policy,
         )
-
-    @classmethod
-    def import_legacy_figpack_curation(
-        cls,
-        uri: str,
-        *,
-        asserted_parent: dict,
-        confirm_unverified_identity: bool = False,
-        **save_kwargs,
-    ) -> dict:
-        """Import an identity-less legacy figure behind an explicit escape.
-
-        This operation cannot prove which curation produced the figure. It is
-        intentionally separate from :meth:`save_curation_from_uri`; callers
-        must independently verify the asserted parent and opt in by name.
-        """
-        if confirm_unverified_identity is not True:
-            raise FigPackIdentityError(
-                "Legacy FigPack import cannot verify its parent. Set "
-                "confirm_unverified_identity=True only after independently "
-                "confirming asserted_parent."
-            )
-        try:
-            sorting_id = asserted_parent["sorting_id"]
-            parent_curation_id = int(asserted_parent["curation_id"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(
-                "asserted_parent must contain sorting_id and curation_id."
-            ) from exc
-        labels, merge_groups = cls.fetch_curation_from_uri(uri)
-        allow_empty = bool(save_kwargs.pop("allow_empty", False))
-        if not labels and not merge_groups and not allow_empty:
-            raise ValueError(
-                "Legacy FigPack figure contains no edits. Pass "
-                "allow_empty=True to record an explicit no-change review."
-            )
-        return CurationV2.save_manual_curation(
-            {"sorting_id": sorting_id},
-            parent_curation_id=parent_curation_id,
-            labels=labels,
-            merge_groups=merge_groups,
-            merge_action=save_kwargs.pop("merge_action", "preview"),
-            curation_source="figpack",
-            description=save_kwargs.pop(
-                "description", "legacy curation imported from FigPack"
-            ),
-            **save_kwargs,
-        )
-
-
-def import_legacy_figpack_curation(
-    uri: str,
-    *,
-    asserted_parent: dict,
-    confirm_unverified_identity: bool = False,
-    **save_kwargs,
-) -> dict:
-    """Module-level explicit escape hatch for identity-less figures."""
-    return FigPackCuration.import_legacy_figpack_curation(
-        uri,
-        asserted_parent=asserted_parent,
-        confirm_unverified_identity=confirm_unverified_identity,
-        **save_kwargs,
-    )

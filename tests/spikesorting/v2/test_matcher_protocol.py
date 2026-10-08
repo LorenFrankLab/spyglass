@@ -324,23 +324,22 @@ def test_degenerate_single_session_returns_empty(clean_registry):
     matcher = _dummy_matcher(mp)
     one = mp.SessionMatcherInput(
         curation_key={"sorting_id": "s", "curation_id": 0},
-        waveform_dir=Path("/tmp/x"),
-        channel_positions_path=Path("/tmp/x/channel_positions.npy"),
+        bundle_dir=Path("/tmp/x"),
+        geometry_path=Path("/tmp/x/channel_positions.npy"),
         recording_date=None,
     )
     assert matcher.match([one], {}) == []
 
 
-def test_bundle_metadata_preserves_legacy_constructors_and_attributes():
+def test_bundle_metadata_normalizes_paths_and_shared_layout_defaults():
     from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
 
     key = {"sorting_id": "s", "curation_id": 0}
     directory, geometry = Path("/tmp/bundle"), Path("/tmp/bundle/geometry.npy")
-    positional = SessionMatcherInput(key, directory, geometry, "2026-01-01")
-    legacy_keywords = SessionMatcherInput(
+    normalized = SessionMatcherInput(
         key,
-        waveform_dir=directory,
-        channel_positions_path=geometry,
+        str(directory),
+        geometry_path=str(geometry),
         recording_date="2026-01-01",
     )
     canonical = SessionMatcherInput(
@@ -351,11 +350,11 @@ def test_bundle_metadata_preserves_legacy_constructors_and_attributes():
         layout_version=1,
         recording_date="2026-01-01",
     )
-    assert positional == legacy_keywords == canonical
-    assert canonical.waveform_dir == canonical.bundle_dir == directory
-    assert (
-        canonical.channel_positions_path == canonical.geometry_path == geometry
-    )
+    assert normalized == canonical
+    assert isinstance(normalized.bundle_dir, Path)
+    assert isinstance(normalized.geometry_path, Path)
+    assert normalized.bundle_dir == directory
+    assert normalized.geometry_path == geometry
 
 
 def test_feature_bundle_can_omit_geometry_and_remains_a_frozen_dataclass():
@@ -369,28 +368,17 @@ def test_feature_bundle_can_omit_geometry_and_remains_a_frozen_dataclass():
         layout="features",
         layout_version=2,
     )
-    assert (
-        bundle.geometry_path is None and bundle.channel_positions_path is None
-    )
+    assert bundle.geometry_path is None
     assert replace(bundle, recording_date="2026-01-01").layout_version == 2
     with pytest.raises(FrozenInstanceError):
         bundle.bundle_dir = Path("/tmp/other")
 
 
-@pytest.mark.parametrize("field", ["bundle_dir", "geometry_path"])
-def test_bundle_metadata_rejects_conflicting_alias_paths(field):
+def test_bundle_metadata_optional_fields_are_keyword_only():
     from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
 
-    kwargs = {
-        "bundle_dir": Path("/tmp/x"),
-        "geometry_path": Path("/tmp/x/geometry"),
-    }
-    alias = (
-        "waveform_dir" if field == "bundle_dir" else "channel_positions_path"
-    )
-    kwargs[alias] = Path("/tmp/different")
-    with pytest.raises(ValueError, match="Conflicting"):
-        SessionMatcherInput({}, **kwargs)
+    with pytest.raises(TypeError, match="positional"):
+        SessionMatcherInput({}, Path("/tmp/x"), Path("/tmp/x/geometry"))
 
 
 @pytest.mark.parametrize("version", [0, -1, True, 1.5, "1"])
@@ -414,8 +402,10 @@ def test_bundle_metadata_requires_a_layout_identifier(layout):
 def test_bundle_metadata_requires_a_directory():
     from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
 
-    with pytest.raises(TypeError, match="requires bundle_dir"):
+    with pytest.raises(TypeError, match="bundle_dir"):
         SessionMatcherInput({})
+    with pytest.raises(TypeError, match="requires bundle_dir"):
+        SessionMatcherInput({}, bundle_dir=None)
 
 
 def test_match_pair_carries_both_side_keys(clean_registry):

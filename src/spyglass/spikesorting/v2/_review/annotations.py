@@ -8,20 +8,16 @@ and small FigPack config normalization helpers.
 
 DB-FREE BY CONTRACT. Imports only the standard library and dependency-light
 curation helpers; it never imports DataJoint, SpikeInterface, or figpack, and
-opens no database connection at import (mirrors ``_selection_identity``).
+opens no database connection at import (mirrors ``_core.selection_identity``).
 """
 
 from __future__ import annotations
 
 import json
 
-from spyglass.spikesorting.v2._curation.transforms import (
-    parse_curation_unit_id,
-)
+from spyglass.spikesorting.v2._curation.transforms import parse_curation_unit_id
 from spyglass.spikesorting.v2._core.enums import CurationLabel
-from spyglass.spikesorting.v2._core.selection_identity import (
-    sha256_json,
-)
+from spyglass.spikesorting.v2._core.selection_identity import sha256_json
 
 #: Install hint surfaced when the optional FigPack packages are missing.
 FIGPACK_INSTALL_HINT = (
@@ -57,7 +53,7 @@ def figpack_config_hash(
     *,
     sorting_id,
     curation_id,
-    curation_uuid=None,
+    curation_uuid,
     label_options,
     displayed_unit_properties,
     upload,
@@ -76,8 +72,7 @@ def figpack_config_hash(
     ----------
     sorting_id, curation_id, curation_uuid
         The ``CurationV2`` key and immutable row-generation identity the view
-        is built for. ``curation_uuid`` remains optional only for callers
-        hashing legacy/external configurations; persisted selections supply it.
+        is built for. Every configuration requires its curation generation.
     label_options : list of str
         The curation label palette.
     displayed_unit_properties : list of str or None
@@ -94,12 +89,12 @@ def figpack_config_hash(
     str
         The 64-char sha256 hex digest.
     """
+    if curation_uuid is None:
+        raise ValueError("curation_uuid must identify a curation generation.")
     payload = {
         "sorting_id": str(sorting_id),
         "curation_id": int(curation_id),
-        "curation_uuid": (
-            str(curation_uuid) if curation_uuid is not None else None
-        ),
+        "curation_uuid": str(curation_uuid),
         "label_options": list(label_options),
         "displayed_unit_properties": normalize_displayed_unit_properties(
             displayed_unit_properties
@@ -125,17 +120,9 @@ def _json_native(value):
 
 
 def pack_display_config(displayed_unit_properties, review_config=None):
-    """Pack optional review identity into the existing display-config blob.
-
-    Plain expert selections retain the historical ``list | None`` storage
-    shape. Profile-backed reviews use a mapping so the existing
-    content-addressed selection can persist and re-check the exact immutable
-    profile snapshot without adding workflow-state schema.
-    """
+    """Store expert properties and an optional guided-review snapshot together."""
     properties = normalize_displayed_unit_properties(displayed_unit_properties)
-    if review_config is None:
-        return properties
-    if not isinstance(review_config, dict):
+    if review_config is not None and not isinstance(review_config, dict):
         raise TypeError(
             "review_config must be a mapping or None; got "
             f"{type(review_config).__name__}."
@@ -147,14 +134,23 @@ def pack_display_config(displayed_unit_properties, review_config=None):
 
 
 def unpack_display_config(stored) -> tuple[list[str] | None, dict | None]:
-    """Decode legacy display lists and profile-backed review configurations."""
-    if isinstance(stored, dict) and set(stored) == {"properties", "review"}:
-        properties = normalize_displayed_unit_properties(stored["properties"])
-        review = stored["review"]
-        if not isinstance(review, dict):
-            raise TypeError("stored review configuration must be a mapping.")
-        return properties, _json_native(review)
-    return normalize_displayed_unit_properties(stored), None
+    """Decode the current display mapping for expert and guided reviews."""
+    if not isinstance(stored, dict) or set(stored) != {"properties", "review"}:
+        raise TypeError(
+            "stored display configuration must contain exactly 'properties' "
+            "and 'review'."
+        )
+    if stored["properties"] is not None and not isinstance(
+        stored["properties"], list
+    ):
+        raise TypeError("stored properties must be a list or None.")
+    properties = normalize_displayed_unit_properties(stored["properties"])
+    review = stored["review"]
+    if review is not None and not isinstance(review, dict):
+        raise TypeError(
+            "stored review configuration must be a mapping or None."
+        )
+    return properties, _json_native(review)
 
 
 def annotations_payload_hash(annotations: dict | None) -> str:

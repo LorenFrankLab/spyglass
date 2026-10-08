@@ -36,18 +36,6 @@ WAVEFORM_BUNDLE_LAYOUT = "split_half_waveforms"
 WAVEFORM_BUNDLE_VERSION = 1
 
 
-def _resolve_bundle_path(path, legacy_path, name: str) -> Path | None:
-    """Resolve a canonical path and its constructor compatibility alias."""
-    if (
-        path is not None
-        and legacy_path is not None
-        and Path(path) != Path(legacy_path)
-    ):
-        raise ValueError(f"Conflicting {name} and legacy alias paths")
-    resolved = path if path is not None else legacy_path
-    return Path(resolved) if resolved is not None else None
-
-
 @dataclass(frozen=True, init=False)
 class SessionMatcherInput:
     """One bundle the wrapper prepares for the matcher per matching input.
@@ -80,12 +68,10 @@ class SessionMatcherInput:
         canonical UTC ISO 8601 string, so plain string comparison is
         chronological; may be ``None`` when a backend does not need it.
 
-    ``waveform_dir`` and ``channel_positions_path`` remain constructor and
-    read-only attribute aliases for ``bundle_dir`` and ``geometry_path``.
-    The original four positional arguments retain their meaning. Legacy
-    calls default to the shared waveform layout/version; new preparers should
-    declare the layout they actually write. A backend must check the layouts
-    and versions it supports before consuming files.
+    The shared waveform layout/version are the defaults. Preparers using
+    another layout declare the format they write; a backend checks supported
+    layouts and versions before consuming files. Paths are normalized to
+    ``Path`` objects when the bundle is created.
     """
 
     curation_key: dict
@@ -98,23 +84,17 @@ class SessionMatcherInput:
     def __init__(
         self,
         curation_key: dict,
-        waveform_dir: Path | None = None,
-        channel_positions_path: Path | None = None,
-        recording_date: Any = None,
+        bundle_dir: Path,
         *,
-        bundle_dir: Path | None = None,
         layout: str = WAVEFORM_BUNDLE_LAYOUT,
         layout_version: int = WAVEFORM_BUNDLE_VERSION,
         geometry_path: Path | None = None,
+        recording_date: Any = None,
     ):
-        directory = _resolve_bundle_path(bundle_dir, waveform_dir, "bundle_dir")
-        if directory is None:
-            raise TypeError(
-                "SessionMatcherInput requires bundle_dir (or waveform_dir)"
-            )
-        geometry = _resolve_bundle_path(
-            geometry_path, channel_positions_path, "geometry_path"
-        )
+        if bundle_dir is None:
+            raise TypeError("SessionMatcherInput requires bundle_dir")
+        directory = Path(bundle_dir)
+        geometry = Path(geometry_path) if geometry_path is not None else None
         if not isinstance(layout, str) or not layout.strip():
             raise ValueError("Matcher bundle layout must be a nonempty string")
         if (
@@ -134,16 +114,6 @@ class SessionMatcherInput:
             ("recording_date", recording_date),
         ):
             object.__setattr__(self, name, value)
-
-    @property
-    def waveform_dir(self) -> Path:
-        """Compatibility alias for bundle_dir."""
-        return self.bundle_dir
-
-    @property
-    def channel_positions_path(self) -> Path | None:
-        """Compatibility alias for geometry_path."""
-        return self.geometry_path
 
 
 @dataclass(frozen=True)
