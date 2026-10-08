@@ -1,9 +1,8 @@
 """Pure curation transforms behind ``CurationV2``.
 
 These functions are the dependency-light core of v2 curation --
-label-value validation, ``UnitLabel``-row validation, manual/FigURL payload
-normalization (the v1/v2 spelling shim feeding ``save_manual_curation``),
-parent/supplied label composition (inherit vs. replace; union on a committed
+label-value validation, ``UnitLabel``-row validation, native manual-curation
+input normalization, parent/supplied label composition (inherit vs. replace; union on a committed
 merge), the post-merge ``CurationV2.Unit`` row construction (merge-group
 validation, ``kept_unit_to_contributors`` mapping, and the per-unit row build),
 and the raw ``MergeGroup`` / ``ParentMergeGroup`` provenance rows
@@ -15,8 +14,7 @@ touching the database, so the merge/label logic is testable without one.
 
 DEPENDENCY-LIGHT BY CONTRACT. This module opens no database connection
 and activates no ``dj.schema`` at import. Its imports are limited to the
-standard library and dependency-light enum / validation / merge-group
-helpers, not ``utils`` (which imports DataJoint / SpikeInterface at load). (The
+standard library and dependency-light enum / validation helpers. (The
 ``spyglass`` package ``__init__`` still loads DataJoint; these transforms
 add no DB/SpikeInterface dependency of their own.)
 """
@@ -24,10 +22,12 @@ add no DB/SpikeInterface dependency of their own.)
 from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Mapping, Sequence
+from typing import Literal
 
-from spyglass.spikesorting._merge_groups import _merge_dict_to_list
 from spyglass.spikesorting.v2._core.enums import CurationLabel
 from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
+
+ManualMergeAction = Literal["preview", "commit"]
 
 
 def validate_curation_label_rows(
@@ -111,49 +111,19 @@ def validate_labels(labels: dict, allow_custom_labels: bool = False) -> None:
                 )
 
 
-def _payload_value(payload: Mapping, field_names: tuple[str, ...]):
-    """Return one payload value, rejecting contradictory aliases."""
-    present = [
-        name
-        for name in field_names
-        if name in payload and payload[name] is not None
-    ]
-    if not present:
-        return None
-    value = payload[present[0]]
-    for name in present[1:]:
-        if payload[name] != value:
-            raise ValueError(
-                "Curation payload contains multiple values for the same field "
-                f"({', '.join(present)}); pass only one spelling."
-            )
-    return value
-
-
-def parse_curation_unit_id(value) -> int:
-    """Parse a transport unit ID, allowing integer strings used by JSON.
-
-    Numeric values must already be integers; floats and booleans must not
-    silently become another unit's ID.
-    """
-    if isinstance(value, str):
-        return int(value)
-    return lossless_int(value, "unit_id")
-
-
-def _normalize_payload_labels(labels) -> dict[int, list[str]]:
-    """Normalize transport labels to ``{int unit_id: [label, ...]}``."""
+def _normalize_manual_labels(labels) -> dict[int, list[str]]:
+    """Normalize native labels to ``{int unit_id: [label, ...]}``."""
     if labels is None:
         return {}
     if not isinstance(labels, Mapping):
         raise ValueError(
-            "Curation payload labels must be a mapping of unit_id to a list of "
+            "Manual curation labels must be a mapping of unit_id to a list of "
             f"labels; got {type(labels).__name__}."
         )
 
     normalized: dict[int, list[str]] = {}
     for unit_id, unit_labels in labels.items():
-        unit_id = parse_curation_unit_id(unit_id)
+        unit_id = lossless_int(unit_id, "unit_id")
         if unit_labels is None:
             normalized[unit_id] = []
             continue
@@ -161,7 +131,7 @@ def _normalize_payload_labels(labels) -> dict[int, list[str]]:
             unit_labels, (list, tuple)
         ):
             raise ValueError(
-                "Curation payload labels[unit_id] must be a list of labels; "
+                "Manual curation labels[unit_id] must be a list of labels; "
                 f"got {type(unit_labels).__name__} for unit_id={unit_id}."
             )
         normalized[unit_id] = [
@@ -170,106 +140,57 @@ def _normalize_payload_labels(labels) -> dict[int, list[str]]:
     return normalized
 
 
-def _iter_payload_merge_group(group) -> list[int]:
-    """Normalize one merge group, preserving singleton/empty typo guards."""
-    if isinstance(group, str) or not isinstance(group, Iterable):
-        raise ValueError(
-            "Curation payload merge groups must be lists of unit ids; got "
-            f"{type(group).__name__}."
-        )
-    return [parse_curation_unit_id(unit_id) for unit_id in group]
-
-
-def _normalize_payload_merge_groups(merge_groups) -> list[list[int]]:
-    """Normalize transport merge groups to ``list[list[int]]``.
-
-    Mapping input is the v1/FigURL per-unit association shape
-    ``{unit_id: [other_unit_ids...]}``; it is converted to full groups with
-    INTERSECTING associations unioned by the shared ``_merge_dict_to_list``
-    (``{1: [2], 2: [3]}`` becomes ``[[1, 2, 3]]``), dropping resulting
-    singletons; each group's ids are sorted.
-    List input is preserved verbatim except for integer coercion so singleton or
-    empty groups still reach ``insert_curation``'s typo guard.
-    """
+def _normalize_manual_merge_groups(merge_groups) -> list[list[int]]:
+    """Normalize list groups, preserving empty/singleton typo guards."""
     if merge_groups is None:
         return []
-    if isinstance(merge_groups, Mapping):
-        # Parse ids first; keys that parse to the same unit share one entry,
-        # which cannot change the connected components (both entries contain
-        # that unit).
-        associations: dict[int, list[int]] = {}
-        for unit_id, associated in merge_groups.items():
-            members = associations.setdefault(
-                parse_curation_unit_id(unit_id), []
-            )
-            if associated is not None and not (
-                isinstance(associated, str) and associated == ""
-            ):
-                if isinstance(associated, str) or not isinstance(
-                    associated, Iterable
-                ):
-                    associated = [associated]
-                for member in associated:
-                    if member is None or (
-                        isinstance(member, str) and member == ""
-                    ):
-                        continue
-                    members.append(parse_curation_unit_id(member))
-        return [sorted(group) for group in _merge_dict_to_list(associations)]
-
-    if isinstance(merge_groups, str) or not isinstance(merge_groups, Iterable):
+    if not isinstance(merge_groups, list):
         raise ValueError(
-            "Curation payload merge_groups must be a list of merge groups; got "
+            "Manual curation merge_groups must be a list of lists of unit ids; got "
             f"{type(merge_groups).__name__}."
         )
-    return [_iter_payload_merge_group(group) for group in merge_groups]
+    normalized = []
+    for group in merge_groups:
+        if not isinstance(group, list):
+            raise ValueError(
+                "Manual curation merge_groups must be a list of lists of unit ids; "
+                f"got a {type(group).__name__} group."
+            )
+        normalized.append(
+            [lossless_int(unit_id, "unit_id") for unit_id in group]
+        )
+    return normalized
 
 
-def normalize_curation_payload(
-    payload: Mapping | None = None,
+def normalize_manual_curation(
     *,
-    labels=None,
-    merge_groups=None,
+    labels: dict[int, list[str]] | None = None,
+    merge_groups: list[list[int]] | None = None,
 ) -> tuple[dict[int, list[str]], list[list[int]]]:
-    """Normalize a manual/FigURL/FigPack curation payload.
+    """Normalize native ``labels=`` and ``merge_groups=`` inputs.
 
-    Accepts the v1/FigURL JSON spellings (``labelsByUnit`` / ``mergeGroups``)
-    and the v2/Python spellings (``labels_by_unit`` / ``merge_groups``), plus
-    explicit ``labels=`` / ``merge_groups=`` kwargs for already-unpacked
-    payloads. Unit ids must be integers or integer strings; floats and booleans
-    are rejected. Label values are coerced through :class:`CurationLabel`;
-    merge-group shape validation is left to
+    Unit IDs must be integers, including NumPy integers. Merge groups must be
+    a list of lists; floats, booleans and transport string IDs are rejected.
+    Label values are coerced through :class:`CurationLabel`;
+    Merge membership, duplicate/overlap and empty/singleton validation is left to
     ``CurationV2.insert_curation`` so typos still produce the same errors there.
     """
-    if payload is None:
-        payload = {}
-    if not isinstance(payload, Mapping):
-        raise ValueError(
-            "Curation payload must be a mapping with labels/merge fields; got "
-            f"{type(payload).__name__}."
-        )
-
-    payload_labels = _payload_value(payload, ("labelsByUnit", "labels_by_unit"))
-    payload_merges = _payload_value(payload, ("mergeGroups", "merge_groups"))
-    if labels is not None and payload_labels is not None:
-        raise ValueError(
-            "Curation payload labels were provided both inside payload and via "
-            "labels=; pass only one source."
-        )
-    if merge_groups is not None and payload_merges is not None:
-        raise ValueError(
-            "Curation payload merge groups were provided both inside payload and "
-            "via merge_groups=; pass only one source."
-        )
-
     return (
-        _normalize_payload_labels(
-            labels if labels is not None else payload_labels
-        ),
-        _normalize_payload_merge_groups(
-            merge_groups if merge_groups is not None else payload_merges
-        ),
+        _normalize_manual_labels(labels),
+        _normalize_manual_merge_groups(merge_groups),
     )
+
+
+def manual_curation_applies_merges(
+    merge_action: ManualMergeAction, merge_groups: list[list[int]]
+) -> bool:
+    """Validate the manual action and decide whether its groups are applied."""
+    if merge_action not in ("preview", "commit"):
+        raise ValueError(
+            "CurationV2.save_manual_curation: merge_action must be "
+            f"'preview' or 'commit'; got {merge_action!r}."
+        )
+    return merge_action == "commit" and bool(merge_groups)
 
 
 def normalize_label_state(

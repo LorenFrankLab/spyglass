@@ -183,6 +183,25 @@ def test_parse_coerces_unit_ids_to_int():
     labels, merges = curation_annotations_to_labels_and_merges(payload)
     assert labels == {7: ["mua"]}
     assert merges == [[8, 9]]
+    from spyglass.spikesorting.v2._curation.transforms import (
+        normalize_manual_curation,
+    )
+
+    assert normalize_manual_curation(labels=labels, merge_groups=merges) == (
+        labels,
+        merges,
+    )
+
+
+@pytest.mark.parametrize(
+    "groups", [{"1": ["2"]}, {}, ["12"], [["1", "2"], {"3": ["4"]}]]
+)
+def test_parse_rejects_non_list_merge_groups(groups):
+    payload = {
+        "annotations": {"/": {"sorting_curation": {"mergeGroups": groups}}}
+    }
+    with pytest.raises(ValueError, match="mergeGroups must be a list of lists"):
+        curation_annotations_to_labels_and_merges(payload)
 
 
 def test_parse_empty_and_missing_yield_empty():

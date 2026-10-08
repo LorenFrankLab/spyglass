@@ -36,6 +36,7 @@ import datajoint as dj
 from spyglass.spikesorting.v2._storage.analyzer_cache import (
     install_staged_folder,
 )
+from spyglass.spikesorting.v2._curation.transforms import ManualMergeAction
 from spyglass.spikesorting.v2._review.annotations import (
     FIGPACK_INSTALL_HINT,
     FIGURE_CONFIG_FILENAME,
@@ -1101,7 +1102,7 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         uri: str,
         parent_curation_key: dict,
         *,
-        merge_action: str = "preview",
+        merge_action: ManualMergeAction = "preview",
         description: str = "curated in FigPack",
         reuse_existing: bool = False,
         allow_empty: bool = False,

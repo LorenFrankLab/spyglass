@@ -33,10 +33,12 @@ from spyglass.spikesorting.v2._curation import (
     restriction as _curation_restriction,
 )
 from spyglass.spikesorting.v2._curation.transforms import (
+    ManualMergeAction,
     build_merge_provenance_rows,
     group_contributor_rows,
     is_merge_preview,
-    normalize_curation_payload,
+    manual_curation_applies_merges,
+    normalize_manual_curation,
     validate_curation_label_rows,
 )
 from spyglass.spikesorting.v2._storage.units_nwb import write_curated_units_nwb
@@ -531,7 +533,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             ``{sorting_id}`` of the upstream Sorting row.
         labels
             Dict ``unit_id -> [label, ...]`` with integer unit IDs. Use
-            ``save_manual_curation`` to import JSON with string IDs.
+            ``FigPackCuration.save_curation_from_uri`` to import JSON annotations.
             Each label is validated against the ``CurationLabel`` enum.
             ``None`` (the default) and ``{}`` are equivalent and produce a
             curation with no ``UnitLabel`` rows.
@@ -1297,10 +1299,9 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         sorting_key: dict,
         *,
         parent_curation_id: int = -1,
-        payload: dict | None = None,
         labels: dict | None = None,
-        merge_groups: list[list[int]] | dict | None = None,
-        merge_action: str = "preview",
+        merge_groups: list[list[int]] | None = None,
+        merge_action: ManualMergeAction = "preview",
         curation_source: str | CurationSource = "manual",
         description: str = "manual curation",
         reuse_existing: bool = False,
@@ -1308,45 +1309,35 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         allow_custom_labels: bool = False,
         label_policy: str = "inherit",
     ) -> dict:
-        """Save a manual/FigPack-style curation payload as the next curation.
+        """Save native manual edits as the next curation.
 
-        This is the FigURL-compatible, payload-oriented public API: callers may
-        pass a v1-shaped payload (``labelsByUnit`` / ``mergeGroups``), a
-        v2-shaped payload (``labels_by_unit`` / ``merge_groups``), or already
-        unpacked ``labels=`` and ``merge_groups=``. ``merge_action`` makes the
-        review/commit choice explicit:
+        Pass ``labels={unit_id: [label, ...]}`` and
+        ``merge_groups=[[unit_id, ...], ...]`` with integer unit IDs.
+        FigPack edits are decoded by ``FigPackCuration.save_curation_from_uri``
+        before reaching this API. ``merge_action`` makes the review/commit
+        choice explicit:
 
-        * ``"preview"`` / ``"propose"`` / ``"draft"`` stores merge groups as
+        * ``"preview"`` stores merge groups as
           unapplied proposals for review.
-        * ``"commit"`` / ``"apply"`` applies non-empty merge groups into the
+        * ``"commit"`` applies non-empty merge groups into the
           child curation's unit set.
         * with no merge groups, the result is a normal committed label-edit
           child regardless of ``merge_action``.
 
         Manual UI edits inherit parent labels by default because the user is
         editing the visible parent curation state; pass ``label_policy="replace"``
-        when the payload is intended to be the full label state.
+        when ``labels`` describes the full label state.
         """
-        labels, merge_groups = normalize_curation_payload(
-            payload, labels=labels, merge_groups=merge_groups
+        labels, merge_groups = normalize_manual_curation(
+            labels=labels, merge_groups=merge_groups
         )
-        action = str(merge_action).lower()
-        if action in ("preview", "propose", "draft"):
-            apply_merge = False
-        elif action in ("commit", "apply"):
-            apply_merge = bool(merge_groups)
-        else:
-            raise ValueError(
-                "CurationV2.save_manual_curation: merge_action must be "
-                "'preview' or 'commit' (aliases: 'propose'/'draft', 'apply'); "
-                f"got {merge_action!r}."
-            )
+        apply_merge = manual_curation_applies_merges(merge_action, merge_groups)
 
         if reuse_existing and parent_curation_id == -1:
             raise ValueError(
                 "CurationV2.save_manual_curation(reuse_existing=True) requires "
                 "an explicit parent_curation_id; root reuse would return the "
-                "existing root row and ignore the manual payload."
+                "existing root row and ignore the manual edits."
             )
 
         return cls.insert_curation(

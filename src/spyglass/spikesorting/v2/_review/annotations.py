@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import json
 
-from spyglass.spikesorting.v2._curation.transforms import parse_curation_unit_id
 from spyglass.spikesorting.v2._core.enums import CurationLabel
+from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
 from spyglass.spikesorting.v2._core.selection_identity import sha256_json
 
 #: Install hint surfaced when the optional FigPack packages are missing.
@@ -283,6 +283,13 @@ def labels_and_merges_to_annotations(
     }
 
 
+def parse_curation_unit_id(value) -> int:
+    """Decode integer strings from JSON without truncating numeric unit IDs."""
+    if isinstance(value, str):
+        return int(value)
+    return lossless_int(value, "unit_id")
+
+
 def curation_annotations_to_labels_and_merges(
     annotations: dict | None,
 ) -> tuple[dict, list]:
@@ -321,8 +328,17 @@ def curation_annotations_to_labels_and_merges(
         parse_curation_unit_id(unit_id): list(unit_labels)
         for unit_id, unit_labels in (state.get("labelsByUnit") or {}).items()
     }
+    raw_groups = state.get("mergeGroups")
+    if raw_groups is None:
+        raw_groups = []
+    if not isinstance(raw_groups, list) or any(
+        not isinstance(group, list) for group in raw_groups
+    ):
+        raise ValueError(
+            "FigPack mergeGroups must be a list of lists of unit IDs."
+        )
     merge_groups = [
         [parse_curation_unit_id(unit_id) for unit_id in group]
-        for group in (state.get("mergeGroups") or [])
+        for group in raw_groups
     ]
     return labels, merge_groups

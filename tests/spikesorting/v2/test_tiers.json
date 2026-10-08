@@ -348,7 +348,7 @@
         "test_propose_merge_off_existing_initial_curation": "regression_gate",
         "test_propose_merge_records_not_applies": "regression_gate",
         "test_save_manual_curation_commit_merge_inherits_parent_labels": "regression_gate",
-        "test_save_manual_curation_preview_merge_payload": "regression_gate",
+        "test_save_manual_curation_preview_merge": "regression_gate",
         "test_summarize_curation_pk_guard_runs_before_schema_access": "db_unit",
         "test_summarize_curation_requires_full_pk": "db_unit"
       }

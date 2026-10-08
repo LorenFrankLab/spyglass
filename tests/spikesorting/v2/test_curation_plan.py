@@ -25,7 +25,8 @@ from spyglass.spikesorting.v2._curation.plan import (
 )
 from spyglass.spikesorting.v2._curation.transforms import (
     build_curated_unit_rows,
-    normalize_curation_payload,
+    manual_curation_applies_merges,
+    normalize_manual_curation,
 )
 
 pytestmark = pytest.mark.unit
@@ -43,115 +44,78 @@ def _unit(uid, amp=10.0, n=100, eid=0):
     }
 
 
-# ---------- normalize_curation_payload (FigURL/FigPack transport) ----------
+# ---------- native manual curation ----------------------------------------
 
 
-def test_normalize_curation_payload_accepts_figurl_spellings():
-    """The manual/FigURL-shaped payload normalizes to v2 insert inputs."""
-    labels, merge_groups = normalize_curation_payload(
-        {
-            "labelsByUnit": {"1": ["noise", "reject"], "2": []},
-            "mergeGroups": [["1", 3], [4, "5"]],
-        }
-    )
-    assert labels == {1: ["noise", "reject"], 2: []}
-    assert merge_groups == [[1, 3], [4, 5]]
-
-
-def test_normalize_curation_payload_accepts_python_spellings_and_kwargs():
-    """Snake-case payload keys and explicit kwargs share one normalizer."""
-    labels, merge_groups = normalize_curation_payload(
-        {"labels_by_unit": {"1": ["mua"]}, "merge_groups": [["1", "2"]]}
-    )
-    assert labels == {1: ["mua"]}
-    assert merge_groups == [[1, 2]]
-
-    labels, merge_groups = normalize_curation_payload(
+def test_normalize_manual_curation_accepts_native_inputs():
+    labels, merge_groups = normalize_manual_curation(
         labels={3: ["accept"]}, merge_groups=[[3, 4]]
     )
     assert labels == {3: ["accept"]}
     assert merge_groups == [[3, 4]]
 
 
-def test_normalize_curation_payload_accepts_association_merge_map():
-    """The v1/FigURL per-unit association map deduplicates to merge groups."""
-    _labels, merge_groups = normalize_curation_payload(
-        {"mergeGroups": {"1": ["2"], "2": ["1"], "3": []}}
-    )
-    assert merge_groups == [[1, 2]]
+@pytest.mark.parametrize(
+    "groups", [{1: [2], 2: [3]}, [[1, 2], {3: [4]}], [(1, 2)], "1,2", (1, 2)]
+)
+def test_normalize_manual_curation_rejects_non_list_groups(groups):
+    """Merge associations and arbitrary iterables are not native groups."""
+    with pytest.raises(ValueError, match="must be a list of lists"):
+        normalize_manual_curation(merge_groups=groups)
 
 
-def test_normalize_curation_payload_unions_intersecting_associations():
-    """A transitive association chain collapses to ONE group (v1 parity).
-
-    v1's ``_merge_dict_to_list`` unions intersecting associations, so
-    ``{1: [2], 2: [3]}`` is one group ``[1, 2, 3]`` -- not overlapping
-    ``[1, 2]`` / ``[2, 3]`` that would later double-assign unit 2 and fail.
-    Disjoint chains stay separate; pure singletons drop.
-    """
-    _labels, chain = normalize_curation_payload(
-        {"mergeGroups": {"1": ["2"], "2": ["3"]}}
-    )
-    assert chain == [[1, 2, 3]]
-
-    _labels, disjoint = normalize_curation_payload(
-        merge_groups={1: [2], 4: [5]}
-    )
-    assert sorted(disjoint) == [[1, 2], [4, 5]]
-
-    _labels, singletons = normalize_curation_payload(
-        merge_groups={1: [], 2: []}
-    )
-    assert singletons == []
-
-
-def test_normalize_curation_payload_rejects_duplicate_sources():
-    """Payload and kwarg sources cannot both set the same semantic field."""
-    with pytest.raises(ValueError, match="both inside payload and via labels"):
-        normalize_curation_payload({"labelsByUnit": {"1": ["mua"]}}, labels={})
-
-    with pytest.raises(
-        ValueError, match="both inside payload and via merge_groups"
-    ):
-        normalize_curation_payload({"mergeGroups": [[1, 2]]}, merge_groups=[])
-
-
-def test_normalize_curation_payload_rejects_scalar_label_value():
+def test_normalize_manual_curation_rejects_scalar_label_value():
     """A string label must be wrapped in a list; do not split characters."""
     with pytest.raises(ValueError, match="must be a list of labels"):
-        normalize_curation_payload({"labelsByUnit": {"1": "noise"}})
+        normalize_manual_curation(labels={1: "noise"})
 
 
-@pytest.mark.parametrize("bad_id", [1.9, 1.0, True, False])
-def test_curation_payload_rejects_non_integer_ids(bad_id):
-    """No transport spelling may truncate an ID or interpret a bool as a unit."""
-    payloads = [
-        {"labelsByUnit": {bad_id: ["accept"]}},
-        {"labelsByUnit": {bad_id: None}},
-        {"mergeGroups": [[bad_id, 2]]},
-        {"mergeGroups": {bad_id: [2]}},
-        {"mergeGroups": {2: [bad_id]}},
-    ]
-    for payload in payloads:
-        with pytest.raises(ValueError, match="unit_id must be an integer"):
-            normalize_curation_payload(payload)
+@pytest.mark.parametrize("bad_id", [1.9, 1.0, True, False, "1"])
+def test_manual_curation_rejects_non_integer_ids(bad_id):
+    """Native IDs cannot be floats, booleans or transport strings."""
     with pytest.raises(ValueError, match="unit_id must be an integer"):
-        normalize_curation_payload(labels={bad_id: ["accept"]})
+        normalize_manual_curation(labels={bad_id: ["accept"]})
     with pytest.raises(ValueError, match="unit_id must be an integer"):
-        normalize_curation_payload(merge_groups=[[bad_id, 2]])
+        normalize_manual_curation(labels={bad_id: None})
+    with pytest.raises(ValueError, match="unit_id must be an integer"):
+        normalize_manual_curation(merge_groups=[[bad_id, 2]])
     with pytest.raises(ValueError, match="unit_id must be an integer"):
         build_curated_unit_rows(
             "s", [_unit(1), _unit(2)], [[bad_id, 2]], 1, True
         )
 
 
-def test_curation_payload_accepts_numpy_integer_ids():
-    labels, groups = normalize_curation_payload(
+def test_manual_curation_accepts_numpy_integer_ids():
+    labels, groups = normalize_manual_curation(
         labels={np.int64(1): ["accept"]},
         merge_groups=[[np.int64(1), np.int32(2)]],
     )
     assert labels == {1: ["accept"]}
     assert groups == [[1, 2]]
+
+
+@pytest.mark.parametrize("action", ["preview", "commit"])
+def test_manual_curation_action_preserves_labels_without_merges(action):
+    assert manual_curation_applies_merges(action, []) is False
+
+
+@pytest.mark.parametrize(
+    "action,applied", [("preview", False), ("commit", True)]
+)
+def test_manual_curation_action_decides_whether_groups_are_applied(
+    action, applied
+):
+    assert manual_curation_applies_merges(action, [[1, 2]]) is applied
+
+
+@pytest.mark.parametrize(
+    "action", ["propose", "draft", "apply", "PREVIEW", "Commit", None]
+)
+def test_manual_curation_action_rejects_other_spellings(action):
+    with pytest.raises(
+        ValueError, match="merge_action must be 'preview' or 'commit'"
+    ):
+        manual_curation_applies_merges(action, [[1, 2]])
 
 
 # ---------- validate_label_unit_ids (stray-label matrix) -------------------

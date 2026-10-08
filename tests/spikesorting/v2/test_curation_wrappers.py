@@ -273,7 +273,7 @@ def test_merge_wrappers_forward_args(populated_sorting):
 
 @pytest.mark.database
 def test_curation_rejects_lossy_unit_ids(planted_two_unit_sort):
-    """Expert and payload writes reject lossy IDs before creating a child."""
+    """Expert and manual writes reject lossy IDs before creating a child."""
     import numpy as np
 
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -307,7 +307,7 @@ def test_curation_rejects_lossy_unit_ids(planted_two_unit_sort):
         child = CurationV2.save_manual_curation(
             sorting_key,
             parent_curation_id=root["curation_id"],
-            payload={"labelsByUnit": {str(a): ["accept"]}},
+            labels={a: ["accept"]},
         )
         assert CurationV2._labels_by_unit(child) == {a: ["accept"]}
     finally:
@@ -315,8 +315,8 @@ def test_curation_rejects_lossy_unit_ids(planted_two_unit_sort):
 
 
 @pytest.mark.database
-def test_save_manual_curation_label_payload_child(populated_sorting):
-    """``save_manual_curation`` stores FigURL/FigPack label payloads as a child."""
+def test_save_manual_curation_labels_child(populated_sorting):
+    """``save_manual_curation`` stores native labels as a child."""
     from spyglass.spikesorting.v2.curation import CurationV2
 
     ids = _unit_ids(populated_sorting)
@@ -329,7 +329,7 @@ def test_save_manual_curation_label_payload_child(populated_sorting):
     child = CurationV2.save_manual_curation(
         populated_sorting,
         parent_curation_id=root["curation_id"],
-        payload={"labelsByUnit": {str(a): ["mua"]}},
+        labels={a: ["mua"]},
         curation_source="figpack",
     )
 
@@ -345,7 +345,7 @@ def test_save_manual_curation_label_payload_child(populated_sorting):
 
 @pytest.mark.database
 @pytest.mark.slow
-def test_save_manual_curation_preview_merge_payload(polymer_60s_sort):
+def test_save_manual_curation_preview_merge(polymer_60s_sort):
     """``merge_action='preview'`` records a draft merge without applying it."""
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -356,7 +356,7 @@ def test_save_manual_curation_preview_merge_payload(polymer_60s_sort):
     preview = CurationV2.save_manual_curation(
         polymer_60s_sort,
         parent_curation_id=root["curation_id"],
-        payload={"mergeGroups": [[str(a), str(b)]]},
+        merge_groups=[[a, b]],
         merge_action="preview",
         curation_source="figpack",
     )
@@ -406,10 +406,10 @@ def test_save_manual_curation_commit_merge_inherits_parent_labels(
 
 
 @pytest.mark.database
-def test_save_manual_curation_rejects_root_reuse_with_payload(
+def test_save_manual_curation_rejects_root_reuse(
     populated_sorting,
 ):
-    """Root reuse would ignore a manual payload, so require an explicit parent."""
+    """Root reuse would ignore manual edits, so require an explicit parent."""
     from spyglass.spikesorting.v2.curation import CurationV2
 
     ids = _unit_ids(populated_sorting)
@@ -421,7 +421,7 @@ def test_save_manual_curation_rejects_root_reuse_with_payload(
     with pytest.raises(ValueError, match="reuse_existing=True"):
         CurationV2.save_manual_curation(
             populated_sorting,
-            payload={"labelsByUnit": {str(ids[0]): ["mua"]}},
+            labels={ids[0]: ["mua"]},
             curation_source="figpack",
             reuse_existing=True,
         )

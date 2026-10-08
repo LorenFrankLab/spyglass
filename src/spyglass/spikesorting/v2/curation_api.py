@@ -18,6 +18,7 @@ from typing import Any, Literal
 import pandas as pd
 
 from spyglass.spikesorting.v2._curation.transforms import (
+    ManualMergeAction,
     group_contributor_rows,
     inherit_parent_labels,
     is_merge_preview,
@@ -1625,13 +1626,18 @@ def commit_merges(
 
 
 def save_manual_curation(
-    *, parent_curation: CurationRef, **kwargs
+    *,
+    parent_curation: CurationRef,
+    labels: dict[int, list[str]] | None = None,
+    merge_groups: list[list[int]] | None = None,
+    merge_action: ManualMergeAction = "preview",
+    **kwargs,
 ) -> CurationRef:
     """Save a manual child from a typed parent; root sentinels are not accepted.
 
     Forwards to ``CurationV2.save_manual_curation`` with the parent's
-    ``sorting_id`` and ``curation_id``. Labels and merge groups come from a
-    FigPack/FigURL-style ``payload`` or from ``labels=`` / ``merge_groups=``.
+    ``sorting_id`` and ``curation_id``. Supply edits with integer unit IDs
+    through ``labels=`` and ``merge_groups=``.
     Unlike :func:`preview_merges` and :func:`commit_merges`, this facade
     does not pre-check merge groups and does not default ``reuse_existing``
     to ``True``; ``CurationV2`` validates the merge groups.
@@ -1640,13 +1646,15 @@ def save_manual_curation(
     ----------
     parent_curation : CurationRef
         The curation to branch from. Its identity is re-verified before use.
+    labels : dict[int, list[str]], optional
+        Labels for each edited unit.
+    merge_groups : list[list[int]], optional
+        Groups of units to merge.
+    merge_action : {"preview", "commit"}
+        Store unapplied merge proposals (default), or apply the groups.
     **kwargs
-        Forwarded to ``CurationV2.save_manual_curation``: ``payload`` (dict
-        with ``labelsByUnit`` / ``mergeGroups`` or ``labels_by_unit`` /
-        ``merge_groups``), ``labels``, ``merge_groups``, ``merge_action``
-        (``"preview"`` by default, or ``"commit"``; aliases ``"propose"``,
-        ``"draft"``, ``"apply"``), ``curation_source`` (default
-        ``"manual"``), ``description`` (default ``"manual curation"``),
+        Forwarded to ``CurationV2.save_manual_curation``: ``curation_source``
+        (default ``"manual"``), ``description`` (default ``"manual curation"``),
         ``reuse_existing`` (default ``False``), ``allow_unknown_unit_ids``,
         ``allow_custom_labels``, and ``label_policy`` (default
         ``"inherit"``). ``parent_curation_id`` is set from
@@ -1665,7 +1673,7 @@ def save_manual_curation(
         If ``parent_curation`` no longer identifies its curation generation
         (the row was deleted or its numeric id reused).
     ValueError
-        If ``merge_action`` is not a recognized value, the payload, labels,
+        If ``merge_action`` is not a recognized value, labels,
         or merge groups are invalid, or ``parent_curation`` is itself an
         uncommitted preview.
     """
@@ -1675,6 +1683,9 @@ def save_manual_curation(
     child = CurationV2.save_manual_curation(
         {"sorting_id": parent.sorting_id},
         parent_curation_id=parent.curation_id,
+        labels=labels,
+        merge_groups=merge_groups,
+        merge_action=merge_action,
         **kwargs,
     )
     return CurationRef.from_key(child)
