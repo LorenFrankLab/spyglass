@@ -65,93 +65,45 @@ def draw_metric_histogram(ax, values, *, title, ylabel="count"):
         )
 
 
-def plot_units_qc_figure(
-    metrics_df: pd.DataFrame,
-    unit_locations: np.ndarray | None,
-    unit_ids: list,
-    *,
-    metric_names: list[str] | None = None,
-    color_metric: str = "snr",
-    depth_axis: int = 1,
-    axes=None,
-):
-    """Render a population QC overview: metric histograms + a depth scatter.
-
-    Parameters
-    ----------
-    metrics_df : pandas.DataFrame
-        Quality metrics, one row per unit (indexed by unit_id). Values may be
-        ``None`` (sanitized non-finite); they are coerced to NaN and dropped
-        per-metric from the histograms rather than distorting an axis.
-    unit_locations : numpy.ndarray or None
-        ``(n_units, 2 or 3)`` estimated unit locations aligned with
-        ``unit_ids``; ``None`` for a zero-unit sort.
-    unit_ids : list
-        Unit ids aligned with ``unit_locations`` rows.
-    metric_names : list of str, optional
-        Metrics to histogram; defaults to the present subset of
-        ``_DEFAULT_QC_METRICS`` (or all numeric columns).
-    color_metric : str
-        Metric used to color the depth scatter.
-    depth_axis : int
-        Column of ``unit_locations`` to treat as depth (default 1 = y).
-    axes : dict, sequence, numpy.ndarray, or matplotlib.axes.Axes, optional
-        Axes to draw into. For non-empty sorts, pass either a mapping with one
-        axis per metric name plus ``"scatter"``, or a flat/numpy sequence where
-        the histogram axes come first and the scatter axis follows. For zero-unit
-        sorts, pass a single axis or ``{"empty": ax}``. If omitted, a figure is
-        created.
-
-    Returns
-    -------
-    dict[str, matplotlib.axes.Axes]
-        Axes keyed by metric name plus ``"scatter"``. A zero-unit sort returns
-        ``{"empty": ax}`` (never raises).
-    """
+def _empty_qc_axes(axes):
+    """Select an axis and render the empty-population state."""
     import matplotlib.pyplot as plt
 
-    numeric = (
-        metrics_df.apply(pd.to_numeric, errors="coerce")
-        if len(metrics_df.columns)
-        else metrics_df
+    if axes is None:
+        _, ax = plt.subplots(figsize=(5, 3))
+    elif isinstance(axes, dict):
+        if not axes:
+            raise ValueError(
+                "plot_units_qc_figure zero-unit axes mapping must include "
+                "'empty' or at least one axis."
+            )
+        ax = axes.get("empty") or next(iter(axes.values()))
+    else:
+        supplied = _flatten_axes(axes)
+        if not supplied:
+            raise ValueError(
+                "plot_units_qc_figure zero-unit axes sequence must include "
+                "at least one axis."
+            )
+        ax = supplied[0]
+        for extra in supplied[1:]:
+            extra.set_axis_off()
+    ax.set_axis_off()
+    ax.text(
+        0.5,
+        0.5,
+        "No units to display (zero-unit sort).",
+        ha="center",
+        va="center",
     )
-    if metric_names is None:
-        present = [m for m in _DEFAULT_QC_METRICS if m in numeric.columns]
-        metric_names = present or list(numeric.columns)
+    return {"empty": ax}
+
+
+def _qc_population_axes(metric_names, axes):
+    """Allocate or validate histogram and scatter axes for a population."""
+    import matplotlib.pyplot as plt
 
     n_hist = len(metric_names)
-    has_units = unit_locations is not None and len(unit_ids) > 0
-
-    if not has_units:
-        if axes is None:
-            _, ax = plt.subplots(figsize=(5, 3))
-        elif isinstance(axes, dict):
-            if not axes:
-                raise ValueError(
-                    "plot_units_qc_figure zero-unit axes mapping must include "
-                    "'empty' or at least one axis."
-                )
-            ax = axes.get("empty") or next(iter(axes.values()))
-        else:
-            supplied = _flatten_axes(axes)
-            if not supplied:
-                raise ValueError(
-                    "plot_units_qc_figure zero-unit axes sequence must include "
-                    "at least one axis."
-                )
-            ax = supplied[0]
-            for extra in supplied[1:]:
-                extra.set_axis_off()
-        ax.set_axis_off()
-        ax.text(
-            0.5,
-            0.5,
-            "No units to display (zero-unit sort).",
-            ha="center",
-            va="center",
-        )
-        return {"empty": ax}
-
     n_cols = min(3, max(1, n_hist))
     n_hist_rows = math.ceil(n_hist / n_cols) if n_hist else 0
     if axes is None:
@@ -203,6 +155,68 @@ def plot_units_qc_figure(
         for extra in supplied[needed:]:
             extra.set_axis_off()
         fig = scatter_ax.figure
+
+    return fig, hist_axes, scatter_ax
+
+
+def plot_units_qc_figure(
+    metrics_df: pd.DataFrame,
+    unit_locations: np.ndarray | None,
+    unit_ids: list,
+    *,
+    metric_names: list[str] | None = None,
+    color_metric: str = "snr",
+    depth_axis: int = 1,
+    axes=None,
+):
+    """Render a population QC overview: metric histograms + a depth scatter.
+
+    Parameters
+    ----------
+    metrics_df : pandas.DataFrame
+        Quality metrics, one row per unit (indexed by unit_id). Values may be
+        ``None`` (sanitized non-finite); they are coerced to NaN and dropped
+        per-metric from the histograms rather than distorting an axis.
+    unit_locations : numpy.ndarray or None
+        ``(n_units, 2 or 3)`` estimated unit locations aligned with
+        ``unit_ids``; ``None`` for a zero-unit sort.
+    unit_ids : list
+        Unit ids aligned with ``unit_locations`` rows.
+    metric_names : list of str, optional
+        Metrics to histogram; defaults to the present subset of
+        ``_DEFAULT_QC_METRICS`` (or all numeric columns).
+    color_metric : str
+        Metric used to color the depth scatter.
+    depth_axis : int
+        Column of ``unit_locations`` to treat as depth (default 1 = y).
+    axes : dict, sequence, numpy.ndarray, or matplotlib.axes.Axes, optional
+        Axes to draw into. For non-empty sorts, pass either a mapping with one
+        axis per metric name plus ``"scatter"``, or a flat/numpy sequence where
+        the histogram axes come first and the scatter axis follows. For zero-unit
+        sorts, pass a single axis or ``{"empty": ax}``. If omitted, a figure is
+        created.
+
+    Returns
+    -------
+    dict[str, matplotlib.axes.Axes]
+        Axes keyed by metric name plus ``"scatter"``. A zero-unit sort returns
+        ``{"empty": ax}`` (never raises).
+    """
+    numeric = (
+        metrics_df.apply(pd.to_numeric, errors="coerce")
+        if len(metrics_df.columns)
+        else metrics_df
+    )
+    if metric_names is None:
+        present = [m for m in _DEFAULT_QC_METRICS if m in numeric.columns]
+        metric_names = present or list(numeric.columns)
+
+    has_units = unit_locations is not None and len(unit_ids) > 0
+
+    if not has_units:
+        return _empty_qc_axes(axes)
+
+    fig, hist_axes, scatter_ax = _qc_population_axes(metric_names, axes)
 
     # Histograms: one small-multiple per metric, NaN dropped.
     for metric, ax in hist_axes.items():

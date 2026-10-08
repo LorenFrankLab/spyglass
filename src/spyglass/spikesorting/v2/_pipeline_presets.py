@@ -709,6 +709,51 @@ def _deep_set(blob: dict, dotted_key: str, value) -> None:
     node[parts[-1]] = value
 
 
+def _derive_preset_parameters(stages, overrides, base_name):
+    """Route overrides and validate all derived scientific blobs before writes."""
+    stage_overrides: dict[str, dict] = {name: {} for name in stages}
+    for dotted_key, value in overrides.items():
+        parts = dotted_key.split(".")
+        matches = [
+            name
+            for name, stage in stages.items()
+            if _path_exists(stage["base_params"], parts)
+        ]
+        if not matches:
+            raise ValueError(
+                f"clone_pipeline_preset: override key {dotted_key!r} does not match any "
+                "parameter in the base preset's preprocessing, "
+                "artifact-detection, or sorter params. Call "
+                f"describe_pipeline_preset({base_name!r}) to see the keys you "
+                "can override."
+            )
+        if len(matches) > 1:
+            raise ValueError(
+                f"clone_pipeline_preset: override key {dotted_key!r} is ambiguous -- it "
+                f"matches multiple stages {sorted(matches)}. clone_pipeline_preset "
+                "cannot disambiguate a top-level key shared across stages; "
+                "insert the parameter row directly for this change."
+            )
+        stage_overrides[matches[0]][dotted_key] = value
+
+    touched = [name for name in stages if stage_overrides[name]]
+
+    # Step 1 -- build + Pydantic-validate every derived blob BEFORE any insert,
+    # so a bad override raises the same teaching error as a direct parameter
+    # insert and leaves the database untouched.
+    derived_params: dict[str, dict] = {}
+    for name in touched:
+        stage = stages[name]
+        blob = copy.deepcopy(stage["base_params"])
+        for dotted_key, value in stage_overrides[name].items():
+            _deep_set(blob, dotted_key, value)
+        derived_params[name] = (
+            stage["schema_cls"].model_validate(blob).model_dump()
+        )
+
+    return touched, derived_params
+
+
 def clone_pipeline_preset(
     base_name: str,
     new_name: str,
@@ -890,45 +935,9 @@ def clone_pipeline_preset(
     # its dotted path. A path present in no stage is a typo / unsupported key; a
     # path present in more than one (e.g. a top-level key shared across stages)
     # cannot be disambiguated by a dotted key alone.
-    stage_overrides: dict[str, dict] = {name: {} for name in stages}
-    for dotted_key, value in overrides.items():
-        parts = dotted_key.split(".")
-        matches = [
-            name
-            for name, stage in stages.items()
-            if _path_exists(stage["base_params"], parts)
-        ]
-        if not matches:
-            raise ValueError(
-                f"clone_pipeline_preset: override key {dotted_key!r} does not match any "
-                "parameter in the base preset's preprocessing, "
-                "artifact-detection, or sorter params. Call "
-                f"describe_pipeline_preset({base_name!r}) to see the keys you "
-                "can override."
-            )
-        if len(matches) > 1:
-            raise ValueError(
-                f"clone_pipeline_preset: override key {dotted_key!r} is ambiguous -- it "
-                f"matches multiple stages {sorted(matches)}. clone_pipeline_preset "
-                "cannot disambiguate a top-level key shared across stages; "
-                "insert the parameter row directly for this change."
-            )
-        stage_overrides[matches[0]][dotted_key] = value
-
-    touched = [name for name in stages if stage_overrides[name]]
-
-    # Step 1 -- build + Pydantic-validate every derived blob BEFORE any insert,
-    # so a bad override raises the same teaching error as a direct parameter
-    # insert and leaves the database untouched.
-    derived_params: dict[str, dict] = {}
-    for name in touched:
-        stage = stages[name]
-        blob = copy.deepcopy(stage["base_params"])
-        for dotted_key, value in stage_overrides[name].items():
-            _deep_set(blob, dotted_key, value)
-        derived_params[name] = (
-            stage["schema_cls"].model_validate(blob).model_dump()
-        )
+    touched, derived_params = _derive_preset_parameters(
+        stages, overrides, base_name
+    )
 
     def _fingerprint(stage, row):
         return parameter_row_fingerprint(

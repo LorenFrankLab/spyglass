@@ -19,6 +19,32 @@ from spyglass.spikesorting.v2._source_resolution import (
 )
 
 
+def _resolve_artifact_merge(plan):
+    """Find or register the materialized artifact output before linking it."""
+    from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
+    art_merge_id = None
+    if plan.artifact_detection_id is not None:
+        art_key = {"artifact_detection_id": plan.artifact_detection_id}
+        try:
+            art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
+        except KeyError:
+            try:
+                ArtifactDetectionOutput.insert_detection(art_key)
+            except KeyError as key_exc:
+                raise SchemaBypassError(
+                    "SortingSelection: artifact_detection_id "
+                    f"{plan.artifact_detection_id} is not materialized in "
+                    "the artifact detection tables (or was concurrently "
+                    "deleted). Populate the artifact detection before "
+                    "linking it to a sort."
+                ) from key_exc
+            art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
+
+    return art_merge_id
+
+
 def insert_selection(table_cls, key: dict) -> dict:
     """Insert master + exactly one source part; return PK-only dict.
 
@@ -153,23 +179,7 @@ def insert_selection(table_cls, key: dict) -> dict:
     # then contains NO merge insert, so a deterministic-id duplicate collides
     # on the master insert (the transaction's first statement) with nothing
     # written to roll back. Hence a single try + refetch, no retry loop.
-    art_merge_id = None
-    if plan.artifact_detection_id is not None:
-        art_key = {"artifact_detection_id": plan.artifact_detection_id}
-        try:
-            art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
-        except KeyError:
-            try:
-                ArtifactDetectionOutput.insert_detection(art_key)
-            except KeyError as key_exc:
-                raise SchemaBypassError(
-                    "SortingSelection: artifact_detection_id "
-                    f"{plan.artifact_detection_id} is not materialized in "
-                    "the artifact detection tables (or was concurrently "
-                    "deleted). Populate the artifact detection before "
-                    "linking it to a sort."
-                ) from key_exc
-            art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
+    art_merge_id = _resolve_artifact_merge(plan)
 
     # Hold the artifact detection's advisory lock -- the same one
     # ``_ArtifactDetectionMixin.delete`` takes -- across the transaction that

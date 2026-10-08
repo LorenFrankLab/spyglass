@@ -337,6 +337,121 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _layout_probe_contacts(plottable):
+    """Set display coordinates while preserving each probe's physical geometry."""
+    probe_ids = sorted(
+        {row["probe_id"] for row in plottable},
+        key=lambda probe_id: (probe_id is None, str(probe_id)),
+    )
+    by_probe = {
+        probe_id: [row for row in plottable if row["probe_id"] == probe_id]
+        for probe_id in probe_ids
+    }
+    multi_probe = len(probe_ids) > 1
+    gap = None
+    if multi_probe:
+        import warnings
+
+        # Gap scales with the overall geometry extent so it is non-zero even
+        # for single-column (linear) probes whose contacts share one rel_x.
+        all_x = [row["plot_x"] for row in plottable]
+        all_y = [row["plot_y"] for row in plottable]
+        scale = max(
+            max(all_x) - min(all_x),
+            max(all_y) - min(all_y),
+            1.0,
+        )
+        gap = 0.45 * scale
+        cursor = 0.0
+        for probe_id in probe_ids:
+            probe_rows = by_probe[probe_id]
+            xs = [row["plot_x"] for row in probe_rows]
+            min_x, max_x = min(xs), max(xs)
+            offset = cursor - min_x
+            for row in probe_rows:
+                row["display_x"] = row["plot_x"] + offset
+            cursor += (max_x - min_x) + gap
+        warnings.warn(
+            f"plot_sort_group_geometry: {len(probe_ids)} probes present. "
+            "Probe.Electrode rel_x/rel_y are per-probe coordinates, so the "
+            "probes are laid out side-by-side along x (x positions are "
+            "display-shifted per probe; within-probe geometry and y depths are "
+            "unchanged).",
+            UserWarning,
+            stacklevel=3,
+        )
+    else:
+        for row in plottable:
+            row["display_x"] = row["plot_x"]
+
+    return probe_ids, by_probe, gap
+
+
+def _shade_probe_blocks(ax, multi_probe, gap, probe_ids, by_probe):
+    """Shade alternating probe blocks in the display layout."""
+    # Shade alternating probe blocks so the side-by-side layout reads as
+    # per-probe groups rather than one undifferentiated row of columns.
+    if multi_probe:
+        band_pad = gap * 0.2
+        for probe_index, probe_id in enumerate(probe_ids):
+            if probe_index % 2:
+                continue
+            probe_xs = [row["display_x"] for row in by_probe[probe_id]]
+            ax.axvspan(
+                min(probe_xs) - band_pad,
+                max(probe_xs) + band_pad,
+                color="0.9",
+                alpha=0.5,
+                zorder=0,
+            )
+
+
+def _annotate_geometry(
+    ax, plottable, by_probe, label_electrodes, max_per_column
+):
+    """Label sparse contacts and separate probe captions from their electrodes."""
+    # Electrode-id labels: shown automatically only when each sort group is
+    # sparse enough to stay legible (tetrodes / stereotrodes) -- a dense polymer
+    # or Neuropixels column would be a wall of overlapping text.
+    # ``label_electrodes`` True/False forces the choice; ``None`` (default)
+    # auto-decides on column density. When shown, the specific reference gets its
+    # electrode_id like any other contact (the star already marks it), so no
+    # separate reference label is needed.
+    if label_electrodes is None:
+        do_label = max_per_column <= _AUTO_LABEL_MAX_PER_COLUMN
+    else:
+        do_label = bool(label_electrodes)
+    if do_label:
+        for row in plottable:
+            ax.annotate(
+                str(row["electrode_id"]),
+                (row["display_x"], row["plot_y"]),
+                xytext=(3, 3),
+                textcoords="offset points",
+                fontsize=7,
+            )
+
+    # Label each probe's column so the side-by-side layout is interpretable.
+    if len(by_probe) > 1:
+        for probe_id, probe_rows in by_probe.items():
+            center_x = sum(row["display_x"] for row in probe_rows) / len(
+                probe_rows
+            )
+            top_y = max(row["plot_y"] for row in probe_rows)
+            ax.annotate(
+                str(probe_id),
+                (center_x, top_y),
+                # Lifted well above the top contacts so the bold probe_id sits
+                # clear of any electrode-id labels drawn on them (offset (3, 3))
+                # when label_electrodes is on, rather than overlapping.
+                xytext=(0, 22),
+                textcoords="offset points",
+                ha="center",
+                fontsize=8,
+                fontweight="bold",
+            )
+
+
 def plot_sort_group_geometry(
     nwb_file_name: str,
     *,
@@ -462,49 +577,8 @@ def plot_sort_group_geometry(
     # offsetting each probe's contacts into its own column; y (depth) is left
     # untouched. ``display_x`` carries the (possibly shifted) plot coordinate so
     # the raw per-probe ``plot_x`` is preserved on each row.
-    probe_ids = sorted(
-        {row["probe_id"] for row in plottable},
-        key=lambda probe_id: (probe_id is None, str(probe_id)),
-    )
-    by_probe = {
-        probe_id: [row for row in plottable if row["probe_id"] == probe_id]
-        for probe_id in probe_ids
-    }
+    probe_ids, by_probe, gap = _layout_probe_contacts(plottable)
     multi_probe = len(probe_ids) > 1
-    if multi_probe:
-        import warnings
-
-        # Gap scales with the overall geometry extent so it is non-zero even
-        # for single-column (linear) probes whose contacts share one rel_x.
-        all_x = [row["plot_x"] for row in plottable]
-        all_y = [row["plot_y"] for row in plottable]
-        scale = max(
-            max(all_x) - min(all_x),
-            max(all_y) - min(all_y),
-            1.0,
-        )
-        gap = 0.45 * scale
-        cursor = 0.0
-        for probe_id in probe_ids:
-            probe_rows = by_probe[probe_id]
-            xs = [row["plot_x"] for row in probe_rows]
-            min_x, max_x = min(xs), max(xs)
-            offset = cursor - min_x
-            for row in probe_rows:
-                row["display_x"] = row["plot_x"] + offset
-            cursor += (max_x - min_x) + gap
-        warnings.warn(
-            f"plot_sort_group_geometry: {len(probe_ids)} probes present. "
-            "Probe.Electrode rel_x/rel_y are per-probe coordinates, so the "
-            "probes are laid out side-by-side along x (x positions are "
-            "display-shifted per probe; within-probe geometry and y depths are "
-            "unchanged).",
-            UserWarning,
-            stacklevel=2,
-        )
-    else:
-        for row in plottable:
-            row["display_x"] = row["plot_x"]
 
     # Marker size shrinks as a column gets dense so stacked contacts don't
     # overlap: a linear polymer shank packs many contacts into a narrow y band,
@@ -518,21 +592,7 @@ def plot_sort_group_geometry(
     bad_s = max(45.0, marker_s * 1.8)
     reference_s = max(90.0, marker_s * 3.0)
 
-    # Shade alternating probe blocks so the side-by-side layout reads as
-    # per-probe groups rather than one undifferentiated row of columns.
-    if multi_probe:
-        band_pad = gap * 0.2
-        for probe_index, probe_id in enumerate(probe_ids):
-            if probe_index % 2:
-                continue
-            probe_xs = [row["display_x"] for row in by_probe[probe_id]]
-            ax.axvspan(
-                min(probe_xs) - band_pad,
-                max(probe_xs) + band_pad,
-                color="0.9",
-                alpha=0.5,
-                zorder=0,
-            )
+    _shade_probe_blocks(ax, multi_probe, gap, probe_ids, by_probe)
 
     cmap = plt.get_cmap("tab10")
     sort_group_ids = sorted({row["sort_group_id"] for row in plottable})
@@ -583,47 +643,9 @@ def plot_sort_group_geometry(
                 label="specific reference",
             )
 
-    # Electrode-id labels: shown automatically only when each sort group is
-    # sparse enough to stay legible (tetrodes / stereotrodes) -- a dense polymer
-    # or Neuropixels column would be a wall of overlapping text.
-    # ``label_electrodes`` True/False forces the choice; ``None`` (default)
-    # auto-decides on column density. When shown, the specific reference gets its
-    # electrode_id like any other contact (the star already marks it), so no
-    # separate reference label is needed.
-    if label_electrodes is None:
-        do_label = max_per_column <= _AUTO_LABEL_MAX_PER_COLUMN
-    else:
-        do_label = bool(label_electrodes)
-    if do_label:
-        for row in plottable:
-            ax.annotate(
-                str(row["electrode_id"]),
-                (row["display_x"], row["plot_y"]),
-                xytext=(3, 3),
-                textcoords="offset points",
-                fontsize=7,
-            )
-
-    # Label each probe's column so the side-by-side layout is interpretable.
-    if multi_probe:
-        for probe_id in probe_ids:
-            probe_rows = by_probe[probe_id]
-            center_x = sum(row["display_x"] for row in probe_rows) / len(
-                probe_rows
-            )
-            top_y = max(row["plot_y"] for row in probe_rows)
-            ax.annotate(
-                str(probe_id),
-                (center_x, top_y),
-                # Lifted well above the top contacts so the bold probe_id sits
-                # clear of any electrode-id labels drawn on them (offset (3, 3))
-                # when label_electrodes is on, rather than overlapping.
-                xytext=(0, 22),
-                textcoords="offset points",
-                ha="center",
-                fontsize=8,
-                fontweight="bold",
-            )
+    _annotate_geometry(
+        ax, plottable, by_probe, label_electrodes, max_per_column
+    )
 
     coordinate_sources = {
         row["coordinate_source"]

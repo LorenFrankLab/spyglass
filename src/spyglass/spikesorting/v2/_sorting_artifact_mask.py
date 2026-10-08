@@ -19,74 +19,18 @@ from __future__ import annotations
 from typing import NamedTuple
 
 
-def artifact_frame_ranges(
-    recording, valid_times, *, artifact_detection_id=None, recording_id=None
+def _validate_artifact_intervals(
+    recording, valid_times, artifact_detection_id, recording_id
 ):
-    """Map excluded periods to half-open frame ranges with bounded memory.
-
-    ``valid_times`` is the artifact-removed (start, end) seconds
-    array from the upstream ``IntervalList``; ``make_fetch``
-    already fetched it as ``obs_intervals`` so ``make_compute``
-    passes it through here instead of re-issuing the DB lookup
-    (the tri-part contract forbids DB I/O inside compute).
-
-    ``artifact_detection_id`` / ``recording_id`` are used only to make the
-    empty-``valid_times`` error message actionable.
-
-    Parameters
-    ----------
-    recording : si.BaseRecording
-        The recording whose actual timestamps define frame coordinates.
-        This mapping function does not modify it.
-    valid_times : numpy.ndarray
-        Artifact-removed ``(n, 2)`` array of (start, end) seconds,
-        sorted by start and non-overlapping.
-    artifact_detection_id : optional
-        Keyword-only. Used only in the empty-``valid_times`` error
-        message. Default ``None``.
-    recording_id : optional
-        Keyword-only. Used only in the empty-``valid_times`` error
-        message. Default ``None``.
-
-    Returns
-    -------
-    list[tuple[int, int]]
-        Excluded half-open frame ranges; empty when every frame is valid.
-
-    Raises
-    ------
-    EmptyArtifactValidTimesError
-        If ``valid_times`` is empty -- masking would zero the whole
-        recording, so the sort must fail loudly instead of running
-        over all-zeros.
-    ValueError
-        If ``valid_times`` is not an ``(n, 2)`` array, has an
-        interval with ``end < start``, or is not sorted-by-start and
-        non-overlapping. The complement walker assumes monotonic,
-        disjoint input; an unsorted/overlapping list would silently
-        under-mask. (The fetched ``obs_intervals`` are monotonic in
-        practice; this guards a hand-built curation override. Strict
-        input is intentional: the walker never silently sorts or merges.)
-    """
+    """Validate the interval contract and bounded recording envelope."""
     import numpy as np
 
     from spyglass.spikesorting.v2._signal_math import (
         _segment_times_at,
-        assert_artifact_frame_fraction,
         assert_positive_sampling_frequency,
-        frames_for_times,
     )
-    from spyglass.spikesorting.v2.exceptions import (
-        EmptyArtifactValidTimesError,
-    )
+    from spyglass.spikesorting.v2.exceptions import EmptyArtifactValidTimesError
 
-    # Single-segment precondition. The complement walk and the single-segment
-    # ``list_periods=[frame_ranges]`` call below both assume ``segment_index=0``
-    # only; the v2 sort recording is always a mono-segment concatenated timeline
-    # (``concatenate_recordings``). A multi-segment recording signals an upstream
-    # construction error -- fail with a clear message instead of the cryptic
-    # ``IndexError`` SpikeInterface's ``silence_periods`` raises when
-    # ``list_periods`` is shorter than the segment count.
     n_segments = recording.get_num_segments()
     if n_segments != 1:
         raise ValueError(
@@ -198,11 +142,81 @@ def artifact_frame_ranges(
             "interval before the first or past the last sample signals an "
             "alignment/units error (e.g. milliseconds vs seconds)."
         )
-    # Walk the valid intervals left-to-right in seconds, collecting the
-    # complement (artifact gaps) as ``(start_time, end_time)`` pairs;
-    # ``end_time is None`` marks the open tail that extends to the exclusive
-    # end of the recording (frame n_samples). The boundary times are then batch-mapped to
-    # frames in one binary search each.
+    return valid_times, n_samples, t_first, t_last
+
+
+def artifact_frame_ranges(
+    recording, valid_times, *, artifact_detection_id=None, recording_id=None
+):
+    """Map excluded periods to half-open frame ranges with bounded memory.
+
+    ``valid_times`` is the artifact-removed (start, end) seconds
+    array from the upstream ``IntervalList``; ``make_fetch``
+    already fetched it as ``obs_intervals`` so ``make_compute``
+    passes it through here instead of re-issuing the DB lookup
+    (the tri-part contract forbids DB I/O inside compute).
+
+    ``artifact_detection_id`` / ``recording_id`` are used only to make the
+    empty-``valid_times`` error message actionable.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The recording whose actual timestamps define frame coordinates.
+        This mapping function does not modify it.
+    valid_times : numpy.ndarray
+        Artifact-removed ``(n, 2)`` array of (start, end) seconds,
+        sorted by start and non-overlapping.
+    artifact_detection_id : optional
+        Keyword-only. Used only in the empty-``valid_times`` error
+        message. Default ``None``.
+    recording_id : optional
+        Keyword-only. Used only in the empty-``valid_times`` error
+        message. Default ``None``.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Excluded half-open frame ranges; empty when every frame is valid.
+
+    Raises
+    ------
+    EmptyArtifactValidTimesError
+        If ``valid_times`` is empty -- masking would zero the whole
+        recording, so the sort must fail loudly instead of running
+        over all-zeros.
+    ValueError
+        If ``valid_times`` is not an ``(n, 2)`` array, has an
+        interval with ``end < start``, or is not sorted-by-start and
+        non-overlapping. The complement walker assumes monotonic,
+        disjoint input; an unsorted/overlapping list would silently
+        under-mask. (The fetched ``obs_intervals`` are monotonic in
+        practice; this guards a hand-built curation override. Strict
+        input is intentional: the walker never silently sorts or merges.)
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._signal_math import (
+        _segment_times_at,
+        assert_artifact_frame_fraction,
+        assert_positive_sampling_frequency,
+        frames_for_times,
+    )
+
+    # Single-segment precondition. The complement walk and the single-segment
+    # ``list_periods=[frame_ranges]`` call below both assume ``segment_index=0``
+    # only; the v2 sort recording is always a mono-segment concatenated timeline
+    # (``concatenate_recordings``). A multi-segment recording signals an upstream
+    # construction error -- fail with a clear message instead of the cryptic
+    # ``IndexError`` SpikeInterface's ``silence_periods`` raises when
+    # ``list_periods`` is shorter than the segment count.
+    valid_times, n_samples, t_first, t_last = _validate_artifact_intervals(
+        recording, valid_times, artifact_detection_id, recording_id
+    )
+    # Walk the valid intervals left-to-right, collecting the complement as
+    # (start_time, end_time) pairs. None marks the exclusive recording end.
+    # Batch-map the boundaries to frames without reading the timestamp vector.
+    ends = valid_times[:, 1]
     gap_time_pairs: list[tuple[float, float | None]] = []
     cursor = t_first
     for vs, ve in valid_times:
