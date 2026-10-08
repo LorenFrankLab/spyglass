@@ -1576,6 +1576,14 @@ and date; excluded units remain in the matchable universe as unmatched units.
 Returned pairs must use integer curation and unit IDs and can reference only
 units retained by preparation; invalid pairs fail before writing the pairs table.
 Prepared files live through inference and are then removed, including on failure.
+`SessionMatcherInput` describes a `bundle_dir`, a `layout` name and positive
+`layout_version`, and an optional `geometry_path`. A backend owns its formats
+and must validate the layout/version it consumes. The shared preparer declares
+`split_half_waveforms` version 1, which UnitMatch requires together with geometry.
+Other preparers can declare feature or spike-train layouts and omit geometry.
+The original positional constructor and the `waveform_dir` /
+`channel_positions_path` attributes remain compatibility aliases for
+`bundle_dir` / `geometry_path`.
 Omitting `input_preparer` uses the shared dense split-half waveform layout, which
 requires SpikeInterface and NumPy but does not import UnitMatchPy. Supply a
 preparer when a backend needs another layout. Register a distinct matcher name

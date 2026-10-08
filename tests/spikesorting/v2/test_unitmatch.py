@@ -2186,8 +2186,8 @@ def test_make_compute_reads_fetched_members_and_only_stages_output(
     ``make_compute`` builds each bundle from those files with no DB access
     beyond staging the pairs NWB. The bundle inputs equal what
     ``CurationV2.get_recording`` / ``get_sorting`` return for the member."""
-    from spyglass.spikesorting.v2 import _unitmatch_backend
     from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.matcher_protocol import get_input_preparer
     from spyglass.spikesorting.v2.recording import (
         _unlink_staged_analysis_file,
     )
@@ -2215,8 +2215,10 @@ def test_make_compute_reads_fetched_members_and_only_stages_output(
         bundle_inputs[Path(session_dir).name] = (recording, sorting)
         return []
 
+    # Observe the registered preparer, which need not use UnitMatch's
+    # compatibility extraction entry point.
     monkeypatch.setattr(
-        _unitmatch_backend, "extract_unitmatch_bundle", _capture
+        get_input_preparer("fixture_pairer_reads"), "extract", _capture
     )
     selection_pk = None
     try:

@@ -192,7 +192,6 @@ def test_custom_matcher_uses_its_preparer_without_unitmatch(
                 assert source.statistics_spans == [(0, 500)]
                 assert jobs['n_jobs'] == 1
                 directory.mkdir()
-                np.save(directory / 'channel_positions.npy', [[0, 0], [0, 20]])
                 (directory / 'spikes.json').write_text(json.dumps({
                     '17': source.sorting.get_unit_spike_train(17).tolist()
                 }))
@@ -201,8 +200,10 @@ def test_custom_matcher_uses_its_preparer_without_unitmatch(
                 if bad_identity:
                     key['curation_id'] = 99
                 return PreparedMatcherInput(
-                    SessionMatcherInput(key, directory, directory / 'channel_positions.npy',
-                                        source.recording_date), (29,), 'were intentionally excluded'
+                    SessionMatcherInput(key, bundle_dir=directory,
+                                        layout='spike_times_json', layout_version=1,
+                                        recording_date=source.recording_date),
+                    (29,), 'were intentionally excluded'
                 )
 
         class Backend:
@@ -210,13 +211,17 @@ def test_custom_matcher_uses_its_preparer_without_unitmatch(
             def match(self, inputs, params):
                 assert [s.recording_date for s in inputs] == [p['input_start_time'] for p in plans]
                 for item in inputs:
-                    prepared_dirs.append(item.waveform_dir)
+                    prepared_dirs.append(item.bundle_dir)
                     if custom_layout:
-                        assert not (item.waveform_dir / 'RawWaveforms').exists()
-                        assert json.loads((item.waveform_dir / 'spikes.json').read_text()) == {
+                        assert item.layout == 'spike_times_json' and item.layout_version == 1
+                        assert item.geometry_path is None
+                        assert not (item.bundle_dir / 'RawWaveforms').exists()
+                        assert json.loads((item.bundle_dir / 'spikes.json').read_text()) == {
                             '17': [100, 200, 300]
                         }
                     else:
+                        assert item.layout == 'split_half_waveforms' and item.layout_version == 1
+                        assert item.geometry_path.is_file()
                         wave = np.load(item.waveform_dir / 'RawWaveforms/Unit17_RawSpikes.npy')
                         np.testing.assert_array_equal(wave, np.ones((2, 2, 2)))
                 # Return reversed sides to exercise canonical orientation too.

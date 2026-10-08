@@ -197,6 +197,28 @@ class UnitMatchBackend:
     name = "unitmatch"
 
     @staticmethod
+    def _validate_bundle_layouts(session_inputs) -> None:
+        from spyglass.spikesorting.v2.matcher_protocol import (
+            WAVEFORM_BUNDLE_LAYOUT,
+            WAVEFORM_BUNDLE_VERSION,
+        )
+
+        for bundle in session_inputs:
+            if (bundle.layout, bundle.layout_version) != (
+                WAVEFORM_BUNDLE_LAYOUT,
+                WAVEFORM_BUNDLE_VERSION,
+            ):
+                raise ValueError(
+                    f"UnitMatch requires {WAVEFORM_BUNDLE_LAYOUT!r} version "
+                    f"{WAVEFORM_BUNDLE_VERSION}; input {bundle.curation_key} "
+                    f"declares {bundle.layout!r} version {bundle.layout_version}."
+                )
+            if bundle.geometry_path is None:
+                raise ValueError(
+                    f"UnitMatch requires geometry_path for input {bundle.curation_key}."
+                )
+
+    @staticmethod
     def validate_geometry(named_positions, params) -> None:
         """Require one shared probe geometry before selecting or matching inputs."""
         assert_consistent_channel_geometry(named_positions)
@@ -229,6 +251,7 @@ class UnitMatchBackend:
         if len(session_inputs) < 2:
             return []
 
+        self._validate_bundle_layouts(session_inputs)
         um = _require_unitmatch()
         param = um.default_params.get_default_param()
         match_threshold = float(
@@ -245,14 +268,14 @@ class UnitMatchBackend:
         # bundle extraction); this is the post-extraction backstop.
         self.validate_geometry(
             [
-                (s.curation_key, np.load(s.channel_positions_path))
+                (s.curation_key, np.load(s.geometry_path))
                 for s in session_inputs
             ],
             params,
         )
-        raw_positions = np.load(session_inputs[0].channel_positions_path)
+        raw_positions = np.load(session_inputs[0].geometry_path)
 
-        session_dirs = [str(s.waveform_dir) for s in session_inputs]
+        session_dirs = [str(s.bundle_dir) for s in session_inputs]
         param["KS_dirs"] = session_dirs
         wave_paths, label_paths, channel_pos = um.utils.paths_from_KS(
             session_dirs

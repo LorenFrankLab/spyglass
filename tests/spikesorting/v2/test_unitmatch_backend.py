@@ -45,6 +45,39 @@ def test_match_single_session_returns_empty():
     assert UnitMatchBackend().match([one], {}) == []
 
 
+@pytest.mark.parametrize(
+    "metadata, message",
+    [
+        (
+            {"layout": "features", "geometry_path": Path("/unused")},
+            "requires 'split_half_waveforms'",
+        ),
+        ({"layout_version": 2, "geometry_path": Path("/unused")}, "version 2"),
+        ({}, "requires geometry_path"),
+    ],
+)
+def test_match_rejects_unsupported_bundle_metadata_before_importing_unitmatch(
+    monkeypatch, metadata, message
+):
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
+
+    def forbidden():
+        raise AssertionError("Invalid bundle triggered UnitMatchPy import")
+
+    monkeypatch.setattr(backend, "_require_unitmatch", forbidden)
+    inputs = [
+        SessionMatcherInput(
+            {"sorting_id": session, "curation_id": 0},
+            bundle_dir=Path("/unused"),
+            **metadata,
+        )
+        for session in ("a", "b")
+    ]
+    with pytest.raises(ValueError, match=message):
+        backend.UnitMatchBackend().match(inputs, {})
+
+
 def _two_one_unit_sessions():
     from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
 

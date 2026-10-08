@@ -1,6 +1,6 @@
 """Plugin interface + registry for cross-session unit matchers.
 
-A *matcher* takes wrapper-prepared waveform bundles, one per matching input,
+A *matcher* takes wrapper-prepared bundles, one per matching input,
 and returns pairwise cross-session unit matches. The interface is deliberately
 narrow so backends (UnitMatch ships built in) can be added without touching
 the DataJoint tables:
@@ -26,13 +26,29 @@ and testable standalone.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from numbers import Integral
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from spyglass.spikesorting.v2.exceptions import UnknownMatcherError
 
+WAVEFORM_BUNDLE_LAYOUT = "split_half_waveforms"
+WAVEFORM_BUNDLE_VERSION = 1
 
-@dataclass(frozen=True)
+
+def _resolve_bundle_path(path, legacy_path, name: str) -> Path | None:
+    """Resolve a canonical path and its constructor compatibility alias."""
+    if (
+        path is not None
+        and legacy_path is not None
+        and Path(path) != Path(legacy_path)
+    ):
+        raise ValueError(f"Conflicting {name} and legacy alias paths")
+    resolved = path if path is not None else legacy_path
+    return Path(resolved) if resolved is not None else None
+
+
+@dataclass(frozen=True, init=False)
 class SessionMatcherInput:
     """One bundle the wrapper prepares for the matcher per matching input.
 
@@ -46,24 +62,88 @@ class SessionMatcherInput:
         ``{"sorting_id": UUID, "curation_id": int}`` identifying the curated
         sorting this bundle was extracted from. The matcher echoes these keys
         back on every :class:`MatchPair`; it does not use them to read data.
-    waveform_dir : pathlib.Path
-        Directory holding the per-unit waveform arrays in the backend's
-        expected layout (for UnitMatch: ``RawWaveforms/Unit{id}_RawSpikes.npy``
-        of shape ``(spike_width, n_channels, 2)`` plus a ``cluster_group.tsv``).
-    channel_positions_path : pathlib.Path
-        ``.npy`` file of shape ``(n_channels, 2)`` with the probe geometry.
+    bundle_dir : pathlib.Path
+        Directory holding the prepared files in the backend's expected layout.
+    layout, layout_version : str, int
+        Format identifier and positive version, interpreted by the backend.
+        The shared layout is ``split_half_waveforms`` version 1: per-unit
+        ``RawWaveforms/Unit{id}_RawSpikes.npy`` arrays of shape
+        ``(spike_width, n_channels, 2)`` plus ``cluster_group.tsv``.
+    geometry_path : pathlib.Path or None
+        Optional geometry file. In the shared waveform layout it is a ``.npy``
+        file of shape ``(n_channels, 2)``. Other layouts define their own
+        metadata, or omit geometry when it is not used.
     recording_date : Any
         The input's frozen start time
         (``UnitMatchSelection.Input.input_start_time``: the earliest
         ``Session.session_start_time`` among its constituent recordings) as a
         canonical UTC ISO 8601 string, so plain string comparison is
         chronological; may be ``None`` when a backend does not need it.
+
+    ``waveform_dir`` and ``channel_positions_path`` remain constructor and
+    read-only attribute aliases for ``bundle_dir`` and ``geometry_path``.
+    The original four positional arguments retain their meaning. Legacy
+    calls default to the shared waveform layout/version; new preparers should
+    declare the layout they actually write. A backend must check the layouts
+    and versions it supports before consuming files.
     """
 
     curation_key: dict
-    waveform_dir: Path
-    channel_positions_path: Path
+    bundle_dir: Path
+    layout: str
+    layout_version: int
+    geometry_path: Path | None
     recording_date: Any = None
+
+    def __init__(
+        self,
+        curation_key: dict,
+        waveform_dir: Path | None = None,
+        channel_positions_path: Path | None = None,
+        recording_date: Any = None,
+        *,
+        bundle_dir: Path | None = None,
+        layout: str = WAVEFORM_BUNDLE_LAYOUT,
+        layout_version: int = WAVEFORM_BUNDLE_VERSION,
+        geometry_path: Path | None = None,
+    ):
+        directory = _resolve_bundle_path(bundle_dir, waveform_dir, "bundle_dir")
+        if directory is None:
+            raise TypeError(
+                "SessionMatcherInput requires bundle_dir (or waveform_dir)"
+            )
+        geometry = _resolve_bundle_path(
+            geometry_path, channel_positions_path, "geometry_path"
+        )
+        if not isinstance(layout, str) or not layout.strip():
+            raise ValueError("Matcher bundle layout must be a nonempty string")
+        if (
+            not isinstance(layout_version, Integral)
+            or isinstance(layout_version, bool)
+            or layout_version < 1
+        ):
+            raise ValueError(
+                "Matcher bundle layout_version must be a positive integer"
+            )
+        for name, value in (
+            ("curation_key", curation_key),
+            ("bundle_dir", directory),
+            ("layout", layout),
+            ("layout_version", int(layout_version)),
+            ("geometry_path", geometry),
+            ("recording_date", recording_date),
+        ):
+            object.__setattr__(self, name, value)
+
+    @property
+    def waveform_dir(self) -> Path:
+        """Compatibility alias for bundle_dir."""
+        return self.bundle_dir
+
+    @property
+    def channel_positions_path(self) -> Path | None:
+        """Compatibility alias for geometry_path."""
+        return self.geometry_path
 
 
 @dataclass(frozen=True)

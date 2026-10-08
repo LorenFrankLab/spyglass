@@ -36,6 +36,8 @@ class WaveformInputPreparer:
 
     def prepare(self, source, directory, params, job_kwargs):
         from spyglass.spikesorting.v2.matcher_protocol import (
+            WAVEFORM_BUNDLE_LAYOUT,
+            WAVEFORM_BUNDLE_VERSION,
             PreparedMatcherInput,
             SessionMatcherInput,
         )
@@ -60,8 +62,10 @@ class WaveformInputPreparer:
         return PreparedMatcherInput(
             SessionMatcherInput(
                 curation_key=dict(source.curation_key),
-                waveform_dir=directory,
-                channel_positions_path=directory / "channel_positions.npy",
+                bundle_dir=directory,
+                layout=WAVEFORM_BUNDLE_LAYOUT,
+                layout_version=WAVEFORM_BUNDLE_VERSION,
+                geometry_path=directory / "channel_positions.npy",
                 recording_date=source.recording_date,
             ),
             tuple(excluded),
