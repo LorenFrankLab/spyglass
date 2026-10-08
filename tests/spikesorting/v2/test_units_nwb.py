@@ -285,6 +285,130 @@ def test_read_units_spike_sample_indices_missing_column(tmp_path):
         read_units_spike_sample_indices(str(p))
 
 
+@pytest.mark.parametrize(
+    "reader",
+    [
+        "read_units_abs_spike_times",
+        "read_units_spike_sample_indices",
+        "read_units_abs_times_and_sample_indices",
+    ],
+)
+@pytest.mark.parametrize(
+    "column,data,match",
+    [
+        ("spike_sample_index", np.array([1.5, 2.0]), "spike_sample_index"),
+        ("spike_sample_index", np.array([True, False]), "spike_sample_index"),
+        ("spike_sample_index", np.array([2**63, 2], dtype=np.uint64), "int64"),
+        ("spike_times", np.array([0.001, np.nan]), "spike_times"),
+        (
+            "spike_times",
+            np.array([[0.001, 0.002], [0.003, 0.004]]),
+            "one-dimensional",
+        ),
+        (
+            "spike_sample_index_index",
+            np.array([1], dtype=np.int64),
+            "matching lengths",
+        ),
+        ("obs_intervals", np.array([[0.0, np.inf]]), "obs_intervals"),
+    ],
+)
+def test_units_readers_reject_malformed_numeric_columns_before_casting(
+    tmp_path, reader, column, data, match
+):
+    """Raw HDF5 dtype/shape errors cannot become apparently valid spikes."""
+    import h5py
+
+    from spyglass.spikesorting.v2._storage import units_nwb
+
+    path = tmp_path / "malformed.nwb"
+    _write_units_nwb_with_samples(path, [(1, [0.001, 0.002], [1, 2])])
+    with h5py.File(path, "a") as handle:
+        name = "units/" + column
+        attributes = dict(handle[name].attrs)
+        del handle[name]
+        replacement = handle.create_dataset(name, data=data)
+        for key, value in attributes.items():
+            replacement.attrs[key] = value
+    with pytest.raises(ValueError, match=match):
+        getattr(units_nwb, reader)(str(path))
+
+
+def test_units_reader_rejects_duplicate_unit_rows(tmp_path):
+    import h5py
+
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        read_units_abs_spike_times,
+    )
+
+    path = tmp_path / "duplicate_ids.nwb"
+    _write_units_nwb_with_samples(path, [(1, [0.001], [1]), (2, [0.002], [2])])
+    with h5py.File(path, "a") as handle:
+        handle["units/id"][:] = [1, 1]
+    with pytest.raises(ValueError, match="unit_id must be unique"):
+        read_units_abs_spike_times(str(path))
+
+
+@pytest.mark.parametrize("bad_id", [1.5, True, "1", 2**63])
+def test_sorting_builder_rejects_lossy_unit_ids(bad_id):
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        numpysorting_from_sample_indices,
+    )
+
+    with pytest.raises(ValueError, match="unit_id"):
+        numpysorting_from_sample_indices({bad_id: [1, 2]}, _FS)
+
+
+@pytest.mark.parametrize("frames", [[1.9], [True], [2**63], [[1, 2]], [-1]])
+def test_sorting_builder_rejects_invalid_sample_frames(frames):
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        numpysorting_from_sample_indices,
+    )
+
+    with pytest.raises(ValueError, match="spike_sample_index"):
+        numpysorting_from_sample_indices({1: frames}, _FS)
+
+
+@pytest.mark.parametrize(
+    "times,frames",
+    [
+        ([[1.0]], [[1, 2]]),
+        ([[1.0]], []),
+        ([[1.0, np.nan]], [[1, 2]]),
+        ([[[1.0]]], [[1]]),
+        ([[1.0]], [[True]]),
+    ],
+)
+def test_merge_rejects_misaligned_or_invalid_observations(times, frames):
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        _dedup_merged_spike_times_and_frames,
+    )
+
+    with pytest.raises(ValueError):
+        _dedup_merged_spike_times_and_frames(times, frames, delta_s=0.4e-3)
+
+
+@pytest.mark.parametrize(
+    "spans",
+    [[[0.5, 10]], [[False, 10]], [[0, 2**63]], [[0, 5], [4, 10]], [[0, 5, 10]]],
+)
+def test_statistics_readback_rejects_corrupt_frames_before_integer_conversion(
+    monkeypatch, spans
+):
+    from spyglass.spikesorting.v2._storage import provenance
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        read_sorting_statistics_spans,
+    )
+
+    monkeypatch.setattr(
+        provenance,
+        "read_provenance_values",
+        lambda *args: {"statistics_spans": spans},
+    )
+    with pytest.raises(ValueError, match="statistics_spans"):
+        read_sorting_statistics_spans("unused.nwb", sorting_id="test")
+
+
 # A source clock with a 100 s wall-clock gap between frames 49 and 50, and
 # spikes on both sides of it: an affine ``t_start + i / fs`` inverse lands the
 # post-gap spikes on the wrong frames. Stored frames preserve the source clock.
@@ -596,6 +720,36 @@ def test_sample_indices_to_times_affine_uses_recording_start():
     np.testing.assert_allclose(out[1], 5.0 + np.array([3, 0, 7]) / _FS)
 
 
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize(
+    "frames", [[-1], [10], [1.5], [True], [2**63], [[1, 2]]]
+)
+def test_frame_to_time_rejects_invalid_frames_before_clock_lookup(
+    explicit, frames
+):
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        _sample_indices_to_times_by_unit,
+    )
+
+    recording = _FakeRecording(np.arange(10) / _FS, explicit=explicit)
+    with pytest.raises(ValueError, match="spike_sample_index"):
+        _sample_indices_to_times_by_unit(recording, {0: frames})
+    assert recording.sample_calls == []
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_frame_to_time_preserves_unsorted_repeated_observations(explicit):
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        _sample_indices_to_times_by_unit,
+    )
+
+    recording = _FakeRecording(np.arange(10) / _FS, explicit=explicit)
+    frames = np.array([7, 2, 7, 0], dtype=np.int64)
+    times = _sample_indices_to_times_by_unit(recording, {0: frames})
+    np.testing.assert_array_equal(times[0], recording.times[frames])
+    assert recording.time_slice_calls == []
+
+
 def test_base_intervals_from_recording_detects_gaps():
     """Gap detection yields one interval per contiguous run from bounded
     timestamp chunks."""
@@ -635,6 +789,42 @@ def units_file_resolver(tmp_path, monkeypatch):
     module.AnalysisNwbfile = AnalysisNwbfile
     monkeypatch.setitem(sys.modules, module.__name__, module)
     return tmp_path
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"abs_times_by_uid": {0: [np.nan]}},
+        {"sample_indices_by_uid": {0: [1.5]}},
+        {"sample_indices_by_uid": {0: [True]}},
+        {"sample_indices_by_uid": {0: [2**63]}},
+        {"sample_indices_by_uid": {0: [[1]]}},
+        {"sample_indices_by_uid": {0: [1, 2]}},
+        {"obs_intervals_by_uid": {0: [[0, np.inf]]}},
+    ],
+)
+def test_curated_writer_rejects_malformed_observations_before_file_io(
+    overrides,
+):
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        _write_curated_units_nwb_body,
+    )
+    from tests.spikesorting.v2._provenance_helpers import curation_header
+
+    values = {
+        "analysis_file_name": "unused.nwb",
+        "nwb_file_name": "source.nwb",
+        "kept_unit_to_contributors": {0: [0]},
+        "apply_merge": False,
+        "labels": {},
+        "abs_times_by_uid": {0: [0.001]},
+        "sample_indices_by_uid": {0: [1]},
+        "obs_intervals_by_uid": {0: [[0.0, 0.01]]},
+        "curation_header": curation_header(),
+        **overrides,
+    }
+    with pytest.raises(ValueError):
+        _write_curated_units_nwb_body(**values)
 
 
 @pytest.mark.parametrize("output", ["zero_units", "populated", "empty_train"])

@@ -63,6 +63,69 @@ _PCA_PARAMS = {
 }
 
 
+@pytest.mark.parametrize("index", [[1, 1], [1.5], [True], [2**63], ["1"]])
+def test_metric_namespace_rejects_ambiguous_or_lossy_unit_index(index):
+    from spyglass.spikesorting.v2._curation.metrics import assert_unit_namespace
+
+    frame = pd.DataFrame({"snr": np.ones(len(index))}, index=index)
+    with pytest.raises(ValueError, match="unit_id"):
+        assert_unit_namespace(frame, [1])
+
+
+def test_metric_namespace_preserves_expected_missing_scientific_values():
+    from spyglass.spikesorting.v2._curation.metrics import assert_unit_namespace
+
+    frame = pd.DataFrame(
+        {"snr": [np.nan, 3.0]}, index=pd.Index([2, 1], dtype=np.int64)
+    )
+    assert_unit_namespace(frame, [1, 2])
+    assert np.isnan(frame.loc[2, "snr"])
+    assert_unit_namespace(pd.DataFrame(index=pd.Index([], dtype=int)), [])
+
+
+@pytest.mark.parametrize("index", [[1.5], [True], [1, 1], [2**63]])
+def test_metric_compute_rejects_bad_producer_index_before_integer_conversion(
+    monkeypatch, index
+):
+    from spikeinterface.metrics import quality
+
+    from spyglass.spikesorting.v2._curation.metrics import compute_metrics
+    from spyglass.spikesorting.v2._sorting import analyzer
+
+    frame = pd.DataFrame({"num_spikes": np.ones(len(index))}, index=index)
+    monkeypatch.setattr(
+        quality, "compute_quality_metrics", lambda *args, **kwargs: frame.copy()
+    )
+    monkeypatch.setattr(
+        analyzer, "ensure_extensions", lambda *args, **kwargs: None
+    )
+    with pytest.raises(ValueError, match="unit_id"):
+        compute_metrics(object(), None, ["num_spikes"], {}, True)
+
+
+@pytest.mark.parametrize(
+    "group", [[1.5, 2], [True, 2], [2**63, 2], [1, 1], ["1", 2]]
+)
+def test_merge_membership_rejects_invalid_native_identifiers(group):
+    from spyglass.spikesorting.v2._curation.metrics import (
+        assert_merge_membership,
+    )
+
+    with pytest.raises(ValueError, match="unit_id"):
+        assert_merge_membership([group], [1, 2])
+
+
+def test_merge_membership_preserves_order_independent_valid_groups():
+    from spyglass.spikesorting.v2._curation.metrics import (
+        assert_merge_membership,
+    )
+
+    groups = [[np.int64(2), np.int32(1)]]
+    assert_merge_membership(groups, [1, 2, 3])
+    assert groups == [[2, 1]]
+    assert_merge_membership([], [])
+
+
 def _analyzer(duration_s, spikes_by_unit, *, whiten, gap_s=0.0, seed=0):
     """Analyzer over a ground-truth recording with chosen per-unit counts.
 

@@ -26,6 +26,11 @@ from typing import Any, NamedTuple
 import numpy as np
 import pandas as pd
 
+from spyglass.spikesorting.v2._core.numerical import (
+    integer_scalar,
+    integer_vector,
+)
+
 from spyglass.spikesorting.v2._sorting.analyzer import (
     STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
 )
@@ -178,6 +183,7 @@ def apply_label_rules(
     is an independent object (a fresh list per ``unit_id``); and a label is
     appended only when not already present (element-against-list dedupe).
     """
+    _metric_unit_ids(metrics_df.index)
     # A plain dict with explicit fresh-list construction -- each unit_id gets
     # its own list object, so one unit's append cannot leak into another.
     labels: dict[int, list[str]] = {}
@@ -1019,14 +1025,18 @@ def spike_counts(display_analyzer, metric_analyzer) -> dict[int, int]:
     must agree; the eligibility classifier uses one set for both.
     """
     counts = {
-        int(unit_id): int(n)
+        integer_scalar(unit_id, name="unit_id"): integer_scalar(
+            n, name="n_spikes", nonnegative=True
+        )
         for unit_id, n in (
             display_analyzer.sorting.count_num_spikes_per_unit().items()
         )
     }
     if metric_analyzer is not None:
         metric_counts = {
-            int(unit_id): int(n)
+            integer_scalar(unit_id, name="unit_id"): integer_scalar(
+                n, name="n_spikes", nonnegative=True
+            )
             for unit_id, n in (
                 metric_analyzer.sorting.count_num_spikes_per_unit().items()
             )
@@ -1040,10 +1050,27 @@ def spike_counts(display_analyzer, metric_analyzer) -> dict[int, int]:
     return counts
 
 
+def _metric_unit_ids(index):
+    identifiers = integer_vector(index.to_numpy(), name="metric unit_id")
+    if len(np.unique(identifiers)) != len(identifiers):
+        raise ValueError(
+            "CurationEvaluation metric unit_id index must be unique."
+        )
+    return identifiers
+
+
 def assert_unit_namespace(metrics_df, expected_unit_ids) -> None:
     """Raise unless the metric index equals the curation's unit set."""
-    computed = {int(u) for u in metrics_df.index}
-    expected = {int(u) for u in expected_unit_ids}
+    computed_ids = _metric_unit_ids(metrics_df.index)
+    expected_ids = integer_vector(
+        list(expected_unit_ids), name="expected unit_id"
+    )
+    if len(np.unique(expected_ids)) != len(expected_ids):
+        raise ValueError(
+            "CurationEvaluation expected unit_id namespace must be unique."
+        )
+    computed = set(computed_ids.tolist())
+    expected = set(expected_ids.tolist())
     if computed != expected:
         raise ValueError(
             "CurationEvaluation namespace invariant violated: computed "
@@ -1057,9 +1084,18 @@ def assert_unit_namespace(metrics_df, expected_unit_ids) -> None:
 
 def assert_merge_membership(merge_groups, expected_unit_ids) -> None:
     """Raise unless every suggested merge member is a curation unit."""
-    expected = {int(u) for u in expected_unit_ids}
+    expected = set(
+        integer_vector(
+            list(expected_unit_ids), name="expected unit_id"
+        ).tolist()
+    )
     for group in merge_groups:
-        members = {int(u) for u in group}
+        member_ids = integer_vector(list(group), name="merge member unit_id")
+        if len(np.unique(member_ids)) != len(member_ids):
+            raise ValueError(
+                "CurationEvaluation merge member unit_id values must be unique within a group."
+            )
+        members = set(member_ids.tolist())
         if not members <= expected:
             raise ValueError(
                 "CurationEvaluation merge-suggestion invariant violated: "
@@ -1212,7 +1248,9 @@ def compute_metrics(
                 # THIS row's metrics.
                 delete_existing_metrics=True,
             )
-        voltage_df.index = voltage_df.index.astype(int)
+        voltage_df.index = pd.Index(
+            _metric_unit_ids(voltage_df.index), name=voltage_df.index.name
+        )
         frames.append(voltage_df)
 
     # PC / cluster-separation metrics -> whitened metric analyzer.
@@ -1290,7 +1328,9 @@ def compute_metrics(
                 # the PC/NN metric compute to the main process.
                 n_jobs=1,
             )
-        pc_df.index = pc_df.index.astype(int)
+        pc_df.index = pd.Index(
+            _metric_unit_ids(pc_df.index), name=pc_df.index.name
+        )
         frames.append(pc_df)
 
     if not frames:
@@ -1396,7 +1436,9 @@ def surface_template_columns(
     # Copy the selected columns before retyping the index so the analyzer's
     # cached template_metrics frame is never mutated in place.
     selected = tm_df[present].copy()
-    selected.index = selected.index.astype(int)
+    selected.index = pd.Index(
+        _metric_unit_ids(selected.index), name=selected.index.name
+    )
     return metrics_df.join(selected)
 
 
@@ -1426,4 +1468,7 @@ def compute_merge_groups(
         compute_needed_extensions=False,
         **compute_kwargs,
     )
-    return [[int(u) for u in group] for group in groups]
+    return [
+        integer_vector(list(group), name="merge member unit_id").tolist()
+        for group in groups
+    ]

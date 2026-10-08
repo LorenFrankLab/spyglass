@@ -21,7 +21,16 @@ filesystem, not the database.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import NamedTuple
+
+from spyglass.spikesorting.v2._core.numerical import (
+    finite_intervals,
+    finite_scalar,
+    finite_vector,
+    integer_scalar,
+    integer_vector,
+)
 
 SPIKE_SAMPLE_INDEX_COLUMN = "spike_sample_index"
 
@@ -29,8 +38,8 @@ SPIKE_SAMPLE_INDEX_COLUMN = "spike_sample_index"
 def read_units_columns(abs_path, columns, *, unit_ids=None) -> tuple:
     """Open a units NWB once and read the requested per-unit columns.
 
-    Only the named ragged columns are read, so a caller that needs one column
-    never materializes the others.
+    Selected units' required columns are validated together, including aligned
+    spike-time/frame lengths. Only the requested columns are returned.
 
     Parameters
     ----------
@@ -55,7 +64,11 @@ def read_units_columns(abs_path, columns, *, unit_ids=None) -> tuple:
     import numpy as np
     import pynwb
 
-    wanted = None if unit_ids is None else {int(u) for u in unit_ids}
+    wanted = (
+        None
+        if unit_ids is None
+        else set(integer_vector(list(unit_ids), name="unit_id").tolist())
+    )
     with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
         nwbf = io.read()
         units = nwbf.units
@@ -68,21 +81,39 @@ def read_units_columns(abs_path, columns, *, unit_ids=None) -> tuple:
                 f"Invalid v2 Units NWB {str(abs_path)!r}: populated Units table "
                 f"is missing required columns {missing}."
             )
-        rows = [
-            (row_ind, int(uid))
-            for row_ind, uid in enumerate(np.asarray(units.id[:], dtype=int))
-            if wanted is None or int(uid) in wanted
-        ]
-        out = []
-        for column in columns:
-            data = units[column]
-            dtype = np.int64 if column == SPIKE_SAMPLE_INDEX_COLUMN else float
-            out.append(
-                {
-                    uid: np.asarray(data[row_ind], dtype=dtype)
-                    for row_ind, uid in rows
-                }
+        identifiers = integer_vector(units.id[:], name="unit_id")
+        if len(np.unique(identifiers)) != len(identifiers):
+            raise ValueError(
+                f"Invalid v2 Units NWB {str(abs_path)!r}: unit_id must be unique."
             )
+        out = [{} for _ in columns]
+        for row_ind, uid in enumerate(identifiers):
+            uid = int(uid)
+            if wanted is not None and uid not in wanted:
+                continue
+            context = f"v2 Units NWB {str(abs_path)!r}, unit_id={uid}"
+            times = finite_vector(
+                units["spike_times"][row_ind], name=f"{context} spike_times"
+            )
+            frames = integer_vector(
+                units[SPIKE_SAMPLE_INDEX_COLUMN][row_ind],
+                name=f"{context} spike_sample_index",
+                nonnegative=True,
+            )
+            if len(times) != len(frames):
+                raise ValueError(
+                    f"{context}: spike_times and spike_sample_index must have matching lengths."
+                )
+            values = {
+                "spike_times": times,
+                SPIKE_SAMPLE_INDEX_COLUMN: frames,
+                "obs_intervals": finite_intervals(
+                    units["obs_intervals"][row_ind],
+                    name=f"{context} obs_intervals",
+                ),
+            }
+            for column, result in zip(columns, out, strict=True):
+                result[uid] = values[column]
         return tuple(out)
 
 
@@ -164,19 +195,25 @@ def curation_source_unit_ids(kept_unit_to_contributors, apply_merge):
     needed: set[int] = set()
     for kept_uid, contribs in kept_unit_to_contributors.items():
         if len(contribs) > 1:
-            needed.update(int(u) for u in contribs)
+            needed.update(
+                integer_vector(
+                    list(contribs), name="merge member unit_id"
+                ).tolist()
+            )
         else:
-            needed.add(int(kept_uid))
+            needed.add(integer_scalar(kept_uid, name="unit_id"))
     return needed
 
 
 def numpysorting_from_sample_indices(sample_indices, fs):
     """Build a ``NumpySorting`` directly from stored sample frames."""
-    import numpy as np
     import spikeinterface as si
 
+    fs = finite_scalar(fs, name="sampling_frequency", positive=True)
     units_dict = {
-        int(uid): np.asarray(frames, dtype=np.int64)
+        integer_scalar(uid, name="unit_id"): integer_vector(
+            frames, name="spike_sample_index", nonnegative=True
+        )
         for uid, frames in sample_indices.items()
     }
     return si.NumpySorting.from_unit_dict([units_dict], sampling_frequency=fs)
@@ -209,6 +246,41 @@ def read_stored_units(units: StoredUnits):
     return sorting_from_units_nwb(units.abs_path, units.sampling_frequency)
 
 
+def _integer_keyed_mapping(values, *, name):
+    if not isinstance(values, Mapping):
+        raise ValueError(f"{name} must be a mapping of integer unit IDs.")
+    return {
+        integer_scalar(uid, name="unit_id"): value
+        for uid, value in values.items()
+    }
+
+
+def _validated_spike_mappings(abs_times, sample_indices):
+    times_by_unit = _integer_keyed_mapping(abs_times, name="spike_times")
+    frames_by_unit = _integer_keyed_mapping(
+        sample_indices, name="spike_sample_index"
+    )
+    if times_by_unit.keys() != frames_by_unit.keys():
+        raise ValueError(
+            "spike_times and spike_sample_index must have matching unit IDs."
+        )
+    for uid in times_by_unit:
+        times = finite_vector(
+            times_by_unit[uid], name=f"unit_id={uid} spike_times"
+        )
+        frames = integer_vector(
+            frames_by_unit[uid],
+            name=f"unit_id={uid} spike_sample_index",
+            nonnegative=True,
+        )
+        if len(times) != len(frames):
+            raise ValueError(
+                f"unit_id={uid}: spike_times and spike_sample_index must have matching lengths."
+            )
+        times_by_unit[uid], frames_by_unit[uid] = times, frames
+    return times_by_unit, frames_by_unit
+
+
 def build_lazy_merged_sorting_from_samples(
     abs_times, sample_indices, units_to_merge, fs, *, delta_s
 ):
@@ -218,22 +290,24 @@ def build_lazy_merged_sorting_from_samples(
     respected. The kept absolute-time events carry their aligned sample frames
     through the same mask, avoiding a full recording timestamp-vector read.
     """
-    import numpy as np
-
+    abs_times, sample_indices = _validated_spike_mappings(
+        abs_times, sample_indices
+    )
+    units_to_merge = [
+        integer_vector(list(group), name="merge member unit_id").tolist()
+        for group in units_to_merge
+    ]
     units_dict: dict = {}
-    merged_members = {int(u) for g in units_to_merge for u in g}
+    merged_members = {u for g in units_to_merge for u in g}
     for uid, frames in sample_indices.items():
-        if int(uid) not in merged_members:
-            units_dict[int(uid)] = np.asarray(frames, dtype=np.int64)
+        if uid not in merged_members:
+            units_dict[uid] = frames
 
-    next_id = max(int(u) for u in abs_times) + 1
+    next_id = max(abs_times, default=-1) + 1
     for contribs in units_to_merge:
         _times, frames = _dedup_merged_spike_times_and_frames(
-            [np.asarray(abs_times[int(u)], dtype=float) for u in contribs],
-            [
-                np.asarray(sample_indices[int(u)], dtype=np.int64)
-                for u in contribs
-            ],
+            [abs_times[u] for u in contribs],
+            [sample_indices[u] for u in contribs],
             delta_s,
         )
         units_dict[next_id] = frames
@@ -245,9 +319,18 @@ def _dedup_merged_spike_times_and_frames(times_list, frames_list, delta_s):
     """Return deduplicated ``(times, frames)`` with both arrays aligned."""
     import numpy as np
 
-    time_arrays = [np.asarray(t, dtype=float) for t in times_list]
-    frame_arrays = [np.asarray(f, dtype=np.int64) for f in frames_list]
-    for times, frames in zip(time_arrays, frame_arrays):
+    times_list, frames_list = list(times_list), list(frames_list)
+    if len(times_list) != len(frames_list):
+        raise ValueError(
+            "Merged unit spike-time and sample-index contributor lists must have matching lengths."
+        )
+    delta_s = finite_scalar(delta_s, name="delta_s", nonnegative=True)
+    time_arrays = [finite_vector(t, name="spike_times") for t in times_list]
+    frame_arrays = [
+        integer_vector(f, name="spike_sample_index", nonnegative=True)
+        for f in frames_list
+    ]
+    for times, frames in zip(time_arrays, frame_arrays, strict=True):
         if times.shape != frames.shape:
             raise ValueError(
                 "Merged unit spike times and sample indices must have matching "
@@ -294,9 +377,15 @@ def abs_spike_times_dataframe(abs_times):
     """
     import pandas as pd
 
+    abs_times = _integer_keyed_mapping(abs_times, name="spike_times")
     unit_ids = list(abs_times)
     return pd.DataFrame(
-        {"spike_times": [abs_times[u] for u in unit_ids]},
+        {
+            "spike_times": [
+                finite_vector(abs_times[u], name=f"unit_id={u} spike_times")
+                for u in unit_ids
+            ]
+        },
         index=pd.Index(unit_ids, name="unit_id"),
     )
 
@@ -322,26 +411,45 @@ def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
     """Map stored sample frames to absolute times without full-vector allocation."""
     import numpy as np
 
+    sample_indices_by_unit = _integer_keyed_mapping(
+        sample_indices_by_unit, name="spike_sample_index"
+    )
+    n_samples = integer_scalar(
+        recording.get_num_samples(segment_index=0),
+        name="recording n_samples",
+        nonnegative=True,
+    )
+    for uid, frames in sample_indices_by_unit.items():
+        frames = integer_vector(
+            frames, name=f"unit_id={uid} spike_sample_index"
+        )
+        if np.any((frames < 0) | (frames >= n_samples)):
+            raise ValueError(
+                f"spike_sample_index contains frame(s) outside the recording range [0, {n_samples})."
+            )
+        sample_indices_by_unit[uid] = frames
+
+    def read_times(frames):
+        times = finite_vector(
+            recording.sample_index_to_time(frames, segment_index=0),
+            name="spike_times",
+        )
+        if len(times) != len(frames):
+            raise ValueError(
+                "spike_times and spike_sample_index must have matching lengths."
+            )
+        return times
+
     if not recording.has_time_vector(segment_index=0):
         # Rate-based: ``frames / fs + t_start`` computed by SpikeInterface.
         return {
-            int(uid): recording.sample_index_to_time(
-                np.asarray(frames, dtype=np.int64), segment_index=0
-            )
+            uid: read_times(frames)
             for uid, frames in sample_indices_by_unit.items()
         }
 
-    n_samples = int(recording.get_num_samples(segment_index=0))
-
     def lookup(frames):
-        frames = np.asarray(frames, dtype=np.int64)
         if frames.size == 0:
             return np.asarray([], dtype=np.float64)
-        if np.any((frames < 0) | (frames >= n_samples)):
-            raise ValueError(
-                "spike_sample_index contains frame(s) outside the recording "
-                f"range [0, {n_samples})."
-            )
         # ``sample_index_to_time`` indexes the h5py-/mmap-backed timestamp
         # vector, whose fancy-indexing requires STRICTLY INCREASING indices.
         # A unit's spike frames are not guaranteed sorted (and may repeat), so
@@ -349,10 +457,7 @@ def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
         # original frame order -- still sparse, no full-vector materialization.
         order = np.argsort(frames, kind="stable")
         uniq, inverse = np.unique(frames[order], return_inverse=True)
-        uniq_times = np.asarray(
-            recording.sample_index_to_time(uniq, segment_index=0),
-            dtype=np.float64,
-        )
+        uniq_times = read_times(uniq)
         out = np.empty(frames.shape, dtype=np.float64)
         out[order] = uniq_times[inverse]
         return out
@@ -381,10 +486,9 @@ def recording_timestamps(recording_row):
     """Return the full timestamp vector of the upstream Recording.
 
     Reads the persisted ``ElectricalSeries`` timestamps -- which for
-    disjoint sort intervals are gap-preserving (non-uniform). The SI
-    readback in ``get_sorting`` maps absolute spike times back to
-    frames via ``np.searchsorted`` against this vector; the affine
-    ``t_start + i/fs`` assumption is wrong across wall-clock gaps.
+    disjoint sort intervals are gap-preserving (non-uniform). Member exports
+    use this acquisition clock to map stored frames back to wall-clock times;
+    the affine ``t_start + i/fs`` assumption is wrong across gaps.
     Reads only the timestamps dataset (not the traces), so it is far
     lighter than loading the full SI recording.
 
@@ -483,7 +587,17 @@ def read_sorting_statistics_spans(
             "and repopulate this Sorting (and its downstream) so noise and "
             "whitening statistics are estimated from its artifact-free spans."
         )
-    return [(int(a), int(b)) for a, b in values[STATISTICS_SPANS_FIELD]]
+    result = []
+    previous_end = 0
+    for pair in values[STATISTICS_SPANS_FIELD]:
+        span = integer_vector(pair, name="statistics_spans", nonnegative=True)
+        if len(span) != 2 or span[1] <= span[0] or span[0] < previous_end:
+            raise ValueError(
+                "statistics_spans requires ordered, nonoverlapping positive frame intervals."
+            )
+        result.append((int(span[0]), int(span[1])))
+        previous_end = span[1]
+    return result
 
 
 def _add_sample_frame_column(nwbf, frame_trains):
@@ -494,6 +608,10 @@ def _add_sample_frame_column(nwbf, frame_trains):
     """
     import numpy as np
 
+    frame_trains = [
+        integer_vector(frames, name="spike_sample_index", nonnegative=True)
+        for frames in frame_trains
+    ]
     nwbf.add_unit_column(
         name=SPIKE_SAMPLE_INDEX_COLUMN,
         description=(
@@ -609,15 +727,21 @@ def _write_sorting_units_nwb_body(
     analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
 
     sample_indices_by_unit = {
-        int(unit_id): np.asarray(
-            sorting.get_unit_spike_train(unit_id=unit_id), dtype=np.int64
+        int(unit_id): integer_vector(
+            sorting.get_unit_spike_train(unit_id=unit_id),
+            name="spike_sample_index",
+            nonnegative=True,
         )
-        for unit_id in sorting.unit_ids
+        for unit_id in integer_vector(sorting.unit_ids, name="unit_id")
     }
     spike_times_by_unit = _sample_indices_to_times_by_unit(
         recording, sample_indices_by_unit
     )
-    sampling_frequency = float(recording.get_sampling_frequency())
+    sampling_frequency = finite_scalar(
+        recording.get_sampling_frequency(),
+        name="sampling_frequency",
+        positive=True,
+    )
     if obs_intervals is None:
         # ``obs_intervals is None`` is the "no artifact-detection pass" case:
         # the artifact-detection pass is optional (an ArtifactDetectionSource
@@ -630,11 +754,14 @@ def _write_sorting_units_nwb_body(
         # gaps (which would inflate the observation duration). For a
         # contiguous recording this collapses to a single
         # ``[t0, t_end]``, unchanged.
-        obs_intervals_arr = np.asarray(
-            _base_intervals_from_recording(recording, sampling_frequency)
+        obs_intervals_arr = finite_intervals(
+            _base_intervals_from_recording(recording, sampling_frequency),
+            name="obs_intervals",
         )
     else:
-        obs_intervals_arr = np.asarray(obs_intervals)
+        obs_intervals_arr = finite_intervals(
+            obs_intervals, name="obs_intervals"
+        )
 
     with pynwb.NWBHDF5IO(
         path=analysis_abs_path, mode="a", load_namespaces=True
@@ -890,6 +1017,26 @@ def _write_curated_units_nwb_body(
         raise ValueError(
             "Curated v2 Units require sample indices and observation intervals."
         )
+    abs_times_by_uid, sample_indices_by_uid = _validated_spike_mappings(
+        abs_times_by_uid, sample_indices_by_uid
+    )
+    obs_intervals_by_uid = _integer_keyed_mapping(
+        obs_intervals_by_uid, name="obs_intervals"
+    )
+    if obs_intervals_by_uid.keys() != abs_times_by_uid.keys():
+        raise ValueError(
+            "obs_intervals and spike_times must have matching unit IDs."
+        )
+    obs_intervals_by_uid = {
+        uid: finite_intervals(intervals, name=f"unit_id={uid} obs_intervals")
+        for uid, intervals in obs_intervals_by_uid.items()
+    }
+    kept_unit_to_contributors = {
+        integer_scalar(uid, name="unit_id"): integer_vector(
+            list(contributors), name="merge member unit_id"
+        ).tolist()
+        for uid, contributors in kept_unit_to_contributors.items()
+    }
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._core.enums import CurationLabel
     from spyglass.spikesorting.v2._core.signal_math import _MERGE_DEDUP_DELTA_MS
