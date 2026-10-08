@@ -45,6 +45,7 @@ from spyglass.spikesorting.v2._recording import (
     sort_groups_insert as _sort_group_insert,
 )
 from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
+from spyglass.spikesorting.v2._storage import rebuilds as _recording_rebuilds
 from spyglass.spikesorting.v2._recording.geometry import (
     fetch_interior_bad_channel_ids,
 )
@@ -1408,7 +1409,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             The present file's absolute path, the stored
             ``electrical_series_path`` and the row's ``content_hash``.
         """
-        from spyglass.spikesorting.v2._storage.nwb import stored_traces
+        from spyglass.spikesorting.v2._storage.rebuilds import stored_traces
 
         return stored_traces(type(self), key, (self & key).fetch1())
 
@@ -1438,12 +1439,12 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def _rebuild_nwb_artifact(self, key) -> None:
         """Rebuild a missing recording artifact -- locked, atomic, reconciled.
 
-        The rebuild is :func:`._recording_nwb.rebuild_nwb_artifact`; it calls
+        The rebuild is :func:`._storage.rebuilds.rebuild_nwb_artifact`; it calls
         ``make_fetch`` and ``_compute_recording_artifact`` on this instance.
-        :func:`._recording_nwb.ensure_artifact_file` calls this method on every
+        :func:`._storage.rebuilds.ensure_artifact_file` calls this method on every
         trace-artifact table, and tests patch it, so it stays on the class.
         """
-        return _recording_nwb.rebuild_nwb_artifact(self, key)
+        return _recording_rebuilds.rebuild_nwb_artifact(self, key)
 
     # ---- Implementation helpers -----------------------------------------
 

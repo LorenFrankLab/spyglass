@@ -28,6 +28,7 @@ from spyglass.spikesorting.v2._recording import (
     session_group as _session_group_insert,
 )
 from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
+from spyglass.spikesorting.v2._storage import rebuilds as _recording_rebuilds
 from spyglass.spikesorting.v2._storage.nwb import StoredTraces
 from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
@@ -964,10 +965,8 @@ class ConcatenatedRecording(
         si.BaseRecording
             The concatenated, masked, unwhitened recording.
         """
-        from spyglass.spikesorting.v2._storage.nwb import (
-            read_stored_traces,
-            stored_traces,
-        )
+        from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
+        from spyglass.spikesorting.v2._storage.rebuilds import stored_traces
 
         return read_stored_traces(
             stored_traces(type(self), key, (self & key).fetch1())
@@ -976,12 +975,12 @@ class ConcatenatedRecording(
     def _rebuild_nwb_artifact(self, key) -> None:
         """Rebuild a missing concat artifact -- locked, atomic, content-verified.
 
-        The rebuild is :func:`._recording_nwb.rebuild_concat_nwb_artifact`; it
+        The rebuild is :func:`._storage.rebuilds.rebuild_concat_nwb_artifact`; it
         calls ``make_fetch`` and ``make_compute`` on this instance.
-        :func:`._recording_nwb.ensure_artifact_file` calls this method on every
+        :func:`._storage.rebuilds.ensure_artifact_file` calls this method on every
         trace-artifact table, so it stays on the class.
         """
-        return _recording_nwb.rebuild_concat_nwb_artifact(self, key)
+        return _recording_rebuilds.rebuild_concat_nwb_artifact(self, key)
 
     def split_sorting_by_session(self, sorting, key) -> dict:
         """Back-map a concat-frame sorting into per-member local sortings.

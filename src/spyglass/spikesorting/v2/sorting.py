@@ -961,7 +961,9 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             Absolute path of the (present) file, for
             :func:`._source_resolution.read_effective_recording`.
         """
-        from spyglass.spikesorting.v2._storage.nwb import ensure_artifact_file
+        from spyglass.spikesorting.v2._storage.rebuilds import (
+            ensure_artifact_file,
+        )
 
         return ensure_artifact_file(
             _TRACE_TABLES[traces.kind],

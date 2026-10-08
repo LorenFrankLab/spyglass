@@ -114,7 +114,9 @@ def test_rebuilt_recording_install_leaves_retryable_state(
     import sys
     from types import ModuleType
 
-    from spyglass.spikesorting.v2._storage.nwb import install_rebuilt_recording
+    from spyglass.spikesorting.v2._storage.rebuilds import (
+        install_rebuilt_recording,
+    )
 
     temp = tmp_path / "rebuilt.nwb"
     canonical = tmp_path / "canonical.nwb"

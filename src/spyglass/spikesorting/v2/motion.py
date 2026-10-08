@@ -758,7 +758,9 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._artifacts.readers import (
             read_recording_artifact_valid_times,
         )
-        from spyglass.spikesorting.v2._storage.nwb import ensure_artifact_file
+        from spyglass.spikesorting.v2._storage.rebuilds import (
+            ensure_artifact_file,
+        )
         from spyglass.spikesorting.v2._core.job_config import (
             _resolved_job_kwargs,
         )
@@ -1393,7 +1395,9 @@ class MotionCorrectedRecording(
         refuses a source whose ``content_hash`` changed since the estimate
         was selected.
         """
-        from spyglass.spikesorting.v2._storage.nwb import ensure_artifact_file
+        from spyglass.spikesorting.v2._storage.rebuilds import (
+            ensure_artifact_file,
+        )
 
         selection = (MotionCorrectedRecordingSelection & key).fetch1()
         interpolation_params = (
@@ -1627,10 +1631,8 @@ class MotionCorrectedRecording(
             The corrected, masked, unwhitened recording, annotated
             ``is_filtered=True``.
         """
-        from spyglass.spikesorting.v2._storage.nwb import (
-            read_stored_traces,
-            stored_traces,
-        )
+        from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
+        from spyglass.spikesorting.v2._storage.rebuilds import stored_traces
 
         return read_stored_traces(
             stored_traces(type(self), key, (self & key).fetch1())
@@ -1640,11 +1642,13 @@ class MotionCorrectedRecording(
         """Rebuild a missing corrected artifact from the SAVED motion.
 
         The rebuild is
-        :func:`._recording_nwb.rebuild_motion_corrected_artifact`; it calls
+        :func:`._storage.rebuilds.rebuild_motion_corrected_artifact`; it calls
         ``make_fetch`` and ``make_compute`` on this instance.
-        :func:`._recording_nwb.ensure_artifact_file` calls this method on
+        :func:`._storage.rebuilds.ensure_artifact_file` calls this method on
         every trace-artifact table.
         """
-        from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
+        from spyglass.spikesorting.v2._storage import (
+            rebuilds as _recording_rebuilds,
+        )
 
-        return _recording_nwb.rebuild_motion_corrected_artifact(self, key)
+        return _recording_rebuilds.rebuild_motion_corrected_artifact(self, key)

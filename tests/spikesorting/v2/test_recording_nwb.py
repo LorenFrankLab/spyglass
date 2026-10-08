@@ -1126,7 +1126,7 @@ def test_artifact_path_reverified_outside_transactions_reused_inside(
     import datajoint as dj
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._storage.nwb import ensure_artifact_file
+    from spyglass.spikesorting.v2._storage.rebuilds import ensure_artifact_file
 
     artifact = tmp_path / "artifact.nwb"
     artifact.write_bytes(b"x" * 16)
