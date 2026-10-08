@@ -747,6 +747,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             # atomically). Staging MUST run OUTSIDE the transaction to keep the
             # inner transaction short -- pinned by
             # ``test_v1_parity.test_curation_v2_nwb_write_outside_transaction``.
+            from spyglass.spikesorting.v2._core.runtime import (
+                runtime_environment_provenance,
+            )
+
             analysis_file_name, units_object_id, staged_parent_nwb = (
                 cls._stage_curation_artifact(
                     sorting_id=sorting_id,
@@ -767,6 +771,9 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                         ),
                         "merges_applied": bool(apply_merge),
                         "description": description,
+                        **runtime_environment_provenance(
+                            execution_params={"stage": "curation"}
+                        ),
                     },
                 )
             )

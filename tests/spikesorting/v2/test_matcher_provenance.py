@@ -31,6 +31,37 @@ class Preparer:
         return {"feature_definition": params["feature_definition"]}
 
 
+def test_matcher_runtime_receipt_records_resolved_jobs():
+    from spyglass.spikesorting.v2._core.runtime import (
+        validate_runtime_provenance,
+    )
+
+    values = matcher_provenance(
+        object(), object(), {}, job_kwargs={"n_jobs": 3, "chunk_duration": "2s"}
+    )
+    validate_runtime_provenance(values)
+    assert values["runtime_environment"]["job_kwargs"] == {
+        "n_jobs": 3,
+        "chunk_duration": "2s",
+    }
+    assert (
+        values["runtime_environment"]["execution_params"]["stage"] == "matching"
+    )
+
+
+@pytest.mark.parametrize("damage", ["missing", "tampered", "incomplete"])
+def test_matcher_provenance_requires_intact_runtime_receipt(damage):
+    values = matcher_provenance(object(), object(), {})
+    if damage == "missing":
+        del values["runtime_environment"]
+    elif damage == "tampered":
+        values["runtime_environment"]["job_kwargs"]["n_jobs"] = 71
+    else:
+        del values["runtime_environment"]["packages"]["numpy"]
+    with pytest.raises(ValueError):
+        validate_matcher_provenance(values)
+
+
 def test_provenance_identifies_both_producers_and_parameter_assets():
     params = {"model_sha256": "a" * 64, "feature_definition": "templates-v2"}
     got = matcher_provenance(Backend(), Preparer(), params)

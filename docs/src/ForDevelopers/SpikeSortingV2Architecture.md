@@ -79,6 +79,22 @@ remain valid. Sorting and curation writers validate complete provenance before
 allocating an output, including the curation generation UUID on member exports.
 Matching rows and NWB headers require producer provenance.
 
+Scientific boundaries use `_core.numerical` to reject fractional or overflowing
+identifiers, malformed shapes, nonfinite observations and misaligned event
+arrays before conversion. Sample-frame bounds apply equally to affine and
+explicit clocks. Legal event order and repeated frames are preserved. Metric
+indexes require unique native integer unit IDs; unavailable metric values may
+still be NaN. Observation windows reject reversed endpoints while metrics
+continue merging overlaps and ignoring zero-length exposure.
+
+Sorting, curation, member exports, evaluation and matching provenance carry
+structured runtime receipts from `_core.runtime`: code bytes and checkout
+identity, Python and dependency versions, platform and accelerator metadata,
+thread configuration, native BLAS settings and resolved execution settings.
+Receipts describe the host orchestrator. Requested container settings and the
+sorter adapter's observed producer versions remain distinct metadata; the host
+receipt does not claim to describe software inside a container.
+
 Native manual curation accepts `labels`, `merge_groups` as lists of unit-ID
 lists, and the actions `preview` or `commit`. The FigPack transport adapter
 converts its JSON field names and string IDs at the boundary. Internal v2
@@ -98,6 +114,13 @@ trips are checked against independently expected samples and timestamps.
 Scientific benchmark manifests pin the harness files and record execution
 provenance. The test guide explains how source hashes, checkout commits and
 historical acceptance evidence relate to the current harness.
+
+The unpinned motion benchmark wrapper additionally stamps runtime receipts.
+Reuse requires matching validated runtime, source and harness fingerprints.
+A failed run cannot restamp an old cached result, and a source or runtime
+change during execution leaves the new evidence unstamped. Lazy optional
+native libraries are recorded as observations; NumPy/SciPy BLAS settings,
+package versions and explicit thread configuration enter runtime identity.
 
 For local test tiers and commands, see the
 [test guide](https://github.com/LorenFrankLab/spyglass/blob/main/tests/README.md).

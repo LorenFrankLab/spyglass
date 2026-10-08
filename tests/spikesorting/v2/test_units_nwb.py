@@ -1163,6 +1163,17 @@ def test_units_nwb_carries_per_unit_and_source_metadata(planted_two_unit_sort):
         assert got["brain_region"] == exp["region_name"]
 
     prov = read_provenance_values(abs_path, SORTING_PROVENANCE)
+    from spyglass.spikesorting.v2._core.runtime import (
+        validate_runtime_provenance,
+    )
+
+    validate_runtime_provenance(prov)
+    assert prov["runtime_environment"]["scope"] == "host_orchestrator"
+    assert prov["runtime_environment"]["job_kwargs"]["n_jobs"] == 1
+    assert (
+        prov["runtime_environment"]["execution_params"]
+        == prov["execution_params"]
+    )
     recording_id = SortingSelection.resolve_source(sort).key["recording_id"]
     artifact_detection_id = SortingSelection.resolve_artifact_detection(sort)
     sel = (SortingSelection & sort).fetch1()

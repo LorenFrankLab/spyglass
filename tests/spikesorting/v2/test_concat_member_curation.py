@@ -217,6 +217,10 @@ def test_member_rows_preserve_units_spikes_labels_and_wall_clock(
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
         header = read_provenance_values(abs_path, CURATION_PROVENANCE)
         validate_curation_header(header)
+        assert (
+            header["runtime_environment"]["execution_params"]["stage"]
+            == "member_export"
+        )
         assert header["curation_uuid"] == parent_uuid
         assert header["member_index"] == int(row["member_index"])
         abs_times, sample_indices, _obs = (

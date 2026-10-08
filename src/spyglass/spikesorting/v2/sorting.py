@@ -1422,6 +1422,15 @@ class Sorting(
             }
             if motion_correction_provenance is not None:
                 source_provenance.update(motion_correction_provenance)
+            from spyglass.spikesorting.v2._core.runtime import (
+                runtime_environment_provenance,
+            )
+
+            source_provenance.update(
+                runtime_environment_provenance(
+                    job_kwargs=job_kwargs, execution_params=execution_params
+                )
+            )
             analysis_file_name, units_object_id = self._stage_sorting_artifact(
                 sorting=sorting_obj,
                 recording=recording,

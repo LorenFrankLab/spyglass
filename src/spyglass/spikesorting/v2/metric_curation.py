@@ -927,12 +927,23 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
 
         def _provenance_tables(source_analyzer_hashes):
+            from spyglass.spikesorting.v2._core.runtime import (
+                runtime_environment_provenance,
+            )
+
             return [
                 build_provenance_table(
                     CURATION_EVALUATION_PROVENANCE,
                     {
                         **base_provenance,
                         "source_analyzer_hashes": source_analyzer_hashes,
+                        **runtime_environment_provenance(
+                            job_kwargs=metric_inputs.metric_job_kwargs,
+                            execution_params={
+                                "stage": "curation_evaluation",
+                                "analyzer_job_kwargs": analyzer_inputs.analyzer_job_kwargs,
+                            },
+                        ),
                     },
                 )
             ]

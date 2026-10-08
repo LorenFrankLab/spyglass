@@ -35,6 +35,8 @@ import numpy as np
 import pynwb
 from hdmf.common import DynamicTable, VectorData
 
+from spyglass.spikesorting.v2._core.runtime import validate_runtime_provenance
+
 #: Bumped when the provenance container layout changes.
 PROVENANCE_SCHEMA_VERSION = 1
 
@@ -163,6 +165,8 @@ def validate_sorting_provenance(values: Mapping) -> None:
             "sorter_version",
             "analyzer_spikeinterface_version",
             "statistics_spans",
+            "runtime_environment",
+            "runtime_environment_sha256",
         ),
         context=context,
     )
@@ -235,6 +239,7 @@ def validate_sorting_provenance(values: Mapping) -> None:
                 f"{context}.statistics_spans requires ordered, nonoverlapping integer frame intervals."
             )
         previous_end = span[1]
+    validate_runtime_provenance(values)
 
 
 def validate_curation_header(values: Mapping) -> None:
@@ -250,6 +255,8 @@ def validate_curation_header(values: Mapping) -> None:
             "curation_source",
             "merges_applied",
             "description",
+            "runtime_environment",
+            "runtime_environment_sha256",
         ),
         context=context,
     )
@@ -276,6 +283,7 @@ def validate_curation_header(values: Mapping) -> None:
         raise ValueError(f"{context}.merges_applied must be a boolean.")
     if not isinstance(values["description"], str):
         raise ValueError(f"{context}.description must be a string.")
+    validate_runtime_provenance(values)
 
 
 def _json_default(value):

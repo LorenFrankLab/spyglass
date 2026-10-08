@@ -69,6 +69,14 @@ original `279a520` reference remains historical provenance. The refresh changes
 no seeds, thresholds or gates and provides no new acceptance run or evidence
 that historical gates pass the current harness.
 
+The unpinned `_motion_acceptance_reuse.py` wrapper also requires a complete
+runtime receipt and matching fingerprint before reusing results. Python,
+dependency/code versions, platform, BLAS/thread settings and the explicit
+benchmark job/recipe settings must match. Existing results without these
+receipts must be rerun. Failed runs never attach new receipts to old metrics,
+and runtime/source drift during execution leaves results unstamped. The pinned
+scientific runner, manifests, seeds and gates are unchanged by this bookkeeping.
+
 Reviewed module defaults, function overrides and fixture minimums live in
 [`spikesorting/v2/test_tiers.json`](spikesorting/v2/test_tiers.json). Collection
 checks assignments against pytest's resolved fixture graph, including fixture

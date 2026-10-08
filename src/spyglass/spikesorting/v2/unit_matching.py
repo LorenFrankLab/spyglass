@@ -1004,8 +1004,15 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         backend = get_matcher(matcher_name)
         spikeinterface_version = si.__version__
         matcher_backend = type(backend).__module__
+        from spyglass.spikesorting.v2._core.job_config import (
+            _resolved_job_kwargs,
+        )
+
         producer_provenance = matcher_provenance(
-            backend, get_input_preparer(matcher_name), params
+            backend,
+            get_input_preparer(matcher_name),
+            params,
+            job_kwargs=_resolved_job_kwargs(job_kwargs),
         )
         matcher_backend_version = producer_provenance["backend"]["version"]
 

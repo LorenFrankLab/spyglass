@@ -15,6 +15,35 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+
+@pytest.mark.parametrize("kind", ["sorting", "curation"])
+@pytest.mark.parametrize("damage", ["missing", "tampered", "incomplete"])
+def test_current_artifact_headers_require_intact_runtime_receipts(kind, damage):
+    from tests.spikesorting.v2._provenance_helpers import (
+        curation_header,
+        sorting_provenance,
+    )
+    from spyglass.spikesorting.v2._storage.provenance import (
+        validate_curation_header,
+        validate_sorting_provenance,
+    )
+
+    values = sorting_provenance() if kind == "sorting" else curation_header()
+    if damage == "missing":
+        del values["runtime_environment"]
+    elif damage == "tampered":
+        values["runtime_environment"]["job_kwargs"]["n_jobs"] = 71
+    else:
+        del values["runtime_environment"]["packages"]["numpy"]
+    validate = (
+        validate_sorting_provenance
+        if kind == "sorting"
+        else validate_curation_header
+    )
+    with pytest.raises(ValueError):
+        validate(values)
+
+
 pytestmark = [pytest.mark.integration, pytest.mark.nwb, pytest.mark.io_heavy]
 
 

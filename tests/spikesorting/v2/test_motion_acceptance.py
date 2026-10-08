@@ -48,6 +48,7 @@ from tests.spikesorting.v2._motion_acceptance import (
     result_is_reusable,
 )
 from tests.spikesorting.v2._motion_acceptance_reuse import (
+    benchmark_runtime_environment,
     production_source_fingerprint,
     run_with_source_fingerprint,
     source_result_is_reusable,
@@ -864,14 +865,44 @@ def test_production_fingerprint_includes_uncommitted_bytes_and_paths(tmp_path):
     assert production_source_fingerprint(source) == renamed
 
 
-def test_result_reuse_needs_current_production_sources():
+@pytest.fixture(scope="module")
+def benchmark_environment():
+    from spyglass.spikesorting.v2._core.runtime import (
+        capture_runtime_environment,
+    )
+
+    return capture_runtime_environment(
+        job_kwargs={"n_jobs": 1, "chunk_duration": "1s"},
+        execution_params={"sorter": "mountainsort5"},
+    )
+
+
+def _runtime_receipt(environment):
+    from spyglass.spikesorting.v2._core.runtime import (
+        runtime_environment_fingerprint,
+    )
+
+    return {
+        "runtime_environment": environment,
+        "runtime_environment_sha256": runtime_environment_fingerprint(
+            environment
+        ),
+    }
+
+
+def test_result_reuse_needs_current_production_sources(benchmark_environment):
     fingerprint = {"git_commit": "abc", "files": {"harness.py": "1"}}
     result = {
         "manifest_sha256": "manifest",
         "harness": fingerprint,
         "production_source_sha256": "before-edit",
+        **_runtime_receipt(benchmark_environment),
     }
-    kwargs = {"manifest_sha": "manifest", "fingerprint": fingerprint}
+    kwargs = {
+        "manifest_sha": "manifest",
+        "fingerprint": fingerprint,
+        "runtime_environment": benchmark_environment,
+    }
     assert source_result_is_reusable(result, source_sha="before-edit", **kwargs)
     assert not source_result_is_reusable(
         result, source_sha="after-edit", **kwargs
@@ -894,8 +925,15 @@ def test_result_reuse_needs_current_production_sources():
 @pytest.mark.parametrize("edit_during_run", [False, True])
 @pytest.mark.parametrize("command", ["case", "representative"])
 def test_benchmark_wrapper_stamps_only_stable_production_sources(
-    tmp_path, edit_during_run, command
+    tmp_path, monkeypatch, benchmark_environment, edit_during_run, command
 ):
+    from tests.spikesorting.v2 import _motion_acceptance_reuse as reuse
+
+    monkeypatch.setattr(
+        reuse,
+        "benchmark_runtime_environment",
+        lambda args: benchmark_environment,
+    )
     source = tmp_path / "src"
     source.mkdir()
     code = source / "motion.py"
@@ -935,8 +973,250 @@ def test_benchmark_wrapper_stamps_only_stable_production_sources(
         assert json.loads(result_path.read_text()) == {
             "metric": 3.125,
             "production_source_sha256": production_source_fingerprint(source),
+            **_runtime_receipt(benchmark_environment),
         }
     assert calls == [args]
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing_snapshot",
+        "missing_digest",
+        "wrong_digest",
+        "tampered_snapshot",
+        "incomplete_snapshot",
+        "wrong_snapshot_type",
+    ],
+)
+def test_benchmark_reuse_rejects_incomplete_or_tampered_runtime_receipts(
+    benchmark_environment, damage
+):
+    import copy
+    import hashlib
+
+    fingerprint = {"git_commit": "abc", "files": {"harness.py": "1"}}
+    result = {
+        "manifest_sha256": "manifest",
+        "harness": fingerprint,
+        "production_source_sha256": "source",
+        **_runtime_receipt(copy.deepcopy(benchmark_environment)),
+    }
+    if damage == "missing_snapshot":
+        result.pop("runtime_environment")
+    elif damage == "missing_digest":
+        result.pop("runtime_environment_sha256")
+    elif damage == "wrong_digest":
+        result["runtime_environment_sha256"] = "0" * 64
+    elif damage == "tampered_snapshot":
+        result["runtime_environment"]["tampered"] = True
+    elif damage == "incomplete_snapshot":
+        result["runtime_environment"] = {"schema_version": 1}
+        # A matching digest alone cannot turn an incomplete schema into evidence.
+        result["runtime_environment_sha256"] = hashlib.sha256(
+            json.dumps(
+                result["runtime_environment"],
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+    else:
+        result["runtime_environment"] = []
+    assert not source_result_is_reusable(
+        result,
+        manifest_sha="manifest",
+        fingerprint=fingerprint,
+        source_sha="source",
+        runtime_environment=benchmark_environment,
+    )
+
+
+def _changed_runtime_environment(environment, change):
+    import copy
+
+    changed = copy.deepcopy(environment)
+    if change == "dependency":
+        current = changed["packages"]["numpy"]
+        changed["packages"]["numpy"] = (
+            "2.0.0" if current != "2.0.0" else "2.0.1"
+        )
+    elif change == "platform":
+        current = changed["platform"]["machine"]
+        changed["platform"]["machine"] = (
+            "x86_64" if current != "x86_64" else "arm64"
+        )
+    elif change == "thread":
+        current = changed["threading"]["environment"]["OMP_NUM_THREADS"]
+        changed["threading"]["environment"]["OMP_NUM_THREADS"] = (
+            "2" if current != "2" else "1"
+        )
+    else:
+        raise AssertionError(change)
+    return changed
+
+
+@pytest.mark.parametrize("change", ["dependency", "platform", "thread"])
+def test_benchmark_reuse_requires_the_current_numerical_runtime(
+    benchmark_environment, change
+):
+    fingerprint = {"git_commit": "abc", "files": {"harness.py": "1"}}
+    result = {
+        "manifest_sha256": "manifest",
+        "harness": fingerprint,
+        "production_source_sha256": "source",
+        **_runtime_receipt(benchmark_environment),
+    }
+    current = _changed_runtime_environment(benchmark_environment, change)
+    # Both environments are complete, valid receipts; their identities differ.
+    assert _runtime_receipt(current)["runtime_environment_sha256"] != (
+        result["runtime_environment_sha256"]
+    )
+    assert not source_result_is_reusable(
+        result,
+        manifest_sha="manifest",
+        fingerprint=fingerprint,
+        source_sha="source",
+        runtime_environment=current,
+    )
+
+
+@pytest.mark.parametrize("change", ["dependency", "platform", "thread"])
+def test_benchmark_wrapper_refuses_to_stamp_evidence_after_runtime_drift(
+    tmp_path, monkeypatch, benchmark_environment, change
+):
+    from tests.spikesorting.v2 import _motion_acceptance_reuse as reuse
+
+    after = _changed_runtime_environment(benchmark_environment, change)
+    snapshots = iter((benchmark_environment, after))
+    monkeypatch.setattr(
+        reuse, "benchmark_runtime_environment", lambda args: next(snapshots)
+    )
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "motion.py").write_text("source")
+    out = tmp_path / "out"
+    out.mkdir()
+    result_path = out / "rigid__s0__dredge.json"
+    args = [
+        "case",
+        "--scenario",
+        "rigid",
+        "--seed",
+        "0",
+        "--recipe",
+        "dredge",
+        "--out",
+        str(out),
+    ]
+
+    def runner(received):
+        assert received == args
+        result_path.write_text(json.dumps({"metric": 3.125}))
+
+    with pytest.raises(RuntimeError, match="Runtime environment changed"):
+        run_with_source_fingerprint(args, runner, source_root=source)
+    # Keep the new metric for diagnosis, without a reusable runtime receipt.
+    assert json.loads(result_path.read_text()) == {"metric": 3.125}
+
+
+@pytest.mark.parametrize("failure", ["raises", "returns_without_writing"])
+def test_benchmark_wrapper_never_stamps_an_existing_result_after_failed_run(
+    tmp_path, monkeypatch, benchmark_environment, failure
+):
+    from tests.spikesorting.v2 import _motion_acceptance_reuse as reuse
+
+    monkeypatch.setattr(
+        reuse,
+        "benchmark_runtime_environment",
+        lambda args: benchmark_environment,
+    )
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "motion.py").write_text("source")
+    out = tmp_path / "out"
+    out.mkdir()
+    result_path = out / "rigid__s0__dredge.json"
+    result_path.write_text(
+        json.dumps(
+            {"old_metric": 1.0, **_runtime_receipt(benchmark_environment)}
+        )
+    )
+    args = [
+        "case",
+        "--scenario",
+        "rigid",
+        "--seed",
+        "0",
+        "--recipe",
+        "dredge",
+        "--out",
+        str(out),
+    ]
+
+    def runner(received):
+        assert received == args
+        assert not result_path.exists()
+        if failure == "raises":
+            raise RuntimeError("benchmark failed before publishing")
+
+    expected = RuntimeError if failure == "raises" else FileNotFoundError
+    with pytest.raises(expected):
+        run_with_source_fingerprint(args, runner, source_root=source)
+    assert not result_path.exists()
+
+
+@pytest.mark.parametrize("command", ["case", "representative"])
+def test_benchmark_runtime_receipt_uses_the_executed_job_and_sorter_settings(
+    monkeypatch, benchmark_environment, command
+):
+    from spyglass.spikesorting.v2._params.sorter import MountainSort5Schema
+    from tests.spikesorting.v2 import _motion_acceptance_reuse as reuse
+    from tests.spikesorting.v2._motion_fixtures import JOB_KWARGS
+
+    captures = []
+
+    def capture(**kwargs):
+        captures.append(kwargs)
+        return benchmark_environment
+
+    monkeypatch.setattr(reuse, "capture_runtime_environment", capture)
+    if command == "case":
+        args = [
+            "case",
+            "--manifest",
+            str(DEVELOPMENT_MANIFEST),
+            "--scenario",
+            "rigid",
+            "--seed",
+            "2",
+            "--recipe",
+            "dredge",
+        ]
+        manifest = load_manifest(DEVELOPMENT_MANIFEST)
+        expected_jobs = manifest.evaluation.job_kwargs
+        expected_params = MountainSort5Schema(
+            **manifest.sorter.params
+        ).model_dump()
+    else:
+        args = ["representative", "--shank", "3", "--sort"]
+        expected_jobs = JOB_KWARGS
+        expected_params = MountainSort5Schema().model_dump()
+    assert benchmark_runtime_environment(args) is benchmark_environment
+    assert len(captures) == 1
+    actual = captures[0]
+    assert actual["job_kwargs"] == expected_jobs
+    assert actual["execution_params"]["sorter"] == "mountainsort5"
+    assert actual["execution_params"]["sorter_params"] == expected_params
+    assert actual["execution_params"]["sorter_job_kwargs"] == {"random_seed": 0}
+    if command == "case":
+        assert actual["execution_params"]["recipe"] == "dredge"
+        assert actual["execution_params"]["recipe_params"] == (
+            manifest.recipes["dredge"].model_dump()
+        )
+        assert actual["execution_params"]["noise_levels_seed"] == 2
+    else:
+        assert actual["execution_params"]["shank"] == 3
+        assert actual["execution_params"]["sort"] is True
 
 
 # ---- opt-in benchmark -------------------------------------------------------
@@ -986,6 +1266,19 @@ def _result(out: Path, case, sha: str) -> dict | None:
         manifest_sha=sha,
         fingerprint=harness_fingerprint(),
         source_sha=production_source_fingerprint(),
+        runtime_environment=benchmark_runtime_environment(
+            [
+                "case",
+                "--manifest",
+                str(_manifest_path()),
+                "--scenario",
+                case[0],
+                "--seed",
+                str(case[1]),
+                "--recipe",
+                case[2],
+            ]
+        ),
     )
     return result if reusable else None
 

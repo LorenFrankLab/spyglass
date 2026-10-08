@@ -1750,6 +1750,10 @@ def test_matcher_provenance_is_required_for_new_runs(two_session_curated_group):
     UnitMatch.populate(key, reserve_jobs=False)
     row = (UnitMatch & key).fetch1()
     validate_matcher_provenance(row["matcher_provenance"])
+    assert (
+        row["matcher_provenance"]["runtime_environment"]["job_kwargs"]["n_jobs"]
+        == 1
+    )
     assert not UnitMatch.heading.attributes["matcher_provenance"].nullable
 
 

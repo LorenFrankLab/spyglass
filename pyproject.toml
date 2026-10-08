@@ -135,6 +135,7 @@ optional-dependencies.spikesorting-v2 = [
   # instance without re-initializing it (analyzer_cache_lock relies on that for
   # same-thread reentrancy).
   "filelock>=3.15",
+  "threadpoolctl>=3", # structured native-thread runtime receipts
   # MS4 bundles its algorithm and supports the v2 NumPy-2 stack through the
   # dispatcher's scoped spikeextractors np.Inf compatibility shim. Pin the
   # native runtime exercised by the real-sort regression test.
@@ -155,6 +156,7 @@ optional-dependencies.spikesorting-v2-matching = [
   # staged populate lifecycle as the main runtime extra.
   "datajoint==0.14.9",
   "filelock>=3.15", # existing-sort analyzer reads use the shared cache lock
+  "threadpoolctl>=3", # structured native-thread runtime receipts
   # cross-session unit tracking. Pinned to the 3.2.6/3.2.7 line, the last
   # release that declares ``numpy<3.0,>=2.0`` so its METADATA coexists with the
   # v2 numpy>=2 baseline (``uv pip check`` is clean against SI 0.104 + numpy 2).
@@ -173,6 +175,7 @@ optional-dependencies.spikesorting-v2-matching = [
 optional-dependencies.spikesorting-v2-curation = [
   "datajoint==0.14.9", # existing v2 sorts use the staged populate lifecycle
   "filelock>=3.15", # shared analyzer locks and atomic draft revision checks
+  "threadpoolctl>=3", # structured native-thread runtime receipts
   # Pinned FigPack view/context APIs used by the Spyglass review extension.
   # Re-verify the browser edit/save/import journey before changing these pins.
   "figpack==0.3.20",

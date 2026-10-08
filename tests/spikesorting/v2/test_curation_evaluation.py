@@ -1499,6 +1499,26 @@ def test_metric_namespace_matches_curation_units(
                 int(u) for u in (CurationV2.Unit & curation).fetch("unit_id")
             }
             assert set(int(u) for u in metrics.index) == expected
+            from spyglass.common.common_nwbfile import AnalysisNwbfile
+            from spyglass.spikesorting.v2._core.runtime import (
+                validate_runtime_provenance,
+            )
+            from spyglass.spikesorting.v2._storage.provenance import (
+                CURATION_EVALUATION_PROVENANCE,
+                read_provenance_values,
+            )
+
+            path = AnalysisNwbfile.get_abs_path(
+                (CurationEvaluation & sel).fetch1("analysis_file_name")
+            )
+            header = read_provenance_values(
+                path, CURATION_EVALUATION_PROVENANCE
+            )
+            validate_runtime_provenance(header)
+            assert (
+                header["runtime_environment"]["execution_params"]["stage"]
+                == "curation_evaluation"
+            )
     finally:
         clear_curations_for(planted_two_unit_sort)
 

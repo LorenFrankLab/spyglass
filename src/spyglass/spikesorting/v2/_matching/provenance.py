@@ -6,6 +6,11 @@ from importlib.metadata import PackageNotFoundError, version
 from collections.abc import Mapping
 from numbers import Integral
 
+from spyglass.spikesorting.v2._core.runtime import (
+    runtime_environment_provenance,
+    validate_runtime_provenance,
+)
+
 
 def validate_matcher_provenance(values: Mapping) -> None:
     """Require producer identities while allowing unknown external versions."""
@@ -69,6 +74,8 @@ def validate_matcher_provenance(values: Mapping) -> None:
                 f"matcher provenance.{name}.fingerprints must contain nonempty string names and fingerprints."
             )
 
+    validate_runtime_provenance(values)
+
 
 def spyglass_version() -> str | None:
     """Installed Spyglass version; unknown when distribution metadata is absent."""
@@ -111,7 +118,9 @@ def _component_provenance(component, version_hook: str, params: dict) -> dict:
     }
 
 
-def matcher_provenance(backend, preparer, params: dict) -> dict:
+def matcher_provenance(
+    backend, preparer, params: dict, *, job_kwargs=None
+) -> dict:
     """Snapshot the registered producers and their optional asset fingerprints.
 
     Versions and fingerprints are observational metadata, not run identity.
@@ -126,5 +135,15 @@ def matcher_provenance(backend, preparer, params: dict) -> dict:
         "backend": _component_provenance(backend, "backend_version", params),
         "preparer": _component_provenance(preparer, "preparer_version", params),
     }
+    values.update(
+        runtime_environment_provenance(
+            job_kwargs=job_kwargs,
+            execution_params={
+                "stage": "matching",
+                "backend": values["backend"]["qualified_name"],
+                "preparer": values["preparer"]["qualified_name"],
+            },
+        )
+    )
     validate_matcher_provenance(values)
     return values

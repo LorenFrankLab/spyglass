@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from spyglass.spikesorting.v2._core.runtime import (
+    runtime_environment_provenance,
+)
+
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -500,7 +504,12 @@ class ConcatMemberCuration(
                 abs_times_by_uid=abs_times_by_uid,
                 sample_indices_by_uid=local_frames,
                 obs_intervals_by_uid=obs_intervals_by_uid,
-                curation_header=curation_header,
+                curation_header={
+                    **curation_header,
+                    **runtime_environment_provenance(
+                        execution_params={"stage": "member_export"}
+                    ),
+                },
                 merge_group_rows=merge_group_rows,
             )
             if set(n_spikes_by_uid) != set(local_frames):
