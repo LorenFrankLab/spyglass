@@ -19,6 +19,7 @@ def clean_registry():
 
     saved_matchers = dict(mp._MATCHER_REGISTRY)
     saved_schemas = dict(mp._SCHEMA_REGISTRY)
+    saved_preparers = dict(mp._PREPARER_REGISTRY)
     try:
         yield mp
     finally:
@@ -26,6 +27,8 @@ def clean_registry():
         mp._MATCHER_REGISTRY.update(saved_matchers)
         mp._SCHEMA_REGISTRY.clear()
         mp._SCHEMA_REGISTRY.update(saved_schemas)
+        mp._PREPARER_REGISTRY.clear()
+        mp._PREPARER_REGISTRY.update(saved_preparers)
 
 
 def _dummy_matcher(mp, name="dummy"):
@@ -66,6 +69,46 @@ def test_register_matcher_rejects_non_conforming_object(clean_registry):
     mp = clean_registry
     with pytest.raises(TypeError):
         mp.register_matcher(object(), DummySchema)
+
+
+def test_input_preparer_registration_preserves_existing_strategy(
+    clean_registry,
+):
+    mp = clean_registry
+
+    class Preparer:
+        def prepare(self, source, directory, params, jobs):
+            return None
+
+    class OtherPreparer(Preparer):
+        pass
+
+    first = Preparer()
+    mp.register_matcher(_dummy_matcher(mp), DummySchema, input_preparer=first)
+    assert mp.get_input_preparer("dummy") is first
+    # Idempotent registration without a strategy preserves the explicit one.
+    backend = mp.get_matcher("dummy")
+    mp.register_matcher(backend, DummySchema)
+    assert mp.get_input_preparer("dummy") is first
+    with pytest.raises(ValueError, match="different input preparer"):
+        mp.register_matcher(
+            backend, DummySchema, input_preparer=OtherPreparer()
+        )
+    assert mp.get_input_preparer("dummy") is first
+    replacement = OtherPreparer()
+    mp.register_matcher(
+        backend, DummySchema, input_preparer=replacement, replace=True
+    )
+    assert mp.get_input_preparer("dummy") is replacement
+
+
+def test_input_preparer_rejects_incomplete_contract(clean_registry):
+    mp = clean_registry
+    with pytest.raises(TypeError, match="input_preparer"):
+        mp.register_matcher(
+            _dummy_matcher(mp), DummySchema, input_preparer=object()
+        )
+    assert not mp.is_registered("dummy")
 
 
 def test_register_matcher_duplicate_name_raises_unless_replace(clean_registry):

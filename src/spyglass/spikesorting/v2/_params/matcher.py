@@ -16,7 +16,30 @@ import math
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class UnitMatchParamsSchema(BaseModel):
+class WaveformBundleParamsSchema(BaseModel):
+    """Controls shared by the symmetric split-half waveform input layout."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ms_before: float = Field(default=1.5, gt=0.0)
+    ms_after: float = Field(default=1.5, gt=0.0)
+    max_spikes_per_unit: int = Field(default=100, ge=1)
+    seed: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _waveform_window_is_symmetric(self):
+        """Keep the shared layout's trough at the window midpoint."""
+        if not math.isclose(
+            self.ms_before, self.ms_after, rel_tol=0.0, abs_tol=1e-12
+        ):
+            raise ValueError(
+                "UnitMatch requires a symmetric waveform window: ms_before "
+                f"({self.ms_before}) must equal ms_after ({self.ms_after})."
+            )
+        return self
+
+
+class UnitMatchParamsSchema(WaveformBundleParamsSchema):
     """Validated ``params`` for a ``MatcherParameters`` row using UnitMatch.
 
     Attributes
@@ -54,20 +77,5 @@ class UnitMatchParamsSchema(BaseModel):
     match_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     tracked_unit_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     max_strict_nodes: int = Field(default=2000, ge=1)
-    ms_before: float = Field(default=1.5, gt=0.0)
-    ms_after: float = Field(default=1.5, gt=0.0)
-    max_spikes_per_unit: int = Field(default=100, ge=1)
-    seed: int = Field(default=0, ge=0)
-    schema_version: int = 1
 
-    @model_validator(mode="after")
-    def _waveform_window_is_symmetric(self):
-        """Keep UnitMatch's trough at the window midpoint it assumes."""
-        if not math.isclose(
-            self.ms_before, self.ms_after, rel_tol=0.0, abs_tol=1e-12
-        ):
-            raise ValueError(
-                "UnitMatch requires a symmetric waveform window: ms_before "
-                f"({self.ms_before}) must equal ms_after ({self.ms_after})."
-            )
-        return self
+    schema_version: int = 1

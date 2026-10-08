@@ -905,6 +905,7 @@ def test_matcher_parameters_duplicate_content_is_matcher_scoped(dj_conn):
 
     saved_m = dict(mp._MATCHER_REGISTRY)
     saved_s = dict(mp._SCHEMA_REGISTRY)
+    saved_preparers = dict(mp._PREPARER_REGISTRY)
     register_matcher(_OtherMatcher(), _OtherSchema)
     try:
         # Same params, DIFFERENT matcher -> not a duplicate.
@@ -935,6 +936,8 @@ def test_matcher_parameters_duplicate_content_is_matcher_scoped(dj_conn):
         mp._MATCHER_REGISTRY.update(saved_m)
         mp._SCHEMA_REGISTRY.clear()
         mp._SCHEMA_REGISTRY.update(saved_s)
+        mp._PREPARER_REGISTRY.clear()
+        mp._PREPARER_REGISTRY.update(saved_preparers)
 
 
 @pytest.mark.slow
@@ -1890,11 +1893,12 @@ def test_make_runs_full_matcher_table_path(
     fixture matcher reads its pairs from ``params``, not the bundles)."""
     from pydantic import BaseModel, ConfigDict, Field
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend
     from spyglass.spikesorting.v2 import matcher_protocol as mp
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.matcher_protocol import (
         MatchPair,
+        PreparedMatcherInput,
+        SessionMatcherInput,
         register_matcher,
     )
     from spyglass.spikesorting.v2.unit_matching import (
@@ -1949,13 +1953,26 @@ def test_make_runs_full_matcher_table_path(
         Path(session_dir).mkdir(parents=True, exist_ok=True)
         return []
 
-    monkeypatch.setattr(
-        _unitmatch_backend, "extract_unitmatch_bundle", _noop_extract
-    )
-
     saved_matchers = dict(mp._MATCHER_REGISTRY)
     saved_schemas = dict(mp._SCHEMA_REGISTRY)
-    register_matcher(_FixturePairer(), _FixtureMatcherParams)
+    saved_preparers = dict(mp._PREPARER_REGISTRY)
+    class FixtureInputPreparer:
+        def prepare(self, source, directory, params, job_kwargs):
+            _noop_extract(directory, source.recording, source.sorting)
+            return PreparedMatcherInput(
+                SessionMatcherInput(
+                    curation_key=dict(source.curation_key),
+                    waveform_dir=directory,
+                    channel_positions_path=directory / "channel_positions.npy",
+                    recording_date=source.recording_date,
+                )
+            )
+
+    register_matcher(
+        _FixturePairer(),
+        _FixtureMatcherParams,
+        input_preparer=FixtureInputPreparer(),
+    )
     selection_pk = None
     try:
         MatcherParameters().insert1(
@@ -2047,6 +2064,8 @@ def test_make_runs_full_matcher_table_path(
         mp._MATCHER_REGISTRY.update(saved_matchers)
         mp._SCHEMA_REGISTRY.clear()
         mp._SCHEMA_REGISTRY.update(saved_schemas)
+        mp._PREPARER_REGISTRY.clear()
+        mp._PREPARER_REGISTRY.update(saved_preparers)
 
 
 @pytest.mark.slow
@@ -3272,11 +3291,12 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
     """
     from pydantic import BaseModel, ConfigDict, Field
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend
     from spyglass.spikesorting.v2 import matcher_protocol as mp
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.matcher_protocol import (
         MatchPair,
+        PreparedMatcherInput,
+        SessionMatcherInput,
         register_matcher,
     )
     from spyglass.spikesorting.v2.pipeline import (
@@ -3342,13 +3362,26 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         Path(session_dir).mkdir(parents=True, exist_ok=True)
         return []
 
-    monkeypatch.setattr(
-        _unitmatch_backend, "extract_unitmatch_bundle", _noop_extract
-    )
-
     saved_matchers = dict(mp._MATCHER_REGISTRY)
     saved_schemas = dict(mp._SCHEMA_REGISTRY)
-    register_matcher(_FixturePairer(), _FixtureMatcherParams)
+    saved_preparers = dict(mp._PREPARER_REGISTRY)
+    class FixtureInputPreparer:
+        def prepare(self, source, directory, params, job_kwargs):
+            _noop_extract(directory, source.recording, source.sorting)
+            return PreparedMatcherInput(
+                SessionMatcherInput(
+                    curation_key=dict(source.curation_key),
+                    waveform_dir=directory,
+                    channel_positions_path=directory / "channel_positions.npy",
+                    recording_date=source.recording_date,
+                )
+            )
+
+    register_matcher(
+        _FixturePairer(),
+        _FixtureMatcherParams,
+        input_preparer=FixtureInputPreparer(),
+    )
     matcher_name = "fixture_pairer_run_params"
     selection_pk = None
     try:
@@ -3463,6 +3496,8 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         mp._MATCHER_REGISTRY.update(saved_matchers)
         mp._SCHEMA_REGISTRY.clear()
         mp._SCHEMA_REGISTRY.update(saved_schemas)
+        mp._PREPARER_REGISTRY.clear()
+        mp._PREPARER_REGISTRY.update(saved_preparers)
 
 
 @pytest.mark.slow

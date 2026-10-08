@@ -1558,12 +1558,26 @@ matcher AUC / few pairs. (Concatenation rejects mismatched electrode spaces
 outright.)
 
 Matching uses [UnitMatch](https://github.com/EnnyvanBeest/UnitMatch)
-(`matcher="unitmatch"`, the one supported backend); its reference probe is the
+(`matcher="unitmatch"`, the built-in backend); its reference probe is the
 128-channel LLNL polymer:
 
 ```bash
 pip install -e ".[spikesorting-v2-matching]"   # UnitMatchPy + mat73
 ```
+
+Custom matchers register through `matcher_protocol.register_matcher(backend,
+schema, input_preparer=preparer)`. Preparation and inference have separate
+contracts: `MatcherInputPreparer.prepare(source, directory, params, job_kwargs)`
+receives a `MatcherInputSource` containing the artifact-masked recording,
+curated sorting, frozen statistics spans, curation identity and date. It returns
+a `PreparedMatcherInput` containing the `SessionMatcherInput` consumed by the
+backend and any excluded unit IDs. Preparation must preserve the frozen identity
+and date; excluded units remain in the matchable universe as unmatched units.
+Prepared files live through inference and are then removed, including on failure.
+Omitting `input_preparer` uses the shared dense split-half waveform layout, which
+requires SpikeInterface and NumPy but does not import UnitMatchPy. Supply a
+preparer when a backend needs another layout. Register a distinct matcher name
+when changing the preparation or inference contract for persisted parameters.
 
 The recommended path is **plan-then-run**: pin curations by a named curation
 strategy, review the plan, then run. Group-based planning uses a `SessionGroup`

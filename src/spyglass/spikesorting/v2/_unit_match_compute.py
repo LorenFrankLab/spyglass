@@ -54,13 +54,13 @@ def extract_and_match(input_plan, matcher_name, params, job_kwargs):
     from spyglass.spikesorting.v2._sorting_analyzer import (
         read_canonical_recording,
     )
-    from spyglass.spikesorting.v2._unitmatch_backend import (
-        NoMatchableUnitsError,
-        extract_unitmatch_bundle,
-    )
     from spyglass.spikesorting.v2._units_nwb import read_stored_units
+    from spyglass.spikesorting.v2._waveform_bundles import NoMatchableUnitsError
     from spyglass.spikesorting.v2.matcher_protocol import (
+        MatcherInputSource,
+        PreparedMatcherInput,
         SessionMatcherInput,
+        get_input_preparer,
         get_matcher,
     )
     from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
@@ -77,9 +77,11 @@ def extract_and_match(input_plan, matcher_name, params, job_kwargs):
             f"nwb_file_name {nwb_file_names})"
         )
 
+    matcher = get_matcher(matcher_name)
+    preparer = get_input_preparer(matcher_name)
     resolved_job_kwargs = _resolved_job_kwargs(job_kwargs)
     input_index_by_curation = {
-        (plan["sorting_id"], plan["curation_id"]): plan["input_index"]
+        (str(plan["sorting_id"]), int(plan["curation_id"])): plan["input_index"]
         for plan in input_plan
     }
     # Feed the matcher in input_index order, the chronological order frozen
@@ -108,66 +110,61 @@ def extract_and_match(input_plan, matcher_name, params, job_kwargs):
             full_sorting = read_stored_units(plan["units"])
             sorting = full_sorting.select_units(plan["matchable_unit_ids"])
             session_dir = Path(tmp_root) / f"input_{plan['input_index']}"
-            # The bundle window / subsample / seed come from the named,
-            # identity-bearing MatcherParameters params blob -- NOT silent
-            # extract function defaults -- so the settings that produced each
-            # bundle are pinned to matcher_params_name and recorded. The
-            # UnitMatch schema always carries these keys; only pass those a
-            # given matcher's schema defines (a custom backend may omit them,
-            # falling back to extract_unitmatch_bundle's own defaults).
-            bundle_kwargs = {
-                key: params[key]
-                for key in (
-                    "ms_before",
-                    "ms_after",
-                    "max_spikes_per_unit",
-                    "seed",
-                )
-                if key in params
-            }
+            source = MatcherInputSource(
+                curation_key={
+                    "sorting_id": plan["sorting_id"],
+                    "curation_id": plan["curation_id"],
+                },
+                recording=recording,
+                sorting=sorting,
+                recording_date=plan["input_start_time"],
+                statistics_spans=plan["statistics_spans"],
+            )
             try:
-                excluded = extract_unitmatch_bundle(
-                    session_dir,
-                    recording,
-                    sorting,
-                    **bundle_kwargs,
-                    job_kwargs=resolved_job_kwargs,
-                    statistics_spans=plan["statistics_spans"],
+                prepared = preparer.prepare(
+                    source, session_dir, params, resolved_job_kwargs
                 )
             except NoMatchableUnitsError as exc:
                 raise NoMatchableUnitsError(
-                    f"UnitMatch.make: {_input_description(plan)} has no "
-                    "unit that can enter a UnitMatch bundle -- every "
-                    "matchable unit had fewer than two sampled spikes "
-                    "whose full waveform window lies inside one statistics "
-                    "span of the sort, so none has two cross-validation "
-                    "halves. Re-curate so a unit with more "
-                    "spikes survives, or drop the input from the selection."
+                    f"UnitMatch.make: {_input_description(plan)} cannot "
+                    f"prepare input for matcher {matcher_name!r}: {exc}"
                 ) from exc
+            if not isinstance(prepared, PreparedMatcherInput) or not isinstance(
+                prepared.session_input, SessionMatcherInput
+            ):
+                raise TypeError(
+                    "Matcher input preparers must return PreparedMatcherInput."
+                )
+            if (
+                prepared.session_input.curation_key
+                != {
+                    "sorting_id": plan["sorting_id"],
+                    "curation_id": plan["curation_id"],
+                }
+                or prepared.session_input.recording_date
+                != plan["input_start_time"]
+            ):
+                raise ValueError(
+                    "Matcher input preparation must preserve the frozen curation identity and date."
+                )
+            excluded = list(prepared.excluded_unit_ids)
+            if not set(excluded).issubset(plan["matchable_unit_ids"]):
+                raise ValueError(
+                    "Matcher input preparer excluded units outside the frozen matchable universe."
+                )
             if excluded:
+                reason = prepared.exclusion_reason or (
+                    f"were excluded by input preparation for matcher {matcher_name!r}"
+                )
                 logger.warning(
                     f"UnitMatch.make: {_input_description(plan)}: units "
-                    f"{excluded} have fewer than two sampled spikes whose "
-                    "full waveform window lies inside one statistics span "
-                    "of the sort and will have no match pairs; "
+                    f"{excluded} {reason} and will have no match pairs; "
                     "they remain in the matchable universe as unmatched "
                     "units."
                 )
-            session_inputs.append(
-                SessionMatcherInput(
-                    curation_key={
-                        "sorting_id": plan["sorting_id"],
-                        "curation_id": plan["curation_id"],
-                    },
-                    waveform_dir=session_dir,
-                    channel_positions_path=(
-                        session_dir / "channel_positions.npy"
-                    ),
-                    recording_date=plan["input_start_time"],
-                )
-            )
+            session_inputs.append(prepared.session_input)
         start = time.perf_counter()
-        raw_pairs = get_matcher(matcher_name).match(session_inputs, params)
+        raw_pairs = matcher.match(session_inputs, params)
         runtime_s = time.perf_counter() - start
     oriented_pairs = canonicalize_match_pairs(
         raw_pairs, input_index_by_curation

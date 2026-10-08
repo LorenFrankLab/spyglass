@@ -472,6 +472,27 @@ def saved_bundles(monkeypatch):
         extract_raw_data=types.SimpleNamespace(save_avg_waveforms=_save)
     )
     monkeypatch.setattr(backend, "_require_unitmatch", lambda: fake_um)
+    from spyglass.spikesorting.v2 import _waveform_bundles
+
+    real_save = _waveform_bundles.save_waveform_arrays
+
+    def save_arrays(waveforms, directory, unit_ids):
+        real_save(waveforms, directory, unit_ids)
+        saved[Path(directory)] = {
+            "waveforms": np.stack(
+                [
+                    np.load(
+                        Path(directory)
+                        / "RawWaveforms"
+                        / f"Unit{uid}_RawSpikes.npy"
+                    )
+                    for uid in unit_ids
+                ]
+            ),
+            "unit_ids": [int(uid) for uid in unit_ids],
+        }
+
+    monkeypatch.setattr(_waveform_bundles, "save_waveform_arrays", save_arrays)
     return saved
 
 
@@ -1226,6 +1247,7 @@ def test_get_matcher_bootstraps_default_after_clear():
     from spyglass.spikesorting.v2 import matcher_protocol as mp
 
     saved_m, saved_s = dict(mp._MATCHER_REGISTRY), dict(mp._SCHEMA_REGISTRY)
+    saved_preparers = dict(mp._PREPARER_REGISTRY)
     try:
         mp._MATCHER_REGISTRY.clear()
         mp._SCHEMA_REGISTRY.clear()
@@ -1235,6 +1257,8 @@ def test_get_matcher_bootstraps_default_after_clear():
         mp._MATCHER_REGISTRY.update(saved_m)
         mp._SCHEMA_REGISTRY.clear()
         mp._SCHEMA_REGISTRY.update(saved_s)
+        mp._PREPARER_REGISTRY.clear()
+        mp._PREPARER_REGISTRY.update(saved_preparers)
 
 
 def _read_polymer_gt():

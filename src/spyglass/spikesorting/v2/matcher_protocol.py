@@ -12,8 +12,10 @@ the DataJoint tables:
 - :class:`MatchPair` -- one cross-session match, keyed by
   ``(sorting_id, curation_id, unit_id)`` on each side.
 - :class:`MatcherProtocol` -- the ``match(session_inputs, params)`` contract.
+- :class:`MatcherInputPreparer` -- the independent preparation contract, from
+  resolved :class:`MatcherInputSource` to :class:`PreparedMatcherInput`.
 - :func:`register_matcher` / :func:`get_matcher` -- the name -> backend +
-  per-matcher params-schema registry that ``MatcherParameters`` validates
+  input preparer + per-matcher params-schema registry that ``MatcherParameters`` validates
   against at insert time.
 
 This module is pure Python with no DataJoint dependency, so it is importable
@@ -84,6 +86,44 @@ class MatchPair:
     fdr_estimate: float | None = None
 
 
+@dataclass(frozen=True)
+class MatcherInputSource:
+    """Resolved, artifact-masked recording and curated units for preparation.
+
+    Preparers receive file-backed SI objects, not tables or database access.
+    ``statistics_spans`` are the frozen intervals inside which waveform
+    windows may be sampled. The identity and date must survive preparation.
+    """
+
+    curation_key: dict
+    recording: Any
+    sorting: Any
+    recording_date: Any
+    statistics_spans: Any
+
+
+@dataclass(frozen=True)
+class PreparedMatcherInput:
+    """A backend-ready bundle and units excluded from that bundle."""
+
+    session_input: SessionMatcherInput
+    excluded_unit_ids: tuple[int, ...] = ()
+    exclusion_reason: str = ""
+
+
+@runtime_checkable
+class MatcherInputPreparer(Protocol):
+    """Prepare one input in the layout required by a registered matcher."""
+
+    def prepare(
+        self,
+        source: MatcherInputSource,
+        directory: Path,
+        params: dict,
+        job_kwargs: dict,
+    ) -> PreparedMatcherInput: ...
+
+
 @runtime_checkable
 class MatcherProtocol(Protocol):
     """Structural interface every cross-session matcher backend implements.
@@ -135,6 +175,7 @@ class MatcherProtocol(Protocol):
 _MATCHER_REGISTRY: dict[str, MatcherProtocol] = {}
 #: name -> per-matcher Pydantic params schema (validates ``MatcherParameters``)
 _SCHEMA_REGISTRY: dict[str, type] = {}
+_PREPARER_REGISTRY: dict[str, MatcherInputPreparer] = {}
 #: Names owned by shipped backends. Registering one of these loads the
 #: built-in first so the replacement rule applies regardless of import order.
 _BUILTIN_MATCHER_NAMES: frozenset[str] = frozenset({"unitmatch"})
@@ -142,7 +183,11 @@ _bootstrapping = False
 
 
 def register_matcher(
-    matcher: MatcherProtocol, schema: type, *, replace: bool = False
+    matcher: MatcherProtocol,
+    schema: type,
+    *,
+    replace: bool = False,
+    input_preparer: MatcherInputPreparer | None = None,
 ) -> None:
     """Register a matcher backend and its params schema under ``matcher.name``.
 
@@ -153,13 +198,19 @@ def register_matcher(
     schema : type
         The Pydantic model validating that matcher's ``MatcherParameters``
         ``params`` blob.
+    input_preparer : MatcherInputPreparer, optional
+        Prepare the backend's input layout. Defaults to the shared dense
+        split-half waveform layout, extracted without UnitMatchPy. Supply a
+        preparer for another layout; the matcher still consumes only bundles.
     replace : bool, optional
         Explicit maintenance override. Registering a name already held by a
         DIFFERENT backend class raises ``ValueError`` unless ``replace=True`` --
         ``MatcherParameters`` stores only the matcher name, so silently pointing
         a name at different code would make existing rows dispatch elsewhere.
-        Re-registering the SAME backend class is always idempotent and needs no
-        flag (this is how :func:`register_default_matchers` self-heals), so the
+        Re-registering the SAME backend class with the same preparer class is
+        idempotent and needs no flag. Omitting the preparer retains the one
+        already registered. A different preparer class also needs ``replace``.
+        This is how :func:`register_default_matchers` self-heals, so the
         built-in registration does NOT use ``replace`` -- it is reserved for a
         deliberate swap to genuinely different code.
 
@@ -168,8 +219,8 @@ def register_matcher(
     TypeError
         If ``matcher`` does not satisfy :class:`MatcherProtocol`.
     ValueError
-        If ``matcher.name`` is already registered to a different backend class
-        and ``replace`` is ``False``.
+        If ``matcher.name`` is already registered to a different backend or
+        preparer class and ``replace`` is ``False``.
     """
     if not isinstance(matcher, MatcherProtocol) or not callable(
         getattr(matcher, "match", None)
@@ -177,6 +228,19 @@ def register_matcher(
         raise TypeError(
             f"{matcher!r} does not satisfy MatcherProtocol (needs a `name` "
             "attribute and a callable `match(session_inputs, params)` method)."
+        )
+    preparer_supplied = input_preparer is not None
+    if input_preparer is None:
+        from spyglass.spikesorting.v2._waveform_bundles import (
+            WaveformInputPreparer,
+        )
+
+        input_preparer = WaveformInputPreparer()
+    if not isinstance(input_preparer, MatcherInputPreparer) or not callable(
+        getattr(input_preparer, "prepare", None)
+    ):
+        raise TypeError(
+            "input_preparer must implement prepare(source, directory, params, job_kwargs)"
         )
     if (
         matcher.name in _BUILTIN_MATCHER_NAMES
@@ -187,6 +251,14 @@ def register_matcher(
         # not decide whether persisted MatcherParameters rows re-route).
         register_default_matchers()
     existing = _MATCHER_REGISTRY.get(matcher.name)
+    existing_preparer = _PREPARER_REGISTRY.get(matcher.name)
+    if (
+        not preparer_supplied
+        and existing is not None
+        and type(existing) is type(matcher)
+        and existing_preparer is not None
+    ):
+        input_preparer = existing_preparer
     if (
         existing is not None
         and type(existing) is not type(matcher)
@@ -200,8 +272,19 @@ def register_matcher(
             "silently re-route existing rows. Pick a distinct name, or pass "
             "replace=True to override deliberately."
         )
+    if (
+        existing is not None
+        and existing_preparer is not None
+        and type(existing_preparer) is not type(input_preparer)
+        and not replace
+    ):
+        raise ValueError(
+            f"Matcher {matcher.name!r} already has a different input preparer. "
+            "Use a distinct matcher name, or replace=True to override deliberately."
+        )
     _MATCHER_REGISTRY[matcher.name] = matcher
     _SCHEMA_REGISTRY[matcher.name] = schema
+    _PREPARER_REGISTRY[matcher.name] = input_preparer
 
 
 def is_registered(name: str) -> bool:
@@ -228,7 +311,7 @@ def register_default_matchers() -> None:
     try:
         # Function-level import avoids an import cycle (the backend imports
         # this module) and keeps the optional UnitMatchPy import lazy (the
-        # backend only imports UnitMatchPy when its match()/extract path
+        # backend only imports UnitMatchPy when its match() path
         # actually runs).
         from spyglass.spikesorting.v2 import _unitmatch_backend
 
@@ -258,6 +341,12 @@ def get_matcher(name: str) -> MatcherProtocol:
     if name not in _MATCHER_REGISTRY:
         _raise_unknown(name)
     return _MATCHER_REGISTRY[name]
+
+
+def get_input_preparer(name: str) -> MatcherInputPreparer:
+    """Return the preparer registered with the named matcher."""
+    get_matcher(name)
+    return _PREPARER_REGISTRY[name]
 
 
 def _get_matcher_schema(name: str) -> type:

@@ -95,7 +95,7 @@ def test_bundle_compute_kwargs_seed_is_authoritative():
     the SI job kwargs (an ambient dj.config seed, or a leaked value) is stripped
     and IGNORED, never allowed to override the identity-bearing seed -- else the
     stored identity would disagree with the seed actually used."""
-    from spyglass.spikesorting.v2._unitmatch_backend import (
+    from spyglass.spikesorting.v2._waveform_bundles import (
         _bundle_compute_kwargs,
     )
 
