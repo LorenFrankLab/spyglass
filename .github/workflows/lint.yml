@@ -9,6 +9,29 @@ on:
   pull_request:
 
 jobs:
+  ruff:
+    name: Ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      # Match the local pre-commit hook; all rules/exclusions live in pyproject.
+      - run: python -m pip install ruff==0.14.13
+      - run: ruff check .
+
+  type-contracts:
+    name: V2 type contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install mypy==2.3.1 typing_extensions
+      - run: mypy --config-file=pyproject.toml
+
   black:
     runs-on: ubuntu-latest
     steps:

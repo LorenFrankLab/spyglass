@@ -231,8 +231,25 @@ line-length = 80
 
 [tool.ruff] # CB: Propose replacing flake8 with ruff to delete setup.cfg
 line-length = 80
+extend-exclude = [ ".claude", "notebooks/py_scripts" ]
 
+lint.select = [ "E4", "E7", "E9", "F" ]
 lint.ignore = [ "E402", "E501", "F401" ]
+
+[tool.mypy]
+# Start with the typed value/protocol boundary. Runtime schema modules and
+# third-party scientific packages are intentionally outside this first gate.
+files = [
+  "src/spyglass/spikesorting/v2/_orchestration/types.py",
+  "src/spyglass/spikesorting/v2/_recording/types.py",
+  "src/spyglass/spikesorting/v2/matcher_protocol.py",
+]
+python_version = "3.10"
+follow_imports = "skip"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
 
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*,.claude,.claude/*'
