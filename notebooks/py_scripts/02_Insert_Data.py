@@ -33,7 +33,6 @@
 #
 
 # +
-import os
 import datajoint as dj
 
 # ignore datajoint+jupyter async warnings
@@ -221,22 +220,50 @@ sgc.ProbeType.insert1(
 # _Notes:_ this may take time as Spyglass creates the copy. You may see a prompt
 # about inserting device information.
 #
-# By default, the session insert process is error permissive. It will log an
-# error and continue attempts across various tables. You have two options you can
-# toggle to adjust this.
+# Ingestion reads the whole file first and works out every row it would insert,
+# before writing anything. If something in the file prevents a table from being
+# filled, you get the whole list of problems and **nothing is written** — the
+# file is as it was, and you can fix it and try again.
 #
-# - `rollback_on_fail`: Default False. If True, errors will still be logged for
-#   all tables and, if any are registered, the `Nwbfile` entry will be deleted.
-#   This is helpful for knowing why your file failed, and making it easy to retry.
-# - `raise_err`: Default False. If True, errors will not be logged and will
-#   instead be raised. This is useful for debugging and exploring the error stack.
-#   The end result may be that some tables may still have entries from this file
-#   that will need to be manually deleted after a failed attempt. 'transactions'
-#   are used where possible to rollback sibling tables, but child table errors
-#   will still leave entries from parent tables.
+# The return value is that plan, one per file you passed. It is falsy when
+# nothing blocked, so `if result:` reads as "was there a problem", and printing
+# it gives the report.
+
+results = sgi.insert_sessions(nwb_file_name)
+plan = results[0]
+
+if plan:  # falsy when nothing blocked
+    print(plan)  # the full report
+else:
+    print(f"{plan.nwb_file_name}: {plan.verdict}")
+
+# ### Checking a file without writing
 #
 
-sgi.insert_sessions(nwb_file_name, rollback_on_fail=False, raise_err=False)
+# `dry_run=True` does the same work and writes nothing at all, so you can read
+# the report before committing to an ingest. This also works on a file Spyglass
+# has never seen — there is no copy and no `Nwbfile` entry yet, and a dry run
+# creates neither.
+
+report = sgi.insert_sessions(nwb_file_name, dry_run=True)[0]
+print(report.report(verbose=True))  # verbose adds what was resolved
+
+# The verdict on the first line says what an ingest would do: `all_new`,
+# `partial_new`, `no_op` if everything is already stored, or `fatal` if the file
+# could not be read at all. Each problem names the NWB object it came from
+# where there is one, and each kind of problem gets a one-line suggestion.
+#
+# Two flags adjust what happens when the news is bad:
+#
+# - `raise_err=True` raises at the end instead of returning the plan. The pass
+#   still completes first, so the exception carries every problem rather than
+#   only the one that stopped it.
+# - `allow_partial=True` inserts the tables that planned cleanly even though
+#   others did not. Off by default, so a half-ingested file is a choice.
+#
+# If the file disagrees with something already stored, the stored value is kept,
+# the rest of the file ingests, and the disagreement is reported for you to act
+# on. Nothing stops to ask.
 
 # ## Inspecting the data
 #

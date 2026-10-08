@@ -373,6 +373,10 @@ REMEDIES = {
         "is described twice in the file."
     ),
     "value_too_long": "Shorten the value in the file, or widen the column.",
+    "file_already_registered": (
+        "This file is already in Nwbfile, so it was skipped. Pass "
+        "reinsert=True to delete the existing session and ingest it again."
+    ),
     "extension_unmet": (
         "This table needs an NWB extension the file does not declare. Convert "
         "the file with that extension, or ingest without this table."

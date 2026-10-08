@@ -103,3 +103,40 @@ def test_insert_sessions_processes_every_file(two_raw_files, common):
         assert common.Session & {
             "nwb_file_name": copy_name
         }, f"{copy_name} registered but not ingested"
+
+
+def test_a_skipped_file_still_returns_a_result(
+    common, mini_copy_name, mini_insert
+):
+    """One result per file given, in the order given.
+
+    A file already in `Nwbfile` is skipped, and used to contribute nothing to
+    the returned list. With several files that left the list shorter than the
+    input, so a caller could neither tell which file had been skipped nor line
+    results up with what it asked for.
+    """
+    from spyglass.data_import import insert_sessions
+
+    raw_name = mini_copy_name.replace("_.nwb", ".nwb")
+
+    with pytest.warns(UserWarning, match="already in Nwbfile"):
+        results = insert_sessions(raw_name)
+
+    assert len(results) == 1, "One file in, one result out"
+    (skipped,) = results
+    assert skipped.nwb_file_name == mini_copy_name, "named by its copy"
+    assert not skipped, "Skipping is not a failure, so the result is falsy"
+    assert "already ingested" in skipped.report(log=False), (
+        "and the headline says so, in one line -- a clean plan does not pad "
+        "itself with empty sections"
+    )
+
+    # The override lives on the problem, not in the default report: an `info`
+    # problem is a note that something was resolved, and those are opt-in.
+    (note,) = [
+        problem
+        for problem in skipped.problems
+        if problem.code == "file_already_registered"
+    ]
+    assert "reinsert" in note.message, "which says how to override it"
+    assert "reinsert" in skipped.report(verbose=True, log=False)

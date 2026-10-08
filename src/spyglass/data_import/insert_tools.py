@@ -9,6 +9,7 @@ import pynwb
 from spyglass.common import Nwbfile, get_raw_eseries, populate_all_common
 from spyglass.settings import debug_mode, raw_dir, test_mode
 from spyglass.utils import logger
+from spyglass.utils.ingestion_plan import IngestionPlan, Problem
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
 
@@ -159,6 +160,25 @@ def insert_sessions(
             warnings.warn(
                 f"Cannot insert data from {nwb_file_name}: {out_nwb_file_name}"
                 + " is already in Nwbfile table."
+            )
+            # A result per file, including this one. Returning nothing for a
+            # skipped file left the list shorter than the input, so a caller
+            # with several files could not tell which had been skipped, or
+            # line results up with what it asked for.
+            results.append(
+                IngestionPlan(
+                    nwb_file_name=out_nwb_file_name,
+                    fatal=(
+                        Problem(
+                            severity="info",
+                            code="file_already_registered",
+                            message=(
+                                f"{out_nwb_file_name} is already in Nwbfile; "
+                                + "skipped. Pass reinsert=True to replace it."
+                            ),
+                        ),
+                    ),
+                )
             )
             continue
         elif file_exists and reinsert:

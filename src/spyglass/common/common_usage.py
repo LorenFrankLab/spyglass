@@ -201,7 +201,12 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         master_key : dict
             `{"nwb_file_name": ...}`.
         """
-        for part in (self.Entry, self.Table, self.Problem):
+        # Derived, not listed: a fourth part added to this master is cleared
+        # by construction. `delete_quick` does not cascade, so the master
+        # delete fails on a foreign key if any part is left behind -- which is
+        # how the previous hardcoded tuple announced itself when `Table` was
+        # added.
+        for part in self.parts(as_objects=True):
             (part & master_key).delete_quick()
         (self & master_key).delete_quick()
 

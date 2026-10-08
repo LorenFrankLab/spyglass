@@ -11,13 +11,20 @@ import pytest
 
 
 @pytest.fixture
-def staged(common, mini_copy_name, mini_insert):
-    """A staged plan for the mini file, so there is something to reuse."""
+def staged(common, mini_copy_name, mini_insert, fresh_plan):
+    """A staged plan for the mini file, so there is something to reuse.
+
+    Cleared and re-parsed rather than planned from whatever is already
+    staged: a plan built *through* reuse inherits whatever an earlier test
+    left behind, so these tests would be asserting about that instead of
+    about reuse. Seen as a plan with zero entries reaching
+    `test_an_unchanged_file_reuses_every_table_that_found_something`.
+    """
     from spyglass.common.common_usage import IngestionPlanLog
     from spyglass.data_import.planner import plan_nwbfile
 
     log = IngestionPlanLog()
-    log.stage(plan_nwbfile(mini_copy_name))
+    log.stage(fresh_plan(mini_copy_name))
 
     yield log
 

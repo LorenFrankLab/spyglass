@@ -272,3 +272,31 @@ def test_a_conflicting_entry_keeps_its_payload(
     assert {r["state"] for r in others} <= {"exists", "inserted"}
 
     log._clear(key)
+
+
+def test_clearing_a_plan_leaves_no_part_behind(common, mini_copy_name):
+    """Every part is cleared, including one added after this was written.
+
+    Derived from `parts()` on both sides -- the code that clears and the
+    assertion that checks it -- so a fourth part is covered without anyone
+    remembering to extend either. The hardcoded list this replaced announced
+    itself by breaking every call site with a foreign-key error when `Table`
+    was added, because `delete_quick` does not cascade.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.data_import.planner import plan_nwbfile
+
+    log = IngestionPlanLog()
+    key = log.stage(plan_nwbfile(mini_copy_name, force_replan=True))
+
+    parts = log.parts(as_objects=True)
+    assert parts, "Premise: the master has parts"
+    assert any(
+        len(part & key) for part in parts
+    ), "Premise: staging filled at least one of them"
+
+    log._clear(key)
+
+    for part in parts:
+        assert not len(part & key), f"{part.full_table_name} kept rows"
+    assert not len(log & key), "and the master row is gone"

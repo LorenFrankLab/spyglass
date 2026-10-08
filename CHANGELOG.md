@@ -2,6 +2,25 @@
 
 ## [0.6.1] (Unreleased)
 
+### Breaking Changes
+
+#### Ingestion Plans the File Before Writing (#1685)
+
+`insert_sessions` and `populate_all_common` parse the whole file, report every
+problem, then insert what was checked. The per-table path that wrote as it went,
+stopping at the first failure, is gone.
+
+- A file with a blocking problem now writes **nothing**; `allow_partial=True`
+    takes what can be taken.
+- The return value is the plan: falsy when nothing blocked, prints as the
+    report. `if result:` still works; expecting `None` on success does not.
+- `InsertError` is no longer written. It still reads, warning once; current
+    records are in `IngestionPlanLog`.
+- Mismatched metadata is reported rather than prompted. The stored value is kept
+    and the run continues; `on_divergence="raise"` declines instead.
+
+See `ForDevelopers/IngestionPlans` for the full breakdown.
+
 ### Infrastructure
 
 - Prevent errors during update for dandi standard from propagating to other

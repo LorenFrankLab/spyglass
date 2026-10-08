@@ -1,4 +1,12 @@
-"""Fixtures shared by the plan-reuse tests."""
+"""Fixtures shared by the plan tests.
+
+**Plan reuse is invisible at the call site.** `plan_nwbfile(name)` reads as
+"plan this file" and may instead return what a previous attempt staged, so a
+test that monkeypatches a parse, or stages a plan it means to reuse, silently
+asserts about whatever ran before it. Four tests were fixed for exactly that
+before this fixture existed. Use `fresh_plan` for anything that needs to
+control what it is testing.
+"""
 
 import shutil
 
@@ -60,3 +68,26 @@ def editable_copy(common, mini_path, mini_copy_name, raw_dir, mini_insert):
     IngestionPlanLog().clear(name)
     (Nwbfile & {"nwb_file_name": name}).delete_quick()
     path.unlink(missing_ok=True)
+
+
+@pytest.fixture
+def fresh_plan(common):
+    """Plan a file from scratch, discarding anything staged for it.
+
+    `force_replan` alone is not enough when the test also stages: the staged
+    record has to go too, or the next plan reuses it.
+
+    Returns
+    -------
+    callable
+        `fresh_plan(nwb_file_name) -> IngestionPlan`.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.data_import.planner import plan_nwbfile
+
+    def build(nwb_file_name, **kwargs):
+        IngestionPlanLog().clear(nwb_file_name)
+        kwargs.setdefault("force_replan", True)
+        return plan_nwbfile(nwb_file_name, **kwargs)
+
+    return build
