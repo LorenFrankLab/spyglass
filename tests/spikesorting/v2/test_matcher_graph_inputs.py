@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from dataclasses import replace
 
 import pytest
 
@@ -302,6 +303,41 @@ def test_canonicalize_orients_side_a_by_lower_input_index():
     assert (row["session_b_sorting_id"], row["session_b_curation_id"]) == early
     assert row["unit_b_id"] == 11
     assert (row["input_a"], row["input_b"]) == (0, 1)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "session_a_curation_id",
+        "session_b_curation_id",
+        "unit_a_id",
+        "unit_b_id",
+    ],
+)
+@pytest.mark.parametrize("value", [17.9, 17.0, True, "17", None])
+def test_canonicalize_rejects_noninteger_identifiers(field, value):
+    from spyglass.spikesorting.v2._matcher_graph import canonicalize_match_pairs
+    from spyglass.spikesorting.v2.matcher_protocol import MatchPair
+
+    pair = replace(MatchPair("a", 17, 17, "b", 17, 17, 0.9), **{field: value})
+    with pytest.raises(ValueError, match=field + " must be an integer"):
+        canonicalize_match_pairs([pair], {("a", 17): 0, ("b", 17): 1})
+
+
+@pytest.mark.parametrize("kind", ["int32", "int64", "uint64"])
+def test_canonicalize_preserves_numpy_integer_identifiers(kind):
+    import numpy as np
+
+    from spyglass.spikesorting.v2._matcher_graph import canonicalize_match_pairs
+    from spyglass.spikesorting.v2.matcher_protocol import MatchPair
+
+    integer = getattr(np, kind)
+    pair = MatchPair(
+        "a", integer(3), integer(17), "b", integer(4), integer(29), 0.9
+    )
+    (row,) = canonicalize_match_pairs([pair], {("a", 3): 0, ("b", 4): 1})
+    assert (row["session_a_curation_id"], row["unit_a_id"]) == (3, 17)
+    assert (row["session_b_curation_id"], row["unit_b_id"]) == (4, 29)
 
 
 def _order_rows(starts, input_starts=None):

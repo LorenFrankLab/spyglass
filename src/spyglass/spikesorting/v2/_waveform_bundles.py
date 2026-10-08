@@ -88,8 +88,14 @@ class NoMatchableUnitsError(ValueError):
 
     Raised by :func:`extract_waveform_bundle` when every unit has fewer than
     two sampled spikes with full waveform support, so no unit has two
-    cross-validation halves.
+    cross-validation halves. ``reason`` lets an input wrapper report the
+    scientific failure without including the bundle's temporary path; the
+    detailed message remains available in the chained cause.
     """
+
+    def __init__(self, message: str = "", *, reason: str | None = None):
+        super().__init__(message)
+        self.reason = message if reason is None else reason
 
 
 def _sorting_with_window_in_one_span(
@@ -339,11 +345,14 @@ def extract_waveform_bundle(
         )
         if statistics_spans is not None:
             support += " and a window inside one statistics span"
+        reason = (
+            "every unit had fewer than two sampled spikes with full waveform "
+            f"support ({support}), so none has two cross-validation halves."
+        )
         raise NoMatchableUnitsError(
             f"extract_unitmatch_bundle: no unit of the session bundled at "
-            f"{session_dir} can be matched -- every unit had fewer than two "
-            f"sampled spikes with full waveform support ({support}), so none "
-            "has two cross-validation halves."
+            f"{session_dir} can be matched -- {reason}",
+            reason=reason,
         )
 
     # (n_kept, spike_width, n_channels, 2)

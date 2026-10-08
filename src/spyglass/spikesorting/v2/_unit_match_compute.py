@@ -48,6 +48,7 @@ def extract_and_match(input_plan, matcher_name, params, job_kwargs):
     from pathlib import Path
 
     from spyglass.settings import temp_dir as spyglass_temp_dir
+    from spyglass.spikesorting.v2._lookup_validation import lossless_int
     from spyglass.spikesorting.v2._matcher_graph import (
         canonicalize_match_pairs,
     )
@@ -94,6 +95,7 @@ def extract_and_match(input_plan, matcher_name, params, job_kwargs):
         prefix="unitmatch_", dir=spyglass_temp_dir
     ) as tmp_root:
         session_inputs = []
+        eligible_unit_ids_by_curation = {}
         for plan in ordered_plan:
             # Build the SI objects (NWB I/O) here from the files make_fetch
             # resolved; the matchable unit set was already resolved +
@@ -127,7 +129,7 @@ def extract_and_match(input_plan, matcher_name, params, job_kwargs):
             except NoMatchableUnitsError as exc:
                 raise NoMatchableUnitsError(
                     f"UnitMatch.make: {_input_description(plan)} cannot "
-                    f"prepare input for matcher {matcher_name!r}: {exc}"
+                    f"prepare input for matcher {matcher_name!r}: {exc.reason}"
                 ) from exc
             if not isinstance(prepared, PreparedMatcherInput) or not isinstance(
                 prepared.session_input, SessionMatcherInput
@@ -147,11 +149,17 @@ def extract_and_match(input_plan, matcher_name, params, job_kwargs):
                 raise ValueError(
                     "Matcher input preparation must preserve the frozen curation identity and date."
                 )
-            excluded = list(prepared.excluded_unit_ids)
+            excluded = [
+                lossless_int(unit, "excluded_unit_id")
+                for unit in prepared.excluded_unit_ids
+            ]
             if not set(excluded).issubset(plan["matchable_unit_ids"]):
                 raise ValueError(
                     "Matcher input preparer excluded units outside the frozen matchable universe."
                 )
+            eligible_unit_ids_by_curation[
+                (str(plan["sorting_id"]), int(plan["curation_id"]))
+            ] = set(plan["matchable_unit_ids"]) - set(excluded)
             if excluded:
                 reason = prepared.exclusion_reason or (
                     f"were excluded by input preparation for matcher {matcher_name!r}"
@@ -167,7 +175,9 @@ def extract_and_match(input_plan, matcher_name, params, job_kwargs):
         raw_pairs = matcher.match(session_inputs, params)
         runtime_s = time.perf_counter() - start
     oriented_pairs = canonicalize_match_pairs(
-        raw_pairs, input_index_by_curation
+        raw_pairs,
+        input_index_by_curation,
+        eligible_unit_ids_by_curation=eligible_unit_ids_by_curation,
     )
     return oriented_pairs, runtime_s
 

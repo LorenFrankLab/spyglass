@@ -1573,6 +1573,8 @@ curated sorting, frozen statistics spans, curation identity and date. It returns
 a `PreparedMatcherInput` containing the `SessionMatcherInput` consumed by the
 backend and any excluded unit IDs. Preparation must preserve the frozen identity
 and date; excluded units remain in the matchable universe as unmatched units.
+Returned pairs must use integer curation and unit IDs and can reference only
+units retained by preparation; invalid pairs fail before writing the pairs table.
 Prepared files live through inference and are then removed, including on failure.
 Omitting `input_preparer` uses the shared dense split-half waveform layout, which
 requires SpikeInterface and NumPy but does not import UnitMatchPy. Supply a

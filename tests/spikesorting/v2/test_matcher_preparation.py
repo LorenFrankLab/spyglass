@@ -3,8 +3,139 @@
 import subprocess
 import sys
 import textwrap
+import uuid
+from types import SimpleNamespace
 
 import pytest
+
+
+@pytest.fixture
+def preparation_contract(tmp_path, monkeypatch):
+    from spyglass import settings
+    from spyglass.spikesorting.v2 import _sorting_analyzer, _units_nwb
+    from spyglass.spikesorting.v2 import matcher_protocol as protocol
+    from spyglass.spikesorting.v2._unit_match_compute import extract_and_match
+
+    monkeypatch.setattr(settings, "temp_dir", str(tmp_path))
+    monkeypatch.setattr(
+        _sorting_analyzer, "read_canonical_recording", lambda _: object()
+    )
+    monkeypatch.setattr(
+        _units_nwb,
+        "read_stored_units",
+        lambda _: SimpleNamespace(select_units=lambda ids: object()),
+    )
+    plans = [
+        {
+            "input_index": i,
+            "sorting_id": uuid.UUID(int=i + 1),
+            "curation_id": 1,
+            "recordings": [{"nwb_file_name": f"{i}.nwb"}],
+            "sorting_input": object(),
+            "units": object(),
+            "matchable_unit_ids": [1, 17, 29],
+            "input_start_time": f"2026-01-0{i + 1}",
+            "statistics_spans": [(0, 100)],
+        }
+        for i in range(2)
+    ]
+    directories = []
+    emitted = [17, 17]
+    excluded = [29]
+
+    class Preparer:
+        def prepare(self, source, directory, params, job_kwargs):
+            directory.mkdir()
+            directories.append(directory)
+            return protocol.PreparedMatcherInput(
+                protocol.SessionMatcherInput(
+                    dict(source.curation_key),
+                    directory,
+                    directory / "positions.npy",
+                    source.recording_date,
+                ),
+                tuple(excluded),
+            )
+
+    def match(inputs, params):
+        # Reverse orientation so each side's prepared set follows identity.
+        a, b = inputs[1].curation_key, inputs[0].curation_key
+        return [
+            protocol.MatchPair(
+                str(a["sorting_id"]),
+                a["curation_id"],
+                emitted[1],
+                str(b["sorting_id"]),
+                b["curation_id"],
+                emitted[0],
+                0.9,
+            )
+        ]
+
+    monkeypatch.setattr(
+        protocol, "get_matcher", lambda _: SimpleNamespace(match=match)
+    )
+    monkeypatch.setattr(protocol, "get_input_preparer", lambda _: Preparer())
+    yield lambda: extract_and_match(
+        plans, "fixture", {}, {"n_jobs": 1}
+    ), emitted, excluded
+    assert directories and all(
+        not directory.exists() for directory in directories
+    )
+
+
+@pytest.mark.parametrize("emitted", [(29, 17), (17, 29), (999, 17), (17, 999)])
+def test_matching_rejects_excluded_or_unknown_units(
+    preparation_contract, emitted
+):
+    run, pair_units, _ = preparation_contract
+    pair_units[:] = emitted
+    with pytest.raises(ValueError, match="prepared matching input"):
+        run()
+
+
+def test_matching_retains_prepared_units(preparation_contract):
+    run, _, _ = preparation_contract
+    (pair,), _ = run()
+    assert pair["unit_a_id"] == pair["unit_b_id"] == 17
+    assert pair["session_a_sorting_id"] == str(uuid.UUID(int=1))
+
+
+@pytest.mark.parametrize("unit", [29.0, True])
+def test_matching_rejects_noninteger_exclusions(preparation_contract, unit):
+    run, _, excluded = preparation_contract
+    excluded[:] = [unit]
+    with pytest.raises(ValueError, match="excluded_unit_id must be an integer"):
+        run()
+
+
+def test_matching_input_error_keeps_reason_and_original_cause(
+    preparation_contract, monkeypatch
+):
+    from spyglass.spikesorting.v2 import matcher_protocol as protocol
+    from spyglass.spikesorting.v2._waveform_bundles import NoMatchableUnitsError
+
+    run, _, _ = preparation_contract
+    original = protocol.get_input_preparer("fixture")
+    reason = "every unit had fewer than two sampled spikes with full waveform support"
+
+    def fail(*args):
+        original.prepare(*args)
+        raise NoMatchableUnitsError(
+            f"No bundle can be built at {args[1]}", reason=reason
+        )
+
+    monkeypatch.setattr(
+        protocol, "get_input_preparer", lambda _: SimpleNamespace(prepare=fail)
+    )
+    with pytest.raises(NoMatchableUnitsError) as raised:
+        run()
+    message = str(raised.value)
+    assert "input_index 0" in message and "0.nwb" in message
+    assert reason in message
+    assert "unitmatch_" not in message
+    assert isinstance(raised.value.__cause__, NoMatchableUnitsError)
+    assert "unitmatch_" in str(raised.value.__cause__)
 
 
 @pytest.mark.parametrize(

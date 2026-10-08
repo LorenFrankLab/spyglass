@@ -163,7 +163,10 @@ class MatcherProtocol(Protocol):
             sides must come from different inputs, every key must be one of
             the ``curation_key`` values passed in, and an unordered pair must
             appear at most once (not also in reversed orientation). Order is
-            not significant; the caller orients and orders the pairs, and
+            not significant. Curation and unit IDs must be Python or NumPy
+            integers; booleans, floats and strings are rejected. Units
+            excluded by preparation cannot appear in pairs.
+            The caller orients and orders the pairs, and
             ``UnitMatch.make`` raises ``ValueError`` on a pair that breaks
             these rules. ``[]`` when fewer than two inputs are given or
             nothing matches.

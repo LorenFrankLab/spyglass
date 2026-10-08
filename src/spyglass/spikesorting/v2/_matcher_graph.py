@@ -318,6 +318,10 @@ def count_recording_spikes(unit_spike_trains: dict, spans: list) -> dict:
 def canonicalize_match_pairs(
     pairs: "list[MatchPair]",
     input_index_by_curation: "dict[tuple[str, int], int]",
+    *,
+    eligible_unit_ids_by_curation: (
+        dict[tuple[str, int], set[int]] | None
+    ) = None,
 ) -> list[dict]:
     """Validate and canonically orient raw matcher output before insertion.
 
@@ -331,6 +335,8 @@ def canonicalize_match_pairs(
     - rejects a pair whose two sides share an ``input_index`` (a same-input
       pair, which includes self-pairs) -- match pairs must span two distinct
       matching inputs;
+    - requires integer curation and unit identifiers without coercion, and
+      when prepared unit sets are supplied, rejects units outside those sets;
     - orients each pair so side A is the lower ``input_index``, then rejects a
       second pair that orients to the same ``(input_a, unit_a, input_b,
       unit_b)`` identity (a reversed duplicate), so ``UnitMatch.Pair`` cannot
@@ -342,6 +348,10 @@ def canonicalize_match_pairs(
         Raw matcher output.
     input_index_by_curation : dict[(str, int), int]
         ``(sorting_id, curation_id) -> input_index`` for the pinned curations.
+    eligible_unit_ids_by_curation : dict[(str, int), set[int]], optional
+        Units retained by each input's preparer. Compute supplies this after
+        exclusions; excluded units remain in the frozen tracking universe but
+        cannot occur in a match pair.
 
     Returns
     -------
@@ -354,19 +364,24 @@ def canonicalize_match_pairs(
     Raises
     ------
     ValueError
-        On an unpinned curation, a same-input pair, or a reversed duplicate.
+        On invalid identifiers, an ineligible unit, an unpinned curation, a
+        same-input pair, or a reversed duplicate.
     """
+    from spyglass.spikesorting.v2._lookup_validation import lossless_int
+
     oriented: dict[tuple, dict] = {}
     for pair in pairs:
         side_a = (
             str(pair.session_a_sorting_id),
-            int(pair.session_a_curation_id),
+            lossless_int(pair.session_a_curation_id, "session_a_curation_id"),
         )
         side_b = (
             str(pair.session_b_sorting_id),
-            int(pair.session_b_curation_id),
+            lossless_int(pair.session_b_curation_id, "session_b_curation_id"),
         )
-        for side in (side_a, side_b):
+        unit_a = lossless_int(pair.unit_a_id, "unit_a_id")
+        unit_b = lossless_int(pair.unit_b_id, "unit_b_id")
+        for side, unit in ((side_a, unit_a), (side_b, unit_b)):
             if side not in input_index_by_curation:
                 raise ValueError(
                     "UnitMatch.make: matcher returned a pair referencing "
@@ -374,6 +389,17 @@ def canonicalize_match_pairs(
                     "UnitMatchSelection.Input curations "
                     f"{sorted(input_index_by_curation)}. The matcher emitted a "
                     "key it was never fed; this is a backend contract violation."
+                )
+            if (
+                eligible_unit_ids_by_curation is not None
+                and unit not in eligible_unit_ids_by_curation[side]
+            ):
+                raise ValueError(
+                    "UnitMatch.make: matcher returned unit "
+                    f"{unit} from curation {side} that is not eligible in its "
+                    "prepared matching input. Units excluded by preparation "
+                    "or absent from the frozen matchable universe cannot "
+                    "occur in match pairs."
                 )
         input_a = input_index_by_curation[side_a]
         input_b = input_index_by_curation[side_b]
@@ -387,17 +413,17 @@ def canonicalize_match_pairs(
         if input_a <= input_b:
             low, low_unit, high, high_unit = (
                 side_a,
-                int(pair.unit_a_id),
+                unit_a,
                 side_b,
-                int(pair.unit_b_id),
+                unit_b,
             )
             low_input, high_input = input_a, input_b
         else:
             low, low_unit, high, high_unit = (
                 side_b,
-                int(pair.unit_b_id),
+                unit_b,
                 side_a,
-                int(pair.unit_a_id),
+                unit_a,
             )
             low_input, high_input = input_b, input_a
         identity = (low_input, low_unit, high_input, high_unit)

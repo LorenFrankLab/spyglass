@@ -755,6 +755,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         def _validate_pair_row(self, row, pinned_cache, seen_edges) -> None:
             """Reject a single ``Pair`` row outside the pinned curation universe."""
+            from spyglass.spikesorting.v2._lookup_validation import lossless_int
             from spyglass.spikesorting.v2.exceptions import (
                 UnitMatchPairIntegrityError,
             )
@@ -769,13 +770,27 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     "UnitMatch.Pair.insert: match_probability "
                     f"{probability} is outside [0, 1]."
                 )
+            try:
+                identifiers = {
+                    name: lossless_int(
+                        row[name], f"UnitMatch.Pair.insert: {name}"
+                    )
+                    for name in (
+                        "session_a_curation_id",
+                        "session_b_curation_id",
+                        "unit_a_id",
+                        "unit_b_id",
+                    )
+                }
+            except ValueError as exc:
+                raise UnitMatchPairIntegrityError(str(exc)) from exc
             endpoint_a = (
                 str(row["session_a_sorting_id"]),
-                int(row["session_a_curation_id"]),
+                identifiers["session_a_curation_id"],
             )
             endpoint_b = (
                 str(row["session_b_sorting_id"]),
-                int(row["session_b_curation_id"]),
+                identifiers["session_b_curation_id"],
             )
             pinned = pinned_cache.get(unitmatch_id)
             if pinned is None:
@@ -803,8 +818,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     f"curation ({endpoint_a}); a unit cannot match itself across "
                     "sessions. Cross-session pairs join two distinct inputs."
                 )
-            node_a = (*endpoint_a, int(row["unit_a_id"]))
-            node_b = (*endpoint_b, int(row["unit_b_id"]))
+            node_a = (*endpoint_a, identifiers["unit_a_id"])
+            node_b = (*endpoint_b, identifiers["unit_b_id"])
             edge = frozenset((node_a, node_b))
             batch = seen_edges.setdefault(
                 unitmatch_id, self._existing_pair_edges(unitmatch_id)

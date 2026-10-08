@@ -1846,6 +1846,40 @@ def test_raw_pair_insert_rejects_unpinned_endpoint(two_session_curated_group):
         UnitMatch.Pair.insert1(bogus, allow_direct_insert=True)
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "session_a_curation_id",
+        "session_b_curation_id",
+        "unit_a_id",
+        "unit_b_id",
+    ],
+)
+@pytest.mark.parametrize("value", [17.9, True, "17"])
+def test_raw_pair_insert_rejects_noninteger_identifiers(dj_conn, field, value):
+    import uuid
+
+    from spyglass.spikesorting.v2.exceptions import UnitMatchPairIntegrityError
+    from spyglass.spikesorting.v2.unit_matching import UnitMatch
+
+    row = {
+        "unitmatch_id": uuid.UUID(int=1),
+        "pair_index": 0,
+        "session_a_sorting_id": uuid.UUID(int=2),
+        "session_a_curation_id": 17,
+        "unit_a_id": 17,
+        "session_b_sorting_id": uuid.UUID(int=3),
+        "session_b_curation_id": 17,
+        "unit_b_id": 17,
+        "match_probability": 0.9,
+        field: value,
+    }
+    with pytest.raises(
+        UnitMatchPairIntegrityError, match=field + " must be an integer"
+    ):
+        UnitMatch.Pair.insert1(row, allow_direct_insert=True)
+
+
 @pytest.mark.slow
 def test_tracked_unit_make_seeds_singletons(two_session_curated_group):
     """``TrackedUnit.make`` seeds the node universe from the curated units and,
@@ -1956,6 +1990,7 @@ def test_make_runs_full_matcher_table_path(
     saved_matchers = dict(mp._MATCHER_REGISTRY)
     saved_schemas = dict(mp._SCHEMA_REGISTRY)
     saved_preparers = dict(mp._PREPARER_REGISTRY)
+
     class FixtureInputPreparer:
         def prepare(self, source, directory, params, job_kwargs):
             _noop_extract(directory, source.recording, source.sorting)
@@ -3365,6 +3400,7 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
     saved_matchers = dict(mp._MATCHER_REGISTRY)
     saved_schemas = dict(mp._SCHEMA_REGISTRY)
     saved_preparers = dict(mp._PREPARER_REGISTRY)
+
     class FixtureInputPreparer:
         def prepare(self, source, directory, params, job_kwargs):
             _noop_extract(directory, source.recording, source.sorting)
