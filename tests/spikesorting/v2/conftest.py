@@ -34,6 +34,16 @@ from tests.spikesorting.v2._motion_db_helpers import (
     session_start_s,
 )
 from tests.spikesorting.v2._sorter_stub import plant_sorter
+from tests.spikesorting.v2._test_tiers import (
+    EXTERNAL_DATA_FIXTURES,
+    SUITE_PATH,
+    TIERS,
+    TierClassificationError,
+    classify_test,
+    database_fixture_names,
+    fixture_minimums,
+    load_manifest,
+)
 
 # These files are scripts and helper modules, not pytest test modules; the
 # leading ``test_`` is part of the component name (the standalone test
@@ -46,6 +56,83 @@ collect_ignore = [
 ]
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config, items):
+    """Assign one reviewed tier before marker selection, then check fixtures.
+
+    The runtime-balanced CI shard called ``unit`` intentionally includes light
+    database work. The ``unit`` tier instead guarantees no database fixtures
+    or downloaded scientific data; ``--v2-tier unit`` also blocks DB access.
+    """
+    manifest = load_manifest()
+    assignments = []
+    failures = []
+    for item in items:
+        if not item.path.is_relative_to(SUITE_PATH):
+            continue
+        if not isinstance(item, pytest.Function):
+            continue
+        module = item.path.relative_to(SUITE_PATH).as_posix()
+        name = item.nodeid.split("::", 1)[1].split("[", 1)[0]
+        declared = None
+        for node in reversed(item.listchain()):
+            tiers = {mark.name for mark in node.own_markers} & set(TIERS)
+            if tiers:
+                if len(tiers) > 1:
+                    failures.append(
+                        f"{item.nodeid}: conflicting explicit tiers {sorted(tiers)}"
+                    )
+                declared = next(iter(tiers))
+                break
+
+        definitions = item._fixtureinfo.name2fixturedefs
+        database_names = database_fixture_names(definitions)
+        try:
+            minimums = fixture_minimums(manifest, definitions)
+            tier = classify_test(
+                manifest,
+                module,
+                name,
+                declared_tier=declared,
+                fixture_tiers=minimums,
+                needs_database=bool(database_names)
+                or item.get_closest_marker("database") is not None,
+                needs_external_data=bool(
+                    set(item.fixturenames) & EXTERNAL_DATA_FIXTURES
+                ),
+            )
+        except TierClassificationError as exc:
+            failures.append(str(exc))
+        else:
+            assignments.append((item, tier))
+
+    if failures:
+        unique = sorted(set(failures))
+        raise pytest.UsageError(
+            "Invalid v2 test-tier assignments:\n" + "\n".join(unique)
+        )
+
+    # Legacy module/class markers otherwise leave DB tests matching ``-m unit``
+    # even when a function-level override is db_unit. Snapshot first, normalize
+    # the hierarchy once, then give each function exactly its effective tier.
+    for item, _ in assignments:
+        for node in item.listchain():
+            if node is item or node.path.is_relative_to(SUITE_PATH):
+                node.own_markers[:] = [
+                    mark for mark in node.own_markers if mark.name not in TIERS
+                ]
+    for item, tier in assignments:
+        item.add_marker(getattr(pytest.mark, tier))
+
+    requested = config.getoption("v2_tier", default=None)
+    if requested is not None:
+        wanted = {item for item, tier in assignments if tier == requested}
+        selected = [item for item in items if item in wanted]
+        deselected = [item for item in items if item not in wanted]
+        items[:] = selected
+        config.hook.pytest_deselected(items=deselected)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def mini_insert():
     """No-op override of the repository-wide sample-data ingestion fixture.
@@ -55,6 +142,25 @@ def mini_insert():
     needed.
     """
     yield
+
+
+@pytest.fixture(autouse=True)
+def _guard_unit_tier_database_access(request, monkeypatch):
+    """Keep isolated tests isolated when they run beside database tiers too."""
+    if request.node.get_closest_marker("unit") is None:
+        yield
+        return
+
+    def refuse(*args, **kwargs):
+        raise AssertionError(
+            "The v2 unit tier attempted DataJoint database access. "
+            "Move this test to a database tier or isolate its DB boundary."
+        )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(dj.Connection, "connect", refuse)
+        patch.setattr(dj.Connection, "query", refuse)
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -247,6 +353,9 @@ def pytest_sessionstart(session):
     pure-helper run starts no download. ``ensure_fixture`` is a no-op when the file is
     already present (e.g. generated locally) or when no URL is configured.
     """
+    if session.config.getoption("v2_tier", default=None) == "unit":
+        return
+
     import os
     import warnings
 

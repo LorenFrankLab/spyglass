@@ -2144,7 +2144,8 @@ def test_evaluation_preview_merges_is_a_rejected_draft(
         clear_curations_for(planted_two_unit_sort)
 
 
-def test_analyzer_curation_table_removed():
+@pytest.mark.db_unit
+def test_analyzer_curation_table_removed(dj_conn):
     """``metric_curation`` exposes no AnalyzerCuration /
     AnalyzerCurationSelection.
 

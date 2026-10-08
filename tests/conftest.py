@@ -64,6 +64,7 @@ from .data_downloader import DataDownloader
 # default + the `SERVER is not None` guard in `pytest_unconfigure` surface the
 # real error instead.
 SERVER = None
+_UNIT_DATABASE_METHODS = {}
 
 
 # ---------- Fix ResourceWarning from datajoint.hash.uuid_from_file -----------
@@ -286,6 +287,15 @@ def pytest_addoption(parser):
     --container-port (str): Default None (uses 330[mysql_version]). Port mapping.
     """
     parser.addoption(
+        "--v2-tier",
+        choices=("unit", "db_unit", "stage", "pipeline", "regression_gate"),
+        default=None,
+        help=(
+            "Run one spikesorting v2 test tier. The unit tier starts no Docker "
+            "server, fetches no datasets and rejects DataJoint connections."
+        ),
+    )
+    parser.addoption(
         "--quiet-spy",
         action="store_true",
         dest="quiet_spy",
@@ -403,10 +413,11 @@ def pytest_configure(config):
     global NO_DLC
 
     TEST_FILE = "minirec20230622.nwb"
-    TEARDOWN = not config.option.no_teardown
+    unit_only = getattr(config.option, "v2_tier", None) == "unit"
+    TEARDOWN = not config.option.no_teardown and not unit_only
     VERBOSE = not config.option.quiet_spy
 
-    NO_DLC = config.option.no_dlc
+    NO_DLC = config.option.no_dlc or unit_only
     pytest.NO_DLC = NO_DLC
 
     # Validate the requested base dir before anything is created or
@@ -453,7 +464,7 @@ def pytest_configure(config):
         vol_dir=config.option.container_vol_dir,
         restart=TEARDOWN,
         shutdown=TEARDOWN,
-        null_server=config.option.no_docker,
+        null_server=config.option.no_docker or unit_only,
         verbose=VERBOSE,
     )
     # Apply credentials now so that dj.config["custom"]["test_mode"] = True
@@ -476,6 +487,23 @@ def pytest_configure(config):
         download_dlc=not NO_DLC,
     )
 
+    if unit_only:
+        _block_unit_database_access()
+
+
+def _block_unit_database_access():
+    """Refuse collection- or runtime-time database access in the unit lane."""
+
+    def refuse(*args, **kwargs):
+        raise AssertionError(
+            "The v2 unit tier attempted DataJoint database access. "
+            "Move this test to a database tier or isolate its DB boundary."
+        )
+
+    for name in ("connect", "query"):
+        _UNIT_DATABASE_METHODS[name] = getattr(dj.Connection, name)
+        setattr(dj.Connection, name, refuse)
+
 
 def pytest_sessionfinish(session, exitstatus):
     # Stash the session so pytest_unconfigure (which only receives ``config``)
@@ -487,6 +515,9 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def pytest_unconfigure(config):
+    for name, method in _UNIT_DATABASE_METHODS.items():
+        setattr(dj.Connection, name, method)
+    _UNIT_DATABASE_METHODS.clear()
     server = globals().get("SERVER")
     if server is None:
         return

@@ -554,6 +554,7 @@ def test_whiten_interception_allowlisted():
 
 
 @pytest.mark.medium
+@pytest.mark.usefixtures("dj_conn")
 def test_ms5_non_default_params_reach_run_sorter_unchanged(monkeypatch):
     """Configured MS5 values reach ``run_sorter`` verbatim; whiten is routed.
 

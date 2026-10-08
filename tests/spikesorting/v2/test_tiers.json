@@ -1,0 +1,1260 @@
+{
+  "version": 1,
+  "modules": {
+    "acceptance/test_handoff_acceptance.py": {
+      "tier": "regression_gate"
+    },
+    "acceptance/test_lifecycle_acceptance.py": {
+      "tier": "regression_gate"
+    },
+    "single_session/test_artifact.py": {
+      "tier": "stage",
+      "overrides": {
+        "test_artifact_detection_parameters_validates_via_insert1": "db_unit",
+        "test_artifact_empty_warning_has_context": "db_unit",
+        "test_detect_artifacts_amplitude_and_zscore_combined": "db_unit",
+        "test_detect_artifacts_below_proportion_threshold_ignored": "db_unit",
+        "test_detect_artifacts_clamps_artifact_at_recording_end": "db_unit",
+        "test_detect_artifacts_finds_known_transient": "db_unit",
+        "test_detect_artifacts_join_window_merges_runs": "db_unit",
+        "test_detect_artifacts_no_threshold_crossings": "db_unit",
+        "test_detect_artifacts_zscore_only_detection": "db_unit"
+      }
+    },
+    "single_session/test_curation_insert.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_curation_get_unit_brain_regions_concat_raises": "db_unit",
+        "test_insert_curation_rejects_missing_sorting_id": "db_unit",
+        "test_unit_brain_region_df_empty_keeps_full_schema": "db_unit"
+      }
+    },
+    "single_session/test_curation_merges.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_applied_and_lazy_merge_ids_match_for_out_of_order_groups": "stage",
+        "test_curation_v2_insert_with_merge_groups_apply_merges": "stage",
+        "test_get_merged_sorting_returns_base_when_merges_applied": "pipeline",
+        "test_get_merged_sorting_returns_base_when_no_merges": "pipeline",
+        "test_insert_curation_rejects_merge_group_overlap": "pipeline",
+        "test_insert_curation_rejects_singleton_merge_group": "pipeline",
+        "test_lazy_vs_applied_merge_frames_equal": "stage",
+        "test_merge_group_contributor_fk_rejects_unknown_unit": "pipeline",
+        "test_merges_applied_records_user_intent": "pipeline",
+        "test_v2_sorting_nwb_excludes_parent_units": "stage"
+      }
+    },
+    "single_session/test_disjoint_intervals.py": {
+      "tier": "stage"
+    },
+    "single_session/test_ground_truth_parity.py": {
+      "tier": "regression_gate",
+      "overrides": {
+        "test_parity_fixture_locator_uses_shared_fixture_package": "unit",
+        "test_v1_baseline_case_rejects_wrong_sorter_or_shank": "unit"
+      }
+    },
+    "single_session/test_merge_dispatch.py": {
+      "tier": "pipeline"
+    },
+    "single_session/test_pipeline_run.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_initialize_v2_defaults_is_idempotent": "db_unit",
+        "test_initialize_v2_defaults_runs_catalog_audit": "db_unit",
+        "test_list_pipeline_presets_enumerates_all_pipeline_presets": "db_unit",
+        "test_run_v2_pipeline_auto_curate_param_defaults_false": "unit",
+        "test_run_v2_pipeline_empty_call_still_reports_mode_choice": "unit",
+        "test_run_v2_pipeline_input_typeddicts_carry_auto_curate": "unit",
+        "test_run_v2_pipeline_names_the_missing_single_session_field": "unit",
+        "test_stage_statuses_vocabulary_includes_skipped": "unit",
+        "test_verify_v2_default_catalog_flags_stale": "db_unit",
+        "test_verify_v2_default_catalog_flags_validated_and_part_drift": "db_unit"
+      }
+    },
+    "single_session/test_recording.py": {
+      "tier": "stage",
+      "overrides": {
+        "test_compute_artifact_filters_before_restriction": "db_unit",
+        "test_compute_artifact_normalizes_on_the_retained_contacts": "db_unit",
+        "test_fetch_sort_group_probe_info_stable_order": "db_unit",
+        "test_inplace_writer_does_not_unlink_canonical_on_failure": "db_unit",
+        "test_raw_source_series_pinned_to_raw_object_id": "db_unit",
+        "test_recording_make_fetch_pins_raw_object_id": "db_unit",
+        "test_recording_rebuild_path_keeps_existing_file_on_failure": "pipeline",
+        "test_recording_selection_insert_is_idempotent": "db_unit",
+        "test_recording_selection_raises_on_duplicate_logical_identity": "db_unit",
+        "test_recording_timestamps_reads_persisted_vector": "db_unit",
+        "test_tetrode_geometry_persists_across_reload": "db_unit",
+        "test_write_nwb_artifact_rejects_heterogeneous_gains": "db_unit",
+        "test_xz_geometry_reloads_with_four_positions": "db_unit"
+      }
+    },
+    "single_session/test_sort_group.py": {
+      "tier": "db_unit"
+    },
+    "single_session/test_sorting.py": {
+      "tier": "stage",
+      "overrides": {
+        "test_analyzer_random_seed_override_is_honored": "db_unit",
+        "test_analyzer_rebuild_is_seeded_reproducible": "db_unit",
+        "test_build_analyzer_compute_args": "db_unit",
+        "test_build_analyzer_strips_random_seed": "db_unit",
+        "test_clusterless_detect_peaks_strips_random_seed": "db_unit",
+        "test_clusterless_detect_peaks_strips_threshold_unit": "db_unit",
+        "test_masked_sort_snr_matches_unmasked_within_tolerance": "pipeline",
+        "test_run_si_sorter_restores_global_job_kwargs": "db_unit",
+        "test_sorting_delete_removes_analyzer_folder": "pipeline",
+        "test_sorting_get_analyzer_loads_folder": "pipeline",
+        "test_sorting_get_sorting_round_trips": "pipeline",
+        "test_sorting_make_fetch_resolves_artifact_obs_intervals": "pipeline",
+        "test_sorting_nwb_writes_obs_intervals_and_curation_label_placeholder": "pipeline",
+        "test_sorting_selection_artifact_id_none_is_distinct_identity": "pipeline"
+      }
+    },
+    "test_acquisition_gap_preprocessing.py": {
+      "tier": "unit"
+    },
+    "test_analysis_selection.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_nullable_annotation_criteria_freeze_the_selected_population": "stage",
+        "test_select_units_for_analysis_round_trip": "stage"
+      }
+    },
+    "test_analyzer_cache.py": {
+      "tier": "unit"
+    },
+    "test_analyzer_cache_completeness.py": {
+      "tier": "unit"
+    },
+    "test_analyzer_commit_scope.py": {
+      "tier": "unit"
+    },
+    "test_analyzer_lifecycle.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_add_extensions_and_delete_acquire_lock": "pipeline",
+        "test_build_analyzer_cleans_partial_folder_when_create_fails": "unit",
+        "test_changed_analyzer_root_causes_miss_and_rebuild": "pipeline",
+        "test_get_analyzer_validates_recipe_before_filesystem": "pipeline",
+        "test_is_canonical_analyzer_folder_name": "unit",
+        "test_load_path_acquires_lock": "unit",
+        "test_make_compute_failure_discards_private_analyzer": "pipeline",
+        "test_rebuild_analyzer_folder_recreates_on_missing": "pipeline",
+        "test_rebuild_publishes_into_temp_not_canonical": "pipeline",
+        "test_rebuild_reconstruction_validates_artifact_interval_ownership": "pipeline",
+        "test_sorting_delete_removes_analyzer_folder": "pipeline"
+      }
+    },
+    "test_analyzer_memory.py": {
+      "tier": "regression_gate"
+    },
+    "test_analyzer_publication.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_duplicate_compute_keeps_winners_analyzer": "stage",
+        "test_orphan_audit_reclaims_only_abandoned_staging": "db_unit"
+      }
+    },
+    "test_analyzer_waveform_params.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_analyzer_waveform_params_schema_rejects_extra": "unit",
+        "test_analyzer_waveform_params_schema_rejects_nonpositive_bounds": "unit",
+        "test_analyzer_waveform_params_schema_rejects_purpose_whiten_mismatch": "unit",
+        "test_rebuild_reads_stored_window_never_re_resolves": "pipeline",
+        "test_sorting_records_display_waveform_params": "pipeline",
+        "test_sparsity_params_default_matches_si_and_validates_methods": "unit",
+        "test_waveform_params_for_preprocessing_literal_region_names": "unit"
+      }
+    },
+    "test_artifact_detection_merge.py": {
+      "tier": "stage",
+      "overrides": {
+        "test_get_merge_id_cross_part_duplicate_raises": "db_unit",
+        "test_get_merge_id_distinguishes_unregistered_from_corrupt": "db_unit",
+        "test_insert_detection_maps_only_missing_parent_to_key_error": "db_unit"
+      }
+    },
+    "test_artifact_integration.py": {
+      "tier": "stage",
+      "overrides": {
+        "test_artifact_compute_kernels_import_without_db": "unit",
+        "test_chunk_seam_detection_is_deterministic_serial_vs_parallel": "db_unit"
+      }
+    },
+    "test_artifact_intervals.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_compute_artifact_chunk_finite_recording_unaffected": "unit",
+        "test_compute_artifact_chunk_raises_on_all_nan_chunk": "unit",
+        "test_compute_artifact_chunk_raises_on_single_nan_sample": "unit",
+        "test_detect_artifacts_no_proportion_warning_on_tetrode": "unit",
+        "test_detect_artifacts_raises_on_single_channel_zscore_only": "unit",
+        "test_detect_artifacts_raises_on_two_channel_zscore_only": "unit",
+        "test_detect_artifacts_raises_when_most_frames_flagged": "unit",
+        "test_detect_artifacts_warns_proportion_rounds_to_all_channels": "unit",
+        "test_detect_artifacts_warns_when_min_length_drops_all_valid_time": "unit",
+        "test_detect_artifacts_warns_zscore_inert_on_single_channel": "unit",
+        "test_scan_artifact_frames_raises_on_nan_at_n_jobs_1": "unit",
+        "test_scan_artifact_frames_raises_on_nan_at_n_jobs_2_process_pool": "unit",
+        "test_spike_times_to_frames_clamp_vs_raise_boundary": "unit",
+        "test_split_runs_at_gaps_splits_only_inside_runs": "unit",
+        "test_timestamp_helpers_peak_memory_bounded_vs_get_times": "unit"
+      }
+    },
+    "test_artifact_mask.py": {
+      "tier": "unit"
+    },
+    "test_artifact_services.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_read_artifact_removed_intervals_missing_artifact_detection_id_raises_value_error": "db_unit"
+      }
+    },
+    "test_bad_channel_detection.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_detect_bad_channels_drops_none_and_pins_method": "unit",
+        "test_detect_bad_channels_flags_dead_channel": "unit",
+        "test_shank_groups_partitions_and_orders": "unit",
+        "test_shank_groups_raises_on_null_probe_shank": "unit"
+      }
+    },
+    "test_bad_channel_handling.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_bad_marked_specific_reference_materializes": "stage",
+        "test_flag_before_create_then_remove_omits": "db_unit",
+        "test_interpolate_completes_probe_remove_omits": "stage",
+        "test_interpolate_without_geometry_raises": "db_unit",
+        "test_make_fetch_reincludes_interior_bad_per_shank": "db_unit",
+        "test_make_fetch_reincludes_only_interior_bad": "db_unit",
+        "test_make_fetch_remove_reincludes_nothing": "db_unit",
+        "test_remove_field_does_not_change_default_recording": "stage",
+        "test_stale_group_post_flag_stays_member": "db_unit"
+      }
+    },
+    "test_bootstrap_safety_guards.py": {
+      "tier": "unit"
+    },
+    "test_brain_region_attribution.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_multi_region_attribution_through_merge_dispatch": "regression_gate"
+      }
+    },
+    "test_ci_shards.py": {
+      "tier": "unit"
+    },
+    "test_clusterless_waveform_features.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_unit_waveform_features_v0v1_guard_unchanged_under_legacy": "unit",
+        "test_unit_waveform_features_v2_full_waveform_and_spike_location": "stage"
+      }
+    },
+    "test_concat_artifacts.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_concat_of_offset_members_persists_masks_at_zero_microvolts": "stage",
+        "test_detected_artifacts_survive_concat_rebuild_and_member_export": "stage",
+        "test_member_artifact_failure_retry_and_reuse": "pipeline"
+      }
+    },
+    "test_concat_member_curation.py": {
+      "tier": "stage"
+    },
+    "test_concat_recording.py": {
+      "tier": "unit"
+    },
+    "test_conftest_teardown_and_fetch.py": {
+      "tier": "unit"
+    },
+    "test_consolidate_intervals.py": {
+      "tier": "unit"
+    },
+    "test_container_sorting.py": {
+      "tier": "unit"
+    },
+    "test_conversion_offset.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_offset_round_trips_through_populate": "stage"
+      }
+    },
+    "test_curated_nwb.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_curated_nwb_carries_merge_lineage": "stage",
+        "test_curated_units_carry_obs_intervals": "stage"
+      }
+    },
+    "test_curation_analyzer.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_merged_unit_waveform_correlogram_and_ssviz_render": "stage",
+        "test_preview_curation_requires_commit": "stage"
+      }
+    },
+    "test_curation_api.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_curation_ref_state_operation_lineage_and_merge_id": "stage",
+        "test_evaluation_facade_snapshot_labels_and_merge_receipt": "stage",
+        "test_subtree_delete_is_leaf_up": "stage"
+      }
+    },
+    "test_curation_composition.py": {
+      "tier": "stage"
+    },
+    "test_curation_evaluation.py": {
+      "tier": "stage",
+      "overrides": {
+        "test_analyzer_curation_table_removed": "db_unit",
+        "test_compute_metrics_escalates_si_metric_errors_on_rule_columns": "db_unit",
+        "test_compute_metrics_leaves_si_metric_defaults_unchanged": "db_unit",
+        "test_compute_metrics_scopes_noise_cluster_spans_to_metric_computes": "db_unit",
+        "test_compute_metrics_sd_ratio_covering_spans_is_spikeinterface": "db_unit",
+        "test_compute_metrics_sd_ratio_ignores_excluded_samples": "db_unit",
+        "test_curation_evaluation_nwb_carries_inputs": "pipeline",
+        "test_curation_evaluation_pc_eval_records_both_roles": "pipeline",
+        "test_curation_evaluation_records_source_provenance": "pipeline",
+        "test_effective_recording_load_matches_table_accessor": "pipeline",
+        "test_evaluation_fails_when_si_swallows_metric_error": "pipeline",
+        "test_evaluation_passes_statistics_spans_to_metric_compute": "pipeline",
+        "test_merged_unit_waveform_metric_recomputed_not_inherited": "db_unit",
+        "test_nn_noise_overlap_is_finite_not_silently_all_nan": "pipeline",
+        "test_resolved_analyzer_loader_matches_get_analyzer": "pipeline",
+        "test_shipped_rules_still_label_on_smoke_fixture": "pipeline",
+        "test_unreferenced_metric_error_does_not_abort_evaluation": "pipeline"
+      }
+    },
+    "test_curation_plan.py": {
+      "tier": "unit"
+    },
+    "test_curation_routing.py": {
+      "tier": "unit"
+    },
+    "test_curation_wrappers.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_create_merged_curation_commits": "regression_gate",
+        "test_create_merged_curation_reuses_matching_child": "regression_gate",
+        "test_curation_rejects_lossy_unit_ids": "stage",
+        "test_insert_curation_dedupes_repeated_labels": "stage",
+        "test_merge_wrappers_forward_allow_custom_labels": "stage",
+        "test_propose_merge_off_existing_initial_curation": "regression_gate",
+        "test_propose_merge_records_not_applies": "regression_gate",
+        "test_save_manual_curation_commit_merge_inherits_parent_labels": "regression_gate",
+        "test_save_manual_curation_preview_merge_payload": "regression_gate",
+        "test_summarize_curation_pk_guard_runs_before_schema_access": "db_unit",
+        "test_summarize_curation_requires_full_pk": "db_unit"
+      }
+    },
+    "test_decoder_runtime.py": {
+      "tier": "unit"
+    },
+    "test_delete_cleanup.py": {
+      "tier": "stage"
+    },
+    "test_dependency_contract.py": {
+      "tier": "unit"
+    },
+    "test_describe_run.py": {
+      "tier": "unit"
+    },
+    "test_disjoint_artifact.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_apply_artifact_mask_preserves_chunk_boundary_frame": "db_unit",
+        "test_detect_artifacts_join_does_not_bridge_gap": "db_unit",
+        "test_detect_artifacts_removal_window_does_not_spill_across_gap": "db_unit",
+        "test_detect_artifacts_valid_times_never_cross_gap": "db_unit"
+      }
+    },
+    "test_disjoint_readback.py": {
+      "tier": "unit"
+    },
+    "test_downstream_consumers.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_downstream_consumer_reads_applied_merge_unit_set": "stage",
+        "test_filter_units": "db_unit",
+        "test_labeled_curation_fetch_keeps_accept_drops_noise": "stage"
+      }
+    },
+    "test_drift_estimate.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_drift_estimate_survives_peaks_sharing_a_frame": "db_unit"
+      }
+    },
+    "test_electrode_table_region.py": {
+      "tier": "unit"
+    },
+    "test_evaluation_hash_lock.py": {
+      "tier": "unit"
+    },
+    "test_evaluation_merge_ids.py": {
+      "tier": "unit"
+    },
+    "test_export_safety.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_export_helper_stops_logging_when_fetch_fails": "unit"
+      }
+    },
+    "test_figpack_curation.py": {
+      "tier": "unit"
+    },
+    "test_figpack_curation_integration.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_bundle_install_keeps_old_bundle_when_replace_fails": "db_unit",
+        "test_displayed_unit_properties_public_but_metrics_not_public": "db_unit",
+        "test_fetch_from_nonexistent_local_path_fails_closed": "db_unit",
+        "test_fetch_from_unreachable_uri_fails_closed": "db_unit",
+        "test_identityless_figure_is_rejected_without_creating_a_child": "stage",
+        "test_make_revalidates_preview_bypassed_selection": "stage",
+        "test_merged_curation_opens": "stage",
+        "test_upload_of_labeled_curation_is_seeded": "stage",
+        "test_upload_without_api_key_raises": "db_unit",
+        "test_verified_save_refuses_reused_numeric_curation_id": "stage"
+      }
+    },
+    "test_firing_rate_zero_units.py": {
+      "tier": "unit"
+    },
+    "test_fixture_ingestion.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_mearec_fixture_ingests_full_electrode_table": "db_unit",
+        "test_mearec_fixture_ingests_session_and_raw": "db_unit",
+        "test_mearec_fixture_registers_probe_with_correct_shanks": "db_unit",
+        "test_mearec_fixture_writes_sidecar_ground_truth_units": "db_unit"
+      }
+    },
+    "test_ingest_cleanup.py": {
+      "tier": "db_unit"
+    },
+    "test_integrity.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_audit_source_part_integrity": "pipeline",
+        "test_no_orphan_part_rows_in_v2_tables": "pipeline",
+        "test_selection_fk_chain_holds_for_artifact_and_sorting_selection": "pipeline"
+      }
+    },
+    "test_internal_architecture.py": {
+      "tier": "unit"
+    },
+    "test_legacy_runtime_boundary.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_no_legacy_schema_changes": "unit",
+        "test_sorter_runtime_resolution": "unit"
+      }
+    },
+    "test_legacy_si_sorters.py": {
+      "tier": "db_unit"
+    },
+    "test_manual_artifacts.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_pipeline_runner_applies_manual_exclusions": "pipeline"
+      }
+    },
+    "test_masked_analyzer_reload.py": {
+      "tier": "unit"
+    },
+    "test_matcher_graph_inputs.py": {
+      "tier": "unit"
+    },
+    "test_matcher_params.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_bundle_params_reach_extract": "db_unit",
+        "test_bundle_seed_override_rejected_at_insert": "db_unit",
+        "test_named_bundle_params_stored_distinctly": "db_unit"
+      }
+    },
+    "test_matcher_preparation.py": {
+      "tier": "unit"
+    },
+    "test_matcher_protocol.py": {
+      "tier": "unit"
+    },
+    "test_matcher_provenance.py": {
+      "tier": "unit"
+    },
+    "test_merge_dedup.py": {
+      "tier": "unit"
+    },
+    "test_merge_id_artifact_resolution.py": {
+      "tier": "pipeline"
+    },
+    "test_merge_id_selectivity.py": {
+      "tier": "db_unit"
+    },
+    "test_merge_probe.py": {
+      "tier": "db_unit"
+    },
+    "test_metric_curation_nwb.py": {
+      "tier": "unit"
+    },
+    "test_metric_curation_plots.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_burst_pair_isi_uses_evaluation_recipe": "stage",
+        "test_curation_evaluation_get_burst_pair_metrics": "db_unit",
+        "test_evaluation_result_burst_pair_metrics_returns_frame": "db_unit",
+        "test_plot_burst_pair_metrics_renders_from_the_data_path": "db_unit"
+      }
+    },
+    "test_metric_curation_transforms.py": {
+      "tier": "unit"
+    },
+    "test_metric_eligibility.py": {
+      "tier": "unit"
+    },
+    "test_migration_guide.py": {
+      "tier": "unit"
+    },
+    "test_motion_acceptance.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_benchmark_case": "regression_gate",
+        "test_benchmark_meets_manifest_gates": "regression_gate",
+        "test_representative_polymer_drift_fixture": "regression_gate"
+      }
+    },
+    "test_motion_consumers.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_concat_member_trace_accessors_have_one_meaning_each": "stage",
+        "test_corrected_concat_bundle_keeps_windows_in_spans": "stage",
+        "test_corrected_concat_sort_end_to_end": "stage",
+        "test_corrected_concat_split_into_members_conserves_spikes": "stage",
+        "test_corrected_sort_across_a_capped_gap_keeps_source_frames_and_times": "stage",
+        "test_motion_cleanup_drops_the_sorts_of_corrected_recordings": "stage",
+        "test_resolver_rebuilds_a_missing_base_artifact": "stage"
+      }
+    },
+    "test_motion_correction.py": {
+      "tier": "stage",
+      "overrides": {
+        "test_a_supplied_estimate_that_does_not_match_fails_before_sorting": "pipeline",
+        "test_apply_reuses_a_supplied_estimate": "pipeline",
+        "test_concat_preflight_names_the_calling_entry_point": "db_unit",
+        "test_concat_preflight_refuses_an_estimate_of_other_member_masks": "pipeline",
+        "test_concat_preflight_refuses_unsupported_motion": "pipeline",
+        "test_correction_recipes_install_and_are_validated": "db_unit",
+        "test_default_estimation_rows_install_idempotently": "db_unit",
+        "test_estimate_motion_does_not_need_the_sorter": "pipeline",
+        "test_estimate_motion_then_apply_on_a_concatenation": "pipeline",
+        "test_estimate_motion_then_apply_that_estimate": "pipeline",
+        "test_estimation_row_duplicating_a_default_is_rejected": "db_unit",
+        "test_estimation_row_rejects_job_kwargs_seed": "db_unit",
+        "test_estimation_row_with_unknown_override_is_rejected": "db_unit",
+        "test_initialize_v2_defaults_installs_motion_recipes": "db_unit",
+        "test_invalid_selection_is_rejected": "db_unit",
+        "test_invalid_support_and_geometry_fail_before_sorting": "pipeline",
+        "test_live_concat_heading_is_current": "db_unit",
+        "test_motion_selection_failure_is_a_stage_error": "pipeline",
+        "test_motion_stage_failure_stops_before_sorting": "pipeline",
+        "test_pipeline_motion_apply_on_a_concatenation": "pipeline",
+        "test_pipeline_motion_modes_on_one_recording": "pipeline",
+        "test_pipeline_surfaces_a_span_without_evidence": "pipeline",
+        "test_preflight_previews_the_motion_ids_the_run_mints": "pipeline",
+        "test_preflight_refuses_motion_on_an_unfiltered_recipe": "pipeline"
+      }
+    },
+    "test_motion_estimation.py": {
+      "tier": "unit"
+    },
+    "test_motion_interpolation.py": {
+      "tier": "unit"
+    },
+    "test_motion_report.py": {
+      "tier": "unit"
+    },
+    "test_mountainsort4_runtime.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_native_ms4_recovers_planted_spikes": "stage"
+      }
+    },
+    "test_multi_source_merge_fetch_nwb.py": {
+      "tier": "pipeline"
+    },
+    "test_notebook_execution.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_targeted_inspection_and_metric_filter_use_final_units": "stage"
+      }
+    },
+    "test_nwb_iterators.py": {
+      "tier": "unit"
+    },
+    "test_nwb_provenance.py": {
+      "tier": "unit"
+    },
+    "test_observed_time.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_binned_counts_and_smoothing_do_not_bridge_exclusions": "db_unit",
+        "test_group_smoothing_splits_a_jump_with_every_bin_observed": "db_unit",
+        "test_group_smoothing_stops_at_a_timestamp_jump": "db_unit"
+      }
+    },
+    "test_orphan_analyzer_classification.py": {
+      "tier": "unit"
+    },
+    "test_parameter_identity.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_describe_parameter_rows_autocuration_duplicate_name_insensitive": "db_unit",
+        "test_describe_parameter_rows_columns_and_usage": "db_unit",
+        "test_describe_parameter_rows_covers_all_seeded_tables": "db_unit",
+        "test_describe_parameter_rows_marks_dynamic_default_shipped": "db_unit",
+        "test_duplicate_parameter_content_escape_hatch": "db_unit",
+        "test_duplicate_parameter_content_rejected": "db_unit",
+        "test_duplicate_rejected_when_schema_version_column_omitted": "db_unit",
+        "test_insert_default_accepts_old_schema_version_row": "db_unit",
+        "test_insert_default_is_idempotent": "db_unit",
+        "test_insert_default_raises_on_stale_same_name_row": "db_unit",
+        "test_params_lookup_rejects_positional_replace": "db_unit",
+        "test_params_lookup_rejects_replace": "db_unit",
+        "test_qmp_duplicate_content_detected_after_double_column": "db_unit",
+        "test_quality_metric_insert_rejects_duplicate_content": "db_unit",
+        "test_rule_missing_policy_persists_and_changes_identity": "db_unit",
+        "test_sorter_duplicate_rejected_scoped_by_sorter": "db_unit",
+        "test_within_batch_duplicate_content_rejected": "db_unit"
+      }
+    },
+    "test_parameter_insert.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_parameter_table_adapters_preserve_insert_contract": "db_unit"
+      }
+    },
+    "test_params_validation.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_clusterless_default_row_ships_noise_levels_one": "db_unit",
+        "test_param_lookup_bulk_insert_validates": "db_unit",
+        "test_shipped_rows_carry_current_params_schema_version": "db_unit"
+      }
+    },
+    "test_parity_canonical.py": {
+      "tier": "unit"
+    },
+    "test_peak_sign_resolution.py": {
+      "tier": "unit"
+    },
+    "test_pipeline_facade.py": {
+      "tier": "unit"
+    },
+    "test_pipeline_observability.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_advisory_key_lock_acquire_error_is_non_fatal": "unit",
+        "test_advisory_key_lock_acquires_and_releases": "db_unit",
+        "test_advisory_key_lock_excludes_other_session": "db_unit",
+        "test_populate_once_populates_within_lock": "unit",
+        "test_populate_tolerating_concurrent_duplicate": "unit"
+      }
+    },
+    "test_pipeline_presets.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_clone_pipeline_preset_allow_duplicate_params_opts_in": "db_unit",
+        "test_clone_pipeline_preset_duplicate_content_under_new_name_raises": "db_unit",
+        "test_clone_pipeline_preset_flat_sorter_override_round_trips": "db_unit",
+        "test_clone_pipeline_preset_idempotent_rerun": "db_unit",
+        "test_clone_pipeline_preset_invalid_override_value_raises": "db_unit",
+        "test_clone_pipeline_preset_name_collision_different_content_raises": "db_unit",
+        "test_clone_pipeline_preset_nested_dotted_override_round_trips": "db_unit",
+        "test_clone_pipeline_preset_no_artifact_base": "db_unit",
+        "test_clone_pipeline_preset_unknown_override_key_raises": "db_unit",
+        "test_describe_pipeline_preset_artifact_none_skips_artifact": "db_unit",
+        "test_describe_pipeline_preset_missing_row_points_to_initialize_defaults": "db_unit",
+        "test_describe_pipeline_preset_surfaces_curation_names": "db_unit",
+        "test_describe_pipeline_preset_unpacks_curation_values": "db_unit",
+        "test_register_pipeline_preset_catches_missing_auto_curation_row": "db_unit",
+        "test_register_pipeline_preset_catches_missing_lookup_row": "db_unit",
+        "test_register_pipeline_preset_catches_missing_metric_row": "db_unit",
+        "test_run_v2_pipeline_concat_mode_accepts_single_session_preset": "pipeline",
+        "test_run_v2_unit_match_unknown_matcher_raises": "db_unit"
+      }
+    },
+    "test_pipeline_session.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_preflight_session_real_all_ok": "db_unit",
+        "test_resolve_no_sort_groups": "db_unit",
+        "test_resolve_subset_and_missing": "db_unit",
+        "test_session_runner_all_groups": "pipeline",
+        "test_session_runner_idempotent": "pipeline"
+      }
+    },
+    "test_preflight.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_apply_with_a_saved_estimate_id_is_a_valid_request": "unit",
+        "test_contradictory_motion_request_fails_before_any_query": "unit",
+        "test_estimate_motion_options_are_keyword_only": "unit",
+        "test_estimate_motion_rejects_a_bad_request_before_any_query": "unit",
+        "test_identity_payload_extraction_stable": "unit",
+        "test_motion_estimate_id_outside_apply_fails_before_any_query": "unit",
+        "test_motion_geometry_eligibility_from_registered_contacts": "unit",
+        "test_motion_needs_a_filtering_preprocessing_recipe": "unit",
+        "test_motion_setup_states_mode_recipe_preset_border_and_status": "unit",
+        "test_preflight_expected_ids_round_trip": "pipeline",
+        "test_preflight_summary_distinguishes_selection_from_completed_output": "unit",
+        "test_preflight_unknown_pipeline_preset": "unit",
+        "test_run_pipeline_preflight_bypass": "pipeline",
+        "test_run_pipeline_preflight_raises": "pipeline",
+        "test_valid_motion_requests_have_no_problem": "unit"
+      }
+    },
+    "test_preprocessing_order.py": {
+      "tier": "unit"
+    },
+    "test_preprocessing_schema.py": {
+      "tier": "unit"
+    },
+    "test_preproduction_migration.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_documented_upgrade_preserves_retained_data": "stage"
+      }
+    },
+    "test_preview_merge_warning.py": {
+      "tier": "stage"
+    },
+    "test_provenance.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_ambient_seed_rejected_then_records_clusterless_provenance": "stage",
+        "test_provenance_columns_are_secondary_not_identity": "db_unit",
+        "test_sorting_row_records_effective_seed_and_versions": "pipeline"
+      }
+    },
+    "test_readme_receipt_keys.py": {
+      "tier": "unit"
+    },
+    "test_recipe_parity.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_shipped_auto_curation_rules_tolerate_low_spike_nan": "pipeline"
+      }
+    },
+    "test_recompute.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_analyzer_inventory_detects_rebuilt_and_legacy_storage": "unit",
+        "test_analyzer_role_hashes_covers_display_and_metric": "unit",
+        "test_analyzer_seed_modes_classifies_seed_provenance": "unit",
+        "test_compare_hash_dicts_all_equal_is_matched": "unit",
+        "test_compare_hash_dicts_classifies_diffs": "unit",
+        "test_current_env_namespaces_reports_core_stack": "unit",
+        "test_env_matches_compatible_on_shared_namespaces": "unit",
+        "test_env_matches_ignores_namespaces_absent_from_env": "unit",
+        "test_env_matches_incompatible_on_version_drift": "unit",
+        "test_env_matches_no_shared_namespace_is_incompatible": "unit",
+        "test_env_matches_none_or_empty_deps_is_incompatible": "unit",
+        "test_legacy_noise_inventory_is_explicitly_unverifiable": "unit",
+        "test_negative_days_rejected": "db_unit",
+        "test_operator_xfail_is_not_inferred_as_automatic_unverifiable": "db_unit",
+        "test_rebuild_refreshes_existing_analyzer_inventory": "db_unit",
+        "test_reclaimed_analyzer_folder_is_not_a_changed_generation": "unit",
+        "test_recompute_attempt_all_rejects_negative_rounding": "db_unit",
+        "test_recording_missing_probe_info_detects_absence": "db_unit",
+        "test_sorting_analyzer_versions_compute_zero_unit_and_missing": "db_unit"
+      }
+    },
+    "test_recompute_hashing.py": {
+      "tier": "unit"
+    },
+    "test_recording_fingerprint.py": {
+      "tier": "unit"
+    },
+    "test_recording_geometry.py": {
+      "tier": "unit"
+    },
+    "test_recording_nwb.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_geometry_columns_are_created_when_absent": "unit",
+        "test_geometry_is_persisted_at_double_precision": "unit",
+        "test_recording_semantic_round_trip": "pipeline"
+      }
+    },
+    "test_recording_provenance.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_filtering_description_reflects_actual_steps": "unit",
+        "test_obs_intervals_recorded_windows_fallback": "pipeline",
+        "test_recording_nwb_carries_source_provenance": "pipeline"
+      }
+    },
+    "test_recording_services.py": {
+      "tier": "unit"
+    },
+    "test_recording_truncation.py": {
+      "tier": "stage",
+      "overrides": {
+        "test_make_insert_raises_on_genuine_truncation": "db_unit",
+        "test_truncation_tolerance_scales_with_interval_count": "db_unit"
+      }
+    },
+    "test_reference_calibration.py": {
+      "tier": "unit"
+    },
+    "test_reference_member_guard.py": {
+      "tier": "unit"
+    },
+    "test_resolve_group_reference.py": {
+      "tier": "unit"
+    },
+    "test_review_api.py": {
+      "tier": "unit"
+    },
+    "test_review_api_integration.py": {
+      "tier": "stage"
+    },
+    "test_review_browser.py": {
+      "tier": "stage"
+    },
+    "test_review_browser_journey.py": {
+      "tier": "stage"
+    },
+    "test_review_delivery.py": {
+      "tier": "stage"
+    },
+    "test_review_inspection.py": {
+      "tier": "stage",
+      "overrides": {
+        "test_hour_budget_defers_large_overviews_without_truncating_focused_units": "unit",
+        "test_raster_budget_spans_full_recording_and_window_keeps_every_spike": "unit",
+        "test_raster_window_includes_start_and_excludes_stop": "unit",
+        "test_trace_window_uses_relative_frames_without_reading_full_timestamps": "unit"
+      }
+    },
+    "test_review_operations.py": {
+      "tier": "unit"
+    },
+    "test_review_profile.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_franklab_review_profile_is_shipped": "db_unit",
+        "test_review_profile_persisted_and_immutable": "db_unit"
+      }
+    },
+    "test_review_recovery_workflow.py": {
+      "tier": "stage"
+    },
+    "test_review_unit_properties.py": {
+      "tier": "unit"
+    },
+    "test_runtime_boundaries.py": {
+      "tier": "unit"
+    },
+    "test_security.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_create_rejects_unsafe_recompute_file_name": "db_unit",
+        "test_local_sorter_scratch_not_world_writable": "db_unit",
+        "test_v2_artifacts_not_world_writable": "pipeline"
+      }
+    },
+    "test_selection_identity.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_artifact_detection_selection_shared_group_writes_deterministic_pk": "pipeline",
+        "test_direct_master_insert_rejected_all_masters": "db_unit",
+        "test_direct_master_insert_rejected_without_flag": "pipeline",
+        "test_factory_master_direct_insert_rejected": "db_unit",
+        "test_make_fetch_rejects_input_hash_drift": "pipeline",
+        "test_master_update1_bypass_allows_mutation": "pipeline",
+        "test_recording_input_hash_matches_make_fetch": "pipeline",
+        "test_recording_selection_duplicate_pk_race_refetches": "pipeline",
+        "test_recording_selection_missing_params_gives_curated_error": "pipeline",
+        "test_recording_selection_rejects_extra_fields": "pipeline",
+        "test_recording_selection_rejects_mismatched_supplied_id": "pipeline",
+        "test_recording_selection_rejects_single_nondeterministic_row": "pipeline",
+        "test_recording_selection_writes_deterministic_pk": "pipeline",
+        "test_sorting_selection_artifact_detection_vs_none_distinct": "pipeline",
+        "test_sorting_selection_duplicate_pk_race_refetches": "pipeline",
+        "test_sorting_selection_orphan_master_raises_schema_bypass": "pipeline",
+        "test_update1_rejected_all_masters": "db_unit"
+      }
+    },
+    "test_selection_plan.py": {
+      "tier": "unit"
+    },
+    "test_service_import_contracts.py": {
+      "tier": "unit"
+    },
+    "test_session_concat_schema.py": {
+      "tier": "db_unit"
+    },
+    "test_session_group_concat.py": {
+      "tier": "stage",
+      "overrides": {
+        "test_concat_rejects_mismatched_electrode_space": "db_unit",
+        "test_concat_selection_rejects_a_stale_motion_key_and_unknown_fields": "db_unit",
+        "test_concat_with_artifact_id_revalidated_at_compute": "db_unit",
+        "test_create_group_rejects_empty_members": "db_unit",
+        "test_create_group_rejects_missing_member_key": "db_unit",
+        "test_create_group_rejects_nonexistent_session": "db_unit",
+        "test_run_v2_pipeline_concat_mode_routes_session_group": "pipeline",
+        "test_session_group_member_has_no_recording_date_column": "db_unit"
+      }
+    },
+    "test_shared_artifact_group.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_artifact_detection_delete_refuses_master_without_part_rows": "db_unit"
+      }
+    },
+    "test_shared_artifact_group_members.py": {
+      "tier": "unit"
+    },
+    "test_si_compat.py": {
+      "tier": "unit"
+    },
+    "test_si_default_snapshots.py": {
+      "tier": "unit"
+    },
+    "test_si_metric_patches.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_nn_noise_overlap_invariant_to_excluded_sample_values": "stage",
+        "test_sd_ratio_on_masked_sort_matches_clean_twin": "stage",
+        "test_sd_ratio_unchanged_when_spans_cover_recording": "stage",
+        "test_template_correction_reproduces_spikeinterface": "stage"
+      }
+    },
+    "test_si_metric_threads.py": {
+      "tier": "unit"
+    },
+    "test_signal_math.py": {
+      "tier": "unit"
+    },
+    "test_sort_group_planning.py": {
+      "tier": "unit"
+    },
+    "test_sorter_execution_params.py": {
+      "tier": "unit"
+    },
+    "test_sorter_parameters.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_ms4_schema_accepts_adjacency_radius_minus_one": "unit"
+      }
+    },
+    "test_sorter_schema_defaults.py": {
+      "tier": "unit"
+    },
+    "test_sorting_accessors.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_get_sorting_dataframe_casts_unit_ids_to_python_int": "pipeline",
+        "test_get_sorting_zero_unit_returns_empty_numpysorting": "pipeline",
+        "test_populate_unit_part_peak_channel_not_in_sort_group": "pipeline",
+        "test_sorting_get_unit_brain_regions_concat_anchor_member_df": "pipeline"
+      }
+    },
+    "test_sorting_add_extensions.py": {
+      "tier": "pipeline"
+    },
+    "test_sorting_analyzer.py": {
+      "tier": "stage",
+      "overrides": {
+        "test_build_analyzer_accepts_distinct_contacts": "unit",
+        "test_build_analyzer_rejects_coincident_contacts": "unit"
+      }
+    },
+    "test_sorting_contracts.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_recording_artifact_result_field_contract": "unit",
+        "test_sorting_make_compute_queries_db_only_to_stage_output": "pipeline",
+        "test_sorting_make_fetch_heals_the_traces_file_idempotently": "pipeline",
+        "test_to_int_unit_id_raises_typed_error_on_non_integer": "unit"
+      }
+    },
+    "test_sorting_dispatch.py": {
+      "tier": "stage",
+      "overrides": {
+        "test_matlab_sorters_require_explicit_container_backend": "db_unit",
+        "test_ms5_non_default_params_reach_run_sorter_unchanged": "db_unit",
+        "test_remove_excess_spikes_drops_empty_units": "unit",
+        "test_run_si_sorter_does_not_leak_numpy_inf": "db_unit",
+        "test_run_si_sorter_keeps_job_kwargs_out_of_sorter_params": "db_unit",
+        "test_run_si_sorter_output_survives_tempdir_cleanup": "db_unit",
+        "test_run_si_sorter_passes_container_kwargs": "db_unit",
+        "test_run_si_sorter_restores_global_job_kwargs_on_raise": "db_unit",
+        "test_run_si_sorter_restores_global_job_kwargs_on_success": "db_unit",
+        "test_sorter_tempdir_cleanup_does_not_mask_sort_exception": "db_unit",
+        "test_span_estimators_without_spans_accept_multi_segment_recordings": "unit",
+        "test_v2_recording_chain_survives_run_sorter_serialization": "unit",
+        "test_whiten_interception_allowlisted": "unit"
+      }
+    },
+    "test_sorting_services.py": {
+      "tier": "unit"
+    },
+    "test_source_resolution.py": {
+      "tier": "unit"
+    },
+    "test_split_leading_restrictions.py": {
+      "tier": "unit"
+    },
+    "test_staged_outputs.py": {
+      "tier": "unit"
+    },
+    "test_statistics_spans_rebuilds.py": {
+      "tier": "stage"
+    },
+    "test_temp_routing.py": {
+      "tier": "db_unit"
+    },
+    "test_test_tiers.py": {
+      "tier": "unit"
+    },
+    "test_tetrode_geometry.py": {
+      "tier": "unit"
+    },
+    "test_tracking_params.py": {
+      "tier": "unit"
+    },
+    "test_unit_annotation.py": {
+      "tier": "unit"
+    },
+    "test_unit_annotation_integration.py": {
+      "tier": "stage"
+    },
+    "test_unit_conventions.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_firing_rate_is_spikes_per_second": "unit",
+        "test_peak_amplitude_template_extremum_is_microvolts": "unit"
+      }
+    },
+    "test_unit_match_generation.py": {
+      "tier": "stage"
+    },
+    "test_unit_match_planning.py": {
+      "tier": "unit"
+    },
+    "test_unit_peak_amplitude.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_row_producer_uses_off_alignment_extremum_and_configured_sign": "unit"
+      }
+    },
+    "test_unitmatch.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_canonicalize_orients_by_ascending_input_index": "unit",
+        "test_canonicalize_rejects_reversed_duplicate": "unit",
+        "test_canonicalize_rejects_same_input_pair": "unit",
+        "test_canonicalize_rejects_unpinned_curation": "unit",
+        "test_clusterless_unit_semantics_derived_and_warned": "stage",
+        "test_derive_tracked_units_budget_cap_raises": "unit",
+        "test_derive_tracked_units_counts_sessions_by_nwb_not_curation": "unit",
+        "test_derive_tracked_units_equal_strength_tie_break_is_member_sorted": "unit",
+        "test_derive_tracked_units_full_triangle_is_one_component": "unit",
+        "test_derive_tracked_units_open_path_splits": "unit",
+        "test_derive_tracked_units_partition_no_unit_in_two_groups": "unit",
+        "test_derive_tracked_units_partition_prefers_stronger_clique": "unit",
+        "test_derive_tracked_units_rejects_edge_outside_universe": "unit",
+        "test_derive_tracked_units_under_cap_succeeds_strict": "unit",
+        "test_derive_tracked_units_unmatched_singleton": "unit",
+        "test_divergent_electrode_space_members_empty_when_matching": "unit",
+        "test_divergent_electrode_space_members_flags_distinct_probe": "unit",
+        "test_driftout_units_recovered_pooled": "unit",
+        "test_external_matcher_satisfies_protocol_and_runs": "unit",
+        "test_matcher_parameters_bulk_insert_is_validated": "db_unit",
+        "test_matcher_parameters_duplicate_content_is_matcher_scoped": "db_unit",
+        "test_matcher_parameters_rejects_unknown_matcher": "db_unit",
+        "test_matcher_parameters_validates_params_per_matcher": "db_unit",
+        "test_pairs_nwb_round_trip_preserves_fdr_none": "unit",
+        "test_raw_pair_insert_rejects_noninteger_identifiers": "db_unit",
+        "test_selection_geometry_dispatches_without_global_policy": "db_unit",
+        "test_unit_semantics_for_sorter": "unit",
+        "test_unitmatch_bundle_rejects_asymmetric_window_before_io": "unit",
+        "test_unitmatch_computed_matches_make_insert_signature": "db_unit",
+        "test_unitmatch_fetched_matches_make_compute_signature": "db_unit",
+        "test_unitmatch_params_reject_asymmetric_waveform_window": "unit",
+        "test_v2_unitmatch_polymer_mearec_ground_truth": "regression_gate"
+      }
+    },
+    "test_unitmatch_backend.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_match_recovers_planted_correspondences": "stage"
+      }
+    },
+    "test_unitmatch_concat.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_daily_concat_workflow_matches_planted_neurons_end_to_end": "db_unit"
+      }
+    },
+    "test_unitmatch_daily_concat.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_daily_concat_matches_planted_units": "regression_gate",
+        "test_days_join_two_members_with_an_exclusion": "stage",
+        "test_spacing_holds_where_stated_and_changes_match_the_constants": "stage",
+        "test_spike_trains_follow_the_planted_members": "stage",
+        "test_three_day_concat_matches_planted_units": "regression_gate",
+        "test_units_per_day_and_ids_do_not_reveal_identity": "stage"
+      }
+    },
+    "test_unitmatch_helpers.py": {
+      "tier": "unit"
+    },
+    "test_units_nwb.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_units_nwb_carries_per_unit_and_source_metadata": "stage",
+        "test_write_sorting_units_nwb_unlinks_staged_file_on_failure": "pipeline"
+      }
+    },
+    "test_ux_smoke.py": {
+      "tier": "pipeline",
+      "overrides": {
+        "test_curation_label_options": "db_unit",
+        "test_describe_sort_groups_empty": "db_unit",
+        "test_describe_units_absent_sorting_id_raises": "db_unit",
+        "test_plot_sort_group_geometry_auto_label_threshold": "unit",
+        "test_plot_sort_group_geometry_auto_labels": "unit",
+        "test_plot_sort_group_geometry_empty": "db_unit",
+        "test_plot_sort_group_geometry_legibility": "unit",
+        "test_plot_sort_group_geometry_multi_probe_offset": "unit",
+        "test_sort_group_electrode_rejects_reference_as_member": "db_unit",
+        "test_sort_group_geometry_specific_reference_star_row": "db_unit"
+      }
+    },
+    "test_v1_parity.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_get_spike_sorting_v2_merge_ids_resolves_restriction": "pipeline"
+      }
+    },
+    "test_visualization_facade.py": {
+      "tier": "db_unit",
+      "overrides": {
+        "test_expert_analyzer_access_is_public": "unit",
+        "test_visualization_facade_exports_expected_helpers": "unit"
+      }
+    },
+    "test_visualization_registry.py": {
+      "tier": "unit"
+    },
+    "test_visualization_render.py": {
+      "tier": "pipeline"
+    },
+    "test_warning_visibility.py": {
+      "tier": "unit"
+    },
+    "test_waveform_features_amplitude.py": {
+      "tier": "unit"
+    },
+    "test_write_buffer_gb.py": {
+      "tier": "unit"
+    }
+  },
+  "fixtures": {
+    "tests/spikesorting/v2/acceptance:workflow": "regression_gate",
+    "tests/spikesorting/v2/single_session:neuropixels_60s_session": "db_unit",
+    "tests/spikesorting/v2/single_session:polymer_60s_session": "db_unit",
+    "tests/spikesorting/v2/single_session:polymer_smoke_session": "db_unit",
+    "tests/spikesorting/v2/single_session:populated_recording": "stage",
+    "tests/spikesorting/v2/single_session:populated_sorting": "pipeline",
+    "tests/spikesorting/v2/single_session:recording_selection_key": "db_unit",
+    "tests/spikesorting/v2/single_session:tetrode_60s_session": "db_unit",
+    "tests/spikesorting/v2/test_artifact_detection_merge.py:ingested_recording": "stage",
+    "tests/spikesorting/v2/test_artifact_integration.py:artifact_e2e_session": "stage",
+    "tests/spikesorting/v2/test_artifact_integration.py:gt60_recording": "stage",
+    "tests/spikesorting/v2/test_bad_channel_detection.py:badchan_session": "db_unit",
+    "tests/spikesorting/v2/test_bad_channel_handling.py:handling_session": "db_unit",
+    "tests/spikesorting/v2/test_brain_region_attribution.py:region_60s_sort": "regression_gate",
+    "tests/spikesorting/v2/test_clusterless_waveform_features.py:polymer_60s_session": "db_unit",
+    "tests/spikesorting/v2/test_clusterless_waveform_features.py:wave_session": "db_unit",
+    "tests/spikesorting/v2/test_concat_member_curation.py:concat_member_curation": "stage",
+    "tests/spikesorting/v2/test_curation_composition.py:merged_parent": "db_unit",
+    "tests/spikesorting/v2/test_curation_evaluation.py:evaluated_merge_parent": "stage",
+    "tests/spikesorting/v2/test_curation_evaluation.py:planted_zero_unit_sort": "stage",
+    "tests/spikesorting/v2/test_curation_wrappers.py:polymer_60s_sort": "regression_gate",
+    "tests/spikesorting/v2/test_delete_cleanup.py:planted_sort": "stage",
+    "tests/spikesorting/v2/test_drift_estimate.py:drift_recording_key": "db_unit",
+    "tests/spikesorting/v2/test_export_safety.py:export_smoke_session": "db_unit",
+    "tests/spikesorting/v2/test_fixture_ingestion.py:mearec_smoke_ingested": "db_unit",
+    "tests/spikesorting/v2/test_ingest_cleanup.py:isolated_interval_owners": "db_unit",
+    "tests/spikesorting/v2/test_matcher_params.py:isolated_matcher_rows": "db_unit",
+    "tests/spikesorting/v2/test_merge_id_artifact_resolution.py:two_sorts_one_recording": "stage",
+    "tests/spikesorting/v2/test_merge_id_selectivity.py:two_v2_merge_ids": "db_unit",
+    "tests/spikesorting/v2/test_motion_consumers.py:corrected_sorts": "pipeline",
+    "tests/spikesorting/v2/test_motion_consumers.py:fresh_curations": "db_unit",
+    "tests/spikesorting/v2/test_motion_correction.py:motion_params": "db_unit",
+    "tests/spikesorting/v2/test_motion_correction.py:self_correcting_preset": "db_unit",
+    "tests/spikesorting/v2/test_motion_correction.py:short_sort_group": "db_unit",
+    "tests/spikesorting/v2/test_motion_correction.py:unfiltered_preset": "db_unit",
+    "tests/spikesorting/v2/test_multi_source_merge_fetch_nwb.py:two_source_output": "db_unit",
+    "tests/spikesorting/v2/test_pipeline_observability.py:first_run": "pipeline",
+    "tests/spikesorting/v2/test_pipeline_observability.py:obs_session": "db_unit",
+    "tests/spikesorting/v2/test_pipeline_presets.py:clone_env": "db_unit",
+    "tests/spikesorting/v2/test_pipeline_session.py:session_inputs": "db_unit",
+    "tests/spikesorting/v2/test_pipeline_session.py:session_run": "pipeline",
+    "tests/spikesorting/v2/test_preflight.py:preflight_inputs": "db_unit",
+    "tests/spikesorting/v2/test_preflight.py:preflight_session": "db_unit",
+    "tests/spikesorting/v2/test_recompute.py:clean_recompute": "db_unit",
+    "tests/spikesorting/v2/test_recompute.py:display_analyzer_folder": "db_unit",
+    "tests/spikesorting/v2/test_recording_nwb.py:xz_probe_session": "db_unit",
+    "tests/spikesorting/v2/test_recording_nwb.py:xz_roundtrip_session": "db_unit",
+    "tests/spikesorting/v2/test_recording_truncation.py:truncation_session": "db_unit",
+    "tests/spikesorting/v2/test_review_browser.py:review_bundle_template": "stage",
+    "tests/spikesorting/v2/test_review_inspection.py:inspection_analyzer_folder": "stage",
+    "tests/spikesorting/v2/test_selection_identity.py:fresh_recording_identity": "db_unit",
+    "tests/spikesorting/v2/test_session_group_concat.py:same_day_group": "db_unit",
+    "tests/spikesorting/v2/test_si_metric_patches.py:sd_ratio_twins": "stage",
+    "tests/spikesorting/v2/test_si_metric_patches.py:small_ground_truth": "stage",
+    "tests/spikesorting/v2/test_sorting_analyzer.py:clean_ground_truth": "stage",
+    "tests/spikesorting/v2/test_sorting_dispatch.py:clean_ground_truth": "stage",
+    "tests/spikesorting/v2/test_statistics_spans_rebuilds.py:masked_planted_sort": "stage",
+    "tests/spikesorting/v2/test_unit_annotation_integration.py:versioned_annotation_sets": "db_unit",
+    "tests/spikesorting/v2/test_unit_match_generation.py:reviewed_curation": "db_unit",
+    "tests/spikesorting/v2/test_unitmatch.py:two_session_curated_group": "pipeline",
+    "tests/spikesorting/v2/test_unitmatch_backend.py:two_session_inputs": "stage",
+    "tests/spikesorting/v2/test_unitmatch_concat.py:member_time_sorts": "stage",
+    "tests/spikesorting/v2/test_unitmatch_concat.py:span_edge_sorts": "stage",
+    "tests/spikesorting/v2/test_unitmatch_daily_concat.py:dataset": "stage",
+    "tests/spikesorting/v2/test_ux_smoke.py:first_hour": "pipeline",
+    "tests/spikesorting/v2/test_ux_smoke.py:ux_session": "db_unit",
+    "tests/spikesorting/v2:chronic_2_session_minirec": "stage",
+    "tests/spikesorting/v2:curation_evaluation_defaults": "db_unit",
+    "tests/spikesorting/v2:daily_concat_match_inputs": "pipeline",
+    "tests/spikesorting/v2:discontinuous_sources": "stage",
+    "tests/spikesorting/v2:drift_recording": "stage",
+    "tests/spikesorting/v2:offset_source_concat": "stage",
+    "tests/spikesorting/v2:planted_matching_days": "db_unit",
+    "tests/spikesorting/v2:planted_three_unit_sort": "stage",
+    "tests/spikesorting/v2:planted_two_unit_sort": "stage",
+    "tests/spikesorting/v2:populated_sorting": "pipeline",
+    "tests/spikesorting/v2:populated_sorting_with_curation": "db_unit",
+    "tests/spikesorting/v2:smoke_nwb": "db_unit",
+    "tests:common": "db_unit",
+    "tests:dj_config": "db_unit",
+    "tests:dj_conn": "db_unit",
+    "tests:mini_insert": "db_unit",
+    "tests:server": "db_unit"
+  }
+}

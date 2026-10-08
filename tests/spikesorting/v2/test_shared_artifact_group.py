@@ -404,6 +404,7 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
         _drop_fake_recording(rec_id)
 
 
+@pytest.mark.usefixtures("dj_conn")
 def test_artifact_detection_delete_refuses_master_without_part_rows():
     """Strict ownership: deleting a ``RecordingArtifactDetection`` master that
     owns NO ``RemovedInterval`` part row raises rather than guessing interval

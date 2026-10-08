@@ -446,7 +446,8 @@ def test_identityless_figure_is_rejected_without_creating_a_child(
         clear_curations_for(planted_two_unit_sort)
 
 
-def test_upload_without_api_key_raises(monkeypatch):
+@pytest.mark.db_unit
+def test_upload_without_api_key_raises(dj_conn, monkeypatch):
     """upload=True without FIGPACK_API_KEY raises a clear, typed error."""
     from spyglass.spikesorting.v2.exceptions import FigPackUploadError
     from spyglass.spikesorting.v2.figpack_curation import _publish_view
@@ -466,7 +467,8 @@ def test_upload_without_api_key_raises(monkeypatch):
         )
 
 
-def test_fetch_from_unreachable_uri_fails_closed():
+@pytest.mark.db_unit
+def test_fetch_from_unreachable_uri_fails_closed(dj_conn):
     """An unreachable figure raises, not silently look like 'no edits'."""
     from spyglass.spikesorting.v2.exceptions import FigPackRetrievalError
     from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
@@ -579,7 +581,8 @@ def test_upload_of_labeled_curation_is_seeded(
         clear_curations_for(planted_two_unit_sort)
 
 
-def test_fetch_from_nonexistent_local_path_fails_closed():
+@pytest.mark.db_unit
+def test_fetch_from_nonexistent_local_path_fails_closed(dj_conn):
     """A missing/typoed local figure path raises, not look like 'no edits'."""
     from spyglass.spikesorting.v2.exceptions import FigPackRetrievalError
     from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
