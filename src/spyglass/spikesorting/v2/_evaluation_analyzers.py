@@ -88,7 +88,8 @@ def evaluate_cached_analyzers(
 
     # Root / label-only: the cached raw-sort analyzers already carry
     # this curation's unit set. Hold the per-sort lock around the
-    # canonical-folder load/rebuild + metric-extension mutation
+    # canonical-folder load/rebuild, metric-extension mutation and source
+    # hashing so the snapshot describes the same protected cache generation.
     # (_compute_metrics / _metric_curation.compute_merge_groups
     # mutate the shared analyzer in place).
     raw_sorting = read_stored_units(sorting_inputs.raw_units)
@@ -129,14 +130,14 @@ def evaluate_cached_analyzers(
             )
         )
 
-    # The metrics were computed over the canonical raw-sort analyzers --
-    # regeneratable scratch not pinned in the schema -- so snapshot the
-    # content hash of EVERY one consumed for stale detection: the display
-    # analyzer always, plus the whitened metric analyzer when PC/NN metrics
-    # consumed it (metric_analyzer is None otherwise).
-    source_analyzer_hashes = analyzer_role_hashes(
-        display_analyzer, metric_analyzer
-    )
+        # The metrics were computed over the canonical raw-sort analyzers --
+        # regeneratable scratch not pinned in the schema -- so snapshot the
+        # content hash of EVERY one consumed for stale detection: the display
+        # analyzer always, plus the whitened metric analyzer when PC/NN metrics
+        # consumed it (metric_analyzer is None otherwise).
+        source_analyzer_hashes = analyzer_role_hashes(
+            display_analyzer, metric_analyzer
+        )
     return metrics_df, labels_by_unit, merge_groups, source_analyzer_hashes
 
 

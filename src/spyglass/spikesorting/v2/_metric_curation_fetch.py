@@ -282,6 +282,8 @@ def detect_stale_source(table_cls, key) -> dict:
     # analyzers are regeneratable scratch, so a reclaimed/corrupt cache is
     # reported as stale per role -- NOT raised, which would abort the caller.
     # The merged path stored None, so only the SI version is checked there.
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_lock
+
     stored_hashes = row["source_analyzer_hashes"]
     current_hashes: dict[str, str | None] = {}
     if stored_hashes:
@@ -290,33 +292,36 @@ def detect_stale_source(table_cls, key) -> dict:
             "display": None,
             "metric": sel["metric_waveform_params_name"],
         }
-        for role, stored in stored_hashes.items():
-            legacy_hash = not analyzer_content_hash_is_current(stored)
-            if legacy_hash:
-                # Byte-only legacy digests cannot prove array shape/dtype
-                # agreement. Keep the old snapshot readable, but require a
-                # fresh evaluation before claiming its source is current.
-                reasons.append(f"source_analyzer_hash_format:{role}")
-            try:
-                analyzer = Sorting().get_analyzer(
-                    sort_key,
-                    waveform_params_name=recipe_for[role],
-                    rebuild=False,
-                )
-            # AnalyzerFolderInvalidError subclasses AnalyzerFolderMissingError,
-            # so catch the invalid/zero-unit cases first.
-            except (AnalyzerFolderInvalidError, ZeroUnitAnalyzerError):
-                current_hashes[role] = None
-                reasons.append(f"source_analyzer_invalid:{role}")
-                continue
-            except AnalyzerFolderMissingError:
-                current_hashes[role] = None
-                reasons.append(f"source_analyzer_missing:{role}")
-                continue
-            current = analyzer_hash_for_role(analyzer, role)
-            current_hashes[role] = current
-            if not legacy_hash and current != stored:
-                reasons.append(f"source_analyzer_hash:{role}")
+        # Protect both roles as one snapshot, including on-demand extension
+        # reads during hashing. get_analyzer's nested lock is reentrant.
+        with analyzer_cache_lock(sel["sorting_id"]):
+            for role, stored in stored_hashes.items():
+                legacy_hash = not analyzer_content_hash_is_current(stored)
+                if legacy_hash:
+                    # Byte-only legacy digests cannot prove array shape/dtype
+                    # agreement. Keep the old snapshot readable, but require a
+                    # fresh evaluation before claiming its source is current.
+                    reasons.append(f"source_analyzer_hash_format:{role}")
+                try:
+                    analyzer = Sorting().get_analyzer(
+                        sort_key,
+                        waveform_params_name=recipe_for[role],
+                        rebuild=False,
+                    )
+                # AnalyzerFolderInvalidError subclasses AnalyzerFolderMissingError,
+                # so catch the invalid/zero-unit cases first.
+                except (AnalyzerFolderInvalidError, ZeroUnitAnalyzerError):
+                    current_hashes[role] = None
+                    reasons.append(f"source_analyzer_invalid:{role}")
+                    continue
+                except AnalyzerFolderMissingError:
+                    current_hashes[role] = None
+                    reasons.append(f"source_analyzer_missing:{role}")
+                    continue
+                current = analyzer_hash_for_role(analyzer, role)
+                current_hashes[role] = current
+                if not legacy_hash and current != stored:
+                    reasons.append(f"source_analyzer_hash:{role}")
 
     return {
         "stale": bool(reasons),
