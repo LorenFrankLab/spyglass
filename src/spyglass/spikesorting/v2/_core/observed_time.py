@@ -11,6 +11,11 @@ from itertools import pairwise
 
 import numpy as np
 
+from spyglass.spikesorting.v2._core.numerical import (
+    finite_intervals,
+    finite_scalar,
+    finite_vector,
+)
 from spyglass.spikesorting.v2._core.signal_math import (
     _normalize,
     intersect_intervals,
@@ -26,7 +31,10 @@ def compact_observation_intervals(intervals_by_unit):
     for unit, intervals in sorted(
         intervals_by_unit.items(), key=lambda item: int(item[0])
     ):
-        intervals = np.asarray(intervals, dtype=float).reshape(-1, 2)
+        intervals = finite_intervals(
+            intervals,
+            name=f"compact_observation_intervals unit {unit} intervals",
+        )
         key = intervals.tobytes()
         if key not in cached:
             cached[key] = len(masks)
@@ -58,11 +66,18 @@ def observed_intervals(recording, valid_times):
         complement_frame_ranges,
     )
 
+    valid_times = finite_intervals(
+        valid_times, name="observed_intervals valid_times"
+    )
     if len(valid_times) == 0:
         return np.empty((0, 2))
     excluded = artifact_frame_ranges(recording, valid_times)
     n = recording.get_num_samples()
-    fs = recording.sampling_frequency
+    fs = finite_scalar(
+        recording.sampling_frequency,
+        name="observed_intervals sampling_frequency",
+        positive=True,
+    )
     boundaries = np.r_[0, base_intervals_and_gaps(recording).gap_after + 1, n]
     kept = []
     for start, stop in complement_frame_ranges(excluded, n):
@@ -78,7 +93,9 @@ def observed_intervals(recording, valid_times):
                 + 1.0 / fs
             )
             kept.append((t0, t1))
-    result = np.asarray(kept, dtype=float).reshape(-1, 2)
+    result = finite_intervals(
+        kept, name="observed_intervals computed intervals"
+    )
     if len(result) > 1:
         bad = np.flatnonzero(result[1:, 0] < result[:-1, 1])
         if bad.size:
@@ -93,8 +110,14 @@ def observed_intervals(recording, valid_times):
 
 def contains_times(intervals, times):
     """Membership without a mask at the recording's acquisition rate."""
-    intervals = np.asarray(intervals, dtype=float).reshape(-1, 2)
+    intervals = finite_intervals(intervals, name="contains_times intervals")
+    # Membership queries retain their scalar/array shape; the event-vector
+    # requirement belongs to observed_metrics rather than this predicate.
     times = np.asarray(times)
+    shape = times.shape
+    times = finite_vector(
+        times.reshape(-1), name="contains_times times"
+    ).reshape(shape)
     if not len(intervals):
         return np.zeros(times.shape, dtype=bool)
     indices = np.searchsorted(intervals[:, 0], times, side="right") - 1
@@ -110,13 +133,20 @@ def observed_metrics(
     observed bins contribute only their observed duration; excluded bins
     contribute nothing. No observed exposure yields unavailable metrics.
     ``intervals`` are first sorted, merged and stripped of zero-length rows,
-    so duplicated or overlapping time counts once.
+    so duplicated or overlapping time counts once. Malformed windows or event
+    vectors raise rather than becoming missing exposure or discarded spikes.
     """
-    if not np.isfinite(bin_duration_s) or bin_duration_s <= 0:
-        raise ValueError("bin_duration_s must be finite and positive.")
+    spike_times = finite_vector(
+        spike_times, name="observed_metrics spike_times"
+    )
+    intervals = finite_intervals(intervals, name="observed_metrics intervals")
+    origin = finite_scalar(origin, name="observed_metrics origin")
+    bin_duration_s = finite_scalar(
+        bin_duration_s, name="observed_metrics bin_duration_s", positive=True
+    )
     intervals = _normalize(intervals)
     duration = float(np.diff(intervals, axis=1).sum())
-    spikes = np.asarray(spike_times)[contains_times(intervals, spike_times)]
+    spikes = spike_times[contains_times(intervals, spike_times)]
     exposure = {}
     for start, stop in intervals:
         first = int(np.floor((start - origin) / bin_duration_s))
@@ -154,7 +184,9 @@ class ObservationAvailability:
     """Common availability of selected units; None means unknown coverage.
 
     Unknown sources do not invent restrictions. Known restrictions still
-    apply in a mixed population, and unknown sources remain explicit.
+    apply in a mixed population, and unknown sources remain explicit. Known
+    windows must be finite, forward, sorted, and disjoint. Stored arrays are
+    owned read-only snapshots, independent of the caller's array.
     """
 
     intervals: np.ndarray | None
@@ -163,12 +195,11 @@ class ObservationAvailability:
     def __post_init__(self):
         if self.intervals is None:
             return
-        arr = np.asarray(self.intervals, dtype=float).reshape(-1, 2)
-        if not np.all(np.isfinite(arr)):
-            raise ValueError(
-                "ObservationAvailability: intervals contain non-finite "
-                f"(NaN/Inf) values: {arr.tolist()!r}."
-            )
+        arr = finite_intervals(
+            self.intervals,
+            name="ObservationAvailability intervals",
+            readonly=True,
+        )
         if len(arr) > 1:
             bad = np.flatnonzero(arr[1:, 0] < arr[:-1, 1])
             if bad.size:
@@ -178,7 +209,6 @@ class ObservationAvailability:
                     f"start and disjoint; interval {arr[i].tolist()} "
                     f"overlaps the next interval {arr[i + 1].tolist()}."
                 )
-        arr.setflags(write=False)
         object.__setattr__(self, "intervals", arr)
 
     @property
@@ -190,24 +220,30 @@ class ObservationAvailability:
         )
 
     def contains(self, times):
-        return (
-            np.ones(np.shape(times), dtype=bool)
-            if self.intervals is None
-            else contains_times(self.intervals, times)
+        if self.intervals is not None:
+            return contains_times(self.intervals, times)
+        times = np.asarray(times)
+        checked = finite_vector(
+            times.reshape(-1), name="ObservationAvailability contains times"
         )
+        return np.ones(checked.shape, dtype=bool).reshape(times.shape)
 
     def restrict(self, intervals):
+        intervals = finite_intervals(
+            intervals, name="ObservationAvailability restrict intervals"
+        )
         if self.intervals is None:
-            arr = np.asarray(intervals)
-            return np.empty((0, 2)) if arr.size == 0 else arr
+            return intervals
         return intersect_intervals(intervals, self.intervals)
 
     def valid_bins(self, time):
         """Only bins wholly inside an observed span are available."""
-        time = np.asarray(time)
+        time = finite_vector(
+            time, name="ObservationAvailability valid_bins time"
+        )
         if self.intervals is None:
             return np.ones(time.shape, dtype=bool)
-        if not len(self.intervals):
+        if not len(self.intervals) or not len(time):
             return np.zeros(time.shape, dtype=bool)
         # Match SortedSpikesGroup's digitize(time[1:-1]) convention. Its final
         # output slot has zero width; represent its timestamp's availability.
@@ -236,7 +272,9 @@ def population_availability(snapshots):
         )
         for index in indices:
             mask = observation["masks"][index]
-            intervals = np.asarray(mask, dtype=float).reshape(-1, 2)
+            intervals = finite_intervals(
+                mask, name=f"population_availability source {source} intervals"
+            )
             common = (
                 intervals
                 if common is None

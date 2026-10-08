@@ -455,3 +455,186 @@ def test_review_timeline_cache_is_pinned_to_curation_generation(
         {"curation_id": 1}, cache_path=path, curation_uuid="replacement"
     )
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "intervals",
+    [
+        [[2.0, 1.0]],
+        [[0.0, np.nan]],
+        [[0.0, np.inf]],
+        [[-np.inf, 1.0]],
+        [0.0, 1.0],
+        [[[0.0, 1.0]]],
+        np.empty((0, 3)),
+    ],
+    ids=[
+        "reversed",
+        "nan",
+        "positive_inf",
+        "negative_inf",
+        "flat",
+        "3d",
+        "wrong_empty_shape",
+    ],
+)
+@pytest.mark.parametrize(
+    "boundary",
+    [
+        "constructor",
+        "metrics",
+        "membership",
+        "recording",
+        "compact",
+        "restrict_known",
+        "restrict_unknown",
+        "population",
+    ],
+)
+def test_observation_boundaries_reject_malformed_windows(intervals, boundary):
+    """Bad windows cannot be reshaped or dropped into apparently valid exposure."""
+    from spyglass.spikesorting.v2._core.observed_time import (
+        compact_observation_intervals,
+    )
+
+    with pytest.raises(ValueError):
+        if boundary == "constructor":
+            ObservationAvailability(intervals)
+        elif boundary == "metrics":
+            observed_metrics([0.5], intervals)
+        elif boundary == "membership":
+            contains_times(intervals, [0.5])
+        elif boundary == "recording":
+            # Reject malformed valid_times before any recording access.
+            observed_intervals(None, intervals)
+        elif boundary == "compact":
+            compact_observation_intervals({7: intervals})
+        elif boundary.startswith("restrict"):
+            known = [[0.0, 3.0]] if boundary == "restrict_known" else None
+            ObservationAvailability(known).restrict(intervals)
+        else:
+            population_availability(
+                [
+                    (
+                        "valid",
+                        [1],
+                        {
+                            "observation_intervals": {
+                                "masks": [[[0.0, 3.0]]],
+                                "unit_mask_ids": {"1": 0},
+                            }
+                        },
+                    ),
+                    (
+                        "malformed",
+                        [2],
+                        {
+                            "observation_intervals": {
+                                "masks": [intervals],
+                                "unit_mask_ids": {"2": 0},
+                            }
+                        },
+                    ),
+                ]
+            )
+
+
+@pytest.mark.parametrize(
+    "spikes", [[np.nan], [np.inf], [-np.inf], [[0.5]], 0.5]
+)
+@pytest.mark.parametrize(
+    "intervals", [[], [[0.0, 1.0]]], ids=["empty_exposure", "observed"]
+)
+def test_observed_metrics_rejects_invalid_events_before_exclusion(
+    spikes, intervals
+):
+    """Invalid events raise even if membership would otherwise discard them."""
+    with pytest.raises(ValueError, match="spike_times"):
+        observed_metrics(spikes, intervals)
+
+
+@pytest.mark.parametrize("origin", [np.nan, np.inf, -np.inf, [0.0]])
+def test_observed_metrics_rejects_invalid_bin_origin_even_without_exposure(
+    origin,
+):
+    with pytest.raises(ValueError, match="origin"):
+        observed_metrics([], [], origin=origin)
+
+
+@pytest.mark.parametrize(
+    "duration", [0.0, -1.0, np.nan, np.inf, -np.inf, [1.0]]
+)
+def test_observed_metrics_rejects_invalid_bin_duration_even_without_exposure(
+    duration,
+):
+    with pytest.raises(ValueError, match="bin_duration_s"):
+        observed_metrics([], [], bin_duration_s=duration)
+
+
+@pytest.mark.parametrize("windows", [[], np.empty((0, 2)), [[1.0, 1.0]]])
+def test_zero_exposure_retains_unavailable_metrics_and_known_empty_coverage(
+    windows,
+):
+    """Empty exposure is valid but carries no firing-rate or presence estimate."""
+    result = observed_metrics([0.5, 1.0, 2.0], windows)
+    assert result["observed_duration_s"] == 0.0
+    assert np.isnan(result["observed_firing_rate_hz"])
+    assert np.isnan(result["observed_presence_ratio"])
+    availability = ObservationAvailability(windows)
+    assert availability.duration_s == 0.0
+    assert availability.contains([0.5, 1.0, 2.0]).tolist() == [
+        False,
+        False,
+        False,
+    ]
+    assert availability.valid_bins([]).shape == (0,)
+    assert observed_intervals(None, []).shape == (0, 2)
+
+
+def test_observation_availability_owns_immutable_snapshot_without_mutating_caller():
+    windows = np.array([[0.0, 1.0], [2.0, 3.0]])
+    availability = ObservationAvailability(windows)
+    assert windows.flags.writeable
+    assert not np.shares_memory(windows, availability.intervals)
+    windows[0, 1] = 10.0
+    np.testing.assert_array_equal(
+        availability.intervals, [[0.0, 1.0], [2.0, 3.0]]
+    )
+    assert availability.duration_s == 2.0
+    with pytest.raises(ValueError):
+        availability.intervals[0, 1] = 4.0
+
+
+def test_observed_metrics_preserves_finite_exclusions_and_overlap_normalization():
+    """Valid finite events outside the windows remain excluded, not invalid."""
+    result = observed_metrics(
+        [-1.0, 0.0, 0.5, 1.5, 2.0, 3.5],
+        [[1.0, 2.0], [0.0, 1.5], [0.0, 1.5], [4.0, 4.0]],
+        origin=np.float64(0.0),
+        bin_duration_s=np.float32(1.0),
+    )
+    assert result == {
+        "observed_duration_s": 2.0,
+        "observed_firing_rate_hz": 1.5,
+        "observed_presence_ratio": 1.0,
+    }
+
+
+@pytest.mark.parametrize("known", [None, [], [[0.0, 2.0]]])
+def test_membership_preserves_query_shape_and_rejects_nonfinite_queries(known):
+    availability = ObservationAvailability(known)
+    query = np.array([[0.0, 1.0], [2.0, 3.0]])
+    expected = (
+        np.ones(query.shape, dtype=bool)
+        if known is None
+        else (query < 2.0 if known else np.zeros(query.shape, dtype=bool))
+    )
+    np.testing.assert_array_equal(availability.contains(query), expected)
+    assert np.shape(availability.contains(1.0)) == ()
+    with pytest.raises(ValueError, match="times"):
+        availability.contains([np.nan])
+    with pytest.raises(ValueError, match="time"):
+        availability.valid_bins([np.inf])
+    with pytest.raises(ValueError, match="time"):
+        availability.valid_bins([[0.0, 1.0]])
+    assert availability.valid_bins([]).shape == (0,)
