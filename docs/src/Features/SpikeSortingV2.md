@@ -1581,6 +1581,16 @@ requires SpikeInterface and NumPy but does not import UnitMatchPy. Supply a
 preparer when a backend needs another layout. Register a distinct matcher name
 when changing the preparation or inference contract for persisted parameters.
 
+`UnitMatch.matcher_provenance` and the pairs NWB header record each producer's
+qualified class name and version, plus the Spyglass version. Backends can supply
+`backend_version()` and preparers `preparer_version()`; unknown versions are
+stored as `None`. Either producer can also implement
+`provenance_fingerprints(params)` returning named model or feature-definition
+fingerprints as strings. These are observational metadata: include any
+result-determining asset fingerprint in the immutable params schema as well,
+and verify the loaded asset against it before use. These hooks also run for
+single-input selections, which skip preparation and inference.
+
 Geometry requirements belong to the backend. It can implement
 `validate_geometry(named_positions, params)` to check the effective channel
 positions before a new multi-input selection is inserted. The positions are

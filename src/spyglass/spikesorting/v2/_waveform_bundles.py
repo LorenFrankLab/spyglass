@@ -25,6 +25,15 @@ def save_waveform_arrays(waveforms, directory, unit_ids):
 class WaveformInputPreparer:
     """Prepare the established dense split-half layout without an inference library."""
 
+    @staticmethod
+    def preparer_version() -> str | None:
+        """The Spyglass distribution implements this bundle extraction."""
+        from spyglass.spikesorting.v2._matcher_provenance import (
+            spyglass_version,
+        )
+
+        return spyglass_version()
+
     def prepare(self, source, directory, params, job_kwargs):
         from spyglass.spikesorting.v2.matcher_protocol import (
             PreparedMatcherInput,

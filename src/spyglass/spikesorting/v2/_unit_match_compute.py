@@ -254,6 +254,7 @@ def unit_match_provenance_tables(
     matcher_backend,
     matcher_backend_version,
     spikeinterface_version,
+    matcher_provenance=None,
 ) -> list:
     """Provenance tables that make a run's pairs NWB self-describing.
 
@@ -273,6 +274,8 @@ def unit_match_provenance_tables(
         The ``MatcherParameters`` row.
     matcher_backend, matcher_backend_version, spikeinterface_version : str
         Producer provenance (``matcher_backend_version`` may be None).
+    matcher_provenance : dict or None
+        Both producer class names, versions and optional asset fingerprints.
 
     Returns
     -------
@@ -300,6 +303,7 @@ def unit_match_provenance_tables(
                 "matcher_backend": matcher_backend,
                 "matcher_backend_version": matcher_backend_version,
                 "spikeinterface_version": spikeinterface_version,
+                "matcher_provenance": matcher_provenance,
             },
         ),
         build_long_provenance_table(

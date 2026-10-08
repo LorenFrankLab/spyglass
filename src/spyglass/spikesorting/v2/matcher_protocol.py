@@ -114,7 +114,12 @@ class PreparedMatcherInput:
 
 @runtime_checkable
 class MatcherInputPreparer(Protocol):
-    """Prepare one input in the layout required by a registered matcher."""
+    """Prepare one input in the layout required by a registered matcher.
+
+    An optional ``preparer_version() -> str | None`` records its implementation
+    version. Both preparers and backends may implement
+    :class:`MatcherProvenanceProvider` to describe result-determining assets.
+    """
 
     def prepare(
         self,
@@ -123,6 +128,20 @@ class MatcherInputPreparer(Protocol):
         params: dict,
         job_kwargs: dict,
     ) -> PreparedMatcherInput: ...
+
+
+@runtime_checkable
+class MatcherProvenanceProvider(Protocol):
+    """Optional model/feature-definition fingerprints for producer provenance.
+
+    Return named fingerprints as nonempty strings. This metadata does not
+    change run identity: result-determining fingerprints must also be fields
+    in the producer's immutable parameter schema, and the producer must verify
+    the loaded assets against them. The hook must not run inference or prepare
+    files; it is also called for a single-input run that skips those operations.
+    """
+
+    def provenance_fingerprints(self, params: dict) -> dict[str, str]: ...
 
 
 @runtime_checkable
@@ -153,6 +172,8 @@ class MatcherProtocol(Protocol):
     need not subclass anything. ``match`` consumes wrapper-prepared bundles and
     returns the cross-session matches, returning ``[]`` for the degenerate
     single-session case (one input) rather than raising.
+    An optional ``backend_version() -> str | None`` records its library version;
+    :class:`MatcherProvenanceProvider` can record model/feature fingerprints.
     """
 
     name: str

@@ -434,6 +434,23 @@ TrackedUnit = unit_matching_module.TrackedUnit
 #   run_v2_unit_match(plan)
 ```
 
+### Adding matcher producer provenance
+
+If matching tables already use `Input` / `InputRecording`, the producer metadata
+addition only needs this nullable column; existing runs and recipes can be kept:
+
+```python
+from spyglass.spikesorting.v2.unit_matching import UnitMatch
+
+UnitMatch().alter(context=UnitMatch.declaration_context)
+```
+
+Older rows retain `matcher_provenance = None` because their preparer version and
+asset fingerprints cannot be recovered reliably. New runs store this metadata
+on the row and in their pairs NWB header. Delete and repopulate a particular run
+if you need its current producers recorded. The full table recreation above
+already declares the new column.
+
 ### Porting a v1 sort to v2
 
 1. Reuse the v1 sort's identity — session (`nwb_file_name`), sort group,

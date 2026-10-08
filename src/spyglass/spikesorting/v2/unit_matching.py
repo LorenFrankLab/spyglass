@@ -163,10 +163,12 @@ class UnitMatchComputed(NamedTuple):
     # ``UnitMatch.RecordingSpikeCount``.
     recording_spike_counts: list[dict]
     # Producer provenance (secondary, never identity): SI version at match time,
-    # the resolved backend's module path, and the backend package version.
+    # the resolved backend's module path and package version, and both
+    # producers' qualified names, versions and optional asset fingerprints.
     spikeinterface_version: str
     matcher_backend: str
     matcher_backend_version: str | None
+    matcher_provenance: dict
 
     def staged_outputs(self) -> StagedOutputs:
         """The staged analysis file ``make_insert`` registers."""
@@ -698,6 +700,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     spikeinterface_version: varchar(32)     # spikeinterface.__version__ at match time
     matcher_backend: varchar(255)           # resolved backend module path (plugin paths can be long)
     matcher_backend_version=null: varchar(64)  # backend package version, NULL if absent
+    matcher_provenance=null: blob            # producer classes, versions and asset fingerprints; NULL for older runs
     """
 
     class Pair(SpyglassMixinPart):
@@ -975,8 +978,14 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """
         import spikeinterface as si
 
+        from spyglass.spikesorting.v2._matcher_provenance import (
+            matcher_provenance,
+        )
         from spyglass.spikesorting.v2._unitmatch_nwb import write_pairs_table
-        from spyglass.spikesorting.v2.matcher_protocol import get_matcher
+        from spyglass.spikesorting.v2.matcher_protocol import (
+            get_input_preparer,
+            get_matcher,
+        )
         from spyglass.spikesorting.v2.recording import (
             _unlink_staged_analysis_file,
         )
@@ -987,9 +996,10 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         backend = get_matcher(matcher_name)
         spikeinterface_version = si.__version__
         matcher_backend = type(backend).__module__
-        matcher_backend_version = getattr(
-            backend, "backend_version", lambda: None
-        )()
+        producer_provenance = matcher_provenance(
+            backend, get_input_preparer(matcher_name), params
+        )
+        matcher_backend_version = producer_provenance["backend"]["version"]
 
         anchor_nwb_file_name = input_plan[0]["recordings"][0]["nwb_file_name"]
         # Snapshot the frozen matchable universe from input_plan (resolved +
@@ -1020,6 +1030,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             matcher_backend=matcher_backend,
             matcher_backend_version=matcher_backend_version,
             spikeinterface_version=spikeinterface_version,
+            matcher_provenance=producer_provenance,
         )
 
         analysis_file_name = AnalysisNwbfile().create(
@@ -1064,6 +1075,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             spikeinterface_version=spikeinterface_version,
             matcher_backend=matcher_backend,
             matcher_backend_version=matcher_backend_version,
+            matcher_provenance=producer_provenance,
         )
 
     def make_insert(
@@ -1079,6 +1091,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         spikeinterface_version,
         matcher_backend,
         matcher_backend_version,
+        matcher_provenance,
     ) -> None:
         """Register the analysis file + insert the master, Pair, and frozen
         ``MatchableUnit`` / ``RecordingSpikeCount`` rows.
@@ -1119,6 +1132,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     "spikeinterface_version": spikeinterface_version,
                     "matcher_backend": matcher_backend,
                     "matcher_backend_version": matcher_backend_version,
+                    "matcher_provenance": matcher_provenance,
                 }
             )
             # ``read_pairs`` returns exactly the Pair part columns
