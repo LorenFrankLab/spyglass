@@ -5,8 +5,8 @@ in ``matcher_protocol``). ``UnitMatchParamsSchema`` validates the ``params``
 blob of a ``MatcherParameters`` row whose ``matcher == "unitmatch"``.
 
 The matcher's own internal knobs (UnitMatch's ``default_params``) are resolved
-inside the backend; the fields here are the v2-owned controls that the tables
-read: the pair-probability cutoffs and the strict tracked-unit graph cap.
+inside the backend. Shared grouping controls come from ``TrackingParamsSchema``
+and shared extraction controls from ``WaveformBundleParamsSchema``.
 """
 
 from __future__ import annotations
@@ -14,6 +14,8 @@ from __future__ import annotations
 import math
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from spyglass.spikesorting.v2._params.tracking import TrackingParamsSchema
 
 
 class WaveformBundleParamsSchema(BaseModel):
@@ -39,7 +41,7 @@ class WaveformBundleParamsSchema(BaseModel):
         return self
 
 
-class UnitMatchParamsSchema(WaveformBundleParamsSchema):
+class UnitMatchParamsSchema(WaveformBundleParamsSchema, TrackingParamsSchema):
     """Validated ``params`` for a ``MatcherParameters`` row using UnitMatch.
 
     Attributes
@@ -75,7 +77,4 @@ class UnitMatchParamsSchema(WaveformBundleParamsSchema):
     model_config = ConfigDict(extra="forbid")
 
     match_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-    tracked_unit_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-    max_strict_nodes: int = Field(default=2000, ge=1)
-
     schema_version: int = 1

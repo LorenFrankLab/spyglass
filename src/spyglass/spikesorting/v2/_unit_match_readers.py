@@ -196,9 +196,12 @@ def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
         One ``TrackedUnit.Member`` row per (tracked unit, member unit).
     """
     from spyglass.spikesorting.v2._matcher_graph import (
+        STRICT_POLICY,
         derive_tracked_units,
     )
-    from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
+    from spyglass.spikesorting.v2._params.tracking import (
+        resolve_tracking_params,
+    )
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
         UnitMatch,
@@ -209,16 +212,7 @@ def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
     params = (
         MatcherParameters & {"matcher_params_name": sel["matcher_params_name"]}
     ).fetch1("params")
-    defaults = UnitMatchParamsSchema.model_fields
-    threshold = float(
-        params.get(
-            "tracked_unit_threshold",
-            defaults["tracked_unit_threshold"].default,
-        )
-    )
-    max_strict_nodes = int(
-        params.get("max_strict_nodes", defaults["max_strict_nodes"].default)
-    )
+    tracking = resolve_tracking_params(params)
 
     # Canonicalize on read to derive_tracked_units' node identity:
     # MatchableUnit stores (sorting_id uuid, curation_id, unit_id); the graph
@@ -266,8 +260,9 @@ def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
     tracked = derive_tracked_units(
         node_universe,
         edges,
-        threshold=threshold,
-        max_strict_nodes=max_strict_nodes,
+        threshold=tracking.tracked_unit_threshold,
+        max_strict_nodes=tracking.max_strict_nodes,
+        policy=STRICT_POLICY,
         input_by_node=input_by_node,
         detected_sessions_by_node=detected_sessions_by_node,
     )

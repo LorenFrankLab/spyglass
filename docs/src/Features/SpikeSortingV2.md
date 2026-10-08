@@ -1715,6 +1715,11 @@ Key behaviors and caveats:
     (`n_matching_inputs == 1`, `median_match_probability` NULL). A universe
     larger than `max_strict_nodes` (default 2000) raises
     `TrackedUnitBudgetExceededError`.
+    These grouping controls belong to the backend-independent
+    `TrackingParamsSchema`, which custom matcher schemas can inherit. Recipes
+    without them use the same defaults. The existing flat parameter names
+    `tracked_unit_threshold` and `max_strict_nodes` remain unchanged; grouping
+    explicitly selects the `strict` policy regardless of the matching backend.
 - **`n_matching_inputs` vs. `n_sessions_detected`.** `n_matching_inputs` counts
     distinct matching inputs (2 for a two-day match, concatenated or not).
     `n_sessions_detected` counts distinct original sessions (`nwb_file_name`)

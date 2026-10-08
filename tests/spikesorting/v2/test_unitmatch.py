@@ -1998,7 +1998,9 @@ def test_make_runs_full_matcher_table_path(
     matcher, writes ``Pair`` rows + the NWB pairs table, and ``TrackedUnit``
     groups the matched pair. Proves ``MatcherProtocol`` plugs into the table
     layer end to end without UnitMatchPy (bundle extraction is stubbed since the
-    fixture matcher reads its pairs from ``params``, not the bundles)."""
+    fixture matcher reads its pairs from ``params``, not the bundles). The
+    backend recipe omits grouping controls, exercising shared tracking defaults.
+    """
     from pydantic import BaseModel, ConfigDict, Field
 
     from spyglass.spikesorting.v2 import matcher_protocol as mp
@@ -2020,8 +2022,6 @@ def test_make_runs_full_matcher_table_path(
         """Params schema for the test-only ``fixture_pairer`` matcher."""
 
         model_config = ConfigDict(extra="forbid")
-        tracked_unit_threshold: float = 0.5
-        max_strict_nodes: int = 2000
         probability: float = 0.99
         pairs: list = Field(default_factory=list)
         schema_version: int = 1
