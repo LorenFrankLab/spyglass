@@ -47,8 +47,8 @@ NWB objects resolved from the file:
 
 ```python
 nwb_data = (SomeTable & key).fetch_nwb()
-lfp = nwb_data[0]["lfp"]  # h5py.Dataset — not yet in RAM
-arr = lfp.data[:]  # data loaded here
+lfp = nwb_data[0]["lfp"]  # an ElectricalSeries
+arr = lfp.data[:]  # .data is the h5py.Dataset; read into RAM here
 ```
 
 ### Memory management

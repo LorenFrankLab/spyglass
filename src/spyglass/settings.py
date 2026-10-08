@@ -963,8 +963,3 @@ else:
     dlc_output_dir = sg_config.dlc_output_dir
     moseq_project_dir = sg_config.moseq_project_dir
     moseq_video_dir = sg_config.moseq_video_dir
-
-# Defaults apply whether or not the config loaded
-nwb_min_free_gb = sg_config.nwb_min_free_gb
-nwb_min_free_pct = sg_config.nwb_min_free_pct
-nwb_max_file_fraction = sg_config.nwb_max_file_fraction

@@ -23,6 +23,11 @@
     #1662
 - Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
 - Add `prefer_download` custom config for stream-capable backends #1662
+- Active management of memory resources for open NWBs: open files are cached and
+    closed under RAM or file-descriptor pressure, least recently used first.
+    Adds `close_nwb()` to release a restriction's files once reads are complete,
+    thresholds under `custom.nwb_cache` in `dj_local_conf.json`, and a `psutil`
+    dependency to read the available memory #1606
 
 ### Pipelines
 
@@ -295,7 +300,6 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add `--container-vol-dir` pytest option to store the test container's MySQL
     data on a chosen disk, and document it alongside the existing
     `--container-name`/`--container-port` options #1661
-- Active management of memory resources for open NWBs #1606
 
 ### Pipelines
 

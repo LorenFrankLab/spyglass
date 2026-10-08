@@ -360,7 +360,7 @@ class FetchMixin(BaseMixin):
         # Process object_id fields if present
         return self._process_object_ids(rec_dicts, *attrs)
 
-    def close_nwb(self) -> bool:
+    def close_nwb(self) -> None:
         """Release NWB file holds for the files relevant to this restriction.
 
         ``fetch_nwb()`` marks each opened NWB file as held, so the cache will
@@ -379,7 +379,6 @@ class FetchMixin(BaseMixin):
         """
         for path in self._nwb_paths():
             _release_nwb_file(path)
-        return True  # for potential use in context manager or chaining
 
     def fetch_pynapple(self, *attrs, **kwargs):
         """Get a pynapple object from the given DataJoint query.
