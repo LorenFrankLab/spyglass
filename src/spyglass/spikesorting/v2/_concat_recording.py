@@ -558,10 +558,9 @@ def assert_concat_compatible(recordings: list) -> None:
         # not. Return None when geometry is unavailable so a probe-less member
         # is not falsely flagged -- but a member that HAS geometry while another
         # does not is still surfaced below.
-        try:
-            return np.asarray(recording.get_channel_locations())
-        except Exception:
+        if not recording.has_channel_location():
             return None
+        return np.asarray(recording.get_channel_locations())
 
     def _scaling(recording, kind):
         # ``gain_to_uV`` / ``offset_to_uV`` are optional; a recording without
@@ -572,10 +571,7 @@ def assert_concat_compatible(recordings: list) -> None:
             if kind == "gain"
             else recording.get_channel_offsets
         )
-        try:
-            values = getter()
-        except Exception:
-            return None
+        values = getter()
         return None if values is None else np.asarray(values)
 
     def _assert_array_matches(reference, value, index, *, noun, share_clause):

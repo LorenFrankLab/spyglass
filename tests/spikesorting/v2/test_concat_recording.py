@@ -718,6 +718,63 @@ def test_assert_concat_compatible_rejects_mismatched_dtype_gain():
 # ---------- electrode_signature_from_rows ----------------------------------
 
 
+def test_assert_concat_compatible_accepts_absent_optional_metadata():
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._concat_recording import (
+        assert_concat_compatible,
+    )
+
+    recordings = [
+        si.NumpyRecording(np.zeros((n, 2), dtype=np.float32), 30_000)
+        for n in (100, 50)
+    ]
+    assert all(not rec.has_channel_location() for rec in recordings)
+    assert all(rec.get_channel_gains() is None for rec in recordings)
+    assert all(rec.get_channel_offsets() is None for rec in recordings)
+    assert_concat_compatible(recordings)
+
+
+def test_assert_concat_compatible_rejects_optional_geometry_presence_mismatch():
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._concat_recording import (
+        assert_concat_compatible,
+    )
+
+    present = _rec_with_locations(100, [0, 1], [[0, 0], [0, 20]])
+    absent = si.NumpyRecording(np.zeros((50, 2), dtype=np.float32), 30_000)
+    with pytest.raises(ValueError, match="geometry presence differs"):
+        assert_concat_compatible([present, absent])
+
+
+@pytest.mark.parametrize(
+    "getter",
+    ["get_channel_locations", "get_channel_gains", "get_channel_offsets"],
+)
+@pytest.mark.parametrize("error_type", [OSError, ValueError])
+@pytest.mark.parametrize("member", [0, 1])
+def test_assert_concat_compatible_propagates_metadata_read_errors(
+    monkeypatch, getter, error_type, member
+):
+    from spyglass.spikesorting.v2._concat_recording import (
+        assert_concat_compatible,
+    )
+
+    recordings = [
+        _rec_with_locations(n, [0, 1], [[0, 0], [0, 20]]) for n in (100, 50)
+    ]
+    failure = error_type("metadata unreadable")
+
+    def broken():
+        raise failure
+
+    monkeypatch.setattr(recordings[member], getter, broken)
+    with pytest.raises(error_type, match="metadata unreadable") as raised:
+        assert_concat_compatible(recordings)
+    assert raised.value is failure
+
+
 @pytest.mark.unit
 def test_electrode_signature_distinguishes_reused_ids_across_groups():
     """Two members whose sort groups carry the SAME electrode ids and regions
