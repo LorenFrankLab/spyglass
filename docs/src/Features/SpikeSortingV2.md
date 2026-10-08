@@ -782,29 +782,26 @@ action methods unless that is intended. `preview_merges` drafts an unapplied
 merge (a preview row downstream consumers reject until committed). Every merge
 action requires at least one group of two or more units.
 
-#### Saving a manual payload
+#### Saving manual edits
 
-`save_manual_curation` also accepts a payload: a v1/FigURL payload
-(`labelsByUnit` / `mergeGroups`), a v2 payload (`labels_by_unit` /
-`merge_groups`), or unpacked `labels=` / `merge_groups=`. `merge_action` is
-`"preview"` (draft) or `"commit"` (apply); a v1 association map
-(`{"1": ["2"], "2": ["3"]}`) is unioned transitively into `[[1, 2, 3]]`.
+`save_manual_curation` accepts `labels={unit_id: [label, ...]}` and
+`merge_groups=[[unit_id, ...], ...]` with integer unit IDs. `merge_action` is
+`"preview"` to store unapplied merge proposals, or `"commit"` to apply them.
 
 ```python
 from spyglass.spikesorting.v2.curation_api import save_manual_curation
 
 child = save_manual_curation(
     parent_curation=root,
-    payload={
-        "labelsByUnit": {"3": ["mua"]},  # FigURL spellings
-        "mergeGroups": {"5": ["6"]},
-    },
+    labels={3: ["mua"]},
+    merge_groups=[[5, 6]],
     merge_action="commit",
 )
 ```
 
 `FigPackCuration.save_curation_from_uri(uri, parent_curation_key)` verifies the
-figure's embedded `curation_uuid` before writing a child; identity-less figures
+figure's embedded `curation_uuid` and decodes its JSON annotations before writing
+a child; identity-less figures
 fail closed.
 
 #### Metric and rule semantics

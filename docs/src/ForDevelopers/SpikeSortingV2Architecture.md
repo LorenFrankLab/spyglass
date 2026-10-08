@@ -68,6 +68,22 @@ DataJoint calls fetch again to verify its deterministic snapshot. Registration
 belongs in `make_insert`, and failed attempts must remove only their own staged
 outputs.
 
+`_storage.nwb` owns trace readers, preprocessing and streaming writes.
+`_storage.rebuilds` owns artifact verification, rebuilding, atomic publication
+and checksum reconciliation, including rollback. Rebuild services depend on
+I/O; writers handle partial-write cleanup without calling rebuild services.
+
+Populated v2 Units tables require stored sample indices and observation
+intervals. Readers reconstruct sortings from those indices; empty outputs
+remain valid. Sorting and curation writers validate complete provenance before
+allocating an output, including the curation generation UUID on member exports.
+Matching rows and NWB headers require producer provenance.
+
+Native manual curation accepts `labels`, `merge_groups` as lists of unit-ID
+lists, and the actions `preview` or `commit`. The FigPack transport adapter
+converts its JSON field names and string IDs at the boundary. Internal v2
+formats and imports have one current contract, without migration shims.
+
 The staged-output mixin and SpikeInterface compatibility adapters own
 version-sensitive library internals. Keep these mechanisms centralized and run
 their lifecycle and serialization checks when changing supported versions.
