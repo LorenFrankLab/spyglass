@@ -1,9 +1,70 @@
 """Operation transport retains scientific identity across partial failures."""
 
 import json
+import tracemalloc
 from types import SimpleNamespace
 
 import pytest
+
+
+def test_noisy_worker_uses_bounded_launcher_memory(tmp_path, monkeypatch):
+    from spyglass.spikesorting.v2 import _review_operations as operations
+
+    marker = "\nWorker failed: waveform export 🧠\n"
+    worker = f"""
+import json, os, sys
+json.load(sys.stdin)
+block = b'x' * (1024 * 1024)
+for _ in range(16):
+    os.write(1, block)
+    os.write(2, block)
+sys.stderr.write({marker!r})
+sys.stderr.flush()
+sys.exit(7)
+"""
+    monkeypatch.setattr(operations, "_WORKER", worker)
+    service = operations.ReviewOperationService("review", tmp_path, {})
+    was_tracing = tracemalloc.is_tracing()
+    if not was_tracing:
+        tracemalloc.start()
+    before, _ = tracemalloc.get_traced_memory()
+    tracemalloc.reset_peak()
+    try:
+        started = service.start({"action": "preview"})
+        service.future.result(timeout=20)
+        _, peak = tracemalloc.get_traced_memory()
+        assert peak - before < 8 * 1024 * 1024
+        state = service.status()
+        assert state["status"] == "failed"
+        assert state["operation_id"] == started["operation_id"]
+        assert state["message"] == "x" * (3000 - len(marker)) + marker
+    finally:
+        service.executor.shutdown(wait=True)
+        if not was_tracing:
+            tracemalloc.stop()
+
+
+def test_worker_launch_failure_releases_ownership(tmp_path, monkeypatch):
+    from spyglass.spikesorting.v2 import _review_operations as operations
+
+    def fail_launch(*args, **kwargs):
+        raise OSError("worker executable unavailable")
+
+    monkeypatch.setattr(operations.subprocess, "run", fail_launch)
+    service = operations.ReviewOperationService("review", tmp_path, {})
+    try:
+        service.start({"action": "preview"})
+        service.future.result(timeout=5)
+        state = service.status()
+        assert state["status"] == "failed"
+        assert (
+            "Could not start the review worker: worker executable unavailable"
+            == state["message"]
+        )
+        with operations._acquire_operation_lock(tmp_path):
+            pass
+    finally:
+        service.executor.shutdown(wait=True)
 
 
 def test_worker_failure_retains_receipt_and_retry_completes_journal(

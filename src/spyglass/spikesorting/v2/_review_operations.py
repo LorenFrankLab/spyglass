@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -21,6 +22,7 @@ OPERATION_FILE = "spyglass_review_operation.json"
 RESULT_FILE = "spyglass_review_result.json"
 ORIGIN_FILE = "spyglass_review_origin.json"
 LOCK_FILE = "spyglass_review_operation.lock"
+_WORKER_ERROR_TAIL_CHARS = 3000
 
 _WORKER = """
 import json, sys
@@ -30,6 +32,19 @@ dj.config.update(request.pop('config'))
 from spyglass.spikesorting.v2._review_operations import run_operation
 run_operation(**request)
 """
+
+
+def _worker_error_tail(stream):
+    """Read a bounded UTF-8 diagnostic, even after a noisy scientific run."""
+    # Four bytes per character cover the final N Unicode characters without
+    # loading the entire file. A partial leading character is outside the tail
+    # or decoded with replacement rather than hiding the worker's exception.
+    limit = 4 * _WORKER_ERROR_TAIL_CHARS
+    stream.seek(0, os.SEEK_END)
+    stream.seek(max(0, stream.tell() - limit))
+    return stream.read(limit).decode("utf-8", errors="replace")[
+        -_WORKER_ERROR_TAIL_CHARS:
+    ]
 
 
 def _acquire_operation_lock(bundle):
@@ -113,18 +128,23 @@ class ReviewOperationService:
             "lock_fd": lock_fd,
         }
         try:
-            outcome = subprocess.run(
-                [sys.executable, "-c", _WORKER],
-                input=json.dumps(payload, default=str),
-                text=True,
-                capture_output=True,
-                check=False,
-                pass_fds=(lock_fd,),
-            )
-            error = (
-                outcome.stderr[-3000:]
-                or "Review worker stopped. Retry to resume the saved operation."
-            )
+            # Scientific progress can be large. Stderr goes straight to an
+            # anonymous disk file and stdout is discarded (never used by this
+            # transport); neither stream is buffered in the launcher process.
+            with tempfile.TemporaryFile() as stderr:
+                subprocess.run(
+                    [sys.executable, "-c", _WORKER],
+                    input=json.dumps(payload, default=str),
+                    text=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=stderr,
+                    check=False,
+                    pass_fds=(lock_fd,),
+                )
+                error = (
+                    _worker_error_tail(stderr)
+                    or "Review worker stopped. Retry to resume the saved operation."
+                )
         except OSError as exc:
             error = f"Could not start the review worker: {exc}"
         journal = self.bundle / OPERATION_FILE
