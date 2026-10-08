@@ -16,7 +16,7 @@ import pytest
 from spyglass.spikesorting.v2._params.analyzer_waveform import (
     AnalyzerWaveformParamsSchema,
 )
-from spyglass.spikesorting.v2._recipe_catalog import (
+from spyglass.spikesorting.v2._core.recipe_catalog import (
     CORTEX_DISPLAY_WAVEFORMS,
     CORTEX_PREPROC,
     HIPPOCAMPUS_DISPLAY_WAVEFORMS,
@@ -70,7 +70,7 @@ def _planted_source_sort(
     """
     import datajoint as dj
 
-    from spyglass.spikesorting.v2._selection_identity import (
+    from spyglass.spikesorting.v2._core.selection_identity import (
         deterministic_id,
         sorting_identity_payload,
     )
@@ -467,9 +467,7 @@ def test_fetch_waveform_params_missing_row_raises(dj_conn):
     actionable message, never silently fall back to a hardcoded / catalog
     default.
     """
-    from spyglass.spikesorting.v2._sorting_analyzer import (
-        fetch_waveform_params,
-    )
+    from spyglass.spikesorting.v2._sorting.analyzer import fetch_waveform_params
     from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
 
     # Ensure the row is absent, then assert the strict failure.
@@ -490,7 +488,7 @@ def test_fetch_waveform_params_missing_row_raises(dj_conn):
 def test_sorting_records_display_waveform_params(populated_sorting):
     """make_fetch resolves + make_insert stores the display recipe; the
     cache-miss rebuild reads the STORED name, never re-resolving."""
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sid = populated_sorting["sorting_id"]
@@ -546,8 +544,8 @@ def test_rebuild_reads_stored_window_never_re_resolves(
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2 import _sorting_fetch
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._sorting import fetch as _sorting_fetch
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sid = populated_sorting["sorting_id"]

@@ -7,7 +7,7 @@ import math
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2._unit_annotation import (
+from spyglass.spikesorting.v2._curation.annotation import (
     annotation_set_hash,
     normalize_annotation_value,
     normalize_producer_parameters,

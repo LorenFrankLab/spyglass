@@ -44,7 +44,7 @@ from spyglass.common import IntervalList, Session  # noqa: F401
 # The worker kernels live in the DB-free ``_artifact_compute`` so a spawned
 # ``n_jobs>1`` worker opens no DB connection (see its docstring); re-exported
 # for ``from ...v2.artifact import _compute_artifact_chunk`` callers.
-from spyglass.spikesorting.v2._artifact_compute import (  # noqa: F401
+from spyglass.spikesorting.v2._artifacts.compute import (
     _compute_artifact_chunk,
     _init_artifact_worker,
 )
@@ -55,30 +55,34 @@ from spyglass.spikesorting.v2._artifact_compute import (  # noqa: F401
 # The class keeps thin delegators where tests pin the surface
 # (``_detect_artifacts`` / ``_scan_artifact_frames`` are called directly on the
 # class, and ``get_artifact_removed_intervals`` is called on instances).
-from spyglass.spikesorting.v2._artifact_intervals import (
+from spyglass.spikesorting.v2._artifacts.intervals import (
     build_artifact_interval_part_rows,
     build_artifact_interval_rows,
-    collect_artifact_interval_rows_to_remove,
     detect_artifacts,
+    scan_artifact_frames,
+)
+from spyglass.spikesorting.v2._artifacts.readers import (
+    collect_artifact_interval_rows_to_remove,
     read_owned_artifact_intervals,
     remove_artifact_interval_rows,
-    scan_artifact_frames,
 )
 from spyglass.spikesorting.v2._params.artifact_detection import (
     ARTIFACT_DETECTION_SCHEMA_VERSION,
     ArtifactDetectionParamsSchema,
 )
-from spyglass.spikesorting.v2._recipe_catalog import artifact_default_contents
-from spyglass.spikesorting.v2._recording_nwb import StoredTraces
-from spyglass.spikesorting.v2._signal_math import timestamp_fingerprint
+from spyglass.spikesorting.v2._core.recipe_catalog import (
+    artifact_default_contents,
+)
+from spyglass.spikesorting.v2._storage.nwb import StoredTraces
+from spyglass.spikesorting.v2._core.signal_math import timestamp_fingerprint
 from spyglass.spikesorting.v2.recording import Recording
-from spyglass.spikesorting.v2.utils import (
+from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
-    _validate_params,
     split_leading_restrictions,
 )
+from spyglass.spikesorting.v2._core.lookup_validation import _validate_params
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 schema = dj.schema("spikesorting_v2_artifact")
@@ -239,7 +243,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             sessions makes the artifact-removed valid times
             undefined.
         """
-        from spyglass.spikesorting.v2._shared_artifact_group import (
+        from spyglass.spikesorting.v2._artifacts.shared_group import (
             validate_shared_artifact_group_members,
         )
         from spyglass.spikesorting.v2.recording import (
@@ -469,16 +473,16 @@ def _insert_artifact_selection(
     dict
         ``{"artifact_detection_id": ...}`` -- the content-addressed PK.
     """
-    from spyglass.spikesorting.v2._selection_identity import (
+    from spyglass.spikesorting.v2._core.selection_identity import (
         artifact_detection_identity_payload,
         assert_supplied_id_matches,
         deterministic_id,
     )
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2._core.lookup_validation import (
         _ensure_lookup_row_exists,
     )
 
-    from spyglass.spikesorting.v2._manual_artifacts import (
+    from spyglass.spikesorting.v2._artifacts.manual import (
         normalize_manual_exclusions,
     )
 
@@ -616,7 +620,7 @@ class SharedGroupArtifactSelection(
         dict
             ``{"artifact_detection_id": ...}`` -- the content-addressed PK.
         """
-        from spyglass.spikesorting.v2._selection_identity import (
+        from spyglass.spikesorting.v2._core.selection_identity import (
             shared_group_member_set_hash,
         )
 
@@ -792,7 +796,9 @@ class _ArtifactDetectionMixin:
         np.ndarray
             Artifact-removed ``valid_times``, shape ``(n_intervals, 2)``.
         """
-        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+        from spyglass.spikesorting.v2._core.job_config import (
+            _resolved_job_kwargs,
+        )
 
         resolved_job_kwargs = _resolved_job_kwargs(artifact_job_kwargs)
         valid_times = self._detect_artifacts(
@@ -801,7 +807,7 @@ class _ArtifactDetectionMixin:
             context=context,
             job_kwargs=resolved_job_kwargs,
         )
-        from spyglass.spikesorting.v2._manual_artifacts import (
+        from spyglass.spikesorting.v2._artifacts.manual import (
             apply_manual_exclusions,
         )
 
@@ -967,7 +973,9 @@ class _ArtifactDetectionMixin:
 
         from contextlib import ExitStack
 
-        from spyglass.spikesorting.v2._db_locking import required_advisory_lock
+        from spyglass.spikesorting.v2._core.db_locking import (
+            required_advisory_lock,
+        )
         from spyglass.spikesorting.v2.artifact_output import (
             ArtifactDetectionOutput,
         )
@@ -1144,7 +1152,7 @@ class RecordingArtifactDetection(
         ArtifactComputed
             The ``valid_times`` plus the one-element per-member target list.
         """
-        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
+        from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
         recording = read_stored_traces(traces)
         valid_times = self._run_artifact_scan(
@@ -1217,7 +1225,7 @@ class SharedGroupArtifactDetection(
             on the selection (scanning it would silently change the result
             under a fixed ``artifact_detection_id``).
         """
-        from spyglass.spikesorting.v2._selection_identity import (
+        from spyglass.spikesorting.v2._core.selection_identity import (
             shared_group_member_set_hash,
         )
         from spyglass.spikesorting.v2.exceptions import (
@@ -1310,7 +1318,7 @@ class SharedGroupArtifactDetection(
         """
         import spikeinterface as si
 
-        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
+        from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
         if not member_recording_ids:
             raise RuntimeError(
@@ -1325,7 +1333,7 @@ class SharedGroupArtifactDetection(
         # enforces session + n_samples + fs + dtype + timestamp equality, but a
         # direct SharedGroupArtifactSelection insert can bypass that, so
         # re-assert the invariants over the loaded recordings here.
-        from spyglass.spikesorting.v2._shared_artifact_group import (
+        from spyglass.spikesorting.v2._artifacts.shared_group import (
             assert_shared_group_recordings_aggregatable,
         )
 

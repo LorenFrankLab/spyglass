@@ -13,7 +13,7 @@ from __future__ import annotations
 def test_classify_orphans_reports_units_bearing_rows_with_missing_folder():
     """A units-bearing row whose computed analyzer folder is gone on disk is a
     DB-side orphan; a row whose folder still exists is not."""
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         classify_orphaned_analyzer_folders,
     )
 
@@ -36,7 +36,7 @@ def test_classify_orphans_reports_units_bearing_rows_with_missing_folder():
 def test_classify_orphans_reports_unreferenced_disk_folders():
     """An on-disk folder under the analyzer root that no row references is a
     disk-side orphan; a referenced folder is kept. Input order is preserved."""
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         classify_orphaned_analyzer_folders,
     )
 
@@ -53,7 +53,7 @@ def test_classify_orphans_reports_unreferenced_disk_folders():
 
 def test_classify_orphans_keeps_referenced_folders_and_present_rows():
     """A row with a present, referenced folder is in neither orphan class."""
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         classify_orphaned_analyzer_folders,
     )
 
@@ -71,7 +71,7 @@ def test_classify_orphans_separates_intentionally_reclaimed_paths():
     DB-side orphan. A missing path without that provenance is still a DB-side
     orphan.
     """
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         classify_orphaned_analyzer_folders,
     )
 

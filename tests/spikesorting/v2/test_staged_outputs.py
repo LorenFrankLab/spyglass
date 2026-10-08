@@ -15,8 +15,8 @@ import pytest
 
 
 def test_staged_tables_refuse_unverified_datajoint_lifecycle(monkeypatch):
-    from spyglass.spikesorting.v2 import _dj_compat
-    from spyglass.spikesorting.v2._staged_outputs import (
+    from spyglass.spikesorting.v2._core import dj_compat as _dj_compat
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
         StagedOutputCleanupMixin,
     )
 
@@ -63,7 +63,7 @@ def _table_class(tmp_path, *, fetch=None, insert_error=None, commit_error=None):
     """Build a stand-in tri-part table staging one file and one folder."""
     from datajoint.autopopulate import AutoPopulate
 
-    from spyglass.spikesorting.v2._staged_outputs import (
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
         StagedOutputCleanupMixin,
         StagedOutputs,
     )
@@ -370,7 +370,7 @@ def analysis_file_resolver(tmp_path, monkeypatch):
 def test_staged_analysis_cleanup_is_idempotent(
     tmp_path, analysis_file_resolver, present
 ):
-    from spyglass.spikesorting.v2._staged_outputs import (
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
         unlink_staged_analysis_file,
     )
 
@@ -388,9 +388,7 @@ def test_partial_artifact_cleanup_preserves_canonical_file(
     tmp_path, analysis_file_resolver, caplog
 ):
     """The recording-writer wrapper refuses canonical files before lookup."""
-    from spyglass.spikesorting.v2._recording_nwb import (
-        _remove_partial_artifact,
-    )
+    from spyglass.spikesorting.v2._storage.nwb import _remove_partial_artifact
 
     canonical = tmp_path / "canonical.nwb"
     canonical.write_bytes(b"canonical artifact")
@@ -414,7 +412,7 @@ def test_units_writer_failure_cleans_staged_file_without_recording_schema(
     """A units writer's failure cleanup needs no recording table import."""
     import builtins
 
-    from spyglass.spikesorting.v2 import _units_nwb
+    from spyglass.spikesorting.v2._storage import units_nwb as _units_nwb
 
     staged = tmp_path / "units.nwb"
 
@@ -453,7 +451,7 @@ def test_analysis_cleanup_failure_preserves_populate_error(
     tmp_path, monkeypatch, analysis_file_resolver, caplog, failure
 ):
     """Cleanup failure is logged while the populate's original error escapes."""
-    from spyglass.spikesorting.v2._staged_outputs import (
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
         StagedOutputCleanupMixin,
     )
 

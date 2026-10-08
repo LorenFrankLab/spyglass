@@ -56,7 +56,9 @@ class _SignallingLock:
 @pytest.fixture
 def lock_requests(monkeypatch):
     """Swap Spyglass's SI metric lock for one that records requests."""
-    from spyglass.spikesorting.v2 import _si_metric_patches
+    from spyglass.spikesorting.v2._core import (
+        si_metric_patches as _si_metric_patches,
+    )
 
     lock = _SignallingLock()
     monkeypatch.setattr(_si_metric_patches, "SI_METRIC_STATE_LOCK", lock)
@@ -137,7 +139,7 @@ def test_concurrent_metric_computes_keep_their_own_defaults(
     import spikeinterface.metrics.quality.misc_metrics as mm
     from spikeinterface.metrics.quality import compute_quality_metrics
 
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         isolated_si_metric_defaults,
     )
 
@@ -220,7 +222,7 @@ def test_concurrent_si_warning_capture_is_attributed_to_its_own_evaluation(
     import spikeinterface.metrics.quality.misc_metrics as mm
     from spikeinterface.metrics.quality import compute_quality_metrics
 
-    from spyglass.spikesorting.v2._metric_curation import (
+    from spyglass.spikesorting.v2._curation.metrics import (
         escalate_si_metric_errors,
     )
 

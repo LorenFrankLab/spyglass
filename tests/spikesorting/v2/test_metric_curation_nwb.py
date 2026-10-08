@@ -15,7 +15,7 @@ import pandas as pd
 import pytest
 from pynwb import NWBHDF5IO, NWBFile
 
-from spyglass.spikesorting.v2._metric_curation_nwb import (
+from spyglass.spikesorting.v2._storage.metrics_nwb import (
     read_merge_suggestions,
     read_proposed_labels,
     read_quality_metrics,
@@ -139,7 +139,7 @@ def test_round_trip_preserves_template_columns(empty_nwb_path):
 
 def test_build_table_guards_nonscalar_column():
     """A non-scalar metric cell fails loudly instead of becoming NaN."""
-    from spyglass.spikesorting.v2._metric_curation_nwb import (
+    from spyglass.spikesorting.v2._storage.metrics_nwb import (
         build_quality_metrics_table,
     )
     from spyglass.spikesorting.v2.exceptions import (
@@ -162,7 +162,7 @@ def test_build_table_guards_nonscalar_column():
 
 def test_build_table_accepts_scalar_nan_and_rejects_one_element_array():
     """Scalar NaN is valid, but a length-one array is still non-scalar."""
-    from spyglass.spikesorting.v2._metric_curation_nwb import (
+    from spyglass.spikesorting.v2._storage.metrics_nwb import (
         build_quality_metrics_table,
     )
     from spyglass.spikesorting.v2.exceptions import (

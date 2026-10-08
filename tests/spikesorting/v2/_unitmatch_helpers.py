@@ -45,7 +45,7 @@ def reforge_selection(
     dict
         The inserted master row.
     """
-    from spyglass.spikesorting.v2._matcher_graph import input_set_hash
+    from spyglass.spikesorting.v2._matching.graph import input_set_hash
     from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
 
     master = (UnitMatchSelection & pk).fetch1()
@@ -107,7 +107,9 @@ def install_fixture_pairer(
     from pydantic import BaseModel, ConfigDict, Field
 
     from spyglass.spikesorting.v2 import matcher_protocol as mp
-    from spyglass.spikesorting.v2._waveform_bundles import WaveformInputPreparer
+    from spyglass.spikesorting.v2._matching.waveforms import (
+        WaveformInputPreparer,
+    )
     from spyglass.spikesorting.v2.matcher_protocol import (
         MatchPair,
         register_matcher,
@@ -126,7 +128,7 @@ def install_fixture_pairer(
 
     def _bundle_unit_ids(session_input) -> set[int]:
         lines = (
-            (Path(session_input.waveform_dir) / "cluster_group.tsv")
+            (Path(session_input.bundle_dir) / "cluster_group.tsv")
             .read_text()
             .splitlines()
         )
@@ -141,7 +143,7 @@ def install_fixture_pairer(
             if fed is not None:
                 fed.extend(
                     (
-                        Path(session_input.waveform_dir).name,
+                        Path(session_input.bundle_dir).name,
                         str(session_input.curation_key["sorting_id"]),
                     )
                     for session_input in session_inputs

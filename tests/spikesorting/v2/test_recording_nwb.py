@@ -522,7 +522,7 @@ def test_recording_semantic_round_trip(xz_roundtrip_session, monkeypatch):
     from spyglass.common import IntervalList
     from spyglass.common.common_lab import LabTeam
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _nwb_iterators as iterators_module
+    from spyglass.spikesorting.v2._storage import iterators as iterators_module
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2._params.preprocessing import (
         PreprocessingParamsSchema,
@@ -753,8 +753,8 @@ def test_specific_reference_physical_units_oracle(
     from spyglass.spikesorting.v2._params.preprocessing import (
         PreprocessingParamsSchema,
     )
-    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
-    from spyglass.spikesorting.v2._recording_preprocessing import (
+    from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._recording.preprocessing import (
         apply_spatial_preprocessing,
     )
     from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -851,7 +851,7 @@ def test_geometry_columns_are_created_when_absent(tmp_path):
     """
     import pynwb
 
-    from spyglass.spikesorting.v2._recording_nwb import (
+    from spyglass.spikesorting.v2._storage.nwb import (
         _ensure_relative_position_columns,
         _persist_channel_geometry,
     )
@@ -996,7 +996,7 @@ def test_geometry_is_persisted_at_double_precision(tmp_path):
     """
     import pynwb
 
-    from spyglass.spikesorting.v2._recording_nwb import (
+    from spyglass.spikesorting.v2._storage.nwb import (
         _persist_channel_geometry,
         read_recording_nwb,
     )
@@ -1126,7 +1126,7 @@ def test_artifact_path_reverified_outside_transactions_reused_inside(
     import datajoint as dj
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._recording_nwb import ensure_artifact_file
+    from spyglass.spikesorting.v2._storage.nwb import ensure_artifact_file
 
     artifact = tmp_path / "artifact.nwb"
     artifact.write_bytes(b"x" * 16)

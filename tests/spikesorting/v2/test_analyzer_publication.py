@@ -81,7 +81,7 @@ def test_duplicate_compute_keeps_winners_analyzer(
 def test_killed_publisher_staging_is_reclaimable(
     tmp_path, restore_custom_config, kill_point
 ):
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_path,
         cleanup_analyzer_staging,
         publish_analyzer_atomically,
@@ -101,7 +101,7 @@ def test_killed_publisher_staging_is_reclaimable(
 import os, signal, sys
 from pathlib import Path
 import datajoint as dj
-from spyglass.spikesorting.v2 import _analyzer_cache as cache
+from spyglass.spikesorting.v2._storage import analyzer_cache as cache
 dj.config.setdefault('custom', {})['spikesorting_v2_analyzer_dir'] = sys.argv[1]
 canonical = cache.analyzer_path(sys.argv[2], 'test')
 replace = os.replace
@@ -137,7 +137,7 @@ cache.publish_analyzer_atomically(canonical, build)
 
 
 def test_cleanup_keeps_active_attempt(tmp_path, restore_custom_config):
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         StagedAnalyzer,
         analyzer_path,
         cleanup_analyzer_staging,
@@ -159,7 +159,7 @@ def test_cleanup_keeps_active_attempt(tmp_path, restore_custom_config):
 def test_orphan_audit_reclaims_only_abandoned_staging(
     dj_conn, tmp_path, restore_custom_config, monkeypatch
 ):
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         StagedAnalyzer,
         analyzer_path,
     )

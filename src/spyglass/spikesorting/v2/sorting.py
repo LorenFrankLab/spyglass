@@ -35,33 +35,33 @@ from spyglass.spikesorting.v2._params.analyzer_waveform import (
     ANALYZER_WAVEFORM_SCHEMA_VERSION,
     AnalyzerWaveformParamsSchema,
 )
-from spyglass.spikesorting.v2._recipe_catalog import (
+from spyglass.spikesorting.v2._core.recipe_catalog import (
     sorter_default_contents,
     waveform_params_default_contents,
 )
-from spyglass.spikesorting.v2._sorting_analyzer import (
+from spyglass.spikesorting.v2._sorting.analyzer import (
     build_analyzer,
     load_or_rebuild_analyzer,
     rebuild_analyzer_folder,
 )
-from spyglass.spikesorting.v2._sorting_artifact_mask import (
+from spyglass.spikesorting.v2._sorting.artifact_mask import (
     apply_artifact_mask,
     sorting_statistics_spans,
 )
-from spyglass.spikesorting.v2._sorting_dispatch import (
+from spyglass.spikesorting.v2._sorting.dispatch import (
     remove_excess_spikes,
     run_clusterless_thresholder,
     run_si_sorter,
     sort_runtime_versions,
 )
-from spyglass.spikesorting.v2 import (
-    _analyzer_cache,
-    _sorter_parameters,
-    _sorting_fetch,
-    _sorting_selection_insert,
-    _sorting_units,
+from spyglass.spikesorting.v2._storage import analyzer_cache as _analyzer_cache
+from spyglass.spikesorting.v2._sorting import (
+    parameters as _sorter_parameters,
+    fetch as _sorting_fetch,
+    selection as _sorting_selection_insert,
+    units as _sorting_units,
 )
-from spyglass.spikesorting.v2._source_resolution import (
+from spyglass.spikesorting.v2._recording.source import (
     EffectiveSource,
     EffectiveTraces,
     SourceLineage,
@@ -70,11 +70,11 @@ from spyglass.spikesorting.v2._source_resolution import (
     effective_source_from_correction,
     sorting_parts_mismatch,
 )
-from spyglass.spikesorting.v2._staged_outputs import (
+from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
     StagedOutputs,
 )
-from spyglass.spikesorting.v2._units_nwb import (
+from spyglass.spikesorting.v2._storage.units_nwb import (
     STATISTICS_SPANS_FIELD,
     StoredUnits,
     abs_spike_times_dataframe,
@@ -97,14 +97,16 @@ from spyglass.spikesorting.v2.recording import Recording  # noqa: F401
 from spyglass.spikesorting.v2.session_group import (
     ConcatenatedRecording,  # noqa: F401
 )
-from spyglass.spikesorting.v2.utils import (
+from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
-    SourceResolution,
     _insert_parameter_rows,
     find_orphaned_masters,
-    resolve_effective_seed,
     split_leading_restrictions,
+)
+from spyglass.spikesorting.v2._recording.source import SourceResolution
+from spyglass.spikesorting.v2._core.job_config import resolve_effective_seed
+from spyglass.spikesorting.v2._recording.unit_metadata import (
     unit_brain_region_df,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
@@ -113,7 +115,7 @@ if TYPE_CHECKING:
     import pandas as pd
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._analyzer_cache import StagedAnalyzer
+    from spyglass.spikesorting.v2._storage.analyzer_cache import StagedAnalyzer
 
 #: The table owning each effective-traces kind's cached NWB artifact.
 _TRACE_TABLES = {
@@ -414,7 +416,7 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         """
         import spikeinterface.sorters as sis
 
-        from spyglass.spikesorting.v2._sorting_dispatch import (
+        from spyglass.spikesorting.v2._sorting.dispatch import (
             is_container_backend,
         )
 
@@ -484,7 +486,7 @@ def _reject_unsafe_waveform_params_name(row, _schema_cls) -> None:
     :func:`._analyzer_cache.assert_path_safe_waveform_params_name` (the owner of
     the analyzer-path policy), which the load path reuses.
     """
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         assert_path_safe_waveform_params_name,
     )
 
@@ -959,9 +961,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             Absolute path of the (present) file, for
             :func:`._source_resolution.read_effective_recording`.
         """
-        from spyglass.spikesorting.v2._recording_nwb import (
-            ensure_artifact_file,
-        )
+        from spyglass.spikesorting.v2._storage.nwb import ensure_artifact_file
 
         return ensure_artifact_file(
             _TRACE_TABLES[traces.kind],
@@ -1039,7 +1039,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         si.BaseRecording
             The persisted traces, annotated ``is_filtered=True``.
         """
-        from spyglass.spikesorting.v2._source_resolution import (
+        from spyglass.spikesorting.v2._recording.source import (
             read_persisted_traces,
         )
 
@@ -1310,7 +1310,7 @@ class Sorting(
         # unmasked: sorting_statistics_spans applies its artifact mask, whose
         # excluded ranges also feed the statistics spans. Concat and
         # motion-corrected traces are stored already masked.
-        from spyglass.spikesorting.v2._source_resolution import (
+        from spyglass.spikesorting.v2._recording.source import (
             read_persisted_traces,
         )
 
@@ -1339,7 +1339,9 @@ class Sorting(
 
         # One resolution feeds both the sorter and the analyzer build, so an
         # n_jobs override (dj.config or the row's job_kwargs) reaches both.
-        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+        from spyglass.spikesorting.v2._core.job_config import (
+            _resolved_job_kwargs,
+        )
 
         job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
         import spikeinterface as si
@@ -1374,7 +1376,7 @@ class Sorting(
         )
         sorting_obj = self._remove_excess_spikes(sorting_obj, recording)
 
-        from spyglass.spikesorting.v2._analyzer_cache import (
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
             StagedAnalyzer,
             analyzer_path,
         )
@@ -1533,7 +1535,7 @@ class Sorting(
         -------
         None
         """
-        from spyglass.spikesorting.v2._analyzer_cache import (
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_publication_transaction,
         )
 
@@ -1714,20 +1716,6 @@ class Sorting(
             abs_path, fs, lambda: recording_timestamps(rec_row)
         )
 
-    @staticmethod
-    def _recording_timestamps(recording_row):
-        """Return the full timestamp vector of the upstream Recording.
-
-        Thin delegator to :func:`._units_nwb.recording_timestamps`; kept
-        as a ``Sorting`` staticmethod because
-        ``test_recording_timestamps_reads_persisted_vector`` calls
-        ``Sorting._recording_timestamps`` directly. The IO (reading only
-        the persisted, gap-preserving ``ElectricalSeries`` timestamps for
-        the ``np.searchsorted`` readback) lives in the service
-        module.
-        """
-        return recording_timestamps(recording_row)
-
     def get_statistics_spans(self, key: dict) -> list[tuple[int, int]]:
         """Return the statistics spans persisted with a sort.
 
@@ -1874,13 +1862,13 @@ class Sorting(
             The extensions actually computed (already-present ones are
             skipped); empty when every requested extension already exists.
         """
-        from spyglass.spikesorting.v2._analyzer_cache import (
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
         )
-        from spyglass.spikesorting.v2._sorting_analyzer import (
-            ensure_extensions,
+        from spyglass.spikesorting.v2._sorting.analyzer import ensure_extensions
+        from spyglass.spikesorting.v2._core.job_config import (
+            _resolved_job_kwargs,
         )
-        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         sorting_id = (self & key).fetch1("sorting_id")
         sorter_job_kwargs = (
@@ -2090,7 +2078,7 @@ class Sorting(
                 target = target & restriction
             return target.delete(*args, safemode=safemode, **kwargs)
 
-        from spyglass.spikesorting.v2._analyzer_cache import (
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
             remove_analyzer_cache,
         )
@@ -2367,8 +2355,8 @@ class Sorting(
         recording,
         key,
         *,
-        sorter_row=None,
-        job_kwargs=None,
+        sorter_row,
+        job_kwargs,
         analyzer_folder=None,
         waveform_params=None,
         statistics_spans=None,
@@ -2380,8 +2368,8 @@ class Sorting(
         ``_rebuild_analyzer_folder`` call ``self._build_analyzer(...)`` and
         the v2 tests call it directly. The analyzer creation, seeded
         extension compute, zero-unit short-circuit, and partial-folder
-        cleanup -- plus the rebuild-only ``SorterParameters`` fallback
-        fetch -- live in the service module. ``waveform_params`` is the
+        cleanup live in the service module. All database inputs and execution
+        kwargs must be resolved before this call. ``waveform_params`` is the
         resolved analyzer-waveform params blob (window / subsample); ``None``
         is invalid and the service raises ``ValueError``.
         """

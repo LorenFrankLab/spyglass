@@ -86,7 +86,7 @@ def test_curation_source_enum_members():
     Pinning these members guards against a refactor dropping them, which would
     make a valid curation_source raise at the insert boundary.
     """
-    from spyglass.spikesorting.v2.utils import CurationSource
+    from spyglass.spikesorting.v2._core.enums import CurationSource
 
     for value in (
         "manual",

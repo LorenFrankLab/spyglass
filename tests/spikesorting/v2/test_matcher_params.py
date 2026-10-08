@@ -95,7 +95,7 @@ def test_bundle_compute_kwargs_seed_is_authoritative():
     the SI job kwargs (an ambient dj.config seed, or a leaked value) is stripped
     and IGNORED, never allowed to override the identity-bearing seed -- else the
     stored identity would disagree with the seed actually used."""
-    from spyglass.spikesorting.v2._waveform_bundles import (
+    from spyglass.spikesorting.v2._matching.waveforms import (
         _bundle_compute_kwargs,
     )
 
@@ -175,13 +175,12 @@ def test_bundle_params_reach_extract(monkeypatch):
     """The named bundle params and the sort's statistics spans reach
     extract_unitmatch_bundle in the matcher compute path -- the params are no
     longer silent function defaults."""
-    from spyglass.spikesorting.v2 import (
-        _sorting_analyzer,
-        _unitmatch_backend,
-        _units_nwb,
-        matcher_protocol,
-        unit_matching,
+    from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
+    from spyglass.spikesorting.v2._matching import (
+        unitmatch_backend as _unitmatch_backend,
     )
+    from spyglass.spikesorting.v2._storage import units_nwb as _units_nwb
+    from spyglass.spikesorting.v2 import matcher_protocol, unit_matching
     from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
 
     captured = []

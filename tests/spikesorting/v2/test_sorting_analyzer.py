@@ -54,7 +54,7 @@ def test_build_analyzer_rejects_coincident_contacts(tmp_path, monkeypatch):
     rather than surfacing probeinterface's bare uniqueness message from
     somewhere inside the analyzer build.
     """
-    from spyglass.spikesorting.v2 import _sorting_analyzer as analyzer_mod
+    from spyglass.spikesorting.v2._sorting import analyzer as analyzer_mod
 
     def _must_not_be_reached(*args, **kwargs):
         raise AssertionError(
@@ -101,7 +101,7 @@ def test_build_analyzer_accepts_distinct_contacts(tmp_path, monkeypatch):
     test above. ``create_sorting_analyzer`` is stubbed with a sentinel so
     this stays DB- and disk-free.
     """
-    from spyglass.spikesorting.v2 import _sorting_analyzer as analyzer_mod
+    from spyglass.spikesorting.v2._sorting import analyzer as analyzer_mod
 
     reached = {}
 
@@ -184,7 +184,7 @@ def test_noise_levels_unbiased_by_masking(
     Per channel, max relative error below 2% against the clean recording's
     exact MAD over all of its samples, via the display (unwhitened) recipe.
     """
-    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
     from tests.spikesorting.v2._masked_statistics_helpers import (
         exact_mad,
         masked_twin,
@@ -222,10 +222,8 @@ def test_noise_levels_extension_equals_cached_values(
     is also recomputed independently from the span samples of that same
     final recording.
     """
-    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        sample_span_data,
-    )
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting.artifact_mask import sample_span_data
     from tests.spikesorting.v2._masked_statistics_helpers import (
         SAMPLING_FREQUENCY,
         exact_mad,
@@ -290,7 +288,7 @@ def test_noise_levels_unmasked_match_spikeinterface(
     """
     from spikeinterface.core import get_noise_levels
 
-    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
     from tests.spikesorting.v2._masked_statistics_helpers import (
         numpy_recording,
     )
@@ -326,7 +324,7 @@ def _same(a, b):
 
 def _whitening_estimates(recording, spans, folder):
     """W and M the span-aware whitening applies."""
-    from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+    from spyglass.spikesorting.v2._sorting.dispatch import pinned_whiten
 
     segment = pinned_whiten(recording, random_seed=0, spans=spans)
     w, m = segment._recording_segments[0].W, segment._recording_segments[0].M
@@ -335,7 +333,7 @@ def _whitening_estimates(recording, spans, folder):
 
 def _analyzer_noise_estimates(recording, spans, folder):
     """``noise_levels`` of both analyzer recipes built with ``spans``."""
-    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
 
     out = {}
     sorting = si.NumpySorting.from_samples_and_labels(
@@ -365,11 +363,11 @@ def _analyzer_noise_estimates(recording, spans, folder):
 
 def _nn_noise_cluster_estimates(recording, spans, folder):
     """The nn noise-cluster draw, raw and on the span-whitened recording."""
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         _draw_noise_cluster,
         noise_cluster_spans,
     )
-    from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+    from spyglass.spikesorting.v2._sorting.dispatch import pinned_whiten
 
     whitened = pinned_whiten(recording, random_seed=0, spans=spans)
     out = {}
@@ -402,9 +400,7 @@ def test_estimates_invariant_to_excluded_sample_values(
     The excluded frames are overwritten with zeros, then +/-10 mV, then NaN;
     every span estimator must return bit-identical results across the three.
     """
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        statistics_spans,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import statistics_spans
     from tests.spikesorting.v2._masked_statistics_helpers import (
         excluded_ranges,
         numpy_recording,

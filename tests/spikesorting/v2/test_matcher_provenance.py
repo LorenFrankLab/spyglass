@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from spyglass.spikesorting.v2._matcher_provenance import matcher_provenance
+from spyglass.spikesorting.v2._matching.provenance import matcher_provenance
 
 
 class Backend:
@@ -54,7 +54,7 @@ def test_unknown_plugin_versions_are_not_guessed():
 
 
 def test_missing_spyglass_distribution_records_unknown(monkeypatch):
-    from spyglass.spikesorting.v2 import _matcher_provenance as provenance
+    from spyglass.spikesorting.v2._matching import provenance
 
     def missing(name):
         raise provenance.PackageNotFoundError(name)
@@ -90,14 +90,14 @@ def test_version_hook_failures_propagate():
 
 
 def test_matcher_asset_provenance_round_trips_in_pairs_nwb(tmp_path):
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         UNITMATCH_PROVENANCE,
         read_provenance_values,
     )
-    from spyglass.spikesorting.v2._unit_match_compute import (
+    from spyglass.spikesorting.v2._matching.compute import (
         unit_match_provenance_tables,
     )
-    from spyglass.spikesorting.v2._unitmatch_nwb import write_pairs_table
+    from spyglass.spikesorting.v2._storage.matches_nwb import write_pairs_table
     from tests.spikesorting.v2.test_nwb_provenance import _new_nwbfile, _write
 
     params = {"model_sha256": "b" * 64, "feature_definition": "templates-v3"}

@@ -64,7 +64,7 @@ def _restore_pipeline_preset_registry():
     non-shipped sorter row. Snapshot and restore around every test in this
     module so a notebook's in-session registrations stay local to it.
     """
-    from spyglass.spikesorting.v2 import _pipeline_presets as _pp
+    from spyglass.spikesorting.v2._orchestration import presets as _pp
 
     snapshot = dict(_pp._PIPELINE_PRESETS)
     try:

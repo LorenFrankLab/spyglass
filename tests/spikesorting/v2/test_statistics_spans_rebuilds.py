@@ -47,7 +47,7 @@ def masked_planted_sort(dj_conn, smoke_nwb):
     from spyglass.common.common_interval import IntervalList
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2._sorting_analyzer import (
+    from spyglass.spikesorting.v2._sorting.analyzer import (
         reconstruct_recording_and_sorting,
     )
     from spyglass.spikesorting.v2.artifact import (
@@ -172,7 +172,7 @@ def masked_planted_sort(dj_conn, smoke_nwb):
 
 
 def _drop_display_folder(sort):
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
 
     folder = analyzer_path(sort["sort_key"]["sorting_id"], sort["display_name"])
     shutil.rmtree(folder)
@@ -198,8 +198,10 @@ def test_curation_evaluation_builds_reuse_persisted_spans(
 ):
     """``CurationEvaluation`` rebuilds the cached analyzer (fast path) and
     builds merged temp analyzers from the sort's persisted spans."""
-    from spyglass.spikesorting.v2 import _sorting_analyzer as sa_mod
-    from spyglass.spikesorting.v2._analyzer_cache import load_analyzer_folder
+    from spyglass.spikesorting.v2._sorting import analyzer as sa_mod
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        load_analyzer_folder,
+    )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
@@ -277,7 +279,7 @@ def test_merged_curation_analyzer_reuses_persisted_spans(
     masked_planted_sort, tmp_path
 ):
     """``build_merged_analyzer`` estimates noise from the sort's spans."""
-    from spyglass.spikesorting.v2._curation_analyzer import (
+    from spyglass.spikesorting.v2._curation.analyzer import (
         build_merged_analyzer,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -358,7 +360,7 @@ def test_curation_recording_accessor_returns_unmasked_traces(
     The accessor serves the reusable preprocessed traces, while every analyzer
     rebuild reads them with the sort's artifact mask applied.
     """
-    from spyglass.spikesorting.v2._sorting_analyzer import (
+    from spyglass.spikesorting.v2._sorting.analyzer import (
         reconstruct_recording_and_sorting,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -394,7 +396,7 @@ def test_curation_recording_accessor_returns_unmasked_traces(
 @pytest.mark.slow
 def test_observed_duration_counts_only_unmasked_samples(masked_planted_sort):
     """The firing-rate denominator is the sort's retained sample duration."""
-    from spyglass.spikesorting.v2._pipeline_reporting import (
+    from spyglass.spikesorting.v2._orchestration.reporting import (
         _observed_duration_s,
     )
     from spyglass.spikesorting.v2.recording import Recording

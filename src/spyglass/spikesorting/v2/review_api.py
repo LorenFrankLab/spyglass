@@ -16,17 +16,17 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
-from spyglass.spikesorting.v2._curation_transforms import (
+from spyglass.spikesorting.v2._curation.transforms import (
     allocate_merged_unit_ids,
     validate_merge_groups,
 )
-from spyglass.spikesorting.v2._figpack_curation import (
+from spyglass.spikesorting.v2._review.annotations import (
     annotations_payload_hash,
     curation_annotations_to_labels_and_merges,
     unpack_display_config,
 )
-from spyglass.spikesorting.v2._lookup_validation import lossless_int
-from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
+from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
+from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
 from spyglass.spikesorting.v2.curation_api import (
     CurationRef,
     EvaluationResult,
@@ -46,7 +46,7 @@ from spyglass.spikesorting.v2.exceptions import (
 if TYPE_CHECKING:
     import pandas as pd
 
-    from spyglass.spikesorting.v2._review_notebook import ReviewCommitPanel
+    from spyglass.spikesorting.v2._review.notebook import ReviewCommitPanel
 
 ReviewStageState = Literal["computed", "reused", "complete"]
 
@@ -284,10 +284,10 @@ class FigPackReview:
         if self.is_hosted:
             url = self.uri
         else:
-            from spyglass.spikesorting.v2._review_delivery import (
+            from spyglass.spikesorting.v2._review.delivery import (
                 serve_review_bundle,
             )
-            from spyglass.spikesorting.v2._review_operations import (
+            from spyglass.spikesorting.v2._review.operations import (
                 ReviewOperationService,
             )
 
@@ -313,7 +313,7 @@ class FigPackReview:
 
     def result(self) -> CurationRef:
         """Read the completed browser review's final, explicitly verified curation."""
-        from spyglass.spikesorting.v2._review_operations import (
+        from spyglass.spikesorting.v2._review.operations import (
             committed_review_result,
         )
 
@@ -334,21 +334,19 @@ class FigPackReview:
         Without a window, the raster uses the review's overview budget. This
         inspection does not edit the draft or change evaluation settings.
         """
-        from spyglass.spikesorting.v2._curation_analyzer import (
+        from spyglass.spikesorting.v2._curation.analyzer import (
             curation_analyzer_with_extensions,
         )
-        from spyglass.spikesorting.v2._observation_io import (
+        from spyglass.spikesorting.v2._storage.observation_io import (
             cached_review_timeline,
             review_timeline,
         )
-        from spyglass.spikesorting.v2._review_inspection import inspection_view
-        from spyglass.spikesorting.v2._review_unit_properties import (
+        from spyglass.spikesorting.v2._review.inspection import inspection_view
+        from spyglass.spikesorting.v2._review.unit_properties import (
             review_unit_properties,
         )
-        from spyglass.spikesorting.v2._review_view import (
-            coerce_units_table_ids,
-        )
-        from spyglass.spikesorting.v2._visualization import (
+        from spyglass.spikesorting.v2._review.view import coerce_units_table_ids
+        from spyglass.spikesorting.v2._review.visualization import (
             DISPLAY_WIDGET_EXTENSIONS,
         )
         from spyglass.spikesorting.v2.figpack_curation import (
@@ -402,7 +400,7 @@ class FigPackReview:
                 ),
             )
             if include_traces:
-                from spyglass.spikesorting.v2._review_inspection import (
+                from spyglass.spikesorting.v2._review.inspection import (
                     add_trace_inspection,
                 )
 
@@ -419,7 +417,7 @@ class FigPackReview:
         Merge commits open the reevaluated child for verification. A no-change
         review has an explicit "Record reviewed" button.
         """
-        from spyglass.spikesorting.v2._review_notebook import ReviewCommitPanel
+        from spyglass.spikesorting.v2._review.notebook import ReviewCommitPanel
 
         return ReviewCommitPanel(self, open_browser=open_browser)
 

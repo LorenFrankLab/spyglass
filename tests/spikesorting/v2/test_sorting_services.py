@@ -29,7 +29,7 @@ def _rec(traces, fs=1000.0, gain=1.0, times=None):
 
 def test_clusterless_noise_levels_precedence():
     """Explicit noise_levels win; else uv->[1.0], mad->None."""
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         _clusterless_noise_levels,
     )
 
@@ -41,7 +41,7 @@ def test_clusterless_noise_levels_precedence():
 
 def test_apply_artifact_mask_rejects_malformed_valid_times():
     """The complement walker rejects inputs that would silently under-mask."""
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
     from spyglass.spikesorting.v2.exceptions import (
@@ -70,7 +70,7 @@ def test_apply_artifact_mask_rejects_nonmonotonic_recording_times():
     cheaply, without materializing the timestamp vector. This pins that the
     endpoint guard is wired into ``apply_artifact_mask`` (not only the pure
     ``_signal_math`` helpers)."""
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
 
@@ -85,9 +85,7 @@ def test_build_sorting_unit_rows_constructs_rows_from_peak_metadata():
     """One ``Sorting.Unit`` row per unit, carrying the peak channel's Electrode
     FK fields, the peak amplitude (as float), and the precomputed spike count,
     merged onto the base key."""
-    from spyglass.spikesorting.v2._sorting_units import (
-        build_sorting_unit_rows,
-    )
+    from spyglass.spikesorting.v2._sorting.units import build_sorting_unit_rows
 
     electrode_by_id = {
         10: {
@@ -138,9 +136,7 @@ def test_build_sorting_unit_rows_constructs_rows_from_peak_metadata():
 def test_build_sorting_unit_rows_rejects_peak_channel_outside_sort_group():
     """A unit whose peak channel is not in the sort group's electrode map is a
     channel-id mismatch -- raise rather than build an invalid Electrode FK."""
-    from spyglass.spikesorting.v2._sorting_units import (
-        build_sorting_unit_rows,
-    )
+    from spyglass.spikesorting.v2._sorting.units import build_sorting_unit_rows
 
     with pytest.raises(RuntimeError, match="not in sort group"):
         build_sorting_unit_rows(
@@ -158,9 +154,7 @@ def test_build_sorting_unit_rows_rejects_peak_channel_outside_sort_group():
 def test_build_sorting_unit_rows_raises_typed_error_on_non_integer_unit_id():
     """A sorter unit id that does not convert to int raises the typed
     NonIntegerUnitIDError (not a bare ValueError)."""
-    from spyglass.spikesorting.v2._sorting_units import (
-        build_sorting_unit_rows,
-    )
+    from spyglass.spikesorting.v2._sorting.units import build_sorting_unit_rows
     from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
 
     with pytest.raises(NonIntegerUnitIDError):
@@ -178,7 +172,7 @@ def test_build_sorting_unit_rows_raises_typed_error_on_non_integer_unit_id():
 
 def test_load_or_rebuild_analyzer_raises_zero_unit_without_path_io():
     """Zero-unit analyzer access fails before touching SI or cache paths."""
-    from spyglass.spikesorting.v2._sorting_analyzer import (
+    from spyglass.spikesorting.v2._sorting.analyzer import (
         load_or_rebuild_analyzer,
     )
     from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
@@ -203,8 +197,11 @@ def test_load_or_rebuild_analyzer_no_rebuild_raises_invalid_for_bad_folder(
 ):
     """An existing but unloadable analyzer folder is not treated as healthy."""
 
-    from spyglass.spikesorting.v2 import _analyzer_cache, _sorting_analyzer
-    from spyglass.spikesorting.v2._sorting_analyzer import (
+    from spyglass.spikesorting.v2._storage import (
+        analyzer_cache as _analyzer_cache,
+    )
+    from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
+    from spyglass.spikesorting.v2._sorting.analyzer import (
         load_or_rebuild_analyzer,
     )
     from spyglass.spikesorting.v2.exceptions import AnalyzerFolderInvalidError
@@ -252,7 +249,10 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2 import _analyzer_cache, _sorting_analyzer
+    from spyglass.spikesorting.v2._storage import (
+        analyzer_cache as _analyzer_cache,
+    )
+    from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
 
     folder = tmp_path / "bad.analyzer"
     folder.mkdir()

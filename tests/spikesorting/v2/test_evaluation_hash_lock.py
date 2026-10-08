@@ -18,11 +18,13 @@ def test_hash_reads_share_cache_generation(
 ):
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2 import _analyzer_cache as cache
-    from spyglass.spikesorting.v2 import _evaluation_analyzers as evaluation
-    from spyglass.spikesorting.v2 import _metric_curation_fetch as fetch
-    from spyglass.spikesorting.v2 import _recompute as hashing
-    from spyglass.spikesorting.v2 import _sorting_analyzer as builders
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
+    from spyglass.spikesorting.v2._curation import (
+        evaluation_analyzers as evaluation,
+    )
+    from spyglass.spikesorting.v2._curation import metric_fetch as fetch
+    from spyglass.spikesorting.v2._storage import recompute as hashing
+    from spyglass.spikesorting.v2._sorting import analyzer as builders
 
     sorting_id = uuid.uuid4()
     monkeypatch.setattr(cache, "analyzer_cache_root", lambda: tmp_path)

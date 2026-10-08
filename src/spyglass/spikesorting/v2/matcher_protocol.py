@@ -363,7 +363,7 @@ def register_matcher(
         )
     preparer_supplied = input_preparer is not None
     if input_preparer is None:
-        from spyglass.spikesorting.v2._waveform_bundles import (
+        from spyglass.spikesorting.v2._matching.waveforms import (
             WaveformInputPreparer,
         )
 
@@ -445,7 +445,9 @@ def register_default_matchers() -> None:
         # this module) and keeps the optional UnitMatchPy import lazy (the
         # backend only imports UnitMatchPy when its match() path
         # actually runs).
-        from spyglass.spikesorting.v2 import _unitmatch_backend
+        from spyglass.spikesorting.v2._matching import (
+            unitmatch_backend as _unitmatch_backend,
+        )
 
         _unitmatch_backend.register()
     finally:

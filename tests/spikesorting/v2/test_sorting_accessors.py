@@ -13,7 +13,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2._recipe_catalog import CORTEX_DISPLAY_WAVEFORMS
+from spyglass.spikesorting.v2._core.recipe_catalog import (
+    CORTEX_DISPLAY_WAVEFORMS,
+)
 from tests.spikesorting.v2._ingest_helpers import (
     _plant_concat_sorting_selection,
 )
@@ -160,7 +162,7 @@ def test_sorting_get_unit_brain_regions_concat_anchor_member_df(
     import pandas as pd
 
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2.utils import SourceResolution
+    from spyglass.spikesorting.v2._recording.source import SourceResolution
 
     template_unit = (Sorting.Unit & populated_sorting).fetch(as_dict=True)[0]
 
@@ -450,11 +452,11 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
         Sorting,
         SortingSelection,
     )
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-    from spyglass.spikesorting.v2._sorting_fetch import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._sorting.fetch import (
         fetch_unit_electrode_metadata,
     )
-    from spyglass.spikesorting.v2._sorting_units import (
+    from spyglass.spikesorting.v2._sorting.units import (
         build_unit_rows_from_analyzer,
     )
 

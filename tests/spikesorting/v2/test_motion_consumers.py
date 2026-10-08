@@ -233,7 +233,7 @@ def _without_sample_frames(patch):
     """Make every units file read back as the older layout (no stored sample
     frames): the sample-frame reader and the layout check both report the
     column absent, as they do for such a file."""
-    from spyglass.spikesorting.v2 import _units_nwb
+    from spyglass.spikesorting.v2._storage import units_nwb as _units_nwb
     from spyglass.spikesorting.v2 import sorting as sorting_module
 
     patch.setattr(
@@ -251,7 +251,7 @@ def _units_readbacks(sort_key, curation, selection):
     curated units ``CurationEvaluation.make_fetch`` resolves for its compute.
     Also returns those resolved units.
     """
-    from spyglass.spikesorting.v2._units_nwb import read_stored_units
+    from spyglass.spikesorting.v2._storage.units_nwb import read_stored_units
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -333,18 +333,20 @@ def test_all_consumers_resolve_selected_correction(
     import shutil
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import (
-        _pipeline_reporting,
-        _sorting_analyzer,
-        _source_resolution,
-        _unitmatch_backend,
-        matcher_protocol,
+    from spyglass.spikesorting.v2._orchestration import (
+        reporting as _pipeline_reporting,
     )
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-    from spyglass.spikesorting.v2._curation_analyzer import (
+    from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
+    from spyglass.spikesorting.v2._recording import source as _source_resolution
+    from spyglass.spikesorting.v2._matching import (
+        unitmatch_backend as _unitmatch_backend,
+    )
+    from spyglass.spikesorting.v2 import matcher_protocol
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._curation.analyzer import (
         _resolve_curation_analyzer,
     )
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         CURATION_EVALUATION_PROVENANCE,
         read_provenance_values,
     )
@@ -609,7 +611,7 @@ def test_curation_manifest_identity_changes_with_the_correction(
 ):
     """A curation analyzer manifest names the corrected recording's content
     as well as the source's, so it differs from the uncorrected sort's."""
-    from spyglass.spikesorting.v2._curation_analyzer import (
+    from spyglass.spikesorting.v2._curation.analyzer import (
         _source_artifact_hashes,
     )
     from spyglass.spikesorting.v2.recording import Recording
@@ -671,8 +673,11 @@ def test_unitmatch_records_the_waveform_traces(
     """A match run records, per input, whether its waveforms came from the
     source or from a corrected recording (and which)."""
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _unitmatch_backend, matcher_protocol
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._matching import (
+        unitmatch_backend as _unitmatch_backend,
+    )
+    from spyglass.spikesorting.v2 import matcher_protocol
+    from spyglass.spikesorting.v2._storage.provenance import (
         UNITMATCH_INPUTS,
         read_long_provenance,
     )
@@ -838,7 +843,7 @@ def test_resolver_rebuilds_a_missing_base_artifact(discontinuous_sources, kind):
     from pathlib import Path
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         load_effective_recording,
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
@@ -879,7 +884,7 @@ def test_corrected_concat_sort_end_to_end(
     count and member-join spans, hands its sorter the corrected traces, and
     its evaluation names the concatenation from the lineage."""
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         CURATION_EVALUATION_PROVENANCE,
         read_provenance_values,
     )
@@ -989,7 +994,7 @@ def test_unitmatch_bundle_of_a_corrected_sort(
     channel set and positions, not the source's (needs UnitMatchPy; the
     matching CI lane runs it)."""
     pytest.importorskip("UnitMatchPy")
-    from spyglass.spikesorting.v2._unitmatch_backend import (
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
         extract_unitmatch_bundle,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -1086,8 +1091,11 @@ def test_corrected_concat_bundle_keeps_windows_in_spans(
 
     from spikeinterface.core import analyzer_extension_core
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend, matcher_protocol
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._matching import (
+        unitmatch_backend as _unitmatch_backend,
+    )
+    from spyglass.spikesorting.v2 import matcher_protocol
+    from spyglass.spikesorting.v2._recording.source import (
         load_effective_recording,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -1311,7 +1319,7 @@ def test_corrected_sort_across_a_capped_gap_keeps_source_frames_and_times(
     gap."""
     from spyglass.common import IntervalList
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_times_and_sample_indices,
         recording_timestamps,
     )
@@ -1401,7 +1409,7 @@ def test_corrected_concat_split_into_members_conserves_spikes(
     it, shifted to member frames, with the member recording's own
     timestamps at those frames."""
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_times_and_sample_indices,
         recording_timestamps,
     )
@@ -1526,7 +1534,7 @@ def test_trace_accessors_have_one_meaning_each(
     the uncorrected sort and the sorting input for the corrected one. The
     UnitMatch bundle input is the sorting input."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2._sorting_analyzer import (
+    from spyglass.spikesorting.v2._sorting.analyzer import (
         read_canonical_recording,
     )
     from spyglass.spikesorting.v2.curation import CurationV2

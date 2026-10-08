@@ -220,7 +220,7 @@ def test_artifact_free_sorting_id_matches_recording_only_payload(
     fold: no ArtifactDetectionSource row participates, and the id is not
     aliased by the merge seam.
     """
-    from spyglass.spikesorting.v2._selection_identity import (
+    from spyglass.spikesorting.v2._core.selection_identity import (
         deterministic_id,
         sorting_identity_payload,
     )
@@ -564,7 +564,7 @@ def test_delete_and_insert_lock_the_same_detection_key(
     """
     import contextlib
 
-    import spyglass.spikesorting.v2._db_locking as db_locking
+    import spyglass.spikesorting.v2._core.db_locking as db_locking
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -640,8 +640,8 @@ def test_required_lock_failure_aborts_insert_and_delete(
     rather than a label. Simulated by patching the lock to raise, the same way a
     ``GET_LOCK`` timeout/error surfaces from ``required_advisory_lock``.
     """
-    import spyglass.spikesorting.v2._db_locking as db_locking
-    from spyglass.spikesorting.v2._db_locking import AdvisoryLockError
+    import spyglass.spikesorting.v2._core.db_locking as db_locking
+    from spyglass.spikesorting.v2._core.db_locking import AdvisoryLockError
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -711,8 +711,8 @@ def test_held_lock_blocks_insert_and_delete(ingested_recording, monkeypatch):
     """
     import datajoint as dj
 
-    import spyglass.spikesorting.v2._db_locking as db_locking
-    from spyglass.spikesorting.v2._db_locking import (
+    import spyglass.spikesorting.v2._core.db_locking as db_locking
+    from spyglass.spikesorting.v2._core.db_locking import (
         AdvisoryLockError,
         _lock_name,
     )

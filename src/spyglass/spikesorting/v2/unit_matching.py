@@ -47,29 +47,29 @@ import datajoint as dj
 
 from spyglass.common import Session  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
-from spyglass.spikesorting.v2 import (
-    _unit_match_compute,
-    _unit_match_fetch,
-    _unit_match_inputs,
-    _unit_match_readers,
+from spyglass.spikesorting.v2._matching import (
+    compute as _unit_match_compute,
+    fetch as _unit_match_fetch,
+    inputs as _unit_match_inputs,
+    readers as _unit_match_readers,
 )
-from spyglass.spikesorting.v2._staged_outputs import (
+from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
     StagedOutputs,
 )
-from spyglass.spikesorting.v2._unit_match_compute import (
+from spyglass.spikesorting.v2._matching.compute import (
     _input_recording_spike_counts,
 )
-from spyglass.spikesorting.v2._unit_match_fetch import (  # noqa: F401
+from spyglass.spikesorting.v2._matching.fetch import (
     _member_match_files,
     _member_waveform_traces,
 )
-from spyglass.spikesorting.v2._unit_match_inputs import (
-    _add_single_recording_frames,  # noqa: F401
+from spyglass.spikesorting.v2._matching.inputs import (
+    _add_single_recording_frames,
     _input_anchor_sort_group,
-    _resolve_match_input,  # noqa: F401
+    _resolve_match_input,
     _validate_member_curations,
-    _warn_clusterless_match_once,  # noqa: F401
+    _warn_clusterless_match_once,
     normalize_curation_choices,
 )
 from spyglass.spikesorting.v2.curation import CurationV2  # noqa: F401
@@ -78,7 +78,7 @@ from spyglass.spikesorting.v2.exceptions import (
     UnknownMatcherError,
 )
 from spyglass.spikesorting.v2.session_group import SessionGroup  # noqa: F401
-from spyglass.spikesorting.v2.utils import (
+from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
 )
@@ -211,8 +211,10 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             _get_matcher_schema,
             _registered_matchers,
         )
-        from spyglass.spikesorting.v2.utils import (
+        from spyglass.spikesorting.v2._core.table_integrity import (
             _insert_parameter_rows,
+        )
+        from spyglass.spikesorting.v2._core.lookup_validation import (
             validate_lookup_rows,
         )
 
@@ -618,7 +620,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         """
         if len(choices_by_input) < 2:
             return []
-        from spyglass.spikesorting.v2._matcher_graph import (
+        from spyglass.spikesorting.v2._matching.graph import (
             divergent_electrode_space_members,
         )
 
@@ -748,7 +750,9 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             """
             from collections.abc import Mapping
 
-            from spyglass.spikesorting.v2.utils import _insert_row_to_dict
+            from spyglass.spikesorting.v2._core.lookup_validation import (
+                _insert_row_to_dict,
+            )
 
             if isinstance(rows, Mapping):
                 rows = [rows]
@@ -765,7 +769,9 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         def _validate_pair_row(self, row, pinned_cache, seen_edges) -> None:
             """Reject a single ``Pair`` row outside the pinned curation universe."""
-            from spyglass.spikesorting.v2._lookup_validation import lossless_int
+            from spyglass.spikesorting.v2._core.lookup_validation import (
+                lossless_int,
+            )
             from spyglass.spikesorting.v2.exceptions import (
                 UnitMatchPairIntegrityError,
             )
@@ -978,10 +984,12 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """
         import spikeinterface as si
 
-        from spyglass.spikesorting.v2._matcher_provenance import (
+        from spyglass.spikesorting.v2._matching.provenance import (
             matcher_provenance,
         )
-        from spyglass.spikesorting.v2._unitmatch_nwb import write_pairs_table
+        from spyglass.spikesorting.v2._storage.matches_nwb import (
+            write_pairs_table,
+        )
         from spyglass.spikesorting.v2.matcher_protocol import (
             get_input_preparer,
             get_matcher,
@@ -1104,7 +1112,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
         call leaves that to its caller.
         """
-        from spyglass.spikesorting.v2._unitmatch_nwb import read_pairs
+        from spyglass.spikesorting.v2._storage.matches_nwb import read_pairs
 
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         # Use an explicit raise (not assert -- assert is stripped under
@@ -1166,7 +1174,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """Return the cross-session match pairs for one run as a DataFrame."""
         import pandas as pd
 
-        from spyglass.spikesorting.v2._unitmatch_nwb import read_pairs
+        from spyglass.spikesorting.v2._storage.matches_nwb import read_pairs
 
         row = (self & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])

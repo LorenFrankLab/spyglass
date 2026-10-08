@@ -45,12 +45,8 @@ def test_rebuild_refreshes_existing_analyzer_inventory(
     """Publishing a new folder retires and recreates its computed inventory."""
     from contextlib import nullcontext
 
-    from spyglass.spikesorting.v2 import (
-        _analyzer_cache as cache,
-    )
-    from spyglass.spikesorting.v2 import (
-        _sorting_analyzer as service,
-    )
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
+    from spyglass.spikesorting.v2._sorting import analyzer as service
     from spyglass.spikesorting.v2 import (
         recompute,
     )
@@ -63,6 +59,15 @@ def test_rebuild_refreshes_existing_analyzer_inventory(
     )
     monkeypatch.setattr(
         service, "fetch_waveform_params", lambda _name: {"purpose": "display"}
+    )
+    from spyglass.spikesorting.v2._sorting import fetch as _sorting_fetch
+
+    sorter_row = {"job_kwargs": {"random_seed": 7}}
+    job_kwargs = {"random_seed": 7, "n_jobs": 1}
+    monkeypatch.setattr(
+        _sorting_fetch,
+        "fetch_sorter_analyzer_inputs",
+        lambda _key: (sorter_row, job_kwargs),
     )
     monkeypatch.setattr(
         cache, "analyzer_path", lambda _sorting_id, _name: tmp_path / "cache"
@@ -93,6 +98,8 @@ def test_rebuild_refreshes_existing_analyzer_inventory(
 
         def _build_analyzer(self, **kwargs):
             assert kwargs["statistics_spans"] == [(0, 10), (10, 20)]
+            assert kwargs["sorter_row"] is sorter_row
+            assert kwargs["job_kwargs"] is job_kwargs
             events.append("build")
 
     service.rebuild_analyzer_folder(
@@ -122,7 +129,7 @@ def test_analyzer_seed_modes_classifies_seed_provenance():
     ``seed`` (random_spikes), a seed nested under ``random_slices_kwargs``
     (noise_levels), or ``"unseeded"`` when no seed is present -- so the manifest
     never silently implies a pinned seed for an extension that has none."""
-    from spyglass.spikesorting.v2._recompute import analyzer_seed_modes
+    from spyglass.spikesorting.v2._storage.recompute import analyzer_seed_modes
 
     analyzer = _FakeAnalyzer(
         {
@@ -155,7 +162,7 @@ def test_analyzer_seed_modes_classifies_seed_provenance():
 
 def test_legacy_noise_inventory_is_explicitly_unverifiable():
     """Legacy noise hashes never masquerade as corruption mismatches."""
-    from spyglass.spikesorting.v2._recompute import (
+    from spyglass.spikesorting.v2._storage.recompute import (
         analyzer_recompute_unverifiable_reason,
     )
 
@@ -185,7 +192,7 @@ def test_legacy_noise_inventory_is_explicitly_unverifiable():
 
 def test_analyzer_inventory_detects_rebuilt_and_legacy_storage():
     """Folder generations refresh cheaply, including pre-fingerprint rows."""
-    from spyglass.spikesorting.v2._recompute import (
+    from spyglass.spikesorting.v2._storage.recompute import (
         analyzer_inventory_storage_changed,
     )
 
@@ -214,7 +221,7 @@ def test_reclaimed_analyzer_folder_is_not_a_changed_generation():
     cascades the audit away) would erase the record and re-plan a rebuild. An
     absent folder with NO reclamation is still a real disappearance.
     """
-    from spyglass.spikesorting.v2._recompute import (
+    from spyglass.spikesorting.v2._storage.recompute import (
         analyzer_inventory_refresh_needed,
     )
 
@@ -257,7 +264,7 @@ def test_analyzer_role_hashes_covers_display_and_metric():
     through the metric analyzer undetected."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._recompute import (
+    from spyglass.spikesorting.v2._storage.recompute import (
         ANALYZER_CONTENT_HASH_PREFIX,
         analyzer_role_hashes,
         combined_hash,
@@ -312,7 +319,7 @@ def test_analyzer_role_hashes_covers_display_and_metric():
 
 
 def test_compare_hash_dicts_classifies_diffs():
-    from spyglass.spikesorting.v2._recompute import compare_hash_dicts
+    from spyglass.spikesorting.v2._storage.recompute import compare_hash_dicts
 
     matched, missing_old, missing_new, differing = compare_hash_dicts(
         {"a": "1", "b": "2", "c": "3"}, {"a": "1", "b": "X", "d": "4"}
@@ -324,7 +331,7 @@ def test_compare_hash_dicts_classifies_diffs():
 
 
 def test_compare_hash_dicts_all_equal_is_matched():
-    from spyglass.spikesorting.v2._recompute import compare_hash_dicts
+    from spyglass.spikesorting.v2._storage.recompute import compare_hash_dicts
 
     matched, mo, mn, diff = compare_hash_dicts({"a": "1"}, {"a": "1"})
     assert matched and not mo and not mn and not diff
@@ -335,7 +342,7 @@ def test_compare_hash_dicts_all_equal_is_matched():
 
 def test_env_matches_compatible_on_shared_namespaces():
     """A file is compatible when every namespace shared with the env agrees."""
-    from spyglass.spikesorting.v2._recompute import env_matches
+    from spyglass.spikesorting.v2._storage.recompute import env_matches
 
     env = {
         "core": "2.9.0",
@@ -348,7 +355,7 @@ def test_env_matches_compatible_on_shared_namespaces():
 
 def test_env_matches_incompatible_on_version_drift():
     """A drifted version on a shared namespace marks the file incompatible."""
-    from spyglass.spikesorting.v2._recompute import env_matches
+    from spyglass.spikesorting.v2._storage.recompute import env_matches
 
     env = {"core": "2.9.0", "hdmf-common": "1.8.0"}
     assert not env_matches({"core": "0.0.0-incompatible"}, env)
@@ -356,7 +363,7 @@ def test_env_matches_incompatible_on_version_drift():
 
 def test_env_matches_none_or_empty_deps_is_incompatible():
     """Deps absent at inventory time can't be confirmed -> incompatible."""
-    from spyglass.spikesorting.v2._recompute import env_matches
+    from spyglass.spikesorting.v2._storage.recompute import env_matches
 
     env = {"core": "2.9.0"}
     assert not env_matches(None, env)
@@ -367,7 +374,7 @@ def test_env_matches_ignores_namespaces_absent_from_env():
     """An extension embedded in the file but not registered in the live env
     (extensions register lazily) is NOT compared -- it never spuriously fails
     the gate, mirroring v1's lenient comparison."""
-    from spyglass.spikesorting.v2._recompute import env_matches
+    from spyglass.spikesorting.v2._storage.recompute import env_matches
 
     env = {"core": "2.9.0", "hdmf-common": "1.8.0"}
     file_deps = {"core": "2.9.0", "ndx-franklab-novela": "0.1.0"}
@@ -376,14 +383,16 @@ def test_env_matches_ignores_namespaces_absent_from_env():
 
 def test_env_matches_no_shared_namespace_is_incompatible():
     """No overlap with the env means nothing was verified -> incompatible."""
-    from spyglass.spikesorting.v2._recompute import env_matches
+    from spyglass.spikesorting.v2._storage.recompute import env_matches
 
     assert not env_matches({"ndx-only": "1.0.0"}, {"core": "2.9.0"})
 
 
 def test_current_env_namespaces_reports_core_stack():
     """The live-env reader returns the base NWB/HDMF namespace versions."""
-    from spyglass.spikesorting.v2._recompute import current_env_namespaces
+    from spyglass.spikesorting.v2._storage.recompute import (
+        current_env_namespaces,
+    )
 
     deps = current_env_namespaces()
     assert "core" in deps and deps["core"]
@@ -684,7 +693,7 @@ def test_sorting_analyzer_recompute_fetch_resolves_inputs_and_compute_needs_no_d
     ``make_compute`` rebuilds and hashes the analyzer from them with no DB
     access, matching the stored analyzer."""
     _assert_temp_base_dir()
-    from spyglass.spikesorting.v2._recompute import compare_hash_dicts
+    from spyglass.spikesorting.v2._storage.recompute import compare_hash_dicts
     from spyglass.spikesorting.v2.recompute import (
         AnalyzerRegenSource,
         SortingAnalyzerRecompute,
@@ -731,7 +740,7 @@ def test_analyzer_manifest_records_noise_levels_seed(
     reported "unseeded". noise_levels joins the recompute content set. The
     content-addressed analyzer_hash is derived from the extension content hashes
     ONLY, so the seed-mode provenance does not shift the recompute identity."""
-    from spyglass.spikesorting.v2._recompute import combined_hash
+    from spyglass.spikesorting.v2._storage.recompute import combined_hash
     from spyglass.spikesorting.v2.recompute import SortingAnalyzerVersions
 
     SortingAnalyzerVersions.populate(populated_sorting, reserve_jobs=False)
@@ -760,7 +769,7 @@ def test_sorting_analyzer_versions_fetch_pins_folder_and_compute_needs_no_db(
     """``make_fetch`` carries the unit count and the analyzer folder (so
     DataJoint's fetch-integrity check covers the sort), and ``make_compute``
     hashes that folder with no DB access, matching the populated row."""
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.recompute import SortingAnalyzerVersions
     from spyglass.spikesorting.v2.sorting import Sorting
     from tests.spikesorting.v2._tripart_helpers import (
@@ -826,7 +835,7 @@ def display_analyzer_folder(populated_sorting):
     """Resolve (building if needed) the sort's display analyzer folder, and
     restore it after the test -- the package-scoped sort's regeneratable cache
     is shared, so a test that deletes the folder must rebuild it on teardown."""
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sort_key = {"sorting_id": populated_sorting["sorting_id"]}
@@ -983,8 +992,8 @@ def test_recompute_metric_verify_independent_of_display_cache(
     leaves the display folder absent."""
     import shutil
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-    from spyglass.spikesorting.v2._recompute import compare_hash_dicts
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.recompute import compare_hash_dicts
     from spyglass.spikesorting.v2.recompute import (
         _recompute_analyzer_hashes,
         _resolve_analyzer_regen_inputs,
@@ -1158,7 +1167,7 @@ def test_recording_recompute_fetch_resolves_inputs_and_compute_only_stages(
     fresh rebuild; the fresh rebuild reproduces the stored content_hash."""
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2 import recompute as rc
-    from spyglass.spikesorting.v2._recompute import combined_hash
+    from spyglass.spikesorting.v2._storage.recompute import combined_hash
     from spyglass.spikesorting.v2.recording import Recording
     from tests.spikesorting.v2._tripart_helpers import (
         fetch_hash,
@@ -1504,8 +1513,8 @@ def test_analyzer_recompute_round_trip(
     """
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2 import recompute as rc
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         CORTEX_DISPLAY_WAVEFORMS,
     )
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -1538,7 +1547,9 @@ def test_analyzer_recompute_round_trip(
 
     import shutil
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_lock
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        analyzer_cache_lock,
+    )
 
     backup = tmp_path / "analyzer-before-reclamation"
     with analyzer_cache_lock(populated_sorting["sorting_id"]):

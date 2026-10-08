@@ -427,7 +427,9 @@ def test_unit_brain_region_df_empty_keeps_full_schema(dj_conn):
     empty and non-empty results share a shape.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.utils import unit_brain_region_df
+    from spyglass.spikesorting.v2._recording.unit_metadata import (
+        unit_brain_region_df,
+    )
 
     empty_units = CurationV2.Unit & "unit_id = -1"  # no unit has id -1
     df = unit_brain_region_df(empty_units, "single_session")
@@ -459,7 +461,7 @@ def test_curation_v2_all_units_labeled_noise(populated_sorting):
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
-    from spyglass.spikesorting.v2.utils import CurationLabel
+    from spyglass.spikesorting.v2._core.enums import CurationLabel
 
     _clear_curations(populated_sorting)
 
@@ -512,7 +514,7 @@ def test_curation_v2_stages_empty_units_nwb_on_zero_kept_units(
     natural way to hit it -- a sorting with zero units -- is
     rejected upstream by ``Sorting.make``).
     """
-    from spyglass.spikesorting.v2 import _curation_plan
+    from spyglass.spikesorting.v2._curation import plan as _curation_plan
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
@@ -1045,7 +1047,7 @@ def test_get_analyzer_accepts_non_sorting_id_restriction(populated_sorting):
     assert analyzer.get_num_units() == int(n_units)
 
 
-def test_insert_curation_rejects_missing_sorting_id():
+def test_insert_curation_rejects_missing_sorting_id(dj_conn):
     """A ``sorting_id`` not in ``Sorting`` raises a clear ValueError.
 
     Translates what would be a raw FK IntegrityError into a "populate Sorting
@@ -1135,7 +1137,7 @@ def test_curation_get_unit_brain_regions_concat_anchor_member_df(
         Sorting,
         SortingSelection,
     )
-    from spyglass.spikesorting.v2.utils import SourceResolution
+    from spyglass.spikesorting.v2._recording.source import SourceResolution
 
     template_unit = (Sorting.Unit & populated_sorting).fetch(as_dict=True)[0]
     # CurationV2.Unit carries the same Electrode FK + amplitude/spike columns

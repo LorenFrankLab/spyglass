@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from spyglass.spikesorting.v2.utils import write_buffer_gb
+from spyglass.spikesorting.v2._storage.metadata import write_buffer_gb
 
 
 def _buffered_seconds(gb, n_channels, fs=30000.0, itemsize=8):

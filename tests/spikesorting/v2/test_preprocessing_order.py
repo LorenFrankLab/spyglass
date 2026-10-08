@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 import spikeinterface.preprocessing as sip
 
-from spyglass.spikesorting.v2._recording_preprocessing import (
+from spyglass.spikesorting.v2._recording.preprocessing import (
     apply_spatial_preprocessing,
     apply_temporal_preprocessing,
 )

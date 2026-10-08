@@ -320,7 +320,7 @@ def test_rebuild_refuses_on_content_drift(populated_recording, monkeypatch):
     raises ``RecordingContentDriftError``; the canonical slot is NOT written
     and the checksum is NOT refreshed (drifted bytes are never served)."""
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _recording_fingerprint as fp_mod
+    from spyglass.spikesorting.v2._recording import fingerprint as fp_mod
     from spyglass.spikesorting.v2.exceptions import (
         RecordingContentDriftError,
     )
@@ -693,7 +693,7 @@ def test_fetch_sort_group_probe_info_stable_order(
 
     from spyglass.common.common_device import Probe
     from spyglass.common.common_ephys import Electrode
-    from spyglass.spikesorting.v2._recording_geometry import (
+    from spyglass.spikesorting.v2._recording.geometry import (
         fetch_sort_group_probe_info,
     )
     from spyglass.spikesorting.v2.recording import SortGroupV2
@@ -770,7 +770,7 @@ def test_fetch_sort_group_probe_info_stable_order(
 
 @pytest.mark.slow
 def test_recording_timestamps_reads_persisted_vector(tmp_path, dj_conn):
-    """``Sorting._recording_timestamps`` returns the upstream Recording's
+    """``recording_timestamps`` returns the upstream Recording's
     actual persisted timestamp vector (first value non-zero), not a
     hardcoded/affine grid from 0.0.
 
@@ -789,7 +789,7 @@ def test_recording_timestamps_reads_persisted_vector(tmp_path, dj_conn):
     from unittest.mock import patch
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._storage.units_nwb import recording_timestamps
 
     fs = 30_000.0
     t0 = 12345.6
@@ -834,14 +834,14 @@ def test_recording_timestamps_reads_persisted_vector(tmp_path, dj_conn):
     with patch.object(
         AnalysisNwbfile, "get_abs_path", return_value=str(nwb_path)
     ):
-        recovered = Sorting._recording_timestamps(fake_row)
+        recovered = recording_timestamps(fake_row)
 
     assert len(recovered) == n_samples, (
-        f"_recording_timestamps returned {len(recovered)} samples; "
+        f"recording_timestamps returned {len(recovered)} samples; "
         f"expected the full {n_samples}-sample vector."
     )
     assert recovered[0] == pytest.approx(t0, abs=1e-6), (
-        f"_recording_timestamps[0] returned {recovered[0]}; expected "
+        f"recording_timestamps[0] returned {recovered[0]}; expected "
         f"{t0}. The v1-era t_start=0 hardcode would silently pass on "
         "t=0 fixtures but break on real session recordings that start "
         "mid-day."
@@ -1474,8 +1474,8 @@ def test_content_hash_is_fingerprint_aggregate(populated_recording):
     fingerprint over the persisted file and assert the stored value matches.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._recompute import combined_hash
-    from spyglass.spikesorting.v2._recording_fingerprint import (
+    from spyglass.spikesorting.v2._storage.recompute import combined_hash
+    from spyglass.spikesorting.v2._recording.fingerprint import (
         recording_content_fingerprint,
     )
     from spyglass.spikesorting.v2.recording import (
@@ -1736,8 +1736,8 @@ def test_recording_fresh_write_cleanup_unlinks_staged_file(
     from spyglass.common import IntervalList  # noqa: F401
     from spyglass.common.common_lab import LabTeam
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _recording_nwb
-    from spyglass.spikesorting.v2 import utils as utils_mod
+    from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
+    from spyglass.spikesorting.v2._core import signal_math as utils_mod
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
         Recording,
@@ -1791,7 +1791,7 @@ def test_recording_fresh_write_cleanup_unlinks_staged_file(
         utils_mod, "_get_recording_timestamps", _raise_after_write
     )
     # The artifact pipeline (``_recording_nwb.compute_recording_artifact``)
-    # imports the symbol at call time from utils, so patching the utils module
+    # imports the symbol at call time from its owner, so patching that module
     # is sufficient; guard against a module-level rebind.
     monkeypatch.setattr(
         _recording_nwb,
@@ -1899,7 +1899,7 @@ def test_recording_rebuild_path_keeps_existing_file_on_failure(
         AnalysisNwbfile,
         Nwbfile,
     )
-    from spyglass.spikesorting.v2 import utils as utils_mod
+    from spyglass.spikesorting.v2._core import signal_math as utils_mod
     from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -2059,7 +2059,7 @@ def test_raw_source_series_pinned_to_raw_object_id(
 
     from tests.spikesorting.v2._ingest_helpers import write_two_eseries_nwb
 
-    from spyglass.spikesorting.v2 import _recording_nwb
+    from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
     from spyglass.spikesorting.v2.recording import Recording
 
     path = tmp_path / "two_eseries.nwb"
@@ -2117,7 +2117,7 @@ def test_inplace_writer_does_not_unlink_canonical_on_failure(
     import pathlib
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _recording_nwb as rn
+    from spyglass.spikesorting.v2._storage import nwb as rn
 
     monkeypatch.setattr(
         AnalysisNwbfile,
@@ -2166,8 +2166,8 @@ def test_compute_artifact_filters_before_restriction(recording_selection_key):
 
     from spyglass.common.common_interval import Interval
     from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._recording.restriction import (
         _consolidate_regular_intervals,
         _recording_start_time,
         select_sort_group_channels,
@@ -2347,7 +2347,7 @@ def test_compute_artifact_normalizes_on_the_retained_contacts(
     import numpy as np
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
     from spyglass.spikesorting.v2.recording import (
         _ELECTRICAL_SERIES_PATH,
         Recording,

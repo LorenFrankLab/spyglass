@@ -94,7 +94,7 @@ def test_development_manifest_is_development_only():
 def test_development_recipes_are_the_shipped_rows_with_a_case_seed():
     """The DREDge recipes are the shipped estimation rows (the manifest sets
     only the noise seed) and every interpolation is a shipped row."""
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         motion_estimation_default_contents,
         motion_interpolation_default_contents,
     )
@@ -126,7 +126,7 @@ def test_held_out_manifest_tests_the_shipped_rows():
     """The committed held-out manifest is held-out only, gated, pins a
     harness, and its DREDge recipes are the shipped estimation rows with
     their noise seed."""
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         motion_estimation_default_contents,
     )
 
@@ -150,6 +150,46 @@ def test_held_out_manifest_tests_the_shipped_rows():
             **manifest.recipes[recipe].estimation,
             "noise_levels_seed": manifest.noise_levels_seed,
         }
+
+
+def test_held_out_manifest_pins_the_current_harness_bytes():
+    """A real held-out run can use this checkout's exact harness files."""
+    manifest = load_manifest(HELD_OUT_MANIFEST)
+    fingerprint = harness_fingerprint()
+    assert manifest.harness.files == fingerprint["files"]
+    check_harness_pin(manifest, fingerprint)
+
+
+@pytest.mark.parametrize(
+    "filename", ["_motion_acceptance_run.py", "_motion_fixtures.py"]
+)
+def test_acceptance_harness_imports_resolve_without_legacy_paths(filename):
+    """Every lazy production import resolves before an expensive case runs."""
+    import ast
+    from importlib import import_module
+
+    prefixes = (
+        "spyglass.spikesorting.v2._motion.",
+        "spyglass.spikesorting.v2._recording.",
+        "spyglass.spikesorting.v2._sorting.",
+        "spyglass.spikesorting.v2._core.",
+        "spyglass.spikesorting.v2._params.",
+    )
+    imports = [
+        node
+        for node in ast.walk(
+            ast.parse(Path(__file__).with_name(filename).read_text())
+        )
+        if isinstance(node, ast.ImportFrom)
+        and node.module
+        and node.module.startswith("spyglass.spikesorting.v2.")
+    ]
+    assert imports
+    for node in imports:
+        assert node.module.startswith(prefixes), node.module
+        module = import_module(node.module)
+        for name in node.names:
+            assert hasattr(module, name.name), f"{node.module}.{name.name}"
 
 
 _GATES = {

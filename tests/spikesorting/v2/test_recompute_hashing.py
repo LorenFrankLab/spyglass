@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2 import _recompute as hashes
+from spyglass.spikesorting.v2._storage import recompute as hashes
 
 
 class _Analyzer:

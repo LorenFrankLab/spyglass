@@ -219,7 +219,7 @@ def test_drift_estimate_survives_peaks_sharing_a_frame(
     from spikeinterface.preprocessing.motion import motion_options_preset
     from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
-    from spyglass.spikesorting.v2 import _recording_nwb
+    from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
     from spyglass.spikesorting.v2.recording import DriftEstimate
     from tests.spikesorting.v2._motion_fixtures import (
         hdf5_timed_recording_with_shared_peak_frame,

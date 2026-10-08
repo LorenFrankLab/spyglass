@@ -52,7 +52,7 @@ def _serializable_recording(n_channels=4, duration=1.0, fs=30_000.0):
     ],
 )
 def test_mask_rejects_nonfinite(valid_times):
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
 
@@ -68,7 +68,7 @@ def test_mask_rejects_nonfinite(valid_times):
     ],
 )
 def test_mask_rejects_out_of_envelope(valid_times):
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
 
@@ -88,7 +88,7 @@ def test_mask_rejects_multi_segment():
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
 
@@ -106,7 +106,7 @@ def test_mask_rejects_multi_segment():
 
 def test_mask_accepts_in_envelope_finite_times():
     """A finite, in-envelope mask still works (the guards don't over-reject)."""
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
 
@@ -162,7 +162,7 @@ def test_masked_recording_survives_run_sorter_serialization(tmp_path):
         SilencedPeriodsRecording,
     )
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
 
@@ -281,7 +281,7 @@ def _mixture_mad(weights_sigmas, *, lo=0.0, hi=50.0, iterations=200):
 
 
 def test_complement_frame_ranges_basic():
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         complement_frame_ranges,
     )
 
@@ -293,7 +293,7 @@ def test_complement_frame_ranges_basic():
 
 
 def test_complement_frame_ranges_merges_overlapping_and_unsorted():
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         complement_frame_ranges,
     )
 
@@ -308,7 +308,7 @@ def test_complement_frame_ranges_merges_overlapping_and_unsorted():
 
 
 def test_complement_frame_ranges_empty_excluded():
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         complement_frame_ranges,
     )
 
@@ -316,7 +316,7 @@ def test_complement_frame_ranges_empty_excluded():
 
 
 def test_boundary_spans_from_timestamps_splits_at_gaps():
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         boundary_spans_from_timestamps,
     )
 
@@ -331,7 +331,7 @@ def test_boundary_spans_from_timestamps_splits_at_gaps():
 def test_boundary_spans_from_timestamps_continuous_is_single_span():
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         boundary_spans_from_timestamps,
     )
 
@@ -344,7 +344,7 @@ def test_boundary_spans_from_timestamps_continuous_is_single_span():
 def test_concat_continuity_offsets_members():
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._concat_recording import concat_continuity
+    from spyglass.spikesorting.v2._recording.concat import concat_continuity
 
     member0 = si.NumpyRecording(
         [np.zeros((100, 2), dtype="float32")], sampling_frequency=1000.0
@@ -355,9 +355,7 @@ def test_concat_continuity_offsets_members():
 
 
 def test_statistics_spans_intersect_boundaries_and_artifacts():
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        statistics_spans,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import statistics_spans
 
     boundary = [(0, 500), (500, 1000)]
     assert statistics_spans(1000, [(450, 550)], boundary) == [
@@ -367,27 +365,21 @@ def test_statistics_spans_intersect_boundaries_and_artifacts():
 
 
 def test_statistics_spans_keeps_adjacent_boundary_spans_unmerged():
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        statistics_spans,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import statistics_spans
 
     boundary = [(0, 500), (500, 1000)]
     assert statistics_spans(1000, [], boundary) == [(0, 500), (500, 1000)]
 
 
 def test_statistics_spans_all_excluded_raises():
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        statistics_spans,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import statistics_spans
 
     with pytest.raises(ValueError, match="no artifact-free samples"):
         statistics_spans(1000, [(0, 1000)], [(0, 1000)])
 
 
 def test_statistics_spans_logs_masked_fraction_and_span_count(caplog):
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        statistics_spans,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import statistics_spans
 
     with caplog.at_level("INFO", logger="spyglass"):
         spans = statistics_spans(1000, [(450, 550)], [(0, 500), (500, 1000)])
@@ -398,7 +390,7 @@ def test_statistics_spans_logs_masked_fraction_and_span_count(caplog):
 
 
 def test_spans_cover_recording():
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         spans_cover_recording,
     )
 
@@ -409,9 +401,7 @@ def test_spans_cover_recording():
 
 
 def test_sample_span_data_never_crosses_a_span_boundary():
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        sample_span_data,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import sample_span_data
 
     rec = _frame_indexed_recording(1000)
     spans = [(0, 300), (600, 1000)]
@@ -439,9 +429,7 @@ def test_sample_span_data_uses_short_spans():
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        sample_span_data,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import sample_span_data
 
     fs = 1000.0
     sigma = 3.5
@@ -478,9 +466,7 @@ def test_sample_span_data_uses_short_spans():
 
 
 def test_sample_span_data_weights_by_length():
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        sample_span_data,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import sample_span_data
 
     rec = _frame_indexed_recording(1000)
     spans = [(0, 900), (900, 1000)]
@@ -502,9 +488,7 @@ def test_sample_span_data_weights_by_length():
 
 
 def test_sample_span_data_budget_exceeds_valid_data():
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        sample_span_data,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import sample_span_data
 
     rec = _frame_indexed_recording(9000)
     spans = [(0, 5000), (5000, 8000)]
@@ -526,9 +510,7 @@ def test_sample_span_data_budget_exceeds_valid_data():
 def test_sample_span_data_exact_quotas_heterogeneous_noise():
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        sample_span_data,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import sample_span_data
 
     # A higher fs keeps the 9 s / 100 ms durations exact while giving the
     # empirical MAD estimator enough samples for a tight (<2%) comparison
@@ -580,7 +562,7 @@ def test_sample_span_data_exact_quotas_heterogeneous_noise():
 
 
 def test_snippet_sampler_respects_length_per_snippet():
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         sample_span_snippet_starts,
     )
 
@@ -607,7 +589,7 @@ def test_snippet_sampler_respects_length_per_snippet():
 def test_no_piece_crosses_selection_join_when_unmasked():
     from spikeinterface.core.recording_tools import get_random_recording_slices
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         boundary_spans_from_timestamps,
         sample_span_data,
         sample_span_snippet_starts,
@@ -664,9 +646,7 @@ def test_sample_span_data_single_full_span_matches_si_chunks():
     import spikeinterface as si
     from spikeinterface.core.recording_tools import get_random_data_chunks
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        sample_span_data,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import sample_span_data
 
     fs = 1000.0
     n = 50_000
@@ -693,7 +673,7 @@ def test_sample_span_data_single_full_span_matches_si_chunks():
 def test_apply_artifact_mask_returns_ranges_matching_silenced_samples():
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
         artifact_frame_ranges,
     )
@@ -740,7 +720,7 @@ def _corrected_row(spans, n_samples=2000):
 
 
 def _corrected_spans(recording, row, **overrides):
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         corrected_statistics_spans,
     )
 
@@ -836,7 +816,7 @@ def test_silenced_samples_read_zero_microvolts_on_an_offset_source():
     offset, so its stored zero is not 0 uV. Silencing must leave the masked
     samples at 0 uV (not at the offset voltage) and every other sample at
     its own voltage."""
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         silence_frame_ranges,
     )
 
@@ -875,7 +855,7 @@ def test_zero_offset_sources_are_silenced_in_their_stored_units(dtype, gain):
     import spikeinterface as si
     import spikeinterface.preprocessing as sip
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         silence_frame_ranges,
     )
 

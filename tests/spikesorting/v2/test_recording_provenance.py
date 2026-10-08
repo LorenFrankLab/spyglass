@@ -53,7 +53,7 @@ def test_filtering_description_reflects_actual_steps():
     from spyglass.spikesorting.v2._params.preprocessing import (
         BandpassFilterParams,
     )
-    from spyglass.spikesorting.v2._recording_preprocessing import (
+    from spyglass.spikesorting.v2._recording.preprocessing import (
         filtering_description,
     )
 
@@ -104,7 +104,7 @@ def test_recording_nwb_carries_source_provenance(populated_sorting):
 
     from spyglass.common import Raw
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         RECORDING_PROVENANCE,
         read_provenance_values,
     )
@@ -191,7 +191,7 @@ def test_obs_intervals_recorded_windows_fallback(populated_sorting):
         RecordingSelection,
     )
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2._artifacts.naming import (
         artifact_detection_interval_list_name,
     )
 
@@ -285,7 +285,7 @@ def test_channel_name_resolution_path_real_nwb(
         _add_probe_and_electrodes,
         tetrode_probe_layout,
     )
-    from spyglass.spikesorting.v2._recording_geometry import (
+    from spyglass.spikesorting.v2._recording.geometry import (
         spikeinterface_channel_ids,
     )
 
@@ -382,7 +382,7 @@ def test_channel_name_maps_by_electrode_id_not_row(dj_conn, tmp_path):
     12 / row 10 (out of range) instead of the rows holding electrode ids 12
     and 10. Requesting ids ``[12, 10]`` must return their own channel names.
     """
-    from spyglass.spikesorting.v2._recording_geometry import (
+    from spyglass.spikesorting.v2._recording.geometry import (
         spikeinterface_channel_ids,
     )
 
@@ -410,7 +410,7 @@ def test_missing_electrode_id_raises(dj_conn, tmp_path):
     for the absent ids 1 and 2 (a wrong-channel mapping with no error). The
     id->row mapping has no entry for those ids and must raise.
     """
-    from spyglass.spikesorting.v2._recording_geometry import (
+    from spyglass.spikesorting.v2._recording.geometry import (
         spikeinterface_channel_ids,
     )
 
@@ -437,7 +437,7 @@ def test_channel_selection_carries_correct_traces(dj_conn, tmp_path):
     """
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         select_sort_group_channels,
     )
 

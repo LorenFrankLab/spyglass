@@ -55,7 +55,7 @@ def test_patched_nn_noise_overlap_is_finite_on_sparse_many_channel(
     channel exceeds the sparse channel count it raises IndexError (swallowed as
     NaN by SI's per-unit ``except``). The fix sparsifies the median first.
     """
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         _nn_noise_overlap_sparse_fixed,
     )
 
@@ -69,7 +69,7 @@ def test_patch_is_idempotent_and_installs_the_fix():
     no-op when applied twice."""
     import spikeinterface.metrics.quality.pca_metrics as pm
 
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         _nn_noise_overlap_sparse_fixed,
         patch_nn_noise_overlap_sparsity,
     )
@@ -111,7 +111,7 @@ def _masked_frame_indexed_recording():
     """
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         complement_frame_ranges,
         statistics_spans,
     )
@@ -164,7 +164,7 @@ def test_nn_noise_cluster_excludes_masked_samples():
     own draw on the same recording is shown to hit excluded frames, so the
     fixture can tell the two apart.
     """
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         _draw_noise_cluster,
         noise_cluster_spans,
     )
@@ -206,7 +206,7 @@ def test_nn_noise_cluster_excludes_masked_samples():
 @pytest.mark.parametrize("cover", ["none", "whole_recording"])
 def test_nn_noise_cluster_unchanged_when_spans_cover_recording(cover):
     """No spans, or one span over the recording, is SI's own draw exactly."""
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         _draw_noise_cluster,
         noise_cluster_spans,
     )
@@ -230,7 +230,7 @@ def test_nn_noise_cluster_warns_when_no_span_fits_a_snippet(caplog):
     """No span long enough for one snippet: a warning names the snippet
     length and the longest span, then the error propagates (SI's caller
     turns it into a silent NaN, so the warning is the only trace)."""
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         _draw_noise_cluster,
         noise_cluster_spans,
     )
@@ -255,7 +255,7 @@ def test_nn_noise_cluster_warns_when_no_span_fits_a_snippet(caplog):
 
 def test_noise_cluster_spans_reset_on_exit_and_on_error():
     """The spans are visible only inside the block, and reset on an error."""
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         _NOISE_CLUSTER_SPANS,
         noise_cluster_spans,
     )
@@ -307,14 +307,12 @@ def _nn_noise_overlap_by_fill(small_ground_truth):
     import spikeinterface as si
     from spikeinterface.metrics.quality import compute_quality_metrics
 
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         noise_cluster_spans,
         patch_nn_noise_overlap_sparsity,
     )
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        statistics_spans,
-    )
-    from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+    from spyglass.spikesorting.v2._sorting.artifact_mask import statistics_spans
+    from spyglass.spikesorting.v2._sorting.dispatch import pinned_whiten
     from tests.spikesorting.v2._masked_statistics_helpers import (
         numpy_recording,
     )
@@ -446,11 +444,11 @@ def sd_ratio_twins():
     import spikeinterface as si
     from probeinterface import generate_linear_probe
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         silence_frame_ranges,
         statistics_spans,
     )
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         cache_span_noise_levels,
     )
     from tests.spikesorting.v2._masked_statistics_helpers import (
@@ -533,7 +531,7 @@ def test_sd_ratio_patch_replaces_the_dispatched_metric_function():
         ComputeQualityMetrics,
     )
 
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         _sd_ratio_statistics_spans,
         patch_sd_ratio_statistics_spans,
     )
@@ -550,7 +548,7 @@ def test_sd_ratio_patch_replaces_the_dispatched_metric_function():
 @pytest.mark.parametrize("cover", ["none", "whole_recording"])
 def test_sd_ratio_unchanged_when_spans_cover_recording(sd_ratio_twins, cover):
     """No spans, or one span over the recording, is SI's value bit for bit."""
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         _sd_ratio_statistics_spans,
         noise_cluster_spans,
     )
@@ -570,7 +568,7 @@ def test_template_correction_reproduces_spikeinterface(sd_ratio_twins):
     applied to SI's uncorrected ratio reproduces SI's corrected ratio, so
     the noise level, extremum channel and template it reads are SI's.
     """
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         _template_corrected_sd_ratio,
     )
 
@@ -591,7 +589,7 @@ def test_sd_ratio_on_masked_sort_matches_clean_twin(sd_ratio_twins):
     """
     from spikeinterface.metrics.quality import compute_quality_metrics
 
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         noise_cluster_spans,
         patch_sd_ratio_statistics_spans,
     )

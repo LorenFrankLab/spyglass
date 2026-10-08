@@ -313,7 +313,9 @@ def test_detect_artifacts_recovers_planted_interval_times():
 def test_spike_times_to_frames_clamp_vs_raise_boundary():
     """Within ~2 sample periods past the end -> clamp (FP rounding); beyond ->
     raise (genuine alignment/units error). Pins the 2*dt tolerance."""
-    from spyglass.spikesorting.v2.utils import _spike_times_to_frames
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _spike_times_to_frames,
+    )
 
     fs = 30000.0
     timestamps = np.arange(100) / fs
@@ -344,7 +346,7 @@ def test_detect_artifacts_warns_when_min_length_drops_all_valid_time(caplog):
     the zero-artifacts warning), so the operator sees the cause here rather
     than three stages later as an ``EmptyArtifactValidTimesError`` at sort
     time."""
-    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     fs = 30000.0
     n, n_ch = 15000, 2  # 0.5 s -- every kept sliver is < min_length_s=1.0
@@ -366,7 +368,7 @@ def test_detect_artifacts_raises_on_single_channel_zscore_only():
     """The z-score is computed ACROSS channels within a frame; on a 1-channel
     group it is identically zero, so a z-score-only config would silently
     detect nothing. Raise instead of returning a misleadingly-clean window."""
-    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
     from spyglass.spikesorting.v2.exceptions import (
         InsufficientZScoreChannelsError,
     )
@@ -383,7 +385,7 @@ def test_detect_artifacts_raises_on_two_channel_zscore_only():
     z-score-only config on a stereotrode flags every frame (threshold < 1) or
     none (threshold > 1) -- never amplitude-sensitively. Raise, same as the
     single-channel case."""
-    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
     from spyglass.spikesorting.v2.exceptions import (
         InsufficientZScoreChannelsError,
     )
@@ -397,7 +399,7 @@ def test_detect_artifacts_raises_on_two_channel_zscore_only():
 def test_detect_artifacts_warns_zscore_inert_on_single_channel(caplog):
     """With ``amplitude_threshold_uv`` also set, single-channel z-score is
     inert (not fatal); warn that only the amplitude detector will fire."""
-    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     rec = _rec(np.zeros((3000, 1), dtype="float32"))
     params = _artifact_params(
@@ -413,7 +415,7 @@ def test_detect_artifacts_warns_proportion_rounds_to_all_channels(caplog):
     rounds up via ``ceil`` to requiring BOTH channels -- silently stricter
     than the nominal 70%. Warn so the operator sees the realized
     requirement."""
-    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     rec = _rec(np.zeros((3000, 2), dtype="float32"))
     params = _artifact_params(
@@ -431,7 +433,7 @@ def test_detect_artifacts_no_proportion_warning_on_tetrode(caplog):
     """On a tetrode (4 ch), ``0.7`` -> ``ceil(2.8)=3`` of 4 -- a genuine
     majority, not silently promoted to all-channels -- so no 'rounds up'
     warning fires."""
-    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     rec = _rec(np.zeros((3000, 4), dtype="float32"))
     params = _artifact_params(
@@ -447,7 +449,7 @@ def test_detect_artifacts_raises_when_most_frames_flagged():
     recording raises ``ArtifactFractionExceededError`` BEFORE materializing a
     per-frame index for every flagged sample (and the slow per-frame join) --
     instead of allocating an O(n_samples) array on a pathological config."""
-    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
     from spyglass.spikesorting.v2.exceptions import (
         ArtifactFractionExceededError,
     )
@@ -467,7 +469,7 @@ def test_apply_artifact_mask_raises_when_valid_times_keep_almost_nothing():
     """A ``valid_times`` keeping only a sliver makes the artifact complement
     span most of the recording; the mask raises ``ArtifactFractionExceededError``
     BEFORE expanding the complement to a per-frame index array."""
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
     from spyglass.spikesorting.v2.exceptions import (
@@ -684,7 +686,7 @@ def test_scan_artifact_frames_returns_bounded_runs(dj_conn):
     contiguous block -> a couple of per-chunk runs (the cross-chunk join happens
     in detect_artifacts), and expanding them recovers exactly the flagged
     frames."""
-    from spyglass.spikesorting.v2._artifact_intervals import (
+    from spyglass.spikesorting.v2._artifacts.intervals import (
         scan_artifact_frames,
     )
 
@@ -711,7 +713,7 @@ def test_split_runs_at_gaps_splits_only_inside_runs():
     leaves a gap at the trailing edge and a gap between runs alone, and is a
     no-op when there are no gaps -- so the joined spans match a per-frame
     gap-aware join."""
-    from spyglass.spikesorting.v2._artifact_intervals import (
+    from spyglass.spikesorting.v2._artifacts.intervals import (
         _split_runs_at_gaps,
     )
 
@@ -1181,7 +1183,7 @@ def test_compute_artifact_chunk_raises_on_single_nan_sample():
     """One NaN sample (on one channel) makes the chunk detector raise a
     ``ValueError`` naming the chunk's frame range and that channel's
     non-finite count, instead of silently returning zero flagged runs."""
-    from spyglass.spikesorting.v2._artifact_compute import (
+    from spyglass.spikesorting.v2._artifacts.compute import (
         _compute_artifact_chunk,
         _init_artifact_worker,
     )
@@ -1211,7 +1213,7 @@ def test_compute_artifact_chunk_raises_on_all_nan_chunk():
     """An all-NaN chunk (e.g. a corrupted segment) raises with the full
     per-channel non-finite count for every channel, not a silent
     all-quiet chunk."""
-    from spyglass.spikesorting.v2._artifact_compute import (
+    from spyglass.spikesorting.v2._artifacts.compute import (
         _compute_artifact_chunk,
         _init_artifact_worker,
     )
@@ -1237,7 +1239,7 @@ def test_compute_artifact_chunk_raises_on_all_nan_chunk():
 def test_compute_artifact_chunk_finite_recording_unaffected():
     """A fully-finite chunk is unaffected by the new guard (the guard is a
     pure addition, not a behavior change on well-formed data)."""
-    from spyglass.spikesorting.v2._artifact_compute import (
+    from spyglass.spikesorting.v2._artifacts.compute import (
         _compute_artifact_chunk,
         _init_artifact_worker,
     )
@@ -1262,7 +1264,7 @@ def test_scan_artifact_frames_raises_on_nan_at_n_jobs_1():
     caller through ``scan_artifact_frames`` at ``n_jobs=1`` -- the
     single-process path, where the live recording object is passed
     straight to the worker (no pickling)."""
-    from spyglass.spikesorting.v2._artifact_intervals import (
+    from spyglass.spikesorting.v2._artifacts.intervals import (
         scan_artifact_frames,
     )
 
@@ -1297,7 +1299,7 @@ def test_scan_artifact_frames_raises_on_nan_at_n_jobs_2_process_pool(
     survives. This test proves that end-to-end on a real process pool
     rather than only reading the source.
     """
-    from spyglass.spikesorting.v2._artifact_intervals import (
+    from spyglass.spikesorting.v2._artifacts.intervals import (
         scan_artifact_frames,
     )
 
@@ -1348,8 +1350,8 @@ def test_timestamp_helpers_peak_memory_bounded_vs_get_times(tmp_path):
     from hdmf.backends.hdf5.h5_utils import H5DataIO
     from pynwb.ecephys import ElectricalSeries
 
-    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
-    from spyglass.spikesorting.v2._signal_math import (
+    from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._core.signal_math import (
         base_intervals_and_gaps,
         timestamp_fingerprint,
     )

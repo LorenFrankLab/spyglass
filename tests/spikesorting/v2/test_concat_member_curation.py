@@ -144,7 +144,7 @@ def test_member_rows_preserve_units_spikes_labels_and_wall_clock(
     import numpy as np
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_times_and_sample_indices,
         recording_timestamps,
     )

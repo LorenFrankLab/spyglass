@@ -20,7 +20,9 @@ import numpy as np
 
 def test_dedup_drops_cross_unit_coincident_spike():
     """A spike within delta from a DIFFERENT contributor is dropped."""
-    from spyglass.spikesorting.v2.utils import _dedup_merged_spike_times
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _dedup_merged_spike_times,
+    )
 
     delta_s = 0.4e-3
     unit_a = np.array([0.010, 0.020, 0.030])
@@ -33,7 +35,9 @@ def test_dedup_drops_cross_unit_coincident_spike():
 
 def test_dedup_keeps_within_unit_close_pair():
     """A close pair from the SAME contributor is kept (membership-aware)."""
-    from spyglass.spikesorting.v2.utils import _dedup_merged_spike_times
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _dedup_merged_spike_times,
+    )
 
     delta_s = 0.4e-3
     # Two spikes 0.1 ms apart but BOTH from unit_a -> not a cross-unit
@@ -46,7 +50,9 @@ def test_dedup_keeps_within_unit_close_pair():
 
 def test_dedup_no_duplicates_is_concatenate_sort():
     """With no near-coincident cross-unit pairs, it is just concat+sort."""
-    from spyglass.spikesorting.v2.utils import _dedup_merged_spike_times
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _dedup_merged_spike_times,
+    )
 
     out = _dedup_merged_spike_times(
         [np.array([0.030, 0.010]), np.array([0.020, 0.040])], 0.4e-3
@@ -55,7 +61,9 @@ def test_dedup_no_duplicates_is_concatenate_sort():
 
 
 def test_dedup_empty():
-    from spyglass.spikesorting.v2.utils import _dedup_merged_spike_times
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _dedup_merged_spike_times,
+    )
 
     out = _dedup_merged_spike_times([np.array([]), np.array([])], 0.4e-3)
     assert out.size == 0

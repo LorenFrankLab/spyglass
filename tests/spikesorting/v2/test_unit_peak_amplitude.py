@@ -36,7 +36,7 @@ def test_peak_amplitude_is_extremum_on_attributed_electrode(populated_sorting):
         Sorting,
         SortingSelection,
     )
-    from spyglass.spikesorting.v2.utils import resolve_peak_sign
+    from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
 
     # The analyzer folder is not a column; load via the accessor, which
     # resolves the path from sorting_id and rebuilds on miss.
@@ -109,8 +109,8 @@ def test_row_producer_uses_off_alignment_extremum_and_configured_sign(
     """The actual row producer connects polarity, peak time, gains and IDs."""
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
-    from spyglass.spikesorting.v2._sorting_units import (
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting.units import (
         build_unit_rows_from_analyzer,
     )
 

@@ -26,25 +26,27 @@ existing rows via the insert_selection helpers and returns the same
 run summary (with the same root_merge_id) without inserting duplicates.
 
 This module is a thin facade: the implementation lives in the
-``_pipeline_*`` submodules (presets, geometry, preflight, reporting, run).
+``_orchestration`` package, with short module names such as ``run``,
+``session``, ``motion``, ``matching``, ``source``, and ``stages``. It also holds
+presets, geometry, preflight, and reporting.
 Every public name is re-exported here, so notebook and user code imports from
 one path (``from spyglass.spikesorting.v2.pipeline import ...``).
 """
 
 from __future__ import annotations
 
-from spyglass.spikesorting.v2._pipeline_geometry import (
+from spyglass.spikesorting.v2._orchestration.geometry import (
     describe_sort_groups,
     plot_sort_group_geometry,
 )
-from spyglass.spikesorting.v2._pipeline_preflight import (
+from spyglass.spikesorting.v2._orchestration.preflight import (
     PreflightCheck,
     PreflightReport,
     PreflightSessionReport,
     preflight_v2_pipeline,
     preflight_v2_pipeline_session,
 )
-from spyglass.spikesorting.v2._pipeline_presets import (
+from spyglass.spikesorting.v2._orchestration.presets import (
     _PIPELINE_PRESETS,
     _PipelinePreset,
     clone_pipeline_preset,
@@ -54,28 +56,30 @@ from spyglass.spikesorting.v2._pipeline_presets import (
     list_pipeline_presets,
     register_pipeline_preset,
 )
-from spyglass.spikesorting.v2._pipeline_public import PIPELINE_FACADE_EXPORTS
-from spyglass.spikesorting.v2._pipeline_reporting import (
+from spyglass.spikesorting.v2._orchestration.exports import (
+    PIPELINE_FACADE_EXPORTS,
+)
+from spyglass.spikesorting.v2._orchestration.reporting import (
     describe_parameter_rows,
     describe_run,
     describe_units,
 )
-from spyglass.spikesorting.v2._pipeline_run import (
+from spyglass.spikesorting.v2._orchestration.matching import (
     describe_unit_match_choices,
-    estimate_motion,
     plan_v2_unit_match,
     plan_v2_unit_match_from_sorts,
-    run_v2_pipeline,
-    run_v2_pipeline_session,
     run_v2_unit_match,
 )
-from spyglass.spikesorting.v2._unit_match_planning import (
+from spyglass.spikesorting.v2._orchestration.motion import estimate_motion
+from spyglass.spikesorting.v2._orchestration.run import run_v2_pipeline
+from spyglass.spikesorting.v2._orchestration.session import (
+    run_v2_pipeline_session,
+)
+from spyglass.spikesorting.v2._matching.planning import (
     UnitMatchInputPlan,
     UnitMatchPlan,
 )
-from spyglass.spikesorting.v2._curation_analyzer import (
-    open_curation_analyzer,
-)
+from spyglass.spikesorting.v2._curation.analyzer import open_curation_analyzer
 from spyglass.spikesorting.v2.analysis_selection import (
     V2_UNIT_SELECTION_POLICIES,
     SelectedGroup,
@@ -103,7 +107,7 @@ from spyglass.spikesorting.v2.review_api import (
     ReviewProfileRef,
     ReviewStageStatus,
 )
-from spyglass.spikesorting.v2._pipeline_types import (
+from spyglass.spikesorting.v2._orchestration.types import (
     EstimateMotionReceipt,
     MotionEstimateDiagnostics,
     MotionMode,

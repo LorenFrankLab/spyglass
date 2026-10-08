@@ -132,7 +132,7 @@ def test_truncation_tolerance_scales_with_interval_count():
     tolerance must accept that legitimate slop while still flagging a
     genuine packet drop. Deterministic (no populate) guard for the policy.
     """
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         truncation_tolerance,
     )
     from spyglass.spikesorting.v2.recording import Recording
@@ -187,7 +187,7 @@ def test_make_insert_raises_on_genuine_truncation():
     populate.
     """
     from spyglass.spikesorting.v2.exceptions import RecordingTruncatedError
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         truncation_tolerance,
     )
     from spyglass.spikesorting.v2.recording import Recording

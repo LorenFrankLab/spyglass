@@ -85,7 +85,7 @@ def test_resolved_job_kwargs_merge(restore_custom_config):
     """Job kwargs merge SI-global, config, and per-row blobs by precedence."""
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+    from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
 
     dj.config["custom"]["spikesorting_v2_job_kwargs"] = {"n_jobs": 4}
 
@@ -131,7 +131,9 @@ def test_get_recording_timestamps_concatenates_multi_segment():
     import numpy as np
     import spikeinterface.core as sc
 
-    from spyglass.spikesorting.v2.utils import _get_recording_timestamps
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _get_recording_timestamps,
+    )
 
     seg0 = np.zeros((100, 4), dtype="float32")
     seg1 = np.zeros((150, 4), dtype="float32")
@@ -162,7 +164,9 @@ def test_get_recording_timestamps_override_returned_verbatim():
     import numpy as np
     import spikeinterface.core as sc
 
-    from spyglass.spikesorting.v2.utils import _get_recording_timestamps
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _get_recording_timestamps,
+    )
 
     rec = sc.NumpyRecording(
         [np.zeros((50, 4), dtype="float32")], sampling_frequency=1000.0

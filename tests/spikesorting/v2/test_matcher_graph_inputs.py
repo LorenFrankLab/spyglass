@@ -29,7 +29,7 @@ def _input(sorting_id, curation_id, start):
 
 
 def _order(inputs):
-    from spyglass.spikesorting.v2._matcher_graph import (
+    from spyglass.spikesorting.v2._matching.graph import (
         chronological_input_order,
     )
 
@@ -138,7 +138,7 @@ def _parts(curation_uuid="00000000-0000-0000-0000-0000000000c1"):
 
 def test_input_set_hash_is_row_order_and_uuid_form_independent():
     """The digest ignores row order and whether ids are UUIDs or strings."""
-    from spyglass.spikesorting.v2._matcher_graph import input_set_hash
+    from spyglass.spikesorting.v2._matching.graph import input_set_hash
 
     input_rows, recording_rows = _parts()
     base = input_set_hash(input_rows, recording_rows)
@@ -188,7 +188,7 @@ def test_input_set_hash_changes_with_every_frozen_field(
 ):
     """A new curation generation, source, recording snapshot or corrected
     session start time is a new id."""
-    from spyglass.spikesorting.v2._matcher_graph import input_set_hash
+    from spyglass.spikesorting.v2._matching.graph import input_set_hash
 
     input_rows, recording_rows = _parts()
     base = input_set_hash(input_rows, recording_rows)
@@ -200,7 +200,7 @@ def test_input_set_hash_changes_with_every_frozen_field(
 def test_input_set_hash_reads_session_start_times_as_utc():
     """A naive session start (as MySQL returns it) and the same instant as a
     timezone-aware value hash identically; a different instant does not."""
-    from spyglass.spikesorting.v2._matcher_graph import input_set_hash
+    from spyglass.spikesorting.v2._matching.graph import input_set_hash
 
     input_rows, recording_rows = _parts()
     base = input_set_hash(input_rows, recording_rows)
@@ -237,7 +237,7 @@ def test_input_set_hash_reads_session_start_times_as_utc():
 
 def test_input_part_structure_errors_names_each_defect():
     """Gapped input indexes, orphan recordings and empty inputs are reported."""
-    from spyglass.spikesorting.v2._matcher_graph import (
+    from spyglass.spikesorting.v2._matching.graph import (
         input_part_structure_errors,
     )
 
@@ -261,7 +261,7 @@ def test_input_part_structure_errors_names_each_defect():
 
 def test_assert_disjoint_input_sessions_names_the_shared_session():
     """Two inputs drawing on one nwb are rejected, naming both inputs."""
-    from spyglass.spikesorting.v2._matcher_graph import (
+    from spyglass.spikesorting.v2._matching.graph import (
         assert_disjoint_input_sessions,
     )
     from spyglass.spikesorting.v2.exceptions import SameSessionMatchError
@@ -279,7 +279,7 @@ def test_assert_disjoint_input_sessions_names_the_shared_session():
 
 def test_canonicalize_orients_side_a_by_lower_input_index():
     """Side a is the lower input_index, whichever side the matcher emitted."""
-    from spyglass.spikesorting.v2._matcher_graph import (
+    from spyglass.spikesorting.v2._matching.graph import (
         canonicalize_match_pairs,
     )
     from spyglass.spikesorting.v2.matcher_protocol import MatchPair
@@ -316,7 +316,9 @@ def test_canonicalize_orients_side_a_by_lower_input_index():
 )
 @pytest.mark.parametrize("value", [17.9, 17.0, True, "17", None])
 def test_canonicalize_rejects_noninteger_identifiers(field, value):
-    from spyglass.spikesorting.v2._matcher_graph import canonicalize_match_pairs
+    from spyglass.spikesorting.v2._matching.graph import (
+        canonicalize_match_pairs,
+    )
     from spyglass.spikesorting.v2.matcher_protocol import MatchPair
 
     pair = replace(MatchPair("a", 17, 17, "b", 17, 17, 0.9), **{field: value})
@@ -328,7 +330,9 @@ def test_canonicalize_rejects_noninteger_identifiers(field, value):
 def test_canonicalize_preserves_numpy_integer_identifiers(kind):
     import numpy as np
 
-    from spyglass.spikesorting.v2._matcher_graph import canonicalize_match_pairs
+    from spyglass.spikesorting.v2._matching.graph import (
+        canonicalize_match_pairs,
+    )
     from spyglass.spikesorting.v2.matcher_protocol import MatchPair
 
     integer = getattr(np, kind)
@@ -361,7 +365,7 @@ def _order_rows(starts, input_starts=None):
 def test_frozen_order_errors_accepts_the_order_selection_writes():
     """Numbering by chronological_input_order passes, with a concat input's
     start time taken as its earliest recording's."""
-    from spyglass.spikesorting.v2._matcher_graph import frozen_order_errors
+    from spyglass.spikesorting.v2._matching.graph import frozen_order_errors
 
     input_rows, recording_rows = _order_rows([_DAY1, _DAY2])
     # Input 1 is a concatenation whose second recording is later still.
@@ -374,7 +378,7 @@ def test_frozen_order_errors_accepts_the_order_selection_writes():
 def test_frozen_order_errors_flags_start_time_and_numbering():
     """A start time that is not the earliest recording's, and numbering that
     disagrees with the frozen times, are both reported."""
-    from spyglass.spikesorting.v2._matcher_graph import frozen_order_errors
+    from spyglass.spikesorting.v2._matching.graph import frozen_order_errors
 
     input_rows, recording_rows = _order_rows(
         [_DAY1, _DAY2], input_starts=[_DAY1 + dt.timedelta(hours=1), _DAY2]
@@ -396,7 +400,7 @@ def test_count_recording_spikes_splits_each_unit_by_recording_span():
     on a span's end belongs to the next span."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._matcher_graph import count_recording_spikes
+    from spyglass.spikesorting.v2._matching.graph import count_recording_spikes
 
     trains = {
         0: np.array([0, 5, 9, 10, 14]),
@@ -431,7 +435,7 @@ def test_count_recording_spikes_refuses_unconserved_spans(trains, spans, match):
     frames from 0, raise instead of leaving spikes uncounted."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._matcher_graph import count_recording_spikes
+    from spyglass.spikesorting.v2._matching.graph import count_recording_spikes
     from spyglass.spikesorting.v2.exceptions import ConcatSplitError
 
     with pytest.raises(ConcatSplitError, match=match):
@@ -443,7 +447,7 @@ def test_count_recording_spikes_refuses_unconserved_spans(trains, spans, match):
 
 def _tracked_counts(members_edges, input_by_node, detected):
     """``{sorted members: (n_sessions_detected, n_matching_inputs)}``."""
-    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     nodes, edges = members_edges
     return {

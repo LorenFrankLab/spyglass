@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from spyglass.spikesorting.v2._figpack_curation import (
+from spyglass.spikesorting.v2._review.annotations import (
     FIGPACK_INSTALL_HINT,
     annotations_payload_hash,
     curation_annotations_to_labels_and_merges,

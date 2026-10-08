@@ -17,8 +17,10 @@ def main() -> None:
     from spyglass.spikesorting.v2._params.preprocessing import (
         PreprocessingParamsSchema,
     )
-    from spyglass.spikesorting.v2._pipeline_types import RunV2PipelineInputs
-    from spyglass.spikesorting.v2._sorting_dispatch import run_si_sorter
+    from spyglass.spikesorting.v2._orchestration.types import (
+        RunV2PipelineInputs,
+    )
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
     assert callable(run_v2_pipeline)
     assert "manual_excluded_times" in RunV2PipelineInputs.__optional_keys__

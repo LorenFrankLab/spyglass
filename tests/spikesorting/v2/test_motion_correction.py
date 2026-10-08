@@ -125,14 +125,16 @@ def _select(recording_key, params_name="dredge_fast_v1", **extra):
 def test_selection_is_content_addressed_and_idempotent(drift_recording):
     import spikeinterface
 
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         MOTION_ALGORITHM_VERSION,
         motion_estimate_identity_payload,
         motion_estimate_selection_identity,
         resolve_estimation_params,
         resolved_params_hash,
     )
-    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        deterministic_id,
+    )
     from spyglass.spikesorting.v2.motion import (
         MotionEstimateSelection,
         MotionEstimationParameters,
@@ -276,7 +278,7 @@ def test_estimate_round_trip(drift_recording):
     configuration, spans, geometry and diagnostics."""
     from unittest import mock
 
-    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2._motion import estimation as _motion
     from spyglass.spikesorting.v2.motion import (
         MotionEstimate,
         MotionEstimateSelection,
@@ -495,7 +497,7 @@ def test_unfiltered_source_planted_directly_is_refused_at_compute(
     restored backup or a bulk load) bypasses that guard. ``MotionEstimate``
     must re-check the recipe itself: ``populate`` raises the same problem
     before reading any file, and no ``MotionEstimate`` row is written."""
-    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2._motion import estimation as _motion
     from spyglass.spikesorting.v2.motion import (
         MotionEstimate,
         MotionEstimateSelection,
@@ -536,7 +538,7 @@ def test_unfiltered_source_planted_directly_is_refused_at_compute(
 def test_stale_selection_is_refused_at_compute(drift_recording, monkeypatch):
     import spikeinterface
 
-    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2._motion import estimation as _motion
     from spyglass.spikesorting.v2.motion import MotionEstimate
 
     key = _select(drift_recording["recording_key"], "dredge_v1")
@@ -584,7 +586,9 @@ def _timestamps_at(recording_key, frames):
 def _assert_time_map(row, spans, starts, ends):
     """The row persists the spans, their first/last timestamps and the
     recipe's clock on them."""
-    from spyglass.spikesorting.v2._motion import build_estimation_clock
+    from spyglass.spikesorting.v2._motion.estimation import (
+        build_estimation_clock,
+    )
 
     np.testing.assert_array_equal(row["continuity_spans"], spans)
     np.testing.assert_array_equal(row["continuity_start_s"], starts)
@@ -655,7 +659,7 @@ def test_concat_persists_its_continuity_and_rebuild_verifies_it(
     from pathlib import Path
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _concat_recording
+    from spyglass.spikesorting.v2._recording import concat as _concat_recording
     from spyglass.spikesorting.v2.exceptions import (
         RecordingContentDriftError,
     )
@@ -708,7 +712,7 @@ def test_concat_persists_its_continuity_and_rebuild_verifies_it(
 
 
 def _motion_spans_of(recording_key):
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         boundary_spans_from_timestamps,
     )
     from spyglass.spikesorting.v2.recording import Recording
@@ -915,8 +919,8 @@ def _no_estimation(*_args, **_kwargs):
 
 
 def _file_hash(abs_path) -> str:
-    from spyglass.spikesorting.v2._recompute import combined_hash
-    from spyglass.spikesorting.v2._recording_fingerprint import (
+    from spyglass.spikesorting.v2._storage.recompute import combined_hash
+    from spyglass.spikesorting.v2._recording.fingerprint import (
         recording_content_fingerprint,
     )
 
@@ -977,7 +981,7 @@ def test_initialize_v2_defaults_installs_motion_recipes(dj_conn, monkeypatch):
         initialize_v2_defaults,
         verify_v2_default_catalog,
     )
-    from spyglass.spikesorting.v2._pipeline_reporting import (
+    from spyglass.spikesorting.v2._orchestration.reporting import (
         _v2_default_catalog_tables,
     )
     from spyglass.spikesorting.v2.motion import MotionCorrectionParameters
@@ -1021,8 +1025,10 @@ def test_interpolation_only_change_reuses_the_estimate(
     import datajoint as dj
     import spikeinterface
 
-    from spyglass.spikesorting.v2 import _motion
-    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2._motion import estimation as _motion
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        deterministic_id,
+    )
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecording,
         MotionCorrectedRecordingSelection,
@@ -1114,7 +1120,7 @@ def test_stale_corrected_selection_is_refused_at_compute(
     leaves no row."""
     import spikeinterface
 
-    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2._motion import estimation as _motion
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecording,
         MotionCorrectedRecordingSelection,
@@ -1175,7 +1181,7 @@ def test_estimate_and_corrected_recording_round_trip(
     import h5py
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2._motion import estimation as _motion
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecording,
         MotionEstimate,
@@ -1260,7 +1266,7 @@ def test_estimate_and_corrected_recording_round_trip(
 
     import spikeinterface
 
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         MOTION_CORRECTION_PROVENANCE,
         read_provenance_values,
     )
@@ -1314,7 +1320,7 @@ def test_estimate_and_corrected_recording_round_trip(
     assert provenance["estimation_clock_sampling_frequency"] == (
         estimate_row["sampling_frequency"]
     )
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         CONCAT_MEMBERS,
         MOTION_CONTINUITY_SPANS,
         read_long_provenance,
@@ -1377,17 +1383,17 @@ def test_persisted_corrected_traces_match_the_interpolation_oracle(
     Interpolating on the acquisition clock gives different traces."""
     from spikeinterface.sortingcomponents.motion import interpolate_motion
 
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         estimation_times,
         resolve_interpolation_params,
     )
     from spyglass.spikesorting.v2._params.motion_estimation import (
         MotionEstimationParamsSchema,
     )
-    from spyglass.spikesorting.v2._recording_geometry import (
+    from spyglass.spikesorting.v2._recording.geometry import (
         flatten_planar_geometry,
     )
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         complement_frame_ranges,
         silence_frame_ranges,
     )
@@ -1508,7 +1514,7 @@ def test_report_reads_the_stored_estimate_and_corrected_recording(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from spyglass.spikesorting.v2._motion_report import frame_of_source_time
+    from spyglass.spikesorting.v2._motion.report import frame_of_source_time
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecording,
         MotionEstimate,
@@ -1696,7 +1702,8 @@ def test_motion_failure_cleanup_and_cache_rebuild(
     from pathlib import Path
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _motion, _recording_nwb
+    from spyglass.spikesorting.v2._motion import estimation as _motion
+    from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
     from spyglass.spikesorting.v2.exceptions import (
         RecordingContentDriftError,
     )
@@ -1787,7 +1794,7 @@ def test_corrected_rebuild_is_guarded_by_content_not_spikeinterface_version(
     import spikeinterface
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2._motion import estimation as _motion
     from spyglass.spikesorting.v2.exceptions import (
         RecordingContentDriftError,
     )
@@ -1853,7 +1860,7 @@ def test_missing_file_of_a_stale_corrected_selection_names_the_repair(
     from pathlib import Path
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2._motion import estimation as _motion
     from spyglass.spikesorting.v2.exceptions import (
         RecordingContentDriftError,
     )
@@ -1911,7 +1918,7 @@ def test_effective_traces_resolve_a_corrected_recording(discontinuous_sources):
     from pathlib import Path
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         EffectiveTraces,
         read_effective_recording,
     )
@@ -1946,7 +1953,7 @@ def test_effective_traces_resolve_a_corrected_recording(discontinuous_sources):
 def test_off_and_estimate_preserve_sort_input(drift_recording):
     """Saving a motion estimate of a sort's source (under the sort's own
     mask) changes neither the sort's id nor the traces its sorter reads."""
-    from spyglass.spikesorting.v2._selection_plan import (
+    from spyglass.spikesorting.v2._core.selection_plan import (
         build_sorting_selection_plan,
     )
     from spyglass.spikesorting.v2.motion import MotionEstimate
@@ -2212,7 +2219,7 @@ def test_corrected_sort_reads_the_corrected_traces(
     persisted traces (not the source's), persists the corrected recording's
     statistics spans, and records the correction in its units NWB."""
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         SORTING_PROVENANCE,
         read_provenance_values,
     )
@@ -2335,7 +2342,7 @@ def test_pipeline_motion_modes_on_one_recording(drift_recording):
     sort; ``apply`` sorts the corrected recording of that estimate; every
     receipt states the mode, recipe, estimate, preset, corrected recording
     and removed channels, and a re-run reuses everything."""
-    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2._motion import estimation as _motion
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecording,
         MotionEstimate,
@@ -2607,7 +2614,7 @@ def test_motion_stage_failure_stops_before_sorting(
     """An estimation or application failure fails its own stage: no estimate
     or corrected row is written for it, and no sort is selected or run --
     the run never falls back to the uncorrected source."""
-    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2._motion import estimation as _motion
     from spyglass.spikesorting.v2.exceptions import PipelineStageError
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
 
@@ -2726,7 +2733,9 @@ def test_preflight_previews_the_motion_ids_the_run_mints(drift_recording):
 def _saved_estimate_of_the_run(drift_recording) -> dict:
     """The ``dredge_fast_v1`` estimate of the pipeline run's recording under
     the run's own artifact detection, saved through the tables."""
-    from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+    from spyglass.spikesorting.v2._orchestration.presets import (
+        _PIPELINE_PRESETS,
+    )
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -2754,7 +2763,7 @@ def test_apply_reuses_a_supplied_estimate(drift_recording, monkeypatch):
     that saved estimate: no estimate is computed (the estimator is patched to
     fail), the corrected recording is made from it, and the receipt,
     ``describe_run`` and preflight's preview all name it."""
-    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2._motion import estimation as _motion
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecordingSelection,
         MotionEstimateSelection,
@@ -2920,7 +2929,7 @@ def test_estimate_motion_then_apply_that_estimate(drift_recording, monkeypatch):
     no sort or curation; the receipt's diagnostics are the saved row's, and
     a second call reuses the estimate. ``apply`` with that id then corrects
     and sorts with it without estimating or selecting an estimate again."""
-    from spyglass.spikesorting.v2 import _motion
+    from spyglass.spikesorting.v2._motion import estimation as _motion
     from spyglass.spikesorting.v2.artifact import RecordingArtifactSelection
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.motion import (
@@ -3159,8 +3168,12 @@ def test_estimate_motion_does_not_need_the_sorter(
     """With the preset's sorter reported unavailable, ``estimate_motion``
     and both preflights without the sorter-only checks pass, while a
     ``run_v2_pipeline`` call (which sorts) is still refused."""
-    from spyglass.spikesorting.v2 import _pipeline_preflight
-    from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+    from spyglass.spikesorting.v2._orchestration import (
+        preflight as _pipeline_preflight,
+    )
+    from spyglass.spikesorting.v2._orchestration.presets import (
+        _PIPELINE_PRESETS,
+    )
     from spyglass.spikesorting.v2.exceptions import PreflightError
     from spyglass.spikesorting.v2.pipeline import (
         estimate_motion,
@@ -3214,8 +3227,12 @@ def test_concat_preflight_refuses_an_estimate_of_other_member_masks(
     estimate of the concatenation it builds passes, and the same
     estimate for a run that adds a manual exclusion to member 0 is refused,
     naming member 0's two detections, before anything is built or sorted."""
-    from spyglass.spikesorting.v2 import _pipeline_preflight
-    from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+    from spyglass.spikesorting.v2._orchestration import (
+        preflight as _pipeline_preflight,
+    )
+    from spyglass.spikesorting.v2._orchestration.presets import (
+        _PIPELINE_PRESETS,
+    )
     from spyglass.spikesorting.v2.exceptions import PreflightError
     from spyglass.spikesorting.v2.pipeline import (
         estimate_motion,
@@ -3310,7 +3327,7 @@ def test_preflight_refuses_a_supplied_estimate_of_changed_traces(
 def self_correcting_preset(dj_conn):
     """A registered preset whose sorter row (spykingcircus2 ``default``)
     runs the sorter's own motion correction."""
-    from spyglass.spikesorting.v2._pipeline_presets import (
+    from spyglass.spikesorting.v2._orchestration.presets import (
         _PIPELINE_PRESETS,
         register_pipeline_preset,
     )
@@ -3411,7 +3428,7 @@ def test_invalid_support_and_geometry_fail_before_sorting(
     from spyglass.spikesorting.v2._params.motion_estimation import (
         MotionEstimationParamsSchema,
     )
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         KRIGING_FORCE_EXTRAPOLATE,
         KRIGING_REMOVE_CHANNELS,
     )
@@ -3681,7 +3698,7 @@ def test_concat_preflight_refuses_unsupported_motion(
 @pytest.fixture
 def unfiltered_preset(dj_conn):
     """A registered preset whose preprocessing recipe is ``no_filter``."""
-    from spyglass.spikesorting.v2._pipeline_presets import (
+    from spyglass.spikesorting.v2._orchestration.presets import (
         _PIPELINE_PRESETS,
         register_pipeline_preset,
     )

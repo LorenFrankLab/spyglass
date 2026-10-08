@@ -145,7 +145,7 @@ def test_create_merged_curation_commits(polymer_60s_sort):
 def test_create_merged_curation_reuses_matching_child(polymer_60s_sort):
     """``reuse_existing=True`` makes a manual-merge notebook cell rerunnable."""
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.utils import CurationLabel
+    from spyglass.spikesorting.v2._core.enums import CurationLabel
 
     a, b = _two_unit_ids(polymer_60s_sort)
     all_unit_ids = _unit_ids(polymer_60s_sort)

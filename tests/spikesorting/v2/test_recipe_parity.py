@@ -277,7 +277,7 @@ def test_shipped_auto_curation_rules_tolerate_low_spike_nan(dj_conn):
     import numpy as np
     import pandas as pd
 
-    from spyglass.spikesorting.v2._metric_curation import apply_label_rules
+    from spyglass.spikesorting.v2._curation.metrics import apply_label_rules
     from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
 
     for master, rules in AutoCurationRules._default_payloads():

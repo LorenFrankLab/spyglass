@@ -145,7 +145,7 @@ def test_populate_rebuilds_reclaimed_inventoried_analyzer(
     """
     import shutil
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.figpack_curation import (
         FigPackCuration,
         FigPackCurationSelection,
@@ -259,7 +259,9 @@ def test_bundle_install_keeps_old_bundle_when_replace_fails(
     """A failed install restores the previous bundle; a good one replaces it."""
     import os
 
-    from spyglass.spikesorting.v2._analyzer_cache import install_staged_folder
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        install_staged_folder,
+    )
 
     def _folder(name, text):
         folder = tmp_path / name
@@ -294,7 +296,7 @@ def test_bundle_install_keeps_old_bundle_when_replace_fails(
 
 def test_edited_curation_round_trips(populated_sorting_with_curation):
     """A user's edited annotations.json round-trips to (labels, merge_groups)."""
-    from spyglass.spikesorting.v2._figpack_curation import (
+    from spyglass.spikesorting.v2._review.annotations import (
         labels_and_merges_to_annotations,
     )
     from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
@@ -337,7 +339,7 @@ def test_save_curation_from_uri_commits_browser_edits(
     populated_sorting_with_curation,
 ):
     """The user workflow: browser edits import as a child curation."""
-    from spyglass.spikesorting.v2._figpack_curation import (
+    from spyglass.spikesorting.v2._review.annotations import (
         labels_and_merges_to_annotations,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -412,7 +414,7 @@ def test_identityless_legacy_import_has_one_explicit_escape(
     """Verified save fails closed; the separately named legacy API opts in."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
-    from spyglass.spikesorting.v2._figpack_curation import (
+    from spyglass.spikesorting.v2._review.annotations import (
         labels_and_merges_to_annotations,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -536,7 +538,7 @@ def test_upload_of_labeled_curation_is_seeded(
     """Hosted publishing uploads the same seeded sidecars as local bundles."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
-    from spyglass.spikesorting.v2._figpack_curation import (
+    from spyglass.spikesorting.v2._review.annotations import (
         curation_annotations_to_labels_and_merges,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -630,10 +632,13 @@ def test_displayed_unit_properties_public_but_metrics_not_public(dj_conn):
 
 def test_make_rejects_tampered_config_hash(populated_sorting_with_curation):
     """A bypassed selection whose config hash != its fields is refused."""
-    from spyglass.spikesorting.v2._figpack_curation import (
+    from spyglass.spikesorting.v2._review.annotations import (
         default_label_options,
+        pack_display_config,
     )
-    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        deterministic_id,
+    )
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
     from spyglass.spikesorting.v2.figpack_curation import (
         FigPackCuration,
@@ -655,7 +660,7 @@ def test_make_rejects_tampered_config_hash(populated_sorting_with_curation):
             **identity,
             "figpack_curation_id": figpack_id,
             "label_options": label_options,
-            "displayed_unit_properties": None,
+            "displayed_unit_properties": pack_display_config(None),
             "upload": False,
             "ephemeral": False,
         },
@@ -667,11 +672,14 @@ def test_make_rejects_tampered_config_hash(populated_sorting_with_curation):
 
 def test_make_rejects_offline_ephemeral_bypass(populated_sorting_with_curation):
     """A bypassed upload=False + ephemeral=True row is refused (inert flag)."""
-    from spyglass.spikesorting.v2._figpack_curation import (
+    from spyglass.spikesorting.v2._review.annotations import (
         default_label_options,
+        pack_display_config,
         figpack_config_hash,
     )
-    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        deterministic_id,
+    )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
     from spyglass.spikesorting.v2.figpack_curation import (
@@ -703,7 +711,7 @@ def test_make_rejects_offline_ephemeral_bypass(populated_sorting_with_curation):
             **identity,
             "figpack_curation_id": figpack_id,
             "label_options": label_options,
-            "displayed_unit_properties": None,
+            "displayed_unit_properties": pack_display_config(None),
             "upload": False,
             "ephemeral": True,
         },
@@ -719,11 +727,14 @@ def test_make_revalidates_preview_bypassed_selection(planted_two_unit_sort):
     """A preview bypassing insert_selection is refused at populate time."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
-    from spyglass.spikesorting.v2._figpack_curation import (
+    from spyglass.spikesorting.v2._review.annotations import (
         default_label_options,
+        pack_display_config,
         figpack_config_hash,
     )
-    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        deterministic_id,
+    )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.figpack_curation import (
         FigPackCuration,
@@ -758,7 +769,7 @@ def test_make_revalidates_preview_bypassed_selection(planted_two_unit_sort):
             **identity,
             "figpack_curation_id": figpack_id,
             "label_options": label_options,
-            "displayed_unit_properties": None,
+            "displayed_unit_properties": pack_display_config(None),
             "upload": False,
             "ephemeral": False,
         },

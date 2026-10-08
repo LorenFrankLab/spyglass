@@ -297,7 +297,9 @@ def test_shuffled_inputs_give_the_same_selection(daily_concat_match_inputs):
 @contextmanager
 def _no_bundle_extraction(monkeypatch):
     """Fail the test if any UnitMatch bundle extraction starts."""
-    from spyglass.spikesorting.v2 import _unitmatch_backend
+    from spyglass.spikesorting.v2._matching import (
+        unitmatch_backend as _unitmatch_backend,
+    )
 
     def _boom(*args, **kwargs):
         raise AssertionError("bundle extraction ran for a rejected selection")
@@ -1397,7 +1399,10 @@ def test_named_sort_plan_runs_without_a_group(
         # resolving that file, or reading any provenance table, raises. (The
         # selection still opens its single recording's own traces file.)
         from spyglass.common.common_nwbfile import AnalysisNwbfile
-        from spyglass.spikesorting.v2 import _nwb_provenance, _unitmatch_nwb
+        from spyglass.spikesorting.v2._storage import (
+            provenance as _nwb_provenance,
+            matches_nwb as _unitmatch_nwb,
+        )
 
         run_file = (UnitMatch & pk).fetch1("analysis_file_name")
         get_abs_path = AnalysisNwbfile.get_abs_path
@@ -1579,12 +1584,12 @@ def test_concat_pairs_and_input_provenance_round_trip(
     upstream rows define; and the NWB pairs are the stored Pair rows."""
     from spyglass.common import Session
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         UNITMATCH_INPUT_RECORDINGS,
         UNITMATCH_INPUTS,
         read_long_provenance,
     )
-    from spyglass.spikesorting.v2._pipeline_reporting import describe_run
+    from spyglass.spikesorting.v2._orchestration.reporting import describe_run
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.pipeline import (
         plan_v2_unit_match_from_sorts,
@@ -2171,10 +2176,10 @@ def test_daily_bundle_uses_corrected_parent_and_valid_support(
     from spikeinterface.core import analyzer_extension_core
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._artifact_intervals import (
+    from spyglass.spikesorting.v2._artifacts.readers import (
         read_recording_artifact_valid_times,
     )
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         load_effective_recording,
         read_persisted_traces,
     )
@@ -3001,7 +3006,7 @@ def test_member_and_source_drift_is_refused_by_selection_make_and_readers(
     under the frozen recording id; before any change, and again once it is
     restored, the member spike times are the planted frames on the member's
     own clock."""
-    from spyglass.spikesorting.v2._units_nwb import recording_timestamps
+    from spyglass.spikesorting.v2._storage.units_nwb import recording_timestamps
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import (
         ConcatMemberDriftError,

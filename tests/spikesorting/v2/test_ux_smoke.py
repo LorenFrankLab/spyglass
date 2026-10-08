@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2._pipeline_run import _STAGE_STATUSES
+from spyglass.spikesorting.v2._orchestration.stages import _STAGE_STATUSES
 from spyglass.spikesorting.v2.pipeline import (
     describe_pipeline_preset,
     describe_pipeline_presets,
@@ -362,7 +362,7 @@ def test_user_notebook_executes(first_hour):
 @pytest.mark.integration
 def test_describe_units_reports_sort_time_quality(first_hour):
     """describe_units returns a per-unit sort-time snapshot for a real sort."""
-    from spyglass.spikesorting.v2._pipeline_reporting import _UNIT_COLUMNS
+    from spyglass.spikesorting.v2._orchestration.reporting import _UNIT_COLUMNS
 
     run_summary = first_hour["run_summary"]
     units = describe_units(run_summary["sorting_id"])
@@ -537,7 +537,7 @@ def test_plot_sort_group_geometry_multi_probe_offset(monkeypatch):
     # ``_pipeline_geometry``; patch it there so the relocated
     # ``plot_sort_group_geometry`` sees the fake rows.
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_geometry."
+        "spyglass.spikesorting.v2._orchestration.geometry."
         "_sort_group_geometry_rows",
         _fake_rows,
     )
@@ -625,7 +625,7 @@ def test_plot_sort_group_geometry_legibility(monkeypatch):
     from spyglass.spikesorting.v2 import pipeline as pl
 
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_geometry."
+        "spyglass.spikesorting.v2._orchestration.geometry."
         "_sort_group_geometry_rows",
         _dense_multi_probe_rows,
     )
@@ -669,7 +669,7 @@ def test_plot_sort_group_geometry_auto_labels(monkeypatch):
 
     # Sparse (4 per column) + default (None) -> labels auto-ON.
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_geometry."
+        "spyglass.spikesorting.v2._orchestration.geometry."
         "_sort_group_geometry_rows",
         _sparse_tetrode_rows,
     )
@@ -686,7 +686,7 @@ def test_plot_sort_group_geometry_auto_labels(monkeypatch):
 
     # Dense (20 per column) + explicit True -> labels forced ON.
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_geometry."
+        "spyglass.spikesorting.v2._orchestration.geometry."
         "_sort_group_geometry_rows",
         _dense_multi_probe_rows,
     )
@@ -729,7 +729,7 @@ def test_plot_sort_group_geometry_auto_label_threshold(
         ]
 
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_geometry."
+        "spyglass.spikesorting.v2._orchestration.geometry."
         "_sort_group_geometry_rows",
         _rows,
     )
@@ -753,7 +753,7 @@ def test_sort_group_geometry_specific_reference_star_row(ux_session):
     members are NOT flagged.
     """
     from spyglass.common.common_ephys import Electrode
-    from spyglass.spikesorting.v2._pipeline_geometry import (
+    from spyglass.spikesorting.v2._orchestration.geometry import (
         _sort_group_geometry_rows,
     )
     from spyglass.spikesorting.v2.recording import SortGroupV2

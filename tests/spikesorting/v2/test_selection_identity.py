@@ -25,7 +25,7 @@ from unittest import mock
 
 import pytest
 
-from spyglass.spikesorting.v2._selection_identity import (
+from spyglass.spikesorting.v2._core.selection_identity import (
     RECORDING_IDENTITY_FIELDS,
     V2_SELECTION_NAMESPACE,
     assert_supplied_id_matches,
@@ -229,7 +229,7 @@ def test_selection_identity_import_pulls_no_db_layer_modules():
 
     probe = textwrap.dedent("""
         import sys
-        import spyglass.spikesorting.v2._selection_identity as s
+        import spyglass.spikesorting.v2._core.selection_identity as s
         assert hasattr(s, "deterministic_id")
         assert hasattr(s, "canonical_identity")
         leaked = sorted(
@@ -269,7 +269,7 @@ def test_populate_recovery_classifies_translated_errors(
     import pymysql
     from datajoint.connection import translate_query_error
 
-    from spyglass.spikesorting.v2._pipeline_run import (
+    from spyglass.spikesorting.v2._orchestration.stages import (
         _populate_tolerating_concurrent_duplicate,
     )
 

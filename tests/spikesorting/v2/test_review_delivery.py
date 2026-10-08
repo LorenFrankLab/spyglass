@@ -32,7 +32,7 @@ def bundle(tmp_path):
     (root / "annotations.json").write_text(json.dumps({"annotations": {}}))
     (root / "spyglass_curation.json").write_text(json.dumps({"id": 1}))
     yield root
-    from spyglass.spikesorting.v2._review_delivery import stop_review_servers
+    from spyglass.spikesorting.v2._review.delivery import stop_review_servers
 
     stop_review_servers()
 
@@ -60,7 +60,7 @@ def _put(url: str, body: bytes, *, revision=None) -> int:
 
 
 def test_serves_bundle_and_writes_only_annotations(bundle):
-    from spyglass.spikesorting.v2._review_delivery import (
+    from spyglass.spikesorting.v2._review.delivery import (
         serve_review_bundle,
         served_review_bundles,
     )
@@ -90,7 +90,7 @@ def test_serves_bundle_and_writes_only_annotations(bundle):
 
 
 def test_repeated_open_reuses_server_and_stop_frees_it(bundle):
-    from spyglass.spikesorting.v2._review_delivery import (
+    from spyglass.spikesorting.v2._review.delivery import (
         serve_review_bundle,
         served_review_bundles,
         stop_review_servers,
@@ -109,14 +109,14 @@ def test_repeated_open_reuses_server_and_stop_frees_it(bundle):
 
 
 def test_missing_bundle_names_recovery(tmp_path):
-    from spyglass.spikesorting.v2._review_delivery import serve_review_bundle
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
 
     with pytest.raises(FileNotFoundError, match="start_review"):
         serve_review_bundle(tmp_path / "gone")
 
 
 def test_connected_actions_require_matching_origin_and_review(bundle):
-    from spyglass.spikesorting.v2._review_delivery import serve_review_bundle
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
 
     class Operations:
         review_id = "pinned-review"
@@ -154,11 +154,11 @@ def test_connected_actions_require_matching_origin_and_review(bundle):
 @pytest.mark.parametrize("action", ["inspect", "commit", "parent"])
 def test_operation_destinations_share_port_and_isolate_bundles(bundle, action):
     """The one forwarded origin serves child assets, drafts, and operations."""
-    from spyglass.spikesorting.v2._review_delivery import (
+    from spyglass.spikesorting.v2._review.delivery import (
         serve_review_bundle,
         stop_review_servers,
     )
-    from spyglass.spikesorting.v2._review_operations import (
+    from spyglass.spikesorting.v2._review.operations import (
         OPERATION_FILE,
         ReviewOperationService,
     )
@@ -216,7 +216,7 @@ def test_operation_destinations_share_port_and_isolate_bundles(bundle, action):
 
 
 def test_stale_and_unconditional_draft_saves_preserve_current_edits(bundle):
-    from spyglass.spikesorting.v2._review_delivery import serve_review_bundle
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
 
     target = serve_review_bundle(bundle) + "annotations.json"
     baseline = _revision(target)
@@ -231,7 +231,7 @@ def test_stale_and_unconditional_draft_saves_preserve_current_edits(bundle):
 def test_reopened_bundle_uses_current_save_protocol_without_rewriting_draft(
     bundle,
 ):
-    from spyglass.spikesorting.v2._review_delivery import serve_review_bundle
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
 
     script = bundle / "extension-spyglass-review.js"
     script.write_text("// old controls without a revision header")
@@ -250,12 +250,12 @@ def test_competing_processes_cannot_both_replace_the_same_draft(bundle):
     import subprocess
     import sys
 
-    from spyglass.spikesorting.v2._review_delivery import serve_review_bundle
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
 
     target = serve_review_bundle(bundle) + "annotations.json"
     code = """
 import sys
-from spyglass.spikesorting.v2._review_delivery import serve_review_bundle
+from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
 print(serve_review_bundle(sys.argv[1]), flush=True)
 sys.stdin.read()
 """

@@ -36,7 +36,9 @@ def _write_units_nwb(path, specs, *, with_obs=True):
 
 
 def test_intersect_interval_sets():
-    from spyglass.spikesorting.v2._signal_math import intersect_interval_sets
+    from spyglass.spikesorting.v2._core.signal_math import (
+        intersect_interval_sets,
+    )
 
     full = np.array([[0.0, 1.0]])
     # identical inputs -> the shared window (common single-sort case).
@@ -62,7 +64,9 @@ def test_intersect_interval_sets():
 
 
 def test_curated_obs_intervals_merge_rule():
-    from spyglass.spikesorting.v2._units_nwb import _curated_obs_intervals
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        _curated_obs_intervals,
+    )
 
     obs = {
         0: np.array([[0.0, 1.0]]),
@@ -85,7 +89,7 @@ def test_curated_obs_intervals_merge_rule():
 
 
 def test_reader_returns_obs_intervals(tmp_path):
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_times_and_sample_indices,
     )
 
@@ -117,7 +121,7 @@ def test_curated_nwb_carries_merge_lineage(planted_two_unit_sort):
     identity/source so the file is interpretable without the DB.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         CURATION_MERGE_LINEAGE,
         CURATION_PROVENANCE,
         read_long_provenance,
@@ -222,8 +226,10 @@ def test_curated_units_carry_obs_intervals(planted_two_unit_sort):
     """A curated export's per-unit obs_intervals match the source sort, and a
     merged unit gets the intersection of its contributors' windows."""
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._signal_math import intersect_interval_sets
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._core.signal_math import (
+        intersect_interval_sets,
+    )
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_times_and_sample_indices,
     )
     from spyglass.spikesorting.v2.curation import CurationV2

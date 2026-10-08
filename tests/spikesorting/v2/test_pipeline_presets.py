@@ -361,7 +361,7 @@ def test_describe_pipeline_preset_missing_row_points_to_initialize_defaults(
     runnable default with one bogus row name) drives the missing-row branch
     without deleting any shared default row.
     """
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     base = presets_mod._PIPELINE_PRESETS[
         "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
@@ -387,7 +387,7 @@ def _custom_spec() -> dict:
 @pytest.mark.unit
 def test_register_pipeline_preset_adds_to_registry(monkeypatch):
     """A registered preset appears in the catalog (no DB row check)."""
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     monkeypatch.setattr(
         presets_mod,
@@ -405,8 +405,8 @@ def test_register_pipeline_preset_owns_a_validated_copy(monkeypatch):
     """The registry keeps its own validated model: mutating the caller's
     model afterwards does not change the registered recipe, and a model whose
     fields were made invalid before registration is rejected."""
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
-    from spyglass.spikesorting.v2._pipeline_presets import _PipelinePreset
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
+    from spyglass.spikesorting.v2._orchestration.presets import _PipelinePreset
 
     monkeypatch.setattr(
         presets_mod,
@@ -441,7 +441,7 @@ def test_register_pipeline_preset_rejects_duplicate():
 @pytest.mark.unit
 def test_register_pipeline_preset_rejects_unknown_field(monkeypatch):
     """Pydantic extra=forbid rejects a typo'd preset field."""
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     monkeypatch.setattr(
         presets_mod,
@@ -459,7 +459,7 @@ def test_register_pipeline_preset_catches_missing_lookup_row(
     dj_conn, monkeypatch
 ):
     """Validating against the DB names the missing row and its table."""
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     from spyglass.spikesorting.v2 import initialize_v2_defaults
 
@@ -479,7 +479,7 @@ def test_register_pipeline_preset_catches_missing_lookup_row(
 @pytest.mark.unit
 def test_register_pipeline_preset_rejects_bad_name(monkeypatch):
     """A non-string or blank name is rejected before touching the registry."""
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     monkeypatch.setattr(
         presets_mod,
@@ -520,7 +520,7 @@ def clone_env(dj_conn, monkeypatch):
     parameter-row name they create (clone-derived or pre-seeded) to the yielded
     list.
     """
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
     from spyglass.spikesorting.v2 import initialize_v2_defaults
 
     initialize_v2_defaults()
@@ -572,7 +572,7 @@ def test_clone_pipeline_preset_rejects_duplicate_new_name():
 @pytest.mark.unit
 def test_clone_pipeline_preset_rejects_bad_new_name(monkeypatch):
     """A non-string or blank new_name is rejected before any DB work."""
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     monkeypatch.setattr(
         presets_mod,
@@ -587,7 +587,7 @@ def test_clone_pipeline_preset_rejects_bad_new_name(monkeypatch):
 @pytest.mark.unit
 def test_clone_pipeline_preset_requires_at_least_one_override(monkeypatch):
     """Cloning with no overrides raises (use register_pipeline_preset for an alias)."""
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     monkeypatch.setattr(
         presets_mod,
@@ -610,7 +610,7 @@ def test_clone_pipeline_preset_flat_sorter_override_round_trips(
     rows are reused (same names as the base), and the base preset's own rows
     are left unchanged.
     """
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     new_name = "lab_ms5_thresh_2026_06"
     clone_env.append(new_name)
@@ -663,7 +663,7 @@ def test_clone_pipeline_preset_nested_dotted_override_round_trips(
     dj_conn, clone_env
 ):
     """A dotted override edits a nested preprocessing key on a forked row."""
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     new_name = "lab_hp700_2026_06"
     clone_env.append(new_name)
@@ -846,7 +846,7 @@ def test_clone_pipeline_preset_idempotent_rerun(dj_conn, clone_env):
     in-memory registration is cleared, as on a fresh process) reuses the
     existing rows without raising a duplicate-content error.
     """
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     new_name = "lab_idempotent_2026_06"
     clone_env.append(new_name)
@@ -946,7 +946,9 @@ def test_run_v2_pipeline_concat_mode_accepts_single_session_preset(dj_conn):
     """Concat mode does not require a motion-pinned preset: the input fields
     set the mode, so a single-session preset reaches the concat preflight,
     which rejects only the absent session group."""
-    from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        DEFAULT_PIPELINE_PRESET,
+    )
     from spyglass.spikesorting.v2.exceptions import PreflightError
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
 
@@ -1167,7 +1169,7 @@ def test_preset_model_artifact_optional_and_no_motion_field():
     run no artifact detection). Presets carry no motion recipe, so a
     ``motion_correction_params_name`` is rejected like any unknown field.
     """
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     preset = presets_mod._PipelinePreset(
         preprocessing_params_name="franklab_hippocampus_2026_06",
@@ -1210,7 +1212,7 @@ def test_register_pipeline_preset_catches_missing_metric_row(
     dj_conn, monkeypatch
 ):
     """A preset naming an absent quality-metric row fails with a clear pointer."""
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     from spyglass.spikesorting.v2 import initialize_v2_defaults
 
@@ -1233,7 +1235,7 @@ def test_register_pipeline_preset_catches_missing_auto_curation_row(
     dj_conn, monkeypatch
 ):
     """A preset naming an absent auto-curation rule set fails clearly."""
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     from spyglass.spikesorting.v2 import initialize_v2_defaults
 
@@ -1326,7 +1328,7 @@ def test_clone_pipeline_preset_no_artifact_base(dj_conn, clone_env):
     must not try to fetch a base artifact row; only the sorter stage is forked
     and the clone inherits the None artifact.
     """
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     new_name = "lab_concat_thresh_2026_06"
     clone_env.append(new_name)

@@ -17,7 +17,7 @@ def test_assert_positive_sampling_frequency_rejects_nonpositive_or_nonfinite():
     """A finite positive fs passes (and is returned as float); 0 / negative /
     NaN / inf raise -- a bad fs silently yields an inf/NaN sample period and
     mis-maps every frame."""
-    from spyglass.spikesorting.v2._signal_math import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         assert_positive_sampling_frequency,
     )
 
@@ -33,7 +33,7 @@ def test_assert_monotonic_timestamps_rejects_empty_and_backward_steps():
     mapping would otherwise silently mis-slice the recording."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._signal_math import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         assert_monotonic_timestamps,
     )
 
@@ -60,7 +60,7 @@ def test_assert_artifact_frame_fraction_guards_pathological_overmasking():
     int64 frame index per artifact sample (O(n_samples), hundreds of MB to GB
     on a long many-channel recording) and a correspondingly slow per-frame pass.
     ``n_samples == 0`` forms no fraction, so it is a no-op."""
-    from spyglass.spikesorting.v2._signal_math import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         _MAX_ARTIFACT_FRAME_FRACTION,
         assert_artifact_frame_fraction,
     )
@@ -85,7 +85,9 @@ def test_spike_times_to_frames_rejects_nonfinite_spike_times(bad):
     """Malformed compatibility inputs must not become last-sample spikes."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._signal_math import _spike_times_to_frames
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _spike_times_to_frames,
+    )
 
     with pytest.raises(ValueError, match="Unit 7 has non-finite"):
         _spike_times_to_frames(
@@ -101,7 +103,9 @@ def test_spike_times_to_frames_rejects_nonmonotonic_recording_times():
     timeline; a backward step there mis-maps every spike frame."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._signal_math import _spike_times_to_frames
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _spike_times_to_frames,
+    )
 
     with pytest.raises(ValueError, match="monotonic"):
         _spike_times_to_frames(
@@ -111,7 +115,7 @@ def test_spike_times_to_frames_rejects_nonmonotonic_recording_times():
 
 def test_dedup_merged_spike_times_drops_cross_unit_coincidences():
     """Cross-contributor spikes within delta collapse; far ones are kept."""
-    from spyglass.spikesorting.v2._signal_math import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         _dedup_merged_spike_times,
     )
 
@@ -130,7 +134,7 @@ def test_dedup_merged_spike_times_keeps_within_unit_close_pair():
     a sub-delta pair is dropped only when the two spikes came from DIFFERENT
     contributors (a cross-unit double-detection), never within one unit.
     """
-    from spyglass.spikesorting.v2._signal_math import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         _dedup_merged_spike_times,
     )
 
@@ -139,7 +143,7 @@ def test_dedup_merged_spike_times_keeps_within_unit_close_pair():
 
 
 def test_dedup_merged_spike_times_empty():
-    from spyglass.spikesorting.v2._signal_math import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         _dedup_merged_spike_times,
     )
 
@@ -206,7 +210,7 @@ def test_frames_for_times_matches_full_vector_searchsorted(kind):
     times -- the property the artifact-mask complement walk depends on."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._signal_math import frames_for_times
+    from spyglass.spikesorting.v2._core.signal_math import frames_for_times
 
     n = 200_000
     rec = _recording_for_kind(kind, n)
@@ -236,7 +240,7 @@ def test_frames_for_times_rejects_non_finite(bad):
     searchsorted contract is pinned by the matches_full_vector test above."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._signal_math import frames_for_times
+    from spyglass.spikesorting.v2._core.signal_math import frames_for_times
 
     rec = _recording_for_kind("rate", 1000)
     with pytest.raises(ValueError, match="non-finite"):
@@ -249,7 +253,9 @@ def test_base_intervals_and_gaps_matches_full_vector(kind):
     the ``np.diff`` gap frame indices, without materializing ``get_times()``."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._signal_math import base_intervals_and_gaps
+    from spyglass.spikesorting.v2._core.signal_math import (
+        base_intervals_and_gaps,
+    )
     from tests.spikesorting.v2._interval_references import (
         base_intervals_from_timestamps,
     )
@@ -277,7 +283,9 @@ def test_base_intervals_and_gaps_gap_at_scan_chunk_boundary():
     interior gap so both gap branches run in one recording."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._signal_math import base_intervals_and_gaps
+    from spyglass.spikesorting.v2._core.signal_math import (
+        base_intervals_and_gaps,
+    )
     from tests.spikesorting.v2._interval_references import (
         base_intervals_from_timestamps,
     )
@@ -306,7 +314,9 @@ def test_base_intervals_and_gaps_rejects_nonpositive_fs():
     infinite/negative, silently collapsing or exploding the chunk split."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._signal_math import base_intervals_and_gaps
+    from spyglass.spikesorting.v2._core.signal_math import (
+        base_intervals_and_gaps,
+    )
 
     rec = _explicit_recording(np.array([0.0, 1.0, 2.0]))
     with pytest.raises(ValueError, match="finite positive"):
@@ -320,7 +330,7 @@ def test_timestamp_fingerprint_matches_array_equal_semantics():
     """
     import numpy as np
 
-    from spyglass.spikesorting.v2._signal_math import timestamp_fingerprint
+    from spyglass.spikesorting.v2._core.signal_math import timestamp_fingerprint
 
     n = 100_000
     ts = np.arange(n, dtype=np.float64) / FS

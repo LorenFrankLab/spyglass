@@ -323,7 +323,7 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
         RecordingArtifactDetection,
         RecordingArtifactSelection,
     )
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2._artifacts.naming import (
         artifact_detection_interval_list_name,
     )
 
@@ -478,7 +478,7 @@ def test_shared_group_member_set_frozen(monkeypatch):
     """
     import uuid
 
-    from spyglass.spikesorting.v2._recording_nwb import StoredTraces
+    from spyglass.spikesorting.v2._storage.nwb import StoredTraces
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
         SharedArtifactGroup,

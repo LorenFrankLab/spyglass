@@ -405,10 +405,12 @@ class Gates(_Model):
 class HarnessPin(_Model):
     """The benchmark code a held-out manifest was fixed against.
 
-    ``git_commit`` is the commit the harness was taken from and ``files`` the
-    SHA-256 of each of :data:`HARNESS_FILES` at that commit
-    (:func:`harness_fingerprint`). A case of the manifest refuses to run
-    when the harness files on disk differ (:func:`check_harness_pin`).
+    ``git_commit`` records the checkout's HEAD when the pin was captured.
+    ``files`` records the exact on-disk SHA-256 of each of :data:`HARNESS_FILES`,
+    including uncommitted edits (:func:`harness_fingerprint`); it does not claim
+    those bytes are committed. A case refuses to run when its harness files
+    differ (:func:`check_harness_pin`). Historical pin refreshes are documented
+    in the adjacent test README; a refreshed pin is not benchmark evidence.
     """
 
     git_commit: str = Field(min_length=7)

@@ -26,7 +26,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2._sort_group_planning import (
+from spyglass.spikesorting.v2._recording.sort_groups import (
     _SortGroupPlan,
     _build_sort_group_rows,
     _plan_sort_groups_by_column,

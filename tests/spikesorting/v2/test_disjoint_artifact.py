@@ -28,7 +28,9 @@ def _base_intervals(timestamps, fs):
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._signal_math import base_intervals_and_gaps
+    from spyglass.spikesorting.v2._core.signal_math import (
+        base_intervals_and_gaps,
+    )
 
     timestamps = np.asarray(timestamps, dtype=np.float64)
     rec = si.NumpyRecording(

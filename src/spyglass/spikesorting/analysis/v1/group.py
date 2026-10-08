@@ -538,7 +538,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         Pass identities from ``fetch_spike_data(return_unit_ids=True)`` when
         already loaded, to avoid reading legacy spike data a second time.
         """
-        from spyglass.spikesorting.v2._observed_time import (
+        from spyglass.spikesorting.v2._core.observed_time import (
             population_availability,
         )
 

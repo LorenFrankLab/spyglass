@@ -21,10 +21,10 @@ import uuid
 
 import pytest
 
-from spyglass.spikesorting.v2._artifact_naming import (
+from spyglass.spikesorting.v2._artifacts.naming import (
     artifact_detection_interval_list_name,
 )
-from spyglass.spikesorting.v2._curation_routing import (
+from spyglass.spikesorting.v2._curation.routing import (
     NO_ARTIFACT_RESTRICTION,
     NO_MOTION_CORRECTION_RESTRICTION,
     classify_and_normalize_restriction,

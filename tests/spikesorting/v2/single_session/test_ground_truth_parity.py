@@ -847,7 +847,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     import hashlib
 
     from spyglass.common import Electrode, IntervalList
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2._artifacts.naming import (
         artifact_detection_interval_list_name,
     )
     from tests.spikesorting.v2._parity_canonical import (
@@ -1338,7 +1338,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
     import hashlib
 
     from spyglass.common import Electrode, IntervalList
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2._artifacts.naming import (
         artifact_detection_interval_list_name,
     )
     from tests.spikesorting.v2._parity_canonical import (

@@ -5,7 +5,7 @@ per-step overrides. SpikeInterface merges each override one level deep over the
 preset step (``dict(preset_step, **user_step)``); the fully resolved
 configuration that is actually passed to SpikeInterface, including every
 signature default the preset leaves implicit, is built by
-``spyglass.spikesorting.v2._motion.resolve_estimation_params``.
+``spyglass.spikesorting.v2._motion.estimation.resolve_estimation_params``.
 
 This schema only checks the shape of the blob and rejects overrides that would
 re-bind an argument the estimator passes itself, change where outputs go, or

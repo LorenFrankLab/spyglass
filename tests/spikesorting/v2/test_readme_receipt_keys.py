@@ -26,7 +26,7 @@ def readme_python() -> str:
 
 def test_readme_receipt_keys_exist(readme_python):
     """Every ``*summary["key"]`` in the README is a run_v2_pipeline key."""
-    from spyglass.spikesorting.v2 import _pipeline_types
+    from spyglass.spikesorting.v2._orchestration import types as _pipeline_types
 
     documented = set()
     for summary_type in (

@@ -22,7 +22,7 @@ pytestmark = [pytest.mark.slow, pytest.mark.integration]
 def _browser_stack():
     browser.require_browser()
     yield
-    from spyglass.spikesorting.v2._review_delivery import stop_review_servers
+    from spyglass.spikesorting.v2._review.delivery import stop_review_servers
 
     stop_review_servers()
 
@@ -50,7 +50,7 @@ def test_browser_review_commit_verify_and_select(
 ):
     from spyglass.spikesorting.analysis.v1 import group as group_module
     from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
-    from spyglass.spikesorting.v2._review_delivery import (
+    from spyglass.spikesorting.v2._review.delivery import (
         served_review_bundles,
         stop_review_servers,
     )

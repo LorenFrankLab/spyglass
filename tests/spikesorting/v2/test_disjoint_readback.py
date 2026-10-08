@@ -33,7 +33,9 @@ def test_spike_times_to_frames_recovers_frames_on_gap_timeline():
     ``round((t - t0) * fs)`` would return ``150 + gap*fs`` (shifted off
     the end); ``searchsorted`` recovers exactly 150.
     """
-    from spyglass.spikesorting.v2.utils import _spike_times_to_frames
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _spike_times_to_frames,
+    )
 
     fs = 30000.0
     dt = 1.0 / fs
@@ -69,7 +71,9 @@ def test_spike_times_to_frames_uses_nearest_sample_for_roundoff():
     instead choose the physically closest timestamp so harmless
     serialization/round-trip noise does not shift every spike one sample late.
     """
-    from spyglass.spikesorting.v2.utils import _spike_times_to_frames
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _spike_times_to_frames,
+    )
 
     fs = 30000.0
     dt = 1.0 / fs
@@ -95,7 +99,9 @@ def test_spike_times_to_frames_uses_nearest_sample_for_roundoff():
 
 def test_spike_times_to_frames_rejects_spikes_in_disjoint_gap():
     """Nearest-neighbor readback must not hide spikes inside wall-clock gaps."""
-    from spyglass.spikesorting.v2.utils import _spike_times_to_frames
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _spike_times_to_frames,
+    )
 
     fs = 30000.0
     dt = 1.0 / fs
@@ -123,7 +129,9 @@ def test_spike_times_to_frames_clamps_out_of_bounds():
     last valid sample keeps the count aligned (the spike is at ~the final
     sample anyway).
     """
-    from spyglass.spikesorting.v2.utils import _spike_times_to_frames
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _spike_times_to_frames,
+    )
 
     fs = 30000.0
     timestamps = np.arange(100) / fs + 5.0
@@ -147,7 +155,9 @@ def test_spike_times_to_frames_raises_on_far_out_of_bounds():
     past in time) is an upstream alignment/units bug and must surface rather
     than be silently absorbed into the last sample.
     """
-    from spyglass.spikesorting.v2.utils import _spike_times_to_frames
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _spike_times_to_frames,
+    )
 
     fs = 30000.0
     timestamps = np.arange(100) / fs + 5.0

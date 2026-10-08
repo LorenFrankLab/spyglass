@@ -1,7 +1,7 @@
 """DB-free unit tests for analyzer-curation transform helpers.
 
 These exercise the pure logic in
-``spyglass.spikesorting.v2._metric_curation`` -- label-rule application
+``spyglass.spikesorting.v2._curation.metrics`` -- label-rule application
 (the three #1513 bug-class invariants), NaN sanitization for serialization
 (#1556), the Spyglass ``isi_violation`` fraction, and the classification of
 expected-missing versus failed metric values -- with no DataJoint
@@ -18,7 +18,7 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
-from spyglass.spikesorting.v2._metric_curation import (
+from spyglass.spikesorting.v2._curation.metrics import (
     apply_label_rules,
     apply_snr_peak_sign,
     assert_rule_metrics_computed,
@@ -177,7 +177,7 @@ def test_metric_warning_capture_restores_configured_threshold(
     """A warning oracle must capture Spyglass without changing quiet policy."""
     import logging
 
-    from spyglass.spikesorting.v2._metric_curation import (
+    from spyglass.spikesorting.v2._curation.metrics import (
         _is_finite_metric_value,
     )
     from spyglass.utils import logger
@@ -203,7 +203,7 @@ def test_is_finite_metric_value_warns_on_non_numeric(caplog):
     """A genuinely non-numeric metric cell (an SI shape/dtype drift) is filtered
     AND logged -- the swallow must be visible, unlike a legitimate NaN which is
     a silent low-spike skip."""
-    from spyglass.spikesorting.v2._metric_curation import (
+    from spyglass.spikesorting.v2._curation.metrics import (
         _is_finite_metric_value,
     )
 
@@ -217,7 +217,7 @@ def test_is_finite_metric_value_warns_on_non_numeric(caplog):
 
 def test_is_finite_metric_value_nan_filtered_silently(caplog):
     """A legitimate NaN (low-spike unit) is filtered without any warning."""
-    from spyglass.spikesorting.v2._metric_curation import (
+    from spyglass.spikesorting.v2._curation.metrics import (
         _is_finite_metric_value,
     )
 

@@ -23,13 +23,13 @@ import datajoint as dj
 
 from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
-from spyglass.spikesorting.v2 import (
-    _concat_recording_fetch,
-    _recording_nwb,
-    _session_group_insert,
+from spyglass.spikesorting.v2._recording import (
+    concat_fetch as _concat_recording_fetch,
+    session_group as _session_group_insert,
 )
-from spyglass.spikesorting.v2._recording_nwb import StoredTraces
-from spyglass.spikesorting.v2._staged_outputs import (
+from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
+from spyglass.spikesorting.v2._storage.nwb import StoredTraces
+from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
     StagedOutputs,
 )
@@ -40,11 +40,11 @@ from spyglass.spikesorting.v2.recording import (
     PreprocessingParameters,  # noqa: F401
     SortGroupV2,  # noqa: F401
 )
-from spyglass.spikesorting.v2.utils import (
+from spyglass.spikesorting.v2._core.table_integrity import (
     FactoryOnlyMaster,
     SelectionMasterInsertGuard,
-    _validate_params,
 )
+from spyglass.spikesorting.v2._core.lookup_validation import _validate_params
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
 if TYPE_CHECKING:
@@ -59,7 +59,7 @@ def _member_electrode_signature(member: dict) -> tuple:
     Fetches the sort group's electrodes (each with its owning
     ``electrode_group_name``) and per-electrode brain region, then delegates the
     signature shape to
-    :func:`._concat_recording.electrode_signature_from_rows`. Each electrode is
+    :func:`._recording.concat.electrode_signature_from_rows`. Each electrode is
     keyed by ``(electrode_group_name, electrode_id)`` because the ``Electrode``
     primary key carries the group and ids can repeat across groups -- so two
     physically distinct probes with reused ids and matching regions never
@@ -68,10 +68,10 @@ def _member_electrode_signature(member: dict) -> tuple:
     signature while members on different sort groups, probes, or regions
     diverge. An electrode without a region maps to ``None``.
     """
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         electrode_signature_from_rows,
     )
-    from spyglass.spikesorting.v2._pipeline_geometry import (
+    from spyglass.spikesorting.v2._recording.unit_metadata import (
         sort_group_electrode_regions,
     )
 
@@ -335,7 +335,7 @@ class ConcatenatedRecordingSelection(
         ``insert_selection`` freezes each ``SessionGroup.Member``'s ordered
         logical identity AND its resolved ``Recording`` (``recording_id`` +
         ``recording_content_hash``) here, and folds the ordered LOGICAL set into
-        ``concat_recording_id`` via :func:`._concat_recording.member_set_hash`.
+        ``concat_recording_id`` via :func:`._recording.concat.member_set_hash`.
         Member identity columns are snapshots; the selected artifact detection
         has a foreign key so it cannot silently disappear. The identity stays
         frozen: a later edit to ``SessionGroup.Member`` or the member's
@@ -445,7 +445,9 @@ class ConcatenatedRecordingSelection(
         ]
         from contextlib import ExitStack
 
-        from spyglass.spikesorting.v2._db_locking import required_advisory_lock
+        from spyglass.spikesorting.v2._core.db_locking import (
+            required_advisory_lock,
+        )
         from spyglass.spikesorting.v2.artifact_output import (
             ArtifactDetectionOutput,
         )
@@ -508,7 +510,7 @@ class ConcatenatedRecordingSelection(
         rejected rather than silently returned. Used by ``insert_selection`` for
         both the pre-insert lookup and the post-duplicate-key refetch.
         """
-        from spyglass.spikesorting.v2._selection_identity import (
+        from spyglass.spikesorting.v2._core.selection_identity import (
             existing_selection_pk,
         )
 
@@ -637,7 +639,7 @@ class ConcatenatedRecording(
         """Verify each frozen member's ``Recording`` and build the load plan.
 
         The verification is
-        :func:`._concat_recording_fetch.resolve_snapshot_recordings` (see it
+        :func:`._recording.concat_fetch.resolve_snapshot_recordings` (see it
         for the plan's fields and the errors). ``make_fetch``, member curation
         and UnitMatch call this method.
         """
@@ -670,7 +672,7 @@ class ConcatenatedRecording(
             ``(recordings, member_sample_counts, member_indices)`` -- aligned
             element-wise and in ``member_index`` order.
         """
-        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
+        from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
         recordings = []
         member_sample_counts = []
@@ -760,7 +762,7 @@ class ConcatenatedRecording(
             member sample counts (which would misalign the ``MemberBoundary``
             back-mapping).
         """
-        from spyglass.spikesorting.v2._concat_recording import (
+        from spyglass.spikesorting.v2._recording.concat import (
             build_concatenated_recording,
             concat_provenance_tables,
             concat_span_arrays,
@@ -768,8 +770,8 @@ class ConcatenatedRecording(
             mask_member_recordings,
             observation_intervals,
         )
-        from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
-        from spyglass.spikesorting.v2._units_nwb import (
+        from spyglass.spikesorting.v2._storage.nwb import write_nwb_artifact
+        from spyglass.spikesorting.v2._storage.units_nwb import (
             _base_intervals_from_recording,
         )
 
@@ -962,7 +964,7 @@ class ConcatenatedRecording(
         si.BaseRecording
             The concatenated, masked, unwhitened recording.
         """
-        from spyglass.spikesorting.v2._recording_nwb import (
+        from spyglass.spikesorting.v2._storage.nwb import (
             read_stored_traces,
             stored_traces,
         )
@@ -1008,11 +1010,11 @@ class ConcatenatedRecording(
             ``(nwb_file_name, interval_list_name)``) so two members sharing an
             NWB/interval but on distinct sort groups -- or, for a mixed-team
             group, distinct teams -- do not collide. See
-            :func:`._concat_recording.member_split_key`.
+            :func:`._recording.concat.member_split_key`.
         """
         import spikeinterface as si
 
-        from spyglass.spikesorting.v2._concat_recording import (
+        from spyglass.spikesorting.v2._recording.concat import (
             member_split_key,
             split_unit_spike_trains,
         )

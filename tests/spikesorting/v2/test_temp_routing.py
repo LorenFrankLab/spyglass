@@ -59,8 +59,8 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
     ), "UnitMatch bundle scratch must be created under the configured temp_dir"
 
     # --- analyzer-recompute scratch (tempfile.TemporaryDirectory) ---------- #
-    from spyglass.spikesorting.v2 import _sorting_analyzer as sa
-    from spyglass.spikesorting.v2 import _units_nwb
+    from spyglass.spikesorting.v2._sorting import analyzer as sa
+    from spyglass.spikesorting.v2._storage import units_nwb as _units_nwb
     from spyglass.spikesorting.v2 import recompute as rc
 
     captured_rc = {}
@@ -83,7 +83,7 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
             waveform_params={},
         ),
         source=rc.AnalyzerRegenSource(
-            recording=None, units=None, sorter_row={}
+            recording=None, units=None, sorter_row={}, job_kwargs={}
         ),
     )
     with pytest.raises(_StopAfterTempDir):

@@ -25,7 +25,7 @@ pytestmark = [
 
 
 def _write_edits(uri: str, labels: dict, groups: list[list[int]]) -> None:
-    from spyglass.spikesorting.v2._figpack_curation import (
+    from spyglass.spikesorting.v2._review.annotations import (
         labels_and_merges_to_annotations,
     )
 
@@ -63,7 +63,7 @@ def test_browser_review_preview_commit_resume_and_continue(
     """The full review journey is pinned, pure, resumable, and merge-safe."""
     from unittest.mock import patch
 
-    from spyglass.spikesorting.v2._figpack_curation import (
+    from spyglass.spikesorting.v2._review.annotations import (
         curation_annotations_to_labels_and_merges,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -318,7 +318,7 @@ def test_worker_retry_reuses_committed_child_after_evaluation_failure(
     planted_two_unit_sort, curation_evaluation_defaults, monkeypatch
 ):
     """A failed merge evaluation can resume without committing another child."""
-    from spyglass.spikesorting.v2._review_operations import (
+    from spyglass.spikesorting.v2._review.operations import (
         OPERATION_FILE,
         RESULT_FILE,
         run_operation,

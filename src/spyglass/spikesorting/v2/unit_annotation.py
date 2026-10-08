@@ -15,8 +15,8 @@ from typing import Any
 import datajoint as dj
 import pandas as pd
 
-from spyglass.spikesorting.v2._lookup_validation import lossless_int
-from spyglass.spikesorting.v2._unit_annotation import (
+from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
+from spyglass.spikesorting.v2._curation.annotation import (
     ANNOTATION_VALUE_TYPES,
     annotation_set_hash,
     normalize_annotation_value,
@@ -31,7 +31,7 @@ from spyglass.spikesorting.v2.annotation_api import (
 )
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.curation_api import CurationRef
-from spyglass.spikesorting.v2.utils import (
+from spyglass.spikesorting.v2._core.table_integrity import (
     FactoryOnlyMaster,
     ImmutableParamsLookup,
 )

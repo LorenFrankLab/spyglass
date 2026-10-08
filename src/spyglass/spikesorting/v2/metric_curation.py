@@ -34,17 +34,17 @@ from typing import NamedTuple
 import datajoint as dj
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.spikesorting.v2 import (
-    _evaluation_acceptance,
-    _evaluation_analyzers,
-    _metric_curation,
-    _metric_curation_fetch,
+from spyglass.spikesorting.v2._curation import (
+    evaluation_acceptance as _evaluation_acceptance,
+    evaluation_analyzers as _evaluation_analyzers,
+    metrics as _metric_curation,
+    metric_fetch as _metric_curation_fetch,
 )
-from spyglass.spikesorting.v2._metric_curation import (
+from spyglass.spikesorting.v2._curation.metrics import (
     _requested_pc_metrics,
     rules_payloads_match,
 )
-from spyglass.spikesorting.v2._metric_curation_nwb import (
+from spyglass.spikesorting.v2._storage.metrics_nwb import (
     read_merge_suggestions,
     read_proposed_labels,
     read_quality_metrics,
@@ -54,23 +54,23 @@ from spyglass.spikesorting.v2._params.metric_curation import (
     prepare_auto_curation_rules,
     prepare_quality_metric_row,
 )
-from spyglass.spikesorting.v2._recipe_catalog import (
+from spyglass.spikesorting.v2._core.recipe_catalog import (
     auto_curation_default_payloads,
     quality_metric_default_rows,
     waveform_params_for_preprocessing,
 )
-from spyglass.spikesorting.v2._source_resolution import EffectiveTraces
-from spyglass.spikesorting.v2._staged_outputs import (
+from spyglass.spikesorting.v2._recording.source import EffectiveTraces
+from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
     StagedOutputs,
 )
-from spyglass.spikesorting.v2._units_nwb import StoredUnits
+from spyglass.spikesorting.v2._storage.units_nwb import StoredUnits
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.exceptions import (
     UnsupportedDirectInsertError,
     ZeroUnitAnalyzerError,
 )
-from spyglass.spikesorting.v2._staged_outputs import (
+from spyglass.spikesorting.v2._storage.staged_outputs import (
     unlink_staged_analysis_file as _unlink_staged_analysis_file,
 )
 from spyglass.spikesorting.v2.sorting import (
@@ -78,9 +78,11 @@ from spyglass.spikesorting.v2.sorting import (
     Sorting,
     SortingSelection,
 )
-from spyglass.spikesorting.v2.utils import (
+from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
+)
+from spyglass.spikesorting.v2._core.lookup_validation import (
     _jsonable_blob,
     reject_duplicate_quality_metric_content,
     reject_stale_quality_metric_defaults,
@@ -112,9 +114,7 @@ def _assert_is_metric_recipe(waveform_params_name: str) -> None:
     building an unwhitened metric analyzer, mirroring the consume-time re-check
     in ``run_clusterless_thresholder``).
     """
-    from spyglass.spikesorting.v2._sorting_analyzer import (
-        fetch_waveform_params,
-    )
+    from spyglass.spikesorting.v2._sorting.analyzer import fetch_waveform_params
 
     recipe = fetch_waveform_params(waveform_params_name)
     if not recipe.get("whiten") or recipe.get("purpose") != "metric":
@@ -642,7 +642,7 @@ class CurationEvaluationSelection(
         ``DuplicateSelectionError`` if an existing row for this identity carries
         a non-deterministic id.
         """
-        from spyglass.spikesorting.v2._selection_identity import (
+        from spyglass.spikesorting.v2._core.selection_identity import (
             assert_supplied_id_matches,
             deterministic_id,
         )
@@ -678,7 +678,9 @@ class CurationEvaluationSelection(
             parent_key, context="CurationEvaluation"
         )
 
-        from spyglass.spikesorting.v2._observed_time import OBSERVATION_VERSION
+        from spyglass.spikesorting.v2._core.observed_time import (
+            OBSERVATION_VERSION,
+        )
 
         identity = {
             "sorting_id": key["sorting_id"],
@@ -741,7 +743,7 @@ class CurationEvaluationSelection(
     @classmethod
     def _find_existing_pk(cls, identity, deterministic_id):
         """Return the PK-only dict for ``identity`` or None; guard bad ids."""
-        from spyglass.spikesorting.v2._selection_identity import (
+        from spyglass.spikesorting.v2._core.selection_identity import (
             existing_selection_pk,
         )
 
@@ -860,11 +862,11 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """
         import spikeinterface as si
 
-        from spyglass.spikesorting.v2._nwb_provenance import (
+        from spyglass.spikesorting.v2._storage.provenance import (
             CURATION_EVALUATION_PROVENANCE,
             build_provenance_table,
         )
-        from spyglass.spikesorting.v2._source_resolution import (
+        from spyglass.spikesorting.v2._recording.source import (
             read_effective_recording,
         )
 
@@ -915,7 +917,9 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         if corrected_id is not None:
             base_provenance["motion_corrected_recording_id"] = str(corrected_id)
 
-        from spyglass.spikesorting.v2._observed_time import OBSERVATION_VERSION
+        from spyglass.spikesorting.v2._core.observed_time import (
+            OBSERVATION_VERSION,
+        )
 
         base_provenance["observation_version"] = OBSERVATION_VERSION
         base_provenance["observed_presence_bin_duration_s"] = (
@@ -963,7 +967,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             )
             statistics_spans = list(recording_inputs.statistics_spans)
 
-            from spyglass.spikesorting.v2._observation_io import (
+            from spyglass.spikesorting.v2._storage.observation_io import (
                 observation_metrics_from_nwb,
             )
 
@@ -1429,7 +1433,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 "the sort-time waveform subsample (full re-extraction is not "
                 "supported)."
             )
-        from spyglass.spikesorting.v2._curation_analyzer import (
+        from spyglass.spikesorting.v2._curation.analyzer import (
             _resolve_curation_analyzer,
         )
 
@@ -1468,7 +1472,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         their own unit namespace. The returned cache-backed analyzer must not be
         mutated; helpers needing an extension use ``_display_analyzer`` below.
         """
-        from spyglass.spikesorting.v2._curation_analyzer import (
+        from spyglass.spikesorting.v2._curation.analyzer import (
             _resolve_curation_analyzer,
         )
 
@@ -1483,7 +1487,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         disk-backed derivative keyed by the exact request (see
         ``_curation_analyzer``), never into the published base cache.
         """
-        from spyglass.spikesorting.v2._curation_analyzer import (
+        from spyglass.spikesorting.v2._curation.analyzer import (
             curation_analyzer_with_extensions,
         )
 
@@ -1512,7 +1516,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             Axes keyed by metric name plus ``"scatter"``. A zero-unit sort
             returns ``{"empty": ax}``.
         """
-        from spyglass.spikesorting.v2._metric_curation_plots import (
+        from spyglass.spikesorting.v2._curation.metric_plots import (
             plot_units_qc_figure,
         )
 
@@ -1536,7 +1540,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
     def get_correlograms(self, key, *, window_ms=100.0, bin_ms=5.0):
         """Return ``(ccgs, bins, unit_ids)`` from the correlograms extension."""
-        from spyglass.spikesorting.v2._metric_curation_plots import (
+        from spyglass.spikesorting.v2._curation.metric_plots import (
             correlograms_from_analyzer,
         )
 
@@ -1548,7 +1552,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         self, key, *, unit_ids=None, window_ms=100.0, bin_ms=5.0
     ):
         """Plot autocorrelograms (one panel per unit). Ported BurstPair view."""
-        from spyglass.spikesorting.v2._metric_curation_plots import (
+        from spyglass.spikesorting.v2._curation.metric_plots import (
             plot_autocorrelograms_figure,
         )
 
@@ -1561,7 +1565,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         self, key, pairs, *, window_ms=100.0, bin_ms=5.0
     ):
         """Plot cross-correlograms for unit pairs (ported BurstPair view)."""
-        from spyglass.spikesorting.v2._metric_curation_plots import (
+        from spyglass.spikesorting.v2._curation.metric_plots import (
             plot_pair_correlograms_figure,
             validate_unit_pairs,
         )
@@ -1575,7 +1579,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def investigate_pair_peaks(self, key, pairs):
         """Plot per-channel peak-amplitude histograms for unit pairs."""
         from spyglass.spikesorting.utils_burst import plot_burst_pair_peaks
-        from spyglass.spikesorting.v2._metric_curation_plots import (
+        from spyglass.spikesorting.v2._curation.metric_plots import (
             peak_amplitudes_from_analyzer,
             validate_unit_pairs,
         )
@@ -1588,7 +1592,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def plot_peak_over_time(self, key, pairs, overlap: bool = True):
         """Plot peak amplitude over time for unit pairs (ported BurstPair view)."""
         from spyglass.spikesorting.utils_burst import plot_burst_peak_over_time
-        from spyglass.spikesorting.v2._metric_curation_plots import (
+        from spyglass.spikesorting.v2._curation.metric_plots import (
             peak_amplitudes_from_analyzer,
             validate_unit_pairs,
         )
@@ -1609,7 +1613,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ``random_spikes`` subset, not the full train), so the two arrays stay
         aligned. Reads the sort's SortingAnalyzer ``waveforms`` extension.
         """
-        from spyglass.spikesorting.v2._metric_curation_plots import (
+        from spyglass.spikesorting.v2._curation.metric_plots import (
             peak_amplitudes_from_analyzer,
         )
 
@@ -1647,7 +1651,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         pd.DataFrame
             Shape ``(n_pairs, 4)``, MultiIndex ``(unit1, unit2)``.
         """
-        from spyglass.spikesorting.v2._metric_curation_plots import (
+        from spyglass.spikesorting.v2._curation.metric_plots import (
             burst_pair_metrics_frame,
         )
 

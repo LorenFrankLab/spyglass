@@ -38,9 +38,7 @@ def test_shank_pitch_is_full_shank_spacing():
     independent of how few a sort group keeps; NaN -> None; < 2 -> None."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._recording_geometry import (
-        _shank_pitch,
-    )
+    from spyglass.spikesorting.v2._recording.geometry import _shank_pitch
 
     # A dense 10-um linear shank.
     shank = np.array([[0, k * 10.0, 0] for k in range(8)], dtype=float)
@@ -65,7 +63,7 @@ def test_interior_bad_channel_ids_pitch_anchored():
     dropped; a bad channel embedded in a dense good run is kept."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._recording_geometry import (
+    from spyglass.spikesorting.v2._recording.geometry import (
         _interior_bad_channel_ids,
     )
 
@@ -214,7 +212,7 @@ def _apply_preprocessing(
     time restriction between them cannot reorder SpikeInterface calls, so
     composing them directly pins the same apply order these tests are about.
     """
-    from spyglass.spikesorting.v2._recording_preprocessing import (
+    from spyglass.spikesorting.v2._recording.preprocessing import (
         apply_spatial_preprocessing,
         apply_temporal_preprocessing,
     )
@@ -326,7 +324,7 @@ def test_filtering_description_interpolate_branch():
     """`filtering_description` appends the interpolate clause only when N > 0
     (so `remove` provenance/content_hash is unchanged), singular vs plural, and
     positioned between bandpass and reference."""
-    from spyglass.spikesorting.v2._recording_preprocessing import (
+    from spyglass.spikesorting.v2._recording.preprocessing import (
         filtering_description,
     )
 
@@ -641,7 +639,7 @@ def test_interpolate_completes_probe_remove_omits(handling_session):
         import numpy as np
         import spikeinterface.preprocessing as sip
 
-        from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+        from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
         from spyglass.utils.nwb_helper_fn import (
             raw_eseries_path_and_timestamp_mode,
         )

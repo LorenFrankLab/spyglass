@@ -18,12 +18,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2._curation_plan import (
+from spyglass.spikesorting.v2._curation.plan import (
     build_curation_insert_plan,
     build_curation_summary,
     validate_label_unit_ids,
 )
-from spyglass.spikesorting.v2._curation_transforms import (
+from spyglass.spikesorting.v2._curation.transforms import (
     build_curated_unit_rows,
     normalize_curation_payload,
 )
@@ -332,7 +332,7 @@ def test_build_curation_summary_passthrough_and_coercions():
 
 
 def _compose(parent, supplied, kept, *, policy="inherit", apply_merge=False):
-    from spyglass.spikesorting.v2._curation_transforms import (
+    from spyglass.spikesorting.v2._curation.transforms import (
         compose_curation_labels,
     )
 

@@ -307,7 +307,9 @@ def source_clock_estimate_and_truth(
     truth : numpy.ndarray
         ``(n_data_bins,)`` ground-truth displacement of each kept bin.
     """
-    from spyglass.spikesorting.v2._motion import displacement_on_source_clock
+    from spyglass.spikesorting.v2._motion.estimation import (
+        displacement_on_source_clock,
+    )
 
     mapped = displacement_on_source_clock(motion, clock)
     half_bin = float(np.diff(motion.temporal_bins_s[0][:2])[0]) / 2

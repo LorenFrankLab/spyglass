@@ -16,7 +16,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2._recipe_catalog import CORTEX_DISPLAY_WAVEFORMS
+from spyglass.spikesorting.v2._core.recipe_catalog import (
+    CORTEX_DISPLAY_WAVEFORMS,
+)
 from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 from tests.spikesorting.v2._sorter_stub import plant_sorter
 
@@ -131,7 +133,7 @@ def test_cancelled_delete_preserves_analyzer_folder_and_row(
     planted_sort, monkeypatch
 ):
     from spyglass.spikesorting.v2.sorting import Sorting
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
 
     folder = analyzer_path(planted_sort["sorting_id"], _DISPLAY)
     assert folder.exists(), "fixture should have created the analyzer folder"
@@ -174,7 +176,7 @@ def test_cancelled_artifact_delete_preserves_interval_list(
     )
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2._artifacts.naming import (
         artifact_detection_interval_list_name,
     )
 
@@ -244,7 +246,7 @@ def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
     )
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2._artifacts.naming import (
         artifact_detection_interval_list_name,
     )
 
@@ -335,7 +337,7 @@ def test_unrestricted_sorting_delete_with_positional_restriction_restricts(
     """
     import uuid
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting
 
     folder = analyzer_path(planted_sort["sorting_id"], _DISPLAY)

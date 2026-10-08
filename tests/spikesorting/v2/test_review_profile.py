@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from spyglass.spikesorting.v2._review_profile import (
+from spyglass.spikesorting.v2._review.profile import (
     normalize_review_profile,
     profile_display_property_vocabulary,
     review_profile_label_policy,
@@ -187,7 +187,7 @@ def test_franklab_review_profile_is_shipped(dj_conn):
 
 def test_review_display_options_are_bounded_and_serializable():
     """Display budget validates, round-trips, and stays display-only."""
-    from spyglass.spikesorting.v2._review_profile import (
+    from spyglass.spikesorting.v2._review.profile import (
         REVIEW_DISPLAY_OPTIONS_VERSION,
         ReviewDisplayOptions,
     )

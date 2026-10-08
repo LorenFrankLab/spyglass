@@ -1,0 +1,954 @@
+"""Artifact-mask service behind ``Sorting``.
+
+``apply_artifact_mask`` zeros the complement of the artifact-removed
+``valid_times`` on the recording before sorting, so the sorter never sees
+artifact frames. ``sorting_statistics_spans`` masks ``Sorting.make_compute``'s
+input and resolves the artifact-free statistics spans for each source kind.
+``make_fetch`` already fetched ``valid_times`` (the tri-part
+``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
+compute), so these functions operate purely on the SpikeInterface recording.
+
+DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
+connection at import: numpy / SpikeInterface / the typed
+``EmptyArtifactValidTimesError`` are imported lazily inside the function, which
+touches no DB at call time.
+"""
+
+from __future__ import annotations
+
+from typing import NamedTuple
+
+
+def _validate_artifact_intervals(
+    recording, valid_times, artifact_detection_id, recording_id
+):
+    """Validate the interval contract and bounded recording envelope."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _segment_times_at,
+        assert_positive_sampling_frequency,
+    )
+    from spyglass.spikesorting.v2.exceptions import EmptyArtifactValidTimesError
+
+    n_segments = recording.get_num_segments()
+    if n_segments != 1:
+        raise ValueError(
+            "apply_artifact_mask: expected a single-segment recording; got "
+            f"{n_segments} segments. The v2 sort recording is a mono-segment "
+            "concatenated timeline; a multi-segment recording signals an "
+            "upstream construction error."
+        )
+
+    valid_times = np.asarray(valid_times, dtype=float)
+    if valid_times.size == 0:
+        raise EmptyArtifactValidTimesError(
+            "Artifact-removed valid_times is empty for "
+            f"artifact_detection_id={artifact_detection_id!r}, "
+            f"recording_id={recording_id!r}: the artifact-detection pass kept "
+            "zero seconds of the recording. Masking would zero the "
+            "entire recording and the sort would run over all-zeros. "
+            "Re-run RecordingArtifactDetection with looser thresholds or "
+            "override the artifact-detection selection."
+        )
+    if valid_times.ndim != 2 or valid_times.shape[1] != 2:
+        raise ValueError(
+            "_apply_artifact_mask: valid_times must be an (n, 2) array "
+            f"of (start, end) seconds; got shape {valid_times.shape}."
+        )
+    # Reject NaN/Inf before any comparison. NaN slips silently through
+    # the < / sorted checks below (every NaN comparison is False), so a
+    # non-finite interval would otherwise under-mask instead of failing loudly.
+    if not np.all(np.isfinite(valid_times)):
+        raise ValueError(
+            "apply_artifact_mask: valid_times contains non-finite (NaN/Inf) "
+            f"values: {valid_times.tolist()!r}. The artifact-removed intervals "
+            "must be finite seconds; a non-finite bound signals an "
+            "alignment/units error upstream."
+        )
+    starts = valid_times[:, 0]
+    ends = valid_times[:, 1]
+    if np.any(ends < starts):
+        raise ValueError(
+            "_apply_artifact_mask: valid_times has an interval whose "
+            "end precedes its start; each interval must be "
+            "(start <= end)."
+        )
+    if valid_times.shape[0] > 1 and (
+        np.any(np.diff(starts) < 0) or np.any(starts[1:] < ends[:-1])
+    ):
+        raise ValueError(
+            "_apply_artifact_mask: valid_times must be sorted by start "
+            "time and non-overlapping (the complement walker assumes "
+            f"monotonic, disjoint input); got {valid_times.tolist()!r}. "
+            "Sort and merge the intervals before passing them."
+        )
+
+    # Map the artifact-removed valid intervals to the complement frame ranges
+    # WITHOUT materializing the recording's full timestamp vector.
+    # ``recording.get_times()`` builds (and caches) a concrete float64 array of
+    # every sample (~824 MB for 1 h @ 30 kHz, 8 bytes/sample); instead we read
+    # only the two recording endpoints and binary-search the (few) interval
+    # boundaries via ``frames_for_times`` / ``_segment_times_at``, both of which
+    # index the h5py-/mmap-backed timestamps lazily (peak memory bounded by the
+    # boundary count, not n_samples). The persisted recording's timestamps are
+    # monotonically non-decreasing by construction (Recording.make) -- the
+    # invariant the searchsorted-equivalent ``frames_for_times`` mapping assumes
+    # (a full-vector ``assert_monotonic_timestamps`` guard would force the
+    # materialization this avoids).
+    n_samples = int(recording.get_num_samples(segment_index=0))
+    if n_samples == 0:
+        raise ValueError(
+            "apply_artifact_mask: recording has zero samples; there is "
+            "nothing to mask."
+        )
+    t_first, t_last = (
+        float(t)
+        for t in _segment_times_at(
+            recording, np.array([0, n_samples - 1], dtype=np.int64)
+        )
+    )
+    # Bounded (two-endpoint) monotonicity tripwire in place of a full-vector
+    # ``assert_monotonic_timestamps``: catch gross corruption
+    # (empty/reversed/NaN-bracketed vector) loudly instead of silently
+    # mis-masking, without materializing. NOTE: this checks only the endpoints
+    # -- an INTERIOR backward step (which Recording.make's ordering invariant
+    # rules out) is not detected here; the chunked ``detect_artifacts`` path
+    # validates monotonicity per chunk.
+    if not (np.isfinite(t_first) and np.isfinite(t_last) and t_last >= t_first):
+        raise ValueError(
+            "apply_artifact_mask: recording endpoints are non-finite or step "
+            f"backward (t_first={t_first}, t_last={t_last}); the persisted "
+            "recording's monotonic timestamp invariant is violated and the "
+            "searchsorted frame mapping would silently mis-mask."
+        )
+    # Reject intervals outside the recording envelope before the walk.
+    # The complement walk silently clips to [t_first, t_last], so an interval
+    # starting before the first sample or ending past the last (a units/
+    # alignment error -- e.g. ms vs s) would be quietly ignored rather than
+    # flagged. Allow the exclusive end used by concatenated recordings and
+    # one sample-period of endpoint slop. The equivalent expressions n / fs
+    # and (n - 1) / fs + 1 / fs can differ by one floating-point step.
+    envelope_tol = 1.0 / assert_positive_sampling_frequency(
+        recording.get_sampling_frequency(), context="apply_artifact_mask: "
+    )
+    envelope_start = np.nextafter(t_first - envelope_tol, -np.inf)
+    envelope_stop = np.nextafter(t_last + envelope_tol, np.inf)
+    if starts.min() < envelope_start or ends.max() > envelope_stop:
+        raise ValueError(
+            "apply_artifact_mask: valid_times "
+            f"{valid_times.tolist()!r} fall outside the recording envelope "
+            f"[{t_first}, {t_last}] seconds (tol={envelope_tol:g}s); an "
+            "interval before the first or past the last sample signals an "
+            "alignment/units error (e.g. milliseconds vs seconds)."
+        )
+    return valid_times, n_samples, t_first, t_last
+
+
+def artifact_frame_ranges(
+    recording, valid_times, *, artifact_detection_id=None, recording_id=None
+):
+    """Map excluded periods to half-open frame ranges with bounded memory.
+
+    ``valid_times`` is the artifact-removed (start, end) seconds
+    array from the upstream ``IntervalList``; ``make_fetch``
+    already fetched it as ``obs_intervals`` so ``make_compute``
+    passes it through here instead of re-issuing the DB lookup
+    (the tri-part contract forbids DB I/O inside compute).
+
+    ``artifact_detection_id`` / ``recording_id`` are used only to make the
+    empty-``valid_times`` error message actionable.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The recording whose actual timestamps define frame coordinates.
+        This mapping function does not modify it.
+    valid_times : numpy.ndarray
+        Artifact-removed ``(n, 2)`` array of (start, end) seconds,
+        sorted by start and non-overlapping.
+    artifact_detection_id : optional
+        Keyword-only. Used only in the empty-``valid_times`` error
+        message. Default ``None``.
+    recording_id : optional
+        Keyword-only. Used only in the empty-``valid_times`` error
+        message. Default ``None``.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Excluded half-open frame ranges; empty when every frame is valid.
+
+    Raises
+    ------
+    EmptyArtifactValidTimesError
+        If ``valid_times`` is empty -- masking would zero the whole
+        recording, so the sort must fail loudly instead of running
+        over all-zeros.
+    ValueError
+        If ``valid_times`` is not an ``(n, 2)`` array, has an
+        interval with ``end < start``, or is not sorted-by-start and
+        non-overlapping. The complement walker assumes monotonic,
+        disjoint input; an unsorted/overlapping list would silently
+        under-mask. (The fetched ``obs_intervals`` are monotonic in
+        practice; this guards a hand-built curation override. Strict
+        input is intentional: the walker never silently sorts or merges.)
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _segment_times_at,
+        assert_artifact_frame_fraction,
+        assert_positive_sampling_frequency,
+        frames_for_times,
+    )
+
+    # Single-segment precondition. The complement walk and the single-segment
+    # ``list_periods=[frame_ranges]`` call below both assume ``segment_index=0``
+    # only; the v2 sort recording is always a mono-segment concatenated timeline
+    # (``concatenate_recordings``). A multi-segment recording signals an upstream
+    # construction error -- fail with a clear message instead of the cryptic
+    # ``IndexError`` SpikeInterface's ``silence_periods`` raises when
+    # ``list_periods`` is shorter than the segment count.
+    valid_times, n_samples, t_first, t_last = _validate_artifact_intervals(
+        recording, valid_times, artifact_detection_id, recording_id
+    )
+    # Walk the valid intervals left-to-right, collecting the complement as
+    # (start_time, end_time) pairs. None marks the exclusive recording end.
+    # Batch-map the boundaries to frames without reading the timestamp vector.
+    ends = valid_times[:, 1]
+    gap_time_pairs: list[tuple[float, float | None]] = []
+    cursor = t_first
+    for vs, ve in valid_times:
+        if vs > cursor:
+            gap_time_pairs.append((float(cursor), float(vs)))
+        cursor = max(cursor, ve)
+    if cursor < t_last:
+        gap_time_pairs.append((float(cursor), None))
+
+    frame_ranges: list[tuple[int, int]] = []
+    if gap_time_pairs:
+        start_frames = frames_for_times(
+            recording, [s for s, _ in gap_time_pairs]
+        )
+        # Map every end in one search: the open tail's ``None`` end maps to
+        # frame ``n_samples`` (the exclusive recording end, which
+        # ``frames_for_times`` cannot produce from a query time), so pass
+        # ``t_last`` as a harmless placeholder that the loop overrides.
+        end_frames = frames_for_times(
+            recording, [t_last if e is None else e for _, e in gap_time_pairs]
+        )
+        for (_, e_time), start, end in zip(
+            gap_time_pairs, start_frames, end_frames
+        ):
+            start = int(start)
+            end = n_samples if e_time is None else int(end)
+            if end > start:
+                frame_ranges.append((start, end))
+
+    # Drop pure inter-chunk-gap ranges. For a DISJOINT recording the
+    # gap-respecting valid_times leave a single boundary frame between
+    # two chunks; the complement walk emits it as a width-1 range whose
+    # successor is a wall-clock discontinuity. That frame is the last
+    # real sample of the preceding chunk (valid) -- masking it would
+    # zero a good sample per gap. A genuine 1-frame artifact instead
+    # has ~1-sample spacing to its neighbor, so it is kept. A manual cut uses
+    # a predecessor float to distinguish an excluded final sample from the
+    # chunk's inclusive endpoint. Read only the two
+    # boundary frames per width-1 candidate instead of indexing a full vector.
+    sample_period = 1.0 / assert_positive_sampling_frequency(
+        recording.get_sampling_frequency(), context="apply_artifact_mask: "
+    )
+
+    def _is_interchunk_boundary_range(start, end):
+        if not (end - start == 1 and end < n_samples):
+            return False
+        ts_start, ts_end = _segment_times_at(
+            recording, np.array([start, end], dtype=np.int64)
+        )
+        return (ts_end - ts_start) > 1.5 * sample_period and np.any(
+            ends == ts_start
+        )
+
+    frame_ranges = [
+        (s, e)
+        for (s, e) in frame_ranges
+        if not _is_interchunk_boundary_range(s, e)
+    ]
+
+    if not frame_ranges:
+        return []
+
+    # Data-sanity guard: a valid_times that keeps almost nothing makes the
+    # artifact complement span most of the recording. The interval-native
+    # silence_periods below keeps peak memory O(n_ranges) regardless of how many
+    # samples are masked, so this is NOT a memory guard -- it is a loud
+    # "you are masking more than the bound; the sort would run on a sliver"
+    # data-sanity check, mainly for a hand-built valid_times override (the normal
+    # pipeline's detect_artifacts guard fires first; see the strict-input note).
+    assert_artifact_frame_fraction(
+        sum(end - start for start, end in frame_ranges),
+        n_samples,
+        context="apply_artifact_mask: ",
+    )
+
+    return frame_ranges
+
+
+def apply_artifact_mask(
+    recording, valid_times, *, artifact_detection_id=None, recording_id=None
+):
+    """Mask excluded periods lazily, preserving frames and timestamps."""
+    ranges = artifact_frame_ranges(
+        recording,
+        valid_times,
+        artifact_detection_id=artifact_detection_id,
+        recording_id=recording_id,
+    )
+    return silence_frame_ranges(recording, ranges)
+
+
+def has_nonzero_offset(recording) -> bool:
+    """Say whether a recording keeps a nonzero channel calibration offset.
+
+    SpikeInterface reads a sample as ``raw * gain + offset`` microvolts, so a
+    stored zero is 0 uV exactly when every channel offset is 0. Bandpass
+    filtering and referencing zero the offset, so this is only true of an
+    unfiltered, unreferenced source (typically integer counts).
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+
+    Returns
+    -------
+    bool
+    """
+    import numpy as np
+
+    offsets = recording.get_channel_offsets()
+    return offsets is not None and bool(np.any(offsets != 0))
+
+
+def recording_with_zero_offset(recording):
+    """Present a recording so that a stored zero reads as 0 uV.
+
+    That holds for every filtered or referenced recording: SpikeInterface's
+    filters set the offsets to 0 (``preprocessing/filter.py:114-115``) and the
+    recording stage zeroes them after referencing. Such a recording (or one
+    with no calibration at all) is returned unchanged, whatever its gains and
+    dtype.
+
+    Only a recording that keeps a nonzero offset (:func:`has_nonzero_offset`)
+    goes through SpikeInterface's ``scale_to_uV``
+    (``preprocessing/scale.py:68-102``), which computes
+    ``raw * gain + offset`` per channel in float32 and sets gains 1 and
+    offsets 0.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The recording to be masked.
+
+    Returns
+    -------
+    si.BaseRecording
+        ``recording`` itself, or its float32 microvolt view.
+    """
+    if not has_nonzero_offset(recording):
+        return recording
+    import spikeinterface.preprocessing as sip
+
+    return sip.scale_to_uV(recording)
+
+
+def silence_frame_ranges(recording, frame_ranges):
+    """Silence validated half-open frame ranges to 0 uV.
+
+    The ranges are zeroed lazily, without expanding them to sample indices.
+    A zeroed stored sample reads as the channel offset, so a recording with
+    a nonzero offset is first presented as float32 microvolts with a unit
+    calibration (:func:`recording_with_zero_offset`) and its silenced samples
+    are 0 uV rather than the offset voltage. Any other recording is silenced
+    in its stored units and keeps its dtype and calibration. With no ranges,
+    ``recording`` itself is returned.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        A single-segment recording.
+    frame_ranges : sequence of (int, int)
+        Validated, sorted, half-open ``[start, end)`` frame ranges.
+
+    Returns
+    -------
+    si.BaseRecording
+        The silenced recording, or ``recording`` when there are no ranges.
+    """
+    import spikeinterface.preprocessing as sip
+
+    if not len(frame_ranges):
+        return recording
+    recording = recording_with_zero_offset(recording)
+
+    # Mask the artifact RANGES with the interval-native ``silence_periods``
+    # rather than expanding them to one trigger per sample. ``list_periods``
+    # takes ``(start, end_frame)`` tuples per segment with a HALF-OPEN ``end``
+    # (frames ``[start, end)`` are zeroed -- matching ``frame_ranges``), zeros
+    # them lazily in a ``SilencedPeriodsRecording``, and never materializes an
+    # O(n_artifact_frames) index array. This also sidesteps an SI 0.104
+    # ``remove_artifacts`` boundary bug (single-sample triggers leave the first
+    # frame of a contiguous run unmasked under ``ms_before/ms_after=0``);
+    # ``silence_periods`` zeros the slice directly, so no run edge is dropped.
+    masked = sip.silence_periods(
+        recording,
+        list_periods=[frame_ranges],
+        mode="zeros",
+    )
+
+    # Force the pickle serialization path for the masked recording.
+    # ``SilencedPeriodsRecording`` stores its artifact intervals in
+    # ``_kwargs["periods"]`` as a *structured* numpy array, which cannot survive
+    # a JSON round-trip (JSON has no structured-array type: the reload receives a
+    # plain nested list and ``__init__`` raises "periods must be a np.array with
+    # dtype ..."). SpikeInterface nonetheless reports this recording as
+    # JSON-serializable, so ``run_sorter`` dumps it to
+    # ``spikeinterface_recording.json`` and dies on reload -- but only when
+    # artifact detection actually flags intervals (so this object is built at
+    # all). Marking it non-JSON-serializable makes ``run_sorter`` fall back to
+    # pickle, which round-trips correctly. (No public setter exists; the private
+    # ``_serializability`` flag is the supported mechanism. The proper fix is
+    # upstream in SpikeInterface.)
+    from spyglass.spikesorting.v2._storage.spikeinterface import (
+        use_pickle_recording_serialization,
+    )
+
+    use_pickle_recording_serialization(masked)
+    return masked
+
+
+def complement_frame_ranges(
+    excluded_ranges: list[tuple[int, int]], n_samples: int
+) -> list[tuple[int, int]]:
+    """Half-open valid-frame ranges left after removing ``excluded_ranges``.
+
+    ``excluded_ranges`` may be unsorted, overlapping, or adjacent; they are
+    sorted and merged before the complement in ``[0, n_samples)`` is taken.
+
+    Parameters
+    ----------
+    excluded_ranges : list[tuple[int, int]]
+        Half-open ``(start, end)`` frame ranges to remove. Need not be
+        sorted, non-overlapping, or merged.
+    n_samples : int
+        Total number of frames; the complement is bounded to ``[0,
+        n_samples)``.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Sorted, disjoint, half-open valid frame ranges. ``[(0, n_samples)]``
+        when ``excluded_ranges`` is empty.
+    """
+    from spyglass.spikesorting.v2._core.signal_math import (
+        merge_sorted_intervals,
+    )
+
+    n_samples = int(n_samples)
+    merged = merge_sorted_intervals(
+        sorted((int(a), int(b)) for a, b in excluded_ranges)
+    )
+
+    valid: list[tuple[int, int]] = []
+    cursor = 0
+    for start, end in merged:
+        if start > cursor:
+            valid.append((cursor, start))
+        cursor = max(cursor, end)
+    if cursor < n_samples:
+        valid.append((cursor, n_samples))
+    return valid
+
+
+def boundary_spans_from_timestamps(recording) -> list[tuple[int, int]]:
+    """Half-open spans that never cross a wall-clock gap in ``recording``'s
+    persisted timestamps.
+
+    A gap is a step between consecutive persisted timestamps greater than
+    ``1.5 / fs`` (``base_intervals_and_gaps``, ``_signal_math.py``); a
+    recording with no explicit time vector (uniform sample-rate timestamps)
+    has no gaps and yields a single span covering the whole recording.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        Single-segment recording whose persisted timestamps define frame
+        coordinates. Not modified.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Sorted, disjoint, half-open frame spans covering ``[0,
+        recording.get_num_samples())``.
+
+    Raises
+    ------
+    ValueError
+        If ``recording`` has more than one segment; the v2 sort/statistics
+        pipeline is single-segment only.
+    """
+    from spyglass.spikesorting.v2._core.signal_math import (
+        base_intervals_and_gaps,
+    )
+
+    n_segments = recording.get_num_segments()
+    if n_segments != 1:
+        raise ValueError(
+            "boundary_spans_from_timestamps: expected a single-segment "
+            f"recording; got {n_segments} segments."
+        )
+    n = recording.get_num_samples()
+    cuts = sorted(
+        {
+            0,
+            n,
+            *(int(g) + 1 for g in base_intervals_and_gaps(recording).gap_after),
+        }
+    )
+    return [(a, b) for a, b in zip(cuts[:-1], cuts[1:]) if b > a]
+
+
+class Continuity(NamedTuple):
+    """Continuity spans and the real timestamps that bound each one.
+
+    Attributes
+    ----------
+    spans : list[tuple[int, int]]
+        Half-open frame spans of uninterrupted acquisition.
+    start_s : list[float]
+        Each span's first timestamp on its own acquisition clock (s).
+    end_s : list[float]
+        Each span's last timestamp on that clock (s): the time of frame
+        ``b - 1``, not ``start + (b - a) / fs``, which drifts from it when the
+        timestamps run at a rate slightly different from ``fs``.
+    """
+
+    spans: list[tuple[int, int]]
+    start_s: list[float]
+    end_s: list[float]
+
+
+def continuity_from_timestamps(recording) -> Continuity:
+    """Continuity spans of ``recording`` with their first and last timestamps.
+
+    The spans are :func:`boundary_spans_from_timestamps`; each boundary is
+    read with scalar lookups, so an HDF5-backed time vector is only indexed
+    one frame at a time.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        Single-segment recording carrying its persisted timestamps.
+
+    Returns
+    -------
+    Continuity
+    """
+    spans = boundary_spans_from_timestamps(recording)
+    return Continuity(
+        spans=spans,
+        start_s=[float(recording.sample_index_to_time(a)) for a, _ in spans],
+        end_s=[float(recording.sample_index_to_time(b - 1)) for _, b in spans],
+    )
+
+
+def statistics_spans(
+    n_samples: int,
+    excluded_ranges: list[tuple[int, int]],
+    boundary_spans: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Artifact-free frame spans that each lie inside a single boundary span.
+
+    The intersection of the artifact-free complement of ``excluded_ranges``
+    with ``boundary_spans``. Two output spans that are adjacent in frame
+    coordinates are never merged: adjacency across a boundary-span edge is
+    exactly the join information the spans exist to preserve.
+
+    Parameters
+    ----------
+    n_samples : int
+        Total number of frames.
+    excluded_ranges : list[tuple[int, int]]
+        Half-open artifact-masked frame ranges (need not be sorted/merged).
+    boundary_spans : list[tuple[int, int]]
+        Disjoint half-open frame spans that never cross a join (e.g. from
+        ``boundary_spans_from_timestamps`` / ``_recording.concat.
+        concat_continuity``); adjacent spans may touch.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Sorted, half-open statistics spans.
+
+    Raises
+    ------
+    ValueError
+        If no artifact-free frame lies inside any boundary span.
+    """
+    from spyglass.spikesorting.v2._core.signal_math import intersect_intervals
+    from spyglass.utils import logger
+
+    n_samples = int(n_samples)
+    valid = complement_frame_ranges(excluded_ranges, n_samples)
+    valid_samples = sum(b - a for a, b in valid)
+    out = [
+        (int(a), int(b))
+        for a, b in intersect_intervals(valid, boundary_spans, merge=False)
+    ]
+    if not out:
+        raise ValueError(
+            "statistics_spans: no artifact-free samples inside any "
+            "acquisition span."
+        )
+    masked_fraction = (
+        (n_samples - valid_samples) / n_samples if n_samples else 0.0
+    )
+    logger.info(
+        "statistics_spans: masked_fraction=%.4f across %d statistics span(s) "
+        "(n_samples=%d).",
+        masked_fraction,
+        len(out),
+        n_samples,
+    )
+    return out
+
+
+def corrected_statistics_spans(
+    recording,
+    row: dict,
+    *,
+    source_n_samples: int,
+    concat_statistics_spans,
+    obs_intervals,
+    artifact_detection_id,
+    recording_id,
+) -> list[tuple[int, int]]:
+    """Return a corrected recording's statistics spans after checking them.
+
+    The ``MotionCorrectedRecording`` row carries a copy of its source's spans;
+    they are used as is. The corrected traces must keep the source's frame
+    count. For a single recording the copied spans must equal those derived
+    from the corrected traces' own timestamps and the sort's pinned mask; for
+    a concatenation they must equal the concatenation's stored spans.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The loaded corrected recording.
+    row : dict
+        Its ``MotionCorrectedRecording`` row (``motion_corrected_recording_id``,
+        ``n_samples``, ``statistics_spans`` ``(n, 2)``).
+    source_n_samples : int
+        The source's frame count.
+    concat_statistics_spans : numpy.ndarray or None
+        A concat source's stored ``(n, 2)`` spans; ``None`` for a single
+        recording.
+    obs_intervals : numpy.ndarray or None
+        The sort's artifact-removed valid times, ``(n_intervals, 2)`` in
+        seconds, or ``None`` without an artifact detection.
+    artifact_detection_id : uuid.UUID or None
+        The sort's pinned detection (single recording only).
+    recording_id : uuid.UUID or None
+        The single-recording source, for error messages.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        The half-open frame spans.
+
+    Raises
+    ------
+    ValueError
+        If the frame count or the spans disagree with the source's.
+    """
+    from spyglass.spikesorting.v2._motion.estimation import normalize_spans
+
+    n_samples = int(recording.get_num_samples())
+    if not n_samples == int(row["n_samples"]) == int(source_n_samples):
+        raise ValueError(
+            "Sorting: motion-corrected recording "
+            f"{row['motion_corrected_recording_id']} has {n_samples} "
+            f"frames (row: {int(row['n_samples'])}); its source has "
+            f"{int(source_n_samples)}."
+        )
+    spans = normalize_spans(row["statistics_spans"])
+    if concat_statistics_spans is None:
+        excluded = []
+        if artifact_detection_id is not None:
+            excluded = artifact_frame_ranges(
+                recording,
+                obs_intervals,
+                artifact_detection_id=artifact_detection_id,
+                recording_id=recording_id,
+            )
+        expected = normalize_spans(
+            statistics_spans(
+                n_samples,
+                excluded,
+                boundary_spans_from_timestamps(recording),
+            )
+        )
+    else:
+        expected = normalize_spans(concat_statistics_spans)
+    if spans != expected:
+        raise ValueError(
+            "Sorting: motion-corrected recording "
+            f"{row['motion_corrected_recording_id']} carries statistics "
+            f"spans {spans}, but its source and the sort's mask give "
+            f"{expected}."
+        )
+    return spans
+
+
+def spans_cover_recording(spans, n_samples: int) -> bool:
+    """True when ``spans`` is ``None`` or exactly ``[(0, n_samples)]``.
+
+    The span estimators delegate to SpikeInterface's own unchanged path in
+    exactly this case, so an unmasked, unjoined recording gets
+    SpikeInterface's estimates bit for bit.
+    """
+    return spans is None or list(spans) == [(0, int(n_samples))]
+
+
+def sample_span_data(
+    recording,
+    spans: list[tuple[int, int]],
+    *,
+    target_samples: int,
+    max_piece: int,
+    seed,
+    return_in_uV: bool,
+):
+    """Randomly sample traces from ``recording`` without crossing a span edge.
+
+    When ``target_samples`` covers every valid frame, every span is read
+    once, in span order, with no randomness. Otherwise each span's exact
+    quota of rows is apportioned by largest-remainder rounding of its
+    length share, then filled with randomly-placed contiguous pieces (each
+    at most ``max_piece`` frames and never longer than its own span); the
+    pieces are concatenated in sorted start-frame order (not draw order).
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+    spans : list[tuple[int, int]]
+        Half-open frame spans to sample from (e.g. ``statistics_spans``).
+    target_samples : int
+        Keyword-only. Requested row budget.
+    max_piece : int
+        Keyword-only. Maximum contiguous frames read per random draw.
+    seed : int
+        Keyword-only. Seeds ``numpy.random.default_rng``.
+    return_in_uV : bool
+        Keyword-only. Forwarded to ``recording.get_traces``.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(min(target_samples, total_valid), n_channels)`` traces.
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    lengths = np.array([b - a for a, b in spans], dtype=np.int64)
+    total_valid = int(lengths.sum())
+    effective_target = min(int(target_samples), total_valid)
+    if effective_target == total_valid:
+        # The budget covers every valid sample: read each span once, no
+        # overlapping draws.
+        data = np.concatenate(
+            [
+                recording.get_traces(
+                    start_frame=a, end_frame=b, return_in_uV=return_in_uV
+                )
+                for a, b in spans
+            ],
+            axis=0,
+        )
+        return data
+    # Largest-remainder apportionment: quotas sum to effective_target exactly
+    # and never exceed a span's length.
+    raw = effective_target * lengths / total_valid
+    quota = np.minimum(np.floor(raw).astype(np.int64), lengths)
+    for i in np.argsort(-(raw - np.floor(raw))):
+        if quota.sum() >= effective_target:
+            break
+        if quota[i] < lengths[i]:
+            quota[i] += 1
+    # (start_frame, piece) pairs, so the final concatenation can be ordered
+    # by start frame across all spans rather than by draw order.
+    pieces: list[tuple[int, np.ndarray]] = []
+    for (a, b), q in zip(spans, quota):
+        remaining = int(q)
+        while remaining > 0:
+            piece = min(max_piece, remaining, b - a)
+            s = int(rng.integers(a, b - piece + 1))
+            pieces.append(
+                (
+                    s,
+                    recording.get_traces(
+                        start_frame=s,
+                        end_frame=s + piece,
+                        return_in_uV=return_in_uV,
+                    ),
+                )
+            )
+            remaining -= piece
+    pieces.sort(key=lambda item: item[0])
+    data = np.concatenate([piece for _, piece in pieces], axis=0)
+    return data
+
+
+def sample_span_snippet_starts(
+    spans: list[tuple[int, int]],
+    *,
+    nsamples: int,
+    n_snippets: int,
+    seed,
+):
+    """Draw fixed-length snippet start frames from ``spans``.
+
+    Starts are drawn uniformly from the set of admissible positions ``s``
+    with ``a <= s`` and ``s + nsamples <= b`` across all spans, i.e. each
+    admissible position is equally likely regardless of which span holds
+    it (implemented as span selection weighted by each span's admissible-
+    position count, then a uniform draw within the chosen span). A span
+    shorter than ``nsamples`` admits no positions and is never chosen.
+
+    Parameters
+    ----------
+    spans : list[tuple[int, int]]
+        Half-open frame spans to draw snippet starts from.
+    nsamples : int
+        Keyword-only. Snippet length in frames.
+    n_snippets : int
+        Keyword-only. Number of starts to draw.
+    seed : int
+        Keyword-only. Seeds ``numpy.random.default_rng``.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_snippets,)`` int64 sorted start frames.
+
+    Raises
+    ------
+    ValueError
+        If no span admits a snippet of length ``nsamples``.
+    """
+    import numpy as np
+
+    nsamples = int(nsamples)
+    counts = np.array(
+        [max(0, (b - a) - nsamples + 1) for a, b in spans], dtype=np.int64
+    )
+    total = int(counts.sum())
+    if total == 0:
+        raise ValueError(
+            "sample_span_snippet_starts: no span admits a snippet of length "
+            f"{nsamples}; every span is shorter than nsamples."
+        )
+    rng = np.random.default_rng(seed)
+    n_snippets = int(n_snippets)
+    span_choices = rng.choice(len(spans), size=n_snippets, p=counts / total)
+    starts = np.empty(n_snippets, dtype=np.int64)
+    for k, i in enumerate(span_choices):
+        a, b = spans[i]
+        starts[k] = rng.integers(a, b - nsamples + 1)
+    return np.sort(starts)
+
+
+def sorting_statistics_spans(
+    recording,
+    traces,
+    *,
+    source_kind,
+    recording_id,
+    artifact_detection_id,
+    obs_intervals,
+    concat_statistics_spans,
+    source_n_samples,
+):
+    """Mask a sort's input and resolve its statistics spans.
+
+    Statistics spans are the artifact-free frame ranges every noise and
+    whitening estimate samples from. Selection and member joins are
+    boundaries even when nothing is masked. A motion-corrected recording was
+    persisted masked, with its source's spans copied onto its row. A single
+    recording is silenced here over its artifact frames (when its traces
+    apply the mask) and its boundaries are read from its persisted
+    timestamps. A concatenation's member masks and spans were materialized
+    upstream and are used as stored.
+
+    Parameters
+    ----------
+    recording : spikeinterface.BaseRecording
+        The sort input, loaded from the effective traces.
+    traces : EffectiveTraces
+        The sort's effective traces (``kind``, ``row``,
+        ``apply_artifact_mask``).
+    source_kind : str
+        ``"recording"`` or ``"concatenated_recording"``.
+    recording_id : str
+        The sort's anchor ``recording_id``.
+    artifact_detection_id : str or None
+        The sort's artifact detection, if any.
+    obs_intervals : numpy.ndarray or None
+        Artifact-removed valid times, shape ``(n_intervals, 2)`` in seconds.
+    concat_statistics_spans : numpy.ndarray or None
+        A concat source's stored spans; ``None`` for a single recording.
+    source_n_samples : int or None
+        The source's frame count a corrected recording must keep.
+
+    Returns
+    -------
+    tuple
+        ``(recording, statistics_spans)``: the recording to sort (silenced
+        over the artifact frames of a masked single recording, otherwise
+        unchanged) and the spans as ``(start_frame, end_frame)`` pairs.
+    """
+    import numpy as np
+
+    if traces.kind == "motion_corrected_recording":
+        # Persisted masked, with the source's spans copied onto its row.
+        spans = corrected_statistics_spans(
+            recording,
+            traces.row,
+            source_n_samples=source_n_samples,
+            concat_statistics_spans=concat_statistics_spans,
+            obs_intervals=obs_intervals,
+            artifact_detection_id=artifact_detection_id,
+            recording_id=(recording_id if source_kind == "recording" else None),
+        )
+    elif source_kind == "recording":
+        # Boundaries from the reloaded recording's persisted timestamps,
+        # read before masking (silencing keeps the same timestamps).
+        boundary_spans = boundary_spans_from_timestamps(recording)
+        excluded_ranges = []
+        if traces.apply_artifact_mask:
+            excluded_ranges = artifact_frame_ranges(
+                recording,
+                obs_intervals,
+                artifact_detection_id=artifact_detection_id,
+                recording_id=recording_id,
+            )
+            recording = silence_frame_ranges(recording, excluded_ranges)
+        spans = statistics_spans(
+            recording.get_num_samples(), excluded_ranges, boundary_spans
+        )
+    else:  # concat member masks and spans were materialized upstream
+        spans = [
+            (int(a), int(b))
+            for a, b in np.asarray(concat_statistics_spans).reshape(-1, 2)
+        ]
+    return recording, spans

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from spyglass.spikesorting.v2._parameter_identity import (
+from spyglass.spikesorting.v2._core.parameter_identity import (
     parameter_fingerprint,
     short_fingerprint,
 )
@@ -323,7 +323,7 @@ def _qmp_row(name, *, metric_names, **overrides):
 
 def test_quality_metric_duplicate_content_rejected():
     """A second NAME for identical QMP content forks provenance -> rejected."""
-    from spyglass.spikesorting.v2._lookup_validation import (
+    from spyglass.spikesorting.v2._core.lookup_validation import (
         reject_duplicate_quality_metric_content,
     )
     from spyglass.spikesorting.v2.exceptions import (
@@ -338,7 +338,7 @@ def test_quality_metric_duplicate_content_rejected():
 
 def test_quality_metric_same_name_reinsert_is_idempotent():
     """Re-inserting the same name+content never trips the guard."""
-    from spyglass.spikesorting.v2._lookup_validation import (
+    from spyglass.spikesorting.v2._core.lookup_validation import (
         reject_duplicate_quality_metric_content,
     )
 
@@ -350,7 +350,7 @@ def test_quality_metric_same_name_reinsert_is_idempotent():
 
 def test_quality_metric_different_content_allowed():
     """A new name with DIFFERENT content is fine."""
-    from spyglass.spikesorting.v2._lookup_validation import (
+    from spyglass.spikesorting.v2._core.lookup_validation import (
         reject_duplicate_quality_metric_content,
     )
 
@@ -361,7 +361,7 @@ def test_quality_metric_different_content_allowed():
 
 def test_quality_metric_duplicate_escape_hatch():
     """``allow_duplicate_params=True`` opts out of the guard."""
-    from spyglass.spikesorting.v2._lookup_validation import (
+    from spyglass.spikesorting.v2._core.lookup_validation import (
         reject_duplicate_quality_metric_content,
     )
 
@@ -374,7 +374,7 @@ def test_quality_metric_duplicate_escape_hatch():
 
 def test_reject_stale_quality_metric_defaults_flags_edited_row():
     """A stored row under a shipped default's name but different content raises."""
-    from spyglass.spikesorting.v2._lookup_validation import (
+    from spyglass.spikesorting.v2._core.lookup_validation import (
         reject_stale_quality_metric_defaults,
     )
     from spyglass.spikesorting.v2.exceptions import (
@@ -393,7 +393,7 @@ def test_reject_stale_quality_metric_defaults_flags_edited_row():
 
 def test_reject_stale_quality_metric_defaults_matches_identical_content():
     """A stored row identical to the shipped default is not stale."""
-    from spyglass.spikesorting.v2._lookup_validation import (
+    from spyglass.spikesorting.v2._core.lookup_validation import (
         reject_stale_quality_metric_defaults,
     )
 
@@ -410,7 +410,7 @@ def test_reject_stale_quality_metric_defaults_accepts_old_schema_version():
     existing recipes are not overwritten), so the version alone must not
     trip this check.
     """
-    from spyglass.spikesorting.v2._lookup_validation import (
+    from spyglass.spikesorting.v2._core.lookup_validation import (
         reject_stale_quality_metric_defaults,
     )
 
@@ -433,7 +433,7 @@ def test_reject_stale_quality_metric_defaults_tolerates_widened_bin_duration():
     """
     import numpy as np
 
-    from spyglass.spikesorting.v2._lookup_validation import (
+    from spyglass.spikesorting.v2._core.lookup_validation import (
         reject_stale_quality_metric_defaults,
     )
 
@@ -459,7 +459,7 @@ def test_reject_stale_quality_metric_defaults_tolerates_widened_bin_duration():
 
 def test_reject_stale_quality_metric_defaults_ignores_other_names():
     """A stored row under a name outside the shipped catalog is untouched."""
-    from spyglass.spikesorting.v2._lookup_validation import (
+    from spyglass.spikesorting.v2._core.lookup_validation import (
         reject_stale_quality_metric_defaults,
     )
 
@@ -804,7 +804,7 @@ def test_params_lookup_rejects_positional_replace(dj_conn):
 def test_describe_parameter_rows_columns_and_usage(dj_conn):
     """Documented columns + correct ``used_by_pipeline_presets`` per row."""
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
-    from spyglass.spikesorting.v2._pipeline_reporting import (
+    from spyglass.spikesorting.v2._orchestration.reporting import (
         _PARAMETER_ROW_COLUMNS,
         describe_parameter_rows,
     )
@@ -866,7 +866,7 @@ def test_describe_parameter_rows_covers_all_seeded_tables(dj_conn):
     but still appear so a user can audit every row they can populate.
     """
     from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2._pipeline_reporting import (
+    from spyglass.spikesorting.v2._orchestration.reporting import (
         describe_parameter_rows,
     )
 
@@ -894,7 +894,7 @@ def test_describe_parameter_rows_marks_dynamic_default_shipped(dj_conn):
     false 'non-catalog row using the franklab name' warning.
     """
     from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2._pipeline_reporting import (
+    from spyglass.spikesorting.v2._orchestration.reporting import (
         describe_parameter_rows,
     )
 
@@ -925,7 +925,7 @@ def test_describe_parameter_rows_autocuration_duplicate_name_insensitive(
     names share a fingerprint (the name FK is excluded from the Rule content) and
     surface as duplicate_of each other.
     """
-    from spyglass.spikesorting.v2._pipeline_reporting import (
+    from spyglass.spikesorting.v2._orchestration.reporting import (
         describe_parameter_rows,
     )
     from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
@@ -966,7 +966,7 @@ def test_describe_parameter_rows_autocuration_duplicate_name_insensitive(
 @pytest.mark.database
 def test_rule_missing_policy_persists_and_changes_identity(dj_conn):
     """Policy round-trips and is semantic in idempotency/reporting identity."""
-    from spyglass.spikesorting.v2._pipeline_reporting import (
+    from spyglass.spikesorting.v2._orchestration.reporting import (
         describe_parameter_rows,
     )
     from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
@@ -1115,7 +1115,9 @@ def test_outer_version_backfilled_for_all_lookups(module_name, schema_name):
     """
     import importlib
 
-    from spyglass.spikesorting.v2._lookup_validation import validate_lookup_rows
+    from spyglass.spikesorting.v2._core.lookup_validation import (
+        validate_lookup_rows,
+    )
 
     schema = getattr(
         importlib.import_module(
@@ -1138,7 +1140,9 @@ def test_outer_version_drift_still_trips_after_backfill():
     """The backfill fills only an ABSENT column; an EXPLICIT outer
     ``params_schema_version`` that disagrees with the blob still raises -- the
     drift check is not papered over."""
-    from spyglass.spikesorting.v2._lookup_validation import validate_lookup_rows
+    from spyglass.spikesorting.v2._core.lookup_validation import (
+        validate_lookup_rows,
+    )
     from spyglass.spikesorting.v2._params.preprocessing import (
         PreprocessingParamsSchema,
     )

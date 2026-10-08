@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2._evaluation_acceptance import (
+from spyglass.spikesorting.v2._curation.evaluation_acceptance import (
     resolve_accepted_merges,
 )
 

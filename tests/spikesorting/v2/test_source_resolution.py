@@ -57,7 +57,7 @@ def written_traces(tmp_path):
 
 
 def _lineage(kind="recording", artifact_detection_id=None):
-    from spyglass.spikesorting.v2._source_resolution import SourceLineage
+    from spyglass.spikesorting.v2._recording.source import SourceLineage
 
     key_name = "recording_id" if kind == "recording" else "concat_recording_id"
     return SourceLineage(
@@ -81,7 +81,7 @@ def _lineage(kind="recording", artifact_detection_id=None):
 def test_base_effective_source_reads_lineage_source(
     kind, artifact_detection_id, expected_mask
 ):
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         effective_source_from_base,
     )
 
@@ -97,8 +97,8 @@ def test_base_effective_source_reads_lineage_source(
 
 
 def test_masks_exactly_when_traces_require_it(written_traces):
-    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._recording.source import (
         effective_source_from_base,
         read_effective_recording,
     )
@@ -142,7 +142,7 @@ def test_masks_exactly_when_traces_require_it(written_traces):
 
 
 def test_concat_traces_are_never_masked_at_load(written_traces):
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         effective_source_from_base,
         read_effective_recording,
     )
@@ -161,7 +161,7 @@ def test_concat_traces_are_never_masked_at_load(written_traces):
 
 
 def test_mask_without_valid_times_raises(written_traces):
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         effective_source_from_base,
         read_effective_recording,
     )
@@ -178,7 +178,7 @@ def test_effective_source_deep_hash_tracks_content():
     """DataJoint's tri-part check ``DeepHash``es every fetched carrier."""
     from deepdiff import DeepHash
 
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         effective_source_from_base,
     )
 
@@ -215,7 +215,7 @@ _WRITTEN_CHANNEL_MAP = {
 def test_motion_corrected_traces_are_never_masked_again(written_traces):
     """A motion-corrected artifact is persisted masked: it loads as stored,
     and asking to mask it again is refused."""
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         EffectiveTraces,
         read_effective_recording,
     )
@@ -243,7 +243,7 @@ def test_motion_corrected_traces_are_never_masked_again(written_traces):
 def test_corrected_effective_source_keeps_lineage(artifact_detection_id):
     """A sort of a corrected recording reads the corrected artifact, never
     masked at load, while its lineage stays the original source."""
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         effective_source_from_correction,
     )
 
@@ -262,7 +262,7 @@ def test_corrected_effective_source_keeps_lineage(artifact_detection_id):
 def test_correction_lineage_mismatch_names_each_difference():
     """Source kind, source id and artifact detection must all agree; ids
     compare as UUIDs whether given as ``str`` or ``uuid.UUID``."""
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         SourceLineage,
         correction_lineage_mismatch,
     )
@@ -330,7 +330,7 @@ def test_corrected_channel_map_must_match_its_row(
 ):
     """A corrected artifact whose channels or positions differ from its row
     (as recorded at correction time) is refused at load, never adapted."""
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         EffectiveTraces,
         read_effective_recording,
     )
@@ -359,7 +359,7 @@ def test_corrected_geometry_must_be_finite_and_distinct(
 ):
     """The loaded corrected geometry is checked before any consumer uses it,
     even when the row records the same (bad) positions."""
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         EffectiveTraces,
         read_effective_recording,
     )

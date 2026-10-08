@@ -13,12 +13,12 @@ import spikeinterface as si
 def test_masked_analyzer_fresh_process_and_derivative(
     tmp_path, concatenated, whiten
 ):
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         load_analyzer_extensions,
         load_analyzer_folder,
     )
-    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         silence_frame_ranges,
     )
 
@@ -95,7 +95,9 @@ for folder in sys.argv[1:3]:
 
 
 def test_recordingless_cache_is_invalid(tmp_path):
-    from spyglass.spikesorting.v2._analyzer_cache import load_analyzer_folder
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        load_analyzer_folder,
+    )
 
     recording, sorting = si.generate_ground_truth_recording(
         durations=[1.0], num_channels=4, num_units=2, seed=0

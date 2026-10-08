@@ -167,7 +167,7 @@ dj.config['database.user'] = sys.argv[2]
 dj.config['database.password'] = 'audit-only'
 from spyglass.spikesorting.v2.curation_api import CurationRef
 from spyglass.spikesorting.v2.curation import CurationV2
-from spyglass.spikesorting.v2._figpack_curation import labels_and_merges_to_annotations
+from spyglass.spikesorting.v2._review.annotations import labels_and_merges_to_annotations
 root = CurationRef.from_key({'sorting_id': uuid.UUID(sys.argv[3]), 'curation_id': int(sys.argv[4])})
 review = root.start_review('account_review')
 labels = {int(sys.argv[5]): ['accept']}
@@ -234,7 +234,9 @@ def test_ground_truth_population_after_auto_labels(workflow, monkeypatch):
     from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
         get_ground_truth_units_table,
     )
-    from spyglass.spikesorting.v2._recipe_catalog import FRANKLAB_CURATION_RULES
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        FRANKLAB_CURATION_RULES,
+    )
     from spyglass.spikesorting.v2.analysis_selection import (
         select_units_for_analysis,
     )

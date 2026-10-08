@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2.utils import (
+from spyglass.spikesorting.v2._core.reference_resolution import (
     assert_reference_not_member,
     resolve_group_reference,
 )

@@ -105,7 +105,7 @@ def masked_twin(traces, probe, fraction: float, *, seed: int = 0):
     Transients are injected inside the excluded ranges, which are then
     silenced with the production ``silence_frame_ranges``.
     """
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         silence_frame_ranges,
         statistics_spans,
     )

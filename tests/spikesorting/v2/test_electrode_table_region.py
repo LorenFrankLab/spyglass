@@ -40,7 +40,9 @@ def _nwb_with_electrode_ids(ids):
 def test_region_maps_ids_to_row_indices_not_raw_ids():
     """Non-contiguous ids [10,11,12,13]; requesting ids [12,11] must yield row
     indices [2,1] that resolve back to ids [12,11]."""
-    from spyglass.spikesorting.v2.utils import electrode_table_region
+    from spyglass.spikesorting.v2._storage.metadata import (
+        electrode_table_region,
+    )
 
     nwbfile = _nwb_with_electrode_ids([10, 11, 12, 13])
     requested = [12, 11]
@@ -57,7 +59,9 @@ def test_region_maps_ids_to_row_indices_not_raw_ids():
 def test_contiguous_ids_unchanged():
     """When id == row index, the mapping is the identity (the common
     Frank-lab case is unchanged)."""
-    from spyglass.spikesorting.v2.utils import electrode_table_region
+    from spyglass.spikesorting.v2._storage.metadata import (
+        electrode_table_region,
+    )
 
     nwbfile = _nwb_with_electrode_ids([0, 1, 2, 3])
     region = electrode_table_region(nwbfile, [2, 0], "sort group")
@@ -68,7 +72,9 @@ def test_contiguous_ids_unchanged():
 
 def test_missing_electrode_id_raises():
     """An id absent from the electrodes table fails loud, not silently."""
-    from spyglass.spikesorting.v2.utils import electrode_table_region
+    from spyglass.spikesorting.v2._storage.metadata import (
+        electrode_table_region,
+    )
 
     nwbfile = _nwb_with_electrode_ids([10, 11, 12, 13])
     with pytest.raises(ValueError, match="not in"):

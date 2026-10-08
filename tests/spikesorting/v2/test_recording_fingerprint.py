@@ -41,8 +41,8 @@ def _baseline(out_path, **overrides):
 
 
 def _aggregate(path, es_path):
-    from spyglass.spikesorting.v2._recompute import combined_hash
-    from spyglass.spikesorting.v2._recording_fingerprint import (
+    from spyglass.spikesorting.v2._storage.recompute import combined_hash
+    from spyglass.spikesorting.v2._recording.fingerprint import (
         recording_content_fingerprint,
     )
 
@@ -54,7 +54,7 @@ def _aggregate(path, es_path):
 def test_recording_content_fingerprint_deterministic(tmp_path):
     """The same persisted file yields an identical component dict AND aggregate
     across repeated reads -- the fingerprint is a pure function of the bytes."""
-    from spyglass.spikesorting.v2._recording_fingerprint import (
+    from spyglass.spikesorting.v2._recording.fingerprint import (
         recording_content_fingerprint,
     )
 
@@ -77,8 +77,8 @@ def test_timestamp_hash_is_bounded_and_matches_whole_vector(
     import h5py
     from spikeinterface.core import BaseRecording
 
-    from spyglass.spikesorting.v2._recompute import combined_hash
-    from spyglass.spikesorting.v2._recording_fingerprint import (
+    from spyglass.spikesorting.v2._storage.recompute import combined_hash
+    from spyglass.spikesorting.v2._recording.fingerprint import (
         TIMESTAMP_ROUNDING,
         recording_content_fingerprint,
     )
@@ -120,7 +120,7 @@ def test_timestamp_hash_is_bounded_and_matches_whole_vector(
 def test_recording_content_fingerprint_discriminates(tmp_path):
     """Every scientifically-meaningful perturbation changes the aggregate;
     sub-``TRACE_ROUNDING`` float noise does not."""
-    from spyglass.spikesorting.v2._recording_fingerprint import TRACE_ROUNDING
+    from spyglass.spikesorting.v2._recording.fingerprint import TRACE_ROUNDING
 
     base_path, es = _baseline(tmp_path / "base.nwb")
     base = _aggregate(base_path, es)
@@ -192,7 +192,7 @@ def test_fingerprint_discriminates_metadata_without_signal_changes(
     tmp_path, overrides
 ):
     """Metadata contributes independently of voltage, time, and probe positions."""
-    from spyglass.spikesorting.v2._recording_fingerprint import (
+    from spyglass.spikesorting.v2._recording.fingerprint import (
         recording_content_fingerprint,
     )
 
@@ -228,7 +228,7 @@ def test_fingerprint_geometry_parity(tmp_path):
     """
     import spikeinterface.extractors as se
 
-    from spyglass.spikesorting.v2._recording_fingerprint import (
+    from spyglass.spikesorting.v2._recording.fingerprint import (
         geometry_component_hash,
         recording_content_fingerprint,
     )
@@ -256,7 +256,7 @@ def test_fingerprint_components_match_canonical_set(tmp_path):
     renamed component would yield a stable-but-wrong scalar; pinning the key set
     guards that identity contract.
     """
-    from spyglass.spikesorting.v2._recording_fingerprint import (
+    from spyglass.spikesorting.v2._recording.fingerprint import (
         FINGERPRINT_COMPONENTS,
         recording_content_fingerprint,
     )
@@ -272,7 +272,7 @@ def test_geometry_component_hash_rejects_empty_coords():
     """A persisted region with no coordinate columns (no probe geometry) is a
     structural impossibility -- hashing it would fold an empty array into a
     content-free constant, so it raises instead."""
-    from spyglass.spikesorting.v2._recording_fingerprint import (
+    from spyglass.spikesorting.v2._recording.fingerprint import (
         geometry_component_hash,
     )
 
@@ -284,7 +284,7 @@ def test_geometry_component_hash_distinguishes_rel_z():
     """A 3-D layout (rel_x/rel_y/rel_z) does not collide with the 2-D layout of
     the same in-plane coordinates -- ``rel_z`` is folded into the geometry hash,
     so a depth change cannot pass as identical geometry."""
-    from spyglass.spikesorting.v2._recording_fingerprint import (
+    from spyglass.spikesorting.v2._recording.fingerprint import (
         geometry_component_hash,
     )
 
@@ -304,8 +304,8 @@ def test_fingerprint_rejects_zero_segment_recording(tmp_path, monkeypatch):
     """A degenerate readback (zero segments) is refused, not hashed to a
     content-free constant -- two distinct broken/truncated readbacks must never
     report 'no drift' on traces that were never actually read."""
-    from spyglass.spikesorting.v2 import _recording_nwb
-    from spyglass.spikesorting.v2._recording_fingerprint import (
+    from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
+    from spyglass.spikesorting.v2._recording.fingerprint import (
         recording_content_fingerprint,
     )
 
@@ -340,7 +340,7 @@ class TestRecordingArtifactLock:
         import datajoint as dj
         from filelock import Timeout
 
-        from spyglass.spikesorting.v2._recording_fingerprint import (
+        from spyglass.spikesorting.v2._recording.fingerprint import (
             recording_artifact_lock,
         )
 
@@ -356,7 +356,7 @@ class TestRecordingArtifactLock:
     ):
         import datajoint as dj
 
-        from spyglass.spikesorting.v2._recording_fingerprint import (
+        from spyglass.spikesorting.v2._recording.fingerprint import (
             recording_artifact_lock,
         )
 

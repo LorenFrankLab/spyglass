@@ -33,9 +33,11 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import datajoint as dj
 
-from spyglass.spikesorting.v2._analyzer_cache import install_staged_folder
-from spyglass.spikesorting.v2._figpack_curation import (
-    FIGPACK_INSTALL_HINT,  # noqa: F401 -- re-exported for callers
+from spyglass.spikesorting.v2._storage.analyzer_cache import (
+    install_staged_folder,
+)
+from spyglass.spikesorting.v2._review.annotations import (
+    FIGPACK_INSTALL_HINT,
     FIGURE_CONFIG_FILENAME,
     curation_annotations_to_labels_and_merges,
     default_label_options,
@@ -45,19 +47,19 @@ from spyglass.spikesorting.v2._figpack_curation import (
     pack_display_config,
     unpack_display_config,
 )
-from spyglass.spikesorting.v2._observation_io import ReviewTimelineInputs
-from spyglass.spikesorting.v2._review_view import (
-    coerce_units_table_ids as _coerce_units_table_ids,
+from spyglass.spikesorting.v2._storage.observation_io import (
+    ReviewTimelineInputs,
 )
-from spyglass.spikesorting.v2._review_view import (
+from spyglass.spikesorting.v2._review.view import (
+    build_curation_view,
     require_figpack,
 )
-from spyglass.spikesorting.v2._selection_identity import (
+from spyglass.spikesorting.v2._core.selection_identity import (
     assert_supplied_id_matches,
     deterministic_id,
     existing_selection_pk,
 )
-from spyglass.spikesorting.v2._staged_outputs import (
+from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
     StagedOutputs,
 )
@@ -70,7 +72,7 @@ from spyglass.spikesorting.v2.exceptions import (
     SchemaBypassError,
 )
 from spyglass.spikesorting.v2.sorting import Sorting
-from spyglass.spikesorting.v2.utils import (
+from spyglass.spikesorting.v2._core.table_integrity import (
     SelectionMasterInsertGuard,
 )
 from spyglass.utils import SpyglassMixin
@@ -289,38 +291,10 @@ def _assert_figure_identity(
     return config
 
 
-def _available_displayed_unit_properties(analyzer) -> list[str]:
-    """Return unit-table columns SpikeInterface can render for ``analyzer``."""
-    from spikeinterface.widgets.utils import make_units_table_from_analyzer
-
-    table = make_units_table_from_analyzer(analyzer)
-    return [str(column) for column in table.columns]
-
-
-def _assert_displayed_unit_properties_available(
-    analyzer, displayed_unit_properties
-) -> None:
-    """Fail closed when requested FigPack unit-table columns are unavailable."""
-    requested = normalize_displayed_unit_properties(displayed_unit_properties)
-    if requested is None:
-        return
-    available = _available_displayed_unit_properties(analyzer)
-    missing = [prop for prop in requested if prop not in available]
-    if missing:
-        raise FigPackDisplayedUnitPropertyError(
-            "FigPackCuration cannot display requested unit properties "
-            f"{missing}; available properties on this sort's display analyzer "
-            f"are {available}. `displayed_unit_properties=None` keeps "
-            "SpikeInterface's default display behavior; otherwise compute the "
-            "needed analyzer metric/template/property columns before building "
-            "the FigPack view."
-        )
-
-
 def _resolve_curation_view_inputs(
     curation_key: dict, display_options
 ) -> tuple[str, ReviewTimelineInputs]:
-    """Resolve the DB inputs of :func:`_build_curation_view`.
+    """Resolve the DB inputs of :func:`._review_view.build_curation_view`.
 
     Resolves the sort's display analyzer carrying the curation-view
     extensions -- building, rebuilding, or extending the published cache as
@@ -329,14 +303,14 @@ def _resolve_curation_view_inputs(
     ``display_options`` is validated first so a malformed display budget fails
     before any analyzer work.
     """
-    from spyglass.spikesorting.v2 import _visualization as _viz
-    from spyglass.spikesorting.v2._curation_analyzer import (
+    from spyglass.spikesorting.v2._review import visualization as _viz
+    from spyglass.spikesorting.v2._curation.analyzer import (
         curation_analyzer_with_extensions,
     )
-    from spyglass.spikesorting.v2._observation_io import (
+    from spyglass.spikesorting.v2._storage.observation_io import (
         resolve_review_timeline_inputs,
     )
-    from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
+    from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
 
     _require_figpack()
     ReviewDisplayOptions.from_mapping(display_options)
@@ -354,96 +328,6 @@ def _resolve_curation_view_inputs(
     ) as analyzer:
         analyzer_folder = str(analyzer.folder)
     return analyzer_folder, resolve_review_timeline_inputs(curation_key)
-
-
-def _build_curation_view(
-    analyzer,
-    curation_key: dict,
-    *,
-    timeline: dict,
-    label_options,
-    displayed_unit_properties,
-    seed_labels=None,
-    review_table=None,
-    display_options=None,
-):
-    """Build the FigPack curation view for a curation (minimal-attach).
-
-    Composes individual SpikeInterface inspection widgets over the sort's
-    display ``analyzer`` (which already carries the curation-view extensions;
-    see :func:`_resolve_curation_view_inputs`), checking that any explicitly
-    requested unit-table columns are available, then attaches only the
-    Spyglass draft control as a sibling. ``timeline`` is the
-    ``review_timeline`` of the curation. ``display_options``
-    (:class:`ReviewDisplayOptions`) bounds the bundle payload -- the per-unit
-    amplitude sample and the correlogram pair filter -- and is display-only.
-    No DB access.
-
-    A profile-backed review passes ``review_table`` (the selected
-    evaluation's metrics, annotation columns and proposals, indexed by unit
-    id). Its columns are shown in SpikeInterface's selectable unit table via
-    ``extra_unit_properties`` -- the table that drives unit selection for
-    the curation control -- in the requested order and INSTEAD of SI's
-    default columns, so the official evaluation stays authoritative even
-    when the display analyzer carries a same-named property. Returns the
-    composed ``figpack.views`` object.
-    """
-    from spyglass.spikesorting.v2._review_inspection import (
-        defer_time_views,
-        inspection_view,
-    )
-    from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
-    from spyglass.spikesorting.v2._review_unit_properties import (
-        review_unit_properties,
-    )
-    from spyglass.spikesorting.v2._review_view import (
-        compose_review_layout,
-        curation_control,
-    )
-
-    display = ReviewDisplayOptions.from_mapping(display_options)
-    if review_table is not None:
-        # Profile-backed: exactly the review columns, no SI defaults.
-        analyzer_properties: list[str] | None = []
-        extra_properties = review_unit_properties(
-            review_table, analyzer.unit_ids
-        )
-    else:
-        # Expert path: analyzer-native SI unit properties (or SI's
-        # defaults when None).
-        analyzer_properties = displayed_unit_properties
-        extra_properties = None
-    _assert_displayed_unit_properties_available(analyzer, analyzer_properties)
-    deferred = defer_time_views(analyzer, display)
-    summary = inspection_view(
-        analyzer,
-        display,
-        timeline=timeline,
-        deferred=deferred,
-        displayed_unit_properties=analyzer_properties,
-        extra_unit_properties=extra_properties,
-        min_similarity_for_correlograms=display.min_similarity_for_correlograms,
-    )
-
-    control = curation_control(label_options, seed_labels)
-    summary_title = "Sorting summary"
-    context = (
-        f"Sorting `{curation_key['sorting_id']}`, curation "
-        f"`{curation_key['curation_id']}`. {display.describe()}. "
-        "Omitted pairs are filtered from the display, not evidence of no correlation. "
-        "Select units and use Inspect selected units / pairs for every pair and "
-        "an exact raster window. Python alternative: "
-        "`review.inspect_units([id1, id2], time_range=(start, stop))`. "
-        "Times are seconds from the start of this sorting recording; concatenated "
-        "recordings use the concatenated timeline."
-    )
-    if review_table is not None:
-        context += " " + review_table.attrs.get("qc_context", "")
-    view = compose_review_layout(
-        summary, control, summary_title=summary_title, context=context
-    )
-    _coerce_units_table_ids(view)
-    return view
 
 
 def _assert_figpack_curatable(curation_key: dict) -> None:
@@ -1076,11 +960,11 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         import figpack_spike_sorting
         import spikeinterface
 
-        from spyglass.spikesorting.v2._analyzer_cache import (
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
             load_analyzer_folder,
         )
-        from spyglass.spikesorting.v2._observation_io import (
+        from spyglass.spikesorting.v2._storage.observation_io import (
             review_timeline_from_inputs,
         )
 
@@ -1088,7 +972,7 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         # load never observes a concurrent atomic publish mid-move.
         with analyzer_cache_lock(curation_key["sorting_id"]):
             analyzer = load_analyzer_folder(analyzer_folder)
-        view = _build_curation_view(
+        view = build_curation_view(
             analyzer,
             curation_key,
             timeline=review_timeline_from_inputs(timeline_inputs),

@@ -21,7 +21,7 @@ matplotlib.use("Agg")
 import pytest  # noqa: E402
 
 from spyglass.spikesorting.v2 import visualization as ssviz  # noqa: E402
-from spyglass.spikesorting.v2._visualization import (  # noqa: E402
+from spyglass.spikesorting.v2._review.visualization import (
     MissingDisplayExtensionError,
 )
 
@@ -336,7 +336,7 @@ def _patch_curation_analyzer(monkeypatch, fake, *, recorder=None):
     """
     from contextlib import contextmanager
 
-    from spyglass.spikesorting.v2 import _curation_analyzer as resolver
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
 
     monkeypatch.setattr(
         ssviz, "_curation_request", lambda curation, *, caller: dict(_REQUEST)
@@ -743,7 +743,7 @@ def test_plot_suggested_merges_compute_missing_requests_display_extensions(
     import spikeinterface.curation as sic
     import spikeinterface.widgets as sw
 
-    from spyglass.spikesorting.v2._visualization import (
+    from spyglass.spikesorting.v2._review.visualization import (
         MissingDisplayExtensionError,
     )
     from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
@@ -833,7 +833,7 @@ def test_export_report_uses_working_copy(dj_conn, monkeypatch):
     assert _requested_extensions(calls) == {"unit_locations"}
 
     # compute_missing=True: requests the display-safe report extensions.
-    from spyglass.spikesorting.v2._visualization import (
+    from spyglass.spikesorting.v2._review.visualization import (
         REPORT_DISPLAY_EXTENSIONS,
     )
 
@@ -1051,7 +1051,7 @@ def test_schema_modules_do_not_import_visualization_eagerly(dj_conn):
 def test_expert_analyzer_access_is_public():
     """``open_curation_analyzer`` is exported by the facade and CurationRef."""
     from spyglass.spikesorting.v2 import pipeline
-    from spyglass.spikesorting.v2._pipeline_public import (
+    from spyglass.spikesorting.v2._orchestration.exports import (
         PACKAGE_ROOT_REEXPORTS,
         PIPELINE_FACADE_EXPORTS,
     )

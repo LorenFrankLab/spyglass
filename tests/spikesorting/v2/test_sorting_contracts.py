@@ -17,7 +17,7 @@ def test_to_int_unit_id_raises_typed_error_on_non_integer():
     and the remap guidance -- not a bare ``int()`` ValueError or a silent
     coercion.
     """
-    from spyglass.spikesorting.v2._sorting_units import _to_int_unit_id
+    from spyglass.spikesorting.v2._sorting.units import _to_int_unit_id
     from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
 
     # Convertible ids pass through.
@@ -142,7 +142,7 @@ def test_recording_artifact_result_field_contract():
     guarantees a future positional ``RecordingComputed(*artifact, ...)`` splat
     would still bind correctly; a reorder/rename in either type fails here.
     """
-    from spyglass.spikesorting.v2.recording import (
+    from spyglass.spikesorting.v2._recording.types import (
         RecordingArtifactResult,
         RecordingComputed,
     )

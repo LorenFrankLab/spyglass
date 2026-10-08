@@ -22,7 +22,7 @@ FIXTURE = (
 
 
 def test_backend_registers_unitmatch():
-    import spyglass.spikesorting.v2._unitmatch_backend  # noqa: F401 (registers)
+    import spyglass.spikesorting.v2._matching.unitmatch_backend  # noqa: F401 (registers)
     from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
     from spyglass.spikesorting.v2.matcher_protocol import (
         _get_matcher_schema,
@@ -34,13 +34,15 @@ def test_backend_registers_unitmatch():
 
 
 def test_match_single_session_returns_empty():
-    from spyglass.spikesorting.v2._unitmatch_backend import UnitMatchBackend
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
+        UnitMatchBackend,
+    )
     from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
 
     one = SessionMatcherInput(
         curation_key={"sorting_id": "s", "curation_id": 0},
-        waveform_dir=Path("/tmp/does-not-matter"),
-        channel_positions_path=Path("/tmp/does-not-matter/cp.npy"),
+        bundle_dir=Path("/tmp/does-not-matter"),
+        geometry_path=Path("/tmp/does-not-matter/cp.npy"),
     )
     assert UnitMatchBackend().match([one], {}) == []
 
@@ -59,7 +61,7 @@ def test_match_single_session_returns_empty():
 def test_match_rejects_unsupported_bundle_metadata_before_importing_unitmatch(
     monkeypatch, metadata, message
 ):
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
     from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
 
     def forbidden():
@@ -84,20 +86,22 @@ def _two_one_unit_sessions():
     return [
         SessionMatcherInput(
             curation_key={"sorting_id": "A", "curation_id": 0},
-            waveform_dir=Path("/x"),
-            channel_positions_path=Path("/x/cp.npy"),
+            bundle_dir=Path("/x"),
+            geometry_path=Path("/x/cp.npy"),
         ),
         SessionMatcherInput(
             curation_key={"sorting_id": "B", "curation_id": 1},
-            waveform_dir=Path("/y"),
-            channel_positions_path=Path("/y/cp.npy"),
+            bundle_dir=Path("/y"),
+            geometry_path=Path("/y/cp.npy"),
         ),
     ]
 
 
 def test_one_directional_match_is_rejected():
     """A pair above threshold in only one CV direction is not emitted."""
-    from spyglass.spikesorting.v2._unitmatch_backend import UnitMatchBackend
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
+        UnitMatchBackend,
+    )
 
     inputs = _two_one_unit_sessions()
     session_switch = np.array([0, 1, 2])
@@ -111,7 +115,9 @@ def test_one_directional_match_is_rejected():
 
 def test_bidirectional_match_reports_mean_probability():
     """Both CV directions above threshold -> pair with the mean probability."""
-    from spyglass.spikesorting.v2._unitmatch_backend import UnitMatchBackend
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
+        UnitMatchBackend,
+    )
 
     inputs = _two_one_unit_sessions()
     session_switch = np.array([0, 1, 2])
@@ -132,14 +138,16 @@ def test_pairs_from_matrix_preserves_sparse_ids_and_session_boundaries(
     column_ids, empty_middle
 ):
     """Uneven inputs, including an empty input, keep their keys and unit ids."""
-    from spyglass.spikesorting.v2._unitmatch_backend import UnitMatchBackend
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
+        UnitMatchBackend,
+    )
     from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
 
     inputs = [
         SessionMatcherInput(
             curation_key={"sorting_id": name, "curation_id": index + 4},
-            waveform_dir=Path("/unused"),
-            channel_positions_path=Path("/unused/positions.npy"),
+            bundle_dir=Path("/unused"),
+            geometry_path=Path("/unused/positions.npy"),
         )
         for index, name in enumerate(("A", "B", "C"))
     ]
@@ -193,7 +201,7 @@ def test_match_raises_if_unitmatch_drops_a_session(tmp_path, monkeypatch):
     """
     from types import SimpleNamespace
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
     from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
 
     positions = tmp_path / "cp.npy"
@@ -201,8 +209,8 @@ def test_match_raises_if_unitmatch_drops_a_session(tmp_path, monkeypatch):
     inputs = [
         SessionMatcherInput(
             curation_key={"sorting_id": s, "curation_id": 0},
-            waveform_dir=tmp_path,
-            channel_positions_path=positions,
+            bundle_dir=tmp_path,
+            geometry_path=positions,
         )
         for s in ("A", "B")
     ]
@@ -245,7 +253,7 @@ def test_match_returns_empty_when_no_good_units(tmp_path, monkeypatch):
     """
     from types import SimpleNamespace
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
     from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
 
     positions = tmp_path / "cp.npy"
@@ -253,8 +261,8 @@ def test_match_returns_empty_when_no_good_units(tmp_path, monkeypatch):
     inputs = [
         SessionMatcherInput(
             curation_key={"sorting_id": s, "curation_id": 0},
-            waveform_dir=tmp_path,
-            channel_positions_path=positions,
+            bundle_dir=tmp_path,
+            geometry_path=positions,
         )
         for s in ("A", "B")
     ]
@@ -296,7 +304,7 @@ def test_match_rejects_mismatched_probe_geometry(tmp_path, monkeypatch):
     """
     from types import SimpleNamespace
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
     from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
 
     cp_a = tmp_path / "cp_a.npy"
@@ -308,13 +316,13 @@ def test_match_rejects_mismatched_probe_geometry(tmp_path, monkeypatch):
     inputs = [
         SessionMatcherInput(
             curation_key={"sorting_id": "A", "curation_id": 0},
-            waveform_dir=tmp_path,
-            channel_positions_path=cp_a,
+            bundle_dir=tmp_path,
+            geometry_path=cp_a,
         ),
         SessionMatcherInput(
             curation_key={"sorting_id": "B", "curation_id": 0},
-            waveform_dir=tmp_path,
-            channel_positions_path=cp_b,
+            bundle_dir=tmp_path,
+            geometry_path=cp_b,
         ),
     ]
     # Past the import guard; the geometry check raises before any UnitMatch call.
@@ -343,7 +351,7 @@ def test_bundle_geometry_is_2d(tmp_path, monkeypatch):
 
     import spikeinterface.full as si
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     fake_um = types.SimpleNamespace(
         extract_raw_data=types.SimpleNamespace(
@@ -373,7 +381,7 @@ def test_bundle_rejects_non_2d_positions(tmp_path, monkeypatch):
 
     import spikeinterface.full as si
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     fake_um = types.SimpleNamespace(
         extract_raw_data=types.SimpleNamespace(
@@ -489,7 +497,7 @@ def saved_bundles(monkeypatch):
     """
     import types
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     saved = {}
 
@@ -505,7 +513,9 @@ def saved_bundles(monkeypatch):
         extract_raw_data=types.SimpleNamespace(save_avg_waveforms=_save)
     )
     monkeypatch.setattr(backend, "_require_unitmatch", lambda: fake_um)
-    from spyglass.spikesorting.v2 import _waveform_bundles
+    from spyglass.spikesorting.v2._matching import (
+        waveforms as _waveform_bundles,
+    )
 
     real_save = _waveform_bundles.save_waveform_arrays
 
@@ -547,7 +557,7 @@ def test_bundle_waveforms_use_mmap_and_scratch_is_reclaimed(
     import spikeinterface as si
 
     from spyglass import settings
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     scratch_root = tmp_path / "scratch"
     scratch_root.mkdir()
@@ -646,7 +656,7 @@ def test_bundle_halves_are_per_unit_temporal(
     onto the planted template must equal that half's mean planted scale; a
     random split would give two means near 1.0.
     """
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     recording, sorting = drift_out_session
     session_dir = tmp_path / "sess"
@@ -696,7 +706,7 @@ def test_bundle_no_zero_halves_invariant(tmp_path, saved_bundles):
     interior spikes (full waveform support, >= 2 sampled) average to exact
     zeros on every channel in both halves.
     """
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     recording, sorting = _planted_session(
         10.0,
@@ -727,7 +737,7 @@ def test_bundle_excludes_units_with_fewer_than_two_sampled_spikes(
     never sampled. Units 3 and 5 are healthy, and their saved arrays must be
     their own planted templates.
     """
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     duration_s = 10.0
     n_samples = int(duration_s * _FS)
@@ -761,7 +771,7 @@ def test_bundle_excludes_units_with_fewer_than_two_sampled_spikes(
 
 def test_bundle_all_units_excluded_raises(tmp_path, saved_bundles):
     """A session with no matchable unit raises before writing any file."""
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     duration_s = 10.0
     n_samples = int(duration_s * _FS)
@@ -788,7 +798,7 @@ def test_bundle_writes_kept_units_raw_waveforms(tmp_path):
     """With real UnitMatchPy, the on-disk bundle holds exactly the kept units,
     each file carrying that unit's own two halves."""
     pytest.importorskip("UnitMatchPy")
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     duration_s = 10.0
     n_samples = int(duration_s * _FS)
@@ -838,7 +848,7 @@ def test_bundle_control_matches_previous_construction(tmp_path, saved_bundles):
         unitmatch_half_split_experiment as experiment,
     )
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     recording, sorting = experiment.make_dataset(0)
     (rec_a, sort_a), _ = experiment.split_sessions(recording, sorting)
@@ -936,7 +946,7 @@ def test_window_in_one_span_known_answers(
     spans, nbefore, nafter, samples, expected
 ):
     """Hand-computed answers at span edges, joins, gaps and exclusions."""
-    from spyglass.spikesorting.v2._signal_math import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         frames_with_window_in_one_span,
     )
 
@@ -949,7 +959,7 @@ def test_window_in_one_span_known_answers(
 
 def test_window_in_one_span_rejects_malformed_spans():
     """Unsorted, overlapping or empty spans, or a negative window, raise."""
-    from spyglass.spikesorting.v2._signal_math import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         frames_with_window_in_one_span,
     )
 
@@ -968,7 +978,7 @@ def test_window_with_no_samples_after_needs_the_frame_in_its_span():
     """With ``n_after=0`` the window excludes the frame itself; a frame on
     the edge between adjacent spans is dropped, because the frame and its
     window would sit in different spans."""
-    from spyglass.spikesorting.v2._signal_math import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         frames_with_window_in_one_span,
     )
 
@@ -1038,7 +1048,7 @@ def test_full_recording_span_matches_the_unfiltered_bundle(
     and more spikes than the per-unit draw, so the random draw is exercised
     and a changed candidate set would change which spikes are drawn.
     """
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     duration_s = 12.0
     n_samples = int(duration_s * _FS)
@@ -1120,7 +1130,7 @@ def test_spans_keep_windows_off_a_member_join(
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     member_s = 4.0
     n_member = int(member_s * _FS)
@@ -1204,7 +1214,7 @@ def test_spans_exclude_units_without_two_supported_spikes(
 ):
     """A unit with fewer than two spikes whose window fits one span is left
     out and returned; when that leaves no unit, nothing is written."""
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     duration_s = 4.0
     n_samples = int(duration_s * _FS)
@@ -1248,7 +1258,7 @@ def test_spans_must_describe_the_recording(tmp_path, saved_bundles):
     before any analyzer is built."""
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     recording, sorting = _planted_session(
         2.0, {3: (_train(0.1, 1.9), _planted_template(0), None)}
@@ -1319,7 +1329,7 @@ def two_session_inputs(tmp_path_factory):
     """Build two bundles with a known overlapping unit set (8 shared)."""
     from spikeinterface.core import NumpySorting
 
-    from spyglass.spikesorting.v2._unitmatch_backend import (
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
         extract_unitmatch_bundle,
     )
     from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
@@ -1360,8 +1370,8 @@ def two_session_inputs(tmp_path_factory):
         inputs.append(
             SessionMatcherInput(
                 curation_key={"sorting_id": name, "curation_id": 0},
-                waveform_dir=sdir,
-                channel_positions_path=sdir / "channel_positions.npy",
+                bundle_dir=sdir,
+                geometry_path=sdir / "channel_positions.npy",
             )
         )
     return inputs, s1_ids, s2_ids, shared
@@ -1370,7 +1380,9 @@ def two_session_inputs(tmp_path_factory):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_match_recovers_planted_correspondences(two_session_inputs):
-    from spyglass.spikesorting.v2._unitmatch_backend import UnitMatchBackend
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
+        UnitMatchBackend,
+    )
 
     inputs, _s1_ids, _s2_ids, shared = two_session_inputs
     pairs = UnitMatchBackend().match(inputs, {"match_threshold": 0.5})

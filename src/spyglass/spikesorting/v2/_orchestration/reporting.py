@@ -1,0 +1,1381 @@
+"""Notebook-facing reporting helpers for the v2 pipeline.
+
+Holds ``describe_parameter_rows`` (parameter catalog table),
+``verify_v2_default_catalog`` (stored-vs-shipped default audit),
+``describe_units`` (per-unit table for one sort), and ``describe_run``
+(receipt table for a run result) with their row builders. ``pipeline.py``
+re-exports the ``describe_*`` functions and the package ``__init__`` re-exports
+``verify_v2_default_catalog``. The session batch runner imports
+``_session_outcome_counts`` from here; reporting does not import the runners.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from spyglass.spikesorting.v2._orchestration.presets import (
+    _PIPELINE_PRESETS,
+    describe_pipeline_presets,
+)
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+
+_PARAMETER_ROW_COLUMNS = [
+    "table",
+    "parameter_name",
+    "sorter",
+    "probe_type",
+    "sampling_rate_hz",
+    "adjacency_radius_um",
+    "params_schema_version",
+    "fingerprint",
+    "is_shipped_default",
+    "recommendation_status",
+    "used_by_pipeline_presets",
+    "duplicate_of",
+    "name_warnings",
+    "summary",
+]
+
+
+def describe_parameter_rows() -> "pd.DataFrame":
+    """Catalog the parameter-Lookup rows currently in the database.
+
+    One row per parameter-Lookup row across ALL ten v2 parameter tables that
+    ``initialize_v2_defaults`` seeds -- the three preset-referenced tables
+    (``PreprocessingParameters`` / ``ArtifactDetectionParameters`` /
+    ``SorterParameters``) plus the downstream / cross-session / motion ones
+    (``AnalyzerWaveformParameters`` / ``QualityMetricParameters`` /
+    ``AutoCurationRules`` / ``MatcherParameters`` /
+    ``MotionEstimationParameters`` / ``MotionInterpolationParameters`` /
+    ``MotionCorrectionParameters``)
+    -- each with its content fingerprint (the row name excluded;
+    ``SorterParameters`` scoped per sorter), whether it is a shipped catalog
+    default, which pipeline presets reference it, and -- when its content
+    duplicates another row's -- the name it duplicates. Discovery metadata that
+    lives on the *presets* (``probe_type`` / ``sampling_rate_hz`` /
+    ``recommendation_status`` / ``used_by_pipeline_presets``) applies only to
+    the three preset-referenced tables and is left blank / ``None`` for the
+    others (they are resolved downstream of preset selection);
+    ``adjacency_radius_um`` is read straight from the ``SorterParameters`` blob.
+
+    Unlike the DB-free :func:`describe_pipeline_presets`, this reads the **live
+    tables**, so user-added rows appear -- call ``initialize_v2_defaults()`` (or
+    each table's ``insert_default()``) first to populate the shipped catalog.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``table``, ``parameter_name``, ``sorter``, ``probe_type``,
+        ``sampling_rate_hz``, ``adjacency_radius_um``, ``params_schema_version``,
+        ``fingerprint`` (short), ``is_shipped_default``,
+        ``recommendation_status``, ``used_by_pipeline_presets`` (list of preset
+        names), ``duplicate_of``, ``name_warnings``, and ``summary``; sorted by
+        ``(table, sorter, parameter_name)``.
+    """
+    import pandas as pd
+
+    preproc_use, artifact_use, sorter_use = _preset_parameter_use()
+    records: list[dict] = [
+        *_preprocessing_parameter_records(preproc_use),
+        *_artifact_parameter_records(artifact_use),
+        *_sorter_parameter_records(sorter_use),
+        *_downstream_parameter_records(),
+    ]
+    _annotate_duplicate_parameter_records(records)
+
+    frame = pd.DataFrame(
+        [{c: rec.get(c) for c in _PARAMETER_ROW_COLUMNS} for rec in records],
+        columns=_PARAMETER_ROW_COLUMNS,
+    )
+    return frame.sort_values(["table", "sorter", "parameter_name"]).reset_index(
+        drop=True
+    )
+
+
+def _preset_parameter_use() -> tuple[dict, dict, dict]:
+    """Which presets reference each parameter row, per stage.
+
+    Returns
+    -------
+    preproc_use : dict[str, list[str]]
+        Preprocessing params name to preset names.
+    artifact_use : dict[str, list[str]]
+        Artifact-detection params name to preset names.
+    sorter_use : dict[tuple[str, str], list[str]]
+        ``(sorter, sorter_params_name)`` to preset names.
+    """
+    preproc_use: dict[str, list[str]] = {}
+    artifact_use: dict[str, list[str]] = {}
+    sorter_use: dict[tuple[str, str], list[str]] = {}
+    for preset_name, preset in _PIPELINE_PRESETS.items():
+        preproc_use.setdefault(preset.preprocessing_params_name, []).append(
+            preset_name
+        )
+        artifact_use.setdefault(
+            preset.artifact_detection_params_name, []
+        ).append(preset_name)
+        sorter_use.setdefault(
+            (preset.sorter, preset.sorter_params_name), []
+        ).append(preset_name)
+    return preproc_use, artifact_use, sorter_use
+
+
+def _str_axis(used_by: list[str], attr: str) -> str:
+    """Distinct non-blank preset values for ``attr``, comma-joined."""
+    vals = {getattr(_PIPELINE_PRESETS[u], attr) for u in used_by}
+    vals.discard("")
+    vals.discard(None)
+    return ", ".join(sorted(vals))
+
+
+def _num_axis(used_by: list[str], attr: str):
+    """Return the single agreed preset value for a numeric ``attr``, else None."""
+    vals = {getattr(_PIPELINE_PRESETS[u], attr) for u in used_by}
+    vals.discard(None)
+    return next(iter(vals)) if len(vals) == 1 else None
+
+
+def _num(value) -> str:
+    """Format a parameter value compactly for a row summary."""
+    # describe reads extra="allow" blobs, so a knob can legitimately be a
+    # string / list / dict. Format numerics compactly, but fall back to
+    # str() instead of letting one odd user row raise and take down the
+    # whole catalog.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value)
+    return f"{value:g}"
+
+
+def _preproc_summary(params: dict) -> str:
+    """One-line summary of a ``PreprocessingParameters`` row."""
+    band = params.get("bandpass_filter")
+    seg = params.get("min_segment_length")
+    seg_str = f", min_segment {_num(seg)} s" if seg is not None else ""
+    if band:
+        return (
+            f"bandpass {_num(band['freq_min'])}-"
+            f"{_num(band['freq_max'])} Hz" + seg_str
+        )
+    return "no bandpass" + seg_str
+
+
+def _artifact_summary(params: dict) -> str:
+    """One-line summary of an ``ArtifactDetectionParameters`` row."""
+    if not params.get("detect", True):
+        return "artifact detection off"
+    amp = params.get("amplitude_threshold_uv")
+    zscore = params.get("zscore_threshold")
+    prop = params.get("proportion_above_threshold")
+    thresholds = []
+    if amp is not None:
+        thresholds.append(f"{_num(amp)} uV")
+    if zscore is not None:
+        thresholds.append(f"{_num(zscore)} z-score")
+    threshold = " + ".join(thresholds) if thresholds else "no threshold"
+    prop_str = (
+        f" @ {_num(prop)} proportion-above-threshold"
+        if prop is not None
+        else ""
+    )
+    return threshold + prop_str
+
+
+def _sorter_summary(sorter: str, params: dict) -> str:
+    """One-line summary of a ``SorterParameters`` row."""
+    bits = [sorter]
+    threshold = params.get("detect_threshold")
+    if threshold is not None:
+        bits.append(f"detect_threshold {_num(threshold)}")
+    radius = params.get("adjacency_radius")
+    if radius is not None:
+        bits.append(f"adjacency_radius {_num(radius)} um")
+    return ", ".join(bits)
+
+
+def _preprocessing_parameter_records(
+    preproc_use: dict[str, list[str]],
+) -> list[dict]:
+    """Catalog records for every ``PreprocessingParameters`` row."""
+    from spyglass.spikesorting.v2._core.lookup_validation import (
+        parameter_row_fingerprint,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
+
+    shipped_preproc = {r[0] for r in PreprocessingParameters._DEFAULT_CONTENTS}
+    records: list[dict] = []
+    for row in PreprocessingParameters.fetch(as_dict=True):
+        params = _jsonable_blob(row["params"])
+        used = sorted(preproc_use.get(row["preprocessing_params_name"], []))
+        records.append(
+            {
+                "table": "PreprocessingParameters",
+                "parameter_name": row["preprocessing_params_name"],
+                "sorter": "",
+                "probe_type": _str_axis(used, "probe_type"),
+                "sampling_rate_hz": _num_axis(used, "sampling_rate_hz"),
+                "adjacency_radius_um": None,
+                "params_schema_version": int(row["params_schema_version"]),
+                "_fp": parameter_row_fingerprint(
+                    "PreprocessingParameters", row
+                ),
+                "is_shipped_default": (
+                    row["preprocessing_params_name"] in shipped_preproc
+                ),
+                "recommendation_status": _str_axis(
+                    used, "recommendation_status"
+                ),
+                "used_by_pipeline_presets": used,
+                "summary": _preproc_summary(params),
+            }
+        )
+    return records
+
+
+def _artifact_parameter_records(
+    artifact_use: dict[str, list[str]],
+) -> list[dict]:
+    """Catalog records for every ``ArtifactDetectionParameters`` row."""
+    from spyglass.spikesorting.v2._core.lookup_validation import (
+        parameter_row_fingerprint,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
+
+    shipped_artifact = {
+        r[0] for r in ArtifactDetectionParameters._DEFAULT_CONTENTS
+    }
+    records: list[dict] = []
+    for row in ArtifactDetectionParameters.fetch(as_dict=True):
+        params = _jsonable_blob(row["params"])
+        used = sorted(
+            artifact_use.get(row["artifact_detection_params_name"], [])
+        )
+        records.append(
+            {
+                "table": "ArtifactDetectionParameters",
+                "parameter_name": row["artifact_detection_params_name"],
+                "sorter": "",
+                "probe_type": _str_axis(used, "probe_type"),
+                "sampling_rate_hz": _num_axis(used, "sampling_rate_hz"),
+                "adjacency_radius_um": None,
+                "params_schema_version": int(row["params_schema_version"]),
+                "_fp": parameter_row_fingerprint(
+                    "ArtifactDetectionParameters", row
+                ),
+                "is_shipped_default": (
+                    row["artifact_detection_params_name"] in shipped_artifact
+                ),
+                "recommendation_status": _str_axis(
+                    used, "recommendation_status"
+                ),
+                "used_by_pipeline_presets": used,
+                "summary": _artifact_summary(params),
+            }
+        )
+    return records
+
+
+def _sorter_parameter_records(
+    sorter_use: dict[tuple[str, str], list[str]],
+) -> list[dict]:
+    """Catalog records for every ``SorterParameters`` row."""
+    from spyglass.spikesorting.v2._core.lookup_validation import (
+        parameter_row_fingerprint,
+    )
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
+
+    shipped_sorter = {(r[0], r[1]) for r in SorterParameters._DEFAULT_CONTENTS}
+    records: list[dict] = []
+    for row in SorterParameters.fetch(as_dict=True):
+        params = _jsonable_blob(row["params"])
+        key = (row["sorter"], row["sorter_params_name"])
+        used = sorted(sorter_use.get(key, []))
+        radius = params.get("adjacency_radius")
+        records.append(
+            {
+                "table": "SorterParameters",
+                "parameter_name": row["sorter_params_name"],
+                "sorter": row["sorter"],
+                "probe_type": _str_axis(used, "probe_type"),
+                "sampling_rate_hz": _num_axis(used, "sampling_rate_hz"),
+                "adjacency_radius_um": (
+                    float(radius) if radius is not None else None
+                ),
+                "params_schema_version": int(row["params_schema_version"]),
+                # Folds in the sorter and execution_params (local vs
+                # container backend), as the duplicate-content guard does.
+                "_fp": parameter_row_fingerprint(
+                    "SorterParameters", row, sorter_keyed=True
+                ),
+                "is_shipped_default": key in shipped_sorter,
+                "recommendation_status": _str_axis(
+                    used, "recommendation_status"
+                ),
+                "used_by_pipeline_presets": used,
+                "summary": _sorter_summary(row["sorter"], params),
+            }
+        )
+    return records
+
+
+def _downstream_parameter_records() -> list[dict]:
+    """Catalog records for the parameter Lookups no preset references.
+
+    The remaining parameter Lookups are not referenced by the pipeline
+    PRESETS (they are resolved downstream of preset selection, used only by
+    cross-session matching, or chosen per run as a motion recipe), so the
+    preset-fold columns (probe_type / sampling_rate_hz / adjacency_radius_um /
+    used_by_pipeline_presets / recommendation_status) stay blank. They ARE
+    content-addressed by name and user-populatable, so listing them keeps this
+    report aligned with the full ``initialize_v2_defaults`` surface (ten
+    Lookups, not three).
+    """
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectionParameters,
+        MotionEstimationParameters,
+        MotionInterpolationParameters,
+    )
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
+    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
+
+    records: list[dict] = []
+    records += _simple_parameter_records(
+        AnalyzerWaveformParameters,
+        "AnalyzerWaveformParameters",
+        "waveform_params_name",
+        {r[0] for r in AnalyzerWaveformParameters._DEFAULT_CONTENTS},
+        lambda r: "",
+    )
+    records += _simple_parameter_records(
+        QualityMetricParameters,
+        "QualityMetricParameters",
+        "metric_params_name",
+        {
+            r["metric_params_name"]
+            for r in QualityMetricParameters._default_rows()
+        },
+        lambda r: f"{len(_jsonable_blob(r.get('metric_names')) or [])} metrics",
+    )
+    records += _simple_parameter_records(
+        AutoCurationRules,
+        "AutoCurationRules",
+        "auto_curation_rules_name",
+        {
+            master["auto_curation_rules_name"]
+            for master, _ in AutoCurationRules._default_payloads()
+        },
+        lambda r: f"merge preset {r.get('auto_merge_preset', '')!r}",
+        extra_content=_autocuration_rule_content,
+    )
+    records += _simple_parameter_records(
+        MatcherParameters,
+        "MatcherParameters",
+        "matcher_params_name",
+        {r["matcher_params_name"] for r in MatcherParameters._default_rows()},
+        lambda r: f"matcher {r.get('matcher', '')!r}",
+    )
+    records += _simple_parameter_records(
+        MotionEstimationParameters,
+        "MotionEstimationParameters",
+        "motion_estimation_params_name",
+        {r[0] for r in MotionEstimationParameters._DEFAULT_CONTENTS},
+        _motion_estimation_summary,
+    )
+    records += _simple_parameter_records(
+        MotionInterpolationParameters,
+        "MotionInterpolationParameters",
+        "motion_interpolation_params_name",
+        {r[0] for r in MotionInterpolationParameters._DEFAULT_CONTENTS},
+        _motion_interpolation_summary,
+    )
+    records += _simple_parameter_records(
+        MotionCorrectionParameters,
+        "MotionCorrectionParameters",
+        "motion_correction_params_name",
+        {r[0] for r in MotionCorrectionParameters._DEFAULT_CONTENTS},
+        lambda r: (
+            f"{r['motion_estimation_params_name']} + "
+            f"{r['motion_interpolation_params_name']}"
+        ),
+    )
+    return records
+
+
+def _simple_parameter_records(
+    table, table_name, name_attr, shipped, summarize, extra_content=None
+) -> list[dict]:
+    """List a name-keyed param Lookup with preset-fold columns blank.
+
+    ``shipped`` is the set of names the table's default catalog ships
+    (each caller knows its table's catalog). ``extra_content(row)`` folds
+    part-table content (e.g. ``AutoCurationRules.Rule`` rows) into the
+    fingerprint so a name-keyed master with identical scalar columns but
+    different part rows is not falsely flagged as a content duplicate.
+    """
+    from spyglass.spikesorting.v2._core.parameter_identity import (
+        parameter_fingerprint,
+    )
+    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
+
+    records: list[dict] = []
+    for simple_row in table.fetch(as_dict=True):
+        version = int(simple_row.get("params_schema_version", 0) or 0)
+        content = {
+            column: _jsonable_blob(value)
+            for column, value in simple_row.items()
+            if column != name_attr
+        }
+        if extra_content is not None:
+            content["__part_content__"] = extra_content(simple_row)
+        records.append(
+            {
+                "table": table_name,
+                "parameter_name": simple_row[name_attr],
+                "sorter": "",
+                "probe_type": None,
+                "sampling_rate_hz": None,
+                "adjacency_radius_um": None,
+                "params_schema_version": version,
+                "_fp": parameter_fingerprint(
+                    table_name,
+                    params=content,
+                    params_schema_version=version,
+                    job_kwargs=None,
+                ),
+                "is_shipped_default": simple_row[name_attr] in shipped,
+                "recommendation_status": None,
+                "used_by_pipeline_presets": [],
+                "summary": summarize(simple_row),
+            }
+        )
+    return records
+
+
+def _autocuration_rule_content(rules_row) -> list[dict]:
+    """The ruleset's ``AutoCurationRules.Rule`` rows, for its fingerprint."""
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
+
+    # The Rule part rows define the named ruleset's content, so fold them
+    # (ordered by rule_index) into the fingerprint -- two rulesets with the
+    # same master columns but different Rule rows are NOT duplicates.
+    # Exclude the auto_curation_rules_name FK (it IS the name being
+    # abstracted away) so two IDENTICAL rule sets under different names share
+    # a fingerprint and surface as duplicate_of.
+    return [
+        {
+            k: _jsonable_blob(v)
+            for k, v in rule.items()
+            if k != "auto_curation_rules_name"
+        }
+        for rule in (
+            AutoCurationRules.Rule
+            & {
+                "auto_curation_rules_name": rules_row[
+                    "auto_curation_rules_name"
+                ]
+            }
+        ).fetch(as_dict=True, order_by="rule_index")
+    ]
+
+
+def _motion_estimation_summary(row) -> str:
+    """One-line summary of a ``MotionEstimationParameters`` row."""
+    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
+
+    params = _jsonable_blob(row["params"])
+    return (
+        f"preset {params.get('preset')!r}, max_gap_s "
+        f"{_num(params.get('max_gap_s'))}"
+    )
+
+
+def _motion_interpolation_summary(row) -> str:
+    """One-line summary of a ``MotionInterpolationParameters`` row."""
+    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
+
+    params = _jsonable_blob(row["params"])
+    return (
+        f"{params.get('spatial_interpolation_method')}, border_mode "
+        f"{params.get('border_mode')!r}"
+    )
+
+
+def _annotate_duplicate_parameter_records(records: list[dict]) -> None:
+    """Fill each record's ``duplicate_of``, ``fingerprint``, ``name_warnings``.
+
+    Rows sharing a fingerprint within the same ``(table, sorter)`` scope are
+    content duplicates under different names.
+    """
+    from spyglass.spikesorting.v2._core.parameter_identity import (
+        short_fingerprint,
+    )
+
+    names_by_fp: dict[tuple[str, str, str], list[str]] = {}
+    for rec in records:
+        names_by_fp.setdefault(
+            (rec["table"], rec["sorter"], rec["_fp"]), []
+        ).append(rec["parameter_name"])
+
+    for rec in records:
+        group = sorted(names_by_fp[(rec["table"], rec["sorter"], rec["_fp"])])
+        others = [n for n in group if n != rec["parameter_name"]]
+        rec["duplicate_of"] = others[0] if others else None
+        rec["fingerprint"] = short_fingerprint(rec["_fp"])
+        warnings = []
+        if rec["duplicate_of"]:
+            warnings.append(f"duplicate content of {rec['duplicate_of']!r}")
+        if (
+            "franklab" in rec["parameter_name"]
+            and not rec["is_shipped_default"]
+        ):
+            warnings.append("non-catalog row using the 'franklab' name")
+        rec["name_warnings"] = "; ".join(warnings)
+
+
+def _content_equal(left, right) -> bool:
+    """Float-tolerant deep equality for fetched-vs-shipped default content.
+
+    Deliberately NOT ``_metric_curation._values_match`` despite the near-identical
+    shape: this audit compares a SHIPPED Python value against a DB-FETCHED value,
+    where a ``bool`` column comes back as ``int`` (DataJoint stores bool as
+    tinyint), so ``False`` shipped must equal ``0`` stored -- the ``left == right``
+    bool branch here conflates them on purpose. ``_values_match`` does the
+    opposite (strict ``type(a) is type(b)``) because its own callers compare two
+    in-memory blobs where a bool-vs-int distinction is real. Float columns are
+    single precision, so floats compare with a tolerance and dicts/lists recurse;
+    both sides are pre-normalized via ``_jsonable_blob``.
+    """
+    import math
+
+    if isinstance(left, bool) or isinstance(right, bool):
+        return left == right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return math.isclose(
+            float(left), float(right), rel_tol=1e-6, abs_tol=1e-9
+        )
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(
+            _content_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
+        return len(left) == len(right) and all(
+            _content_equal(a, b) for a, b in zip(left, right)
+        )
+    return left == right
+
+
+def _canonical_quality_metric_rows(table) -> list[dict]:
+    """Shipped ``QualityMetricParameters`` defaults in their STORED shape.
+
+    ``_default_rows`` is the raw insert INPUT -- it omits the columns the
+    validated insert fills (``template_metric_columns``, ``params_schema_version``,
+    ``job_kwargs``). Run them through the same preparation the insert uses so
+    every stored column joins the drift comparison, not just the raw inputs.
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        prepare_quality_metric_row,
+    )
+
+    return [prepare_quality_metric_row(row) for row in table._default_rows()]
+
+
+def _canonical_autocuration_master_rows(table) -> list[dict]:
+    """Shipped ``AutoCurationRules`` MASTER defaults in their STORED shape.
+
+    ``_default_payloads`` masters omit the validated-fill columns
+    (``auto_merge_kwargs``, ``params_schema_version``, ``job_kwargs``). Run
+    them through the same preparation ``insert_rules`` uses so a drift in
+    those defaulted master columns is compared too (the ``Rule`` parts are
+    compared separately in ``verify_v2_default_catalog``).
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        prepare_auto_curation_rules,
+    )
+
+    return [
+        prepare_auto_curation_rules(master, rule_rows)[0]
+        for master, rule_rows in table._default_payloads()
+    ]
+
+
+def _shipped_default_rows(table) -> list[dict]:
+    """Shipped default rows for a Lookup in their STORED (canonical) shape.
+
+    ``_DEFAULT_CONTENTS`` positional tuples are zipped to the table heading (and
+    are already canonical). The dynamic-default tables expose raw insert INPUT
+    (``_default_rows`` / ``_default_payloads``), so their canonical stored rows
+    are rebuilt via the table's own validation so EVERY stored column -- not just
+    the raw inputs -- joins the drift comparison. Returns ``[]`` when a table
+    exposes no static default source.
+    """
+    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
+
+    contents = getattr(table, "_DEFAULT_CONTENTS", None)
+    if contents:
+        names = list(table().heading.names)
+        return [dict(zip(names, _jsonable_blob(list(row)))) for row in contents]
+    if table.__name__ == "QualityMetricParameters":
+        return _canonical_quality_metric_rows(table)
+    if table.__name__ == "AutoCurationRules":
+        return _canonical_autocuration_master_rows(table)
+    rows_fn = getattr(table, "_default_rows", None)
+    if callable(rows_fn):
+        return [dict(row) for row in rows_fn()]
+    payloads_fn = getattr(table, "_default_payloads", None)
+    if callable(payloads_fn):
+        # Master scalars only; the ``Rule`` parts are compared separately in
+        # ``verify_v2_default_catalog`` (a drifted rule threshold would otherwise
+        # be invisible).
+        return [dict(master) for master, _parts in payloads_fn()]
+    return []
+
+
+def _v2_default_catalog_tables():
+    """The default-bearing v2 parameter Lookups + their name attribute.
+
+    Every table ``initialize_v2_defaults`` seeds, paired with its params-name
+    column. Imported lazily so the package stays import-light.
+    """
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectionParameters,
+        MotionEstimationParameters,
+        MotionInterpolationParameters,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
+        SorterParameters,
+    )
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
+
+    return [
+        (PreprocessingParameters, "preprocessing_params_name"),
+        (ArtifactDetectionParameters, "artifact_detection_params_name"),
+        (SorterParameters, "sorter_params_name"),
+        (AnalyzerWaveformParameters, "waveform_params_name"),
+        (QualityMetricParameters, "metric_params_name"),
+        (AutoCurationRules, "auto_curation_rules_name"),
+        (MatcherParameters, "matcher_params_name"),
+        (MotionEstimationParameters, "motion_estimation_params_name"),
+        (MotionInterpolationParameters, "motion_interpolation_params_name"),
+        (MotionCorrectionParameters, "motion_correction_params_name"),
+    ]
+
+
+def _diverged_autocuration_rules(table) -> list[dict]:
+    """Stale ``AutoCurationRules.Rule`` part rows vs the shipped rule sets.
+
+    The master scalar compare misses a drifted rule (threshold / operator / label
+    / shape column), so compare the shipped ``_default_payloads`` rule rows to the
+    stored ``Rule`` rows per name: a different rule count, a missing
+    ``rule_index``, or a diverged rule field is a stale default.
+    """
+    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
+
+    stale: list[dict] = []
+    for master, shipped_rules in table._default_payloads():
+        name = master["auto_curation_rules_name"]
+        restriction = {"auto_curation_rules_name": name}
+        if not (table & restriction):
+            continue  # not seeded
+        stored_by_index = {
+            int(rule["rule_index"]): rule
+            for rule in (table.Rule & restriction).fetch(as_dict=True)
+        }
+        if len(stored_by_index) != len(shipped_rules):
+            stale.append(
+                {
+                    "table": "AutoCurationRules.Rule",
+                    "name": name,
+                    "fields": ["rule_count"],
+                }
+            )
+            continue
+        for shipped_rule in shipped_rules:
+            index = int(shipped_rule["rule_index"])
+            stored_rule = stored_by_index.get(index)
+            if stored_rule is None:
+                stale.append(
+                    {
+                        "table": "AutoCurationRules.Rule",
+                        "name": name,
+                        "fields": [f"rule_index_{index}_missing"],
+                    }
+                )
+                continue
+            diverged = [
+                field
+                for field, value in shipped_rule.items()
+                if field not in ("auto_curation_rules_name", "rule_index")
+                and field in stored_rule
+                and not _content_equal(
+                    _jsonable_blob(value), _jsonable_blob(stored_rule[field])
+                )
+            ]
+            if diverged:
+                stale.append(
+                    {
+                        "table": "AutoCurationRules.Rule",
+                        "name": f"{name}[{index}]",
+                        "fields": sorted(diverged),
+                    }
+                )
+    return stale
+
+
+def verify_v2_default_catalog(*, strict: bool = False) -> list[dict]:
+    """Flag stored same-name default rows whose content diverged from shipped.
+
+    ``initialize_v2_defaults`` re-runs each ``insert_default()`` idempotently and
+    NEVER compares a stored same-name row's content to the shipped content
+    (``reject_duplicate_parameter_content`` skips existing-PK rows). So a stored
+    shipped-default row whose content has since diverged from the shipped content
+    -- e.g. a hand-edited stored blob or a row seeded under an older default --
+    silently keeps its stale content. This audit compares, for each shipped
+    default present in the DB, the stored content to the shipped content (per PK,
+    so the per-sorter ``SorterParameters`` keys correctly) and returns the
+    divergences. For ``QualityMetricParameters`` the canonical
+    ``template_metric_columns`` default is included, and for ``AutoCurationRules``
+    the ``Rule`` part rows are compared too, so a drifted rule threshold or
+    waveform-shape column is not invisible.
+
+    Parameters
+    ----------
+    strict : bool, optional
+        Raise ``DuplicateParameterContentError`` listing the stale defaults
+        instead of returning them. Default ``False`` (return the list).
+
+    Returns
+    -------
+    list[dict]
+        One entry per stale default: ``{"table", "name", "fields"}`` where
+        ``fields`` are the diverged content columns. Empty when the catalog is
+        clean.
+    """
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
+
+    stale: list[dict] = []
+    for table, name_attr in _v2_default_catalog_tables():
+        pk_fields = list(table.primary_key)
+        stored_by_pk = {
+            tuple(row[field] for field in pk_fields): row
+            for row in table.fetch(as_dict=True)
+        }
+        for shipped in _shipped_default_rows(table):
+            try:
+                pk = tuple(shipped[field] for field in pk_fields)
+            except KeyError:
+                continue  # shipped row missing a PK field -> not comparable
+            stored = stored_by_pk.get(pk)
+            if stored is None:
+                continue  # not seeded (e.g. sorter not installed); skip
+            diverged = [
+                field
+                for field, shipped_value in shipped.items()
+                if field not in pk_fields
+                and field in stored
+                and not _content_equal(
+                    _jsonable_blob(shipped_value),
+                    _jsonable_blob(stored[field]),
+                )
+            ]
+            if diverged:
+                stale.append(
+                    {
+                        "table": table.__name__,
+                        "name": shipped[name_attr],
+                        "fields": sorted(diverged),
+                    }
+                )
+        if table.__name__ == "AutoCurationRules":
+            stale.extend(_diverged_autocuration_rules(table))
+    if strict and stale:
+        raise DuplicateParameterContentError(
+            "verify_v2_default_catalog: stored default row(s) diverge from the "
+            f"shipped content: {stale}. Drop the stale row(s) and re-seed via "
+            "insert_default(), or reconcile the divergence deliberately."
+        )
+    return stale
+
+
+_UNIT_COLUMNS = [
+    "sorting_id",
+    "unit_id",
+    "n_spikes",
+    "firing_rate_hz",
+    "peak_amplitude_uv",
+    "peak_electrode_id",
+    "brain_region",
+]
+
+
+def _observed_duration_s(sorting_id) -> float:
+    """Seconds the sort actually observed, for a firing-rate denominator.
+
+    Mirrors ``Sorting.make_fetch``: when the sort ran artifact detection the
+    denominator is the retained sample duration, otherwise the materialized
+    recording's sample count / sampling frequency (not its wall-clock span).
+    Using the raw recording length would overstate the denominator -- and so
+    understate firing rate -- for artifact-masked sorts.
+    """
+    import numpy as np
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.spikesorting.v2._core.observed_time import observed_intervals
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2._artifacts.naming import (
+        artifact_detection_interval_list_name,
+    )
+
+    sorting_key = {"sorting_id": sorting_id}
+    source, traces = SortingSelection.resolve_effective_source(sorting_key)
+    # Only the sample count and timestamps are read, so the traces load as
+    # persisted, with no artifact mask applied at load.
+    recording = SortingSelection.load_stored_traces(traces)
+    if source.kind == "concatenated_recording":
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecording,
+        )
+
+        intervals = (ConcatenatedRecording & source.key).fetch1("obs_intervals")
+        return float(
+            np.diff(observed_intervals(recording, intervals), axis=1).sum()
+        )
+    recording_id = source.key["recording_id"]
+    artifact_detection_id = source.artifact_detection_id
+    if artifact_detection_id is not None:
+        nwb_file_name = (
+            RecordingSelection & {"recording_id": recording_id}
+        ).fetch1("nwb_file_name")
+        valid_times = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": artifact_detection_interval_list_name(
+                    artifact_detection_id
+                ),
+            }
+        ).fetch1("valid_times")
+        return float(
+            np.diff(observed_intervals(recording, valid_times), axis=1).sum()
+        )
+    return recording.get_num_samples() / recording.sampling_frequency
+
+
+def describe_units(sorting_id) -> "pd.DataFrame":
+    """Return a per-unit, sort-time quality snapshot for one sort.
+
+    A read-only "what did this sort produce?" receipt built entirely from
+    metadata committed at sort time -- it computes no SpikeInterface extension
+    and loads no recording. Use it right after ``run_v2_pipeline``
+    (``describe_units(run_summary["sorting_id"])``) to sanity-check a sort
+    before the deeper analyzer-backed quality metrics (SNR / ISI / nearest-
+    neighbour), which are computed by the analyzer-driven curation step
+    (``CurationEvaluation``).
+
+    ``firing_rate_hz`` uses the duration the sort actually OBSERVED -- the
+    artifact-removed ``valid_times`` total when the sort ran artifact detection,
+    otherwise the materialized recording duration (see
+    :func:`_observed_duration_s`). ``peak_electrode_id`` and ``brain_region``
+    come from each unit's peak-amplitude ``Electrode`` row (anchored to the
+    first member for concat sorts).
+
+    Parameters
+    ----------
+    sorting_id
+        ``sorting_id`` of a populated ``Sorting`` row (e.g.
+        ``run_summary["sorting_id"]``).
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per unit, sorted by ``unit_id``. Empty, with the documented
+        columns, for a zero-unit sort. Columns are ``sorting_id``, ``unit_id``,
+        ``n_spikes``, ``firing_rate_hz``, ``peak_amplitude_uv``,
+        ``peak_electrode_id`` (the unit's peak-amplitude ``electrode_id``), and
+        ``brain_region``.
+    """
+    import pandas as pd
+
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.common.common_region import BrainRegion
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = {"sorting_id": sorting_id}
+    if not (Sorting & sorting_key):
+        raise ValueError(
+            f"describe_units: sorting_id {sorting_id!r} is not in Sorting. "
+            "Populate the sort first (e.g. via run_v2_pipeline) and pass "
+            "run_summary['sorting_id']."
+        )
+
+    unit_rows = ((Sorting.Unit & sorting_key) * Electrode * BrainRegion).fetch(
+        as_dict=True
+    )
+    if not unit_rows:
+        return pd.DataFrame(columns=_UNIT_COLUMNS)
+
+    duration_s = _observed_duration_s(sorting_id)
+    if duration_s <= 0:
+        # Units present but zero observed seconds is a contradiction (an
+        # all-artifact mask or a truncated recording). Raise loudly rather than
+        # emitting an all-NaN firing_rate column that reads as a display quirk
+        # and hides the upstream defect.
+        raise ValueError(
+            f"describe_units: sorting_id {sorting_id!r} has {len(unit_rows)} "
+            f"unit(s) but its observed duration is {duration_s}s. A sort with "
+            "units cannot span zero observed time -- check the recording "
+            "duration and the artifact-detection interval."
+        )
+    rows = []
+    for unit in sorted(unit_rows, key=lambda row: int(row["unit_id"])):
+        n_spikes = int(unit["n_spikes"])
+        rows.append(
+            {
+                "sorting_id": sorting_id,
+                "unit_id": int(unit["unit_id"]),
+                "n_spikes": n_spikes,
+                "firing_rate_hz": n_spikes / duration_s,
+                "peak_amplitude_uv": float(unit["peak_amplitude_uv"]),
+                "peak_electrode_id": int(unit["electrode_id"]),
+                "brain_region": str(unit["region_name"]),
+            }
+        )
+    return pd.DataFrame(rows, columns=_UNIT_COLUMNS)
+
+
+_RUN_COLUMNS = [
+    "row_type",
+    "sort_group_id",
+    "stage",
+    "status",
+    "seconds",
+    "n_units",
+    "root_merge_id",
+    "auto_labeled_merge_id",
+    "member_index",
+    "nwb_file_name",
+    "member_merge_id",
+    "warning",
+    "error",
+    "setting",
+    "value",
+]
+
+# Canonical stage order for the run receipt; extras (if any) append after.
+_RUN_STAGE_ORDER = (
+    "recording",
+    "artifact_detection",
+    # Concat-mode source stages run BEFORE sorting (a single-session run has
+    # recording/artifact_detection instead; the receipt lists only the stages a
+    # run actually has), so order them here to keep the receipt chronological.
+    "member_recording",
+    "member_artifact_detection",
+    "concat_recording",
+    # The motion stages run on the sort's source, after it is built and
+    # before the sort, in either input mode.
+    "motion_estimate",
+    "motion_corrected_recording",
+    "sorting",
+    "curation",
+    "auto_curation",
+    "member_curation",
+    "figpack",
+    "merge",
+)
+
+
+#: Motion receipt fields ``describe_run`` shows, in display order.
+_RUN_MOTION_FIELDS = (
+    "motion_mode",
+    "motion_correction_params_name",
+    "motion_estimate_id",
+    "motion_estimate_supplied",
+    "motion_estimation_preset",
+    "motion_corrected_recording_id",
+    "motion_removed_channel_ids",
+    "motion_spans_without_evidence",
+)
+
+
+def _run_blank_row() -> dict[str, Any]:
+    return {col: None for col in _RUN_COLUMNS}
+
+
+def _run_stage_seconds_total(summary) -> "float | None":
+    """Total wall-clock across a run summary's ``stage_seconds`` dict."""
+    if not isinstance(summary, dict):
+        return None
+    stage_seconds = summary.get("stage_seconds")
+    if not isinstance(stage_seconds, dict) or not stage_seconds:
+        return None
+    return float(sum(stage_seconds.values()))
+
+
+def _run_warnings(entry: dict, partial: dict | None = None) -> list[str]:
+    """Warnings from a session-result entry plus any partial summary."""
+    warnings: list[str] = []
+    for source in (entry.get("warnings"), (partial or {}).get("warnings")):
+        if not source:
+            continue
+        if isinstance(source, str):
+            warnings.append(source)
+        else:
+            warnings.extend(str(warning) for warning in source)
+    return warnings
+
+
+def _run_metadata(entry: dict, partial: dict | None, key: str):
+    """Read top-level metadata, falling back to a partial run summary."""
+    value = entry.get(key)
+    if value is None and isinstance(partial, dict):
+        value = partial.get(key)
+    return value
+
+
+def _failed_partial_summary(entry: dict) -> "dict | None":
+    """A failed session entry's partial run summary, or ``None``."""
+    partial = entry.get("partial_run_summary")
+    if entry.get("outcome") == "failed" and isinstance(partial, dict):
+        return partial
+    return None
+
+
+def _session_outcome_counts(results: list) -> tuple[int, int, int, int]:
+    """Count a session result's ok, failed, zero-unit and warned groups.
+
+    ``n_units`` and warnings fall back to a failed group's partial run
+    summary. A ``require_units=True`` zero-unit group raises with no partial
+    summary, so its ``n_units`` is None (not 0) and it counts as failed only;
+    zero-unit counts groups that completed with zero units.
+
+    Returns
+    -------
+    tuple of int
+        ``(n_ok, n_failed, n_zero_unit, n_with_warnings)``.
+    """
+    n_ok = n_failed = n_zero = n_warn = 0
+    for entry in results:
+        partial = _failed_partial_summary(entry)
+        if entry.get("outcome") == "ok":
+            n_ok += 1
+        elif entry.get("outcome") == "failed":
+            n_failed += 1
+        if _run_metadata(entry, partial, "n_units") == 0:
+            n_zero += 1
+        if _run_warnings(entry, partial):
+            n_warn += 1
+    return n_ok, n_failed, n_zero, n_warn
+
+
+def _describe_match_input(match_input) -> str:
+    """One line for a unit-match receipt input: kind, sessions, curation, traces.
+
+    ``match_input`` is a ``UnitMatchInputSummary``.
+    """
+    if match_input.motion_corrected_recording_id is None:
+        traces = f"{match_input.waveform_traces} traces (not motion corrected)"
+    else:
+        traces = (
+            f"{match_input.waveform_traces} traces "
+            "(motion corrected, motion_corrected_recording_id="
+            f"{match_input.motion_corrected_recording_id})"
+        )
+    return (
+        f"{match_input.source_kind} {match_input.source_id}; "
+        f"{match_input.n_recordings} recording(s) from "
+        f"{', '.join(match_input.nwb_file_names)}; "
+        f"curation sorting_id={match_input.sorting_id}, "
+        f"curation_id={match_input.curation_id} "
+        f"(curation_uuid={match_input.curation_uuid}); {traces}"
+    )
+
+
+def _describe_run_single_rows(
+    run_summary: dict, *, sort_group_id=None
+) -> list[dict[str, Any]]:
+    """Receipt rows for one ``run_v2_pipeline`` summary (summary, stages, warnings)."""
+    stage_seconds = run_summary.get("stage_seconds") or {}
+    stage_names = [
+        stage
+        for stage in _RUN_STAGE_ORDER
+        if f"{stage}_status" in run_summary or stage in stage_seconds
+    ]
+    stage_names += [s for s in stage_seconds if s not in stage_names]
+
+    rows = []
+    auto_labeled_merge_id = run_summary.get("auto_labeled_merge_id")
+    # The root-only / auto-curated status is a run_v2_pipeline concept, keyed on
+    # its root_merge_id. Other dict summaries that flow through describe_run
+    # (e.g. a run_v2_unit_match manifest) have no root_merge_id -- leave their
+    # summary status blank rather than mislabeling them "root only".
+    if "root_merge_id" in run_summary:
+        summary_status = (
+            "auto-labeled"
+            if run_summary.get("auto_labeled_curation_id") is not None
+            else "root only"
+        )
+    else:
+        summary_status = None
+    header = _run_blank_row()
+    header.update(
+        row_type="summary",
+        sort_group_id=sort_group_id,
+        status=summary_status,
+        seconds=_run_stage_seconds_total(run_summary),
+        n_units=run_summary.get("n_units"),
+        root_merge_id=run_summary.get("root_merge_id"),
+        auto_labeled_merge_id=auto_labeled_merge_id,
+    )
+    rows.append(header)
+    for stage in stage_names:
+        row = _run_blank_row()
+        row.update(
+            row_type="stage",
+            sort_group_id=sort_group_id,
+            stage=stage,
+            status=run_summary.get(f"{stage}_status"),
+            seconds=stage_seconds.get(stage),
+        )
+        rows.append(row)
+    for setting, value in (run_summary.get("scientific_config") or {}).items():
+        row = _run_blank_row()
+        row.update(
+            row_type="config",
+            sort_group_id=sort_group_id,
+            setting=setting,
+            value=repr(value),
+        )
+        rows.append(row)
+    for artifact in run_summary.get("member_artifacts", []):
+        row = _run_blank_row()
+        row.update(
+            row_type="member_artifact",
+            member_index=artifact["member_index"],
+            status=artifact["status"],
+            setting="artifact_detection_id",
+            value=f"{artifact['artifact_detection_id']}; masked {artifact['masked_duration_s']:.6g} s",
+        )
+        rows.append(row)
+    if "artifact_masked_duration_s" in run_summary:
+        row = _run_blank_row()
+        row.update(
+            row_type="config",
+            setting="artifact_masked_duration_s",
+            value=str(run_summary["artifact_masked_duration_s"]),
+        )
+        rows.append(row)
+    # The motion stage's receipt: one ``config`` row per field (``None``
+    # where the mode does not produce it), so an estimate or a corrected
+    # recording is never hidden in a nested dict.
+    if "motion_mode" in run_summary:
+        for setting in _RUN_MOTION_FIELDS:
+            row = _run_blank_row()
+            row.update(
+                row_type="config",
+                sort_group_id=sort_group_id,
+                setting=setting,
+                value=str(run_summary.get(setting)),
+            )
+            rows.append(row)
+    for member_index, member_merge_id in sorted(
+        (run_summary.get("member_merge_ids") or {}).items()
+    ):
+        row = _run_blank_row()
+        row.update(
+            row_type="member",
+            member_index=int(member_index),
+            member_merge_id=member_merge_id,
+        )
+        rows.append(row)
+    # A run_v2_unit_match receipt: one row per matching input, in input_index
+    # (chronological) order.
+    for match_input in run_summary.get("inputs") or ():
+        row = _run_blank_row()
+        row.update(
+            row_type="input",
+            nwb_file_name=", ".join(match_input.nwb_file_names),
+            setting=f"input_{match_input.input_index}",
+            value=_describe_match_input(match_input),
+        )
+        rows.append(row)
+    for warning in run_summary.get("warnings") or []:
+        row = _run_blank_row()
+        row.update(
+            row_type="warning",
+            sort_group_id=sort_group_id,
+            warning=str(warning),
+        )
+        rows.append(row)
+    # What the sort stage executed, from the receipt's resolved sorter config
+    # (the same ``resolve_sort_config`` the dispatcher runs): one ``config``
+    # row per effective setting so the receipt shows the SI kwargs, whiten
+    # routing, seed, job kwargs and backend that produced this sort.
+    sorter_config = run_summary.get("sorter_config")
+    if isinstance(sorter_config, dict):
+        for setting in (
+            "sorter",
+            "external_whiten",
+            "random_seed",
+            "job_kwargs",
+            "execution_backend",
+            "container_image",
+            "si_sorter_params",
+        ):
+            if setting not in sorter_config:
+                continue
+            row = _run_blank_row()
+            row.update(
+                row_type="config",
+                sort_group_id=sort_group_id,
+                setting=setting,
+                value=repr(sorter_config[setting]),
+            )
+            rows.append(row)
+    return rows
+
+
+def describe_run(result) -> "pd.DataFrame":
+    """Render a ``run_v2_pipeline`` summary (or session result) as a receipt.
+
+    The post-run companion to the ``describe_*`` discovery helpers: it turns the
+    plain dict / list those runners return into a long-format DataFrame whose
+    rows are explicit, so the things easiest to overlook -- a zero-unit sort, a
+    concat member merge ID, a warning, or a failed group -- are first-class
+    rows, not values buried in a nested dict. Warnings never disappear into a
+    print statement.
+
+    Pass a single ``dict`` run summary -- a ``run_v2_pipeline`` summary or a
+    ``run_v2_unit_match`` manifest (both carry ``stage_seconds`` + per-stage
+    ``*_status`` keys) -- or a ``run_v2_pipeline_session`` result (``list`` of
+    dicts). For the session form, a leading ``summary`` row carries the ok /
+    failed / zero-unit / with-warnings counts and ``seconds`` is
+    ``sum(stage_seconds.values())`` per group; partial / missing summaries on
+    failed groups are tolerated.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``row_type`` (``"summary"`` / ``"stage"`` / ``"member"`` /
+        ``"input"`` / ``"group"`` / ``"warning"``), ``sort_group_id``,
+        ``stage``, ``status``,
+        ``seconds``, ``n_units``, ``root_merge_id``, ``auto_labeled_merge_id``,
+        ``member_index``, ``nwb_file_name``, ``member_merge_id``, ``warning``,
+        ``error``, ``setting``, ``value``. ``config`` rows carry the
+        scientific setup, the effective sorter configuration and the motion
+        receipt (``motion_mode``, ``motion_correction_params_name``,
+        ``motion_estimate_id``, ``motion_estimate_supplied``,
+        ``motion_estimation_preset``,
+        ``motion_corrected_recording_id``, ``motion_removed_channel_ids``,
+        ``motion_spans_without_evidence``; ``"None"`` where the mode produces
+        none). For a
+        ``run_v2_pipeline`` summary the ``summary`` row's
+        ``status`` is ``"root only"`` / ``"auto-labeled"``. Single-session
+        runs expose the auto-labeled child through ``auto_labeled_merge_id``;
+        concat runs leave that synthetic-timeline ID unset and expose their
+        session-safe outputs through the ``member`` rows instead. For any other
+        dict summary (e.g. ``run_v2_unit_match``, which has no
+        ``root_merge_id``) the ``summary`` status is blank and its stages render
+        from its own ``*_status`` keys. A ``run_v2_unit_match`` receipt adds one
+        ``input`` row per matching input, in ``input_index`` order:
+        ``setting`` is ``input_<index>``, ``nwb_file_name`` lists the input's
+        sessions, and ``value`` gives its source kind and id, recordings,
+        pinned curation and whether its waveforms came from motion-corrected
+        traces (with the ``motion_corrected_recording_id``).
+    """
+    import pandas as pd
+
+    if isinstance(result, dict):
+        return pd.DataFrame(
+            _describe_run_single_rows(result), columns=_RUN_COLUMNS
+        )
+    if isinstance(result, list):
+        rows = []
+        total_seconds = 0.0
+        have_seconds = False
+        for entry in result:
+            outcome = entry.get("outcome")
+            sort_group_id = entry.get("sort_group_id")
+            partial = _failed_partial_summary(entry)
+            warnings = _run_warnings(entry, partial)
+            n_units = _run_metadata(entry, partial, "n_units")
+            root_merge_id = _run_metadata(entry, partial, "root_merge_id")
+            auto_labeled_merge_id = _run_metadata(
+                entry, partial, "auto_labeled_merge_id"
+            )
+            if outcome not in ("ok", "failed"):
+                # Don't silently count an unrecognized entry as ok -- that would
+                # inflate the ok tally and give false reassurance (e.g. a raw
+                # run summary mistakenly wrapped in a list has no 'outcome').
+                raise ValueError(
+                    "describe_run: session-result entry for sort_group_id="
+                    f"{sort_group_id!r} has outcome={outcome!r}; expected 'ok' "
+                    "or 'failed'. Pass a run_v2_pipeline_session result (list), "
+                    "or a single run_v2_pipeline summary as a dict."
+                )
+
+            seconds = _run_stage_seconds_total(
+                entry if outcome != "failed" else partial
+            )
+            if seconds is not None:
+                total_seconds += seconds
+                have_seconds = True
+
+            group = _run_blank_row()
+            group.update(
+                row_type="group",
+                sort_group_id=sort_group_id,
+                status=outcome,
+                seconds=seconds,
+                n_units=n_units,
+                root_merge_id=root_merge_id,
+                auto_labeled_merge_id=auto_labeled_merge_id,
+                error=entry.get("error"),
+            )
+            rows.append(group)
+            for warning in warnings:
+                row = _run_blank_row()
+                row.update(
+                    row_type="warning",
+                    sort_group_id=sort_group_id,
+                    warning=str(warning),
+                )
+                rows.append(row)
+
+        n_ok, n_failed, n_zero, n_warn = _session_outcome_counts(result)
+        header = _run_blank_row()
+        header.update(
+            row_type="summary",
+            status=(
+                f"{n_ok} ok, {n_failed} failed, {n_zero} zero-unit, "
+                f"{n_warn} with warnings"
+            ),
+            seconds=total_seconds if have_seconds else None,
+        )
+        return pd.DataFrame([header] + rows, columns=_RUN_COLUMNS)
+
+    raise TypeError(
+        "describe_run: expected a run_v2_pipeline run summary (dict) or a "
+        "run_v2_pipeline_session result (list of dicts); got "
+        f"{type(result).__name__}."
+    )

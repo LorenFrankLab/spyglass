@@ -15,7 +15,9 @@ def test_add_extensions_idempotent(populated_sorting):
     extension computes nothing (returns ``[]``) and never recomputes
     waveforms/templates (which would cascade-delete derived extensions).
     """
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_lock
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        analyzer_cache_lock,
+    )
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sorting = Sorting()

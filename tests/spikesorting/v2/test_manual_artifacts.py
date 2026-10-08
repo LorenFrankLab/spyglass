@@ -12,13 +12,13 @@ def test_manual_exclusions_mask_exact_samples_and_keep_detected_artifacts(
 ):
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         mask_member_recordings,
     )
-    from spyglass.spikesorting.v2._manual_artifacts import (
+    from spyglass.spikesorting.v2._artifacts.manual import (
         apply_manual_exclusions,
     )
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
 
@@ -59,11 +59,11 @@ def test_manual_exclusions_mask_exact_samples_and_keep_detected_artifacts(
 def test_manual_exclusion_normalization_and_identity():
     import uuid
 
-    from spyglass.spikesorting.v2._manual_artifacts import (
+    from spyglass.spikesorting.v2._artifacts.manual import (
         normalize_manual_exclusions,
         resolve_manual_exclusions,
     )
-    from spyglass.spikesorting.v2._selection_identity import (
+    from spyglass.spikesorting.v2._core.selection_identity import (
         artifact_detection_identity_payload,
     )
 
@@ -89,10 +89,10 @@ def test_manual_exclusion_normalization_and_identity():
 
 
 def test_manual_exclusions_enable_the_stage_without_mutating_the_preset():
-    from spyglass.spikesorting.v2._manual_artifacts import (
+    from spyglass.spikesorting.v2._artifacts.manual import (
         artifact_recipe_with_manual_exclusions,
     )
-    from spyglass.spikesorting.v2._pipeline_presets import _PipelinePreset
+    from spyglass.spikesorting.v2._orchestration.presets import _PipelinePreset
 
     preset = _PipelinePreset(
         preprocessing_params_name="p",
@@ -118,7 +118,7 @@ def test_pipeline_runner_applies_manual_exclusions(
     """Public runner inputs reach the exact samples passed to the sorter."""
     from spikeinterface.core import NumpySorting
 
-    from spyglass.spikesorting.v2 import _pipeline_presets as presets
+    from spyglass.spikesorting.v2._orchestration import presets
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
         RecordingArtifactDetection,

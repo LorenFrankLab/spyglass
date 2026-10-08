@@ -188,7 +188,9 @@ def main():
     dj.conn().ping()
 
     from spyglass.settings import temp_dir
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_root
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        analyzer_cache_root,
+    )
 
     monitor = TreeMonitor(
         [
@@ -280,7 +282,9 @@ def _run_workflow(args, result: dict, timings: dict) -> None:
     from spyglass.spikesorting.analysis.v1 import group as analysis_group
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2 import visualization as ssviz
-    from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+    from spyglass.spikesorting.v2._orchestration.presets import (
+        _PIPELINE_PRESETS,
+    )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.pipeline import (
         FigPackReview,

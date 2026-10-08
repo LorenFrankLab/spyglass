@@ -19,7 +19,7 @@ from spyglass.spikesorting.v2._params.sorter import (
     reject_reserved_execution_keys,
     validate_execution_params,
 )
-from spyglass.spikesorting.v2._sorting_dispatch import (
+from spyglass.spikesorting.v2._sorting.dispatch import (
     MATLAB_SORTERS,
     assert_matlab_sorter_has_container_backend,
     build_run_sorter_container_kwargs,
@@ -186,7 +186,9 @@ def test_recommended_container_rows_pin_si_runtime():
     ``spikeinterface_version`` -- never the unpinned ``installation_mode="auto"``
     + ``spikeinterface_version=None`` combination, which drifts with the host.
     """
-    from spyglass.spikesorting.v2._recipe_catalog import sorter_default_contents
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        sorter_default_contents,
+    )
 
     container_rows = [
         row for row in sorter_default_contents() if is_container_backend(row[5])
@@ -219,7 +221,7 @@ def test_container_row_matches_local_sibling_science():
     MS4 row (shared ``_MS4_RATE_PARAMS[30000]`` source). A regression that drifted
     one side would otherwise pass every other test.
     """
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         MS4_30KHZ,
         MS4_20KHZ,
         MS4_SINGULARITY_30KHZ,
@@ -243,7 +245,7 @@ def test_parameter_fingerprint_folds_execution_params():
     Preprocessing/Artifact row's fingerprint stays byte-identical to the
     pre-execution-params behavior.
     """
-    from spyglass.spikesorting.v2._parameter_identity import (
+    from spyglass.spikesorting.v2._core.parameter_identity import (
         parameter_fingerprint,
     )
 

@@ -315,7 +315,7 @@ def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import SortingSelection
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2._artifacts.naming import (
         artifact_detection_interval_list_name,
     )
 

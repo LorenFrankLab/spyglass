@@ -842,7 +842,7 @@ def test_verify_v2_default_catalog_flags_stale(dj_conn):
         initialize_v2_defaults,
         verify_v2_default_catalog,
     )
-    from spyglass.spikesorting.v2._pipeline_reporting import (
+    from spyglass.spikesorting.v2._orchestration.reporting import (
         _shipped_default_rows,
     )
     from spyglass.spikesorting.v2.exceptions import (
@@ -894,7 +894,7 @@ def test_initialize_v2_defaults_runs_catalog_audit(dj_conn, caplog):
     import logging
 
     from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2._pipeline_reporting import (
+    from spyglass.spikesorting.v2._orchestration.reporting import (
         _shipped_default_rows,
     )
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
@@ -1085,7 +1085,7 @@ def test_stage_statuses_vocabulary_includes_skipped():
     no-artifact preset, so the closed ``_STAGE_STATUSES`` set the observability
     tests validate against must contain it, alongside the populate states.
     """
-    from spyglass.spikesorting.v2._pipeline_run import _STAGE_STATUSES
+    from spyglass.spikesorting.v2._orchestration.stages import _STAGE_STATUSES
 
     assert "skipped" in _STAGE_STATUSES
     assert {"computed", "reused"} <= _STAGE_STATUSES
@@ -1116,7 +1116,7 @@ def test_run_v2_pipeline_input_typeddicts_carry_auto_curate():
     defaults" for typed ``run_v2_pipeline(**inputs)`` call sites, so a new
     optional kwarg must appear there too.
     """
-    from spyglass.spikesorting.v2._pipeline_types import (
+    from spyglass.spikesorting.v2._orchestration.types import (
         RunV2PipelineInputs,
         RunV2PipelineSessionInputs,
     )
@@ -1178,7 +1178,9 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     # Use the preset's OWN evaluation recipe names so this pre-populated
     # evaluation is the one the auto-curate run resolves (a different rules row
     # would be a different evaluation identity).
-    from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+    from spyglass.spikesorting.v2._orchestration.presets import (
+        _PIPELINE_PRESETS,
+    )
 
     bundle = _PIPELINE_PRESETS[common["pipeline_preset"]]
     eval_key = CurationEvaluationSelection.insert_selection(

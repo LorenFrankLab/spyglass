@@ -272,7 +272,9 @@ def test_run_si_sorter_passes_container_kwargs(monkeypatch):
     import spikeinterface as si
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2 import _container_sorting
+    from spyglass.spikesorting.v2._sorting import (
+        container as _container_sorting,
+    )
     from spyglass.spikesorting.v2.sorting import Sorting
 
     captured: dict = {}
@@ -369,7 +371,9 @@ def test_run_si_sorter_keeps_job_kwargs_out_of_sorter_params(monkeypatch):
     import spikeinterface as si
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2 import _container_sorting
+    from spyglass.spikesorting.v2._sorting import (
+        container as _container_sorting,
+    )
     from spyglass.spikesorting.v2.sorting import Sorting
 
     captured: dict = {}
@@ -428,10 +432,10 @@ def test_v2_recording_chain_survives_run_sorter_serialization(tmp_path):
     import spikeinterface as si
     from spikeinterface.core import load
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
-    from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+    from spyglass.spikesorting.v2._sorting.dispatch import pinned_whiten
 
     def _assert_roundtrips(recording, name):
         # Mirror SI basesorter.setup_recording: JSON when the recording claims
@@ -531,7 +535,7 @@ def test_whiten_interception_allowlisted():
     uncurated sorter's ``whiten`` must be passed through to the sorter
     unchanged, not silently rewritten.
     """
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         _should_external_whiten,
     )
 
@@ -565,7 +569,7 @@ def test_ms5_non_default_params_reach_run_sorter_unchanged(monkeypatch):
     import spikeinterface.sorters as sis
 
     from spyglass.spikesorting.v2._params.sorter import MountainSort5Schema
-    from spyglass.spikesorting.v2._sorting_dispatch import resolve_sort_config
+    from spyglass.spikesorting.v2._sorting.dispatch import resolve_sort_config
     from spyglass.spikesorting.v2.sorting import Sorting
 
     captured: dict = {}
@@ -617,9 +621,7 @@ def test_remove_excess_spikes_drops_empty_units(caplog):
     import numpy as np
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting_dispatch import (
-        remove_excess_spikes,
-    )
+    from spyglass.spikesorting.v2._sorting.dispatch import remove_excess_spikes
 
     fs = 30_000.0
     rec = si.generate_recording(
@@ -712,7 +714,7 @@ def test_pinned_whiten_unmasked_is_bit_identical_to_previous(
     import numpy as np
     import spikeinterface.preprocessing as sip
 
-    from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+    from spyglass.spikesorting.v2._sorting.dispatch import pinned_whiten
 
     recording = clean_recording
     n_samples = recording.get_num_samples()
@@ -752,7 +754,7 @@ def test_pinned_whiten_is_deterministic_across_calls(clean_recording):
     import numpy as np
     import spikeinterface.preprocessing as sip
 
-    from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+    from spyglass.spikesorting.v2._sorting.dispatch import pinned_whiten
 
     recording = clean_recording
     seed = 13
@@ -793,7 +795,7 @@ def test_span_whitening_matrix_matches_spikeinterface_on_full_span(
     import numpy as np
     from spikeinterface.preprocessing.whiten import compute_whitening_matrix
 
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         _span_whitening_matrix,
     )
     from tests.spikesorting.v2._masked_statistics_helpers import (
@@ -832,7 +834,7 @@ def test_whitened_valid_samples_have_unit_variance_under_masking(
     """
     import numpy as np
 
-    from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+    from spyglass.spikesorting.v2._sorting.dispatch import pinned_whiten
     from tests.spikesorting.v2._masked_statistics_helpers import masked_twin
 
     traces, probe, _ = clean_ground_truth
@@ -859,7 +861,7 @@ def test_run_si_sorter_whitens_from_statistics_spans(
     import numpy as np
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         _span_whitening_matrix,
         run_si_sorter,
     )
@@ -915,10 +917,8 @@ def test_clusterless_mad_noise_levels_come_from_statistics_spans(
     import numpy as np
     from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        sample_span_data,
-    )
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import sample_span_data
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         run_clusterless_thresholder,
     )
     from tests.spikesorting.v2._masked_statistics_helpers import (
@@ -984,7 +984,7 @@ def test_clusterless_non_mad_paths_ignore_statistics_spans(
     written to the recording."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         run_clusterless_thresholder,
     )
     from tests.spikesorting.v2._masked_statistics_helpers import masked_twin
@@ -1026,10 +1026,8 @@ def test_span_std_noise_levels_are_the_std_of_span_samples(
     import numpy as np
     from spikeinterface.core import get_noise_levels
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        sample_span_data,
-    )
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import sample_span_data
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         cache_span_noise_levels,
     )
     from tests.spikesorting.v2._masked_statistics_helpers import (
@@ -1089,7 +1087,7 @@ def test_span_estimators_without_spans_accept_multi_segment_recordings():
     import spikeinterface.preprocessing as sip
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         cache_span_noise_levels,
         pinned_whiten,
     )
@@ -1136,7 +1134,7 @@ def test_sorting_wrappers_forward_statistics_spans(
     import spikeinterface as si
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         _span_whitening_matrix,
         cache_span_noise_levels,
     )

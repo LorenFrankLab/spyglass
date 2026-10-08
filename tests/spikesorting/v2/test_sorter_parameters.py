@@ -57,9 +57,7 @@ def test_sorter_parameters_skips_uninstalled_sorters(monkeypatch):
     """
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2._sorting_dispatch import (
-        is_container_backend,
-    )
+    from spyglass.spikesorting.v2._sorting.dispatch import is_container_backend
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     real_installed = set(sis.installed_sorters())
@@ -551,7 +549,7 @@ def test_container_ms4_default_row_inserts_without_local_ms4(monkeypatch):
     """
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         MS4_30KHZ,
         MS4_SINGULARITY_30KHZ,
     )
@@ -622,7 +620,7 @@ def test_legacy_seeder_skips_matlab(monkeypatch, request):
     """
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2._sorting_dispatch import MATLAB_SORTERS
+    from spyglass.spikesorting.v2._sorting.dispatch import MATLAB_SORTERS
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     matlab_sorter = MATLAB_SORTERS[0]  # e.g. "kilosort2_5"

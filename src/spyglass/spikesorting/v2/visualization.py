@@ -55,8 +55,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from contextlib import contextmanager
 
-from spyglass.spikesorting.v2 import _visualization as _viz
-from spyglass.spikesorting.v2._visualization import (
+from spyglass.spikesorting.v2._review import visualization as _viz
+from spyglass.spikesorting.v2._review.visualization import (
     MissingDisplayExtensionError,
     available_visualizations,
     plot_metrics_figure,
@@ -132,7 +132,7 @@ def _curation_analyzer_for_plot(
     one -- and reused afterwards. The returned analyzer is the published
     object and must not be mutated.
     """
-    from spyglass.spikesorting.v2._curation_analyzer import (
+    from spyglass.spikesorting.v2._curation.analyzer import (
         _resolve_curation_analyzer,
     )
 
@@ -160,7 +160,7 @@ def _curation_working_copy(curation, required_extensions, *, caller):
     For exporters: SpikeInterface computes extensions onto the analyzer it is
     handed, so exports run on an owned temp copy (never the published cache).
     """
-    from spyglass.spikesorting.v2._curation_analyzer import (
+    from spyglass.spikesorting.v2._curation.analyzer import (
         open_curation_analyzer,
     )
 

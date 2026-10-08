@@ -27,27 +27,26 @@ import datajoint as dj
 
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
-from spyglass.spikesorting.v2 import (
-    _curation_insert,
-    _curation_readers,
-    _curation_restriction,
+from spyglass.spikesorting.v2._curation import (
+    insert as _curation_insert,
+    readers as _curation_readers,
+    restriction as _curation_restriction,
 )
-from spyglass.spikesorting.v2._curation_transforms import (
+from spyglass.spikesorting.v2._curation.transforms import (
     build_merge_provenance_rows,
     group_contributor_rows,
     is_merge_preview,
     normalize_curation_payload,
     validate_curation_label_rows,
 )
-from spyglass.spikesorting.v2._units_nwb import write_curated_units_nwb
-from spyglass.spikesorting.v2._staged_outputs import (
+from spyglass.spikesorting.v2._storage.units_nwb import write_curated_units_nwb
+from spyglass.spikesorting.v2._storage.staged_outputs import (
     unlink_staged_analysis_file as _unlink_staged_analysis_file,
 )
 from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-from spyglass.spikesorting.v2.utils import (
-    CurationLabel,
-    CurationSource,
-    FactoryOnlyMaster,
+from spyglass.spikesorting.v2._core.enums import CurationLabel, CurationSource
+from spyglass.spikesorting.v2._core.table_integrity import FactoryOnlyMaster
+from spyglass.spikesorting.v2._recording.unit_metadata import (
     unit_brain_region_df,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
@@ -361,7 +360,9 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         A leading positional restriction is accepted for the
         ``Table().delete(restriction)`` form.
         """
-        from spyglass.spikesorting.v2.utils import split_leading_restrictions
+        from spyglass.spikesorting.v2._core.table_integrity import (
+            split_leading_restrictions,
+        )
 
         restriction_args, args = split_leading_restrictions(args)
         if restriction_args:
@@ -1474,7 +1475,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             )
 
         from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-        from spyglass.spikesorting.v2._curation_plan import (
+        from spyglass.spikesorting.v2._curation.plan import (
             build_curation_summary,
         )
 
@@ -1671,7 +1672,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         si.BaseRecording
             The sorting input, annotated ``is_filtered=True``.
         """
-        from spyglass.spikesorting.v2._sorting_analyzer import (
+        from spyglass.spikesorting.v2._sorting.analyzer import (
             read_canonical_recording,
             resolve_canonical_recording,
         )
@@ -2013,7 +2014,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         str
             ``"clusterless_threshold_crossings"`` or ``"sorted_units"``.
         """
-        from spyglass.spikesorting.v2._sorting_dispatch import (
+        from spyglass.spikesorting.v2._sorting.dispatch import (
             unit_semantics_for_sorter,
         )
 
@@ -2275,8 +2276,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             BrainRegion``) covering every electrode in the sort group (the
             anchor member's sort group for concat sorts).
         """
-        from spyglass.spikesorting.v2 import _sorting_fetch
-        from spyglass.spikesorting.v2._pipeline_geometry import (
+        from spyglass.spikesorting.v2._sorting import fetch as _sorting_fetch
+        from spyglass.spikesorting.v2._recording.unit_metadata import (
             sort_group_electrode_regions,
         )
         from spyglass.spikesorting.v2.recording import RecordingSelection

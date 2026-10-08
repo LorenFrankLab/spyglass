@@ -30,7 +30,7 @@ from spyglass.common.common_nwbfile import (
     AnalysisNwbfile,
     Nwbfile,
 )  # noqa: F401
-from spyglass.spikesorting.v2._motion import (
+from spyglass.spikesorting.v2._motion.estimation import (
     motion_from_storage_dict,
     motion_max_abs_displacement_um,
     motion_n_temporal_bins,
@@ -40,36 +40,36 @@ from spyglass.spikesorting.v2._params.preprocessing import (
     PREPROCESSING_SCHEMA_VERSION,
     PreprocessingParamsSchema,
 )
-from spyglass.spikesorting.v2 import (
-    _recording_fetch,
-    _recording_nwb,
-    _sort_group_insert,
+from spyglass.spikesorting.v2._recording import (
+    fetch as _recording_fetch,
+    sort_groups_insert as _sort_group_insert,
 )
-from spyglass.spikesorting.v2._recording_geometry import (
+from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
+from spyglass.spikesorting.v2._recording.geometry import (
     fetch_interior_bad_channel_ids,
 )
-from spyglass.spikesorting.v2._recording_nwb import (
+from spyglass.spikesorting.v2._storage.nwb import (
     _ELECTRICAL_SERIES_NAME,
     _ELECTRICAL_SERIES_PATH,
     StoredTraces,
     write_nwb_artifact,
 )
-from spyglass.spikesorting.v2._recording_types import (
+from spyglass.spikesorting.v2._recording.types import (
     RecordingArtifactResult,
     RecordingComputed,
     RecordingFetched,
 )
-from spyglass.spikesorting.v2._selection_identity import (
+from spyglass.spikesorting.v2._core.selection_identity import (
     recording_input_hash,
 )
-from spyglass.spikesorting.v2._recording_restriction import (
+from spyglass.spikesorting.v2._recording.restriction import (
     compute_recording_save_expectation,
     truncation_tolerance,
 )
-from spyglass.spikesorting.v2._recipe_catalog import (
+from spyglass.spikesorting.v2._core.recipe_catalog import (
     preprocessing_default_contents,
 )
-from spyglass.spikesorting.v2._sort_group_planning import (
+from spyglass.spikesorting.v2._recording.sort_groups import (
     _SortGroupPlan,
     _build_sort_group_rows,
     _electrode_group_sort_key,
@@ -77,15 +77,17 @@ from spyglass.spikesorting.v2._sort_group_planning import (
     _plan_sort_groups_by_shank,
     _reference_electrode_group,
 )
-from spyglass.spikesorting.v2._staged_outputs import (
+from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
     unlink_staged_analysis_file as _unlink_staged_analysis_file,
 )
-from spyglass.spikesorting.v2.utils import (
+from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
-    _validate_params,
+)
+from spyglass.spikesorting.v2._core.lookup_validation import _validate_params
+from spyglass.spikesorting.v2._core.reference_resolution import (
     _validate_reference_fields,
     assert_reference_not_member,
 )
@@ -892,13 +894,13 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             ``{"recording_id": <uuid>}`` -- never a list, never the full
             row.
         """
-        from spyglass.spikesorting.v2._selection_identity import (
+        from spyglass.spikesorting.v2._core.selection_identity import (
             recording_identity_payload,
         )
-        from spyglass.spikesorting.v2._selection_plan import (
+        from spyglass.spikesorting.v2._core.selection_plan import (
             build_recording_selection_plan,
         )
-        from spyglass.spikesorting.v2.utils import (
+        from spyglass.spikesorting.v2._core.lookup_validation import (
             _ensure_lookup_row_exists,
         )
 
@@ -977,7 +979,7 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         Used by ``insert_selection`` for both the pre-insert lookup and
         the post-duplicate-key refetch.
         """
-        from spyglass.spikesorting.v2._selection_identity import (
+        from spyglass.spikesorting.v2._core.selection_identity import (
             existing_selection_pk,
         )
 
@@ -1152,7 +1154,9 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         # so the resolved dict is unused; the call keeps this stage's
         # resolution path wired like every other compute stage (tests patch
         # ``_resolved_job_kwargs`` to confirm it).
-        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+        from spyglass.spikesorting.v2._core.job_config import (
+            _resolved_job_kwargs,
+        )
 
         _resolved_job_kwargs(preprocessing_job_kwargs)
 
@@ -1381,7 +1385,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             The preprocessed (bandpass-filtered, common-referenced)
             recording, annotated ``is_filtered=True``.
         """
-        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
+        from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
         return read_stored_traces(self.resolve_stored_traces(key))
 
@@ -1404,7 +1408,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             The present file's absolute path, the stored
             ``electrical_series_path`` and the row's ``content_hash``.
         """
-        from spyglass.spikesorting.v2._recording_nwb import stored_traces
+        from spyglass.spikesorting.v2._storage.nwb import stored_traces
 
         return stored_traces(type(self), key, (self & key).fetch1())
 
@@ -1504,7 +1508,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         The streamed (chunk-iterator) NWB write and the post-write
         content-fingerprint hashing
-        (:func:`._recording_fingerprint.recording_content_fingerprint`) live
+        (:func:`spyglass.spikesorting.v2._recording.fingerprint.recording_content_fingerprint`) live
         in the service module. Returns ``(analysis_file_name,
         electrical_series_object_id, content_hash)``.
         """
@@ -1641,7 +1645,7 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
         """
         import spikeinterface.preprocessing as sip
 
-        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
+        from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
         recording = read_stored_traces(traces)
         # The NWB reader keeps the timestamps as a lazy HDF5 dataset, and

@@ -1,6 +1,6 @@
 """Pure helper tests and DB-free NWB integration tests for concatenation.
 
-Drive ``_concat_recording`` directly -- the sample-boundary / spike-train
+Drive ``_recording.concat`` directly -- the sample-boundary / spike-train
 back-mapping math is pure. Synthetic recordings exercise in-memory stitching;
 NWB integration cases exercise persisted clocks, scaling, masking, and stitching.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2._concat_recording import (
+from spyglass.spikesorting.v2._recording.concat import (
     build_concatenated_recording,
     cumulative_member_boundaries,
     member_set_hash,
@@ -348,7 +348,7 @@ def _rec_with_locations(n_samples, channel_ids, locations, fs=30_000.0):
 @pytest.mark.unit
 def test_assert_concat_compatible_accepts_matching_members():
     """Members sharing channel ids and geometry pass the pre-concat check."""
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         assert_concat_compatible,
     )
 
@@ -362,7 +362,7 @@ def _persisted_concat_member(
     tmp_path, index, start_s, fs=30_000.0, *, clock="timestamps"
 ):
     """Write a calibrated member; return its reader and independent source arrays."""
-    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
     from tests.spikesorting.v2._ingest_helpers import (
         write_processed_recording_nwb,
     )
@@ -415,7 +415,7 @@ def test_concat_persisted_timestamp_rates_preserve_members(
     tmp_path, monkeypatch, offsets
 ):
     """Offset roundoff permits stitching without changing source data or clocks."""
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         mask_member_recordings,
     )
 
@@ -588,7 +588,7 @@ def test_timestamp_rate_roundoff_is_bounded_by_both_member_durations(
     sample_counts, allowed
 ):
     """The same rate uncertainty is safe below one frame and refused above it."""
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         assert_concat_compatible,
     )
 
@@ -610,7 +610,7 @@ def test_timestamp_rate_roundoff_is_bounded_by_both_member_durations(
 def test_assert_concat_compatible_rejects_channel_id_mismatch():
     """A member with different channel ids (or count) is rejected early with a
     clear message instead of failing deep in SI's concatenate_recordings."""
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         assert_concat_compatible,
     )
 
@@ -630,7 +630,7 @@ def test_assert_concat_compatible_rejects_geometry_mismatch():
     """Members with matching channel ids but different probe geometry are
     rejected -- cross-session waveforms must align channel-for-channel. This is
     the case SI's id-only check would let through silently."""
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         assert_concat_compatible,
     )
 
@@ -644,7 +644,7 @@ def test_assert_concat_compatible_rejects_geometry_mismatch():
 def test_assert_concat_compatible_rejects_mismatched_fs():
     """Members with the same channel ids/geometry but different sampling
     frequencies cannot be stitched into one continuous timeline."""
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         assert_concat_compatible,
     )
 
@@ -686,7 +686,7 @@ def test_assert_concat_compatible_rejects_mismatched_dtype_gain():
     """Members with mismatched sample dtype, channel gains, or channel offsets
     are rejected -- concatenation would silently combine differently-scaled
     traces into one recording."""
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         assert_concat_compatible,
     )
 
@@ -721,7 +721,7 @@ def test_assert_concat_compatible_rejects_mismatched_dtype_gain():
 def test_assert_concat_compatible_accepts_absent_optional_metadata():
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         assert_concat_compatible,
     )
 
@@ -738,7 +738,7 @@ def test_assert_concat_compatible_accepts_absent_optional_metadata():
 def test_assert_concat_compatible_rejects_optional_geometry_presence_mismatch():
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         assert_concat_compatible,
     )
 
@@ -757,7 +757,7 @@ def test_assert_concat_compatible_rejects_optional_geometry_presence_mismatch():
 def test_assert_concat_compatible_propagates_metadata_read_errors(
     monkeypatch, getter, error_type, member
 ):
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         assert_concat_compatible,
     )
 
@@ -783,7 +783,7 @@ def test_electrode_signature_distinguishes_reused_ids_across_groups():
     must get DIFFERENT signatures. Dropping the group name would collapse two
     physically distinct electrode spaces into one and let the concat read one
     member in the other's frame."""
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         electrode_signature_from_rows,
     )
 
@@ -809,7 +809,7 @@ def test_electrode_signature_matches_for_identical_physical_electrodes():
     """Identical electrode group / id / region across members -> equal
     signature, regardless of fetched-row order (signature is order-invariant).
     """
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         electrode_signature_from_rows,
     )
 
@@ -828,7 +828,7 @@ def test_electrode_signature_matches_for_identical_physical_electrodes():
 def test_electrode_signature_marks_missing_region_as_none():
     """An electrode absent from the region map maps to None (best-effort
     region), not a KeyError."""
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         electrode_signature_from_rows,
     )
 

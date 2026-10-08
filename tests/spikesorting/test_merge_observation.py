@@ -114,7 +114,9 @@ def plant_members(merge_table, monkeypatch):
     none). Returns the list of ``selection_observations`` calls the code makes,
     so a test can assert no NWB read is attempted for a legacy source.
     """
-    from spyglass.spikesorting.v2 import _observation_io
+    from spyglass.spikesorting.v2._storage import (
+        observation_io as _observation_io,
+    )
 
     def _plant(members):
         spike_times, unit_ids, observed = [], [], {}
@@ -343,7 +345,9 @@ def test_merge_observation_failure_names_the_merge(
     observed-time contract exists to catch, so the read still raises -- but
     it names the merge and the snapshot-backed alternative.
     """
-    from spyglass.spikesorting.v2 import _observation_io
+    from spyglass.spikesorting.v2._storage import (
+        observation_io as _observation_io,
+    )
 
     plant_members([_v2("v2-a", [[0, 3], [4, 10]], {1: [1.0]})])
 

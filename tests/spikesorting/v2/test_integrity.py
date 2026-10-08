@@ -194,7 +194,7 @@ def test_staging_tables_remove_outputs_of_failed_populates():
     """
     from datajoint.autopopulate import AutoPopulate
 
-    from spyglass.spikesorting.v2._staged_outputs import (
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
         StagedOutputCleanupMixin,
     )
 
@@ -491,7 +491,9 @@ def test_audit_source_part_integrity(populated_sorting):
     import uuid
 
     from spyglass.spikesorting.v2.sorting import SortingSelection
-    from spyglass.spikesorting.v2.utils import audit_source_part_integrity
+    from spyglass.spikesorting.v2._core.table_integrity import (
+        audit_source_part_integrity,
+    )
 
     recording_parts = [
         SortingSelection.RecordingSource,

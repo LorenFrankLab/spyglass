@@ -14,7 +14,7 @@ constructions:
     the production bundle builder.
 ``per_unit``
     Whatever the production
-    :func:`spyglass.spikesorting.v2._unitmatch_backend.extract_unitmatch_bundle`
+    :func:`spyglass.spikesorting.v2._matching.unitmatch_backend.extract_unitmatch_bundle`
     currently builds, called with the arguments the matcher table uses.
 
 Data: one 120 s, 30 kHz, 16-channel ground-truth recording with 20 units per
@@ -236,7 +236,9 @@ def extract_time_half_bundle(
     ``cluster_group.tsv`` (every unit ``good``).
     """
     from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
-    from spyglass.spikesorting.v2._unitmatch_backend import _require_unitmatch
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
+        _require_unitmatch,
+    )
 
     validated = UnitMatchParamsSchema(
         ms_before=ms_before,
@@ -322,7 +324,7 @@ def extract_per_unit_bundle(session_dir, recording, sorting) -> list[int]:
     list of int
         Unit ids the production builder reports as excluded from the bundle.
     """
-    from spyglass.spikesorting.v2._unitmatch_backend import (
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
         extract_unitmatch_bundle,
     )
 
@@ -474,7 +476,7 @@ def match_sessions(
         in ``unit_ids`` present in both sessions' loaded bundle. Empty if
         UnitMatch never reached its naive-Bayes step.
     """
-    from spyglass.spikesorting.v2._unitmatch_backend import (
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
         UnitMatchBackend,
         _require_unitmatch,
     )
@@ -483,8 +485,8 @@ def match_sessions(
     inputs = [
         SessionMatcherInput(
             curation_key={"sorting_id": label, "curation_id": 0},
-            waveform_dir=Path(d),
-            channel_positions_path=Path(d) / "channel_positions.npy",
+            bundle_dir=Path(d),
+            geometry_path=Path(d) / "channel_positions.npy",
         )
         for label, d in zip(SESSIONS, session_dirs)
     ]

@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 import pytest  # noqa: E402
 
-from spyglass.spikesorting.v2._metric_curation_plots import (  # noqa: E402
+from spyglass.spikesorting.v2._curation.metric_plots import (
     plot_units_qc_figure,
     validate_unit_pairs,
 )
@@ -229,7 +229,7 @@ def test_peak_amplitudes_aligned_to_waveform_subset(capped_analyzer):
     subset's spike times (not the full train) or the arrays mismatch for units
     with more spikes than the cap -- which would break ``plot_peak_over_time``.
     """
-    from spyglass.spikesorting.v2._metric_curation_plots import (
+    from spyglass.spikesorting.v2._curation.metric_plots import (
         peak_amplitudes_from_analyzer,
     )
 
@@ -251,7 +251,7 @@ def test_peak_amplitudes_sampled_at_waveform_peak(synthetic_analyzer):
     the peak. Sampling at ``nbefore`` reads the peak, and the per-channel shape
     is kept for the burst plots.
     """
-    from spyglass.spikesorting.v2._metric_curation_plots import (
+    from spyglass.spikesorting.v2._curation.metric_plots import (
         peak_amplitudes_from_analyzer,
     )
 
@@ -299,7 +299,7 @@ def test_peak_amplitudes_dense_for_cross_unit_alignment(
     """Per-unit amplitudes are dense (all channels), so the pair plots overlay
     the SAME physical contact across units rather than mismatched sparse columns.
     """
-    from spyglass.spikesorting.v2._metric_curation_plots import (
+    from spyglass.spikesorting.v2._curation.metric_plots import (
         peak_amplitudes_from_analyzer,
     )
 
@@ -324,7 +324,7 @@ def test_correlograms_from_analyzer_honors_window_bin(synthetic_analyzer):
     """correlograms_from_analyzer uses the REQUESTED window/bin, not the stored
     50/1 ms curation extension (which would silently override the burst params).
     """
-    from spyglass.spikesorting.v2._metric_curation_plots import (
+    from spyglass.spikesorting.v2._curation.metric_plots import (
         correlograms_from_analyzer,
     )
 
@@ -345,7 +345,7 @@ def test_burst_pair_metrics_flags_oversplit(synthetic_analyzer):
     wf_similarity is SI's cosine template similarity; unit_distance is the
     euclidean distance between unit_locations. Each row carries all four legs.
     """
-    from spyglass.spikesorting.v2._metric_curation_plots import (
+    from spyglass.spikesorting.v2._curation.metric_plots import (
         burst_pair_metrics_from_analyzer,
     )
 
@@ -366,7 +366,7 @@ def test_burst_pair_metrics_flags_oversplit(synthetic_analyzer):
 
 
 def test_burst_pair_isi_uses_interval_count(synthetic_analyzer, monkeypatch):
-    from spyglass.spikesorting.v2._metric_curation_plots import (
+    from spyglass.spikesorting.v2._curation.metric_plots import (
         burst_pair_metrics_frame,
     )
 
@@ -393,7 +393,7 @@ def test_burst_pair_metrics_frame_is_pair_indexed(synthetic_analyzer):
     """
     import pandas as pd
 
-    from spyglass.spikesorting.v2._metric_curation_plots import (
+    from spyglass.spikesorting.v2._curation.metric_plots import (
         burst_pair_metrics_frame,
     )
 
@@ -416,7 +416,7 @@ def test_burst_pair_metrics_frame_is_pair_indexed(synthetic_analyzer):
 
 def test_burst_pair_metrics_frame_respects_explicit_pairs(synthetic_analyzer):
     """An explicit ``pairs`` list is returned in order and nothing else."""
-    from spyglass.spikesorting.v2._metric_curation_plots import (
+    from spyglass.spikesorting.v2._curation.metric_plots import (
         burst_pair_metrics_frame,
     )
 
@@ -592,7 +592,7 @@ def test_burst_pair_asymmetry_is_zero_for_symmetric_correlogram(
     side, so a perfectly symmetric burst-shaped correlogram reads as
     ``+1`` in BOTH directions instead of ``0``.
     """
-    from spyglass.spikesorting.v2 import _metric_curation_plots as mod
+    from spyglass.spikesorting.v2._curation import metric_plots as mod
 
     unit_ids = list(synthetic_analyzer.unit_ids)
     n = len(unit_ids)

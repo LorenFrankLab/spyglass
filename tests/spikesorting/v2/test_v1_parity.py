@@ -279,9 +279,7 @@ def test_ms4_default_row_only_inserted_when_ms4_installed():
     """
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2._sorting_dispatch import (
-        is_container_backend,
-    )
+    from spyglass.spikesorting.v2._sorting.dispatch import is_container_backend
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     # Assert the gating DECISION (independent of the live table state,
@@ -351,7 +349,9 @@ def test_get_spike_sorting_v2_merge_ids_resolves_restriction(
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.utils import get_spike_sorting_v2_merge_ids
+    from spyglass.spikesorting.v2.curation_api import (
+        get_spike_sorting_v2_merge_ids,
+    )
 
     # Clear any prior curation (master-before-part) then mint a root,
     # which registers exactly one v2 merge row for this sorting.

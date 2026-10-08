@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import spikeinterface as si
 
-from spyglass.spikesorting.v2._recording_preprocessing import (
+from spyglass.spikesorting.v2._recording.preprocessing import (
     apply_spatial_preprocessing,
 )
 

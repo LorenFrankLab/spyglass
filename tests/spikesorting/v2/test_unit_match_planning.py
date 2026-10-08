@@ -13,7 +13,7 @@ import uuid
 
 import pytest
 
-from spyglass.spikesorting.v2._unit_match_planning import (
+from spyglass.spikesorting.v2._matching.planning import (
     UnitMatchPlan,
     build_unit_match_plan,
 )
@@ -77,7 +77,7 @@ def _full_member(idx, nwb, choices):
 
 def test_member_choices_to_dataframe_one_row_per_choice():
     """The ``describe_*`` view flattens to one row per (member, choice)."""
-    from spyglass.spikesorting.v2._unit_match_planning import (
+    from spyglass.spikesorting.v2._matching.planning import (
         member_choices_to_dataframe,
     )
 
@@ -429,7 +429,7 @@ def _sort(sorting_id, choices, kind="recording", nwbs=("day1.nwb",)):
 
 
 def _input_plan(sorts, curation_strategy, **kw):
-    from spyglass.spikesorting.v2._unit_match_planning import (
+    from spyglass.spikesorting.v2._matching.planning import (
         build_unit_match_input_plan,
     )
 
@@ -628,9 +628,7 @@ def test_plans_require_the_reviewed_curation_generation(form, strategy):
 def test_run_v2_unit_match_checks_an_input_plan_before_the_database():
     """An input plan with explicit args, or a not-ok input plan, raises
     before any table access."""
-    from spyglass.spikesorting.v2._unit_match_planning import (
-        UnitMatchInputPlan,
-    )
+    from spyglass.spikesorting.v2._matching.planning import UnitMatchInputPlan
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
     from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
 
@@ -655,7 +653,7 @@ def test_run_v2_unit_match_checks_an_input_plan_before_the_database():
 def test_runner_refuses_unpinned_plans_before_loading_tables(monkeypatch, form):
     import sys
 
-    from spyglass.spikesorting.v2._unit_match_planning import UnitMatchInputPlan
+    from spyglass.spikesorting.v2._matching.planning import UnitMatchInputPlan
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
     from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
 

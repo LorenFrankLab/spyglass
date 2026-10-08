@@ -70,7 +70,9 @@ def _truth_motion(displacement, depths):
 
 
 def _one_span_clock(n_samples: int):
-    from spyglass.spikesorting.v2._motion import build_estimation_clock
+    from spyglass.spikesorting.v2._motion.estimation import (
+        build_estimation_clock,
+    )
 
     return build_estimation_clock(
         [(0, n_samples)],
@@ -82,7 +84,7 @@ def _one_span_clock(n_samples: int):
 
 
 def _apply(recording, motion, clock, spans, interpolation=FORCE_EXTRAPOLATE):
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         apply_motion_on_estimation_clock,
     )
 
@@ -126,8 +128,10 @@ def test_default_interpolation_row_is_the_preset_interpolation(preset):
         InterpolateMotionRecording,
     )
 
-    from spyglass.spikesorting.v2._motion import resolve_interpolation_params
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._motion.estimation import (
+        resolve_interpolation_params,
+    )
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         motion_correction_default_contents,
         motion_interpolation_default_contents,
     )
@@ -177,7 +181,9 @@ def test_default_interpolation_row_is_the_preset_interpolation(preset):
 def test_invalid_interpolation_params_are_rejected(change, match):
     from pydantic import ValidationError
 
-    from spyglass.spikesorting.v2._motion import resolve_interpolation_params
+    from spyglass.spikesorting.v2._motion.estimation import (
+        resolve_interpolation_params,
+    )
 
     params = {**FORCE_EXTRAPOLATE, **change}
     params = {k: v for k, v in params.items() if v is not None}
@@ -186,7 +192,7 @@ def test_invalid_interpolation_params_are_rejected(change, match):
 
 
 def test_interpolation_hash_is_canonical_and_content_sensitive():
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         resolve_interpolation_params,
         resolved_params_hash,
     )
@@ -262,7 +268,7 @@ def test_frames_look_up_the_time_they_had_at_estimation():
     reads the wrong bins after the gap."""
     from spikeinterface.sortingcomponents.motion import interpolate_motion
 
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         build_estimation_clock,
         estimation_times,
     )
@@ -386,10 +392,12 @@ def test_removing_every_channel_is_an_error(pitch_steps):
 def test_corrected_identity_changes_with_each_term():
     import uuid
 
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         motion_corrected_identity_payload,
     )
-    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        deterministic_id,
+    )
 
     base = {
         "motion_estimate_id": uuid.UUID(int=1),

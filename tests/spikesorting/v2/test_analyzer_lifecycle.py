@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from spyglass.spikesorting.v2._recipe_catalog import CORTEX_DISPLAY_WAVEFORMS
+from spyglass.spikesorting.v2._core.recipe_catalog import (
+    CORTEX_DISPLAY_WAVEFORMS,
+)
 from tests.spikesorting.v2._ingest_helpers import (
     _plant_concat_sorting_selection,
 )
@@ -60,7 +62,9 @@ def _record_lock_acquisitions(monkeypatch):
     """Record real acquisitions and whether a critical call is guarded."""
     from contextlib import contextmanager
 
-    from spyglass.spikesorting.v2 import _analyzer_cache
+    from spyglass.spikesorting.v2._storage import (
+        analyzer_cache as _analyzer_cache,
+    )
 
     class Acquisitions(list):
         def __init__(self):
@@ -90,7 +94,7 @@ def _record_lock_acquisitions(monkeypatch):
 
 def _current_analyzer_inventory(monkeypatch, recompute, artifact):
     """Supply the inventory prerequisite without bypassing the delete guard."""
-    from spyglass.spikesorting.v2._recompute import (
+    from spyglass.spikesorting.v2._storage.recompute import (
         ANALYZER_CONTENT_HASH_PREFIX,
         ANALYZER_CONTENT_HASH_VERSION,
     )
@@ -121,7 +125,7 @@ def test_load_path_acquires_lock(monkeypatch, tmp_path):
     import numpy as np
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting_analyzer import (
+    from spyglass.spikesorting.v2._sorting.analyzer import (
         BASE_ANALYZER_EXTENSIONS,
         _load_analyzer_folder_or_rebuild,
     )
@@ -140,7 +144,9 @@ def test_load_path_acquires_lock(monkeypatch, tmp_path):
         list(BASE_ANALYZER_EXTENSIONS), n_jobs=1, progress_bar=False
     )
     acquired = _record_lock_acquisitions(monkeypatch)
-    from spyglass.spikesorting.v2 import _analyzer_cache
+    from spyglass.spikesorting.v2._storage import (
+        analyzer_cache as _analyzer_cache,
+    )
 
     real_load = _analyzer_cache.load_analyzer_folder
 
@@ -280,7 +286,7 @@ def test_add_extensions_and_delete_acquire_lock(populated_sorting, monkeypatch):
     fixture untouched; the lock recorder is installed AFTER populate so it
     observes only the two guarded operations.
     """
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     sort_pk = _fresh_unit_producing_selection(populated_sorting)
@@ -327,7 +333,7 @@ def test_get_analyzer_validates_recipe_before_filesystem(
     ``bad/name``) -- or a path-safe-but-unknown recipe -- must be rejected
     BEFORE ``_load_analyzer_folder_or_rebuild`` can rmtree or rebuild a folder.
     """
-    from spyglass.spikesorting.v2 import _sorting_analyzer as sa
+    from spyglass.spikesorting.v2._sorting import analyzer as sa
     from spyglass.spikesorting.v2.sorting import Sorting
 
     reached_filesystem = []
@@ -417,7 +423,7 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
 
     # The caller resolves the cache folder (it carries the recipe identity) and
     # passes it in; build_analyzer does no path lookup of its own.
@@ -472,7 +478,7 @@ def test_rebuild_publishes_into_temp_not_canonical(
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting
 
     folder = analyzer_path(populated_sorting["sorting_id"], _DISPLAY)
@@ -514,7 +520,7 @@ def test_find_orphaned_skips_hidden_staging(dj_conn):
     reported as a stray analyzer folder."""
     import shutil
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting
 
     analyzer_root = analyzer_path("x", _DISPLAY).parent
@@ -543,7 +549,7 @@ def test_rebuild_analyzer_folder_recreates_on_missing(populated_sorting):
     import shutil
 
     from spyglass.spikesorting.v2.sorting import Sorting
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
 
     folder = analyzer_path(populated_sorting["sorting_id"], _DISPLAY)
     original = Sorting().get_analyzer(populated_sorting)
@@ -591,7 +597,7 @@ def test_sorting_delete_removes_analyzer_folder(
     is untouched.
     """
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
 
     sort_pk = _fresh_unit_producing_selection(populated_sorting)
     Sorting.populate(sort_pk, reserve_jobs=False)
@@ -618,7 +624,7 @@ def test_make_compute_failure_discards_private_analyzer(
     populated_sorting, monkeypatch
 ):
     """A units-NWB failure discards the attempt's analyzer before publication."""
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     sort_pk = _fresh_unit_producing_selection(populated_sorting)
@@ -662,7 +668,8 @@ def test_rebuild_reconstruction_validates_artifact_interval_ownership(
     helper to a sentinel and assert the rebuild path calls it (proving it routes
     through the validation, not around it).
     """
-    from spyglass.spikesorting.v2 import _artifact_intervals, _sorting_analyzer
+    from spyglass.spikesorting.v2._artifacts import readers as _artifact_readers
+    from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sort_pk = populated_sorting  # artifact-backed sort
@@ -672,7 +679,7 @@ def test_rebuild_reconstruction_validates_artifact_interval_ownership(
         raise RuntimeError(sentinel)
 
     monkeypatch.setattr(
-        _artifact_intervals,
+        _artifact_readers,
         "read_artifact_removed_intervals",
         _must_route_here,
     )
@@ -697,7 +704,7 @@ def test_changed_analyzer_root_causes_miss_and_rebuild(
     import datajoint as dj
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sid = populated_sorting["sorting_id"]
@@ -834,7 +841,7 @@ def test_curation_health_report_is_scoped_to_sorting(dj_conn):
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_path,
         curation_analyzer_path,
     )
@@ -895,7 +902,7 @@ def test_find_orphaned_analyzer_folders_db_side(dj_conn):
     import uuid
 
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
 
     sid = uuid.uuid4()
     folder = analyzer_path(sid, _DISPLAY)  # never written on disk
@@ -930,7 +937,7 @@ def test_find_orphaned_analyzer_folders_disk_side(dj_conn):
     import shutil
     import uuid
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting
 
     stray = analyzer_path(uuid.uuid4(), _DISPLAY)
@@ -956,7 +963,7 @@ def test_find_orphaned_analyzer_folders_stale_recipe(dj_conn):
     import shutil
     import uuid
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     sid = uuid.uuid4()
@@ -1001,7 +1008,7 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
 
     import datajoint as dj
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluationSelection,
         QualityMetricParameters,
@@ -1191,7 +1198,7 @@ def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
     import uuid
 
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
 
     sid = uuid.uuid4()
     folder = analyzer_path(sid, _DISPLAY)  # never written on disk
@@ -1215,7 +1222,7 @@ def test_is_canonical_analyzer_folder_name():
     are canonical analyzer-cache folders."""
     import uuid as uuidlib
 
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         is_canonical_analyzer_folder_name as canon,
     )
 
@@ -1237,7 +1244,7 @@ def test_orphan_sweep_ignores_nonmatching_dirs(monkeypatch, tmp_path):
     analyzer root cannot lead it to delete unrelated subdirectories."""
     import uuid as uuidlib
 
-    from spyglass.spikesorting.v2 import _analyzer_cache as ac
+    from spyglass.spikesorting.v2._storage import analyzer_cache as ac
     from spyglass.spikesorting.v2.sorting import Sorting
 
     monkeypatch.setattr(ac, "analyzer_cache_root", lambda: tmp_path)
@@ -1266,7 +1273,9 @@ def test_curation_evaluation_display_derivative_delegates_without_mutation(
     """Plot-only extensions are delegated to a detached curation derivative."""
     from contextlib import contextmanager
 
-    from spyglass.spikesorting.v2 import _curation_analyzer
+    from spyglass.spikesorting.v2._curation import (
+        analyzer as _curation_analyzer,
+    )
     from spyglass.spikesorting.v2 import metric_curation as mc
 
     request = {

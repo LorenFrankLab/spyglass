@@ -16,9 +16,9 @@ def test_concurrent_sorters_and_ambient_reader_restore_their_own_state(
     import spikeinterface.sorters as sis
 
     from spyglass import settings
-    from spyglass.spikesorting.v2 import _si_compat
-    from spyglass.spikesorting.v2._sorting_dispatch import run_si_sorter
-    from spyglass.spikesorting.v2.utils import _ambient_job_kwargs
+    from spyglass.spikesorting.v2._core import si_compat as _si_compat
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
+    from spyglass.spikesorting.v2._core.job_config import _ambient_job_kwargs
 
     monkeypatch.setattr(settings, "temp_dir", str(tmp_path))
     monkeypatch.delattr(np, "Inf", raising=False)
@@ -106,7 +106,7 @@ def test_nested_sorter_state_restores_outer_settings(monkeypatch):
     import numpy as np
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._si_compat import sorter_runtime_state
+    from spyglass.spikesorting.v2._core.si_compat import sorter_runtime_state
 
     monkeypatch.delattr(np, "Inf", raising=False)
     original = dict(si.get_global_job_kwargs())
@@ -123,7 +123,7 @@ def test_nested_sorter_state_restores_outer_settings(monkeypatch):
 def test_existing_numpy_alias_is_preserved(monkeypatch):
     import numpy as np
 
-    from spyglass.spikesorting.v2._si_compat import sorter_runtime_state
+    from spyglass.spikesorting.v2._core.si_compat import sorter_runtime_state
 
     existing_alias = object()
     monkeypatch.setattr(np, "Inf", existing_alias, raising=False)

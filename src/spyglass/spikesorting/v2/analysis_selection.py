@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from spyglass.spikesorting.v2._selection_identity import sha256_json
+from spyglass.spikesorting.v2._core.selection_identity import sha256_json
 from spyglass.spikesorting.v2.curation_api import CurationRef, EvaluationResult
 
 #: A read-only label policy: ``include_labels`` / ``exclude_labels`` tuples
@@ -430,8 +430,10 @@ def select_units_for_analysis(
                     else f"criterion failed: {column} {criterion} (value={value})"
                 )
     included = tuple(u for u in included if u not in excluded)
-    from spyglass.spikesorting.v2._observation_io import selection_observations
-    from spyglass.spikesorting.v2._observed_time import (
+    from spyglass.spikesorting.v2._storage.observation_io import (
+        selection_observations,
+    )
+    from spyglass.spikesorting.v2._core.observed_time import (
         OBSERVATION_VERSION,
         normalize_observation_provenance,
     )
@@ -453,7 +455,7 @@ def select_units_for_analysis(
         "annotation_sets": [a.snapshot() for a in annotations],
     }
     # Canonical JSON also makes non-serializable criteria fail before writes.
-    from spyglass.spikesorting.v2._lookup_validation import _jsonable_blob
+    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
     provenance = _jsonable_blob(provenance)
     selection_hash = sha256_json(provenance, separators=(", ", ": "))[:12]

@@ -27,7 +27,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 # sort-group geometry helper).
 _NOTEBOOK = _REPO_ROOT / "notebooks" / "10_Spike_SortingV2_Curation.ipynb"
 
-from spyglass.spikesorting.v2._visualization import (  # noqa: E402
+from spyglass.spikesorting.v2._review.visualization import (
     DISPLAY_WIDGET_EXTENSIONS,
     MissingDisplayExtensionError,
     SI_METRIC_WIDGET_EXTENSIONS,

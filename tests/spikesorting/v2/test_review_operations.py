@@ -8,7 +8,7 @@ import pytest
 
 
 def test_noisy_worker_uses_bounded_launcher_memory(tmp_path, monkeypatch):
-    from spyglass.spikesorting.v2 import _review_operations as operations
+    from spyglass.spikesorting.v2._review import operations
 
     marker = "\nWorker failed: waveform export 🧠\n"
     worker = f"""
@@ -45,7 +45,7 @@ sys.exit(7)
 
 
 def test_worker_launch_failure_releases_ownership(tmp_path, monkeypatch):
-    from spyglass.spikesorting.v2 import _review_operations as operations
+    from spyglass.spikesorting.v2._review import operations
 
     def fail_launch(*args, **kwargs):
         raise OSError("worker executable unavailable")
@@ -71,7 +71,7 @@ def test_worker_failure_retains_receipt_and_retry_completes_journal(
     tmp_path, monkeypatch
 ):
     from spyglass.spikesorting.v2 import review_api
-    from spyglass.spikesorting.v2._review_operations import (
+    from spyglass.spikesorting.v2._review.operations import (
         OPERATION_FILE,
         RESULT_FILE,
         run_operation,
@@ -144,7 +144,7 @@ def test_service_reports_interrupted_work_and_serializes_actions(
 ):
     import threading
 
-    from spyglass.spikesorting.v2._review_operations import (
+    from spyglass.spikesorting.v2._review.operations import (
         OPERATION_FILE,
         ReviewOperationService,
     )
@@ -173,7 +173,7 @@ def test_service_reports_interrupted_work_and_serializes_actions(
 def test_service_waits_for_worker_release_before_reporting_result(
     tmp_path, status
 ):
-    from spyglass.spikesorting.v2._review_operations import (
+    from spyglass.spikesorting.v2._review.operations import (
         OPERATION_FILE,
         ReviewOperationService,
         _acquire_operation_lock,
@@ -195,8 +195,8 @@ def test_service_waits_for_worker_release_before_reporting_result(
 
 
 def test_delivery_failure_keeps_the_scientific_result(tmp_path, monkeypatch):
-    from spyglass.spikesorting.v2 import _review_delivery
-    from spyglass.spikesorting.v2._review_operations import (
+    from spyglass.spikesorting.v2._review import delivery as _review_delivery
+    from spyglass.spikesorting.v2._review.operations import (
         OPERATION_FILE,
         ReviewOperationService,
     )
@@ -229,7 +229,7 @@ def test_delivery_failure_keeps_the_scientific_result(tmp_path, monkeypatch):
 def test_reopened_service_cannot_overlap_a_live_worker(tmp_path, monkeypatch):
     import threading
 
-    from spyglass.spikesorting.v2._review_operations import (
+    from spyglass.spikesorting.v2._review.operations import (
         ReviewOperationService,
     )
 
@@ -262,7 +262,7 @@ def test_bundle_ownership_survives_launcher_exit(tmp_path):
     import sys
     import time
 
-    from spyglass.spikesorting.v2._review_operations import (
+    from spyglass.spikesorting.v2._review.operations import (
         _acquire_operation_lock,
     )
 
@@ -277,7 +277,7 @@ with os.fdopen(int(sys.argv[2]), "a+"):
         time.sleep(.02)
 """
     launcher = """import os, subprocess, sys
-from spyglass.spikesorting.v2._review_operations import _acquire_operation_lock
+from spyglass.spikesorting.v2._review.operations import _acquire_operation_lock
 lock = _acquire_operation_lock(sys.argv[1])
 subprocess.Popen([sys.executable, "-c", sys.argv[2], sys.argv[1], str(lock.fileno())], pass_fds=(lock.fileno(),), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 os._exit(0)

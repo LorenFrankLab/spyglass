@@ -11,7 +11,7 @@ import pytest
 def _runtime_checks():
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         _check_local_sorter_runtime,
     )
 
@@ -70,7 +70,7 @@ def test_native_ms4_recovers_planted_spikes(tmp_path, monkeypatch):
     from spikeinterface.comparison import compare_sorter_to_ground_truth
 
     import spyglass.settings as settings
-    from spyglass.spikesorting.v2._sorting_dispatch import run_si_sorter
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
     assert int(np.__version__.split(".")[0]) >= 2
     assert not hasattr(np, "Inf")

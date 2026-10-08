@@ -481,11 +481,11 @@
     }
   },
   "harness": {
-    "git_commit": "279a52003dc2d301a276bc8cb4610dc669f4b5cc",
+    "git_commit": "34e554ce9f4322e6f1b3b6fe60cd167adc8cd90c",
     "files": {
-      "_motion_acceptance.py": "92938b099731606d626b28636128fed732caa42f36c7685afd909f2a2b5072af",
-      "_motion_acceptance_run.py": "959a7a8dc6a92f666c1bd23866b1652b378cb7371465d95cf49dd96bc5cd9da0",
-      "_motion_fixtures.py": "3a26b3337b49abdbe5687c0655d54ef424070912f2438ffc9889f2f5ca6554b4"
+      "_motion_acceptance.py": "78f2926ceae11093793064177529141497fe3490b84fd9d9851d0f753021ac13",
+      "_motion_acceptance_run.py": "e6f168f80ff382c31dff9c7537419a51c79843b29eecd76031590058995c267a",
+      "_motion_fixtures.py": "d560a67302091b89869fdfe671e5f2a85a4bcc9131c269499f4c8c40f1d52d55"
     }
   }
 }

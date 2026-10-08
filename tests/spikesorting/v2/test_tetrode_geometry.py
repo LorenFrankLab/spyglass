@@ -26,7 +26,7 @@ def _assert_tetrode_gate_noop(
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._recording_geometry import (
+    from spyglass.spikesorting.v2._recording.geometry import (
         maybe_apply_tetrode_geometry,
     )
 

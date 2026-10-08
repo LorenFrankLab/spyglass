@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from spyglass.spikesorting.v2._signal_math import (
+from spyglass.spikesorting.v2._core.signal_math import (
     assert_monotonic_timestamps,
     assert_positive_sampling_frequency,
 )

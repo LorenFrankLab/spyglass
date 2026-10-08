@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from spyglass.spikesorting.v2._metric_curation import (
+from spyglass.spikesorting.v2._curation.metrics import (
     assert_rule_metrics_computed,
     expected_missing_units,
     isi_violation_fraction,
@@ -158,7 +158,7 @@ def _nn_metrics(analyzer, metric_kwargs=_SHIPPED_NN_KWARGS):
     """nn metrics with Spyglass's patched noise overlap, run in-process."""
     from spikeinterface.metrics.quality import compute_quality_metrics
 
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         patch_nn_noise_overlap_sparsity,
     )
 
@@ -412,7 +412,7 @@ def _applied_metric_params(analyzer, metric_kwargs):
     """
     from spikeinterface.metrics.quality import compute_quality_metrics
 
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         patch_nn_noise_overlap_sparsity,
     )
 
@@ -479,7 +479,7 @@ def test_isolated_si_metric_defaults_keeps_each_compute_on_pristine_defaults(
     no kwargs runs on SI's shipped defaults, SI's defaults are unchanged
     afterwards, and each computed extension keeps the params it applied.
     """
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         isolated_si_metric_defaults,
     )
 
@@ -509,7 +509,7 @@ def test_isolated_si_metric_defaults_restores_after_a_failed_compute(
     nn_analyzer,
 ):
     """A compute that raises still leaves SI's defaults untouched."""
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         isolated_si_metric_defaults,
     )
 

@@ -56,7 +56,9 @@ def _artifact_params(**overrides):
 
 def test_detect_artifacts_detect_false_returns_full_window(monkeypatch):
     """``detect=False`` returns recorded coverage without reading artifact traces."""
-    from spyglass.spikesorting.v2 import _artifact_intervals
+    from spyglass.spikesorting.v2._artifacts import (
+        intervals as _artifact_intervals,
+    )
 
     def reject_scan(*args, **kwargs):
         raise AssertionError("detect=False must skip the artifact scan")
@@ -78,7 +80,7 @@ def test_detect_artifacts_detect_false_returns_full_window(monkeypatch):
 
 def test_scan_artifact_frames_flags_transient_only():
     """``scan_artifact_frames`` flags the artifact frames and nothing else."""
-    from spyglass.spikesorting.v2._artifact_intervals import (
+    from spyglass.spikesorting.v2._artifacts.intervals import (
         scan_artifact_frames,
     )
 
@@ -92,7 +94,7 @@ def test_scan_artifact_frames_flags_transient_only():
 
 def test_detect_artifacts_excludes_transient_window():
     """``detect_artifacts`` carves the artifact out of the valid times."""
-    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     traces = np.zeros((100, 2), dtype="float32")
     traces[50:52, :] = 5000.0
@@ -108,7 +110,7 @@ def test_detect_artifacts_excludes_transient_window():
 
 def test_build_artifact_interval_rows_single_recording_fallback():
     """Empty ``per_member`` -> one row keyed by the master nwb_file_name."""
-    from spyglass.spikesorting.v2._artifact_intervals import (
+    from spyglass.spikesorting.v2._artifacts.intervals import (
         build_artifact_interval_rows,
     )
 
@@ -130,7 +132,7 @@ def test_build_artifact_interval_rows_single_recording_fallback():
 
 def test_build_artifact_interval_rows_one_row_per_member():
     """A shared-group source writes one row per distinct member nwb file."""
-    from spyglass.spikesorting.v2._artifact_intervals import (
+    from spyglass.spikesorting.v2._artifacts.intervals import (
         build_artifact_interval_rows,
     )
 
@@ -153,7 +155,7 @@ def test_build_artifact_interval_rows_one_row_per_member():
 
 def test_build_artifact_interval_part_rows_owns_interval_rows():
     """Ownership rows carry the ArtifactDetection PK + IntervalList PK only."""
-    from spyglass.spikesorting.v2._artifact_intervals import (
+    from spyglass.spikesorting.v2._artifacts.intervals import (
         build_artifact_interval_part_rows,
     )
 
@@ -198,7 +200,7 @@ def test_read_artifact_removed_intervals_missing_artifact_detection_id_raises_va
     with no ``artifact_detection_id`` surfaces this targeted message rather than
     a missing-id routing failure.
     """
-    from spyglass.spikesorting.v2._artifact_intervals import (
+    from spyglass.spikesorting.v2._artifacts.readers import (
         read_artifact_removed_intervals,
     )
 

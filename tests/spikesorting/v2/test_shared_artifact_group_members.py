@@ -14,7 +14,7 @@ import pytest
 def test_validate_shared_group_members_returns_single_session():
     """Members in one session at one sampling frequency validate and yield the
     shared nwb_file_name."""
-    from spyglass.spikesorting.v2._shared_artifact_group import (
+    from spyglass.spikesorting.v2._artifacts.shared_group import (
         validate_shared_artifact_group_members,
     )
 
@@ -30,7 +30,7 @@ def test_validate_shared_group_members_returns_single_session():
 def test_validate_shared_group_members_accepts_one_shot_iterable():
     """The helper documents an iterable input, so one-shot iterators must work
     even though validation needs two passes over the member metadata."""
-    from spyglass.spikesorting.v2._shared_artifact_group import (
+    from spyglass.spikesorting.v2._artifacts.shared_group import (
         validate_shared_artifact_group_members,
     )
 
@@ -45,7 +45,7 @@ def test_validate_shared_group_members_accepts_one_shot_iterable():
 def test_validate_shared_group_members_rejects_multiple_sessions():
     """Members spanning more than one session raise -- a shared artifact pass
     is meaningless across sessions (IntervalList is keyed by nwb_file_name)."""
-    from spyglass.spikesorting.v2._shared_artifact_group import (
+    from spyglass.spikesorting.v2._artifacts.shared_group import (
         validate_shared_artifact_group_members,
     )
 
@@ -61,7 +61,7 @@ def test_validate_shared_group_members_rejects_multiple_sessions():
 def test_validate_shared_group_members_rejects_differing_sampling_frequency():
     """Members with differing sampling frequencies raise -- aggregate_channels
     requires identical fs."""
-    from spyglass.spikesorting.v2._shared_artifact_group import (
+    from spyglass.spikesorting.v2._artifacts.shared_group import (
         validate_shared_artifact_group_members,
     )
 
@@ -109,7 +109,7 @@ def _recording_with_different_interior_clock():
 
 
 def test_assert_shared_group_aggregatable_accepts_matching_members():
-    from spyglass.spikesorting.v2._shared_artifact_group import (
+    from spyglass.spikesorting.v2._artifacts.shared_group import (
         assert_shared_group_recordings_aggregatable,
     )
 
@@ -144,7 +144,7 @@ def test_assert_shared_group_aggregatable_accepts_matching_members():
 def test_assert_shared_group_aggregatable_rejects_bypass(
     make_second, nwb_names, match
 ):
-    from spyglass.spikesorting.v2._shared_artifact_group import (
+    from spyglass.spikesorting.v2._artifacts.shared_group import (
         assert_shared_group_recordings_aggregatable,
     )
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError

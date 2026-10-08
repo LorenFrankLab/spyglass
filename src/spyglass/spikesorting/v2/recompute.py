@@ -32,11 +32,11 @@ import datajoint as dj
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_user import UserEnvironment
-from spyglass.spikesorting.v2._analyzer_cache import (
+from spyglass.spikesorting.v2._storage.analyzer_cache import (
     analyzer_cache_lock,
     analyzer_folder_storage_fingerprint,
 )
-from spyglass.spikesorting.v2._recompute import (
+from spyglass.spikesorting.v2._storage.recompute import (
     ANALYZER_CONTENT_HASH_VERSION,
     ANALYZER_RECOMPUTE_EXTENSIONS,
     analyzer_inventory_refresh_needed,
@@ -49,7 +49,7 @@ from spyglass.spikesorting.v2._recompute import (
     env_matches,
     hash_extension_data,
 )
-from spyglass.spikesorting.v2._recording_fingerprint import (
+from spyglass.spikesorting.v2._recording.fingerprint import (
     TRACE_ROUNDING,
     recording_content_fingerprint,
 )
@@ -214,11 +214,14 @@ class AnalyzerRegenSource(NamedTuple):
         The sort's units NWB (its statistics spans are read from it too).
     sorter_row : dict
         The sort's ``SorterParameters`` row.
+    job_kwargs : dict
+        Execution kwargs resolved by the fetch adapter before computation.
     """
 
     recording: object
     units: object
     sorter_row: dict
+    job_kwargs: dict
 
 
 class AnalyzerRegenInputs(NamedTuple):
@@ -495,7 +498,7 @@ class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
         have in common agrees on version (so a re-preprocess writes
         namespace-comparable output). Reads the live catalog once, then keeps the
         rows whose inventoried ``nwb_deps`` are compatible (see
-        :func:`~spyglass.spikesorting.v2._recompute.env_matches`). Operates on
+        :func:`~spyglass.spikesorting.v2._storage.recompute.env_matches`). Operates on
         ``self`` (restrict first to scope the scan).
         """
         env_deps = current_env_namespaces()
@@ -765,7 +768,7 @@ class RecordingArtifactRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
         Reads only ``regen_inputs``; the one DB access left is staging the
         fresh rebuild (see :mod:`._recording_nwb`).
         """
-        from spyglass.spikesorting.v2._recording_nwb import read_stored_traces
+        from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
         def _regen():
             # Open the canonical file (healed in make_fetch, which failed
@@ -1053,7 +1056,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         """
         import spikeinterface as si
 
-        from spyglass.spikesorting.v2._sorting_analyzer import (
+        from spyglass.spikesorting.v2._sorting.analyzer import (
             load_analyzer_folder_no_rebuild,
         )
 
@@ -1380,7 +1383,7 @@ def _analyzer_folder(sorting_id, waveform_params_name):
     accounting and delete target resolve the explicit ``waveform_params_name``
     (display or whitened metric), keyed ``{sorting_id}__{name}.analyzer``.
     """
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
 
     return analyzer_path(sorting_id, waveform_params_name)
 
@@ -1394,12 +1397,10 @@ def _validated_analyzer_recipe(
     ``AnalyzerWaveformParameters`` row, as ``Sorting.get_analyzer`` does,
     before any folder is read.
     """
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         assert_path_safe_waveform_params_name,
     )
-    from spyglass.spikesorting.v2._sorting_analyzer import (
-        fetch_waveform_params,
-    )
+    from spyglass.spikesorting.v2._sorting.analyzer import fetch_waveform_params
 
     assert_path_safe_waveform_params_name(waveform_params_name)
     return AnalyzerRecipe(
@@ -1461,12 +1462,12 @@ def _resolve_analyzer_regen_inputs(
     the sorter row. A failure stops the resolution and is carried as a
     :class:`FetchFailure`.
     """
-    from spyglass.spikesorting.v2._sorting_analyzer import (
+    from spyglass.spikesorting.v2._sorting.analyzer import (
         resolve_canonical_recording,
     )
-    from spyglass.spikesorting.v2.sorting import (
-        SorterParameters,
-        SortingSelection,
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2._sorting.fetch import (
+        fetch_sorter_analyzer_inputs,
     )
 
     what = "SortingAnalyzerRecompute"
@@ -1478,6 +1479,7 @@ def _resolve_analyzer_regen_inputs(
 
     def _source():
         canonical = resolve_canonical_recording(sort_key)
+        sorter_row, job_kwargs = fetch_sorter_analyzer_inputs(sort_key)
         return AnalyzerRegenSource(
             recording=canonical,
             units=SortingSelection.resolve_stored_units(
@@ -1485,14 +1487,8 @@ def _resolve_analyzer_regen_inputs(
                 canonical.source,
                 canonical.abs_path,
             ),
-            sorter_row=(
-                SorterParameters
-                & (
-                    (SortingSelection & sort_key).proj(
-                        "sorter", "sorter_params_name"
-                    )
-                )
-            ).fetch1(),
+            sorter_row=sorter_row,
+            job_kwargs=job_kwargs,
         )
 
     recipe = _resolve_or_failure(
@@ -1518,12 +1514,12 @@ def _recompute_analyzer_hashes(inputs: AnalyzerRegenInputs, rounding: int):
     or whitened metric); the rebuild uses that recipe's params, so the fresh
     analyzer is byte-comparable to the cached one for the SAME recipe.
     """
-    from spyglass.spikesorting.v2._sorting_analyzer import (
+    from spyglass.spikesorting.v2._sorting.analyzer import (
         build_analyzer,
         load_analyzer_folder_no_rebuild,
         read_canonical_recording,
     )
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_sorting_statistics_spans,
         read_stored_units,
     )
@@ -1579,7 +1575,7 @@ def _recompute_analyzer_hashes(inputs: AnalyzerRegenInputs, rounding: int):
         # only the extensions this verify hashes (ANALYZER_RECOMPUTE_EXTENSIONS)
         # -- every one is seed-pinned, noise_levels included, so the rebuild is
         # content-identical.
-        from spyglass.spikesorting.v2._analyzer_cache import (
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
             ANALYZER_FOLDER_SUFFIX,
             load_analyzer_folder,
         )
@@ -1590,6 +1586,7 @@ def _recompute_analyzer_hashes(inputs: AnalyzerRegenInputs, rounding: int):
             recording,
             {"sorting_id": str(inputs.sorting_id)},
             sorter_row=source.sorter_row,
+            job_kwargs=source.job_kwargs,
             analyzer_folder=fresh_folder,
             waveform_params=recipe.waveform_params,
             extensions=ANALYZER_RECOMPUTE_EXTENSIONS,
@@ -1734,7 +1731,7 @@ def _delete_files(
     interleave with a concurrent ``get_recording`` rebuild of the same recording
     -- no unlink racing a write, no reader seeing a half-state.
     """
-    from spyglass.spikesorting.v2._recording_fingerprint import (
+    from spyglass.spikesorting.v2._recording.fingerprint import (
         recording_artifact_lock,
     )
 
@@ -1796,7 +1793,9 @@ def _delete_analyzer_folders(
     hashed extensions -- is the correct, simplest behavior. Each full-folder
     deletion is logged so the over-deletion is explicit, never silent.
     """
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_lock
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        analyzer_cache_lock,
+    )
 
     cutoff = _recent_cutoff(days_since_creation)
     authorized, matched = _authorize_artifacts_for_deletion(

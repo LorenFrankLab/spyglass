@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import pytest
 
-from spyglass.spikesorting.v2.utils import split_leading_restrictions
+from spyglass.spikesorting.v2._core.table_integrity import (
+    split_leading_restrictions,
+)
 
 pytestmark = pytest.mark.unit
 

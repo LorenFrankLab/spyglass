@@ -9,11 +9,11 @@ from tests.spikesorting.v2._sorter_stub import plant_sorter
 def test_mask_members_preserves_disjoint_times_and_exact_boundaries():
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         mask_member_recordings,
         observation_intervals,
     )
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
 
@@ -46,7 +46,7 @@ def test_mask_members_preserves_disjoint_times_and_exact_boundaries():
 def test_unmasked_members_keep_their_samples():
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         mask_member_recordings,
     )
 
@@ -76,11 +76,11 @@ def test_offset_members_concatenate_in_microvolts_with_masks_at_zero():
     with a unit calibration, so the masked frames of the stitched artifact
     read 0 uV rather than the offset voltage, and an unmasked member stays
     on the same scale as a masked one."""
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         build_concatenated_recording,
         mask_member_recordings,
     )
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         silence_frame_ranges,
     )
 
@@ -115,7 +115,7 @@ def test_members_with_different_offsets_are_refused_before_conversion():
     """Converting members to microvolts would put members with different
     offsets on one scale; the members themselves must still share offsets,
     gains and dtype, as the unconverted concatenation required."""
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         mask_member_recordings,
     )
 
@@ -129,7 +129,7 @@ def test_members_with_nearly_equal_offsets_are_converted_together():
     """Offsets 0 and 1e-9 pass the members' compatibility check (``allclose``)
     but only the second is nonzero. Every member is then converted to
     microvolts, so the concatenation never mixes dtypes."""
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         build_concatenated_recording,
         mask_member_recordings,
     )
@@ -158,7 +158,7 @@ def test_zero_offset_members_are_masked_in_their_stored_units(dtype, gain):
     those concat artifacts (and their content hashes) are unchanged."""
     import spikeinterface.preprocessing as sip
 
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         build_concatenated_recording,
         mask_member_recordings,
     )
@@ -196,13 +196,11 @@ def test_concat_preserves_member_internal_gaps():
     """
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         concat_continuity,
         mask_member_recordings,
     )
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        statistics_spans,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import statistics_spans
 
     first = NumpyRecording(np.ones((800, 2), dtype="float32"), 1000)
     first.set_times(5 + np.arange(800) / 1000)
@@ -246,8 +244,8 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     from pathlib import Path
 
     from spyglass.common import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _concat_recording as concat_services
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._recording import concat as concat_services
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         artifact_frame_ranges,
     )
     from spyglass.spikesorting.v2.artifact import (
@@ -412,10 +410,10 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     # the test covers interval propagation even if a detector finds no units.
     from spikeinterface.core import NumpySorting
 
-    from spyglass.spikesorting.v2._pipeline_reporting import (
+    from spyglass.spikesorting.v2._orchestration.reporting import (
         _observed_duration_s,
     )
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_times_and_sample_indices,
     )
     from spyglass.spikesorting.v2.concat_member_curation import (
@@ -469,10 +467,10 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     assert effective.traces.apply_artifact_mask is False
     # Both analyzer rebuild routes must see the exact materialized mask, not
     # reload an unmasked member or apply member wall-clock intervals to concat.
-    from spyglass.spikesorting.v2._sorting_analyzer import (
+    from spyglass.spikesorting.v2._sorting.analyzer import (
         reconstruct_recording_and_sorting,
     )
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         load_effective_recording,
     )
 
@@ -614,7 +612,7 @@ def test_member_artifact_failure_retry_and_reuse(
 ):
     from spikeinterface.core import NumpySorting
 
-    from spyglass.spikesorting.v2 import _pipeline_presets as presets
+    from spyglass.spikesorting.v2._orchestration import presets
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
         RecordingArtifactDetection,

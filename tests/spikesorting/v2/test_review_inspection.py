@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(
 def test_raster_budget_spans_full_recording_and_window_keeps_every_spike():
     import spikeinterface.core as si
 
-    from spyglass.spikesorting.v2._review_inspection import raster_view
+    from spyglass.spikesorting.v2._review.inspection import raster_view
 
     recording = si.NumpyRecording(np.zeros((10000, 2)), 1000)
     recording.set_dummy_probe_from_locations(np.array([[0, 0], [0, 20]]))
@@ -39,7 +39,7 @@ def test_raster_window_includes_start_and_excludes_stop(
 ):
     import spikeinterface.core as si
 
-    from spyglass.spikesorting.v2._review_inspection import raster_view
+    from spyglass.spikesorting.v2._review.inspection import raster_view
 
     recording = si.NumpyRecording(np.zeros((2000, 2)), sampling_frequency)
     recording.set_dummy_probe_from_locations(np.array([[0, 0], [0, 20]]))
@@ -58,11 +58,11 @@ def test_raster_window_includes_start_and_excludes_stop(
 def test_hour_budget_defers_large_overviews_without_truncating_focused_units():
     import spikeinterface.core as si
 
-    from spyglass.spikesorting.v2._review_inspection import (
+    from spyglass.spikesorting.v2._review.inspection import (
         defer_time_views,
         raster_view,
     )
-    from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
+    from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
 
     duration, fs = 3600, 1000
     recording = si.NumpyRecording(
@@ -98,9 +98,7 @@ def test_trace_window_uses_relative_frames_without_reading_full_timestamps(
     import spikeinterface.core as si
     import spikeinterface.widgets as sw
 
-    from spyglass.spikesorting.v2._review_inspection import (
-        add_trace_inspection,
-    )
+    from spyglass.spikesorting.v2._review.inspection import add_trace_inspection
 
     recording, sorting = si.generate_ground_truth_recording(
         durations=[2.0], num_channels=4, num_units=1, seed=6
@@ -176,9 +174,11 @@ def inspection_analyzer_folder(tmp_path_factory):
 def test_focused_inspection_keeps_cached_arrays_lazy_and_filters_selector(
     inspection_analyzer_folder, monkeypatch
 ):
-    from spyglass.spikesorting.v2._analyzer_cache import load_analyzer_folder
-    from spyglass.spikesorting.v2._review_inspection import inspection_view
-    from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        load_analyzer_folder,
+    )
+    from spyglass.spikesorting.v2._review.inspection import inspection_view
+    from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
 
     analyzer = load_analyzer_folder(inspection_analyzer_folder)
     waveforms = analyzer.get_extension("waveforms").data["waveforms"]
@@ -224,9 +224,11 @@ def test_focused_inspection_keeps_cached_arrays_lazy_and_filters_selector(
 def test_deferred_inspection_never_loads_amplitudes_or_builds_raster(
     inspection_analyzer_folder, monkeypatch
 ):
-    from spyglass.spikesorting.v2 import _review_inspection as inspection
-    from spyglass.spikesorting.v2._analyzer_cache import load_analyzer_folder
-    from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
+    from spyglass.spikesorting.v2._review import inspection
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        load_analyzer_folder,
+    )
+    from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
 
     analyzer = load_analyzer_folder(inspection_analyzer_folder)
 
@@ -245,9 +247,11 @@ def test_deferred_inspection_never_loads_amplitudes_or_builds_raster(
 def test_amplitude_sampling_is_repeatable_and_uses_relative_times(
     inspection_analyzer_folder,
 ):
-    from spyglass.spikesorting.v2._analyzer_cache import load_analyzer_folder
-    from spyglass.spikesorting.v2._review_inspection import amplitude_view
-    from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        load_analyzer_folder,
+    )
+    from spyglass.spikesorting.v2._review.inspection import amplitude_view
+    from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
 
     analyzer = load_analyzer_folder(inspection_analyzer_folder)
     analyzer.recording.set_times(
@@ -275,8 +279,10 @@ def test_amplitude_sampling_is_repeatable_and_uses_relative_times(
 def test_cache_inventory_reads_parameters_without_loading_arrays(
     inspection_analyzer_folder, monkeypatch
 ):
-    from spyglass.spikesorting.v2._analyzer_cache import load_analyzer_folder
-    from spyglass.spikesorting.v2._curation_analyzer import _extension_inventory
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        load_analyzer_folder,
+    )
+    from spyglass.spikesorting.v2._curation.analyzer import _extension_inventory
 
     analyzer = load_analyzer_folder(inspection_analyzer_folder)
     assert set(analyzer.extensions) == {"waveforms"}
@@ -293,7 +299,7 @@ def test_cache_inventory_reads_parameters_without_loading_arrays(
 def test_disk_copy_retains_unloaded_extensions_and_expert_si_operations(
     inspection_analyzer_folder, tmp_path, monkeypatch
 ):
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_extension_array,
         copy_analyzer_folder,
         load_analyzer_extensions,
@@ -348,8 +354,8 @@ def test_expert_cache_load_still_recovers_corrupt_extension_data(
 ):
     from contextlib import nullcontext
 
-    from spyglass.spikesorting.v2 import _analyzer_cache as cache
-    from spyglass.spikesorting.v2._sorting_analyzer import (
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
+    from spyglass.spikesorting.v2._sorting.analyzer import (
         _load_analyzer_folder_or_rebuild,
     )
     from spyglass.spikesorting.v2.exceptions import AnalyzerFolderInvalidError

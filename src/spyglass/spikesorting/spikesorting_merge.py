@@ -758,7 +758,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             ``intervals`` is ``None`` when no contributing merge stores spans;
             ``unknown_sources`` holds the merge ids that could not report any.
         """
-        from spyglass.spikesorting.v2._observed_time import (
+        from spyglass.spikesorting.v2._core.observed_time import (
             population_availability,
         )
 
@@ -779,7 +779,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             if sources.get(name) in OBSERVED_INTERVAL_SOURCES:
                 # Imported inside the branch so a v0/v1-only environment, where
                 # the v2 layer may not import at all, never reaches for it.
-                from spyglass.spikesorting.v2 import _observation_io
+                from spyglass.spikesorting.v2._storage import (
+                    observation_io as _observation_io,
+                )
 
                 try:
                     observation = _observation_io.selection_observations(

@@ -16,11 +16,11 @@ import spikeinterface.sorters as sis
 from spikeinterface.sorters import container_tools
 from spikeinterface.sorters.sorterlist import sorter_dict
 
-from spyglass.spikesorting.v2._container_sorting import (
+from spyglass.spikesorting.v2._sorting.container import (
     RUNTIME_ANNOTATION,
     run_sorter_container,
 )
-from spyglass.spikesorting.v2._sorting_dispatch import (
+from spyglass.spikesorting.v2._sorting.dispatch import (
     run_si_sorter,
     sort_runtime_versions,
 )

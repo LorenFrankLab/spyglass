@@ -40,7 +40,9 @@ LOCATIONS = np.column_stack([np.zeros(8), 20.0 * np.arange(8)])
 
 
 def _clock():
-    from spyglass.spikesorting.v2._motion import build_estimation_clock
+    from spyglass.spikesorting.v2._motion.estimation import (
+        build_estimation_clock,
+    )
 
     return build_estimation_clock(
         SPANS, SOURCE_START_S, SOURCE_END_S, FS, MAX_GAP_S
@@ -58,7 +60,7 @@ def _motion(nonrigid: bool = False):
 
 
 def _inputs(nonrigid: bool = False, **extra):
-    from spyglass.spikesorting.v2._motion_report import MotionReportInputs
+    from spyglass.spikesorting.v2._motion.report import MotionReportInputs
 
     return MotionReportInputs(
         motion=_motion(nonrigid),
@@ -85,7 +87,9 @@ def _close_figures():
 
 def test_estimation_clock_of_the_constructed_inputs():
     """Guard the hand-derived clock the other expectations rest on."""
-    from spyglass.spikesorting.v2._motion import displacement_on_source_clock
+    from spyglass.spikesorting.v2._motion.estimation import (
+        displacement_on_source_clock,
+    )
 
     clock = _clock()
     np.testing.assert_allclose(clock.estimation_start_s, [100.0, 107.0, 110.5])
@@ -96,7 +100,7 @@ def test_estimation_clock_of_the_constructed_inputs():
 def test_summary_values_of_a_rigid_estimate():
     """Displacement size, time range, evidence, masking, gaps and border
     channels equal the values the constructed inputs imply."""
-    from spyglass.spikesorting.v2._motion_report import motion_report_summary
+    from spyglass.spikesorting.v2._motion.report import motion_report_summary
 
     summary = motion_report_summary(_inputs())
 
@@ -171,7 +175,7 @@ def test_summary_values_of_a_rigid_estimate():
 def test_summary_names_removed_or_extrapolated_channels(
     border_mode, removed, extrapolated
 ):
-    from spyglass.spikesorting.v2._motion_report import motion_report_summary
+    from spyglass.spikesorting.v2._motion.report import motion_report_summary
 
     summary = motion_report_summary(
         _inputs(border_mode=border_mode, removed_channel_ids=removed)
@@ -182,7 +186,7 @@ def test_summary_names_removed_or_extrapolated_channels(
 
 
 def test_summary_of_a_nonrigid_estimate():
-    from spyglass.spikesorting.v2._motion_report import motion_report_summary
+    from spyglass.spikesorting.v2._motion.report import motion_report_summary
 
     summary = motion_report_summary(_inputs(nonrigid=True))
     assert summary["rigid"] is False
@@ -195,7 +199,7 @@ def test_summary_of_a_nonrigid_estimate():
 
 
 def test_evidence_counts_must_match_the_spans():
-    from spyglass.spikesorting.v2._motion_report import (
+    from spyglass.spikesorting.v2._motion.report import (
         MotionReportInputs,
         motion_report_summary,
     )
@@ -207,7 +211,7 @@ def test_evidence_counts_must_match_the_spans():
 
 
 def test_frame_and_source_time_maps_invert_each_other():
-    from spyglass.spikesorting.v2._motion_report import (
+    from spyglass.spikesorting.v2._motion.report import (
         frame_of_source_time,
         source_time_of_frames,
     )
@@ -228,8 +232,10 @@ def test_time_maps_follow_a_span_whose_timestamps_run_fast():
     at 1 kHz over 10.01 s): frame 10 000, 5 000 frames into the span, is at
     110 + 5 * 1.001 s, not the nominal 115 s, and the inverse map undoes
     that scale."""
-    from spyglass.spikesorting.v2._motion import build_estimation_clock
-    from spyglass.spikesorting.v2._motion_report import (
+    from spyglass.spikesorting.v2._motion.estimation import (
+        build_estimation_clock,
+    )
+    from spyglass.spikesorting.v2._motion.report import (
         frame_of_source_time,
         source_time_of_frames,
     )
@@ -254,7 +260,7 @@ def test_time_maps_follow_a_span_whose_timestamps_run_fast():
 
 
 def test_default_trace_channels_are_the_middle_of_the_probe():
-    from spyglass.spikesorting.v2._motion_report import default_trace_channels
+    from spyglass.spikesorting.v2._motion.report import default_trace_channels
 
     assert default_trace_channels(CHANNEL_IDS, LOCATIONS, 1) == [2, 3, 4, 5]
 
@@ -265,7 +271,7 @@ def test_figure_panels_and_labels(nonrigid):
     draws one line per span, a nonrigid one a heatmap with a colorbar."""
     from matplotlib.collections import QuadMesh
 
-    from spyglass.spikesorting.v2._motion_report import plot_motion_report
+    from spyglass.spikesorting.v2._motion.report import plot_motion_report
 
     fig = plot_motion_report(_inputs(nonrigid=nonrigid))
     axes = _axes(fig)
@@ -306,7 +312,7 @@ def test_figure_panels_and_labels(nonrigid):
 def test_figure_flags_the_span_without_evidence():
     """The evidence panel marks span 1, its tick is highlighted, and the
     timeline shades exactly that span's source-time extent."""
-    from spyglass.spikesorting.v2._motion_report import (
+    from spyglass.spikesorting.v2._motion.report import (
         _COLORS,
         plot_motion_report,
     )
@@ -344,7 +350,7 @@ def test_figure_flags_the_span_without_evidence():
 
 
 def test_figure_marks_removed_and_extrapolated_channels():
-    from spyglass.spikesorting.v2._motion_report import plot_motion_report
+    from spyglass.spikesorting.v2._motion.report import plot_motion_report
 
     removed = _axes(
         plot_motion_report(
@@ -376,7 +382,7 @@ def test_figure_marks_removed_and_extrapolated_channels():
 def test_figure_draws_trace_windows_when_given():
     """Panel (e) overlays original and corrected traces per channel, labeled
     in microvolts."""
-    from spyglass.spikesorting.v2._motion_report import (
+    from spyglass.spikesorting.v2._motion.report import (
         TraceWindow,
         plot_motion_report,
     )
@@ -426,7 +432,7 @@ def test_trace_lines_break_at_an_acquisition_gap():
     """A window holding span 0's last 50 frames and span 1's first 50: every
     trace line has exactly one NaN, between 104.999 s and 110.0 s, so no
     line bridges the gap."""
-    from spyglass.spikesorting.v2._motion_report import (
+    from spyglass.spikesorting.v2._motion.report import (
         TraceWindow,
         plot_motion_report,
         source_time_of_frames,

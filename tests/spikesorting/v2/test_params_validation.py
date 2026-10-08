@@ -486,7 +486,9 @@ def test_insert_row_to_dict_normalizes_and_rejects_bad_shapes():
     strings / characters) -- is rejected loudly rather than silently
     zipped into a malformed row.
     """
-    from spyglass.spikesorting.v2.utils import _insert_row_to_dict
+    from spyglass.spikesorting.v2._core.lookup_validation import (
+        _insert_row_to_dict,
+    )
 
     names = ("sorter", "sorter_params_name", "params")
     # Mapping passes through as a shallow copy.
@@ -525,7 +527,9 @@ def test_clusterless_noise_levels_length_guard():
     other explicit length is a configuration error; ``None`` is always
     valid (SI estimates per-channel MAD).
     """
-    from spyglass.spikesorting.v2.utils import _assert_noise_levels_length
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _assert_noise_levels_length,
+    )
 
     n_channels = 4
     # None and the two valid explicit lengths are accepted (no raise).
@@ -799,7 +803,7 @@ def test_schema_version_constants_match_schema_defaults():
 
 def test_recipe_catalog_rows_copy_inner_schema_version():
     """Recipe rows derive the outer version from the validated params blob."""
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         artifact_default_contents,
         preprocessing_default_contents,
         sorter_default_contents,
@@ -841,7 +845,9 @@ def test_reference_fields_validation():
     iff the mode is ``"specific"``. (Validates the helper directly; the
     same helper runs inside ``SortGroupV2.insert1`` / ``insert``.)
     """
-    from spyglass.spikesorting.v2.utils import _validate_reference_fields
+    from spyglass.spikesorting.v2._core.reference_resolution import (
+        _validate_reference_fields,
+    )
 
     # Valid rows.
     _validate_reference_fields({"reference_mode": "none"})

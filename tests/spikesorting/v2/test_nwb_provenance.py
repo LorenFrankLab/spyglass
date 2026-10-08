@@ -1,7 +1,7 @@
 """DB-free unit tests for the NWB provenance scratch helper.
 
 These exercise the pure (de)serialization in
-``spyglass.spikesorting.v2._nwb_provenance`` -- the ``key``/``value_json``
+``spyglass.spikesorting.v2._storage.provenance`` -- the ``key``/``value_json``
 scalar provenance container and the typed long-table container -- with no
 DataJoint server and no SpikeInterface analyzer. The helper writes into and
 reads back from a real (tiny) NWB file on disk, so the round-trip assertions
@@ -40,7 +40,7 @@ def _write(nwbfile, tmp_path):
 
 def test_scalar_provenance_round_trips_mixed_types(tmp_path):
     """A scalar bundle (str/int/float/bool/None/dict/list) survives HDF5."""
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         PROVENANCE_SCHEMA_VERSION,
         build_provenance_table,
         read_provenance_values,
@@ -82,7 +82,7 @@ def test_scalar_provenance_coerces_datajoint_types(tmp_path):
 
     import numpy as np
 
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         build_provenance_table,
         read_provenance_values,
     )
@@ -112,7 +112,7 @@ def test_scalar_provenance_coerces_datajoint_types(tmp_path):
 
 def test_long_provenance_table_round_trips_typed_rows(tmp_path):
     """A typed long table (one row per member) survives HDF5 with native types."""
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         PROVENANCE_SCHEMA_VERSION,
         build_long_provenance_table,
         read_long_provenance,
@@ -147,7 +147,7 @@ def test_long_provenance_table_round_trips_typed_rows(tmp_path):
 
 def test_long_provenance_table_handles_empty_rows(tmp_path):
     """A zero-row long table still writes and reads back as an empty list."""
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         build_long_provenance_table,
         read_long_provenance,
     )

@@ -18,10 +18,8 @@ from pathlib import Path
 import pytest
 
 from spyglass.spikesorting.v2.exceptions import PipelineStageError
-from spyglass.spikesorting.v2._pipeline_run import (
-    _STAGE_STATUSES,
-    run_v2_pipeline,
-)
+from spyglass.spikesorting.v2._orchestration.stages import _STAGE_STATUSES
+from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
 from tests.spikesorting.v2._ingest_helpers import (
     configure_v2_run_inputs,
     copy_and_insert_nwb,
@@ -341,7 +339,7 @@ def test_populate_tolerating_concurrent_duplicate():
     """
     import datajoint as dj
 
-    from spyglass.spikesorting.v2._pipeline_run import (
+    from spyglass.spikesorting.v2._orchestration.stages import (
         _populate_tolerating_concurrent_duplicate,
     )
 
@@ -401,7 +399,9 @@ def test_populate_once_populates_within_lock(monkeypatch, lock_acquired):
     """
     import contextlib
 
-    from spyglass.spikesorting.v2 import _pipeline_run
+    from spyglass.spikesorting.v2._orchestration import (
+        stages as _pipeline_stages,
+    )
 
     events = []
 
@@ -420,8 +420,8 @@ def test_populate_once_populates_within_lock(monkeypatch, lock_acquired):
         def __and__(self, key):
             return []  # row absent -> tolerant helper won't swallow anything
 
-    monkeypatch.setattr(_pipeline_run, "_advisory_key_lock", _fake_lock)
-    _pipeline_run._populate_once(_FakeTable(), {"sorting_id": "x"})
+    monkeypatch.setattr(_pipeline_stages, "advisory_key_lock", _fake_lock)
+    _pipeline_stages._populate_once(_FakeTable(), {"sorting_id": "x"})
     assert events == ["lock-enter", "populate", "lock-exit"]
 
 
@@ -431,7 +431,9 @@ def test_advisory_key_lock_acquires_and_releases(dj_conn):
     import datajoint as dj
     from datajoint.hash import key_hash
 
-    from spyglass.spikesorting.v2._pipeline_run import _advisory_key_lock
+    from spyglass.spikesorting.v2._core.db_locking import (
+        advisory_key_lock as _advisory_key_lock,
+    )
 
     connection = dj.conn()
 
@@ -462,7 +464,9 @@ def test_advisory_key_lock_acquires_and_releases(dj_conn):
 @pytest.mark.unit
 def test_advisory_key_lock_acquire_error_is_non_fatal():
     """A GET_LOCK failure yields False and never raises (lock is best-effort)."""
-    from spyglass.spikesorting.v2._pipeline_run import _advisory_key_lock
+    from spyglass.spikesorting.v2._core.db_locking import (
+        advisory_key_lock as _advisory_key_lock,
+    )
 
     class _BadConnection:
         def query(self, *args, **kwargs):
@@ -489,7 +493,9 @@ def test_advisory_key_lock_excludes_other_session(dj_conn):
     """
     import datajoint as dj
 
-    from spyglass.spikesorting.v2._pipeline_run import _advisory_key_lock
+    from spyglass.spikesorting.v2._core.db_locking import (
+        advisory_key_lock as _advisory_key_lock,
+    )
 
     conn_b = dj.Connection(
         dj.config["database.host"],

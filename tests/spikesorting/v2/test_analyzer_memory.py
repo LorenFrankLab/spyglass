@@ -43,10 +43,10 @@ _SCRIPT = _MAXRSS + textwrap.dedent("""
     from pathlib import Path
     import numpy as np
     import spikeinterface as si
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         ANALYZER_FOLDER_SUFFIX, load_analyzer_folder,
     )
-    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
 
     workdir = Path(sys.argv[1])
     rec, sort = si.generate_ground_truth_recording(
@@ -108,7 +108,7 @@ _ZARR_SCRIPT = _MAXRSS + textwrap.dedent("""
 _LOAD_SCRIPT = _MAXRSS + textwrap.dedent("""
     import json, sys
     import numpy as np
-    from spyglass.spikesorting.v2._analyzer_cache import load_analyzer_folder
+    from spyglass.spikesorting.v2._storage.analyzer_cache import load_analyzer_folder
     folder = sys.argv[1]
     base = maxrss()
     analyzer = load_analyzer_folder(folder)
@@ -128,7 +128,7 @@ _UNITMATCH_SCRIPT = _MAXRSS + textwrap.dedent("""
     import numpy as np
     import spikeinterface as si
     import spyglass.settings as settings
-    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
 
     workdir = Path(sys.argv[1])
     workdir.mkdir(parents=True, exist_ok=True)

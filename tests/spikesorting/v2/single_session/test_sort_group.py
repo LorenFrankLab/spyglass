@@ -224,7 +224,9 @@ def test_handle_existing_rejects_duplicate_sort_group_ids(dj_conn):
     (``explicit_sort_group_ids=False``) are always unique, so the check
     is gated on the explicit path.
     """
-    from spyglass.spikesorting.v2._sort_group_insert import handle_existing
+    from spyglass.spikesorting.v2._recording.sort_groups_insert import (
+        handle_existing,
+    )
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     # Duplicates surface on a fresh session (no existing rows): the

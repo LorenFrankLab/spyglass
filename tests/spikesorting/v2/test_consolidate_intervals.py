@@ -24,7 +24,7 @@ import numpy as np
 
 def _consolidate(intervals):
     """Frame bounds on a 10-sample grid where frame == integer time (1 Hz)."""
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         _consolidate_regular_intervals,
     )
 

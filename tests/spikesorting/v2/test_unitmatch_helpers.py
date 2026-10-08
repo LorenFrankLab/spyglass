@@ -71,7 +71,9 @@ def _registry_snapshot():
 def test_fixture_stub_observes_units_without_real_extraction(
     fixture_lookup, monkeypatch, tmp_path
 ):
-    from spyglass.spikesorting.v2 import _waveform_bundles
+    from spyglass.spikesorting.v2._matching import (
+        waveforms as _waveform_bundles,
+    )
 
     def forbidden(*args, **kwargs):
         raise AssertionError("Stubbed fixture ran waveform extraction")

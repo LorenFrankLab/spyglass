@@ -11,15 +11,15 @@ import numpy as np
 from spyglass.common import Session  # noqa: F401
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.spikesorting.v2._concat_recording import (
+from spyglass.spikesorting.v2._recording.concat import (
     member_spike_times,
     split_unit_spike_trains,
 )
-from spyglass.spikesorting.v2._staged_outputs import (
+from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
     StagedOutputs,
 )
-from spyglass.spikesorting.v2._units_nwb import (
+from spyglass.spikesorting.v2._storage.units_nwb import (
     _write_curated_units_nwb_body,
     read_series_timestamps,
     read_units_spike_sample_indices,
@@ -263,7 +263,9 @@ class ConcatMemberCuration(
 
     def delete(self, *args, **kwargs):
         """Delete member rows and reclaim their orphaned analysis files."""
-        from spyglass.spikesorting.v2.utils import split_leading_restrictions
+        from spyglass.spikesorting.v2._core.table_integrity import (
+            split_leading_restrictions,
+        )
 
         restriction_args, args = split_leading_restrictions(args)
         if restriction_args:
@@ -514,7 +516,7 @@ class ConcatMemberCuration(
                     "the conserved member split."
                 )
         except Exception:
-            from spyglass.spikesorting.v2._staged_outputs import (
+            from spyglass.spikesorting.v2._storage.staged_outputs import (
                 unlink_staged_analysis_file as _unlink_staged_analysis_file,
             )
 
@@ -704,7 +706,7 @@ class ConcatMemberCuration(
     @classmethod
     def get_sort_group_info(cls, key: dict) -> "dj.Table":
         """Return all electrodes and regions for this member's sort group."""
-        from spyglass.spikesorting.v2._pipeline_geometry import (
+        from spyglass.spikesorting.v2._recording.unit_metadata import (
             sort_group_electrode_regions,
         )
 

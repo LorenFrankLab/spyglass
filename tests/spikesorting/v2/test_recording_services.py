@@ -25,7 +25,7 @@ def test_nwb_reader_is_lazy_and_preserves_metadata(
     import spikeinterface as si
     import spikeinterface.extractors as se
 
-    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
     from tests.spikesorting.v2._ingest_helpers import (
         write_processed_recording_nwb,
     )
@@ -114,9 +114,7 @@ def test_rebuilt_recording_install_leaves_retryable_state(
     import sys
     from types import ModuleType
 
-    from spyglass.spikesorting.v2._recording_nwb import (
-        install_rebuilt_recording,
-    )
+    from spyglass.spikesorting.v2._storage.nwb import install_rebuilt_recording
 
     temp = tmp_path / "rebuilt.nwb"
     canonical = tmp_path / "canonical.nwb"
@@ -163,7 +161,7 @@ def test_rebuilt_recording_install_leaves_retryable_state(
 
 
 def test_truncation_tolerance_scales_with_interval_count():
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         truncation_tolerance,
     )
 
@@ -175,7 +173,7 @@ def test_truncation_tolerance_scales_with_interval_count():
 def test_save_expectation_sums_disjoint_intended_intervals():
     """Disjoint intended epochs: the expected duration is the sum of every
     epoch and the interval count is preserved."""
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         compute_recording_save_expectation,
     )
 
@@ -193,7 +191,7 @@ def test_save_expectation_drops_sub_min_segment_slivers():
     """A requested epoch shorter than min_segment_length is excluded from the
     request total (the intersect already dropped it from the intended set), so
     it is not flagged as over-request -- it was intentionally dropped."""
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         compute_recording_save_expectation,
     )
 
@@ -214,7 +212,7 @@ def test_save_expectation_flags_request_past_raw_coverage():
     """A sort interval running past the raw recording is clipped to raw in the
     intended set; over_request is the dropped past-coverage span (the warning
     trigger)."""
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         compute_recording_save_expectation,
     )
 
@@ -231,7 +229,7 @@ def test_save_expectation_flags_request_past_raw_coverage():
 def test_regular_interval_consolidation_matches_timestamp_search():
     """The lazy regular-grid path must match the established searchsorted path
     without materializing the full timestamp vector."""
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         _consolidate_regular_intervals,
     )
     from tests.spikesorting.v2._interval_references import (
@@ -264,7 +262,7 @@ def test_regular_interval_consolidation_snaps_grid_boundaries():
     rate-based path must agree with the full-vector searchsorted reference
     exactly.
     """
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         _consolidate_regular_intervals,
     )
     from tests.spikesorting.v2._interval_references import (
@@ -295,7 +293,7 @@ def test_regular_interval_consolidation_snaps_grid_boundaries():
 def test_lazy_timestamp_override_indexes_and_slices_regular_grid():
     """Lazy timestamp overrides expose array-like indexing while allocating only
     requested slices."""
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         _lazy_timestamp_override,
     )
 
@@ -315,7 +313,7 @@ def test_lazy_timestamp_override_rejects_fancy_indexing_clearly():
     """Lazy timestamp overrides intentionally support only the current streaming
     consumers' int/slice indexing; unsupported indexing should fail explicitly.
     """
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         _lazy_timestamp_override,
     )
 
@@ -332,10 +330,12 @@ def test_lazy_timestamp_override_rejects_fancy_indexing_clearly():
 def test_get_recording_timestamps_preserves_lazy_override():
     """A lazy override must not be forced through np.asarray before the NWB
     chunk iterator has a chance to stream it."""
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         _lazy_timestamp_override,
     )
-    from spyglass.spikesorting.v2.utils import _get_recording_timestamps
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _get_recording_timestamps,
+    )
 
     override = _lazy_timestamp_override(
         np.array([[0, 3]]),
@@ -437,7 +437,7 @@ def test_lazy_regular_path_matches_eager_on_nonzero_start_recording():
     """
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         _consolidate_regular_intervals,
         _lazy_timestamp_override,
         _recording_num_frames,
@@ -487,7 +487,7 @@ def test_lazy_regular_path_matches_eager_on_nonzero_start_recording():
 def test_filtering_description_lists_only_steps_that_ran():
     from types import SimpleNamespace
 
-    from spyglass.spikesorting.v2._recording_preprocessing import (
+    from spyglass.spikesorting.v2._recording.preprocessing import (
         filtering_description,
     )
 
@@ -528,8 +528,8 @@ def test_explicit_restriction_keeps_hdf5_timestamps_lazy(
 ):
     import h5py
 
-    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._recording.restriction import (
         restrict_recording_times,
     )
     from tests.spikesorting.v2._ingest_helpers import (
@@ -591,7 +591,7 @@ def test_explicit_restriction_keeps_hdf5_timestamps_lazy(
 def test_restriction_preserves_segment_boundaries_and_rejects_backward_time():
     import spikeinterface.core as si
 
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         restrict_recording_times,
     )
 
@@ -668,7 +668,7 @@ def _bandpass_params(freq_min=600.0, freq_max=6000.0):
 
 def _selected_frames(recording, intervals):
     """(start, stop) frames of each selected interval on the regular grid."""
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         _consolidate_regular_intervals,
     )
 
@@ -696,10 +696,10 @@ def test_restriction_output_unchanged_by_reorder():
     parent segment's time kwargs, so the restriction arithmetic sees the same
     clock either way.
     """
-    from spyglass.spikesorting.v2._recording_preprocessing import (
+    from spyglass.spikesorting.v2._recording.preprocessing import (
         apply_temporal_preprocessing,
     )
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         restrict_recording_times,
     )
 
@@ -757,10 +757,10 @@ def test_restricted_traces_match_continuously_filtered_reference():
     import scipy.signal
     import spikeinterface.preprocessing as sip
 
-    from spyglass.spikesorting.v2._recording_preprocessing import (
+    from spyglass.spikesorting.v2._recording.preprocessing import (
         apply_temporal_preprocessing,
     )
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         restrict_recording_times,
     )
 
@@ -896,7 +896,7 @@ def _explicit_clock_recording(duration_s, seed=11):
 
 def _explicit_clock_frames(recording, intervals):
     """Frames ``restrict_recording_times`` selects on an explicit clock."""
-    from spyglass.spikesorting.v2._signal_math import frames_for_times
+    from spyglass.spikesorting.v2._core.signal_math import frames_for_times
 
     bounds = np.asarray(intervals, dtype=float).reshape(-1, 2)
     starts = frames_for_times(recording, bounds[:, 0])
@@ -926,10 +926,10 @@ def test_restricted_traces_match_reference_on_explicit_clock():
     import scipy.signal
     import spikeinterface.preprocessing as sip
 
-    from spyglass.spikesorting.v2._recording_preprocessing import (
+    from spyglass.spikesorting.v2._recording.preprocessing import (
         apply_temporal_preprocessing,
     )
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         restrict_recording_times,
     )
 
@@ -1052,10 +1052,10 @@ def test_sliver_after_highpass_matches_continuous_filter():
     shorter than the 600 Hz high-pass settling time, so restrict-then-filter
     returns ringing from the two joins rather than signal.
     """
-    from spyglass.spikesorting.v2._recording_preprocessing import (
+    from spyglass.spikesorting.v2._recording.preprocessing import (
         apply_temporal_preprocessing,
     )
-    from spyglass.spikesorting.v2._recording_restriction import (
+    from spyglass.spikesorting.v2._recording.restriction import (
         restrict_recording_times,
     )
     import spikeinterface.preprocessing as sip

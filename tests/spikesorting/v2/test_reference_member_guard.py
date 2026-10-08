@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from spyglass.spikesorting.v2.utils import assert_reference_not_member
+from spyglass.spikesorting.v2._core.reference_resolution import (
+    assert_reference_not_member,
+)
 
 
 def test_specific_reference_in_group_raises():

@@ -1,8 +1,8 @@
 """The review figure in a real browser (DB-free).
 
-Composes the production review layout (``_review_view``) over an in-memory
-SpikeInterface analyzer with the official-property unit table
-(``_review_unit_properties``), saves a real FigPack bundle, serves it with
+Builds the production review figure (``_review_view.build_curation_view``)
+over an in-memory SpikeInterface analyzer and an official-property unit table,
+saves a real FigPack bundle, serves it with
 the production local delivery (``_review_delivery``), and drives headless
 Chromium through the local sequence: select units in the unit table, add /
 remove labels, propose a merge, **Save draft**, reload. Assertions are on the
@@ -32,17 +32,10 @@ def review_bundle_template(tmp_path_factory):
     browser.require_browser()
     import spikeinterface.core as sc
 
-    from spyglass.spikesorting.v2._figpack_curation import (
+    from spyglass.spikesorting.v2._review.annotations import (
         labels_and_merges_to_annotations,
     )
-    from spyglass.spikesorting.v2._review_unit_properties import (
-        review_unit_properties,
-    )
-    from spyglass.spikesorting.v2._review_view import (
-        coerce_units_table_ids,
-        compose_review_layout,
-        curation_control,
-    )
+    from spyglass.spikesorting.v2._review.view import build_curation_view
 
     recording, sorting = sc.generate_ground_truth_recording(
         durations=[6.0], num_channels=4, num_units=3, seed=0
@@ -71,26 +64,20 @@ def review_bundle_template(tmp_path_factory):
         },
         index=pd.Index([1, 2, 3], name="unit_id"),
     )
-    from spyglass.spikesorting.v2._review_unit_properties import (
+    from spyglass.spikesorting.v2._review.unit_properties import (
         missing_rule_metrics,
     )
 
     table["unavailable_qc"] = missing_rule_metrics(table, ["snr"])
-    from spyglass.spikesorting.v2._review_inspection import inspection_view
-    from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
-
-    summary = inspection_view(
+    view = build_curation_view(
         analyzer,
-        ReviewDisplayOptions(),
+        {"sorting_id": "synthetic-browser-test", "curation_id": 0},
+        timeline=None,
+        label_options=LABEL_OPTIONS,
         displayed_unit_properties=[],
-        extra_unit_properties=review_unit_properties(table, analyzer.unit_ids),
+        seed_labels={1: ["accept"], 2: ["noise"]},
+        review_table=table,
     )
-    view = compose_review_layout(
-        summary,
-        curation_control(LABEL_OPTIONS, {1: ["accept"], 2: ["noise"]}),
-        summary_title="Sorting summary -- synthetic browser test",
-    )
-    coerce_units_table_ids(view)
     bundle = tmp_path_factory.mktemp("browser") / "review.figpack"
     view.save(str(bundle), title="Spyglass v2 browser test")
     (bundle / "annotations.json").write_text(
@@ -106,7 +93,7 @@ def review_bundle_template(tmp_path_factory):
 @pytest.fixture
 def review_bundle(review_bundle_template, tmp_path):
     """Give each browser test its own writable annotations and server."""
-    from spyglass.spikesorting.v2._review_delivery import stop_review_servers
+    from spyglass.spikesorting.v2._review.delivery import stop_review_servers
 
     bundle = tmp_path / "review.figpack"
     shutil.copytree(review_bundle_template, bundle)
@@ -117,7 +104,7 @@ def review_bundle(review_bundle_template, tmp_path):
 
 
 def _saved_state(bundle):
-    from spyglass.spikesorting.v2._figpack_curation import (
+    from spyglass.spikesorting.v2._review.annotations import (
         curation_annotations_to_labels_and_merges,
     )
 
@@ -129,7 +116,7 @@ def _saved_state(bundle):
 def test_stale_tab_preserves_edits_and_can_reapply_on_latest_draft(
     review_bundle, tmp_path
 ):
-    from spyglass.spikesorting.v2._review_delivery import serve_review_bundle
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
 
     url = serve_review_bundle(review_bundle)
     with browser.review_page(url, artifacts=tmp_path) as first:
@@ -175,7 +162,7 @@ def test_review_columns_and_controls_are_usable(
     """Official columns appear in the selectable unit table in the requested
     order with their values (gaps empty), a metric row selects that unit for
     curation, and the curation controls are reachable at both viewports."""
-    from spyglass.spikesorting.v2._review_delivery import serve_review_bundle
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
 
     url = serve_review_bundle(review_bundle)
     with browser.review_page(
@@ -232,7 +219,7 @@ def test_browser_edits_reach_annotations_and_survive_reload(
 ):
     """Label add/remove + a merge proposal saved by the browser land in the
     bundle's annotations.json as Spyglass reads them, and reload shows them."""
-    from spyglass.spikesorting.v2._review_delivery import serve_review_bundle
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
 
     url = serve_review_bundle(review_bundle)
     with browser.review_page(url, artifacts=tmp_path) as page:
@@ -282,17 +269,12 @@ def test_large_review_save_reload(n_units, tmp_path):
 
     import spikeinterface.core as sc
 
-    from spyglass.spikesorting.v2._review_delivery import (
+    from spyglass.spikesorting.v2._review.delivery import (
         serve_review_bundle,
         stop_review_servers,
     )
-    from spyglass.spikesorting.v2._review_inspection import inspection_view
-    from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
-    from spyglass.spikesorting.v2._review_view import (
-        coerce_units_table_ids,
-        compose_review_layout,
-        curation_control,
-    )
+    from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
+    from spyglass.spikesorting.v2._review.view import build_curation_view
 
     browser.require_browser()
     start = perf_counter()
@@ -312,22 +294,21 @@ def test_large_review_save_reload(n_units, tmp_path):
             "template_similarity",
         ]
     )
-    summary = inspection_view(
+    view = build_curation_view(
         analyzer,
-        ReviewDisplayOptions(max_amplitudes_per_unit=1000),
-        min_similarity_for_correlograms=0.2,
+        {"sorting_id": "synthetic-scale-test", "curation_id": 0},
+        label_options=LABEL_OPTIONS,
+        displayed_unit_properties=None,
+        display_options=ReviewDisplayOptions(
+            max_amplitudes_per_unit=1000,
+            min_similarity_for_correlograms=0.2,
+        ),
         timeline={
             "excluded": np.array([[2.0, 3.0]]),
             "mappings": [("synthetic", 0, 6, 100, 106)],
             "concatenated": False,
         },
     )
-    view = compose_review_layout(
-        summary,
-        curation_control(LABEL_OPTIONS),
-        summary_title="Sorting summary",
-    )
-    coerce_units_table_ids(view)
     bundle = tmp_path / "stress.figpack"
     view.save(str(bundle), title=f"{n_units} unit review")
     result = {

@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 import pandas as pd
 
-from spyglass.spikesorting.v2._lookup_validation import lossless_int
+from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
 from spyglass.spikesorting.v2.curation_api import CurationRef, EvaluationResult
 
 AnnotationValueType = Literal["float", "int", "bool", "text"]

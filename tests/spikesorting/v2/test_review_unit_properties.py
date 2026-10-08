@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from spyglass.spikesorting.v2._review_unit_properties import (
+from spyglass.spikesorting.v2._review.unit_properties import (
     display_column_array,
     review_unit_properties,
 )
@@ -68,7 +68,7 @@ def test_review_unit_properties_aligns_to_analyzer_order_and_keeps_order():
 
 
 def test_missing_rule_inputs_follow_enabled_rules_and_unit_ids():
-    from spyglass.spikesorting.v2._review_unit_properties import (
+    from spyglass.spikesorting.v2._review.unit_properties import (
         missing_rule_metrics,
     )
 

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from spyglass.spikesorting.v2.utils import resolve_peak_sign
+from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
 
 
 def _pos_neg_analyzer():
@@ -154,9 +154,7 @@ def test_peak_sign_persists_attributed_electrode(
     """
     from spikeinterface.core import template_tools
 
-    from spyglass.spikesorting.v2._sorting_units import (
-        build_sorting_unit_rows,
-    )
+    from spyglass.spikesorting.v2._sorting.units import build_sorting_unit_rows
 
     analyzer, sorting = _pos_neg_analyzer()
 

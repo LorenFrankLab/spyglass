@@ -111,7 +111,7 @@ def _isolate_si_metric_defaults():
         yield
         return
 
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         _si_metric_param_copies,
     )
 

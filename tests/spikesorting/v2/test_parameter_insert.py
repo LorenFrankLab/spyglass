@@ -8,9 +8,11 @@ import pytest
 from pydantic import BaseModel, Field, ValidationError
 
 from spyglass.spikesorting.v2.exceptions import DuplicateParameterContentError
-from spyglass.spikesorting.v2.utils import (
+from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
     _insert_parameter_rows,
+)
+from spyglass.spikesorting.v2._core.lookup_validation import (
     validate_lookup_rows,
 )
 

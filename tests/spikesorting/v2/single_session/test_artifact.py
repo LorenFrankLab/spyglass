@@ -1246,7 +1246,7 @@ def test_shared_artifact_group_populate_end_to_end(
         SharedGroupArtifactDetection,
         SharedGroupArtifactSelection,
     )
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2._artifacts.naming import (
         artifact_detection_interval_list_name,
     )
 
@@ -1405,7 +1405,7 @@ def test_shared_artifact_group_multi_member_union(
         RecordingSelection,
         SortGroupV2,
     )
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2._artifacts.naming import (
         artifact_detection_interval_list_name,
     )
 
@@ -1474,7 +1474,7 @@ def test_shared_artifact_group_multi_member_union(
 
     # ``insert_group`` validates the members through ``get_recording``; the
     # detection reads the files its ``make_fetch`` resolved.
-    from spyglass.spikesorting.v2 import _recording_nwb
+    from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
 
     path_a = Recording().resolve_stored_traces({"recording_id": rid_a}).abs_path
     monkeypatch.setattr(Recording, "get_recording", _fake_get_recording)

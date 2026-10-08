@@ -113,7 +113,9 @@ def test_register_rejects_noncallable_geometry_validation(clean_registry):
 def test_unitmatch_geometry_validation_needs_no_inference_library(
     clean_registry, monkeypatch
 ):
-    from spyglass.spikesorting.v2 import _unitmatch_backend
+    from spyglass.spikesorting.v2._matching import (
+        unitmatch_backend as _unitmatch_backend,
+    )
 
     def unexpected_import():
         raise AssertionError("Geometry preflight imported UnitMatchPy")
@@ -248,7 +250,7 @@ _FRESH_PROCESS_CLAIM = """
 import sys
 from spyglass.spikesorting.v2 import matcher_protocol as mp
 
-assert "spyglass.spikesorting.v2._unitmatch_backend" not in sys.modules
+assert "spyglass.spikesorting.v2._matching.unitmatch_backend" not in sys.modules
 assert not mp.is_registered("unitmatch")
 
 

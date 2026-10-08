@@ -30,7 +30,9 @@ def _rec(gains, offsets):
 
 
 def test_uniform_gain_zero_offset():
-    from spyglass.spikesorting.v2.utils import resolve_conversion_and_offset
+    from spyglass.spikesorting.v2._storage.metadata import (
+        resolve_conversion_and_offset,
+    )
 
     conv, off = resolve_conversion_and_offset(_rec([0.195] * 4, [0.0] * 4))
     assert conv == pytest.approx(0.195e-6)
@@ -39,7 +41,9 @@ def test_uniform_gain_zero_offset():
 
 def test_nonzero_offset_is_preserved():
     """The DC offset must survive (volts = raw*gain + offset), not be dropped."""
-    from spyglass.spikesorting.v2.utils import resolve_conversion_and_offset
+    from spyglass.spikesorting.v2._storage.metadata import (
+        resolve_conversion_and_offset,
+    )
 
     conv, off = resolve_conversion_and_offset(_rec([0.195] * 4, [1000.0] * 4))
     assert conv == pytest.approx(0.195e-6)
@@ -47,7 +51,9 @@ def test_nonzero_offset_is_preserved():
 
 
 def test_heterogeneous_gain_raises():
-    from spyglass.spikesorting.v2.utils import resolve_conversion_and_offset
+    from spyglass.spikesorting.v2._storage.metadata import (
+        resolve_conversion_and_offset,
+    )
 
     with pytest.raises(ValueError, match="heterogeneous channel gains"):
         resolve_conversion_and_offset(_rec([0.195, 0.2, 0.195, 0.2], [0.0] * 4))
@@ -55,14 +61,18 @@ def test_heterogeneous_gain_raises():
 
 @pytest.mark.parametrize("bad_gain", [0.0, -0.195])
 def test_nonpositive_gain_raises(bad_gain):
-    from spyglass.spikesorting.v2.utils import resolve_conversion_and_offset
+    from spyglass.spikesorting.v2._storage.metadata import (
+        resolve_conversion_and_offset,
+    )
 
     with pytest.raises(ValueError, match="non-positive"):
         resolve_conversion_and_offset(_rec([bad_gain] * 4, [0.0] * 4))
 
 
 def test_heterogeneous_offset_raises():
-    from spyglass.spikesorting.v2.utils import resolve_conversion_and_offset
+    from spyglass.spikesorting.v2._storage.metadata import (
+        resolve_conversion_and_offset,
+    )
 
     with pytest.raises(ValueError, match="offset"):
         resolve_conversion_and_offset(
@@ -101,7 +111,7 @@ def test_no_filter_reference_zeroes_channel_offset(
     Fails without the reference-path offset zeroing (offsets stay at
     1000 uV).
     """
-    from spyglass.spikesorting.v2._recording_preprocessing import (
+    from spyglass.spikesorting.v2._recording.preprocessing import (
         apply_spatial_preprocessing,
     )
 
@@ -122,7 +132,7 @@ def test_no_filter_no_reference_preserves_offset():
     """Guard against over-zeroing: with ``reference_mode='none'`` no
     referencing runs, so a genuine DC offset must be carried through (offsets
     are zeroed ONLY after a ``common_reference`` branch)."""
-    from spyglass.spikesorting.v2._recording_preprocessing import (
+    from spyglass.spikesorting.v2._recording.preprocessing import (
         apply_spatial_preprocessing,
     )
 
@@ -152,7 +162,7 @@ def test_offset_round_trips_through_populate(dj_conn, monkeypatch, smoke_nwb):
     """
     from pathlib import Path
 
-    import spyglass.spikesorting.v2.utils as v2_utils
+    import spyglass.spikesorting.v2._storage.metadata as v2_utils
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.recording import (

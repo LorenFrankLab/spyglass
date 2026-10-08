@@ -107,7 +107,7 @@ def two_sorts_one_recording(populated_sorting):
 def test_merge_ids_artifact_restriction_is_exclusive(two_sorts_one_recording):
     """Restricting by ``artifact_detection_id`` returns only the matching sort's
     merge_id -- not both sorts on the recording."""
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2.curation_api import (
         get_spike_sorting_v2_merge_ids,
     )
 
@@ -159,7 +159,9 @@ def test_merge_ids_distinguish_two_artifact_backed_sorts(
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2.utils import get_spike_sorting_v2_merge_ids
+    from spyglass.spikesorting.v2.curation_api import (
+        get_spike_sorting_v2_merge_ids,
+    )
 
     ctx = two_sorts_one_recording
     recording_id = ctx["recording_id"]
@@ -245,7 +247,7 @@ def test_merge_ids_restrict_by_artifact_interval_name(
 ):
     """The ``interval_list_name='artifact_detection_{uuid}'`` convention resolves to
     the single matching merge_id (exercises the str->UUID cast)."""
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2.curation_api import (
         get_spike_sorting_v2_merge_ids,
     )
 
@@ -271,7 +273,7 @@ def test_merge_ids_artifact_detection_id_none_selects_no_artifact_sort(
     It anti-joins: returns only the sort with NO ArtifactDetectionSource row,
     not both sorts on the recording.
     """
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2.curation_api import (
         get_spike_sorting_v2_merge_ids,
     )
 
@@ -289,7 +291,7 @@ def test_merge_ids_no_artifact_sort_unaffected(two_sorts_one_recording):
     """A sort with NO ArtifactDetectionSource still resolves by rec/curation keys --
     the optional-part intersection is skipped when no artifact detection is asked
     for, so it is not dropped."""
-    from spyglass.spikesorting.v2.utils import (
+    from spyglass.spikesorting.v2.curation_api import (
         get_spike_sorting_v2_merge_ids,
     )
 

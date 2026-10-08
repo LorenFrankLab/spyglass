@@ -14,13 +14,13 @@ from pathlib import Path
 import pytest
 import spikeinterface.full as si
 
-from spyglass.spikesorting.v2._analyzer_cache import (
+from spyglass.spikesorting.v2._storage.analyzer_cache import (
     analyzer_cache_root,
     analyzer_path,
     publish_analyzer_atomically,
     remove_analyzer_cache,
 )
-from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
 
 # A display (unwhitened) recipe blob -- build_analyzer requires the resolved
 # waveform params (it never picks a default), so the probe-projection tests
@@ -133,7 +133,7 @@ def test_analyzer_cache_import_pulls_no_db_layer_modules():
 
     probe = textwrap.dedent("""
         import sys
-        import spyglass.spikesorting.v2._analyzer_cache as c
+        import spyglass.spikesorting.v2._storage.analyzer_cache as c
         assert hasattr(c, "analyzer_path")
         assert hasattr(c, "analyzer_cache_root")
         assert hasattr(c, "remove_analyzer_cache")
@@ -182,7 +182,7 @@ class TestAnalyzerCacheLock:
     def test_lock_is_memoized_per_sort(self, tmp_path, restore_custom_config):
         import datajoint as dj
 
-        from spyglass.spikesorting.v2._analyzer_cache import (
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
         )
 
@@ -206,7 +206,7 @@ class TestAnalyzerCacheLock:
         """
         import datajoint as dj
 
-        from spyglass.spikesorting.v2._analyzer_cache import (
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
         )
 
@@ -230,7 +230,7 @@ class TestAnalyzerCacheLock:
         import datajoint as dj
         from filelock import Timeout
 
-        from spyglass.spikesorting.v2._analyzer_cache import (
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
         )
 
@@ -255,7 +255,7 @@ class TestAnalyzerCacheLock:
     ):
         import datajoint as dj
 
-        from spyglass.spikesorting.v2._analyzer_cache import (
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
         )
 
@@ -270,7 +270,7 @@ class TestAnalyzerCacheLock:
     ):
         import datajoint as dj
 
-        from spyglass.spikesorting.v2._analyzer_cache import (
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
             analyzer_cache_root,
         )
@@ -328,7 +328,9 @@ class TestPublishAnalyzerAtomically:
         self, tmp_path, monkeypatch, restore_custom_config
     ):
         """The publisher acquires the sort-level lock around build + swap."""
-        from spyglass.spikesorting.v2 import _analyzer_cache as cache_mod
+        from spyglass.spikesorting.v2._storage import (
+            analyzer_cache as cache_mod,
+        )
 
         self._configure_root(tmp_path)
         canonical = analyzer_path("sidP", "rec")

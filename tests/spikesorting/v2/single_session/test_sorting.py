@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from spyglass.spikesorting.v2._recipe_catalog import CORTEX_DISPLAY_WAVEFORMS
+from spyglass.spikesorting.v2._core.recipe_catalog import (
+    CORTEX_DISPLAY_WAVEFORMS,
+)
 from tests.spikesorting.v2._ingest_helpers import _clean_session_v2
 from tests.spikesorting.v2._sorter_stub import plant_sorter
 from tests.spikesorting.v2.single_session._helpers import _build_synthetic_rec
@@ -84,7 +86,7 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
     assert row["n_units"] > 0
     from pathlib import Path
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
 
     # The analyzer folder is not a column; resolve it from
     # (sorting_id, display recipe name).
@@ -655,7 +657,7 @@ def test_sorting_make_rollback_cleans_units_nwb(
 
     # Upstream cascades can leave a cache from an earlier committed result.
     # A failed new attempt must neither replace nor remove that folder.
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_folder_storage_fingerprint,
         analyzer_path,
     )
@@ -749,7 +751,7 @@ def test_changed_second_fetch_leaves_no_staged_sort_outputs(
 
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_path,
         remove_analyzer_cache,
     )
@@ -1619,7 +1621,7 @@ def test_sorting_delete_removes_analyzer_folder(populated_sorting):
     folder is gone.
     """
     from spyglass.spikesorting.v2.sorting import Sorting
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
 
     folder = analyzer_path(populated_sorting["sorting_id"], _DISPLAY)
     # ``_build_analyzer`` runs at populate time, so the folder is a

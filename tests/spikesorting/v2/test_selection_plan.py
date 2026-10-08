@@ -20,7 +20,7 @@ import uuid
 
 import pytest
 
-from spyglass.spikesorting.v2._selection_plan import (
+from spyglass.spikesorting.v2._core.selection_plan import (
     build_recording_selection_plan,
     build_sorting_selection_plan,
 )
@@ -416,7 +416,7 @@ _CORRECTED_2 = "55555555-5555-5555-5555-555555555555"
 def test_off_and_estimate_preserve_sort_input(source, sorting_id, canonical):
     """Without a corrected recording the payload has no motion term and the
     ids equal the recorded ones; an explicit ``None`` is the same request."""
-    from spyglass.spikesorting.v2._selection_identity import (
+    from spyglass.spikesorting.v2._core.selection_identity import (
         canonical_identity,
         sorting_identity_payload,
     )
@@ -447,7 +447,7 @@ def test_corrected_recording_enters_sort_identity(
 ):
     """A corrected recording adds one normalized term to either source kind:
     a new id, distinct per corrected recording, shared by str and UUID."""
-    from spyglass.spikesorting.v2._selection_identity import (
+    from spyglass.spikesorting.v2._core.selection_identity import (
         sorting_identity_payload,
     )
 
@@ -494,7 +494,7 @@ def test_corrected_concat_sort_still_rejects_an_artifact():
 
 
 def _lineage_of(source):
-    from spyglass.spikesorting.v2._source_resolution import SourceLineage
+    from spyglass.spikesorting.v2._recording.source import SourceLineage
 
     if "concat_recording_id" in source:
         return SourceLineage(
@@ -521,7 +521,7 @@ def test_sort_parts_must_still_give_the_stored_sorting_id(
     """The parts a selection was inserted with give back its ``sorting_id``
     (the recorded ids included); a correction part added to an uncorrected
     sort, or deleted from a corrected one, gives another id."""
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         sorting_parts_mismatch,
     )
 
@@ -578,7 +578,7 @@ def test_sort_parts_must_still_give_the_stored_sorting_id(
 def test_sort_parts_detect_artifact_part_drift():
     """Deleting a sort's artifact detection part, adding one, or adding one
     to a concatenated-recording sort all break the stored ``sorting_id``."""
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         sorting_parts_mismatch,
     )
 

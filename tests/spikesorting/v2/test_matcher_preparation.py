@@ -12,9 +12,10 @@ import pytest
 @pytest.fixture
 def preparation_contract(tmp_path, monkeypatch):
     from spyglass import settings
-    from spyglass.spikesorting.v2 import _sorting_analyzer, _units_nwb
+    from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
+    from spyglass.spikesorting.v2._storage import units_nwb as _units_nwb
     from spyglass.spikesorting.v2 import matcher_protocol as protocol
-    from spyglass.spikesorting.v2._unit_match_compute import extract_and_match
+    from spyglass.spikesorting.v2._matching.compute import extract_and_match
 
     monkeypatch.setattr(settings, "temp_dir", str(tmp_path))
     monkeypatch.setattr(
@@ -51,8 +52,8 @@ def preparation_contract(tmp_path, monkeypatch):
                 protocol.SessionMatcherInput(
                     dict(source.curation_key),
                     directory,
-                    directory / "positions.npy",
-                    source.recording_date,
+                    geometry_path=directory / "positions.npy",
+                    recording_date=source.recording_date,
                 ),
                 tuple(excluded),
             )
@@ -113,7 +114,9 @@ def test_matching_input_error_keeps_reason_and_original_cause(
     preparation_contract, monkeypatch
 ):
     from spyglass.spikesorting.v2 import matcher_protocol as protocol
-    from spyglass.spikesorting.v2._waveform_bundles import NoMatchableUnitsError
+    from spyglass.spikesorting.v2._matching.waveforms import (
+        NoMatchableUnitsError,
+    )
 
     run, _, _ = preparation_contract
     original = protocol.get_input_preparer("fixture")
@@ -161,8 +164,9 @@ def test_custom_matcher_uses_its_preparer_without_unitmatch(
 
         sys.meta_path.insert(0, BlockUnitMatch())
         from spyglass import settings
-        from spyglass.spikesorting.v2 import _unit_match_compute as compute
-        from spyglass.spikesorting.v2 import _sorting_analyzer, _units_nwb
+        from spyglass.spikesorting.v2._matching import compute
+        from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
+        from spyglass.spikesorting.v2._storage import units_nwb as _units_nwb
         from spyglass.spikesorting.v2.matcher_protocol import (
             MatchPair, PreparedMatcherInput, SessionMatcherInput,
             register_matcher,
@@ -222,7 +226,7 @@ def test_custom_matcher_uses_its_preparer_without_unitmatch(
                     else:
                         assert item.layout == 'split_half_waveforms' and item.layout_version == 1
                         assert item.geometry_path.is_file()
-                        wave = np.load(item.waveform_dir / 'RawWaveforms/Unit17_RawSpikes.npy')
+                        wave = np.load(item.bundle_dir / 'RawWaveforms/Unit17_RawSpikes.npy')
                         np.testing.assert_array_equal(wave, np.ones((2, 2, 2)))
                 # Return reversed sides to exercise canonical orientation too.
                 a, b = inputs[1].curation_key, inputs[0].curation_key

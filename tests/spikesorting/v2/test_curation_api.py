@@ -79,7 +79,7 @@ def test_merge_group_normalization_is_lossless():
     """
     import numpy as np
 
-    from spyglass.spikesorting.v2._lookup_validation import lossless_int
+    from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
     from spyglass.spikesorting.v2.curation_api import _normalize_merge_groups
 
     assert _normalize_merge_groups([[1, 2], (3, 4)]) == [[1, 2], [3, 4]]

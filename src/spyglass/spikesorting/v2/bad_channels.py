@@ -26,7 +26,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from spyglass.spikesorting.v2._enums import BadChannelLabel
+    from spyglass.spikesorting.v2._core.enums import BadChannelLabel
 
 __all__ = ["detect_bad_channels", "suggest_bad_channels"]
 
@@ -286,10 +286,10 @@ def suggest_bad_channels(
 
     from spyglass.common.common_ephys import Electrode, Raw
     from spyglass.common.common_nwbfile import Nwbfile
-    from spyglass.spikesorting.v2._recording_geometry import (
+    from spyglass.spikesorting.v2._recording.geometry import (
         spikeinterface_channel_ids,
     )
-    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
     from spyglass.utils.nwb_helper_fn import get_raw_eseries_path
 
     # 1. Electrode metadata, grouped by physical shank (fail loud on a missing
@@ -337,7 +337,7 @@ def suggest_bad_channels(
     # freq_max must be below the recording's Nyquist (fs/2); a value at/above
     # it fails opaquely inside scipy's filter design (shared check with
     # apply_temporal_preprocessing).
-    from spyglass.spikesorting.v2._signal_math import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         assert_freq_max_below_nyquist,
     )
 

@@ -190,7 +190,7 @@ def test_assert_concat_preflight_guards_members_and_auto_curate(
     'raw data valid times' / sort-group-electrode / sampling-rate checks: a
     VALID same-day group must not trip any of them.
     """
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         assert_concat_preflight,
     )
     from spyglass.spikesorting.v2.exceptions import PreflightError
@@ -427,8 +427,10 @@ def test_concat_id_folds_member_set(same_day_group):
     deterministic id of (identity + member_set_hash) and DIFFERS from the
     pre-fold formula (identity alone), and the stored hash is the hash of the
     captured snapshot rows."""
-    from spyglass.spikesorting.v2._concat_recording import member_set_hash
-    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2._recording.concat import member_set_hash
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        deterministic_id,
+    )
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
     )
@@ -1219,7 +1221,7 @@ def test_concat_rebuild_refuses_on_content_drift(same_day_group, monkeypatch):
     import shutil
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _recording_fingerprint as fp_mod
+    from spyglass.spikesorting.v2._recording import fingerprint as fp_mod
     from spyglass.spikesorting.v2.exceptions import (
         RecordingContentDriftError,
     )
@@ -1265,7 +1267,7 @@ def test_concat_split_conserves_all_spikes(same_day_group):
     import numpy as np
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._concat_recording import member_split_key
+    from spyglass.spikesorting.v2._recording.concat import member_split_key
     from spyglass.spikesorting.v2.exceptions import ConcatSplitError
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
@@ -1338,7 +1340,7 @@ def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
     concatenation does not correct motion.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         CONCAT_MEMBERS,
         CONCAT_PROVENANCE,
         read_long_provenance,
@@ -1520,7 +1522,7 @@ def test_concat_make_raises_on_sample_count_drift(same_day_group, monkeypatch):
     import numpy as np
     import spikeinterface as si
 
-    import spyglass.spikesorting.v2._concat_recording as concat_mod
+    import spyglass.spikesorting.v2._recording.concat as concat_mod
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
         ConcatenatedRecordingSelection,
@@ -1600,7 +1602,7 @@ def test_concat_sort_end_to_end_and_split(same_day_group, caplog):
     raises on concat brain regions without the anchor opt-in (and returns the
     anchor-member frame with it), and ``split_sorting_by_session`` returns one
     per-member sorting in each member's local frame with unit ids preserved."""
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.exceptions import (
         ConcatBrainRegionAmbiguousError,
     )
@@ -1808,7 +1810,7 @@ def test_concat_curation_evaluation_acceptance_creates_committed_child(
     # concat_recording_id (recording_id is None for a concat source) so the file
     # is interpretable standalone rather than only via the upstream join.
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         CURATION_EVALUATION_PROVENANCE,
         read_provenance_values,
     )
@@ -2251,7 +2253,7 @@ def test_concat_analyzer_receives_statistics_spans_after_reload(
     import numpy as np
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_path,
         load_analyzer_folder,
     )
@@ -2398,7 +2400,7 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     Its manifest has per-member source keys and a skipped artifact stage; only
     session-aligned member outputs enter the merge. The run reuses work on retry.
     """
-    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.concat_member_curation import (

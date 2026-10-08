@@ -25,9 +25,9 @@ from pathlib import Path
 import datajoint as dj
 import pytest
 
-import spyglass.spikesorting.v2._pipeline_run as plr
+import spyglass.spikesorting.v2._orchestration.session as plr
 import spyglass.spikesorting.v2.pipeline as pl
-from spyglass.spikesorting.v2._pipeline_preflight import (
+from spyglass.spikesorting.v2._orchestration.preflight import (
     _resolve_session_sort_group_ids,
 )
 from spyglass.spikesorting.v2.exceptions import (
@@ -138,7 +138,7 @@ def test_session_helpers_forward_the_motion_request(monkeypatch):
     mode and recipe; a contradictory pair is refused before any query."""
     _no_db(monkeypatch)
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_preflight."
+        "spyglass.spikesorting.v2._orchestration.preflight."
         "_resolve_session_sort_group_ids",
         lambda **kw: [0, 1],
     )
@@ -154,7 +154,7 @@ def test_session_helpers_forward_the_motion_request(monkeypatch):
         return _ok_report(sort_group_id, pipeline_preset)
 
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_preflight.preflight_v2_pipeline",
+        "spyglass.spikesorting.v2._orchestration.preflight.preflight_v2_pipeline",
         _preflight,
     )
 
@@ -191,12 +191,12 @@ def test_session_helpers_forward_the_motion_request(monkeypatch):
 def test_preflight_session_all_groups(monkeypatch):
     """One ``group_reports`` entry per target, aggregated ``ok``; no DB."""
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_preflight."
+        "spyglass.spikesorting.v2._orchestration.preflight."
         "_resolve_session_sort_group_ids",
         lambda **kw: [0, 1, 2],
     )
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_preflight.preflight_v2_pipeline",
+        "spyglass.spikesorting.v2._orchestration.preflight.preflight_v2_pipeline",
         lambda *, sort_group_id, pipeline_preset, **kw: _ok_report(
             sort_group_id, pipeline_preset
         ),
@@ -248,7 +248,7 @@ def test_preflight_session_collects_group_errors(monkeypatch):
     warnings-only group does not flip it.
     """
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_preflight."
+        "spyglass.spikesorting.v2._orchestration.preflight."
         "_resolve_session_sort_group_ids",
         lambda **kw: [0, 1, 2],
     )
@@ -266,7 +266,7 @@ def test_preflight_session_collects_group_errors(monkeypatch):
         return _ok_report(sort_group_id, pipeline_preset)
 
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_preflight.preflight_v2_pipeline",
+        "spyglass.spikesorting.v2._orchestration.preflight.preflight_v2_pipeline",
         fake_preflight,
     )
 

@@ -70,7 +70,7 @@ def test_merge_resolution_may_keep_inherited_label_outside_palette():
 
 def test_review_and_persistence_agree_on_multiple_merge_ids():
     """Reordered groups with gaps in source IDs keep conflicts and labels aligned."""
-    from spyglass.spikesorting.v2._curation_transforms import (
+    from spyglass.spikesorting.v2._curation.transforms import (
         build_curated_unit_rows,
     )
     from spyglass.spikesorting.v2.review_api import (

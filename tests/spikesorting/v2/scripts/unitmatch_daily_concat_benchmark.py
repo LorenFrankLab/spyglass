@@ -2,22 +2,22 @@
 
 Each simulated day is a same-day concatenation of two member recordings of
 unequal length, joined into ONE SpikeInterface segment with the production
-:func:`spyglass.spikesorting.v2._concat_recording.build_concatenated_recording`.
+:func:`spyglass.spikesorting.v2._recording.concat.build_concatenated_recording`.
 One member of every day carries a silenced artifact exclusion
-(:func:`spyglass.spikesorting.v2._sorting_artifact_mask.silence_frame_ranges`),
+(:func:`spyglass.spikesorting.v2._sorting.artifact_mask.silence_frame_ranges`),
 and the day's statistics spans come from the production
-:func:`spyglass.spikesorting.v2._sorting_artifact_mask.statistics_spans`. The
+:func:`spyglass.spikesorting.v2._sorting.artifact_mask.statistics_spans`. The
 "sort" of a day is the planted ground truth (no sorter), with sparse unit ids
 drawn independently per day, so a neuron's identity cannot be read off its id.
 
 Every day goes through the production path the ``UnitMatch`` table runs:
-:func:`spyglass.spikesorting.v2._unitmatch_backend.extract_unitmatch_bundle`
+:func:`spyglass.spikesorting.v2._matching.unitmatch_backend.extract_unitmatch_bundle`
 with the day's statistics spans, :meth:`UnitMatchBackend.match` (real
 UnitMatchPy) over the days in chronological order,
-:func:`spyglass.spikesorting.v2._matcher_graph.canonicalize_match_pairs`, and
-:func:`spyglass.spikesorting.v2._matcher_graph.derive_tracked_units` with the
+:func:`spyglass.spikesorting.v2._matching.graph.canonicalize_match_pairs`, and
+:func:`spyglass.spikesorting.v2._matching.graph.derive_tracked_units` with the
 per-recording detection map built by
-:func:`spyglass.spikesorting.v2._matcher_graph.count_recording_spikes`. Every
+:func:`spyglass.spikesorting.v2._matching.graph.count_recording_spikes`. Every
 target comes from the planted truth, never from the code under test.
 
 Neurons (per seed; templates from SpikeInterface ``generate_templates`` with
@@ -633,11 +633,11 @@ def make_day(label, day, spec, neurons, probe, rng) -> Day:
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._concat_recording import (
+    from spyglass.spikesorting.v2._recording.concat import (
         build_concatenated_recording,
         cumulative_member_boundaries,
     )
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         silence_frame_ranges,
         statistics_spans,
     )
@@ -752,7 +752,7 @@ def build_bundle(session_dir, day: Day) -> list[int]:
     list of int
         Unit ids the extractor left out of the bundle.
     """
-    from spyglass.spikesorting.v2._unitmatch_backend import (
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
         extract_unitmatch_bundle,
     )
 
@@ -785,7 +785,7 @@ def match_days(session_dirs, labels) -> tuple[list, dict | None]:
         ``match_class_prior``, ``n_expected_matches`` and ``n_units``;
         ``None`` if UnitMatch never reached its naive-Bayes step.
     """
-    from spyglass.spikesorting.v2._unitmatch_backend import (
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
         UnitMatchBackend,
         _require_unitmatch,
     )
@@ -794,8 +794,8 @@ def match_days(session_dirs, labels) -> tuple[list, dict | None]:
     inputs = [
         SessionMatcherInput(
             curation_key={"sorting_id": label, "curation_id": 0},
-            waveform_dir=Path(d),
-            channel_positions_path=Path(d) / "channel_positions.npy",
+            bundle_dir=Path(d),
+            geometry_path=Path(d) / "channel_positions.npy",
         )
         for label, d in zip(labels, session_dirs)
     ]
@@ -839,7 +839,7 @@ def track_units(dataset: Dataset, oriented_pairs) -> tuple[list, dict]:
         ``{day label: {unit id: [count per member]}}`` from
         :func:`count_recording_spikes`.
     """
-    from spyglass.spikesorting.v2._matcher_graph import (
+    from spyglass.spikesorting.v2._matching.graph import (
         count_recording_spikes,
         derive_tracked_units,
     )
@@ -1096,7 +1096,7 @@ def run_one(scenario: str, seed: int, out_dir) -> dict:
     Bundles are written to ``out_dir/<scenario>/seed<seed>/<day label>`` and
     the record to ``run.json`` beside them.
     """
-    from spyglass.spikesorting.v2._matcher_graph import (
+    from spyglass.spikesorting.v2._matching.graph import (
         canonicalize_match_pairs,
     )
 

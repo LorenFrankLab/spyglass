@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from spyglass.spikesorting.v2 import CurationLabel
-from spyglass.spikesorting.v2._pipeline_reporting import (
+from spyglass.spikesorting.v2._orchestration.reporting import (
     _RUN_COLUMNS,
     describe_run,
 )
@@ -142,7 +142,9 @@ def test_describe_run_lists_each_unit_match_input():
     corrected recording's id)."""
     import uuid
 
-    from spyglass.spikesorting.v2._pipeline_types import UnitMatchInputSummary
+    from spyglass.spikesorting.v2._orchestration.types import (
+        UnitMatchInputSummary,
+    )
 
     ids = {name: uuid.UUID(int=i + 1) for i, name in enumerate("abcdefg")}
     inputs = (
@@ -271,7 +273,7 @@ def test_describe_run_rejects_list_entry_without_outcome():
 
 
 def test_curation_label_export_and_order():
-    # DB-free: CurationLabel is re-exported from the stdlib-only _enums module.
+    # DB-free: CurationLabel is re-exported from the stdlib-only _core.enums module.
     assert [label.value for label in CurationLabel] == [
         "accept",
         "mua",

@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 import spikeinterface as si
 
-from spyglass.spikesorting.v2 import _analyzer_cache as cache
-from spyglass.spikesorting.v2 import _sorting_analyzer as analyzer_service
-from spyglass.spikesorting.v2._sorting_analyzer import (
+from spyglass.spikesorting.v2._storage import analyzer_cache as cache
+from spyglass.spikesorting.v2._sorting import analyzer as analyzer_service
+from spyglass.spikesorting.v2._sorting.analyzer import (
     BASE_ANALYZER_EXTENSIONS,
     _load_analyzer_folder_or_rebuild,
     build_analyzer,

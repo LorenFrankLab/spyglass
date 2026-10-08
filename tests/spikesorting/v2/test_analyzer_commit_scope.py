@@ -31,7 +31,7 @@ def test_framework_publication_lock_covers_commit_and_rollback(
     tmp_path, monkeypatch, failure
 ):
     """Use DataJoint's actual tri-part dispatch and transaction callbacks."""
-    from spyglass.spikesorting.v2 import _analyzer_cache as cache
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
 
     monkeypatch.setattr(cache, "analyzer_cache_root", lambda: tmp_path)
     sorting_id = uuid.uuid4()
@@ -78,7 +78,7 @@ def test_framework_publication_lock_covers_commit_and_rollback(
 def test_direct_publication_transaction_keeps_lock_through_own_commit(
     tmp_path, monkeypatch
 ):
-    from spyglass.spikesorting.v2 import _analyzer_cache as cache
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
 
     monkeypatch.setattr(cache, "analyzer_cache_root", lambda: tmp_path)
     sorting_id = uuid.uuid4()
@@ -105,7 +105,7 @@ def test_direct_publication_transaction_keeps_lock_through_own_commit(
 def test_direct_publication_refuses_caller_transaction(tmp_path, monkeypatch):
     from datajoint.errors import DataJointError
 
-    from spyglass.spikesorting.v2 import _analyzer_cache as cache
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
 
     monkeypatch.setattr(cache, "analyzer_cache_root", lambda: tmp_path)
     table = SimpleNamespace(connection=SimpleNamespace(in_transaction=True))
@@ -121,7 +121,7 @@ def test_orphan_sweep_rechecks_owner_after_publisher_finishes(
     """The scan sees an uncommitted folder; locked cleanup sees its outcome."""
     import datajoint as dj
 
-    from spyglass.spikesorting.v2 import _analyzer_cache as cache
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
 
     monkeypatch.setattr(cache, "analyzer_cache_root", lambda: tmp_path)
     sorting_id = uuid.uuid4()
@@ -208,7 +208,7 @@ def test_orphan_sweep_rechecks_owner_after_publisher_finishes(
 def test_orphan_cleanup_refuses_repeatable_read_transaction(tmp_path):
     from datajoint.errors import DataJointError
 
-    from spyglass.spikesorting.v2 import _analyzer_cache as cache
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
 
     table = SimpleNamespace(connection=SimpleNamespace(in_transaction=True))
     with pytest.raises(DataJointError, match="outside a database transaction"):
@@ -216,7 +216,7 @@ def test_orphan_cleanup_refuses_repeatable_read_transaction(tmp_path):
 
 
 def test_failed_publish_discards_only_its_attempt(tmp_path, monkeypatch):
-    from spyglass.spikesorting.v2 import _analyzer_cache as cache
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
 
     monkeypatch.setattr(cache, "analyzer_cache_root", lambda: tmp_path)
     canonical = cache.analyzer_path(uuid.uuid4(), "test")

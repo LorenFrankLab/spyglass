@@ -17,7 +17,7 @@ import datajoint as dj
 import pytest
 import spikeinterface as si
 
-from spyglass.spikesorting.v2.utils import (
+from spyglass.spikesorting.v2._core.job_config import (
     _resolved_job_kwargs,
     _warn_ambient_seed_once,
     resolve_effective_seed,
@@ -133,7 +133,7 @@ def test_sorter_distribution_version_maps_known_and_none():
     sorters and the in-process clusterless thresholder (whose producing version
     is ``spikeinterface_version``, recorded separately) -- never a wrong guess.
     """
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         sorter_distribution_version,
     )
 
@@ -286,7 +286,7 @@ def test_ambient_seed_rejected_then_records_clusterless_provenance(
 def test_sorting_id_unchanged_after_provenance_columns():
     """The sorting_id derivation excludes the provenance columns, so a fixed
     sorting selection identity still mints the pre-change deterministic id."""
-    from spyglass.spikesorting.v2._selection_identity import (
+    from spyglass.spikesorting.v2._core.selection_identity import (
         deterministic_id,
         sorting_identity_payload,
     )
@@ -308,7 +308,9 @@ def test_unitmatch_id_unchanged_after_provenance_columns():
     bundle params enter identity via matcher_params_name, NOT the
     deterministic payload -- so a fixed selection identity (matcher params +
     input_set_hash) always mints the same id."""
-    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        deterministic_id,
+    )
 
     identity = {
         "matcher_params_name": "unitmatch_default",

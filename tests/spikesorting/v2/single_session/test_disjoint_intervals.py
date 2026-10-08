@@ -505,7 +505,7 @@ def test_reloaded_two_interval_artifact_exposes_gap(
     from spyglass.common.common_interval import IntervalList
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         boundary_spans_from_timestamps,
     )
     from spyglass.spikesorting.v2.artifact import (

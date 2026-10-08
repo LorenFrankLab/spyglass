@@ -100,10 +100,10 @@ def test_effective_recording_load_matches_table_accessor(populated_sorting):
     """
     import numpy as np
 
-    from spyglass.spikesorting.v2._artifact_intervals import (
+    from spyglass.spikesorting.v2._artifacts.readers import (
         read_artifact_removed_intervals,
     )
-    from spyglass.spikesorting.v2._source_resolution import (
+    from spyglass.spikesorting.v2._recording.source import (
         load_effective_recording,
     )
     from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
@@ -149,8 +149,8 @@ def test_resolved_analyzer_loader_matches_get_analyzer(populated_sorting):
     """
     import numpy as np
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-    from spyglass.spikesorting.v2._sorting_analyzer import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._sorting.analyzer import (
         fetch_waveform_params,
         load_or_rebuild_analyzer_from_resolved,
         reconstruct_recording_and_sorting,
@@ -161,7 +161,7 @@ def test_resolved_analyzer_loader_matches_get_analyzer(populated_sorting):
         Sorting,
         SortingSelection,
     )
-    from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+    from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
 
     sorting_key = dict(populated_sorting)
     ref = Sorting().get_analyzer(sorting_key)
@@ -410,7 +410,7 @@ def test_curation_evaluation_records_source_provenance(
     monkeypatch.undo()  # restore version before the analyzer-hash check
 
     # An analyzer-content drift (a different re-hash) is flagged per role.
-    import spyglass.spikesorting.v2._recompute as rc
+    import spyglass.spikesorting.v2._storage.recompute as rc
 
     monkeypatch.setattr(
         rc, "hash_extension_data", lambda analyzer, **k: {"x": "deadbeef"}
@@ -449,7 +449,7 @@ def test_curation_evaluation_nwb_carries_inputs(
     import spikeinterface as si
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         CURATION_EVALUATION_PROVENANCE,
         read_provenance_values,
     )
@@ -544,7 +544,7 @@ def test_curation_evaluation_pc_eval_records_both_roles(
 
     # Perturb only the metric analyzer's hash (the one carrying
     # principal_components): the metric role is flagged, the display role is not.
-    import spyglass.spikesorting.v2._recompute as rc
+    import spyglass.spikesorting.v2._storage.recompute as rc
 
     real_hash = rc.hash_extension_data
 
@@ -601,7 +601,7 @@ def test_nn_noise_overlap_is_finite_not_silently_all_nan(
 
 def _franklab_evaluation(curation_key, metric_params_name="franklab_default"):
     """Selection for the shipped Frank-lab auto-curation rules."""
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         FRANKLAB_CURATION_RULES,
     )
     from spyglass.spikesorting.v2.metric_curation import (
@@ -624,7 +624,7 @@ def _ensure_franklab_with_sd_ratio_metric_params():
     its content still equals the current ``franklab_default`` plus
     ``sd_ratio``; otherwise ``DuplicateParameterContentError`` names it.
     """
-    from spyglass.spikesorting.v2._lookup_validation import (
+    from spyglass.spikesorting.v2._core.lookup_validation import (
         reject_stale_quality_metric_defaults,
     )
     from spyglass.spikesorting.v2._params.metric_curation import (
@@ -667,7 +667,7 @@ def _franklab_label_oracle(metrics):
     """
     import numpy as np
 
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         FRANKLAB_CURATION_RULES,
     )
     from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
@@ -902,7 +902,7 @@ def test_compute_metrics_scopes_noise_cluster_spans_to_metric_computes(
     """
     import spikeinterface.metrics.quality as sqm
 
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         _NOISE_CLUSTER_SPANS,
     )
     from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
@@ -1086,9 +1086,7 @@ def _sd_ratio_analyzer(fill):
     import numpy as np
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        statistics_spans,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import statistics_spans
     from tests.spikesorting.v2._masked_statistics_helpers import (
         SAMPLING_FREQUENCY,
         excluded_ranges,
@@ -1150,13 +1148,11 @@ def test_compute_metrics_sd_ratio_ignores_excluded_samples(dj_conn):
     import numpy as np
     import spikeinterface.metrics.quality.misc_metrics as mm
 
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         _sd_ratio_statistics_spans,
         noise_cluster_spans,
     )
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        sample_span_data,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import sample_span_data
     from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
 
     results = {}
@@ -1346,7 +1342,7 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
     from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
 
     rec, two, merged = _two_distinct_template_inputs()
@@ -1415,7 +1411,9 @@ def test_curation_evaluation_rejects_preview_at_make_fetch(
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
-    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        deterministic_id,
+    )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
@@ -1520,7 +1518,7 @@ def test_root_curation_uses_cached_raw_analyzer_fast_path(
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
-    import spyglass.spikesorting.v2._sorting_analyzer as sa_mod
+    import spyglass.spikesorting.v2._sorting.analyzer as sa_mod
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
@@ -1698,7 +1696,7 @@ def test_make_compute_reads_units_without_sample_frames_without_the_db(
     The older layout is simulated by making the sample-frame reader report
     the column absent, which is exactly what it returns for such a file.
     """
-    from spyglass.spikesorting.v2 import _units_nwb
+    from spyglass.spikesorting.v2._storage import units_nwb as _units_nwb
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
@@ -1872,7 +1870,7 @@ def test_zero_unit_curation_evaluation_writes_empty_tables(
     try:
         root = CurationV2.insert_curation(sorting_key=sorting_key)
         assert len(CurationV2.Unit & root) == 0
-        from spyglass.spikesorting.v2._curation_analyzer import (
+        from spyglass.spikesorting.v2._curation.analyzer import (
             _resolve_curation_analyzer,
         )
         from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
@@ -1898,7 +1896,7 @@ def test_zero_unit_curation_evaluation_writes_empty_tables(
         # is written even though there are no metrics (no analyzer is built, so
         # the source-analyzer manifest is None).
         from spyglass.common.common_nwbfile import AnalysisNwbfile
-        from spyglass.spikesorting.v2._nwb_provenance import (
+        from spyglass.spikesorting.v2._storage.provenance import (
             CURATION_EVALUATION_PROVENANCE,
             read_provenance_values,
         )
@@ -2896,14 +2894,14 @@ def test_evaluation_populate_repairs_partially_built_canonical_analyzer(
 
     import numpy as np
 
-    from spyglass.spikesorting.v2._analyzer_cache import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
         StagedAnalyzer,
         analyzer_cache_lock,
         analyzer_folder_storage_fingerprint,
         copy_analyzer_folder,
         load_analyzer_folder,
     )
-    from spyglass.spikesorting.v2._sorting_analyzer import (
+    from spyglass.spikesorting.v2._sorting.analyzer import (
         BASE_ANALYZER_EXTENSIONS,
     )
     from spyglass.spikesorting.v2.metric_curation import (

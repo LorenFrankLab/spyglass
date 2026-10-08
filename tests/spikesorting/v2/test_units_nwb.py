@@ -23,7 +23,9 @@ _TS = np.arange(100, dtype=float) / _FS
 
 
 def _lazy_merge(abs_times, units_to_merge, timestamps=_TS):
-    from spyglass.spikesorting.v2._units_nwb import build_lazy_merged_sorting
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        build_lazy_merged_sorting,
+    )
 
     return build_lazy_merged_sorting(
         abs_times,
@@ -109,7 +111,7 @@ def test_build_lazy_merged_sorting_fresh_ids_in_group_order():
 
 
 def test_empty_spike_times_dataframe_shape():
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         empty_spike_times_dataframe,
     )
 
@@ -120,7 +122,9 @@ def test_empty_spike_times_dataframe_shape():
 
 
 def test_abs_spike_times_dataframe_roundtrip():
-    from spyglass.spikesorting.v2._units_nwb import abs_spike_times_dataframe
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        abs_spike_times_dataframe,
+    )
 
     df = abs_spike_times_dataframe(
         {0: np.array([1.0, 2.0]), 3: np.array([5.0])}
@@ -133,7 +137,7 @@ def test_abs_spike_times_dataframe_roundtrip():
 
 
 def test_numpysorting_from_sample_indices_roundtrip():
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         numpysorting_from_sample_indices,
     )
 
@@ -147,7 +151,7 @@ def test_numpysorting_from_sample_indices_roundtrip():
 
 def test_build_lazy_merged_sorting_from_samples_avoids_timestamp_mapping():
     """Merged preview keeps frames already stored in the Units NWB."""
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         build_lazy_merged_sorting_from_samples,
     )
 
@@ -196,7 +200,9 @@ def _write_units_nwb_with_samples(path, rows):
 
     import pynwb
 
-    from spyglass.spikesorting.v2._units_nwb import SPIKE_SAMPLE_INDEX_COLUMN
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        SPIKE_SAMPLE_INDEX_COLUMN,
+    )
 
     nwbfile = pynwb.NWBFile(
         session_description="test",
@@ -220,7 +226,7 @@ def _write_units_nwb_with_samples(path, rows):
 
 
 def test_read_units_abs_spike_times_populated(tmp_path):
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_spike_times,
     )
 
@@ -234,7 +240,7 @@ def test_read_units_abs_spike_times_populated(tmp_path):
 
 def test_read_units_abs_spike_times_empty(tmp_path):
     """No Units table -> {} (the zero-unit-sort edge case)."""
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_spike_times,
     )
 
@@ -244,7 +250,7 @@ def test_read_units_abs_spike_times_empty(tmp_path):
 
 
 def test_read_units_spike_sample_indices_populated(tmp_path):
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_spike_sample_indices,
     )
 
@@ -263,7 +269,7 @@ def test_read_units_spike_sample_indices_populated(tmp_path):
 
 
 def test_read_units_spike_sample_indices_missing_column(tmp_path):
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_spike_sample_indices,
     )
 
@@ -336,7 +342,7 @@ def test_stored_units_readback_recovers_frames_in_both_file_layouts(tmp_path):
     the source series' timestamps; a file with them never reads the source
     (its path is ``None`` here, so reading it would raise).
     """
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         StoredUnits,
         read_stored_units,
     )
@@ -372,7 +378,7 @@ def test_units_readback_reads_source_timestamps_only_without_sample_frames(
 ):
     """The timestamps callback runs only for a file without sample frames,
     and ``units_nwb_stores_sample_indices`` predicts which branch runs."""
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         sorting_from_units_nwb,
         units_nwb_stores_sample_indices,
     )
@@ -411,7 +417,7 @@ def test_read_units_abs_times_and_sample_indices_matches_single_readers(
     """The single-open combined reader returns exactly what the two
     single-column readers return -- with the sample column, without it, and for
     an empty Units table."""
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_spike_times,
         read_units_abs_times_and_sample_indices,
         read_units_spike_sample_indices,
@@ -457,7 +463,7 @@ def test_read_units_abs_times_and_sample_indices_filters_to_requested_units(
     keeps a subset of a large sort never materializes the discarded units.
     ``None`` reads every unit; a requested id absent from the table is skipped
     (the caller's kept-set is authoritative)."""
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_times_and_sample_indices,
     )
 
@@ -500,7 +506,9 @@ def test_curation_source_unit_ids_selects_kept_and_contributors():
     (NOT the fresh merged head id) -- exactly mirroring the write body's access,
     so dropped units are never read. ``apply_merge=False`` writes every original
     unit 1:1, so it returns ``None`` (read all)."""
-    from spyglass.spikesorting.v2._units_nwb import curation_source_unit_ids
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        curation_source_unit_ids,
+    )
 
     # 2 and 5 kept as-is; 11 is a fresh merged head of contributors 3 and 7.
     kept = {2: [2], 5: [5], 11: [3, 7]}
@@ -569,7 +577,7 @@ class _FakeRecording:
 def test_sample_indices_to_times_maps_only_requested_frames():
     """frame->time mapping goes through sample_index_to_time with ONLY the spike
     frames (one request per unit), never the full timeline."""
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         _sample_indices_to_times_by_unit,
     )
 
@@ -596,7 +604,7 @@ def test_sample_indices_to_times_affine_uses_recording_start():
     """A rate-based recording maps frames to ``frames / fs + t_start``."""
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         _sample_indices_to_times_by_unit,
     )
 
@@ -614,7 +622,7 @@ def test_sample_indices_to_times_affine_uses_recording_start():
 def test_base_intervals_from_recording_detects_gaps():
     """Gap detection yields one interval per contiguous run from bounded
     timestamp chunks."""
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         _base_intervals_from_recording,
     )
 
@@ -642,7 +650,7 @@ def _write_sorting_provenance_nwb(path, provenance):
 
     import pynwb
 
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         SORTING_PROVENANCE,
         build_provenance_table,
     )
@@ -662,7 +670,7 @@ def _write_sorting_provenance_nwb(path, provenance):
 
 def test_read_sorting_statistics_spans_round_trips_int_pairs(tmp_path):
     """Persisted spans read back as ``(start, end)`` int tuples, in order."""
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_sorting_statistics_spans,
     )
 
@@ -686,7 +694,7 @@ def test_read_sorting_statistics_spans_raises_when_absent(tmp_path, provenance):
     """A sorting NWB without persisted spans raises, naming the sort and the
     fix, instead of letting a caller fall back to whole-recording statistics.
     """
-    from spyglass.spikesorting.v2._units_nwb import (
+    from spyglass.spikesorting.v2._storage.units_nwb import (
         read_sorting_statistics_spans,
     )
 
@@ -717,7 +725,7 @@ def test_write_sorting_units_nwb_unlinks_staged_file_on_failure(
     from pathlib import Path
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import _units_nwb
+    from spyglass.spikesorting.v2._storage import units_nwb as _units_nwb
     from spyglass.spikesorting.v2.sorting import Sorting
 
     nwb_file_name = Sorting.resolve_anchor_nwb_file_name(populated_sorting)
@@ -757,7 +765,7 @@ def test_units_nwb_carries_per_unit_and_source_metadata(planted_two_unit_sort):
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.common.common_region import BrainRegion
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         SORTING_PROVENANCE,
         read_provenance_values,
     )

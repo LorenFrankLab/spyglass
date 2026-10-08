@@ -50,7 +50,7 @@ def test_unitmatch_bundle_rejects_asymmetric_window_before_io():
     """The public bundle builder enforces the same centered-window contract."""
     from pydantic import ValidationError
 
-    from spyglass.spikesorting.v2._unitmatch_backend import (
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
         extract_unitmatch_bundle,
     )
 
@@ -74,7 +74,7 @@ def test_unit_semantics_for_sorter():
     """unit_semantics is derived from the sorter (single source of truth): the
     clusterless thresholder emits ONE threshold-crossing pseudo-unit, not a
     sorted neuron; every real sorter emits sorted units."""
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         unit_semantics_for_sorter,
     )
 
@@ -109,7 +109,7 @@ _INPUT_INDEX = {_CUR_A: 0, _CUR_B: 1}
 
 def test_canonicalize_orients_by_ascending_input_index():
     """A pair given B->A is stored A->B (ascending input_index)."""
-    from spyglass.spikesorting.v2._matcher_graph import (
+    from spyglass.spikesorting.v2._matching.graph import (
         canonicalize_match_pairs,
     )
 
@@ -127,7 +127,7 @@ def test_canonicalize_orients_by_ascending_input_index():
 
 def test_canonicalize_rejects_same_input_pair():
     """A pair whose two sides are the same input (incl. self-pairs) raises."""
-    from spyglass.spikesorting.v2._matcher_graph import (
+    from spyglass.spikesorting.v2._matching.graph import (
         canonicalize_match_pairs,
     )
 
@@ -138,7 +138,7 @@ def test_canonicalize_rejects_same_input_pair():
 
 def test_canonicalize_rejects_reversed_duplicate():
     """The same unit pair given in both orientations cannot both survive."""
-    from spyglass.spikesorting.v2._matcher_graph import (
+    from spyglass.spikesorting.v2._matching.graph import (
         canonicalize_match_pairs,
     )
 
@@ -150,7 +150,7 @@ def test_canonicalize_rejects_reversed_duplicate():
 
 def test_canonicalize_rejects_unpinned_curation():
     """A pair referencing a curation not in the pinned input set raises."""
-    from spyglass.spikesorting.v2._matcher_graph import (
+    from spyglass.spikesorting.v2._matching.graph import (
         canonicalize_match_pairs,
     )
 
@@ -166,7 +166,7 @@ def _nodes(*specs):
 
 def test_derive_tracked_units_full_triangle_is_one_component():
     """Three sessions, all pairwise edges high -> one clique of all three."""
-    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     a, b, c = _nodes(("A", 1), ("B", 1), ("C", 1))
     edges = [(a, b, 0.9), (b, c, 0.9), (a, c, 0.9)]
@@ -184,7 +184,7 @@ def test_derive_tracked_units_full_triangle_is_one_component():
 
 def test_derive_tracked_units_open_path_splits():
     """A<->B and B<->C high but A<->C low -> >=2 components, none with A and C."""
-    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     a, b, c = _nodes(("A", 1), ("B", 1), ("C", 1))
     edges = [(a, b, 0.9), (b, c, 0.9), (a, c, 0.2)]
@@ -204,7 +204,7 @@ def test_derive_tracked_units_partition_no_unit_in_two_groups():
     A1/B1. Strict tracking is a partition, so every curated unit appears in
     exactly one tracked unit (greedy maximal-clique cover), not duplicated.
     """
-    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     a1, a2 = ("A", 0, 1), ("A", 0, 2)
     b1, b2 = ("B", 0, 1), ("B", 0, 2)
@@ -229,7 +229,7 @@ def test_derive_tracked_units_partition_prefers_stronger_clique():
     {A1,B1}, but the stronger match is {A1,B2}, so the probability-aware
     tie-break must keep {A1,B2} whole and drop B1 to a singleton.
     """
-    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     a1 = ("A", 0, 1)
     b1, b2 = ("B", 0, 1), ("B", 0, 2)
@@ -245,7 +245,7 @@ def test_derive_tracked_units_partition_prefers_stronger_clique():
 
 def test_derive_tracked_units_unmatched_singleton():
     """A node with only sub-threshold edges is a singleton tracked unit."""
-    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     a, b = _nodes(("A", 1), ("B", 1))
     edges = [(a, b, 0.2)]  # below threshold -> no edge in the graph
@@ -262,7 +262,7 @@ def test_derive_tracked_units_unmatched_singleton():
 
 def test_derive_tracked_units_budget_cap_raises():
     """A node universe above ``max_strict_nodes`` refuses the clique search."""
-    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
     from spyglass.spikesorting.v2.exceptions import (
         TrackedUnitBudgetExceededError,
     )
@@ -274,7 +274,7 @@ def test_derive_tracked_units_budget_cap_raises():
 
 def test_derive_tracked_units_under_cap_succeeds_strict():
     """Under the cap the search runs and every row is policy 'strict'."""
-    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     nodes = [("S", 0, u) for u in range(5)]
     tracked = derive_tracked_units(nodes, [], threshold=0.5, max_strict_nodes=5)
@@ -286,7 +286,7 @@ def test_derive_tracked_units_rejects_edge_outside_universe():
     """An edge endpoint absent from the node universe raises (networkx
     add_edge would otherwise silently create the node, smuggling a unit past
     the node budget and into the partition)."""
-    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     a, b = _nodes(("A", 1), ("B", 1))
     stray = ("C", 0, 1)  # not in node_universe
@@ -304,7 +304,7 @@ def test_derive_tracked_units_equal_strength_tie_break_is_member_sorted():
     {A1,B1} whole and drop B2 to a singleton -- locking the determinism that
     ``tracked_unit_id`` assignment relies on.
     """
-    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     a1 = ("A", 0, 1)
     b1, b2 = ("B", 0, 1), ("B", 0, 2)
@@ -326,7 +326,7 @@ def test_derive_tracked_units_counts_sessions_by_nwb_not_curation():
     must key on the recording session (nwb), not on (sorting_id, curation_id) --
     otherwise a within-day match across two sort groups inflates to multi-session.
     """
-    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     # Sortings "A" and "B" are two sort groups of the SAME day; "C" is another day.
     a, b, c = _nodes(("A", 1), ("B", 1), ("C", 1))
@@ -355,7 +355,7 @@ def test_divergent_electrode_space_members_flags_distinct_probe():
     not a rejection: electrode-group names / ids are taken from each NWB and are
     not guaranteed stable across labs' ingestion, so UnitMatch warns rather than
     blocking a legitimate chronic match."""
-    from spyglass.spikesorting.v2._matcher_graph import (
+    from spyglass.spikesorting.v2._matching.graph import (
         divergent_electrode_space_members,
     )
 
@@ -370,7 +370,7 @@ def test_divergent_electrode_space_members_flags_distinct_probe():
 def test_divergent_electrode_space_members_empty_when_matching():
     """Members on the same electrode space (identical signature) -> no divergent
     members; a single-member selection trivially has none."""
-    from spyglass.spikesorting.v2._matcher_graph import (
+    from spyglass.spikesorting.v2._matching.graph import (
         divergent_electrode_space_members,
     )
 
@@ -391,7 +391,7 @@ def test_pairs_nwb_round_trip_preserves_fdr_none(tmp_path):
 
     from pynwb import NWBHDF5IO, NWBFile
 
-    from spyglass.spikesorting.v2._unitmatch_nwb import (
+    from spyglass.spikesorting.v2._storage.matches_nwb import (
         build_pairs_table,
         read_pairs,
         write_pairs_table,
@@ -510,8 +510,8 @@ def test_external_matcher_satisfies_protocol_and_runs():
     inputs = [
         SessionMatcherInput(
             curation_key={"sorting_id": s, "curation_id": 0},
-            waveform_dir=Path("/unused"),
-            channel_positions_path=Path("/unused/cp.npy"),
+            bundle_dir=Path("/unused"),
+            geometry_path=Path("/unused/cp.npy"),
         )
         for s in ("A", "B")
     ]
@@ -592,7 +592,7 @@ def test_driftout_units_recovered_pooled(tmp_path):
     DB-free: this test requests no ``dj_conn`` fixture and the functions it
     imports (:func:`make_dataset`, :func:`make_scenario_sessions`,
     :func:`run_one`, :func:`evaluate_gates`) reach a database only through
-    ``spyglass.spikesorting.v2._unitmatch_backend`` and ``.matcher_protocol``,
+    ``spyglass.spikesorting.v2._matching.unitmatch_backend`` and ``.matcher_protocol``,
     neither of which opens a DataJoint connection at import time or at call
     time here -- ``run_one`` builds bundles on disk and matches them through
     ``UnitMatchBackend.match``, with no table access. pytest fixtures are
@@ -1710,7 +1710,7 @@ def test_unitmatch_records_backend_version(two_session_curated_group):
     row = (UnitMatch & pk).fetch1()
     assert row["spikeinterface_version"] == si.__version__
     assert row["matcher_backend"] == (
-        "spyglass.spikesorting.v2._unitmatch_backend"
+        "spyglass.spikesorting.v2._matching.unitmatch_backend"
     )
     # The single-session path never calls UnitMatchPy, so it also runs (and
     # records NULL) where the optional package is not installed.
@@ -1721,11 +1721,11 @@ def test_unitmatch_records_backend_version(two_session_curated_group):
     assert row["matcher_backend_version"] == expected_version
     provenance = row["matcher_provenance"]
     assert provenance["backend"]["qualified_name"] == (
-        "spyglass.spikesorting.v2._unitmatch_backend.UnitMatchBackend"
+        "spyglass.spikesorting.v2._matching.unitmatch_backend.UnitMatchBackend"
     )
     assert provenance["backend"]["version"] == expected_version
     assert provenance["preparer"]["qualified_name"] == (
-        "spyglass.spikesorting.v2._unitmatch_backend.UnitMatchInputPreparer"
+        "spyglass.spikesorting.v2._matching.unitmatch_backend.UnitMatchInputPreparer"
     )
     assert provenance["preparer"]["version"] == provenance["spyglass_version"]
 
@@ -2071,8 +2071,8 @@ def test_make_runs_full_matcher_table_path(
             return PreparedMatcherInput(
                 SessionMatcherInput(
                     curation_key=dict(source.curation_key),
-                    waveform_dir=directory,
-                    channel_positions_path=directory / "channel_positions.npy",
+                    bundle_dir=directory,
+                    geometry_path=directory / "channel_positions.npy",
                     recording_date=source.recording_date,
                 )
             )
@@ -2787,7 +2787,7 @@ def test_all_excluded_member_raises_with_member_identity(
     the reason, and no UnitMatch row or staged pairs NWB is left behind.
     """
     pytest.importorskip("UnitMatchPy")
-    from spyglass.spikesorting.v2._unitmatch_backend import (
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
         NoMatchableUnitsError,
     )
     from spyglass.spikesorting.v2.unit_matching import UnitMatch
@@ -2920,9 +2920,11 @@ def test_v2_unitmatch_polymer_mearec_ground_truth(dj_conn, tmp_path):
 
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2._lookup_validation import _validate_params
+    from spyglass.spikesorting.v2._core.lookup_validation import (
+        _validate_params,
+    )
     from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
-    from spyglass.spikesorting.v2._unitmatch_backend import (
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
         UnitMatchBackend,
         extract_unitmatch_bundle,
     )
@@ -3028,10 +3030,8 @@ def test_v2_unitmatch_polymer_mearec_ground_truth(dj_conn, tmp_path):
                         "sorting_id": f"polymer_gt_{index}",
                         "curation_id": 0,
                     },
-                    waveform_dir=session_dir,
-                    channel_positions_path=(
-                        session_dir / "channel_positions.npy"
-                    ),
+                    bundle_dir=session_dir,
+                    geometry_path=(session_dir / "channel_positions.npy"),
                 )
             )
 
@@ -3232,7 +3232,9 @@ def test_geometry_preflight_fails_before_extraction(
     runs (extraction lives in ``UnitMatch.make``, which never runs here)."""
     import numpy as np
 
-    from spyglass.spikesorting.v2 import _unitmatch_backend
+    from spyglass.spikesorting.v2._matching import (
+        unitmatch_backend as _unitmatch_backend,
+    )
     from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
 
     grp = two_session_curated_group
@@ -3338,7 +3340,7 @@ def test_unitmatch_nwb_self_describes(two_session_curated_group):
     input count.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._nwb_provenance import (
+    from spyglass.spikesorting.v2._storage.provenance import (
         UNITMATCH_INPUT_RECORDINGS,
         UNITMATCH_INPUTS,
         UNITMATCH_PROVENANCE,
@@ -3535,8 +3537,8 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
             return PreparedMatcherInput(
                 SessionMatcherInput(
                     curation_key=dict(source.curation_key),
-                    waveform_dir=directory,
-                    channel_positions_path=directory / "channel_positions.npy",
+                    bundle_dir=directory,
+                    geometry_path=directory / "channel_positions.npy",
                     recording_date=source.recording_date,
                 )
             )
@@ -3603,7 +3605,9 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         # ``f"{stage}_status"``, so the summary's status-key stem must match the
         # stage_seconds key. A regression that renamed one but not the other
         # would render a blank status here.
-        from spyglass.spikesorting.v2._pipeline_reporting import describe_run
+        from spyglass.spikesorting.v2._orchestration.reporting import (
+            describe_run,
+        )
 
         receipt = describe_run(summary)
         stage_status = (
@@ -3829,7 +3833,7 @@ def test_describe_unit_match_choices_unsorted_member_and_multiple_recordings(
     one null-curation row so it reads "sort me first").
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2._pipeline_run import (
+    from spyglass.spikesorting.v2._orchestration.matching import (
         _unit_match_member_choices,
     )
     from spyglass.spikesorting.v2.curation import CurationV2

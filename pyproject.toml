@@ -52,7 +52,7 @@ dependencies = [
   "ndx-ophys-devices",
   "ndx-optogenetics==0.3.0",
   "ndx-pose",
-  "networkx",                       # imported by spikesorting v2 _matcher_graph
+  "networkx",                       # imported by spikesorting v2 _matching.graph
   "non-local-detector==0.6.9",
   # NLD 0.6.9 uses the clip(a_min=..., a_max=...) keywords removed in JAX 0.10.
   # Keep the published detector API and test real fitting before moving these.
@@ -128,7 +128,7 @@ optional-dependencies.spikesorting-v2 = [
   # on the lifecycle exercised by its transaction/rollback regression tests.
   "datajoint==0.14.9",
   # Cross-process locks for the shared analyzer cache
-  # (_analyzer_cache.analyzer_cache_lock) and the recording, concat and motion
+  # (_storage.analyzer_cache.analyzer_cache_lock) and recording, concat and motion
   # cache rebuilds.
   # Pure-Python and tiny; declared explicitly rather than relied on transitively
   # via torch. >=3.15: first release whose is_singleton lock reuses the live
@@ -163,7 +163,7 @@ optional-dependencies.spikesorting-v2-matching = [
   # still has a numpy-2 RUNTIME break in its metric path (``np.arange`` on
   # 1-element ``argwhere`` endpoints in ``param_functions``). The matcher backend
   # MUST install the scoped ``param_functions`` arange shim (see
-  # spyglass.spikesorting.v2._unitmatch_backend) or every run aborts.
+  # spyglass.spikesorting.v2._matching.unitmatch_backend) or every run aborts.
   # Revisit when UnitMatchPy restores numpy>=2 support upstream.
   "UnitMatchPy>=3.2.6,<3.2.8",
   "mat73",                     # UnitMatchPy reads MATLAB .mat exports

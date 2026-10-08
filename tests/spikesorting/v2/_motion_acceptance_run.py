@@ -12,9 +12,9 @@ scenario's recording and its noise-free twin (SpikeInterface
 ``generate_drifting_recording``), bandpasses them, derives continuity with the
 stage's own helpers (``continuity_from_timestamps`` / ``concat_continuity``),
 masks planted artifacts (``statistics_spans``, ``silence_frame_ranges``),
-estimates with ``_motion.estimate_motion_in_spans`` on the estimation clock
+estimates with ``_motion.estimation.estimate_motion_in_spans`` on the estimation clock
 (``build_estimation_clock``), applies with
-``_motion.apply_motion_on_estimation_clock``, sorts with the sorting stage's
+``_motion.estimation.apply_motion_on_estimation_clock``, sorts with the sorting stage's
 ``run_si_sorter`` + ``remove_excess_spikes`` and compares with the ground
 truth. The metrics (motion error, corrected-signal fidelity, sorting accuracy,
 border channels, cost) are defined in :func:`plain_motion_error`,
@@ -79,7 +79,7 @@ class ScenarioRecording(NamedTuple):
         generated recording's clock, SpikeInterface ``Motion`` sign.
     unit_depths_um : numpy.ndarray
         ``(num_units,)`` ground-truth unit depths (for the nonrigid factor).
-    continuity : _sorting_artifact_mask.Continuity
+    continuity : _sorting.artifact_mask.Continuity
         Continuity spans with their first and last source timestamps.
     excluded : list[tuple[int, int]]
         Masked frame ranges (empty without planted artifacts).
@@ -204,8 +204,8 @@ def build_scenario(
     """Generate, filter, cut, join and mask one scenario's recording."""
     from spikeinterface.core import concatenate_recordings
 
-    from spyglass.spikesorting.v2._concat_recording import concat_continuity
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._recording.concat import concat_continuity
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         continuity_from_timestamps,
     )
     from tests.spikesorting.v2._motion_fixtures import (
@@ -394,7 +394,9 @@ def source_clock_motion_error(motion, clock, displacement, channel_depths, dfs):
     and max of ``|error|`` are reported. Sign: correlation of the estimate
     averaged over channel depths with the truth, per kept bin.
     """
-    from spyglass.spikesorting.v2._motion import displacement_on_source_clock
+    from spyglass.spikesorting.v2._motion.estimation import (
+        displacement_on_source_clock,
+    )
     from tests.spikesorting.v2._motion_fixtures import (
         source_clock_estimate_and_truth,
     )
@@ -554,7 +556,7 @@ def sorting_metrics(gt_sorting, sorting, comparison) -> dict:
 def _sort(manifest, recording, spans, tag: str):
     """Sort through the v2 sorting stage's DB-free runner."""
     from spyglass.spikesorting.v2._params.sorter import MountainSort5Schema
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         remove_excess_spikes,
         run_si_sorter,
     )
@@ -585,14 +587,14 @@ def run_case(
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         apply_motion_on_estimation_clock,
         build_estimation_clock,
         estimate_motion_in_spans,
         resolve_estimation_params,
         resolve_interpolation_params,
     )
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         silence_frame_ranges,
         statistics_spans,
     )
@@ -824,19 +826,19 @@ def run_representative(
     import spikeinterface as si
     import spikeinterface.extractors as se
 
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         apply_motion_on_estimation_clock,
         build_estimation_clock,
         estimate_motion_in_spans,
         resolve_estimation_params,
         resolve_interpolation_params,
     )
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         KRIGING_FORCE_EXTRAPOLATE,
         motion_estimation_default_contents,
         motion_interpolation_default_contents,
     )
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         continuity_from_timestamps,
     )
     from tests.spikesorting.v2._motion_fixtures import JOB_KWARGS, bandpass
@@ -989,7 +991,7 @@ def run_representative(
 
 def _sort_representative(recording, spans):
     from spyglass.spikesorting.v2._params.sorter import MountainSort5Schema
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         remove_excess_spikes,
         run_si_sorter,
     )

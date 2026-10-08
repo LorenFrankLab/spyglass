@@ -18,10 +18,12 @@ from collections.abc import Mapping
 
 import datajoint as dj
 
-from spyglass.spikesorting.v2._enums import CurationLabel
-from spyglass.spikesorting.v2._figpack_curation import default_label_options
-from spyglass.spikesorting.v2._recipe_catalog import FRANKLAB_CURATION_RULES
-from spyglass.spikesorting.v2._review_profile import (
+from spyglass.spikesorting.v2._core.enums import CurationLabel
+from spyglass.spikesorting.v2._review.annotations import default_label_options
+from spyglass.spikesorting.v2._core.recipe_catalog import (
+    FRANKLAB_CURATION_RULES,
+)
+from spyglass.spikesorting.v2._review.profile import (
     normalize_review_profile,
     profile_display_property_vocabulary,
     review_profile_label_policy,
@@ -31,7 +33,7 @@ from spyglass.spikesorting.v2.metric_curation import (
     AutoCurationRules,
     QualityMetricParameters,
 )
-from spyglass.spikesorting.v2.utils import ImmutableParamsLookup
+from spyglass.spikesorting.v2._core.table_integrity import ImmutableParamsLookup
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v2_review_profile")

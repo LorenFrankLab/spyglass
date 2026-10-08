@@ -15,14 +15,16 @@ import pytest
 
 def _resolve(params):
     """Resolve ``params``, naming the shipped rows' gap cap unless given."""
-    from spyglass.spikesorting.v2._motion import resolve_estimation_params
-    from spyglass.spikesorting.v2._recipe_catalog import MOTION_MAX_GAP_S
+    from spyglass.spikesorting.v2._motion.estimation import (
+        resolve_estimation_params,
+    )
+    from spyglass.spikesorting.v2._core.recipe_catalog import MOTION_MAX_GAP_S
 
     return resolve_estimation_params({"max_gap_s": MOTION_MAX_GAP_S, **params})
 
 
 def _hash(resolved):
-    from spyglass.spikesorting.v2._motion import resolved_params_hash
+    from spyglass.spikesorting.v2._motion.estimation import resolved_params_hash
 
     return resolved_params_hash(resolved)
 
@@ -172,7 +174,7 @@ def test_recorded_noise_budget_is_the_span_samplers():
         get_random_recording_slices,
     )
 
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         STATISTICS_SAMPLE_CHUNK_MS,
         STATISTICS_SAMPLE_NUM_CHUNKS,
         _sample_statistics_spans,
@@ -208,7 +210,9 @@ def test_recorded_noise_budget_is_the_span_samplers():
 def test_gap_cap_is_required_and_part_of_the_resolved_configuration():
     from pydantic import ValidationError
 
-    from spyglass.spikesorting.v2._motion import resolve_estimation_params
+    from spyglass.spikesorting.v2._motion.estimation import (
+        resolve_estimation_params,
+    )
 
     with pytest.raises(ValidationError, match="max_gap_s"):
         resolve_estimation_params({"preset": "dredge"})
@@ -236,7 +240,9 @@ def test_resolved_configuration_is_json_stable():
 
 
 def test_step_kwargs_are_fresh_copies_with_callables_restored():
-    from spyglass.spikesorting.v2._motion import spikeinterface_step_kwargs
+    from spyglass.spikesorting.v2._motion.estimation import (
+        spikeinterface_step_kwargs,
+    )
 
     resolved = _resolve(
         {"preset": "dredge", "estimate_motion_kwargs": {"xcorr_kw": {}}}
@@ -293,7 +299,7 @@ def test_unknown_key_or_unsupported_method_is_rejected(overrides, match):
 
 
 def test_default_rows_resolve():
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         motion_estimation_default_contents,
     )
 
@@ -336,7 +342,9 @@ KNOWN_ANSWER_DURATION_S = 90.0
 
 def _one_span_clock(recording):
     """The estimation clock of a gap-free recording: its own ``t0 + i / fs``."""
-    from spyglass.spikesorting.v2._motion import build_estimation_clock
+    from spyglass.spikesorting.v2._motion.estimation import (
+        build_estimation_clock,
+    )
 
     n = recording.get_num_samples()
     return build_estimation_clock(
@@ -349,7 +357,9 @@ def _one_span_clock(recording):
 
 
 def _estimate(recording, spans=None, preset="dredge_fast", clock=None):
-    from spyglass.spikesorting.v2._motion import estimate_motion_in_spans
+    from spyglass.spikesorting.v2._motion.estimation import (
+        estimate_motion_in_spans,
+    )
     from tests.spikesorting.v2._motion_fixtures import JOB_KWARGS
 
     clock = _one_span_clock(recording) if clock is None else clock
@@ -385,7 +395,9 @@ def test_unmasked_single_span_estimate_equals_compute_motion(preset):
     import spikeinterface as si
     import spikeinterface.preprocessing as sip
 
-    from spyglass.spikesorting.v2._motion import spikeinterface_step_kwargs
+    from spyglass.spikesorting.v2._motion.estimation import (
+        spikeinterface_step_kwargs,
+    )
     from tests.spikesorting.v2._motion_fixtures import (
         JOB_KWARGS,
         rigid_drift_recordings,
@@ -479,11 +491,11 @@ def test_masked_noise_levels_come_from_the_statistics_spans():
     the masked zeros and comes out lower."""
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         silence_frame_ranges,
         statistics_spans,
     )
-    from spyglass.spikesorting.v2._sorting_dispatch import (
+    from spyglass.spikesorting.v2._sorting.dispatch import (
         cache_span_noise_levels,
     )
     from tests.spikesorting.v2._motion_fixtures import rigid_drift_recordings
@@ -531,11 +543,11 @@ def test_non_positive_or_non_finite_noise_level_is_an_error(masked):
     estimator (one span) and on the span sampler (masked frames)."""
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         estimation_noise_levels,
         resolve_estimation_params,
     )
-    from spyglass.spikesorting.v2._recipe_catalog import MOTION_MAX_GAP_S
+    from spyglass.spikesorting.v2._core.recipe_catalog import MOTION_MAX_GAP_S
 
     fs = 30_000.0
     n = int(12 * fs)
@@ -574,9 +586,7 @@ def test_integer_calibrations_of_one_voltage_estimate_identically(preset):
     import spikeinterface.sortingcomponents.motion as si_motion
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
-        statistics_spans,
-    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import statistics_spans
     from tests.spikesorting.v2._motion_fixtures import (
         polymer_shank_probe,
         rigid_drift_recordings,
@@ -733,7 +743,7 @@ def test_masked_artifacts_do_not_reach_the_estimate(rigid_drift_90s):
 
     import spikeinterface.sortingcomponents.motion as si_motion
 
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         silence_frame_ranges,
         statistics_spans,
     )
@@ -832,7 +842,9 @@ def test_estimation_clock_caps_only_long_gaps():
     real gap ``g_i = t_{i+1} - (u_i + 1 / fs)``: a gap below the cap keeps
     its real length, a longer one is capped, a zero gap stays zero. At
     fs = 8 Hz every value is exact in binary floating point."""
-    from spyglass.spikesorting.v2._motion import build_estimation_clock
+    from spyglass.spikesorting.v2._motion.estimation import (
+        build_estimation_clock,
+    )
 
     spans = [(0, 8), (8, 24), (24, 28), (28, 32)]
     # Span lengths 1.0 / 2.0 / 0.5 / 0.5 s with timestamps at exactly 8 Hz;
@@ -875,7 +887,9 @@ def test_adjacent_spans_join_with_a_zero_gap(origin_s):
     adjacent: whatever the timestamps' magnitude, float rounding of the
     timestamps and of the derived rate must not turn the zero gap into an
     overlap, and the clock keeps (at most) a sub-sample gap."""
-    from spyglass.spikesorting.v2._motion import build_estimation_clock
+    from spyglass.spikesorting.v2._motion.estimation import (
+        build_estimation_clock,
+    )
 
     timestamps, fs, splits = _adjacent_splits(origin_s)
     n = timestamps.size
@@ -911,8 +925,10 @@ def test_gap_is_measured_from_the_real_last_timestamp():
     timestamp. Timestamps that genuinely overlap still raise."""
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.spikesorting.v2._motion import build_estimation_clock
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._motion.estimation import (
+        build_estimation_clock,
+    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         continuity_from_timestamps,
     )
 
@@ -996,7 +1012,9 @@ def test_gap_is_measured_from_the_real_last_timestamp():
 def test_estimation_clock_rejects_invalid_input(
     spans, starts, ends, cap, match
 ):
-    from spyglass.spikesorting.v2._motion import build_estimation_clock
+    from spyglass.spikesorting.v2._motion.estimation import (
+        build_estimation_clock,
+    )
 
     with pytest.raises(ValueError, match=match):
         build_estimation_clock(spans, starts, ends, 1000.0, max_gap_s=cap)
@@ -1008,7 +1026,7 @@ def test_clock_view_presents_the_estimation_clock():
     SpikeInterface round trip (pickle rebuilds it from its kwargs)."""
     import pickle
 
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         EstimationClockRecording,
         build_estimation_clock,
         estimation_times,
@@ -1073,7 +1091,7 @@ def test_clock_view_presents_the_estimation_clock():
 def test_source_clock_mapping_flags_bins_inside_a_capped_gap():
     from spikeinterface.core.motion import Motion
 
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         build_estimation_clock,
         displacement_on_source_clock,
     )
@@ -1110,7 +1128,7 @@ def test_source_clock_mapping_follows_the_real_timestamps():
     by up to 0.3 s by the end of the 30 s span."""
     from spikeinterface.core.motion import Motion
 
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         build_estimation_clock,
         displacement_on_source_clock,
     )
@@ -1134,8 +1152,10 @@ def test_source_clock_mapping_follows_the_real_timestamps():
 
 def _clock_for(spans, starts, ends=None):
     """The shipped recipe's clock; ``ends`` default to uniform timestamps."""
-    from spyglass.spikesorting.v2._motion import build_estimation_clock
-    from spyglass.spikesorting.v2._recipe_catalog import MOTION_MAX_GAP_S
+    from spyglass.spikesorting.v2._motion.estimation import (
+        build_estimation_clock,
+    )
+    from spyglass.spikesorting.v2._core.recipe_catalog import MOTION_MAX_GAP_S
     from tests.spikesorting.v2._motion_fixtures import SAMPLING_FREQUENCY
 
     if ends is None:
@@ -1155,7 +1175,9 @@ def test_single_span_clock_is_the_source_clock():
     import spikeinterface as si
     import spikeinterface.preprocessing as sip
 
-    from spyglass.spikesorting.v2._motion import spikeinterface_step_kwargs
+    from spyglass.spikesorting.v2._motion.estimation import (
+        spikeinterface_step_kwargs,
+    )
     from tests.spikesorting.v2._motion_fixtures import (
         JOB_KWARGS,
         SAMPLING_FREQUENCY,
@@ -1297,7 +1319,7 @@ def test_unequal_members_with_a_join_and_an_internal_gap():
     jumps planted in both gaps are recovered in one reference frame."""
     from spikeinterface.core import concatenate_recordings
 
-    from spyglass.spikesorting.v2._concat_recording import concat_continuity
+    from spyglass.spikesorting.v2._recording.concat import concat_continuity
     from tests.spikesorting.v2._motion_fixtures import (
         SAMPLING_FREQUENCY,
         common_frame_error_on_source_clock,
@@ -1356,7 +1378,9 @@ def test_span_without_peaks_is_reported_not_fatal(caplog):
     source times, and the estimate is still made from the other span."""
     import logging
 
-    from spyglass.spikesorting.v2._motion import spans_without_evidence
+    from spyglass.spikesorting.v2._motion.estimation import (
+        spans_without_evidence,
+    )
     from tests.spikesorting.v2._motion_fixtures import rigid_drift_recordings
 
     recording, _, _ = rigid_drift_recordings(seed=0, duration_s=5.0)
@@ -1447,7 +1471,7 @@ def test_peak_near_a_join_is_not_suppressed_across_it():
 
 
 def test_peak_window_must_lie_inside_one_span():
-    from spyglass.spikesorting.v2._signal_math import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         frames_with_window_in_one_span,
     )
 
@@ -1464,7 +1488,7 @@ def test_peak_window_must_lie_inside_one_span():
 def test_detection_window_must_not_cross_a_join():
     """Only joins between continuity spans restrict detection support; the
     recording's own start and end do not."""
-    from spyglass.spikesorting.v2._motion import peaks_clear_of_joins
+    from spyglass.spikesorting.v2._motion.estimation import peaks_clear_of_joins
 
     spans = np.array([[0, 30], [30, 60], [60, 90]])
     peaks = np.array([0, 1, 25, 26, 33, 34, 55, 56, 63, 64, 89])
@@ -1537,7 +1561,9 @@ def _column(n_contacts, pitch=26.0):
     ],
 )
 def test_ineligible_geometry_is_rejected(positions, properties, match):
-    from spyglass.spikesorting.v2._motion import check_estimation_eligibility
+    from spyglass.spikesorting.v2._motion.estimation import (
+        check_estimation_eligibility,
+    )
 
     recording = _bare_recording(positions, properties=properties)
     with pytest.raises(ValueError, match=match):
@@ -1546,7 +1572,9 @@ def test_ineligible_geometry_is_rejected(positions, properties, match):
 
 def test_short_probe_is_eligible_for_a_rigid_recipe():
     """The nonrigid-window check applies only to nonrigid recipes."""
-    from spyglass.spikesorting.v2._motion import check_estimation_eligibility
+    from spyglass.spikesorting.v2._motion.estimation import (
+        check_estimation_eligibility,
+    )
 
     recording = _bare_recording(_column(16))
     check_estimation_eligibility(recording, _resolve({"preset": "rigid_fast"}))
@@ -1555,7 +1583,9 @@ def test_short_probe_is_eligible_for_a_rigid_recipe():
 def test_recording_without_positions_has_no_probe():
     from spikeinterface.core import NumpyRecording
 
-    from spyglass.spikesorting.v2._motion import check_estimation_eligibility
+    from spyglass.spikesorting.v2._motion.estimation import (
+        check_estimation_eligibility,
+    )
 
     recording = NumpyRecording(
         [np.zeros((100, 4), dtype="float32")], sampling_frequency=30_000.0
@@ -1565,7 +1595,9 @@ def test_recording_without_positions_has_no_probe():
 
 
 def test_ineligible_geometry_fails_before_estimation():
-    from spyglass.spikesorting.v2._motion import estimate_motion_in_spans
+    from spyglass.spikesorting.v2._motion.estimation import (
+        estimate_motion_in_spans,
+    )
 
     recording = _bare_recording(_column(16))
     n = recording.get_num_samples()
@@ -1593,7 +1625,7 @@ def test_ineligible_geometry_fails_before_estimation():
     ],
 )
 def test_invalid_spans_are_rejected(continuity, statistics, match):
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         build_estimation_clock,
         estimate_motion_in_spans,
     )
@@ -1653,10 +1685,12 @@ def test_non_finite_displacement_is_an_error():
 def test_identity_omits_an_absent_artifact_detection():
     import uuid
 
-    from spyglass.spikesorting.v2._motion import (
+    from spyglass.spikesorting.v2._motion.estimation import (
         motion_estimate_identity_payload,
     )
-    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        deterministic_id,
+    )
 
     common = dict(
         source_kind="recording",
@@ -1705,14 +1739,18 @@ def test_identity_omits_an_absent_artifact_detection():
 def test_concat_heading_with_removed_motion_columns_is_refused(
     recording_heading, selection_heading
 ):
-    from spyglass.spikesorting.v2._motion import assert_concat_schema_current
+    from spyglass.spikesorting.v2._motion.estimation import (
+        assert_concat_schema_current,
+    )
 
     with pytest.raises(ValueError, match="Recreate the v2 concat tables"):
         assert_concat_schema_current(recording_heading, selection_heading)
 
 
 def test_current_concat_heading_passes():
-    from spyglass.spikesorting.v2._motion import assert_concat_schema_current
+    from spyglass.spikesorting.v2._motion.estimation import (
+        assert_concat_schema_current,
+    )
 
     assert_concat_schema_current(
         ["concat_recording_id", "content_hash", "statistics_spans"],

@@ -184,7 +184,8 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2 import _recording_nwb, _source_resolution
+    from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
+    from spyglass.spikesorting.v2._recording import source as _source_resolution
 
     # Substitute the loaded preprocessed recording with the synthetic one
     # carrying a known transient at both seams: RecordingArtifactDetection
@@ -456,7 +457,7 @@ def test_artifact_masking_preserves_clean_gt_spikes(
     inj_rec.set_channel_offsets([0.0] * n_ch)
     inj_rec = inj_rec.set_probe(orig.get_probe())
 
-    from spyglass.spikesorting.v2 import _recording_nwb
+    from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
 
     monkeypatch.setattr(
         _recording_nwb, "read_stored_traces", lambda traces: inj_rec
@@ -762,7 +763,7 @@ def test_artifact_compute_kernels_import_without_db():
 
     probe = textwrap.dedent("""
         import sys
-        import spyglass.spikesorting.v2._artifact_compute as k
+        import spyglass.spikesorting.v2._artifacts.compute as k
 
         assert hasattr(k, "_init_artifact_worker")
         assert hasattr(k, "_compute_artifact_chunk")
@@ -795,7 +796,7 @@ def test_make_fetch_heals_recording_and_compute_needs_no_db(
     The read is substituted with the synthetic transient recording, keyed on
     the resolved file, so the detected gap shows compute scanned the
     recording its fetch pinned."""
-    from spyglass.spikesorting.v2 import _recording_nwb
+    from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -982,10 +983,10 @@ def test_make_fetch_raises_when_recording_absent_from_interval_dict(
     )
     # Helper returns a dict for a DIFFERENT nwb (e.g. a shared-group source that
     # lost this member's row): make_fetch must raise, not feed a dict to the
-    # mask. make_fetch re-imports the helper from _artifact_intervals at call
+    # mask. make_fetch re-imports the helper from _artifact_readers at call
     # time, so patch it on the SOURCE module (not on `sorting`).
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._artifact_intervals."
+        "spyglass.spikesorting.v2._artifacts.readers."
         "read_artifact_removed_intervals",
         lambda key, as_dict=False: {"some_other_session.nwb": [[0.0, 1.0]]},
     )
@@ -1018,7 +1019,7 @@ def test_manual_exclusions_are_persisted_and_compose_with_detection(
     artifact_e2e_session, monkeypatch
 ):
     from spyglass.common import IntervalList
-    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
     from spyglass.spikesorting.v2.artifact import (
@@ -1026,7 +1027,7 @@ def test_manual_exclusions_are_persisted_and_compose_with_detection(
         RecordingArtifactDetection,
         RecordingArtifactSelection,
     )
-    from spyglass.spikesorting.v2 import _recording_nwb
+    from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
 
     recording = _synth_recording_with_transient()
     monkeypatch.setattr(

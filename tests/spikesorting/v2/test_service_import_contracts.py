@@ -2,7 +2,7 @@
 
 The table-class internals are factored into dependency-light service
 modules. The load-bearing property the whole extraction rests on is that
-the ``_*`` service modules import without pulling in the DB layer
+the private domain service modules import without pulling in the DB layer
 (``spyglass.common`` or a v2 *schema* module), so a cold import opens no
 DB connection. These tests pin that import boundary and check that the
 typed pipeline contracts are re-exported beside ``run_v2_pipeline``.
@@ -18,104 +18,25 @@ from pathlib import Path
 import pytest
 
 # Service modules that MUST be importable without the DataJoint DB layer.
+_SERVICE_ROOT = (
+    Path(__file__).resolve().parents[3] / "src/spyglass/spikesorting/v2"
+)
 _DB_FREE_SERVICE_MODULES = [
-    "_acquisition_spans",
-    "_analyzer_cache",
-    "_container_sorting",
-    "_artifact_compute",
-    "_artifact_intervals",
-    "_artifact_naming",
     "bad_channels",
-    "_concat_recording",
-    "_concat_recording_fetch",
-    "_curation_analyzer",
-    "_curation_insert",
-    "_curation_plan",
-    "_curation_readers",
-    "_curation_restriction",
-    "_curation_routing",
-    "_curation_transforms",
-    "_db_locking",
-    "_dj_compat",
-    "_enums",
-    "_evaluation_acceptance",
-    "_evaluation_analyzers",
-    "_figpack_curation",
-    "_json_io",
-    "_lookup_validation",
-    "_manual_artifacts",
-    "_matcher_graph",
-    "_metric_curation",
-    "_metric_curation_fetch",
-    "_metric_curation_nwb",
-    "_metric_curation_plots",
-    "_motion",
-    "_motion_compute",
-    "_motion_report",
-    "_motion_report_inputs",
-    "_motion_selection_insert",
-    "_nwb_metadata_helpers",
-    "_nwb_iterators",
-    "_nwb_provenance",
-    "_observation_io",
-    "_observed_time",
-    "_parameter_identity",
-    "_pipeline_geometry",
-    "_pipeline_preflight",
-    "_pipeline_presets",
-    "_pipeline_public",
-    "_pipeline_reporting",
-    "_pipeline_run",
-    "_pipeline_types",
-    "_recipe_catalog",
-    "_recompute",
-    "_recording_fetch",
-    "_recording_fingerprint",
-    "_recording_geometry",
-    "_recording_nwb",
-    "_recording_preprocessing",
-    "_recording_restriction",
-    "_recording_types",
-    "_reference_resolution",
-    "_review_delivery",
-    "_review_drafts",
-    "_review_http",
-    "_review_inspection",
-    "_review_notebook",
-    "_review_operations",
-    "_review_profile",
-    "_review_unit_properties",
-    "_review_view",
-    "_selection_identity",
-    "_selection_plan",
-    "_session_group_insert",
-    "_shared_artifact_group",
-    "_signal_math",
-    "_si_metric_patches",
-    "_si_compat",
-    "_si_storage",
-    "_sort_group_insert",
-    "_sort_group_planning",
-    "_sorter_parameters",
-    "_sorting_analyzer",
-    "_sorting_artifact_mask",
-    "_sorting_dispatch",
-    "_sorting_fetch",
-    "_sorting_selection_insert",
-    "_sorting_units",
-    "_source_resolution",
-    "_staged_outputs",
-    "_unit_annotation",
-    "_unit_match_compute",
-    "_waveform_bundles",
-    "_unit_match_fetch",
-    "_unit_match_inputs",
-    "_unit_match_planning",
-    "_unit_match_readers",
-    "_unitmatch_backend",
-    "_unitmatch_nwb",
-    "_units_nwb",
-    "_visualization",
+    *sorted(
+        ".".join(
+            (
+                path.parent
+                if path.name == "__init__.py"
+                else path.with_suffix("")
+            )
+            .relative_to(_SERVICE_ROOT)
+            .parts
+        )
+        for path in _SERVICE_ROOT.rglob("*.py")
+        if path != _SERVICE_ROOT / "__init__.py"
+        and path.relative_to(_SERVICE_ROOT).parts[0].startswith("_")
+    ),
 ]
 
 
@@ -129,18 +50,33 @@ def test_cold_import_probes_cover_all_private_services():
         / "v2"
     )
     assert service_dir.is_dir()
+    assert (service_dir / "_orchestration").is_dir()
+    assert not (service_dir / "_internal").exists()
     services = {
-        path.stem
-        for path in service_dir.glob("_*.py")
-        if path.stem != "__init__"
+        ".".join(
+            (
+                path.parent
+                if path.name == "__init__.py"
+                else path.with_suffix("")
+            )
+            .relative_to(service_dir)
+            .parts
+        )
+        for path in service_dir.rglob("*.py")
+        if path != service_dir / "__init__.py"
+        and path.relative_to(service_dir).parts[0].startswith("_")
     }
     missing = services - set(_DB_FREE_SERVICE_MODULES)
     assert not missing, f"Missing cold-import probes: {sorted(missing)!r}"
+    assert len(_DB_FREE_SERVICE_MODULES) == len(set(_DB_FREE_SERVICE_MODULES))
+    assert "_motion" in _DB_FREE_SERVICE_MODULES
+    assert "_recording" in _DB_FREE_SERVICE_MODULES
+    assert "_params" in _DB_FREE_SERVICE_MODULES
 
 
 @pytest.mark.parametrize("modname", _DB_FREE_SERVICE_MODULES)
 def test_service_module_imports_without_db_layer(modname):
-    """Each ``_*`` service module cold-imports with no DB-layer dependency.
+    """Each private service and package imports with no DB-layer dependency.
 
     Importing a v2 *schema* module (artifact / sorting / recording /
     curation) activates ``dj.schema(...)`` and the ``from spyglass.common
@@ -211,7 +147,7 @@ def test_service_module_imports_without_db_layer(modname):
 
 def test_pipeline_type_contracts_are_reexported_from_facade():
     """Typed pipeline contracts are discoverable beside ``run_v2_pipeline``."""
-    from spyglass.spikesorting.v2 import _pipeline_types as pipeline_types
+    from spyglass.spikesorting.v2._orchestration import types as pipeline_types
     from spyglass.spikesorting.v2 import pipeline
 
     for name in pipeline_types.__all__:

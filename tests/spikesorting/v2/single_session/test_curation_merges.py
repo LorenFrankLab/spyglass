@@ -161,7 +161,9 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     # forbids genuine sub-0.4 ms firing), so it is dropped. v1's lazy
     # get_merged_sorting did this; v2 applies it to the apply_merge=True
     # stored train too (via _dedup_merged_spike_times).
-    from spyglass.spikesorting.v2.utils import _dedup_merged_spike_times
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _dedup_merged_spike_times,
+    )
 
     src_sorting = Sorting().get_sorting(sort_pk)
     src_head = np.asarray(
@@ -511,7 +513,7 @@ def test_curation_n_spikes_matches_apply_merge(dj_conn):
     logic (the ``apply_merge=True`` end-to-end half is covered by
     ``test_curation_v2_insert_with_merge_groups_apply_merges``).
     """
-    from spyglass.spikesorting.v2._curation_transforms import (
+    from spyglass.spikesorting.v2._curation.transforms import (
         build_curated_unit_rows,
     )
 
@@ -604,7 +606,7 @@ def test_curation_two_merge_groups_assign_ids_in_canonical_min_order(dj_conn):
     -- spike content and unit count are identical -- and matching the
     applied and lazy paths is the more important contract.
     """
-    from spyglass.spikesorting.v2._curation_transforms import (
+    from spyglass.spikesorting.v2._curation.transforms import (
         build_curated_unit_rows,
     )
 
@@ -678,7 +680,7 @@ def test_merged_unit_inherits_max_amplitude_contributor_electrode():
     assertions still pass. Deterministic via
     ``build_curated_unit_rows`` (no populate).
     """
-    from spyglass.spikesorting.v2._curation_transforms import (
+    from spyglass.spikesorting.v2._curation.transforms import (
         build_curated_unit_rows,
     )
 
@@ -1047,7 +1049,7 @@ def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
     user-iteration order) changes only which group gets ``max+1`` for
     reordered input, never spike content or unit count.
     """
-    from spyglass.spikesorting.v2._curation_transforms import (
+    from spyglass.spikesorting.v2._curation.transforms import (
         build_curated_unit_rows,
     )
 
@@ -1116,7 +1118,7 @@ def test_curation_rejects_invalid_merge_groups(
     silently no-op or fall through to staging that would double-count
     contributors. Covers the empty/singleton shape contract too.
     """
-    from spyglass.spikesorting.v2._curation_transforms import (
+    from spyglass.spikesorting.v2._curation.transforms import (
         build_curated_unit_rows,
     )
 

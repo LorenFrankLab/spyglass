@@ -38,10 +38,10 @@ import datajoint as dj
 import numpy as np
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.spikesorting.v2 import (
-    _motion_compute,
-    _motion_report_inputs,
-    _motion_selection_insert,
+from spyglass.spikesorting.v2._motion import (
+    compute as _motion_compute,
+    report_inputs as _motion_report_inputs,
+    selection as _motion_selection_insert,
 )
 from spyglass.spikesorting.v2._params.motion_estimation import (
     MOTION_ESTIMATION_SCHEMA_VERSION,
@@ -51,13 +51,13 @@ from spyglass.spikesorting.v2._params.motion_interpolation import (
     MOTION_INTERPOLATION_SCHEMA_VERSION,
     MotionInterpolationParamsSchema,
 )
-from spyglass.spikesorting.v2._recipe_catalog import (
+from spyglass.spikesorting.v2._core.recipe_catalog import (
     motion_correction_default_contents,
     motion_estimation_default_contents,
     motion_interpolation_default_contents,
 )
-from spyglass.spikesorting.v2._source_resolution import SourceLineage
-from spyglass.spikesorting.v2._staged_outputs import (
+from spyglass.spikesorting.v2._recording.source import SourceLineage
+from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
     StagedOutputs,
 )
@@ -71,7 +71,7 @@ from spyglass.spikesorting.v2.session_group import (
     ConcatenatedRecording,
     ConcatenatedRecordingSelection,
 )
-from spyglass.spikesorting.v2.utils import (
+from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
@@ -127,7 +127,9 @@ class MotionEstimationParameters(
         duplicate-content guard. ``allow_duplicate_params=True`` opts out of
         that guard; see ``reject_duplicate_parameter_content``.
         """
-        from spyglass.spikesorting.v2._motion import resolve_estimation_params
+        from spyglass.spikesorting.v2._motion.estimation import (
+            resolve_estimation_params,
+        )
 
         def _resolve_and_check_job_kwargs(row, _schema_cls):
             resolve_estimation_params(row["params"])
@@ -270,7 +272,9 @@ def preprocessing_filter_problem(preprocessing_params_name: str) -> str | None:
     str or None
         The problem, or ``None`` when the recipe applies a temporal filter.
     """
-    from spyglass.spikesorting.v2._motion import unfiltered_source_problem
+    from spyglass.spikesorting.v2._motion.estimation import (
+        unfiltered_source_problem,
+    )
 
     return unfiltered_source_problem(
         preprocessing_params_name,
@@ -300,7 +304,9 @@ def _assert_concat_tables_current() -> None:
     database whose concat tables were not recreated may hold
     already-corrected concat traces.
     """
-    from spyglass.spikesorting.v2._motion import assert_concat_schema_current
+    from spyglass.spikesorting.v2._motion.estimation import (
+        assert_concat_schema_current,
+    )
 
     assert_concat_schema_current(
         ConcatenatedRecording.heading.names,
@@ -428,7 +434,7 @@ class MotionEstimateSelection(
         DuplicateSelectionError
             If a match has a non-deterministic ``motion_estimate_id``.
         """
-        from spyglass.spikesorting.v2._selection_identity import (
+        from spyglass.spikesorting.v2._core.selection_identity import (
             existing_selection_pk,
         )
 
@@ -495,7 +501,7 @@ class MotionEstimateSelection(
             the stored ``motion_estimate_id`` (a raw insert or part-only
             delete bypassing :meth:`insert_selection`).
         """
-        from spyglass.spikesorting.v2._motion import (
+        from spyglass.spikesorting.v2._motion.estimation import (
             motion_estimate_parts_mismatch,
         )
         from spyglass.spikesorting.v2.exceptions import SchemaBypassError
@@ -654,7 +660,9 @@ def _estimation_clock_of(row: dict):
 
     ``row`` needs only the time-map columns (``_ESTIMATION_CLOCK_COLUMNS``).
     """
-    from spyglass.spikesorting.v2._motion import estimation_clock_from_blob
+    from spyglass.spikesorting.v2._motion.estimation import (
+        estimation_clock_from_blob,
+    )
 
     return estimation_clock_from_blob(
         {
@@ -747,13 +755,13 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             insert via ``allow_direct_insert=True``), so this is re-checked
             here before any file is read.
         """
-        from spyglass.spikesorting.v2._artifact_intervals import (
+        from spyglass.spikesorting.v2._artifacts.readers import (
             read_recording_artifact_valid_times,
         )
-        from spyglass.spikesorting.v2._recording_nwb import (
-            ensure_artifact_file,
+        from spyglass.spikesorting.v2._storage.nwb import ensure_artifact_file
+        from spyglass.spikesorting.v2._core.job_config import (
+            _resolved_job_kwargs,
         )
-        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         lineage = MotionEstimateSelection.resolve_source(key)
         problem = _source_filter_problem(lineage.kind, lineage.key)
@@ -826,8 +834,8 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             On a stale selection, spans out of acquisition order, or any
             estimation failure (see ``estimate_motion_in_spans``).
         """
-        from spyglass.spikesorting.v2 import _motion
-        from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+        from spyglass.spikesorting.v2._motion import estimation as _motion
+        from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
 
         resolved = _motion.resolve_estimation_params(params)
         resolved_hash = _motion.resolved_params_hash(resolved)
@@ -929,7 +937,9 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         -------
         spikeinterface.core.motion.Motion
         """
-        from spyglass.spikesorting.v2._motion import motion_from_storage_dict
+        from spyglass.spikesorting.v2._motion.estimation import (
+            motion_from_storage_dict,
+        )
 
         return motion_from_storage_dict((self & key).fetch1("motion"))
 
@@ -973,7 +983,9 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             per such span (times on the source's own clock, s); empty when
             every span kept a peak.
         """
-        from spyglass.spikesorting.v2._motion import spans_without_evidence
+        from spyglass.spikesorting.v2._motion.estimation import (
+            spans_without_evidence,
+        )
 
         return spans_without_evidence(
             (self & key).fetch1("peaks_per_continuity_span"),
@@ -996,7 +1008,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         -------
         _motion.SourceClockDisplacement
         """
-        from spyglass.spikesorting.v2._motion import (
+        from spyglass.spikesorting.v2._motion.estimation import (
             displacement_on_source_clock,
         )
 
@@ -1229,7 +1241,7 @@ class MotionCorrectedRecordingSelection(
             If a row with the same identity has a non-deterministic id (a raw
             insert bypassing :meth:`insert_selection`).
         """
-        from spyglass.spikesorting.v2._selection_identity import (
+        from spyglass.spikesorting.v2._core.selection_identity import (
             existing_selection_pk,
         )
 
@@ -1381,9 +1393,7 @@ class MotionCorrectedRecording(
         refuses a source whose ``content_hash`` changed since the estimate
         was selected.
         """
-        from spyglass.spikesorting.v2._recording_nwb import (
-            ensure_artifact_file,
-        )
+        from spyglass.spikesorting.v2._storage.nwb import ensure_artifact_file
 
         selection = (MotionCorrectedRecordingSelection & key).fetch1()
         interpolation_params = (
@@ -1467,15 +1477,15 @@ class MotionCorrectedRecording(
             or an application failure (see
             ``_motion.apply_motion_on_estimation_clock``).
         """
-        from spyglass.spikesorting.v2 import _motion
-        from spyglass.spikesorting.v2._recording_geometry import (
+        from spyglass.spikesorting.v2._motion import estimation as _motion
+        from spyglass.spikesorting.v2._recording.geometry import (
             flatten_planar_geometry,
         )
-        from spyglass.spikesorting.v2._recording_nwb import (
+        from spyglass.spikesorting.v2._storage.nwb import (
             read_recording_nwb,
             write_nwb_artifact,
         )
-        from spyglass.spikesorting.v2._recording_restriction import (
+        from spyglass.spikesorting.v2._recording.restriction import (
             _LazyRecordingTimestamps,
         )
 
@@ -1617,7 +1627,7 @@ class MotionCorrectedRecording(
             The corrected, masked, unwhitened recording, annotated
             ``is_filtered=True``.
         """
-        from spyglass.spikesorting.v2._recording_nwb import (
+        from spyglass.spikesorting.v2._storage.nwb import (
             read_stored_traces,
             stored_traces,
         )
@@ -1635,6 +1645,6 @@ class MotionCorrectedRecording(
         :func:`._recording_nwb.ensure_artifact_file` calls this method on
         every trace-artifact table.
         """
-        from spyglass.spikesorting.v2 import _recording_nwb
+        from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
 
         return _recording_nwb.rebuild_motion_corrected_artifact(self, key)

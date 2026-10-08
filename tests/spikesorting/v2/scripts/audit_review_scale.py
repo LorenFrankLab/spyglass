@@ -23,20 +23,14 @@ def main():
     import spikeinterface as si
     from playwright.sync_api import sync_playwright
 
-    from spyglass.spikesorting.v2._figpack_curation import (
+    from spyglass.spikesorting.v2._review.annotations import (
         labels_and_merges_to_annotations,
     )
-    from spyglass.spikesorting.v2._review_delivery import (
+    from spyglass.spikesorting.v2._review.delivery import (
         serve_review_bundle,
         stop_review_servers,
     )
-    from spyglass.spikesorting.v2._review_inspection import inspection_view
-    from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
-    from spyglass.spikesorting.v2._review_view import (
-        coerce_units_table_ids,
-        compose_review_layout,
-        curation_control,
-    )
+    from spyglass.spikesorting.v2._review.view import build_curation_view
     from tests.spikesorting.v2 import _browser_review as ui
     from tests.spikesorting.v2.scripts.measure_release_workflow import (
         TreeMonitor,
@@ -77,15 +71,14 @@ def main():
         assert np.isfinite(analyzer.get_extension("templates").get_data()).all()
         measurements["analyzer_seconds"] = perf_counter() - start
         start = perf_counter()
-        summary = inspection_view(
-            analyzer, ReviewDisplayOptions(), displayed_unit_properties=[]
+        view = build_curation_view(
+            analyzer,
+            {"sorting_id": "synthetic-scale-audit", "curation_id": 0},
+            timeline=None,
+            label_options=["accept", "noise"],
+            displayed_unit_properties=[],
+            seed_labels={},
         )
-        view = compose_review_layout(
-            summary,
-            curation_control(["accept", "noise"], {}),
-            summary_title="Synthetic unit-count scaling",
-        )
-        coerce_units_table_ids(view)
         view.save(str(bundle), title="Review scaling")
         (bundle / "annotations.json").write_text(
             json.dumps(

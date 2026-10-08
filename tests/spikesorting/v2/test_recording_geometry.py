@@ -17,7 +17,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2._recording_geometry import (
+from spyglass.spikesorting.v2._recording.geometry import (
     assert_unique_contact_positions,
     classify_missing_geometry,
     normalize_channel_locations,
@@ -451,7 +451,7 @@ def test_tetrode_repair_applies_gates():
     this predicate, so its four gates are pinned here: one all-true case, and
     one case per gate that flips it to False with everything else held.
     """
-    from spyglass.spikesorting.v2._recording_geometry import (
+    from spyglass.spikesorting.v2._recording.geometry import (
         tetrode_repair_applies,
     )
 
@@ -500,7 +500,7 @@ def test_effective_contact_plane(case, verdict):
     gives its plane, a set with no position reads as all-zero (collapsed),
     coincident contacts collapse, and a partly missing set is ``partial``
     with its positions untouched."""
-    from spyglass.spikesorting.v2._recording_geometry import (
+    from spyglass.spikesorting.v2._recording.geometry import (
         effective_contact_plane,
     )
 

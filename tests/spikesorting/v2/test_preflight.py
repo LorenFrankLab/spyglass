@@ -26,7 +26,7 @@ from pathlib import Path
 import datajoint as dj
 import pytest
 
-from spyglass.spikesorting.v2._selection_identity import (
+from spyglass.spikesorting.v2._core.selection_identity import (
     artifact_detection_identity_payload,
     deterministic_id,
     recording_identity_payload,
@@ -259,7 +259,7 @@ def test_contradictory_motion_request_fails_before_any_query(
     [("off", None), ("estimate", "any_recipe"), ("apply", "any_recipe")],
 )
 def test_valid_motion_requests_have_no_problem(mode, name):
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         motion_request_problem,
     )
 
@@ -331,7 +331,7 @@ def test_motion_estimate_id_outside_apply_fails_before_any_query(
 
 @pytest.mark.unit
 def test_apply_with_a_saved_estimate_id_is_a_valid_request():
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         motion_request_problem,
     )
 
@@ -411,8 +411,10 @@ def test_estimate_motion_options_are_keyword_only():
 
 
 def _resolved_motion_recipe(name: str) -> dict:
-    from spyglass.spikesorting.v2._motion import resolve_estimation_params
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._motion.estimation import (
+        resolve_estimation_params,
+    )
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         motion_estimation_default_contents,
     )
 
@@ -456,7 +458,7 @@ def test_motion_geometry_eligibility_from_registered_contacts(case, match):
     left to the recording-geometry check (reported once)."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         motion_geometry_problem_from_contacts,
     )
 
@@ -494,8 +496,10 @@ def test_motion_geometry_eligibility_from_registered_contacts(case, match):
 def test_motion_needs_a_filtering_preprocessing_recipe(name, refused):
     """Motion is estimated on filtered traces: a shipped recipe without a
     temporal filter is refused, naming it; a bandpass recipe is not."""
-    from spyglass.spikesorting.v2._motion import unfiltered_source_problem
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._motion.estimation import (
+        unfiltered_source_problem,
+    )
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         preprocessing_default_contents,
     )
 
@@ -512,8 +516,8 @@ def test_motion_needs_a_filtering_preprocessing_recipe(name, refused):
 
 def _catalog_motion_recipe(interpolation_name="kriging_force_extrapolate_v1"):
     """A ``MotionRecipe`` built from the shipped rows, without the DB."""
-    from spyglass.spikesorting.v2._pipeline_preflight import MotionRecipe
-    from spyglass.spikesorting.v2._recipe_catalog import (
+    from spyglass.spikesorting.v2._orchestration.preflight import MotionRecipe
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
         motion_estimation_default_contents,
         motion_interpolation_default_contents,
     )
@@ -546,7 +550,7 @@ def test_motion_setup_states_mode_recipe_preset_border_and_status(concat):
     """The scientific setup names the selected motion mode, recipe, resolved
     estimation preset, applied border mode and experimental status, in both
     run shapes; ``off`` says the sort reads the uncorrected source."""
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         MOTION_RECIPE_STATUS,
         _describe_motion,
     )
@@ -646,9 +650,9 @@ def test_preflight_all_pass(preflight_inputs):
     # Preflight describes what execution uses: the effective sorter config is
     # resolved by the dispatcher's own ``resolve_sort_config`` over the
     # preset's SorterParameters row, so the report and the sort cannot differ.
-    from spyglass.spikesorting.v2._sorting_dispatch import resolve_sort_config
+    from spyglass.spikesorting.v2._sorting.dispatch import resolve_sort_config
     from spyglass.spikesorting.v2.sorting import SorterParameters
-    from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+    from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
 
     assert "sorter_params_valid" in {c.name for c in report.checks}
     config = report.effective_config
@@ -731,7 +735,7 @@ def test_preflight_gates_analyzer_waveform_params_row(
     ]
     assert check.ok is True
 
-    import spyglass.spikesorting.v2._recipe_catalog as catalog_mod
+    import spyglass.spikesorting.v2._core.recipe_catalog as catalog_mod
 
     monkeypatch.setattr(
         catalog_mod,
@@ -892,7 +896,7 @@ def test_preflight_rejects_coincident_contacts_after_repair(
     """
     import numpy as np
 
-    import spyglass.spikesorting.v2._recording_geometry as geometry
+    import spyglass.spikesorting.v2._recording.geometry as geometry
 
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -1004,7 +1008,7 @@ def test_preflight_missing_params_row_points_to_initialize_defaults(
     (a copy of the runnable default with one bogus row name) drives the
     missing-row branch without deleting any shared default row.
     """
-    import spyglass.spikesorting.v2._pipeline_preflight as preflight_mod
+    import spyglass.spikesorting.v2._orchestration.preflight as preflight_mod
     from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
 
     base = _PIPELINE_PRESETS["franklab_tetrode_hippocampus_30khz_ms5_2026_06"]
@@ -1146,7 +1150,7 @@ def test_preflight_sorter_runtime_backend_missing(
         "franklab_probe_hippocampus_30khz_ms4_2026_06"
     ].sorter
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_preflight._SORTER_RUNTIME_BACKENDS",
+        "spyglass.spikesorting.v2._orchestration.preflight._SORTER_RUNTIME_BACKENDS",
         {default_sorter: ("definitely_absent_backend_xyz",)},
     )
 
@@ -1527,7 +1531,7 @@ def test_container_runtime_probes_return_bool_detail_unmocked():
     every mocked test would stay green. This calls the probes for real and only
     asserts the contract shape (either truth value is fine in any environment).
     """
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         _docker_runtime_available,
         _singularity_runtime_available,
     )
@@ -1547,7 +1551,7 @@ def test_preflight_container_runtime_errors(preflight_inputs, monkeypatch):
     error naming the backend + image -- and never falls back to a local
     ``sorter_installed`` check.
     """
-    from spyglass.spikesorting.v2 import _pipeline_preflight as pf
+    from spyglass.spikesorting.v2._orchestration import preflight as pf
 
     monkeypatch.setattr(
         pf,
@@ -1582,7 +1586,7 @@ def test_preflight_reports_container_ms4_modern_host_path(
     report carries a non-blocking advisory making clear the host can stay on the
     v2 numpy>=2 environment because the MS4 runtime lives inside the container.
     """
-    from spyglass.spikesorting.v2 import _pipeline_preflight as pf
+    from spyglass.spikesorting.v2._orchestration import preflight as pf
 
     monkeypatch.setattr(
         pf,
@@ -1668,7 +1672,7 @@ _CONCAT_PRESET = "franklab_concat_hippocampus_30khz_ms5_2026_09"
 def test_assert_preset_compute_rows_passes_for_seeded_concat_preset(dj_conn):
     """A seeded concat preset's compute rows + local sorter pass the check."""
     from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         assert_preset_compute_rows,
     )
 
@@ -1688,7 +1692,7 @@ def test_assert_preset_compute_rows_raises_on_missing_sorter_row(dj_conn):
     missing sorter row failed only deep in the member/concat populate.
     """
     from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         assert_preset_compute_rows,
     )
 
@@ -1708,7 +1712,7 @@ def test_assert_preset_compute_rows_raises_on_missing_preprocessing_row(
 ):
     """A missing PreprocessingParameters row fails fast with the exact fix."""
     from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         assert_preset_compute_rows,
     )
 
@@ -1729,7 +1733,7 @@ _CONTAINER_PRESET = "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
 def test_assert_concat_preflight_raises_on_missing_group(dj_conn):
     """The concat preflight fails fast when the SessionGroup does not exist."""
     from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         assert_concat_preflight,
     )
     from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
@@ -1746,9 +1750,9 @@ def test_assert_preset_compute_rows_container_backend_checks_runtime(
 ):
     """A container-backend preset's runtime is a BLOCKING preflight check
     (matching single-session), not silently skipped."""
-    import spyglass.spikesorting.v2._pipeline_preflight as preflight_mod
+    import spyglass.spikesorting.v2._orchestration.preflight as preflight_mod
     from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         assert_preset_compute_rows,
     )
     from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
@@ -1783,11 +1787,13 @@ def test_assert_preset_compute_rows_container_backend_checks_runtime(
 
 @pytest.mark.database
 def test_scientific_setup_uses_execution_rows(preflight_inputs):
-    from spyglass.spikesorting.v2 import _pipeline_presets as pl
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration import presets as pl
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         describe_scientific_setup,
     )
-    from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        DEFAULT_PIPELINE_PRESET,
+    )
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
 
@@ -1828,8 +1834,8 @@ def test_scientific_setup_uses_execution_rows(preflight_inputs):
 def test_concat_scientific_setup_reports_explicit_no_mask(
     preflight_inputs, artifact_recipe
 ):
-    from spyglass.spikesorting.v2 import _pipeline_presets as pl
-    from spyglass.spikesorting.v2._pipeline_preflight import (
+    from spyglass.spikesorting.v2._orchestration import presets as pl
+    from spyglass.spikesorting.v2._orchestration.preflight import (
         describe_scientific_setup,
     )
 

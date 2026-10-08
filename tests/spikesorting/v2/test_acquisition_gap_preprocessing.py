@@ -7,10 +7,10 @@ import spikeinterface as si
 from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
-from spyglass.spikesorting.v2._recording_preprocessing import (
+from spyglass.spikesorting.v2._recording.preprocessing import (
     apply_temporal_preprocessing,
 )
-from spyglass.spikesorting.v2._recording_restriction import (
+from spyglass.spikesorting.v2._recording.restriction import (
     restrict_recording_times,
 )
 
@@ -65,10 +65,10 @@ def test_temporal_margins_do_not_cross_acquisition_gaps(phase_shift, bandpass):
 
 
 def test_acquisition_span_clock_remains_lazy_when_reconstructed():
-    from spyglass.spikesorting.v2._acquisition_spans import (
+    from spyglass.spikesorting.v2._recording.acquisition_spans import (
         AcquisitionSpanRecording,
     )
-    from spyglass.spikesorting.v2._signal_math import frames_for_times
+    from spyglass.spikesorting.v2._core.signal_math import frames_for_times
 
     fs, n = 30_000.0, 90_000
     recording = si.NumpyRecording([np.zeros((n, 1), dtype=np.float32)], fs)
@@ -118,11 +118,11 @@ def test_gapped_nwb_preprocessing_streams_exact_timestamps(tmp_path):
     from pynwb import NWBHDF5IO, NWBFile
     from pynwb.ecephys import ElectricalSeries
 
-    from spyglass.spikesorting.v2._nwb_iterators import (
+    from spyglass.spikesorting.v2._storage.iterators import (
         SpikeInterfaceRecordingDataChunkIterator,
         TimestampsDataChunkIterator,
     )
-    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
 
     fs, n = 30_000.0, 3000
     traces = np.zeros((2 * n, 1), dtype=np.float64)

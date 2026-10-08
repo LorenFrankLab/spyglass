@@ -18,7 +18,7 @@ def test_timestamps_iterator_reconstructs_with_final_one_sample_chunk():
     reconstructs the input EXACTLY, including a forced final 1-sample buffer
     (the ``n_samples % buffer == 1`` tail edge).
     """
-    from spyglass.spikesorting.v2._nwb_iterators import (
+    from spyglass.spikesorting.v2._storage.iterators import (
         TimestampsDataChunkIterator,
     )
 
@@ -49,7 +49,7 @@ def test_timestamps_iterator_reconstructs_with_final_one_sample_chunk():
 
 def test_timestamps_iterator_single_sample_input_round_trips():
     """A length-1 timestamps vector (entirely the 0-d squeeze edge) round-trips."""
-    from spyglass.spikesorting.v2._nwb_iterators import (
+    from spyglass.spikesorting.v2._storage.iterators import (
         TimestampsDataChunkIterator,
     )
 
@@ -67,7 +67,7 @@ def test_timestamps_iterator_length_one_chunk_returns_1d():
     scalar. The slice of the 1-D timestamps vector is already 1-D, so no
     squeeze is needed; squeezing collapsed an ``n_samples % buffer == 1`` tail
     to 0-d, which only survived by HDMF's broadcast-assignment luck."""
-    from spyglass.spikesorting.v2._nwb_iterators import (
+    from spyglass.spikesorting.v2._storage.iterators import (
         TimestampsDataChunkIterator,
     )
 

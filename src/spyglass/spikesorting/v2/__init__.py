@@ -8,14 +8,16 @@ dependencies (Pydantic, modern SpikeInterface) until a submodule is used.
 The eager symbols are kept dependency-light: ``initialize_v2_defaults``
 installs every default Lookup row the pipeline needs in one call (removing the
 "forgot to call ``insert_default``" first-run friction), and ``CurationLabel``
-is re-exported from the stdlib-only ``_enums`` module so notebook users can
+is re-exported from the stdlib-only ``_core.enums`` module so notebook users can
 discover the canonical label set without importing a table module.
 """
 
 from importlib import import_module
 
-from spyglass.spikesorting.v2._enums import CurationLabel
-from spyglass.spikesorting.v2._pipeline_public import PACKAGE_ROOT_REEXPORTS
+from spyglass.spikesorting.v2._core.enums import CurationLabel
+from spyglass.spikesorting.v2._orchestration.exports import (
+    PACKAGE_ROOT_REEXPORTS,
+)
 
 
 def initialize_v2_defaults() -> None:
@@ -72,7 +74,7 @@ def initialize_v2_defaults() -> None:
     # an old schema version, or a hand-edited blob) is NOT reseeded and goes
     # unnoticed. Audit for that here and WARN (non-strict) -- an admin can run
     # ``verify_v2_default_catalog(strict=True)`` to fail hard.
-    from spyglass.spikesorting.v2._pipeline_reporting import (
+    from spyglass.spikesorting.v2._orchestration.reporting import (
         verify_v2_default_catalog,
     )
     from spyglass.utils import logger
@@ -118,7 +120,7 @@ def __getattr__(name):
     # ``from spyglass.spikesorting.v2 import verify_v2_default_catalog`` works
     # without importing the DataJoint reporting layer at package import.
     if name == "verify_v2_default_catalog":
-        from spyglass.spikesorting.v2._pipeline_reporting import (
+        from spyglass.spikesorting.v2._orchestration.reporting import (
             verify_v2_default_catalog,
         )
 

@@ -17,18 +17,21 @@ from typing import Any, Literal
 
 import pandas as pd
 
-from spyglass.spikesorting.v2._curation_transforms import (
+from spyglass.spikesorting.v2._curation.transforms import (
     group_contributor_rows,
     inherit_parent_labels,
     is_merge_preview,
     normalize_label_state,
     validate_merge_groups,
 )
-from spyglass.spikesorting.v2._lookup_validation import lossless_int
+from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
+from spyglass.spikesorting.v2._recording.unit_metadata import (
+    get_spike_sorting_v2_merge_ids as get_spike_sorting_v2_merge_ids,
+)
 
 # Whether THIS call materialized a row ("computed") or found it already
 # present ("reused"). Distinct from the pipeline-level ``StageStatus`` in
-# ``_pipeline_types`` (which adds "skipped") and from the review layer's
+# ``_orchestration.types`` (which adds "skipped") and from the review layer's
 # ``ReviewStageState`` (which adds "complete").
 MaterializationStatus = Literal["computed", "reused"]
 CommitStatus = Literal["preview", "committed"]
@@ -566,7 +569,7 @@ class CurationRef:
         parameters reuse them. The whitened metric analyzer is an
         evaluation-internal object and is not exposed here.
         """
-        from spyglass.spikesorting.v2._curation_analyzer import (
+        from spyglass.spikesorting.v2._curation.analyzer import (
             open_curation_analyzer,
         )
         from spyglass.spikesorting.v2.sorting import Sorting
@@ -876,7 +879,7 @@ class EvaluationResult:
             row is gone, or its selection no longer names the evaluated
             curation.
         """
-        from spyglass.spikesorting.v2._review_unit_properties import (
+        from spyglass.spikesorting.v2._review.unit_properties import (
             missing_rule_metrics,
         )
         from spyglass.spikesorting.v2.metric_curation import AutoCurationRules

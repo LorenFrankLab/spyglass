@@ -9,7 +9,7 @@ the contract the split must preserve.
 
 from __future__ import annotations
 
-from spyglass.spikesorting.v2._pipeline_public import (
+from spyglass.spikesorting.v2._orchestration.exports import (
     PACKAGE_ROOT_REEXPORTS,
     PIPELINE_FACADE_EXPORTS,
 )

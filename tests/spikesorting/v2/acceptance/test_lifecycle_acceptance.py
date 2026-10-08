@@ -153,7 +153,7 @@ def test_two_browser_drafts_preserve_both_edits(
 ):
     from playwright.sync_api import sync_playwright
 
-    from spyglass.spikesorting.v2._review_delivery import stop_review_servers
+    from spyglass.spikesorting.v2._review.delivery import stop_review_servers
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.review_profile import CurationReviewProfile
@@ -257,10 +257,10 @@ def test_masked_sort_review(workflow):
     import urllib.parse
     import urllib.request
 
-    from spyglass.spikesorting.v2._figpack_curation import (
+    from spyglass.spikesorting.v2._review.annotations import (
         labels_and_merges_to_annotations,
     )
-    from spyglass.spikesorting.v2._review_delivery import stop_review_servers
+    from spyglass.spikesorting.v2._review.delivery import stop_review_servers
     from spyglass.spikesorting.v2.review_api import FigPackReview
     from spyglass.spikesorting.v2.review_profile import FRANKLAB_REVIEW_PROFILE
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -323,7 +323,9 @@ def test_masked_sort_review(workflow):
 
 def test_fresh_process_rebuild_preserves_population(workflow, monkeypatch):
     from spyglass.spikesorting.analysis.v1 import group as group_module
-    from spyglass.spikesorting.v2._analyzer_cache import remove_analyzer_cache
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        remove_analyzer_cache,
+    )
     from spyglass.spikesorting.v2.analysis_selection import (
         select_units_for_analysis,
     )

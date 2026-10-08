@@ -22,7 +22,7 @@ def _concurrent_cache_resolve_worker(
     """Resolve one fake analyzer through the production cache transaction."""
     import datajoint as dj
 
-    from spyglass.spikesorting.v2 import _curation_analyzer as resolver
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
 
     dj.config["custom"]["spikesorting_v2_analyzer_dir"] = cache_root
 
@@ -66,7 +66,7 @@ def _folder_content_hash(folder: Path) -> str:
 def test_curation_cache_path_covers_generation_recipe_role_and_si(
     monkeypatch, tmp_path
 ):
-    from spyglass.spikesorting.v2 import _analyzer_cache as cache
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
 
     monkeypatch.setattr(cache, "analyzer_cache_root", lambda: tmp_path)
     sorting_id = uuid.uuid4()
@@ -99,7 +99,7 @@ def test_curation_cache_path_covers_generation_recipe_role_and_si(
 
 
 def test_curation_cache_path_rejects_invalid_identity(tmp_path, monkeypatch):
-    from spyglass.spikesorting.v2 import _analyzer_cache as cache
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
 
     monkeypatch.setattr(cache, "analyzer_cache_root", lambda: tmp_path)
     with pytest.raises(ValueError, match="role"):
@@ -114,7 +114,7 @@ def test_curation_cache_path_rejects_invalid_identity(tmp_path, monkeypatch):
 
 def test_reused_numeric_id_cannot_reuse_generation_cache(tmp_path, monkeypatch):
     """A delete/recreate generation changes path even if curation_id repeats."""
-    from spyglass.spikesorting.v2 import _analyzer_cache as cache
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
 
     monkeypatch.setattr(cache, "analyzer_cache_root", lambda: tmp_path)
     sorting_id = uuid.uuid4()
@@ -133,7 +133,7 @@ def test_reused_numeric_id_cannot_reuse_generation_cache(tmp_path, monkeypatch):
 def test_spike_content_hash_covers_units_segments_and_frames():
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._curation_analyzer import (
+    from spyglass.spikesorting.v2._curation.analyzer import (
         hash_sorting_spike_content,
     )
 
@@ -164,7 +164,7 @@ def test_spike_content_hash_covers_units_segments_and_frames():
 
 def test_extension_inventory_never_reads_payload(monkeypatch):
     """Cache hits validate small metadata without decoding extension arrays."""
-    from spyglass.spikesorting.v2 import _curation_analyzer as resolver
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
 
     class _Extension:
         def __init__(self):
@@ -200,7 +200,7 @@ def test_folder_storage_fingerprint_tracks_file_stats_and_ignores_manifest(
     tmp_path,
 ):
     """The cheap disk fingerprint covers analyzer files, not its own manifest."""
-    from spyglass.spikesorting.v2 import _curation_analyzer as resolver
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
 
     payload = tmp_path / "extensions" / "templates" / "data.bin"
     payload.parent.mkdir(parents=True)
@@ -220,7 +220,7 @@ def test_cache_rejects_storage_drift_before_loading_analyzer(
     """Changed chunks invalidate a cache without opening their array payloads."""
     import json
 
-    from spyglass.spikesorting.v2 import _curation_analyzer as resolver
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
 
     expected = {
         "sorting_id": "sorting-id",
@@ -287,7 +287,7 @@ def test_open_curation_analyzer_yields_disk_backed_working_copy(
     cache itself (mutable SI object).
     """
     from spyglass import settings
-    from spyglass.spikesorting.v2 import _curation_analyzer as resolver
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
 
     seen: dict = {}
 
@@ -323,9 +323,11 @@ def test_single_low_level_analyzer_builder(tmp_path, monkeypatch, wants_pc):
     from types import ModuleType, SimpleNamespace
 
     from spyglass import settings
-    from spyglass.spikesorting.v2 import _curation_analyzer as resolver
-    from spyglass.spikesorting.v2 import _evaluation_analyzers
-    from spyglass.spikesorting.v2 import _sorting_analyzer
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
+    from spyglass.spikesorting.v2._curation import (
+        evaluation_analyzers as _evaluation_analyzers,
+    )
+    from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
 
     sorting_id = uuid.uuid4()
     key = {"sorting_id": sorting_id, "curation_id": 3}
@@ -411,7 +413,10 @@ def test_single_low_level_analyzer_builder(tmp_path, monkeypatch, wants_pc):
         is saved[interactive_folder]
     )
 
-    from spyglass.spikesorting.v2 import _analyzer_cache, _metric_curation
+    from spyglass.spikesorting.v2._storage import (
+        analyzer_cache as _analyzer_cache,
+    )
+    from spyglass.spikesorting.v2._curation import metrics as _metric_curation
 
     monkeypatch.setattr(
         _analyzer_cache,
@@ -511,7 +516,7 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
     import pandas as pd
 
     from spyglass.spikesorting.v2 import visualization as ssviz
-    from spyglass.spikesorting.v2._curation_analyzer import (
+    from spyglass.spikesorting.v2._curation.analyzer import (
         _resolve_curation_analyzer,
         curation_analyzer_cache_path,
         curation_analyzer_with_extensions,
@@ -655,7 +660,7 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         # the shared analyzer's version. The sort analyzer is package-scoped
         # (an earlier browser review may have persisted display extensions),
         # so establish the states this block relies on first.
-        from spyglass.spikesorting.v2._analyzer_cache import (
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
         )
 
@@ -824,7 +829,7 @@ def test_preview_curation_requires_commit(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
     """A proposed merge has no final analyzer namespace until committed."""
-    from spyglass.spikesorting.v2._curation_analyzer import (
+    from spyglass.spikesorting.v2._curation.analyzer import (
         _resolve_curation_analyzer,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -853,7 +858,7 @@ def test_preview_curation_requires_commit(
 
 def test_extension_params_match_semantics():
     """Partial requests constrain only their keys; mismatches are not present."""
-    from spyglass.spikesorting.v2._curation_analyzer import (
+    from spyglass.spikesorting.v2._curation.analyzer import (
         extension_params_match,
     )
 
@@ -893,8 +898,10 @@ def test_compute_request_on_copy_restores_invalidated_dependents(tmp_path):
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._analyzer_cache import load_analyzer_folder
-    from spyglass.spikesorting.v2._curation_analyzer import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        load_analyzer_folder,
+    )
+    from spyglass.spikesorting.v2._curation.analyzer import (
         _compute_request_on_copy,
         extension_params_match,
     )
@@ -983,11 +990,13 @@ def test_compute_request_on_copy_keeps_si_metric_defaults(tmp_path):
     import spikeinterface as si
     from spikeinterface.metrics.template.metrics import RecoverySlope
 
-    from spyglass.spikesorting.v2._analyzer_cache import load_analyzer_folder
-    from spyglass.spikesorting.v2._curation_analyzer import (
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        load_analyzer_folder,
+    )
+    from spyglass.spikesorting.v2._curation.analyzer import (
         _compute_request_on_copy,
     )
-    from spyglass.spikesorting.v2._si_metric_patches import (
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
         isolated_si_metric_defaults,
     )
 
