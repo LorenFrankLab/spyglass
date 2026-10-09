@@ -113,12 +113,6 @@ class MotionEstimationParameters(
 
     _DEFAULT_CONTENTS: tuple = motion_estimation_default_contents()
 
-    def insert1(self, row, allow_duplicate_params=False, **kwargs):
-        """Insert one validated motion-estimation parameter row."""
-        self.insert(
-            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
-        )
-
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
         """Insert motion-estimation parameter rows after validation.
 
@@ -182,12 +176,6 @@ class MotionInterpolationParameters(
     """
 
     _DEFAULT_CONTENTS: tuple = motion_interpolation_default_contents()
-
-    def insert1(self, row, allow_duplicate_params=False, **kwargs):
-        """Insert one validated motion-interpolation parameter row."""
-        self.insert(
-            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
-        )
 
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
         """Insert motion-interpolation parameter rows after validation.

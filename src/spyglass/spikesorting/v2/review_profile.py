@@ -71,10 +71,6 @@ class CurationReviewProfile(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     profile_hash: char(64)             # sha256 over recipe/display/import semantics
     """
 
-    def insert1(self, row, **kwargs):
-        """Validate and insert one profile through the whole-row boundary."""
-        self.insert([row], **kwargs)
-
     def insert(self, rows, *, replace=False, **kwargs):
         """Normalize, content-address, and insert immutable profile rows."""
         if replace:

@@ -188,15 +188,6 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     job_kwargs=null: blob
     """
 
-    def insert1(self, row, allow_duplicate_params=False, **kwargs):
-        """Validate and insert a single matcher-parameters row."""
-        # Delegate to ``insert`` so one validated path serves both insert1 and
-        # bulk insert (a bulk insert must not bypass the registry / Pydantic
-        # checks), mirroring the other validated v2 parameter Lookups.
-        self.insert(
-            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
-        )
-
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
         """Validate the matcher name + params against the registry, then insert.
 
@@ -728,10 +719,6 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         drift_estimate_um=0.0: float
         fdr_estimate=NULL: float
         """
-
-        def insert1(self, row, **kwargs):
-            """Validate one pair against the pinned curation universe, insert."""
-            self.insert([row], **kwargs)
 
         def insert(self, rows, **kwargs):
             """Validate every pair against the selection's pinned inputs.

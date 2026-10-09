@@ -117,10 +117,6 @@ class UnitAnnotationDefinition(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         cls().insert1(row, skip_duplicates=True)
         return AnnotationDefinitionRef.from_key(row)
 
-    def insert1(self, row, **kwargs):
-        """Validate a definition through the whole-row insert boundary."""
-        self.insert([row], **kwargs)
-
     def insert(self, rows, *, replace=False, **kwargs):
         """Normalize rows and reject redefinition under an existing version."""
         if replace:

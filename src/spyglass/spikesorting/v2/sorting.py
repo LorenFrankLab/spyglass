@@ -299,13 +299,6 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     # ``sorter_params_name`` (a local MS4 row and a containerized MS4 row are
     # distinct named rows), not an in-place mutation.
 
-    def insert1(self, row, allow_duplicate_params=False, **kwargs):
-        """Validate and insert a single row via the ``insert`` path."""
-        # Delegate to ``insert`` so one validated path serves both.
-        self.insert(
-            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
-        )
-
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
         """Validate every row against its per-sorter schema, then insert.
 
@@ -522,13 +515,6 @@ class AnalyzerWaveformParameters(
     # The shipped region rows are defined in
     # ``_recipe_catalog.waveform_params_default_contents`` (single source).
     _DEFAULT_CONTENTS: tuple = waveform_params_default_contents()
-
-    def insert1(self, row, allow_duplicate_params=False, **kwargs):
-        """Insert one row through the validated bulk ``insert`` path."""
-        # Delegate to ``insert`` so one validated path serves both.
-        self.insert(
-            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
-        )
 
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
         """Validate each ``params`` blob + path-safe name, then insert.

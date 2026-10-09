@@ -145,13 +145,6 @@ class ArtifactDetectionParameters(
     # ``_recipe_catalog.artifact_default_contents`` (single source).
     _DEFAULT_CONTENTS: tuple = artifact_default_contents()
 
-    def insert1(self, row, allow_duplicate_params=False, **kwargs):
-        """Insert one validated artifact-detection parameter row."""
-        # Delegate to ``insert`` so one validated path serves both.
-        self.insert(
-            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
-        )
-
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
         """Insert artifact-detection parameter rows after validation.
 

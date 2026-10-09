@@ -266,10 +266,6 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         """The shipped rows (``_recipe_catalog.quality_metric_default_rows``)."""
         return quality_metric_default_rows()
 
-    def insert1(self, row, **kwargs):
-        """Validate one row's params then insert it."""
-        self.insert([row], **kwargs)
-
     def insert(self, rows, *, allow_duplicate_params=False, **kwargs):
         """Validate every row's params, reject duplicate content, then insert.
 

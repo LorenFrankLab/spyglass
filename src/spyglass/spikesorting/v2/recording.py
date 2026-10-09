@@ -173,7 +173,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     reference_electrode_id = null: int
     """
     # ``reference_mode`` is validated against the ``ReferenceMode`` Literal
-    # in ``insert1`` / ``insert`` (varchar, not a MySQL enum -- the mode set
+    # in ``insert`` (varchar, not a MySQL enum -- the mode set
     # may grow; see ``ReferenceMode``). ``reference_electrode_id`` is
     # non-null iff ``reference_mode == 'specific'``. v1's ``SortGroup``
     # instead stores a single ``sort_reference_electrode_id`` int whose magic
@@ -201,11 +201,6 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             rows = [dict(r) for r in rows]
             self._assert_no_reference_member(rows)
             super().insert(rows, **kwargs)
-
-        def insert1(self, row, **kwargs):
-            row = dict(row)
-            self._assert_no_reference_member([row])
-            super().insert1(row, **kwargs)
 
         @staticmethod
         def _assert_no_reference_member(rows):
@@ -242,11 +237,6 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                         "the sort would run one channel short. Use a "
                         "cross-group reference electrode."
                     )
-
-    def insert1(self, row, **kwargs):
-        """Insert one row after validating its reference fields."""
-        _validate_reference_fields(dict(row))
-        super().insert1(row, **kwargs)
 
     def insert(self, rows, **kwargs):
         """Insert rows after validating each row's reference fields."""
@@ -736,13 +726,6 @@ class PreprocessingParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     # mismatched one. The shipped rows are defined in
     # ``_recipe_catalog.preprocessing_default_contents`` (single source).
     _DEFAULT_CONTENTS: tuple = preprocessing_default_contents()
-
-    def insert1(self, row, allow_duplicate_params=False, **kwargs):
-        """Insert one row through the validated bulk ``insert`` path."""
-        # Delegate to ``insert`` so one validated path serves both.
-        self.insert(
-            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
-        )
 
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
         """Insert rows after Pydantic-validating each params blob.

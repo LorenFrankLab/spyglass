@@ -933,7 +933,7 @@ def test_artifact_detection_parameters_validates_via_insert1(dj_conn):
     """``ArtifactDetectionParameters.insert1`` validates the
     ``params`` blob through Pydantic before the row is written.
 
-    Exercises lines 92-96 (the custom ``insert1`` override).
+    DataJoint's ``insert1`` dispatches to the validating ``insert`` override.
     A blob with an unknown key violates ``extra="forbid"`` and the
     insert is rejected before any row reaches the DB.
     """

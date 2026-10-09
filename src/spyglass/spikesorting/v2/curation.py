@@ -167,18 +167,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         curation_label: varchar(32)
         """
 
-        def insert1(self, row, *, allow_custom_labels: bool = False, **kwargs):
-            """Validate and insert a single ``UnitLabel`` row."""
-            # Delegate to ``insert`` (as DataJoint's own ``insert1`` does:
-            # ``self.insert((row,))``) so the single validation happens in
-            # one place AND ``allow_custom_labels`` survives the dispatch.
-            # Validating here then calling ``super().insert1`` would lose
-            # the flag, because DataJoint's internal ``insert1 -> insert``
-            # hop re-enters this override with the default False.
-            self.insert(
-                [row], allow_custom_labels=allow_custom_labels, **kwargs
-            )
-
         def insert(self, rows, *, allow_custom_labels: bool = False, **kwargs):
             """Validate ``curation_label`` values, then insert the rows."""
             rows = list(rows)
@@ -259,10 +247,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         parent_unit_id: int
         ---
         """
-
-        def insert1(self, row, **kwargs):
-            """Validate, then insert a single ``ParentMergeGroup`` row."""
-            self.insert([row], **kwargs)
 
         def insert(self, rows, **kwargs):
             """Insert parent-namespace merge rows, enforcing provenance.
