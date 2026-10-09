@@ -123,15 +123,12 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
     )
     # The validated model is DeepHash-stable across DataJoint's two
     # ``make_fetch`` calls (its ``__dict__`` is primitives).
-    preprocessing_row = (
-        PreprocessingParameters
-        & {"preprocessing_params_name": sel["preprocessing_params_name"]}
-    ).fetch1()
     preprocessing_params = PreprocessingParamsSchema.model_validate(
-        preprocessing_row["params"]
+        (
+            PreprocessingParameters
+            & {"preprocessing_params_name": sel["preprocessing_params_name"]}
+        ).fetch1("params")
     )
-    # Resolved in make_compute (see the comment there).
-    preprocessing_job_kwargs = preprocessing_row.get("job_kwargs")
     # Decides whether the legacy ``tetrode_12.5`` geometry repair applies.
     probe_types, electrode_group_names = fetch_sort_group_probe_info(
         nwb_file_name, channel_ids
@@ -178,7 +175,6 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
         sort_valid_times=sort_valid_times,
         raw_valid_times=raw_valid_times,
         preprocessing_params=preprocessing_params,
-        preprocessing_job_kwargs=preprocessing_job_kwargs,
         probe_types=probe_types,
         electrode_group_names=electrode_group_names,
         bad_channel_ids=bad_channel_ids,

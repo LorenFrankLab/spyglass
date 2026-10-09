@@ -119,7 +119,7 @@ def test_recording_fetched_matches_make_compute_signature():
     ``make_compute(key, *fetched)``, so the NamedTuple field order is a wire
     contract. ``raw_object_id`` was appended to both ``RecordingFetched`` and
     ``make_compute`` -- a misalignment would silently mis-bind the str-adjacent
-    slots (e.g. ``preprocessing_job_kwargs`` / ``raw_object_id``) without a
+    slots (e.g. ``raw_object_id`` / ``raw_path``) without a
     TypeError.
     """
     import inspect

@@ -1895,10 +1895,7 @@ def test_recording_rebuild_path_keeps_existing_file_on_failure(
     Uses a freshly created AnalysisNwbfile as the stand-in cache so the shared
     fixture's real recording file is never touched.
     """
-    from spyglass.common.common_nwbfile import (
-        AnalysisNwbfile,
-        Nwbfile,
-    )
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._core import signal_math as utils_mod
     from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
@@ -1935,22 +1932,10 @@ def test_recording_rebuild_path_keeps_existing_file_on_failure(
         utils_mod, "_get_recording_timestamps", _raise_after_write
     )
 
-    raw_path = Nwbfile().get_abs_path(nwb_file_name)
     try:
         with pytest.raises(Exception, match="rebuild post-write boom"):
             Recording()._compute_recording_artifact(
-                raw_path=raw_path,
-                raw_object_id=fetched.raw_object_id,
-                nwb_file_name=nwb_file_name,
-                interval_list_name=fetched.sel["interval_list_name"],
-                channel_ids=fetched.channel_ids,
-                reference_mode=fetched.reference_mode,
-                reference_electrode_id=fetched.reference_electrode_id,
-                sort_valid_times=fetched.sort_valid_times,
-                raw_valid_times=fetched.raw_valid_times,
-                preprocessing_params=fetched.preprocessing_params,
-                probe_types=fetched.probe_types,
-                electrode_group_names=fetched.electrode_group_names,
+                fetched,
                 existing_analysis_file_name=existing,  # REBUILD path
             )
         assert (
@@ -2059,6 +2044,7 @@ def test_raw_source_series_pinned_to_raw_object_id(
 
     from tests.spikesorting.v2._ingest_helpers import write_two_eseries_nwb
 
+    from spyglass.spikesorting.v2._recording.types import RecordingFetched
     from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
     from spyglass.spikesorting.v2.recording import Recording
 
@@ -2081,19 +2067,23 @@ def test_raw_source_series_pinned_to_raw_object_id(
 
     with pytest.raises(_StopAfterRead):
         Recording()._compute_recording_artifact(
-            raw_path=str(path),
-            raw_object_id=second_obj,
-            nwb_file_name="unused.nwb",
-            interval_list_name="raw data valid times",
-            channel_ids=[0],
-            reference_mode="none",
-            reference_electrode_id=None,
-            sort_valid_times=np.array([[0.0, 1.0]]),
-            raw_valid_times=np.array([[0.0, 1.0]]),
-            preprocessing_params=None,
-            probe_types=(),
-            electrode_group_names=(),
-            bad_channel_ids=(),
+            RecordingFetched(
+                sel={
+                    "nwb_file_name": "unused.nwb",
+                    "interval_list_name": "raw data valid times",
+                },
+                channel_ids=[0],
+                reference_mode="none",
+                reference_electrode_id=None,
+                sort_valid_times=np.array([[0.0, 1.0]]),
+                raw_valid_times=np.array([[0.0, 1.0]]),
+                preprocessing_params=None,
+                probe_types=(),
+                electrode_group_names=(),
+                bad_channel_ids=(),
+                raw_object_id=second_obj,
+                raw_path=str(path),
+            ),
             existing_analysis_file_name=None,
         )
 
@@ -2199,19 +2189,10 @@ def test_compute_artifact_filters_before_restriction(recording_selection_key):
     )
 
     artifact = Recording()._compute_recording_artifact(
-        raw_path=Nwbfile().get_abs_path(nwb_file_name),
-        raw_object_id=fetched.raw_object_id,
-        nwb_file_name=nwb_file_name,
-        interval_list_name=fetched.sel["interval_list_name"],
-        channel_ids=fetched.channel_ids,
-        reference_mode=fetched.reference_mode,
-        reference_electrode_id=fetched.reference_electrode_id,
-        sort_valid_times=sort_valid_times,
-        raw_valid_times=fetched.raw_valid_times,
-        preprocessing_params=validated,
-        probe_types=fetched.probe_types,
-        electrode_group_names=fetched.electrode_group_names,
-        bad_channel_ids=fetched.bad_channel_ids,
+        fetched._replace(
+            sort_valid_times=sort_valid_times,
+            preprocessing_params=validated,
+        )
     )
     written_abs_path = AnalysisNwbfile.get_abs_path(artifact.analysis_file_name)
     try:
@@ -2391,19 +2372,12 @@ def test_compute_artifact_normalizes_on_the_retained_contacts(
             )
 
         artifact = Recording()._compute_recording_artifact(
-            raw_path=str(patched),
-            raw_object_id=fetched.raw_object_id,
-            nwb_file_name=nwb_file_name,
-            interval_list_name=fetched.sel["interval_list_name"],
-            channel_ids=fetched.channel_ids,
-            reference_mode="specific",
-            reference_electrode_id=reference_electrode_id,
-            sort_valid_times=np.array([[0.13, 1.27]], dtype=float),
-            raw_valid_times=fetched.raw_valid_times,
-            preprocessing_params=fetched.preprocessing_params,
-            probe_types=fetched.probe_types,
-            electrode_group_names=fetched.electrode_group_names,
-            bad_channel_ids=fetched.bad_channel_ids,
+            fetched._replace(
+                raw_path=str(patched),
+                reference_mode="specific",
+                reference_electrode_id=reference_electrode_id,
+                sort_valid_times=np.array([[0.13, 1.27]], dtype=float),
+            )
         )
         written_abs_path = AnalysisNwbfile.get_abs_path(
             artifact.analysis_file_name

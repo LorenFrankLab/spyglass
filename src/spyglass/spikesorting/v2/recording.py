@@ -1076,7 +1076,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         sort_valid_times,
         raw_valid_times,
         preprocessing_params,
-        preprocessing_job_kwargs,
         probe_types,
         electrode_group_names,
         bad_channel_ids,
@@ -1113,8 +1112,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             seconds.
         preprocessing_params : PreprocessingParamsSchema
             Validated preprocessing parameters.
-        preprocessing_job_kwargs : dict or None
-            Per-row SpikeInterface job kwargs blob.
         probe_types : tuple
             Per-channel ``probe_type`` for the sort group.
         electrode_group_names : tuple
@@ -1134,21 +1131,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         RecordingComputed
             Computed artifact metadata unpacked into ``make_insert``.
         """
-        # The streaming write uses HDMF's chunked iterator, not SI job_kwargs,
-        # so the resolved dict is unused; the call keeps this stage's
-        # resolution path wired like every other compute stage (tests patch
-        # ``_resolved_job_kwargs`` to confirm it).
-        from spyglass.spikesorting.v2._core.job_config import (
-            _resolved_job_kwargs,
-        )
-
-        _resolved_job_kwargs(preprocessing_job_kwargs)
-
-        artifact = self._compute_recording_artifact(
-            raw_path=raw_path,
-            raw_object_id=raw_object_id,
-            nwb_file_name=sel["nwb_file_name"],
-            interval_list_name=sel["interval_list_name"],
+        fetched = RecordingFetched(
+            sel=sel,
             channel_ids=channel_ids,
             reference_mode=reference_mode,
             reference_electrode_id=reference_electrode_id,
@@ -1158,6 +1142,11 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             probe_types=probe_types,
             electrode_group_names=electrode_group_names,
             bad_channel_ids=bad_channel_ids,
+            raw_object_id=raw_object_id,
+            raw_path=raw_path,
+        )
+        artifact = self._compute_recording_artifact(
+            fetched,
             provenance_tables=_recording_nwb.recording_provenance_table(
                 recording_id=sel["recording_id"],
                 raw_object_id=raw_object_id,
@@ -1434,20 +1423,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     @classmethod
     def _compute_recording_artifact(
         cls,
+        fetched: RecordingFetched,
         *,
-        raw_path: str,
-        raw_object_id: str,
-        nwb_file_name: str,
-        interval_list_name: str,
-        channel_ids: list,
-        reference_mode: str,
-        reference_electrode_id: int | None,
-        sort_valid_times,
-        raw_valid_times,
-        preprocessing_params: PreprocessingParamsSchema,
-        probe_types: tuple,
-        electrode_group_names: tuple,
-        bad_channel_ids: tuple = (),
         existing_analysis_file_name: str | None = None,
         provenance_tables=None,
     ) -> RecordingArtifactResult:
@@ -1458,22 +1435,37 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         so ``RecordingArtifactRecompute.make_compute`` can run it without a
         table instance (constructing one queries the DB). The writer is an
         explicit dependency of the service.
+
+        Parameters
+        ----------
+        fetched : RecordingFetched
+            The inputs :meth:`make_fetch` resolved.
+        existing_analysis_file_name : str or None, optional
+            When ``None`` (default), stage a fresh ``AnalysisNwbfile``;
+            otherwise write into this existing file in place.
+        provenance_tables : optional
+            Source-lineage scratch table(s) to embed in the file (see
+            :func:`._storage.nwb.recording_provenance_table`).
+
+        Returns
+        -------
+        RecordingArtifactResult
         """
         return _recording_nwb.compute_recording_artifact(
             writer=cls._write_nwb_artifact,
-            raw_path=raw_path,
-            raw_object_id=raw_object_id,
-            nwb_file_name=nwb_file_name,
-            interval_list_name=interval_list_name,
-            channel_ids=channel_ids,
-            reference_mode=reference_mode,
-            reference_electrode_id=reference_electrode_id,
-            sort_valid_times=sort_valid_times,
-            raw_valid_times=raw_valid_times,
-            preprocessing_params=preprocessing_params,
-            probe_types=probe_types,
-            electrode_group_names=electrode_group_names,
-            bad_channel_ids=bad_channel_ids,
+            raw_path=fetched.raw_path,
+            raw_object_id=fetched.raw_object_id,
+            nwb_file_name=fetched.sel["nwb_file_name"],
+            interval_list_name=fetched.sel["interval_list_name"],
+            channel_ids=fetched.channel_ids,
+            reference_mode=fetched.reference_mode,
+            reference_electrode_id=fetched.reference_electrode_id,
+            sort_valid_times=fetched.sort_valid_times,
+            raw_valid_times=fetched.raw_valid_times,
+            preprocessing_params=fetched.preprocessing_params,
+            probe_types=fetched.probe_types,
+            electrode_group_names=fetched.electrode_group_names,
+            bad_channel_ids=fetched.bad_channel_ids,
             existing_analysis_file_name=existing_analysis_file_name,
             provenance_tables=provenance_tables,
         )

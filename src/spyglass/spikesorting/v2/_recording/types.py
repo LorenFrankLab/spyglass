@@ -45,7 +45,6 @@ class RecordingFetched(NamedTuple):
     sort_valid_times: np.ndarray
     raw_valid_times: np.ndarray
     preprocessing_params: PreprocessingParamsSchema
-    preprocessing_job_kwargs: dict | None
     probe_types: tuple
     electrode_group_names: tuple
     bad_channel_ids: tuple

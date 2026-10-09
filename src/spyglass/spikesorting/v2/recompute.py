@@ -913,19 +913,7 @@ def _recompute_recording_fingerprint(fetched) -> dict:
     and error -- it never enters the canonical slot.
     """
     result = Recording._compute_recording_artifact(
-        raw_path=fetched.raw_path,
-        raw_object_id=fetched.raw_object_id,
-        nwb_file_name=fetched.sel["nwb_file_name"],
-        interval_list_name=fetched.sel["interval_list_name"],
-        channel_ids=fetched.channel_ids,
-        reference_mode=fetched.reference_mode,
-        reference_electrode_id=fetched.reference_electrode_id,
-        sort_valid_times=fetched.sort_valid_times,
-        raw_valid_times=fetched.raw_valid_times,
-        preprocessing_params=fetched.preprocessing_params,
-        probe_types=fetched.probe_types,
-        electrode_group_names=fetched.electrode_group_names,
-        bad_channel_ids=fetched.bad_channel_ids,
+        fetched,
         existing_analysis_file_name=None,  # fresh, unregistered temp file
     )
     fresh_abs = AnalysisNwbfile.get_abs_path(result.analysis_file_name)
