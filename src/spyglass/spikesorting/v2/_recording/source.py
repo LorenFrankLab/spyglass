@@ -516,9 +516,5 @@ class SourceResolution:
     helpers.
     """
 
-    kind: Literal[
-        "recording",
-        "concatenated_recording",
-        "shared_artifact_group",
-    ]
+    kind: Literal["recording", "concatenated_recording"]
     key: dict

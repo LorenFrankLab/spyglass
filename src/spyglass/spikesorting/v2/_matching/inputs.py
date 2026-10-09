@@ -828,30 +828,6 @@ def _snapshot_mismatches(input_row, recording_rows, live) -> list[str]:
     return mismatches
 
 
-def _input_anchor_sort_group(sorting_id) -> tuple[str, int]:
-    """``(nwb_file_name, sort_group_id)`` of an input's first recording.
-
-    The recording of a single-recording sort, or the first member of a
-    concatenation sort.
-    """
-    from spyglass.spikesorting.v2._sorting.fetch import first_concat_member
-    from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
-    source = SortingSelection.resolve_source({"sorting_id": sorting_id})
-    if source.kind == "recording":
-        nwb_file_name, sort_group_id = (RecordingSelection & source.key).fetch1(
-            "nwb_file_name", "sort_group_id"
-        )
-    else:
-        first, _ = first_concat_member(source.key)
-        nwb_file_name, sort_group_id = (
-            first["nwb_file_name"],
-            first["sort_group_id"],
-        )
-    return str(nwb_file_name), int(sort_group_id)
-
-
 def normalize_curation_choices(curation_choices) -> dict[int, tuple]:
     """``{member_index: {sorting_id, curation_id}}`` -> ``{int: (sid, int)}``.
 

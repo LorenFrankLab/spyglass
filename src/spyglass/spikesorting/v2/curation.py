@@ -2262,23 +2262,14 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         from spyglass.spikesorting.v2._recording.unit_metadata import (
             sort_group_electrode_regions,
         )
-        from spyglass.spikesorting.v2.recording import RecordingSelection
 
         sorting_id = (cls & key).fetch1("sorting_id")
-        source = SortingSelection.resolve_source({"sorting_id": sorting_id})
-        if source.kind == "recording":
-            recording_key = source.key
-        else:  # concatenated_recording -> anchor member's sort group
-            anchor_recording_id, _nwb, _preproc = (
-                _sorting_fetch.resolve_concat_anchor(source.key)
-            )
-            recording_key = {"recording_id": anchor_recording_id}
-        # ``RecordingSelection.fetch1("KEY")`` returns only the UUID PK;
-        # the upstream nwb_file_name + sort_group_id are non-PK columns
-        # that we have to fetch explicitly.
-        nwb_file_name, sort_group_id = (
-            RecordingSelection & recording_key
-        ).fetch1("nwb_file_name", "sort_group_id")
+        anchor = _sorting_fetch.resolve_sort_anchor(
+            SortingSelection.resolve_source({"sorting_id": sorting_id})
+        )
         return sort_group_electrode_regions(
-            {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
+            {
+                "nwb_file_name": anchor.nwb_file_name,
+                "sort_group_id": anchor.sort_group_id,
+            }
         )

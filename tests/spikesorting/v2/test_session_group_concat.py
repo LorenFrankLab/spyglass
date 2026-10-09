@@ -1736,13 +1736,12 @@ def test_concat_sort_end_to_end_and_split(same_day_group, caplog):
     # empty RecordingSource join): the CurationEvaluation NWB anchor resolves to
     # the first member, and describe_units computes firing rate against the
     # concat recording's total_duration_s.
-    from spyglass.spikesorting.v2.metric_curation import (
-        _nwb_file_name_for_sorting,
-    )
     from spyglass.spikesorting.v2.pipeline import describe_units
 
     assert (
-        _nwb_file_name_for_sorting({"sorting_id": sort_pk["sorting_id"]})
+        Sorting.resolve_anchor_nwb_file_name(
+            {"sorting_id": sort_pk["sorting_id"]}
+        )
         == first_nwb
     )
     units_df = describe_units(sort_pk["sorting_id"])

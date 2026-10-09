@@ -1151,9 +1151,8 @@ class Sorting(
         Source-agnostic: a single-recording sort anchors to its own
         ``RecordingSelection``; a concat sort anchors to the FIRST frozen
         ``MemberSnapshot`` member (the deterministic parent the per-unit Electrode
-        FK and the curated/analyzer NWBs all use). Centralizes the
-        unwrap-to-nwb dispatch that several reporting / curation accessors need,
-        so the "which member is the anchor" decision lives in exactly one place.
+        FK and the curated/analyzer NWBs all use), as resolved by
+        :func:`._sorting.fetch.resolve_sort_anchor`.
 
         Parameters
         ----------

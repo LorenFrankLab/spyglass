@@ -66,7 +66,6 @@ from spyglass.spikesorting.v2._matching.fetch import (
 )
 from spyglass.spikesorting.v2._matching.inputs import (
     _add_single_recording_frames,
-    _input_anchor_sort_group,
     _resolve_match_input,
     _validate_member_curations,
     _warn_clusterless_match_once,
@@ -587,13 +586,20 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         path uses, so two physically distinct probes never collapse to one
         electrode space even when their channel geometry coincides.
         """
+        from spyglass.spikesorting.v2._sorting.fetch import resolve_sort_anchor
         from spyglass.spikesorting.v2.session_group import (
             _member_electrode_signature,
         )
+        from spyglass.spikesorting.v2.sorting import SortingSelection
 
-        nwb_file_name, sort_group_id = _input_anchor_sort_group(sorting_id)
+        anchor = resolve_sort_anchor(
+            SortingSelection.resolve_source({"sorting_id": sorting_id})
+        )
         return _member_electrode_signature(
-            {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
+            {
+                "nwb_file_name": anchor.nwb_file_name,
+                "sort_group_id": anchor.sort_group_id,
+            }
         )
 
     @classmethod

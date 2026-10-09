@@ -5,8 +5,9 @@ the sort's source and its anchor recording (the sort's own recording, or the
 first frozen member of a concatenation), the sorter and display-analyzer
 recipes, the execution backend, the per-unit electrode metadata, a
 motion-corrected recording's provenance, and the effective traces file
-(rebuilt here if missing). :func:`resolve_anchor_nwb_file_name` is the body of
-the public ``Sorting.resolve_anchor_nwb_file_name``.
+(rebuilt here if missing). :func:`resolve_sort_anchor` is the one place that
+decides which recording a sort anchors to; :func:`resolve_anchor_nwb_file_name`
+is the body of the public ``Sorting.resolve_anchor_nwb_file_name``.
 
 Imports without the DB layer: the DataJoint tables are imported inside the
 functions.
@@ -14,7 +15,8 @@ functions.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import uuid
+from typing import TYPE_CHECKING, NamedTuple
 
 from spyglass.spikesorting.v2._core.recipe_catalog import (
     waveform_params_for_preprocessing,
@@ -22,6 +24,7 @@ from spyglass.spikesorting.v2._core.recipe_catalog import (
 from spyglass.spikesorting.v2._sorting.analyzer import fetch_waveform_params
 
 if TYPE_CHECKING:
+    from spyglass.spikesorting.v2._recording.source import SourceResolution
     from spyglass.spikesorting.v2.sorting import SortingFetched
 
 
@@ -60,7 +63,6 @@ def fetch_sorting_inputs(key) -> SortingFetched:
         ``sorter_row``, anchor ``nwb_file_name``, ``obs_intervals``,
         display recipe, execution params) for the compute step.
     """
-    from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
         SortingFetched,
@@ -92,15 +94,39 @@ def fetch_sorting_inputs(key) -> SortingFetched:
         }
     ).fetch1()
 
-    # Resolve the anchor recording_id / nwb file / preprocessing recipe.
-    # Single-recording: the sort's own RecordingSelection. Concat: the
-    # first member (deterministic parent anchor). Valid observation times
-    # are resolved separately from this metadata anchor.
+    if (
+        source.kind == "concatenated_recording"
+        and sel_row.get("artifact_detection_id") is not None
+    ):
+        # Concat artifacts are masked before concatenation and carry
+        # their own member detection provenance and kept intervals.
+        # ``insert_selection`` rejects a concat source carrying an
+        # artifact_detection_id, but a direct insert of a
+        # ConcatenatedRecordingSource + ArtifactDetectionSource pair can
+        # bypass that. Re-assert here (the compute boundary) so the sort is
+        # never run UNMASKED while a stray ArtifactDetectionSource row claims
+        # an artifact pass -- raise rather than silently dropping the mask.
+        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
+        raise SchemaBypassError(
+            "Sorting.make_fetch: concat source for sorting_id="
+            f"{key.get('sorting_id')!r} carries artifact_detection_id="
+            f"{sel_row['artifact_detection_id']!r}, but a concat sort "
+            "owns its member masks through ConcatenatedRecordingSelection. "
+            "The ArtifactDetectionSource "
+            "part was inserted without SortingSelection.insert_selection "
+            "(schema bypass) and cannot describe all concat members. Re-create the selection "
+            "via insert_selection, or drop the stray "
+            "ArtifactDetectionSource row."
+        )
+
+    # The anchor recording / nwb file / preprocessing recipe. Valid
+    # observation times are resolved separately from this metadata anchor.
+    anchor = resolve_sort_anchor(source)
+    recording_id = anchor.recording_id
+    nwb_file_name = anchor.nwb_file_name
+    preprocessing_params_name = anchor.preprocessing_params_name
     if source.kind == "recording":
-        recording_id = source.key["recording_id"]
-        nwb_file_name, preprocessing_params_name = (
-            RecordingSelection & {"recording_id": recording_id}
-        ).fetch1("nwb_file_name", "preprocessing_params_name")
         # Pre-fetch the observation-interval window so ``_write_units_nwb``
         # can write ``obs_intervals=`` on every ``add_unit`` call.
         # Downstream firing-rate computations need the artifact-removed
@@ -128,33 +154,6 @@ def fetch_sorting_inputs(key) -> SortingFetched:
             obs_intervals = None
         concat_statistics_spans = None
     else:  # concatenated_recording
-        # Concat artifacts are masked before concatenation and carry
-        # their own member detection provenance and kept intervals.
-        # ``insert_selection`` rejects a concat source carrying an
-        # artifact_detection_id, but a direct insert of a
-        # ConcatenatedRecordingSource + ArtifactDetectionSource pair can
-        # bypass that. Re-assert here (the compute boundary) so the sort is
-        # never run UNMASKED while a stray ArtifactDetectionSource row claims
-        # an artifact pass -- raise rather than silently dropping the mask.
-        if sel_row.get("artifact_detection_id") is not None:
-            from spyglass.spikesorting.v2.exceptions import (
-                SchemaBypassError,
-            )
-
-            raise SchemaBypassError(
-                "Sorting.make_fetch: concat source for sorting_id="
-                f"{key.get('sorting_id')!r} carries artifact_detection_id="
-                f"{sel_row['artifact_detection_id']!r}, but a concat sort "
-                "owns its member masks through ConcatenatedRecordingSelection. "
-                "The ArtifactDetectionSource "
-                "part was inserted without SortingSelection.insert_selection "
-                "(schema bypass) and cannot describe all concat members. Re-create the selection "
-                "via insert_selection, or drop the stray "
-                "ArtifactDetectionSource row."
-            )
-        recording_id, nwb_file_name, preprocessing_params_name = (
-            resolve_concat_anchor(source.key)
-        )
         from spyglass.spikesorting.v2.session_group import (
             ConcatenatedRecording,
         )
@@ -333,83 +332,93 @@ def fetch_unit_electrode_metadata(recording_id, nwb_file_name):
     return sort_group_id, electrode_by_id, region_by_electrode
 
 
-def first_concat_member(source_key):
-    """Return the concat anchor member row and its preprocessing recipe.
+class SortAnchor(NamedTuple):
+    """The recording a sort anchors its session-level metadata to.
 
-    The anchor is the FIRST frozen member (by ``member_index``) from the
+    A single-recording sort anchors to its own recording; a concat sort
+    anchors to the FIRST frozen member. The anchor is the analysis-NWB parent
+    and the per-unit ``Electrode`` FK source; ``preprocessing_params_name`` is
+    the source's preprocessing recipe (a concat's single shared one).
+    """
+
+    recording_id: uuid.UUID
+    nwb_file_name: str
+    sort_group_id: int
+    preprocessing_params_name: str
+
+
+def resolve_sort_anchor(source: SourceResolution) -> SortAnchor:
+    """Resolve a sort source to its anchor recording.
+
+    A single-recording sort anchors to its own ``RecordingSelection`` row. A
+    concat sort anchors to the FIRST frozen member (by ``member_index``) of
     ``ConcatenatedRecordingSelection.MemberSnapshot`` -- never the live
     ``SessionGroup.Member`` set, so a later group edit cannot re-point an
-    existing concat sort's anchor. The frozen row carries the anchor's
-    ``nwb_file_name`` (the analysis parent) and ``recording_id`` (the
-    per-unit ``Electrode`` FK); the preprocessing recipe is the concat
-    selection's single shared one.
+    existing concat sort's anchor. The snapshot froze the member's resolved
+    ``recording_id`` when the concat id was minted, so no
+    ``RecordingSelection`` join is needed; the full multi-session provenance
+    stays queryable through ``MemberSnapshot``.
 
     Parameters
     ----------
-    source_key : dict
-        ``{"concat_recording_id": ...}`` from ``resolve_source``.
+    source : SourceResolution
+        The sort's source, from ``SortingSelection.resolve_source``.
 
     Returns
     -------
-    tuple[dict, str]
-        ``(first_member_snapshot_row, preprocessing_params_name)``.
+    SortAnchor
+        The anchor ``recording_id``, ``nwb_file_name`` and ``sort_group_id``,
+        and the source's ``preprocessing_params_name``.
+
+    Raises
+    ------
+    SchemaBypassError
+        If a concat selection has no ``MemberSnapshot`` rows.
     """
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+    from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
     )
 
-    concat_sel = (ConcatenatedRecordingSelection & source_key).fetch1()
+    if source.kind == "recording":
+        recording_id = source.key["recording_id"]
+        nwb_file_name, sort_group_id, preprocessing_params_name = (
+            RecordingSelection & {"recording_id": recording_id}
+        ).fetch1("nwb_file_name", "sort_group_id", "preprocessing_params_name")
+        return SortAnchor(
+            recording_id=recording_id,
+            nwb_file_name=str(nwb_file_name),
+            sort_group_id=int(sort_group_id),
+            preprocessing_params_name=str(preprocessing_params_name),
+        )
+    preprocessing_params_name = (
+        ConcatenatedRecordingSelection & source.key
+    ).fetch1("preprocessing_params_name")
     snapshot = (
-        ConcatenatedRecordingSelection.MemberSnapshot & source_key
+        ConcatenatedRecordingSelection.MemberSnapshot & source.key
     ).fetch(as_dict=True, order_by="member_index", limit=1)
     if not snapshot:
         raise SchemaBypassError(
             "Sorting: concat selection "
-            f"{dict(source_key)} has no MemberSnapshot rows; the frozen "
+            f"{dict(source.key)} has no MemberSnapshot rows; the frozen "
             "member set is written by insert_selection. Drop the selection "
             "and re-insert via insert_selection."
         )
-    return snapshot[0], concat_sel["preprocessing_params_name"]
-
-
-def resolve_concat_anchor(source_key):
-    """Resolve a concat source to its anchor recording / NWB / preprocessing.
-
-    Reads the anchor ``recording_id`` straight from the frozen snapshot (no
-    ``RecordingSelection`` join needed -- the snapshot froze the resolved
-    ``recording_id`` when the concat id was minted). The full multi-session
-    provenance stays queryable through
-    ``ConcatenatedRecordingSelection.MemberSnapshot``.
-
-    Parameters
-    ----------
-    source_key : dict
-        ``{"concat_recording_id": ...}`` from ``resolve_source``.
-
-    Returns
-    -------
-    tuple[uuid.UUID, str, str]
-        ``(anchor_recording_id, anchor_nwb_file_name,
-        preprocessing_params_name)``.
-    """
-    first_member, preprocessing_params_name = first_concat_member(source_key)
-    return (
-        first_member["recording_id"],
-        first_member["nwb_file_name"],
-        preprocessing_params_name,
+    first_member = snapshot[0]
+    return SortAnchor(
+        recording_id=first_member["recording_id"],
+        nwb_file_name=str(first_member["nwb_file_name"]),
+        sort_group_id=int(first_member["sort_group_id"]),
+        preprocessing_params_name=str(preprocessing_params_name),
     )
 
 
 def resolve_anchor_nwb_file_name(key) -> str:
     """Return the analysis-NWB parent ``nwb_file_name`` for a sort.
 
-    Source-agnostic: a single-recording sort anchors to its own
-    ``RecordingSelection``; a concat sort anchors to the FIRST frozen
-    ``MemberSnapshot`` member (the deterministic parent the per-unit Electrode
-    FK and the curated/analyzer NWBs all use). Centralizes the
-    unwrap-to-nwb dispatch that several reporting / curation accessors need,
-    so the "which member is the anchor" decision lives in exactly one place.
+    The ``nwb_file_name`` of :func:`resolve_sort_anchor` -- the deterministic
+    parent the per-unit Electrode FK and the curated/analyzer NWBs all use.
 
     Parameters
     ----------
@@ -421,11 +430,8 @@ def resolve_anchor_nwb_file_name(key) -> str:
     str
         The anchor session's ``nwb_file_name``.
     """
-    from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    source = SortingSelection.resolve_source(key)
-    if source.kind == "recording":
-        return (RecordingSelection & source.key).fetch1("nwb_file_name")
-    # NWB only -- read it off the anchor member row; no recording_id join.
-    return first_concat_member(source.key)[0]["nwb_file_name"]
+    return resolve_sort_anchor(
+        SortingSelection.resolve_source(key)
+    ).nwb_file_name

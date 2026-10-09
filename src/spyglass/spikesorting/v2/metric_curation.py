@@ -92,17 +92,6 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 schema = dj.schema("spikesorting_v2_metric_curation")
 
 
-def _nwb_file_name_for_sorting(sorting_key: dict) -> str:
-    """Return the analyzer-curation NWB parent ``nwb_file_name`` for a sort.
-
-    Thin alias for ``Sorting.resolve_anchor_nwb_file_name`` (the single owner of
-    the source-agnostic anchor dispatch: a single-recording sort reads its
-    ``RecordingSelection``; a concat sort anchors to the first
-    ``SessionGroup.Member``).
-    """
-    return Sorting.resolve_anchor_nwb_file_name(sorting_key)
-
-
 def _assert_is_metric_recipe(waveform_params_name: str) -> None:
     """Raise unless ``waveform_params_name`` is a whitened metric recipe.
 

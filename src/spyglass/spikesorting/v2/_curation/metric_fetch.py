@@ -60,7 +60,6 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
         EvaluationSortingInputs,
         QualityMetricParameters,
         _assert_is_metric_recipe,
-        _nwb_file_name_for_sorting,
     )
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
@@ -181,7 +180,7 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
 
     return CurationEvaluationFetched(
         recording_inputs=EvaluationRecordingInputs(
-            nwb_file_name=_nwb_file_name_for_sorting(sorting_key),
+            nwb_file_name=Sorting.resolve_anchor_nwb_file_name(sorting_key),
             source_kind=lineage.kind,
             recording_id=recording_id,
             concat_recording_id=(
