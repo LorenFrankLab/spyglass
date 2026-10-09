@@ -85,7 +85,7 @@ def finite_scalar(
     return result
 
 
-def _finite_array(array, *, name, copy, readonly):
+def _finite_array(array, *, name, readonly=False):
     if array.size and array.dtype.kind not in "iuf":
         raise ValueError(f"{name} must contain finite real numbers.")
     with np.errstate(over="ignore", invalid="ignore"):
@@ -96,49 +96,33 @@ def _finite_array(array, *, name, copy, readonly):
         )
     if not np.all(np.isfinite(result)):
         raise ValueError(f"{name} must contain only finite values.")
-    if copy or readonly:
-        result = result.copy()
     if readonly:
+        result = result.copy()
         result.flags.writeable = False
     return result
 
 
-def finite_vector(
-    values, *, name: str, copy: bool = False, readonly: bool = False
-):
-    """Return a finite float64 1D vector, preserving order and duplicates.
-
-    ``readonly=True`` returns an owned copy so the caller's array stays writable.
-    """
+def finite_vector(values, *, name: str):
+    """Return a finite float64 1D vector, preserving order and duplicates."""
     array = _array(values, name=name)
     if array.ndim != 1:
         raise ValueError(f"{name} must be a one-dimensional array.")
-    return _finite_array(array, name=name, copy=copy, readonly=readonly)
+    return _finite_array(array, name=name)
 
 
-def finite_intervals(
-    values,
-    *,
-    name: str,
-    allow_zero_length: bool = True,
-    copy: bool = False,
-    readonly: bool = False,
-):
+def finite_intervals(values, *, name: str, readonly: bool = False):
     """Return finite float64 ``(n, 2)`` intervals without sorting or merging.
 
-    Empty ``[]`` denotes ``(0, 2)``. Reversed intervals are always rejected;
-    zero-length intervals are allowed by default. ``readonly=True`` owns a copy.
+    Empty ``[]`` denotes ``(0, 2)``. Reversed intervals are rejected;
+    zero-length intervals are allowed. ``readonly=True`` returns an owned,
+    non-writeable copy so the caller's array stays writable.
     """
     array = _array(values, name=name)
     if array.ndim == 1 and not array.size:
         array = array.reshape(0, 2)
     if array.ndim != 2 or array.shape[1] != 2:
         raise ValueError(f"{name} must have shape (n, 2).")
-    result = _finite_array(array, name=name, copy=copy, readonly=readonly)
-    invalid = result[:, 1] < result[:, 0]
-    if not allow_zero_length:
-        invalid |= result[:, 1] == result[:, 0]
-    if np.any(invalid):
-        relation = "greater than" if not allow_zero_length else "at least"
-        raise ValueError(f"{name} stop must be {relation} its start.")
+    result = _finite_array(array, name=name, readonly=readonly)
+    if np.any(result[:, 1] < result[:, 0]):
+        raise ValueError(f"{name} stop must be at least its start.")
     return result

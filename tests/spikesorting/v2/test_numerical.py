@@ -59,15 +59,11 @@ def test_spike_vector_requires_finite_real_one_dimensional_data(values):
         finite_vector(values, name="spike_times")
 
 
-def test_readonly_observations_own_storage_without_changing_caller():
+def test_spike_vector_preserves_order_and_duplicates():
     values = np.array([1.0, -2.0, 1.0])
-    got = finite_vector(values, name="spike_times", readonly=True)
-    np.testing.assert_array_equal(got, values)
-    assert not np.shares_memory(got, values)
-    assert values.flags.writeable
-    assert not got.flags.writeable
-    values[0] = 20.0
-    assert got[0] == 1.0
+    np.testing.assert_array_equal(
+        finite_vector(values, name="spike_times"), values
+    )
     assert finite_vector([], name="spike_times").shape == (0,)
 
 
@@ -85,9 +81,9 @@ def test_intervals_preserve_zeros_overlap_and_input_order_for_owning_algorithm()
     got = finite_intervals(values, name="intervals", readonly=True)
     np.testing.assert_array_equal(got, values)
     assert not np.shares_memory(got, values)
+    assert values.flags.writeable
+    assert not got.flags.writeable
     assert finite_intervals([], name="intervals").shape == (0, 2)
-    with pytest.raises(ValueError, match="stop"):
-        finite_intervals(values, name="intervals", allow_zero_length=False)
 
 
 @pytest.mark.parametrize("value", [True, np.nan, np.inf, "1", [1]])
