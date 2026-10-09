@@ -709,20 +709,17 @@ def _write_sorting_units_nwb_body(
     ``unit_metadata`` (``{unit_id: {peak_amplitude_uv, peak_electrode_id,
     n_spikes, brain_region}}``) adds the matching per-unit columns -- the SAME
     values used for ``Sorting.Unit`` (computed once). ``source_provenance``
-    (from :mod:`._storage.provenance`) is embedded as a scratch header so the file
-    is interpretable without the DB.
+    (from :mod:`._storage.provenance`, already validated by the caller) is
+    embedded as a scratch header so the file is interpretable without the DB.
     """
     import numpy as np
     import pynwb
 
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._storage.provenance import (
         SORTING_PROVENANCE,
         build_provenance_table,
-        validate_sorting_provenance,
     )
-
-    validate_sorting_provenance(source_provenance)
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
 
     analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
 
