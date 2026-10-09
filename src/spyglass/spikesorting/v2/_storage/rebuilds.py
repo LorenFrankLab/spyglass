@@ -55,6 +55,44 @@ def install_rebuilt_recording(
         raise
 
 
+def _reject_irreproducible_rebuild(
+    computed, row: dict, *, context: str, explanation: str
+) -> None:
+    """Discard a staged rebuild whose content differs from the stored row.
+
+    Parameters
+    ----------
+    computed
+        The rebuild result, carrying the staged ``analysis_file_name`` and its
+        readback ``content_hash``.
+    row : dict
+        The stored artifact row (``analysis_file_name``, ``content_hash``).
+    context : str
+        The rebuilding method, prefixed to the error and cleanup log.
+    explanation : str
+        Why the environment may no longer reproduce the artifact and how to
+        recover; appended to the error message.
+
+    Raises
+    ------
+    RecordingContentDriftError
+        If ``computed.content_hash`` differs from ``row["content_hash"]``. The
+        staged file is removed first; the canonical slot is never touched.
+    """
+    from spyglass.spikesorting.v2.exceptions import (
+        RecordingContentDriftError,
+    )
+
+    if computed.content_hash == row["content_hash"]:
+        return
+    _unlink_staged_analysis_file(computed.analysis_file_name, context=context)
+    raise RecordingContentDriftError(
+        f"{context}: rebuilt content_hash {computed.content_hash} does not "
+        f"match the stored content_hash {row['content_hash']} for "
+        f"{row['analysis_file_name']!r}. {explanation}"
+    )
+
+
 def _file_identity(abs_path: str) -> tuple[int, int, int] | None:
     """``(inode, size, mtime_ns)`` of a file, or ``None`` if it is absent."""
     import os
@@ -189,9 +227,6 @@ def rebuild_nwb_artifact(table, key) -> None:
     from spyglass.spikesorting.v2._recording.fingerprint import (
         recording_artifact_lock,
     )
-    from spyglass.spikesorting.v2.exceptions import (
-        RecordingContentDriftError,
-    )
     from spyglass.utils import logger
 
     row = (table & key).fetch1()
@@ -245,24 +280,25 @@ def rebuild_nwb_artifact(table, key) -> None:
                 ),
             ),
         )
-        temp_abs = AnalysisNwbfile.get_abs_path(rebuilt.analysis_file_name)
-
-        if rebuilt.content_hash != row["content_hash"]:
-            Path(temp_abs).unlink(missing_ok=True)
-            raise RecordingContentDriftError(
-                "Recording._rebuild_nwb_artifact: rebuilt content_hash "
-                f"{rebuilt.content_hash} does not match the stored "
-                f"content_hash {row['content_hash']} for "
-                f"{analysis_file_name!r}. The current environment no "
-                "longer reproduces this recording (e.g. a SpikeInterface/"
-                "BLAS upgrade, an edited raw NWB, or changed upstream "
-                "inputs). The canonical artifact was NOT modified. Recover "
-                "by restoring a backup of the artifact, rerunning the "
-                "recompute under the original environment, or deleting and "
-                "repopulating the Recording row (and its downstream)."
-            )
-
-        install_rebuilt_recording(temp_abs, canonical_abs, analysis_file_name)
+        _reject_irreproducible_rebuild(
+            rebuilt,
+            row,
+            context="Recording._rebuild_nwb_artifact",
+            explanation=(
+                "The current environment no longer reproduces this recording "
+                "(e.g. a SpikeInterface/BLAS upgrade, an edited raw NWB, or "
+                "changed upstream inputs). The canonical artifact was NOT "
+                "modified. Recover by restoring a backup of the artifact, "
+                "rerunning the recompute under the original environment, or "
+                "deleting and repopulating the Recording row (and its "
+                "downstream)."
+            ),
+        )
+        install_rebuilt_recording(
+            AnalysisNwbfile.get_abs_path(rebuilt.analysis_file_name),
+            canonical_abs,
+            analysis_file_name,
+        )
 
         logger.info(
             "Recording.get_recording: rebuilt + reconciled "
@@ -360,21 +396,17 @@ def rebuild_motion_corrected_artifact(table, key) -> None:
             *fetched,
             allow_spikeinterface_version_change=True,
         )
-        if computed.content_hash != row["content_hash"]:
-            _unlink_staged_analysis_file(
-                computed.analysis_file_name,
-                context="MotionCorrectedRecording._rebuild_nwb_artifact",
-            )
-            raise RecordingContentDriftError(
-                "MotionCorrectedRecording._rebuild_nwb_artifact: rebuilt "
-                f"content_hash {computed.content_hash} does not match the "
-                f"stored content_hash {row['content_hash']} for "
-                f"{analysis_file_name!r}. The current environment no "
-                "longer reproduces this corrected recording (e.g. a "
-                "SpikeInterface/BLAS upgrade). The canonical artifact was "
-                "NOT modified. Recover by restoring a backup or deleting "
-                "and repopulating the MotionCorrectedRecording row."
-            )
+        _reject_irreproducible_rebuild(
+            computed,
+            row,
+            context="MotionCorrectedRecording._rebuild_nwb_artifact",
+            explanation=(
+                "The current environment no longer reproduces this corrected "
+                "recording (e.g. a SpikeInterface/BLAS upgrade). The canonical "
+                "artifact was NOT modified. Recover by restoring a backup or "
+                "deleting and repopulating the MotionCorrectedRecording row."
+            ),
+        )
         install_rebuilt_recording(
             AnalysisNwbfile.get_abs_path(computed.analysis_file_name),
             canonical_abs,
@@ -481,25 +513,19 @@ def rebuild_concat_nwb_artifact(table, key) -> None:
         # make_compute writes a FRESH (unregistered) temp analysis file and
         # returns its readback content fingerprint as ``content_hash``.
         computed = table.make_compute(key, *fetched)
-        temp_abs = AnalysisNwbfile.get_abs_path(computed.analysis_file_name)
-
-        if computed.content_hash != row["content_hash"]:
-            _unlink_staged_analysis_file(
-                computed.analysis_file_name,
-                context="ConcatenatedRecording._rebuild_nwb_artifact",
-            )
-            raise RecordingContentDriftError(
-                "ConcatenatedRecording._rebuild_nwb_artifact: rebuilt "
-                f"content_hash {computed.content_hash} does not match the "
-                f"stored content_hash {row['content_hash']} for "
-                f"{analysis_file_name!r}. The current environment no longer "
-                "reproduces this concatenated recording (e.g. a "
-                "SpikeInterface/BLAS upgrade or a changed member recording). "
-                "The canonical artifact "
-                "was NOT modified. Recover by restoring a backup, rerunning "
-                "under the original environment, or deleting and repopulating "
-                "the ConcatenatedRecording row (and its downstream)."
-            )
+        _reject_irreproducible_rebuild(
+            computed,
+            row,
+            context="ConcatenatedRecording._rebuild_nwb_artifact",
+            explanation=(
+                "The current environment no longer reproduces this "
+                "concatenated recording (e.g. a SpikeInterface/BLAS upgrade "
+                "or a changed member recording). The canonical artifact was "
+                "NOT modified. Recover by restoring a backup, rerunning under "
+                "the original environment, or deleting and repopulating the "
+                "ConcatenatedRecording row (and its downstream)."
+            ),
+        )
         # The traces fingerprint does not include the stored spans:
         # downstream sorts estimate noise from the statistics spans and
         # motion estimation reads the continuity spans and their first
@@ -530,4 +556,8 @@ def rebuild_concat_nwb_artifact(table, key) -> None:
                 "ConcatenatedRecording row (and its downstream)."
             )
 
-        install_rebuilt_recording(temp_abs, canonical_abs, analysis_file_name)
+        install_rebuilt_recording(
+            AnalysisNwbfile.get_abs_path(computed.analysis_file_name),
+            canonical_abs,
+            analysis_file_name,
+        )
