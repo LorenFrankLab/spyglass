@@ -266,3 +266,171 @@ def test_jsonable_coerces_each_kind_it_claims_to():
     import json
 
     json.dumps(_jsonable({"k": [np.arange(3), datetime(2026, 1, 1)]}))
+
+
+# ---------------------------------------------------------------------------
+# Key identity -- a Spyglass rule, strictly coarser than any backend
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "a, b",
+    [
+        ("Sleep", "sleep"),  # case
+        ("Sleep", " Sleep "),  # surrounding whitespace
+        ("Sleep", "SLEEP "),  # both
+    ],
+)
+def test_keys_differing_only_in_case_or_space_are_one_identity(a, b):
+    """Spyglass names one thing once, however it was typed.
+
+    Stricter than the backend, so it never offers the database a row the
+    insert will reject.
+    """
+    from spyglass.utils.ingestion_plan import collated
+
+    assert collated(a) == collated(b), f"{a!r} and {b!r} must be one identity"
+
+
+def test_accents_are_a_known_and_accepted_gap():
+    """`Müller` and `Muller` stay two identities; the server calls them one.
+
+    Not a bug to fix but a line drawn: folding accents needs NFKD
+    normalisation for a case that effectively does not arise, so the pair
+    reaches the insert and fails as a `planner_miss`. Pinned so the gap stays
+    deliberate -- if this ever starts biting, this test is where the decision
+    is recorded.
+    """
+    from spyglass.utils.ingestion_plan import collated
+
+    assert collated("Müller") != collated("Muller")
+
+
+@pytest.mark.parametrize("a, b", [("alpha", "beta"), ("task1", "task2")])
+def test_genuinely_different_keys_stay_different(a, b):
+    """Strict is not the same as collapsing everything."""
+    from spyglass.utils.ingestion_plan import collated
+
+    assert collated(a) != collated(b), f"{a!r} and {b!r} are not one identity"
+
+
+def test_collated_leaves_non_strings_alone():
+    """Only strings carry case; everything else passes through untouched."""
+    from spyglass.utils.ingestion_plan import collated
+
+    for value in (0, 1.5, None, b"bytes", True):
+        assert collated(value) is value
+
+
+def test_identity_needs_no_knowledge_of_the_backend():
+    """`collated` takes a value and nothing else.
+
+    The first implementation read each table's collation and folded to match,
+    which made row identity depend on parsing collation names and on PAD vs
+    NO PAD. Pinned here because the pull toward re-adding it is real: it is
+    the "accurate" answer, and it is the wrong one -- Spyglass owns this rule.
+    """
+    import inspect
+
+    from spyglass.utils import ingestion_plan
+
+    assert list(inspect.signature(ingestion_plan.collated).parameters) == [
+        "value"
+    ], "collated must depend on the value alone"
+    assert not hasattr(
+        ingestion_plan, "table_collation"
+    ), "backend collation lookup should not come back"
+
+
+def _lettered_task_name(table):
+    """A stored task_name containing a letter, so swapcase changes it."""
+    for name in sorted(table.fetch("task_name")):
+        if name != name.swapcase():
+            return name
+    return None
+
+
+def test_spyglass_identity_is_at_least_as_strict_as_the_server(
+    common, mini_copy_name, mini_insert
+):
+    """The invariant that keeps the planner and the insert in agreement.
+
+    If the server calls two keys equal, Spyglass must too -- otherwise a
+    stored row reads as novel and the insert rejects it (`planner_miss`), or a
+    stored parent reads as missing and `missing_parent` blocks the table and
+    everything beneath it. The converse is allowed: Spyglass may be stricter.
+
+    Asserted as an implication rather than an equality, so it holds on a
+    case-sensitive deployment too, where the server's answer flips and ours
+    does not.
+    """
+    from spyglass.utils.ingestion_plan import row_key
+
+    task = common.Task()
+    stored = _lettered_task_name(task)
+    if stored is None:
+        pytest.skip("no stored task_name contains a letter to vary")
+    varied = stored.swapcase()
+
+    if not (task & {"task_name": varied}):
+        pytest.skip("this deployment's collation distinguishes case")
+
+    assert row_key(task, {"task_name": stored}) == row_key(
+        task, {"task_name": varied}
+    ), (
+        f"the server treats {stored!r} and {varied!r} as one key, so Spyglass "
+        "must not treat them as two"
+    )
+
+
+def test_a_row_the_server_already_holds_is_not_offered_as_novel(
+    common, mini_copy_name, mini_insert
+):
+    """Novelty must not offer a row the insert will reject.
+
+    Deciding identity with Python's `==` returned a differently-cased row as
+    new; the insert then raised `DuplicateError`, which `_write_plan` records
+    as `planner_miss` -- whose own remedy text asks the user to report it as a
+    planner gap. It was one.
+    """
+    from spyglass.data_import.planner import _novel_rows
+
+    task = common.Task()
+    stored = _lettered_task_name(task)
+    if stored is None:
+        pytest.skip("no stored task_name contains a letter to vary")
+    varied = stored.swapcase()
+
+    if not (task & {"task_name": varied}):
+        pytest.skip("this deployment's collation distinguishes case")
+
+    assert not _novel_rows(
+        task, [{"task_name": varied, "task_description": "x"}]
+    ), f"{varied!r} is already stored as {stored!r} and must not be offered"
+
+
+def test_a_stored_parent_is_not_reported_missing_under_another_case(
+    common, mini_copy_name, mini_insert
+):
+    """The foreign-key check must find what the insert would find.
+
+    A miss here is `missing_parent` at severity `hard`, which blocks the table
+    and every table beneath it -- so a capitalisation difference in a shared
+    key took out a whole branch of the plan.
+    """
+    from spyglass.data_import.planner import VirtualKeySpace
+    from spyglass.utils.ingestion_plan import row_key
+
+    task = common.Task()
+    stored = _lettered_task_name(task)
+    if stored is None:
+        pytest.skip("no stored task_name contains a letter to vary")
+    varied = stored.swapcase()
+
+    if not (task & {"task_name": varied}):
+        pytest.skip("this deployment's collation distinguishes case")
+
+    key_space = VirtualKeySpace()
+    assert key_space.holds(
+        task, row_key(task, {"task_name": varied})
+    ), f"{varied!r} resolves to the stored {stored!r} and must read as present"

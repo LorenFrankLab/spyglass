@@ -179,13 +179,71 @@ def entry_digest(entry: dict) -> str:
     return hashed.hexdigest()
 
 
-def row_key(table, row) -> tuple:
-    """Return a row's primary key as a hashable tuple.
+def collated(value):
+    """Reduce a string key value to Spyglass's notion of one identity.
 
-    Values are coerced to the column's declared type first. The database
-    coerces on insert -- a planned `'0'` for an integer column is stored as
-    `0` -- so comparing raw values would report an entry as new, or a parent
-    as missing, when it is neither.
+    **A Spyglass rule, not a mirror of the server's collation.** Two keys that
+    differ only in case or surrounding whitespace name one thing: `Sleep` and
+    `sleep` are one task. Deliberately *stricter* than the backend, so what
+    Spyglass calls one key the database always does too, and never the reverse.
+
+    Erring that way is the point, because the failure modes are not
+    symmetric:
+
+    - Too strict — two rows the database would keep apart collapse, or are
+      reported as a `duplicate_key`. Visible, and under the rule above it is
+      the intended answer rather than a defect.
+    - Too lax — a row looks novel and the insert then rejects it
+      (`planner_miss`), or a stored parent looks missing and `missing_parent`
+      blocks the table and everything beneath it. That is what comparing with
+      Python's `==` did.
+
+    Reading each column's collation and folding to match was built first and
+    removed. It made row identity depend on parsing collation names (`_ci`,
+    `_ai`, the `general_ci` special case, PAD vs NO PAD) -- backend detail
+    that drifts, and that no Spyglass behaviour should rest on. One rule the
+    project owns is easier to keep true than a reimplementation of MySQL's.
+
+    Parameters
+    ----------
+    value : Any
+        A primary-key value. Returned unchanged unless it is a string.
+
+    Returns
+    -------
+    Any
+    """
+    if not isinstance(value, str):
+        return value
+
+    # Accents are *not* folded: `Müller` and `Muller` stay two identities
+    # here, while the default collation calls them one, so that pair still
+    # reaches the insert and fails as a `planner_miss`. Judged not worth NFKD
+    # normalisation for how rarely it arises; written down so the gap is known
+    # rather than rediscovered.
+    #
+    # `strip` is kept: a PAD SPACE collation (MySQL 5.7's default) ignores
+    # trailing spaces, so without it Spyglass would be *laxer* than that
+    # backend -- the direction that fails. A key with space around it is a
+    # typo in every case seen so far.
+    return value.strip().casefold()
+
+
+def row_key(table, row) -> tuple:
+    """Return a row's primary key as Spyglass identifies it.
+
+    Two reductions, because comparing raw values answers the wrong question:
+
+    - **Type**, via `coerced`. The database coerces on insert -- a planned
+      `'0'` for an integer column is stored as `0` -- so a raw comparison
+      reports an entry as new, or a parent as missing, when it is neither.
+    - **Case and surrounding whitespace**, via `collated`. A Spyglass rule,
+      stricter than the backend: see that function for why erring strict is
+      the safe direction, and for the one gap it leaves.
+
+    This is the single definition of row identity. Novelty, foreign-key
+    presence, same-key collapsing and the staged `key_hash` all come through
+    here, so none of them can drift from the others.
 
     Parameters
     ----------
@@ -197,10 +255,12 @@ def row_key(table, row) -> tuple:
     Returns
     -------
     tuple
-        (attribute, value) pairs, sorted by attribute.
+        (attribute, value) pairs, sorted by attribute. Reduced, so it is an
+        identity rather than a record of what the row said -- show a reader
+        the row's own values, never this.
     """
     return tuple(
-        (attr, hashable(coerced(table, attr, row.get(attr))))
+        (attr, collated(hashable(coerced(table, attr, row.get(attr)))))
         for attr in sorted(table.primary_key)
     )
 

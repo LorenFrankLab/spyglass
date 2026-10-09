@@ -906,7 +906,9 @@ class IngestionMixin(BaseMixin):
         seen, kept, conflicts = dict(), [], []
 
         for row in rows:
-            pk = tuple(row.get(attr) for attr in tbl.primary_key)
+            # `row_key`, not the raw values: two rows the database considers
+            # one key must collapse here, or they reach the insert and raise.
+            pk = row_key(tbl, row)
             if (first := seen.get(pk)) is None:
                 seen[pk] = row
                 kept.append(row)
@@ -916,7 +918,19 @@ class IngestionMixin(BaseMixin):
                 for key in set(first).union(row)
                 if self._unequal_vals(key, first, row)
             ):
-                conflicts.append((dict(zip(tbl.primary_key, pk)), differing))
+                # The row's own values, not `pk`, which is folded for
+                # comparison and would show a reader a key they never wrote.
+                # Keyed on `tbl`, not `self`: the rows may be destined for a
+                # table this one merely feeds, with a different primary key.
+                conflicts.append(
+                    (
+                        {
+                            attr: row.get(attr)
+                            for attr in sorted(tbl.primary_key)
+                        },
+                        differing,
+                    )
+                )
 
         return kept, conflicts
 
@@ -1127,11 +1141,16 @@ class IngestionMixin(BaseMixin):
             key = row_key(table, row)
 
             if key in seen:
+                # The row's own values, not `key`, which is folded for
+                # comparison and would name a key the reader never wrote.
+                shown = {
+                    attr: row.get(attr) for attr in sorted(table.primary_key)
+                }
                 problems.append(
                     Problem(
                         severity="hard",
                         code="duplicate_key",
-                        message=f"Two planned entries share the key {dict(key)}",
+                        message=f"Two planned entries share the key {shown}",
                         table=table.full_table_name,
                     )
                 )
