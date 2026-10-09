@@ -76,7 +76,7 @@ def fetch_sorting_inputs(key) -> SortingFetched:
     # carry an ``artifact_detection_id`` key. Resolve it once here and stash it
     # on ``sel_row`` so the
     # downstream readers (obs_intervals derivation below,
-    # make_compute's artifact-mask gate, _rebuild_analyzer_folder)
+    # make_compute's artifact-mask gate, rebuild_analyzer_folder)
     # see the artifact-detection id without re-querying. Without this the
     # ``sel_row.get("artifact_detection_id")`` reads would always be None
     # and every artifact-backed sort would silently skip artifact masking.

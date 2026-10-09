@@ -208,7 +208,7 @@ def test_sorting_make_fetch_resolves_artifact_obs_intervals(populated_sorting):
     Regression guard for the artifact-source schema: the artifact pass
     lives on the zero-or-one ``ArtifactDetectionSource`` part, not a nullable
     ``artifact_detection_id`` FK on the ``SortingSelection`` master. ``make_fetch`` /
-    ``make_compute`` / ``_rebuild_analyzer_folder`` gate artifact masking
+    ``make_compute`` / ``rebuild_analyzer_folder`` gate artifact masking
     on ``sel_row["artifact_detection_id"]``; after the column was dropped, that key
     is absent on the raw ``fetch1()`` row, so ``make_fetch`` must resolve
     it via ``SortingSelection.resolve_artifact_detection(key)`` and stash it. If it

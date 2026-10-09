@@ -42,7 +42,6 @@ from spyglass.spikesorting.v2._core.recipe_catalog import (
 from spyglass.spikesorting.v2._sorting.analyzer import (
     build_analyzer,
     load_or_rebuild_analyzer,
-    rebuild_analyzer_folder,
 )
 from spyglass.spikesorting.v2._sorting.artifact_mask import (
     apply_artifact_mask,
@@ -1978,21 +1977,6 @@ class Sorting(
             self.root_curation(key), output_folder, **kwargs
         )
 
-    def _rebuild_analyzer_folder(self, key) -> None:
-        """Rebuild the analyzer folder for an existing Sorting row.
-
-        Reloads the canonical sorting from the units NWB so the
-        rebuilt analyzer is bit-equivalent to the one Sorting.make
-        wrote -- not a fresh, possibly nondeterministic, sort.
-
-        ``key`` must carry a literal ``sorting_id`` (it is used directly
-        for ``analyzer_path`` and the ``SortingSelection`` fetches). The
-        public ``get_analyzer`` resolves the canonical id from a general
-        restriction and hands this private helper a normalized
-        ``{"sorting_id": ...}``; callers should do the same.
-        """
-        return rebuild_analyzer_folder(self, key)
-
     def delete(self, *args, safemode=None, **kwargs):
         """Cascade-delete + analyzer-cache cleanup on disk.
 
@@ -2326,9 +2310,8 @@ class Sorting(
         """Build the binary-folder SortingAnalyzer + base extensions.
 
         Thin delegator to :func:`._sorting_analyzer.build_analyzer`; kept as
-        a ``Sorting`` staticmethod because ``make_compute`` /
-        ``_rebuild_analyzer_folder`` call ``self._build_analyzer(...)`` and
-        the v2 tests call it directly. The analyzer creation, seeded
+        a ``Sorting`` staticmethod because ``make_compute`` calls
+        ``self._build_analyzer(...)`` and the v2 tests call it directly. The analyzer creation, seeded
         extension compute, zero-unit short-circuit, and partial-folder
         cleanup live in the service module. All database inputs and execution
         kwargs must be resolved before this call. ``waveform_params`` is the

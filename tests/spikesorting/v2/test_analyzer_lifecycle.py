@@ -576,7 +576,7 @@ def test_rebuild_analyzer_folder_recreates_on_missing(populated_sorting):
                 pass
 
 
-# ``_rebuild_analyzer_folder`` also supports a concat source (it loads the
+# ``rebuild_analyzer_folder`` also supports a concat source (it loads the
 # materialized ConcatenatedRecording cache); the concat rebuild path is exercised
 # end-to-end by the chronic smoke's get_analyzer call in
 # ``tests/spikesorting/v2/test_session_group_concat.py``.
