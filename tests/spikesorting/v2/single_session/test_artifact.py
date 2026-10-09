@@ -556,11 +556,11 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
         ).super_delete(warn=False)
 
 
-# ---------- ArtifactDetection: signal-level _detect_artifacts ------------
+# ---------- ArtifactDetection: signal-level detect_artifacts ------------
 
 
 def test_detect_artifacts_finds_known_transient(dj_conn):
-    """``RecordingArtifactDetection._detect_artifacts`` runs its amplitude-
+    """``detect_artifacts`` runs its amplitude-
     threshold scan body and produces the expected valid-time
     complement of a known synthetic transient.
 
@@ -574,12 +574,12 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
 
     Every existing artifact test uses the ``"none"`` preset which
     short-circuits at the ``if not validated.detect`` guard in
-    ``_detect_artifacts`` (artifact.py:846) and writes a single all-
+    ``detect_artifacts`` and writes a single all-
     valid interval. That left the entire amplitude-threshold
     detection body (~50 lines, the actual artifact-finding code) at
     0% coverage.
 
-    This test calls ``_detect_artifacts`` directly with a synthetic
+    This test calls ``detect_artifacts`` directly with a synthetic
     ``NumpyRecording`` carrying a deterministic 200-sample, 200 uV
     transient at frames 1000-1199. The threshold (50 uV) and
     proportion (50% of channels) are set so the transient
@@ -593,9 +593,7 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-    )
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     # Build a synthetic 4-channel, 5000-sample recording with a
     # 200 uV transient at frames 1000-1199 across all channels.
@@ -626,7 +624,7 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
 
-    valid_times = RecordingArtifactDetection._detect_artifacts(rec, params)
+    valid_times = detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
     # half_window_frames = ceil(0.05 ms * 30 kHz / 2 / 1000) = 1.
@@ -639,7 +637,7 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
     assert valid_times.shape == (2, 2), (
         f"Expected exactly 2 valid intervals around the synthetic "
         f"transient at frames 1000-1199, got shape {valid_times.shape}. "
-        "_detect_artifacts either skipped the detection body or "
+        "detect_artifacts either skipped the detection body or "
         "merged the artifact and valid runs incorrectly."
     )
     # First valid interval ends at the start of the expanded
@@ -670,7 +668,7 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
 
 
 def test_detect_artifacts_no_threshold_crossings(dj_conn):
-    """``_detect_artifacts`` returns the full recording window as a
+    """``detect_artifacts`` returns the full recording window as a
     single valid interval when no frame trips the threshold.
 
     Exercises the early-return branch at ``len(frames_above) == 0``
@@ -684,9 +682,7 @@ def test_detect_artifacts_no_threshold_crossings(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-    )
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     # Recording with all-zero traces -- nothing can exceed any
     # positive threshold.
@@ -702,7 +698,7 @@ def test_detect_artifacts_no_threshold_crossings(dj_conn):
         zscore_threshold=None,
         proportion_above_threshold=0.5,
     )
-    valid_times = RecordingArtifactDetection._detect_artifacts(rec, params)
+    valid_times = detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
     assert valid_times.shape == (1, 2)
@@ -711,7 +707,7 @@ def test_detect_artifacts_no_threshold_crossings(dj_conn):
 
 
 def test_detect_artifacts_zscore_only_detection(dj_conn):
-    """``_detect_artifacts`` runs the z-score-only branch when
+    """``detect_artifacts`` runs the z-score-only branch when
     ``amplitude_threshold_uv is None``.
 
     The z-score is **across channels per frame** (matching v1's
@@ -729,9 +725,7 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-    )
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     rng = np.random.default_rng(42)
     # 32 channels so the cross-channel z-score on a single-channel
@@ -760,7 +754,7 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
-    valid_times = RecordingArtifactDetection._detect_artifacts(rec, params)
+    valid_times = detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
     assert valid_times.shape == (2, 2), (
@@ -774,7 +768,7 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
 
 
 def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
-    """``_detect_artifacts`` OR-combines the amplitude and z-score detectors.
+    """``detect_artifacts`` OR-combines the amplitude and z-score detectors.
 
     v2 matches v1's per-channel OR (``above_amp | above_z`` in
     ``_artifact_compute._compute_artifact_chunk``): a channel is flagged when
@@ -803,9 +797,7 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-    )
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     rng = np.random.default_rng(42)
     n_samples, n_channels = 5000, 32
@@ -830,7 +822,7 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
-    valid_times = RecordingArtifactDetection._detect_artifacts(rec, params)
+    valid_times = detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
     def _covered(t):
@@ -858,11 +850,11 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
 
 
 def test_detect_artifacts_join_window_merges_runs(dj_conn):
-    """``_detect_artifacts`` merges two artifact runs separated by
+    """``detect_artifacts`` merges two artifact runs separated by
     fewer than ``join_window_frames`` into a single artifact span.
 
     Exercises the ``cur_end = f`` branch inside
-    ``_detect_artifacts``'s join loop which the single-run test
+    ``detect_artifacts``'s join loop which the single-run test
     doesn't hit. Builds two transients separated by 10 frames;
     with join_window_ms set so join_window_frames > 10, the runs
     merge into one. With a smaller join window, the runs stay
@@ -873,9 +865,7 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-    )
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     n_samples, n_channels = 5000, 4
     traces = np.zeros((n_samples, n_channels), dtype=np.float32)
@@ -885,7 +875,7 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
 
     # join_window_ms = 1.0 -> join_window_frames = ceil(1 * 30 / 1) =
     # 30 frames. Gap between A and B is 10 frames, so they merge.
-    merged = RecordingArtifactDetection._detect_artifacts(
+    merged = detect_artifacts(
         rec,
         ArtifactDetectionParamsSchema(
             detect=True,
@@ -911,7 +901,7 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
     # sliver filter eats the middle interval. The middle sliver is
     # ``(10 frames gap) - 2*half_window_frames(=1) = 8 frames``
     # = ~0.27 ms at 30 kHz. Use 0.0001 s (0.1 ms) to keep it.
-    unmerged = RecordingArtifactDetection._detect_artifacts(
+    unmerged = detect_artifacts(
         rec,
         ArtifactDetectionParamsSchema(
             detect=True,
@@ -967,11 +957,11 @@ def test_artifact_detection_parameters_validates_via_insert1(dj_conn):
     ), "Failed validation should not have written a row."
 
 
-# ---------- _detect_artifacts cross-channel proportion boundary ----------
+# ---------- detect_artifacts cross-channel proportion boundary ----------
 
 
 def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
-    """``_detect_artifacts`` does NOT flag artifact frames when
+    """``detect_artifacts`` does NOT flag artifact frames when
     fewer than ``proportion_above_threshold`` of channels exceed the
     amplitude threshold.
 
@@ -988,9 +978,7 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-    )
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     n_samples, n_channels = 5000, 4
     traces = np.zeros((n_samples, n_channels), dtype=np.float32)
@@ -1009,7 +997,7 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
-    valid_times = RecordingArtifactDetection._detect_artifacts(rec, params)
+    valid_times = detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
     assert valid_times.shape == (1, 2), (
@@ -1115,7 +1103,7 @@ def test_artifact_detection_delete_requires_interval_ownership_part_rows(
 
 
 def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
-    """``_detect_artifacts`` clamps the half-open end of an artifact
+    """``detect_artifacts`` clamps the half-open end of an artifact
     that runs to the last sample.
 
     The clamp ``min(end_f + 1, len(timestamps) - 1)`` at
@@ -1129,9 +1117,7 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-    )
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     n_samples, n_channels = 1000, 4
     traces = np.zeros((n_samples, n_channels), dtype=np.float32)
@@ -1148,12 +1134,12 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
-    valid_times = RecordingArtifactDetection._detect_artifacts(rec, params)
+    valid_times = detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
     # The artifact runs from frame 990 to the end. The clamp
     # produces a single valid interval before the artifact (the
-    # tail-valid branch in ``_detect_artifacts`` -- the
+    # tail-valid branch in ``detect_artifacts`` -- the
     # ``if cursor < valid_end`` guard -- fires only if there is
     # tail after the last artifact, which is false here because
     # the artifact reaches the end).
@@ -1342,14 +1328,15 @@ def test_artifact_empty_warning_has_context(dj_conn, monkeypatch):
     """
     import numpy as np
 
-    from spyglass.spikesorting.v2 import artifact as artifact_mod
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
+    from spyglass.utils import logger
 
     captured = []
     monkeypatch.setattr(
-        artifact_mod.logger,
+        logger,
         "warning",
         lambda msg, *a, **k: captured.append(msg),
     )
@@ -1358,7 +1345,7 @@ def test_artifact_empty_warning_has_context(dj_conn, monkeypatch):
     validated = ArtifactDetectionParamsSchema(
         detect=True, amplitude_threshold_uv=500.0
     )
-    out = artifact_mod.RecordingArtifactDetection._detect_artifacts(
+    out = detect_artifacts(
         rec, validated, context=" for artifact_detection_id=abc-123"
     )
     assert out.shape == (1, 2)  # full window returned on zero artifacts

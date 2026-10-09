@@ -265,7 +265,7 @@ def test_artifact_detection_selection_missing_lookup_row_diagnostic():
 @pytest.mark.usefixtures("dj_conn")
 def test_detect_artifacts_empty_sliver_filter_returns_empty():
     """When ``min_length_s`` filters out every kept interval,
-    ``_detect_artifacts`` returns ``np.empty((0, 2))``.
+    ``detect_artifacts`` returns ``np.empty((0, 2))``.
 
     Detection finds artifact frames (so the early all-valid return at the
     zero-frames branch is NOT taken), the complement is built, then a huge
@@ -277,7 +277,7 @@ def test_detect_artifacts_empty_sliver_filter_returns_empty():
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     rec = _synthetic_artifact_recording()
     validated = ArtifactDetectionParamsSchema(
@@ -290,7 +290,7 @@ def test_detect_artifacts_empty_sliver_filter_returns_empty():
         min_length_s=1e9,  # larger than the whole recording -> all filtered
     )
 
-    out = RecordingArtifactDetection._detect_artifacts(rec, validated)
+    out = detect_artifacts(rec, validated)
     assert out.shape == (
         0,
         2,

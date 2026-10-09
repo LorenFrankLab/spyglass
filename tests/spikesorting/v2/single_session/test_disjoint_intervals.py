@@ -922,7 +922,7 @@ def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
     ``[timestamps[0], timestamps[-1]]`` envelope instead would
     reintroduce the gap -- inflating obs_intervals duration and letting
     sub-min_length slivers survive. The artifact-detected (detect=True)
-    per-chunk subtraction is pinned by the synthetic ``_detect_artifacts``
+    per-chunk subtraction is pinned by the synthetic ``detect_artifacts``
     test in ``test_disjoint_artifact.py``.
     """
     import uuid

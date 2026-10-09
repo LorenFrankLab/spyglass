@@ -52,14 +52,10 @@ from spyglass.spikesorting.v2._artifacts.compute import (
 # Artifact-removed interval construction + IntervalList persistence live in a
 # DB-free service module so the artifact-detection tables stay thin
 # orchestrators.
-# The class keeps thin delegators where tests pin the surface
-# (``_detect_artifacts`` / ``_scan_artifact_frames`` are called directly on the
-# class, and ``get_artifact_removed_intervals`` is called on instances).
 from spyglass.spikesorting.v2._artifacts.intervals import (
     build_artifact_interval_part_rows,
     build_artifact_interval_rows,
     detect_artifacts,
-    scan_artifact_frames,
 )
 from spyglass.spikesorting.v2._artifacts.readers import (
     collect_artifact_interval_rows_to_remove,
@@ -122,7 +118,7 @@ class ArtifactDetectionParameters(
 
     ``job_kwargs`` is the optional per-row SpikeInterface job-kwargs blob that
     governs the chunked detection scan
-    (``_ArtifactDetectionMixin._scan_artifact_frames``). It is merged over the
+    (:func:`._artifacts.intervals.scan_artifact_frames`). It is merged over the
     SI-global and ``dj.config['custom']
     ['spikesorting_v2_job_kwargs']`` defaults by ``_resolved_job_kwargs``. The
     memory-relevant key is the chunk size -- ``chunk_duration`` (e.g. ``"1s"``,
@@ -736,28 +732,6 @@ class _ArtifactDetectionMixin:
     _parallel_make = True
     _single_source: bool = True
 
-    @staticmethod
-    def _scan_artifact_frames(recording, validated, job_kwargs=None):
-        """Flag contiguous artifact-frame RUNS via a chunked executor.
-
-        Thin delegator to
-        :func:`._artifact_intervals.scan_artifact_frames`; kept as a
-        staticmethod for the public/tested chunked artifact-scan boundary.
-        """
-        return scan_artifact_frames(recording, validated, job_kwargs)
-
-    @staticmethod
-    def _detect_artifacts(recording, validated, context="", job_kwargs=None):
-        """Run amplitude / z-score artifact scan on a SI recording.
-
-        Thin delegator to :func:`._artifact_intervals.detect_artifacts`; kept
-        as a staticmethod because ``make_compute`` calls
-        ``self._detect_artifacts(...)`` and the v2 tests call it on the class.
-        """
-        return detect_artifacts(
-            recording, validated, context=context, job_kwargs=job_kwargs
-        )
-
     def _run_artifact_scan(
         self,
         recording,
@@ -794,7 +768,7 @@ class _ArtifactDetectionMixin:
         )
 
         resolved_job_kwargs = _resolved_job_kwargs(artifact_job_kwargs)
-        valid_times = self._detect_artifacts(
+        valid_times = detect_artifacts(
             recording,
             validated,
             context=context,

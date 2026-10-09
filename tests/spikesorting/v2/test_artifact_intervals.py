@@ -3,7 +3,7 @@
 Locks two contracts a silent error would corrupt:
 * ``apply_artifact_mask`` REJECTS malformed valid_times (empty,
   wrong-shape, end<start, unsorted/overlapping) instead of under-masking;
-* ``RecordingArtifactDetection._detect_artifacts`` returns valid_times that are
+* ``detect_artifacts`` returns valid_times that are
   start-sorted, non-overlapping, within the recording bounds, >= min_length_s,
   exclude the detected artifact, and never span an inter-chunk wall-clock gap
   (the disjoint case also proves a chunk-boundary artifact IS masked -- an
@@ -136,7 +136,7 @@ def test_apply_artifact_mask_zeros_complement_frames():
 
 
 # --------------------------------------------------------------------------- #
-# _detect_artifacts output structure (contiguous)
+# detect_artifacts output structure (contiguous)
 # --------------------------------------------------------------------------- #
 
 
@@ -156,7 +156,7 @@ def _assert_valid_times_well_formed(vt, t0, t_end, min_length_s):
 
 @pytest.mark.usefixtures("dj_conn")
 def test_detect_artifacts_output_structure_contiguous():
-    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     fs = 30000.0
     n, n_ch = 120000, 4  # 4 s
@@ -166,9 +166,7 @@ def test_detect_artifacts_output_structure_contiguous():
     rec = _rec(traces, fs=fs)
     params = _artifact_params()
 
-    vt = RecordingArtifactDetection._detect_artifacts(
-        rec, params, job_kwargs=None
-    )
+    vt = detect_artifacts(rec, params, job_kwargs=None)
     times = rec.get_times()
     _assert_valid_times_well_formed(
         vt, times[0], times[-1], params.min_length_s
@@ -181,14 +179,14 @@ def test_detect_artifacts_output_structure_contiguous():
 
 
 # --------------------------------------------------------------------------- #
-# _detect_artifacts on a DISJOINT recording (a chunk-boundary artifact
+# detect_artifacts on a DISJOINT recording (a chunk-boundary artifact
 # IS masked, valid_times never span the gap)
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.usefixtures("dj_conn")
 def test_detect_artifacts_disjoint_masks_chunk_boundary_artifact():
-    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     fs = 30000.0
     per_chunk = 60000  # 2 s each
@@ -205,9 +203,7 @@ def test_detect_artifacts_disjoint_masks_chunk_boundary_artifact():
     rec = _rec(traces, fs=fs, times=times)
     params = _artifact_params()
 
-    vt = RecordingArtifactDetection._detect_artifacts(
-        rec, params, job_kwargs=None
-    )
+    vt = detect_artifacts(rec, params, job_kwargs=None)
     _assert_valid_times_well_formed(
         vt, times[0], times[-1], params.min_length_s
     )
@@ -260,7 +256,7 @@ def test_detect_artifacts_recovers_planted_interval_times():
     the valid_times complement that mislocates, splits, merges, or over-/under-
     removes an artifact is caught -- not just "populate did not crash".
     """
-    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     fs = 30000.0
     n, n_ch = 150000, 4  # 5.0 s
@@ -275,9 +271,7 @@ def test_detect_artifacts_recovers_planted_interval_times():
     rec = _rec(traces, fs=fs)
     params = _artifact_params(removal_window_ms=removal_window_ms)
 
-    vt = RecordingArtifactDetection._detect_artifacts(
-        rec, params, job_kwargs=None
-    )
+    vt = detect_artifacts(rec, params, job_kwargs=None)
     times = rec.get_times()
     _assert_valid_times_well_formed(
         vt, times[0], times[-1], params.min_length_s
@@ -495,7 +489,7 @@ def test_apply_artifact_mask_raises_when_valid_times_keep_almost_nothing():
 # --------------------------------------------------------------------------- #
 # Chunked artifact detection + the artifact-mask complement walker.
 #
-# Covers the chunked ``_scan_artifact_frames`` (frame-identical to a
+# Covers the chunked ``scan_artifact_frames`` (frame-identical to a
 # whole-recording in-memory reference, job_kwargs propagation, default chunking,
 # multiprocess worker path, bounded peak memory) and ``apply_artifact_mask``
 # input strictness (empty / unsorted valid_times raise; full coverage
@@ -617,7 +611,7 @@ def test_chunked_artifact_matches_in_memory_reference(
     channel_offsets_uv,
     proportion_above_threshold,
 ):
-    """The chunked ``_scan_artifact_frames`` produces frame-identical
+    """The chunked ``scan_artifact_frames`` produces frame-identical
     output to the whole-recording in-memory reference, and is invariant to
     chunk boundaries.
 
@@ -638,7 +632,9 @@ def test_chunked_artifact_matches_in_memory_reference(
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+    from spyglass.spikesorting.v2._artifacts.intervals import (
+        scan_artifact_frames,
+    )
 
     rec = _synthetic_artifact_recording(offsets=channel_offsets_uv)
     validated = ArtifactDetectionParamsSchema(
@@ -659,11 +655,11 @@ def test_chunked_artifact_matches_in_memory_reference(
     )
 
     # Many small chunks (~0.1 s each → ~30 chunks) exercises chunk seams.
-    chunked = RecordingArtifactDetection._scan_artifact_frames(
+    chunked = scan_artifact_frames(
         rec, validated, job_kwargs={"n_jobs": 1, "chunk_duration": "0.1s"}
     )
     # A single chunk spanning the whole recording == the in-memory path.
-    single = RecordingArtifactDetection._scan_artifact_frames(
+    single = scan_artifact_frames(
         rec, validated, job_kwargs={"n_jobs": 1, "chunk_size": 90_000}
     )
 
@@ -751,7 +747,9 @@ def test_artifact_job_kwargs_propagate_to_executor(dj_conn, monkeypatch):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+    from spyglass.spikesorting.v2._artifacts.intervals import (
+        scan_artifact_frames,
+    )
 
     rec = _synthetic_artifact_recording()
     validated = ArtifactDetectionParamsSchema(
@@ -789,7 +787,7 @@ def test_artifact_job_kwargs_propagate_to_executor(dj_conn, monkeypatch):
     # ChunkRecordingExecutor`` inside the scan binds this spy at call time.
     monkeypatch.setattr(jt, "ChunkRecordingExecutor", _SpyExecutor)
 
-    RecordingArtifactDetection._scan_artifact_frames(
+    scan_artifact_frames(
         rec,
         validated,
         job_kwargs={"n_jobs": 2, "chunk_duration": "0.5s"},
@@ -806,14 +804,16 @@ def test_artifact_scan_chunked_by_default(dj_conn, monkeypatch):
 
     ChunkRecordingExecutor with no chunk-size key processes the whole
     recording in a single chunk -- the exact full-traces memory profile the
-    restoration removed. Any direct ``_detect_artifacts`` caller (not just the
+    restoration removed. Any direct ``detect_artifacts`` caller (not just the
     production ``make_compute`` path that merges SI's global job kwargs) must
-    still be bounded, so ``_scan_artifact_frames`` defaults to a 1 s chunk.
+    still be bounded, so ``scan_artifact_frames`` defaults to a 1 s chunk.
     """
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+    from spyglass.spikesorting.v2._artifacts.intervals import (
+        scan_artifact_frames,
+    )
 
     rec = _synthetic_artifact_recording()
     validated = ArtifactDetectionParamsSchema(
@@ -845,7 +845,7 @@ def test_artifact_scan_chunked_by_default(dj_conn, monkeypatch):
     monkeypatch.setattr(jt, "ChunkRecordingExecutor", _SpyExecutor)
 
     # No job_kwargs at all -- the bare default path.
-    RecordingArtifactDetection._scan_artifact_frames(rec, validated)
+    scan_artifact_frames(rec, validated)
     assert seen["chunk_duration"] == "1s", (
         "default scan did not chunk: ChunkRecordingExecutor got "
         f"chunk_duration={seen.get('chunk_duration')!r} / "
@@ -873,7 +873,9 @@ def test_artifact_scan_multiprocess_worker_path_runs(dj_conn, tmp_path):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+    from spyglass.spikesorting.v2._artifacts.intervals import (
+        scan_artifact_frames,
+    )
 
     # _synthetic_artifact_recording is an in-memory NumpyRecording (not
     # dict-serializable); save it to a binary folder so to_dict()/si.load()
@@ -889,10 +891,10 @@ def test_artifact_scan_multiprocess_worker_path_runs(dj_conn, tmp_path):
         min_length_s=0.001,
     )
 
-    single = RecordingArtifactDetection._scan_artifact_frames(
+    single = scan_artifact_frames(
         saved, validated, job_kwargs={"n_jobs": 1, "chunk_duration": "0.5s"}
     )
-    multi = RecordingArtifactDetection._scan_artifact_frames(
+    multi = scan_artifact_frames(
         saved, validated, job_kwargs={"n_jobs": 2, "chunk_duration": "0.5s"}
     )
     # The planted bursts must actually be detected, else "equal" is vacuous.
@@ -925,7 +927,9 @@ def test_artifact_detection_peak_memory_bounded_by_chunk_size(
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+    from spyglass.spikesorting.v2._artifacts.intervals import (
+        scan_artifact_frames,
+    )
 
     fs = 30_000.0
     n_channels = 32
@@ -956,7 +960,7 @@ def test_artifact_detection_peak_memory_bounded_by_chunk_size(
 
     tracemalloc.start()
     try:
-        runs = RecordingArtifactDetection._scan_artifact_frames(
+        runs = scan_artifact_frames(
             rec, validated, job_kwargs={"n_jobs": 1, "chunk_duration": "1s"}
         )
         _, peak = tracemalloc.get_traced_memory()

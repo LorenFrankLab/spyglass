@@ -687,7 +687,7 @@ def test_chunk_seam_detection_is_deterministic_serial_vs_parallel(
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     fs = 30_000.0
     n_samples = 5000
@@ -727,9 +727,9 @@ def test_chunk_seam_detection_is_deterministic_serial_vs_parallel(
 
     # Reference: single pass (the default 1 s chunk == 30000 frames spans the
     # whole 5000-sample recording), serial.
-    reference = RecordingArtifactDetection._detect_artifacts(rec_mem, params)
+    reference = detect_artifacts(rec_mem, params)
     # Test: chunk boundary at frame 1100 (inside the transient), multi-process.
-    parallel = RecordingArtifactDetection._detect_artifacts(
+    parallel = detect_artifacts(
         rec_disk, params, job_kwargs={"chunk_size": 1100, "n_jobs": 2}
     )
 
