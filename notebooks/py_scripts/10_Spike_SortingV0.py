@@ -31,7 +31,7 @@
 #   [the Setup notebook](./00_Setup.ipynb)
 # - For additional info on DataJoint syntax, including table definitions and
 #   inserts, see
-#   [the Insert Data notebook](./01_Insert_Data.ipynb)
+#   [the Insert Data notebook](./02_Insert_Data.ipynb)
 #
 
 # ### [Extract the recording](#section1)<br>
@@ -63,7 +63,6 @@
 #
 
 # +
-import os
 import datajoint as dj
 import numpy as np
 import spyglass.common as sgc
@@ -155,7 +154,7 @@ if name in my_team_members:
 #
 
 # If you haven't already, load an NWB file. For more details on downloading and
-# importing data, see [this notebook](./01_Insert_Data.ipynb).
+# importing data, see [this notebook](./02_Insert_Data.ipynb).
 #
 
 # +
@@ -593,7 +592,7 @@ SpikeSortingOutput.CuratedSpikeSorting() & ss_key
 # the AutomaticCuration populated above as a starting point for manual curation, though you could also
 # start from the opriginal curation entry by selecting the proper key from the `Curation` table
 #
-# _Note_: This step requires setting up your kachery sharing through the [sharing notebook](02_Data_Sync.ipynb)
+# _Note_: This step requires setting up your kachery sharing through the [sharing notebook](03_Data_Sync.ipynb)
 #
 #
 

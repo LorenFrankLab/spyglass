@@ -33,7 +33,6 @@
 #
 
 # +
-import os
 import datajoint as dj
 
 # ignore datajoint+jupyter async warnings
@@ -403,7 +402,7 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 # )
 # ```
 #
-# Please see the [next notebook](./03_Merge_Tables.ipynb) for a more detailed
+# Please see the [Merge Tables notebook](./04_Merge_Tables.ipynb) for a more detailed
 # explanation.
 #
 # </details>
@@ -631,5 +630,5 @@ sgc.Session.DataAcquisitionDevice & {"nwb_file_name": nwb_copy_file_name}
 # ## Up Next
 #
 
-# In the [next notebook](./02_Data_Sync.ipynb), we'll explore tools for syncing.
+# In the [next notebook](./03_Data_Sync.ipynb), we'll explore tools for syncing.
 #

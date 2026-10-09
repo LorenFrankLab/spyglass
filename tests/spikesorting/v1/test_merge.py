@@ -37,7 +37,10 @@ def test_merge_get_sorting(spike_merge, pop_spike_merge):
 
 
 def test_merge_get_sort_group_info(spike_merge, pop_spike_merge):
-    sort_info = spike_merge.get_sort_group_info(pop_spike_merge).fetch1()
+    # one row per electrode since #1678; this row is the group's electrode 0
+    sort_info = (
+        spike_merge.get_sort_group_info(pop_spike_merge) & {"electrode_id": 0}
+    ).fetch1()
     expected = {
         "bad_channel": "False",
         "contacts": "",

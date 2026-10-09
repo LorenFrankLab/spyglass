@@ -28,12 +28,14 @@ def test_electrode_populate(common_ephys):
 def test_elec_group_populate(pop_common_electrode_group):
     assert (
         len(pop_common_electrode_group) == 32
-    ), "ElectrodeGroup.populate failed"
+    ), "ElectrodeGroup not ingested from nwb file"
 
 
-def test_raw_populate(common_ephys):
-    common_ephys.Raw.populate()
-    assert len(common_ephys.Raw()) == 1, "Raw.populate failed"
+def test_raw_populate(mini_insert, common_ephys, mini_dict):
+    # Raw is ingested by insert_sessions; make is deprecated and raises.
+    assert len(common_ephys.Raw()) == 1, "Raw not ingested from nwb file"
+    with pytest.raises(NotImplementedError):
+        common_ephys.Raw().make(mini_dict)
 
 
 def test_sample_count_populate(common_ephys):

@@ -184,4 +184,4 @@
 # ## Up Next
 #
 
-# Next, we'll try [inserting data](./01_Insert_Data.ipynb)
+# Next, we'll try [inserting data](./02_Insert_Data.ipynb)

@@ -24,7 +24,7 @@
 # - To set up your Spyglass environment and database, see
 #   [the Setup notebook](./00_Setup.ipynb)
 # - This tutorial assumes you've already
-#   [extracted waveforms](./41_Extracting_Clusterless_Waveform_Features.ipynb), as well as loaded
+#   [extracted waveforms](./40_Extracting_Clusterless_Waveform_Features.ipynb), as well as loaded
 #   [position data](./20_Position_Trodes.ipynb). If 1D decoding, this data should also be
 #   [linearized](./24_Linearization.ipynb).
 #

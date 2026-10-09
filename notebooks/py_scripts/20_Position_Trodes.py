@@ -27,7 +27,7 @@
 #   [the Setup notebook](./00_Setup.ipynb)
 # - For additional info on DataJoint syntax, including table definitions and
 #   inserts, see
-#   [the Insert Data notebook](./01_Insert_Data.ipynb)
+#   [the Insert Data notebook](./02_Insert_Data.ipynb)
 #
 # In this tutorial, we'll process position data extracted with Trodes Tracking by
 #
@@ -49,7 +49,6 @@
 #
 
 # +
-import os
 import datajoint as dj
 import matplotlib.pyplot as plt
 import spyglass.common as sgc
@@ -400,5 +399,5 @@ axes[1].set_title("Upsampled Velocity", fontsize=20)
 
 # ## Up Next
 
-# In the [next notebook](./21_Position_DLC_1.ipynb), we'll explore using DeepLabCut to generate position data from video.
+# In the [next notebook](./21_DLC.ipynb), we'll explore using DeepLabCut to generate position data from video.
 #

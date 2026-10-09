@@ -43,14 +43,19 @@ def recomp_selection(recomp_module):
 @pytest.fixture(scope="module")
 def recomp_tbl(recomp_module, recomp_selection, spike_v1, pop_rec):
     """Fixture to ensure recompute table is loaded."""
-    _ = spike_v1, pop_rec  # Ensure pop_rec is used to load the recording
+    _ = spike_v1  # Ensure the recording is populated
 
-    # Re-populate selection if empty. After a prior --no-teardown run,
-    # make() calls remove_matched() to clean up entries post-recompute.
-    if not len(recomp_selection):
-        recomp_selection.attempt_all()
+    # Ensure a selection entry exists for this recording, regardless of what
+    # prior runs left behind. attempt_all() restricts to `this_env`, so it
+    # silently inserts nothing whenever the current environment does not
+    # match the one that made the recording -- including when the env cannot
+    # be resolved at all. force_attempt lifts that restriction.
+    if not len(recomp_selection & pop_rec):
+        recomp_selection.attempt_all(restr=pop_rec, force_attempt=True)
 
-    key = recomp_selection.fetch("KEY")[0]
+    keys = (recomp_selection & pop_rec).fetch("KEY")
+    assert keys, f"No recompute selection entries for {pop_rec}"
+    key = keys[0]
     key["logged_at_creation"] = False  # Prevent skip of recompute
     recomp_selection.update1(key)
 

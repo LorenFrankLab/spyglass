@@ -41,7 +41,11 @@ def test_curation_sort(spike_v1, pop_curation):
 
 
 def test_curation_sort_info(spike_v1, pop_curation):
-    sort_info = spike_v1.CurationV1.get_sort_group_info(pop_curation).fetch1()
+    # one row per electrode since #1678; this row is the group's electrode 0
+    sort_info = (
+        spike_v1.CurationV1.get_sort_group_info(pop_curation)
+        & {"electrode_id": 0}
+    ).fetch1()
     exp = {
         "bad_channel": "False",
         "curation_id": 0,
@@ -76,8 +80,10 @@ def test_curation_sort_info(spike_v1, pop_curation):
 
 
 def test_curation_sort_metric(spike_v1, pop_curation, pop_curation_metric):
-    sort_metric = spike_v1.CurationV1.get_sort_group_info(
-        pop_curation_metric
+    # one row per electrode since #1678; this row is the group's electrode 0
+    sort_metric = (
+        spike_v1.CurationV1.get_sort_group_info(pop_curation_metric)
+        & {"electrode_id": 0}
     ).fetch1()
     expected = {
         "bad_channel": "False",
