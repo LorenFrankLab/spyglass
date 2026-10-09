@@ -13,10 +13,40 @@
 ```
 -->
 
+### Breaking Changes
+
+#### `get_sort_group_info` Returns Every Electrode (#1678)
+
+`get_sort_group_info` returned a single representative electrode per sort group,
+so a sort group spanning a whole tetrode was described by one of its four
+channels. It now returns one row per electrode, on `CurationV1`,
+`CuratedSpikeSorting` and `SpikeSortingOutput`.
+
+**Impact**: any caller that assumed a single row — `fetch1()`, or indexing the
+first row — will now see one row per electrode of the group.
+
+**Migration guide**:
+
+```python
+# OLD: one row per sort group
+info = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch1()
+
+# NEW: restrict to the electrode you want
+info = (
+    SpikeSortingOutput().get_sort_group_info(merge_keys) & {"electrode_id": 0}
+).fetch1()
+
+# ... or keep every electrode of the group
+rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
+```
+
 ### Documentation
 
 - Add LFP artifact detection to the LFP notebook #1641
 - Add File Backends developer page #1662
+- Repair stale notebook cross-links and guard them with a test #1678
+- Move Export tutorial into its own `Data Export` docs category #1678
+- Document admin-only table declaration and MySQL role activation #1678
 
 ### Infrastructure
 
@@ -32,8 +62,25 @@
     call's file handler when these calls nested #1679
 - Correct `Populate.md` on `_parallel_make`, the double `make_fetch` call, and
     the `None` return from `make_compute` #1679
+- Fix `SpyglassMixinPart.delete` recursion; add `force` for part deletes #1678
+- Grant `dj_user` all but `CREATE` on shared prefixes #1678
+- Grant `REFERENCES` alongside `SELECT` on all read-access schemas #1678
+- Default analysis schema prefix to `database.user` when unset #1678
+- Import `_fir_filter` in a fixture, not at test-module scope #1678
+- Neutralize DeepLabCut's `importlib.reload(logging)` in tests #1678
+- Stop calling `populate()` on deprecated `make`s in tests #1678
+- Repair a stale raw external checksum when a container is reused #1678
+- Force the v1 recompute selection attempt in its test fixture #1678
 
 ### Pipelines
+
+- Common
+
+    - Run `UserEnvironment` pip freeze via the active interpreter #1678
+
+- Decoding
+
+    - Pair waveform-feature units with spike times by label, not position #1678
 
 - Position
 
@@ -60,6 +107,10 @@
         written before this have a null hash; a recompute of one warns and is
         accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
         #1662
+    - Respect `safemode` in `RecordingRecompute.delete` #1678
+    - Split recording and artifact restrictions in merge-id lookup #1678
+    - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
+        #1678
 
 ## [0.6.0] (Sep 1st 2026)
 
@@ -188,9 +239,6 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add pages for custom analysis tables and class inheritance structure #1435
 - Add support for bandstop filter type #1464
 - Add Interval and Populate migration guides #1615
-- Repair stale notebook cross-links and guard them with a test #1678
-- Move Export tutorial into its own `Data Export` docs category #1678
-- Document admin-only table declaration and MySQL role activation #1678
 
 ### Infrastructure
 
@@ -324,15 +372,6 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add `--container-vol-dir` pytest option to store the test container's MySQL
     data on a chosen disk, and document it alongside the existing
     `--container-name`/`--container-port` options #1661
-- Fix `SpyglassMixinPart.delete` recursion; add `force` for part deletes #1678
-- Grant `dj_user` all but `CREATE` on shared prefixes #1678
-- Grant `REFERENCES` alongside `SELECT` on all read-access schemas #1678
-- Default analysis schema prefix to `database.user` when unset #1678
-- Import `_fir_filter` in a fixture, not at test-module scope #1678
-- Neutralize DeepLabCut's `importlib.reload(logging)` in tests #1678
-- Stop calling `populate()` on deprecated `make`s in tests #1678
-- Repair a stale raw external checksum when a container is reused #1678
-- Force the v1 recompute selection attempt in its test fixture #1678
 
 ### Pipelines
 
@@ -374,7 +413,6 @@ for label, interval_data in results.groupby("interval_labels"):
         `populate_all_common`, so a rerun no longer reports or rolls back on
         failures logged by an earlier attempt #1497
     - `PositionSource` ingestion is now responsible for `RawPosition` #1660
-    - Run `UserEnvironment` pip freeze via the active interpreter #1678
 
 - Decoding
 
@@ -401,7 +439,6 @@ for label, interval_data in results.groupby("interval_labels"):
         needs. Temporary, pending #1609 #1619
     - Fix `DecodingParameters.insert_default()`, which raised `AttributeError` on
         every call, and stop `insert` from mutating the caller's rows #1619
-    - Pair waveform-feature units with spike times by label, not position #1678
 
 - LFP
 
@@ -456,15 +493,6 @@ for label, interval_data in results.groupby("interval_labels"):
         maintaining hardcoded removal lists #1655
     - Fix `MetricCuration` dropping non-empty `merge_groups` #1626
     - Add `unit_criteria` to `UnitSelectionParams` #1670
-    - Respect `safemode` in `RecordingRecompute.delete` #1678
-    - Split recording and artifact restrictions in merge-id lookup #1678
-    - **BREAKING**: `get_sort_group_info` returns one row per electrode of each
-        sort group, on `CurationV1`, `CuratedSpikeSorting` and
-        `SpikeSortingOutput`. It previously returned a single representative
-        electrode, which the method name did not suggest. Callers that assumed one
-        row should restrict to the electrode they want #1678
-    - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
-        #1678
 
 ## [0.5.5] (Aug 6, 2025)
 
