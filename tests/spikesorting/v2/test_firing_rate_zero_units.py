@@ -1,22 +1,25 @@
-"""``firing_rate_from_spike_indicator``: Hz scaling and zero-unit handling.
+"""Spike-indicator firing rates: Hz scaling and zero-unit handling.
 
-The function converts a spike-indicator matrix (counts per time bin) into a
-firing rate in **spikes per second**: it multiplies the per-bin counts by the
-sampling frequency (recovered as ``1/median(diff(time))``) and convolves with a
-normalized Gaussian. Two properties matter scientifically and are pinned here:
+``firing_rate_from_spike_indicator`` converts a spike-indicator matrix (counts
+per time bin) into a firing rate in **spikes per second**: it multiplies the
+per-bin counts by the sampling frequency (recovered as ``1/median(diff(time))``)
+and convolves with a normalized Gaussian. Two properties matter scientifically
+and are pinned here:
 
 * **Hz scaling.** The time-integral of the rate equals the spike count, and the
   scale is derived from the time grid -- a rate accidentally returned in
   counts/bin (missing the ``* sampling_frequency``) would be off by a factor of
   ``fs`` and would track the bin width instead of staying invariant to it.
 * **Zero-unit handling.** v2 supports zero-unit curations
-  (``require_units=False``); they flow into ``SpikeSortingOutput.get_firing_rate``
-  / ``SortedSpikesGroup.get_firing_rate`` through this function, where
-  ``np.stack([], axis=1)`` on an empty (0-column) indicator would raise
-  ``ValueError``. A zero-unit group should return an empty-but-shaped rate, not
-  crash.
+  (``require_units=False``). They reach
+  ``ClusterlessDecodingV1.get_firing_rate`` through
+  ``firing_rate_from_spike_indicator``, where ``np.stack([], axis=1)`` on an
+  empty (0-column) indicator would raise ``ValueError``, and they reach
+  ``SpikeSortingOutput.get_firing_rate`` / ``SortedSpikesGroup.get_firing_rate``
+  through ``observed_spike_indicator`` and ``firing_rate_over_observed_runs``.
+  A zero-unit group should return an empty-but-shaped rate, not crash.
 
-Hermetic -- pure function, no DB.
+Hermetic -- pure functions, no DB.
 """
 
 from __future__ import annotations
@@ -24,7 +27,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
+from spyglass.spikesorting._observed_time import ObservationAvailability
+from spyglass.utils.spikesorting import (
+    firing_rate_from_spike_indicator,
+    firing_rate_over_observed_runs,
+    observed_spike_indicator,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -44,6 +52,31 @@ def test_zero_units_multiunit_returns_zero_rate():
     )
     assert out.shape == (200, 1)
     assert np.all(out == 0.0)
+
+
+@pytest.mark.parametrize(
+    "intervals", [None, [[0.0, 0.4], [0.6, 1.0]]], ids=["unknown", "gapped"]
+)
+def test_zero_units_observed_indicator_and_rate(intervals):
+    """The merge-table / group path keeps the empty shape over observed runs:
+    0 units -> a (n_time, 0) indicator and rate, and a multiunit rate that is
+    zero inside the observed runs and NaN outside them."""
+    time = np.linspace(0.0, 1.0, 200)
+    observation = ObservationAvailability(intervals)
+
+    indicator, valid = observed_spike_indicator([], time, observation)
+    assert indicator.shape == (200, 0)
+    np.testing.assert_array_equal(valid, observation.valid_bins(time))
+
+    rate = firing_rate_over_observed_runs(indicator, time, valid)
+    assert rate.shape == (200, 0)
+
+    mua = firing_rate_over_observed_runs(indicator, time, valid, multiunit=True)
+    assert mua.shape == (200, 1)
+    assert np.all(mua[valid, 0] == 0.0)
+    assert np.all(np.isnan(mua[~valid, 0]))
+    if intervals is not None:
+        assert (~valid).any()
 
 
 def test_nonzero_units_unaffected():

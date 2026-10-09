@@ -20,9 +20,8 @@ from spyglass.utils.dj_merge_tables import _Merge
 from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.logging import logger
 from spyglass.utils.spikesorting import (
-    contiguous_observed_runs,
-    firing_rate_from_spike_indicator,
-    firing_rate_over_runs,
+    firing_rate_over_observed_runs,
+    observed_spike_indicator,
 )
 
 
@@ -884,28 +883,11 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         np.ndarray of bool, optional
             if return_validity is True, True where every unit was observed
         """
-        time = np.asarray(time)
-        min_time, max_time = time[[0, -1]]
         spike_times, unit_ids = (cls & key).get_spike_times_by_unit(key)
         observation = cls.get_observation_intervals(key, unit_ids=unit_ids)
-        spike_indicator = np.zeros((len(time), len(spike_times)))
-
-        for ind, times in enumerate(spike_times):
-            times = times[
-                (times >= min_time)
-                & (times <= max_time)
-                & observation.contains(times)
-            ]
-            spike_indicator[:, ind] = np.bincount(
-                np.digitize(times, time[1:-1]),
-                minlength=time.shape[0],
-            )
-
-        if spike_indicator.ndim == 1:
-            spike_indicator = spike_indicator[:, np.newaxis]
-
-        valid = observation.valid_bins(time)
-        spike_indicator[~valid, :] = np.nan
+        spike_indicator, valid = observed_spike_indicator(
+            spike_times, time, observation
+        )
         if return_validity:
             return (
                 (spike_indicator, unit_ids, valid)
@@ -1009,24 +991,13 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             rate is carried across unobserved time or across a jump in the
             time axis of more than 1.5 sample periods.
         """
-        time = np.asarray(time)
         spike_indicator, valid = cls.get_spike_indicator(
             key, time, return_validity=True
         )
-        runs = contiguous_observed_runs(
-            time, valid, 1 / np.median(np.diff(time))
-        )
-        if len(runs) == 1 and runs[0].size == time.size:
-            return firing_rate_from_spike_indicator(
-                spike_indicator=spike_indicator,
-                time=time,
-                multiunit=multiunit,
-                smoothing_sigma=smoothing_sigma,
-            )
-        return firing_rate_over_runs(
+        return firing_rate_over_observed_runs(
             spike_indicator,
             time,
-            runs,
+            valid,
             multiunit=multiunit,
             smoothing_sigma=smoothing_sigma,
         )
