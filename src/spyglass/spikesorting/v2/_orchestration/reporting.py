@@ -77,11 +77,31 @@ def describe_parameter_rows() -> "pd.DataFrame":
     """
     import pandas as pd
 
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
     preproc_use, artifact_use, sorter_use = _preset_parameter_use()
     records: list[dict] = [
-        *_preprocessing_parameter_records(preproc_use),
-        *_artifact_parameter_records(artifact_use),
-        *_sorter_parameter_records(sorter_use),
+        *_preset_parameter_records(
+            PreprocessingParameters,
+            "preprocessing_params_name",
+            preproc_use,
+            lambda row, params: _preproc_summary(params),
+        ),
+        *_preset_parameter_records(
+            ArtifactDetectionParameters,
+            "artifact_detection_params_name",
+            artifact_use,
+            lambda row, params: _artifact_summary(params),
+        ),
+        *_preset_parameter_records(
+            SorterParameters,
+            "sorter_params_name",
+            sorter_use,
+            lambda row, params: _sorter_summary(row["sorter"], params),
+            sorter_keyed=True,
+        ),
         *_downstream_parameter_records(),
     ]
     _annotate_duplicate_parameter_records(records)
@@ -195,129 +215,57 @@ def _sorter_summary(sorter: str, params: dict) -> str:
     return ", ".join(bits)
 
 
-def _preprocessing_parameter_records(
-    preproc_use: dict[str, list[str]],
+def _preset_parameter_records(
+    table, name_attr, preset_use, summarize, *, sorter_keyed=False
 ) -> list[dict]:
-    """Catalog records for every ``PreprocessingParameters`` row."""
+    """Catalog records for every row of a preset-referenced param Lookup.
+
+    ``preset_use`` maps each row's key -- its ``name_attr`` value, or
+    ``(sorter, name)`` when ``sorter_keyed`` -- to the presets that name it.
+    ``summarize(row, params)`` renders the row's one-line summary.
+    ``sorter_keyed`` (``SorterParameters``) also fills the ``sorter`` and
+    ``adjacency_radius_um`` columns and folds the sorter and
+    execution_params (local vs container backend) into the fingerprint, as
+    the duplicate-content guard does.
+    """
     from spyglass.spikesorting.v2._core.lookup_validation import (
+        _jsonable_blob,
         parameter_row_fingerprint,
     )
-    from spyglass.spikesorting.v2.recording import PreprocessingParameters
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
-    shipped_preproc = {r[0] for r in PreprocessingParameters._DEFAULT_CONTENTS}
+    table_name = table.__name__
+    if sorter_keyed:
+        shipped = {(r[0], r[1]) for r in table._DEFAULT_CONTENTS}
+    else:
+        shipped = {r[0] for r in table._DEFAULT_CONTENTS}
     records: list[dict] = []
-    for row in PreprocessingParameters.fetch(as_dict=True):
+    for row in table.fetch(as_dict=True):
         params = _jsonable_blob(row["params"])
-        used = sorted(preproc_use.get(row["preprocessing_params_name"], []))
+        key = (
+            (row["sorter"], row[name_attr]) if sorter_keyed else row[name_attr]
+        )
+        used = sorted(preset_use.get(key, []))
+        radius = params.get("adjacency_radius") if sorter_keyed else None
         records.append(
             {
-                "table": "PreprocessingParameters",
-                "parameter_name": row["preprocessing_params_name"],
-                "sorter": "",
-                "probe_type": _str_axis(used, "probe_type"),
-                "sampling_rate_hz": _num_axis(used, "sampling_rate_hz"),
-                "adjacency_radius_um": None,
-                "params_schema_version": int(row["params_schema_version"]),
-                "_fp": parameter_row_fingerprint(
-                    "PreprocessingParameters", row
-                ),
-                "is_shipped_default": (
-                    row["preprocessing_params_name"] in shipped_preproc
-                ),
-                "recommendation_status": _str_axis(
-                    used, "recommendation_status"
-                ),
-                "used_by_pipeline_presets": used,
-                "summary": _preproc_summary(params),
-            }
-        )
-    return records
-
-
-def _artifact_parameter_records(
-    artifact_use: dict[str, list[str]],
-) -> list[dict]:
-    """Catalog records for every ``ArtifactDetectionParameters`` row."""
-    from spyglass.spikesorting.v2._core.lookup_validation import (
-        parameter_row_fingerprint,
-    )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
-
-    shipped_artifact = {
-        r[0] for r in ArtifactDetectionParameters._DEFAULT_CONTENTS
-    }
-    records: list[dict] = []
-    for row in ArtifactDetectionParameters.fetch(as_dict=True):
-        params = _jsonable_blob(row["params"])
-        used = sorted(
-            artifact_use.get(row["artifact_detection_params_name"], [])
-        )
-        records.append(
-            {
-                "table": "ArtifactDetectionParameters",
-                "parameter_name": row["artifact_detection_params_name"],
-                "sorter": "",
-                "probe_type": _str_axis(used, "probe_type"),
-                "sampling_rate_hz": _num_axis(used, "sampling_rate_hz"),
-                "adjacency_radius_um": None,
-                "params_schema_version": int(row["params_schema_version"]),
-                "_fp": parameter_row_fingerprint(
-                    "ArtifactDetectionParameters", row
-                ),
-                "is_shipped_default": (
-                    row["artifact_detection_params_name"] in shipped_artifact
-                ),
-                "recommendation_status": _str_axis(
-                    used, "recommendation_status"
-                ),
-                "used_by_pipeline_presets": used,
-                "summary": _artifact_summary(params),
-            }
-        )
-    return records
-
-
-def _sorter_parameter_records(
-    sorter_use: dict[tuple[str, str], list[str]],
-) -> list[dict]:
-    """Catalog records for every ``SorterParameters`` row."""
-    from spyglass.spikesorting.v2._core.lookup_validation import (
-        parameter_row_fingerprint,
-    )
-    from spyglass.spikesorting.v2.sorting import SorterParameters
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
-
-    shipped_sorter = {(r[0], r[1]) for r in SorterParameters._DEFAULT_CONTENTS}
-    records: list[dict] = []
-    for row in SorterParameters.fetch(as_dict=True):
-        params = _jsonable_blob(row["params"])
-        key = (row["sorter"], row["sorter_params_name"])
-        used = sorted(sorter_use.get(key, []))
-        radius = params.get("adjacency_radius")
-        records.append(
-            {
-                "table": "SorterParameters",
-                "parameter_name": row["sorter_params_name"],
-                "sorter": row["sorter"],
+                "table": table_name,
+                "parameter_name": row[name_attr],
+                "sorter": row["sorter"] if sorter_keyed else "",
                 "probe_type": _str_axis(used, "probe_type"),
                 "sampling_rate_hz": _num_axis(used, "sampling_rate_hz"),
                 "adjacency_radius_um": (
                     float(radius) if radius is not None else None
                 ),
                 "params_schema_version": int(row["params_schema_version"]),
-                # Folds in the sorter and execution_params (local vs
-                # container backend), as the duplicate-content guard does.
                 "_fp": parameter_row_fingerprint(
-                    "SorterParameters", row, sorter_keyed=True
+                    table_name, row, sorter_keyed=sorter_keyed
                 ),
-                "is_shipped_default": key in shipped_sorter,
+                "is_shipped_default": key in shipped,
                 "recommendation_status": _str_axis(
                     used, "recommendation_status"
                 ),
                 "used_by_pipeline_presets": used,
-                "summary": _sorter_summary(row["sorter"], params),
+                "summary": summarize(row, params),
             }
         )
     return records
@@ -351,14 +299,12 @@ def _downstream_parameter_records() -> list[dict]:
     records: list[dict] = []
     records += _simple_parameter_records(
         AnalyzerWaveformParameters,
-        "AnalyzerWaveformParameters",
         "waveform_params_name",
         {r[0] for r in AnalyzerWaveformParameters._DEFAULT_CONTENTS},
         lambda r: "",
     )
     records += _simple_parameter_records(
         QualityMetricParameters,
-        "QualityMetricParameters",
         "metric_params_name",
         {
             r["metric_params_name"]
@@ -368,7 +314,6 @@ def _downstream_parameter_records() -> list[dict]:
     )
     records += _simple_parameter_records(
         AutoCurationRules,
-        "AutoCurationRules",
         "auto_curation_rules_name",
         {
             master["auto_curation_rules_name"]
@@ -379,28 +324,24 @@ def _downstream_parameter_records() -> list[dict]:
     )
     records += _simple_parameter_records(
         MatcherParameters,
-        "MatcherParameters",
         "matcher_params_name",
         {r["matcher_params_name"] for r in MatcherParameters._default_rows()},
         lambda r: f"matcher {r.get('matcher', '')!r}",
     )
     records += _simple_parameter_records(
         MotionEstimationParameters,
-        "MotionEstimationParameters",
         "motion_estimation_params_name",
         {r[0] for r in MotionEstimationParameters._DEFAULT_CONTENTS},
         _motion_estimation_summary,
     )
     records += _simple_parameter_records(
         MotionInterpolationParameters,
-        "MotionInterpolationParameters",
         "motion_interpolation_params_name",
         {r[0] for r in MotionInterpolationParameters._DEFAULT_CONTENTS},
         _motion_interpolation_summary,
     )
     records += _simple_parameter_records(
         MotionCorrectionParameters,
-        "MotionCorrectionParameters",
         "motion_correction_params_name",
         {r[0] for r in MotionCorrectionParameters._DEFAULT_CONTENTS},
         lambda r: (
@@ -412,7 +353,7 @@ def _downstream_parameter_records() -> list[dict]:
 
 
 def _simple_parameter_records(
-    table, table_name, name_attr, shipped, summarize, extra_content=None
+    table, name_attr, shipped, summarize, extra_content=None
 ) -> list[dict]:
     """List a name-keyed param Lookup with preset-fold columns blank.
 
@@ -427,6 +368,7 @@ def _simple_parameter_records(
     )
     from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
+    table_name = table.__name__
     records: list[dict] = []
     for simple_row in table.fetch(as_dict=True):
         version = int(simple_row.get("params_schema_version", 0) or 0)
