@@ -824,9 +824,11 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             node_a = (*endpoint_a, identifiers["unit_a_id"])
             node_b = (*endpoint_b, identifiers["unit_b_id"])
             edge = frozenset((node_a, node_b))
-            batch = seen_edges.setdefault(
-                unitmatch_id, self._existing_pair_edges(unitmatch_id)
-            )
+            if unitmatch_id not in seen_edges:
+                seen_edges[unitmatch_id] = self._existing_pair_edges(
+                    unitmatch_id
+                )
+            batch = seen_edges[unitmatch_id]
             if edge in batch:
                 raise UnitMatchPairIntegrityError(
                     "UnitMatch.Pair.insert: duplicate / reversed edge between "
