@@ -19,6 +19,8 @@ from collections.abc import Mapping
 from importlib.metadata import PackageNotFoundError, distributions, version
 from pathlib import Path
 
+from spyglass.spikesorting.v2._core.selection_identity import sha256_json
+
 RUNTIME_SCHEMA_VERSION = 1
 _PACKAGES = (
     "spyglass-neuro",
@@ -124,9 +126,7 @@ def _source_identity():
     }
     if not files:
         raise ValueError("Cannot fingerprint Spyglass source: no Python files.")
-    source_sha = hashlib.sha256(
-        json.dumps(files, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    source_sha = sha256_json(files)
     root = package.parent.parent
     commit = None
     if (root / ".git").exists():
@@ -485,14 +485,11 @@ def runtime_environment_fingerprint(snapshot):
     }
     _validate_runtime_values(snapshot)
     try:
-        encoded = json.dumps(
-            identity, sort_keys=True, separators=(",", ":"), allow_nan=False
-        ).encode()
+        return sha256_json(identity, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise ValueError(
             "runtime environment must contain finite JSON values."
         ) from exc
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def runtime_environment_provenance(*, job_kwargs=None, execution_params=None):

@@ -130,11 +130,9 @@ def member_set_hash(snapshot_rows: list[dict]) -> str:
     str
         A 64-character lowercase hex SHA-256 digest of the ordered member set.
     """
-    import hashlib
-    import json
-
     from spyglass.spikesorting.v2._core.selection_identity import (
         canonical_identity,
+        sha256_json,
     )
 
     # Reuse the single v2 identity canonicalization (UUID<->str, numpy<->int
@@ -143,16 +141,14 @@ def member_set_hash(snapshot_rows: list[dict]) -> str:
     # member's logical fields canonicalize order-independently; we order the
     # MEMBERS by member_index so the concatenation order is part of the hash.
     ordered = sorted(snapshot_rows, key=lambda row: int(row["member_index"]))
-    payload = json.dumps(
+    return sha256_json(
         [
             canonical_identity(
                 {field: row[field] for field in MEMBER_SNAPSHOT_LOGICAL_FIELDS}
             )
             for row in ordered
-        ],
-        separators=(",", ":"),
+        ]
     )
-    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def concat_recording_artifact_lock(concat_recording_id, *, timeout: float = -1):
