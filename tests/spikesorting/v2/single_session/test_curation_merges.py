@@ -160,9 +160,9 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     # one physical spike double-detected (a neuron's refractory period
     # forbids genuine sub-0.4 ms firing), so it is dropped. v1's lazy
     # get_merged_sorting did this; v2 applies it to the apply_merge=True
-    # stored train too (via _dedup_merged_spike_times).
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _dedup_merged_spike_times,
+    # stored train too; SpikeInterface's dedup is the reference.
+    from spikeinterface.curation.mergeunitssorting import (
+        get_non_duplicated_events,
     )
 
     src_sorting = Sorting().get_sorting(sort_pk)
@@ -173,8 +173,8 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         src_sorting.get_unit_spike_train(unit_id=absorbed, return_times=True)
     )
     raw_concat = np.sort(np.concatenate([src_head, src_absorbed]))
-    expected_merged = _dedup_merged_spike_times(
-        [src_head, src_absorbed], 0.4e-3
+    expected_merged = get_non_duplicated_events(
+        [src_head.astype(float), src_absorbed.astype(float)], 0.4e-3
     )
     # The 60s fixture's two merged units share at least one cross-unit
     # double-detection, so dedup is genuinely exercised end-to-end.

@@ -174,7 +174,7 @@ def test_build_lazy_merged_sorting_from_samples_avoids_timestamp_mapping():
     assert sorted(int(u) for u in sorting.get_unit_ids()) == [3, 4]
     assert _unit_train(sorting, 3) == [20]
     # The first contributor's frame is retained by the same stable sort / keep
-    # mask as _dedup_merged_spike_times.
+    # mask as SpikeInterface's get_non_duplicated_events.
     assert _unit_train(sorting, 4) == [10]
 
 

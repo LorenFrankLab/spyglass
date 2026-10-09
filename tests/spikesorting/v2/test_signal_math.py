@@ -2,9 +2,7 @@
 
 Covers the boundary invariant guards (positive sampling frequency,
 monotonic timestamps) wired into the frame-mapping functions
-(``_spike_times_to_frames`` / ``base_intervals_and_gaps``) and the
-absolute-time merge dedup (``_dedup_merged_spike_times``) that the lazy
-units-NWB merge is built on.
+(``_spike_times_to_frames`` / ``base_intervals_and_gaps``).
 All pure numpy -- no DB, no NWB IO.
 """
 
@@ -111,43 +109,6 @@ def test_spike_times_to_frames_rejects_nonmonotonic_recording_times():
         _spike_times_to_frames(
             np.array([0.0, 2.0, 1.0]), np.array([0.5]), 3, unit_id=0
         )
-
-
-def test_dedup_merged_spike_times_drops_cross_unit_coincidences():
-    """Cross-contributor spikes within delta collapse; far ones are kept."""
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _dedup_merged_spike_times,
-    )
-
-    # unit A=[0.0], unit B=[0.0001] -> 0.1 ms apart, different units -> dedup.
-    near = _dedup_merged_spike_times([[0.0], [0.0001]], delta_s=0.4e-3)
-    assert near.tolist() == [0.0]
-    # unit A=[0.0], unit B=[0.001] -> 1 ms apart -> both kept.
-    far = _dedup_merged_spike_times([[0.0], [0.001]], delta_s=0.4e-3)
-    assert far.tolist() == [0.0, 0.001]
-
-
-def test_dedup_merged_spike_times_keeps_within_unit_close_pair():
-    """A close pair from the SAME contributor is a real event, kept.
-
-    The membership guard mirrors SI's ``(diff>delta)|(diff(membership)==0)``:
-    a sub-delta pair is dropped only when the two spikes came from DIFFERENT
-    contributors (a cross-unit double-detection), never within one unit.
-    """
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _dedup_merged_spike_times,
-    )
-
-    out = _dedup_merged_spike_times([[0.0, 0.0001]], delta_s=0.4e-3)
-    assert out.tolist() == [0.0, 0.0001]
-
-
-def test_dedup_merged_spike_times_empty():
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _dedup_merged_spike_times,
-    )
-
-    assert _dedup_merged_spike_times([], delta_s=0.4e-3).tolist() == []
 
 
 # --------------------------------------------------------------------------- #

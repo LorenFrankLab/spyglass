@@ -544,45 +544,11 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
 # A neuron's refractory period (~1-2 ms) means a genuine spike train never
 # has a sub-0.4 ms pair,
 # so this only removes double-detections of one physical event shared
-# across merged contributors. Lives here next to
-# ``_dedup_merged_spike_times`` -- the algorithm it parameterizes -- so the
-# ``curation`` schema module and ``_units_nwb`` import it from this pure
-# layer rather than the lower-level ``_units_nwb`` reaching back into the
+# across merged contributors. Lives in this pure layer so the ``curation``
+# schema module and ``_storage.units_nwb`` (which holds the dedup it
+# parameterizes) both import it without ``units_nwb`` reaching back into the
 # schema module.
 _MERGE_DEDUP_DELTA_MS = 0.4
-
-
-def _dedup_merged_spike_times(times_list, delta_s):
-    """Membership-aware duplicate-spike removal for a merged unit.
-
-    Delegates to SpikeInterface's ``get_non_duplicated_events`` (the dedup
-    behind ``MergeUnitsSorting``): concatenate the contributor spike trains,
-    sort, and drop a spike only when it is within ``delta_s`` seconds of the
-    previous spike AND came from a different contributor. A within-unit close
-    pair is kept, and the first spike is always kept. Inputs are cast to
-    float64 seconds, and an empty ``times_list`` returns an empty float array.
-
-    Parameters
-    ----------
-    times_list : list[array-like]
-        One spike-time array (seconds) per contributor unit.
-    delta_s : float
-        Coincidence window in seconds (e.g. ``0.4e-3``).
-
-    Returns
-    -------
-    np.ndarray
-        Sorted, deduplicated merged spike times (seconds).
-    """
-    import numpy as np
-    from spikeinterface.curation.mergeunitssorting import (
-        get_non_duplicated_events,
-    )
-
-    arrays = [np.asarray(t, dtype=float) for t in times_list]
-    if not arrays:
-        return np.asarray([], dtype=float)
-    return get_non_duplicated_events(arrays, delta_s)
 
 
 # --------------------------------------------------------------------------- #
