@@ -37,7 +37,7 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
 
     # --- UnitMatch bundle scratch (tempfile.TemporaryDirectory) ------------- #
     import spyglass.settings as settings
-    from spyglass.spikesorting.v2 import unit_matching as um
+    from spyglass.spikesorting.v2._matching.compute import extract_and_match
 
     monkeypatch.setattr(settings, "temp_dir", configured)
 
@@ -48,7 +48,7 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
     # Reach the temp site after the cheap pure preamble: an empty input plan
     # is enough (the loop body never runs -- the recorder aborts first).
     with pytest.raises(_StopAfterTempDir):
-        um.UnitMatch._extract_and_match(
+        extract_and_match(
             input_plan=[],
             matcher_name="unitmatchpy",
             params={},

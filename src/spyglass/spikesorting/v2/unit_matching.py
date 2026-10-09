@@ -1060,8 +1060,10 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 oriented_pairs: list[dict] = []
                 runtime_s = 0.0
             else:
-                oriented_pairs, runtime_s = self._extract_and_match(
-                    input_plan, matcher_name, params, job_kwargs
+                oriented_pairs, runtime_s = (
+                    _unit_match_compute.extract_and_match(
+                        input_plan, matcher_name, params, job_kwargs
+                    )
                 )
             pairs_object_id = write_pairs_table(
                 abs_path, oriented_pairs, provenance_tables=provenance_tables
@@ -1164,18 +1166,6 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             self.RecordingSpikeCount.insert(
                 [{**key, **count} for count in recording_spike_counts]
             )
-
-    @staticmethod
-    def _extract_and_match(input_plan, matcher_name, params, job_kwargs):
-        """Extract per-input bundles, run the matcher, canonicalize the pairs.
-
-        Returns ``(oriented_pairs, runtime_s)``. See
-        :func:`._unit_match_compute.extract_and_match`; ``make_compute``
-        calls it through the instance.
-        """
-        return _unit_match_compute.extract_and_match(
-            input_plan, matcher_name, params, job_kwargs
-        )
 
     def get_pairs(self, key) -> "pd.DataFrame":
         """Return the cross-session match pairs for one run as a DataFrame."""

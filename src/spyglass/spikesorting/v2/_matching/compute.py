@@ -1,6 +1,6 @@
 """Compute steps of ``UnitMatch.make_compute`` that need no database.
 
-:func:`extract_and_match` is the body of ``UnitMatch._extract_and_match``: it
+:func:`extract_and_match` is called by ``UnitMatch.make_compute``: it
 extracts a waveform bundle per matching input from the files ``make_fetch``
 resolved, runs the matcher in chronological input order and canonicalizes the
 pairs. :func:`_input_recording_spike_counts` counts each matchable unit's

@@ -24,6 +24,9 @@ from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
     StagedOutputs,
 )
+from spyglass.spikesorting.v2._recording.concat_fetch import (
+    resolve_snapshot_recordings,
+)
 from spyglass.spikesorting.v2._storage.units_nwb import (
     _write_curated_units_nwb_body,
     read_series_timestamps,
@@ -404,7 +407,7 @@ class ConcatMemberCuration(
         snapshots = (
             ConcatenatedRecordingSelection.MemberSnapshot & concat_key
         ).fetch(as_dict=True, order_by="member_index")
-        ConcatenatedRecording._resolve_snapshot_recordings(snapshots)
+        resolve_snapshot_recordings(snapshots)
 
         indices, ends = (
             ConcatenatedRecording.MemberBoundary & concat_key

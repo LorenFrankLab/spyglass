@@ -8,7 +8,7 @@ Two roles live here:
 - :func:`extract_unitmatch_bundle` -- the *wrapper* helper that turns a curated
   SpikeInterface sorting + recording into a UnitMatch directory bundle (dense
   per-unit cross-validation-half templates + channel positions + good-unit
-  labels). ``UnitMatch._extract_and_match`` (run from
+  labels). :func:`._matching.compute.extract_and_match` (run from
   ``UnitMatch.make_compute``) calls this once per matching input; it reads the
   traces the input's sorter read but writes only the self-contained bundle.
 - :class:`UnitMatchBackend.match` -- the *matcher*: it reads the prepared bundle

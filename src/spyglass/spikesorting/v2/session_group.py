@@ -636,26 +636,13 @@ class ConcatenatedRecording(
         """
 
     @staticmethod
-    def _resolve_snapshot_recordings(snapshot_rows):
-        """Verify each frozen member's ``Recording`` and build the load plan.
-
-        The verification is
-        :func:`._recording.concat_fetch.resolve_snapshot_recordings` (see it
-        for the plan's fields and the errors). ``make_fetch``, member curation
-        and UnitMatch call this method.
-        """
-        return _concat_recording_fetch.resolve_snapshot_recordings(
-            snapshot_rows
-        )
-
-    @staticmethod
     def _load_member_recordings(member_plan, member_traces):
         """Load each member's cached ``Recording`` from the resolved plan (SI I/O).
 
         The compute-side half: given the fetch-resolved ``member_plan`` (see
-        :meth:`_resolve_snapshot_recordings`) and member files, read each
-        cached ``Recording`` and collect its sample count (the basis for the
-        ``MemberBoundary`` back-mapping). Aligned element-wise in
+        :func:`._recording.concat_fetch.resolve_snapshot_recordings`) and
+        member files, read each cached ``Recording`` and collect its sample
+        count (the basis for the ``MemberBoundary`` back-mapping). Aligned element-wise in
         ``member_index`` order. No DB access -- the files were resolved at
         fetch time.
 
@@ -663,7 +650,7 @@ class ConcatenatedRecording(
         ----------
         member_plan : list[dict]
             Resolved per-member plan dicts from
-            :meth:`_resolve_snapshot_recordings`.
+            :func:`._recording.concat_fetch.resolve_snapshot_recordings`.
         member_traces : tuple[StoredTraces, ...]
             Each member's resolved file, aligned with ``member_plan``.
 
@@ -724,7 +711,7 @@ class ConcatenatedRecording(
         ConcatMemberDriftError
             If a frozen member's recording content drifted from the snapshot.
         """
-        return _concat_recording_fetch.fetch_concat_inputs(self, key)
+        return _concat_recording_fetch.fetch_concat_inputs(key)
 
     def make_compute(
         self,

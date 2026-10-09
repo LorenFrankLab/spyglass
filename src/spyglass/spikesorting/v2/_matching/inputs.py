@@ -379,7 +379,7 @@ def _resolve_match_input(
     (``ConcatenatedRecordingSelection.MemberSnapshot``) in member order;
     each member must still resolve to a ``Recording`` with the content hash
     the concatenation froze
-    (``ConcatenatedRecording._resolve_snapshot_recordings``), and carries
+    (:func:`._recording.concat_fetch.resolve_snapshot_recordings`), and carries
     its frames in the concatenation (``ConcatenatedRecording.MemberBoundary``:
     the cumulative exclusive ``end_sample``, a member starting where the
     previous one ended) and its kept intervals on its own clock
@@ -422,6 +422,9 @@ def _resolve_match_input(
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,
+    )
+    from spyglass.spikesorting.v2._recording.concat_fetch import (
+        resolve_snapshot_recordings,
     )
     from spyglass.spikesorting.v2.exceptions import (
         ConcatMemberDriftError,
@@ -484,7 +487,7 @@ def _resolve_match_input(
         # Recording's timestamps) alike; a member repopulated with other
         # content after the concatenation was built is refused here.
         try:
-            ConcatenatedRecording._resolve_snapshot_recordings(snapshot)
+            resolve_snapshot_recordings(snapshot)
         except (ConcatMemberDriftError, MissingRecordingForConcatError) as exc:
             position = (
                 "" if input_index is None else f"input_index {input_index} "

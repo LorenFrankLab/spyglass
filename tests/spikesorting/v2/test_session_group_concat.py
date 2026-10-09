@@ -885,11 +885,12 @@ def test_load_member_recordings_returns_aligned_counts_and_indices(
     materialization contract, exercised without driving a full populate."""
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+    from spyglass.spikesorting.v2._recording.concat_fetch import (
+        resolve_snapshot_recordings,
+    )
 
     grp = same_day_group
-    member_plan = ConcatenatedRecording._resolve_snapshot_recordings(
-        _member_snapshot(grp)
-    )
+    member_plan = resolve_snapshot_recordings(_member_snapshot(grp))
     member_traces = tuple(
         Recording().resolve_stored_traces(plan["recording_pk"])
         for plan in member_plan
@@ -916,7 +917,9 @@ def test_resolve_snapshot_recordings_raises_on_missing_recording(
     from spyglass.spikesorting.v2.exceptions import (
         MissingRecordingForConcatError,
     )
-    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+    from spyglass.spikesorting.v2._recording.concat_fetch import (
+        resolve_snapshot_recordings,
+    )
 
     snapshot = _member_snapshot(same_day_group)
     # Point the first frozen member at a recording_id with no Recording row.
@@ -925,7 +928,7 @@ def test_resolve_snapshot_recordings_raises_on_missing_recording(
         "recording_id": "00000000-0000-0000-0000-000000000000",
     }
     with pytest.raises(MissingRecordingForConcatError, match="populate"):
-        ConcatenatedRecording._resolve_snapshot_recordings(snapshot)
+        resolve_snapshot_recordings(snapshot)
 
 
 @pytest.mark.slow
@@ -936,13 +939,15 @@ def test_resolve_snapshot_recordings_raises_on_member_content_drift(
     snapshot raises ``ConcatMemberDriftError`` -- the concat would be built from
     different underlying data than its id was minted for."""
     from spyglass.spikesorting.v2.exceptions import ConcatMemberDriftError
-    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+    from spyglass.spikesorting.v2._recording.concat_fetch import (
+        resolve_snapshot_recordings,
+    )
 
     snapshot = _member_snapshot(same_day_group)
     # Freeze a content hash that diverges from the live Recording's.
     snapshot[0] = {**snapshot[0], "recording_content_hash": "f" * 64}
     with pytest.raises(ConcatMemberDriftError, match="content"):
-        ConcatenatedRecording._resolve_snapshot_recordings(snapshot)
+        resolve_snapshot_recordings(snapshot)
 
 
 @pytest.mark.slow

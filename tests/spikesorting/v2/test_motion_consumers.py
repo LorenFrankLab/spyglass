@@ -257,7 +257,7 @@ def _units_readbacks(sort_key, curation, selection):
 def _hand_input_plan(curations):
     """A UnitMatch input plan for ``curations``, built as ``make_fetch`` does.
 
-    For driving ``UnitMatch._extract_and_match`` / ``make_compute`` directly
+    For driving ``extract_and_match`` / ``make_compute`` directly
     on sorts of one recording, which a selection would reject as sharing a
     session.
     """
@@ -346,10 +346,8 @@ def test_all_consumers_resolve_selected_correction(
         _resolve_analyzer_regen_inputs,
     )
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2.unit_matching import (
-        UnitMatch,
-        UnitMatchSelection,
-    )
+    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+    from spyglass.spikesorting.v2._matching.compute import extract_and_match
 
     sorts = corrected_sorts
     sort = sorts["corrected_sort"]
@@ -524,9 +522,7 @@ def test_all_consumers_resolve_selected_correction(
         matcher_protocol, "get_matcher", lambda name: _NoPairs()
     )
     input_plan = _hand_input_plan([root, uncorrected_root])
-    pairs, _runtime = UnitMatch._extract_and_match(
-        input_plan, "unitmatch", {}, {}
-    )
+    pairs, _runtime = extract_and_match(input_plan, "unitmatch", {}, {})
     assert pairs == []
     _assert_reads_corrected(
         bundle_inputs["input_0"], sorts, "UnitMatch bundle input"
@@ -1067,7 +1063,7 @@ def test_corrected_concat_bundle_keeps_windows_in_spans(
         Sorting,
         SortingSelection,
     )
-    from spyglass.spikesorting.v2.unit_matching import UnitMatch
+    from spyglass.spikesorting.v2._matching.compute import extract_and_match
 
     concat_key = discontinuous_sources["concat_key"]
     corrected_key = populated_corrected(
@@ -1141,7 +1137,7 @@ def test_corrected_concat_bundle_keeps_windows_in_spans(
             "motion_corrected_recording",
             "concatenated_recording",
         ]
-        UnitMatch._extract_and_match(input_plan, "unitmatch", {}, {})
+        extract_and_match(input_plan, "unitmatch", {}, {})
 
         assert sorted(extracted) == ["input_0", "input_1"]
         traces_by_input = {}

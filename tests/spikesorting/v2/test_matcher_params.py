@@ -180,7 +180,8 @@ def test_bundle_params_reach_extract(monkeypatch):
         unitmatch_backend as _unitmatch_backend,
     )
     from spyglass.spikesorting.v2._storage import units_nwb as _units_nwb
-    from spyglass.spikesorting.v2 import matcher_protocol, unit_matching
+    from spyglass.spikesorting.v2 import matcher_protocol
+    from spyglass.spikesorting.v2._matching.compute import extract_and_match
     from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
 
     captured = []
@@ -234,9 +235,7 @@ def test_bundle_params_reach_extract(monkeypatch):
         }
         for index, unit_ids in enumerate([[1, 2], [3, 4]])
     ]
-    unit_matching.UnitMatch._extract_and_match(
-        input_plan, "unitmatch", params, {}
-    )
+    extract_and_match(input_plan, "unitmatch", params, {})
     assert [name for name, _ in captured] == ["input_0", "input_1"]
     for (_, actual), expected_spans in zip(
         captured, ([[0, 30_000]], [[1000, 26_000]]), strict=True

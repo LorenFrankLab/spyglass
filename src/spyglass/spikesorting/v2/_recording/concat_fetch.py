@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from spyglass.spikesorting.v2.session_group import ConcatRecordingFetched
 
 
-def fetch_concat_inputs(table, key: dict) -> ConcatRecordingFetched:
+def fetch_concat_inputs(key: dict) -> ConcatRecordingFetched:
     """Read every DB input ``ConcatenatedRecording.make_compute`` needs.
 
     The body of ``ConcatenatedRecording.make_fetch`` (see its docstring for
@@ -28,9 +28,6 @@ def fetch_concat_inputs(table, key: dict) -> ConcatRecordingFetched:
 
     Parameters
     ----------
-    table : ConcatenatedRecording
-        The populating instance; ``_resolve_snapshot_recordings`` is called on
-        it.
     key : dict
         The ``ConcatenatedRecordingSelection`` primary key
         (``{"concat_recording_id": ...}``) being populated.
@@ -71,7 +68,7 @@ def fetch_concat_inputs(table, key: dict) -> ConcatRecordingFetched:
     # whose members span different physical electrode spaces (same SI channel
     # ids/geometry, different DB electrodes/regions).
     assert_members_share_electrode_space(snapshot)
-    member_plan = table._resolve_snapshot_recordings(snapshot)
+    member_plan = resolve_snapshot_recordings(snapshot)
     member_traces = tuple(
         Recording().resolve_stored_traces(plan["recording_pk"])
         for plan in member_plan
