@@ -19,6 +19,7 @@ from spyglass.spikesorting.v2._recording.concat import (
     member_spike_times,
     split_unit_spike_trains,
 )
+from spyglass.spikesorting.v2._storage.rebuilds import ensure_artifact_file
 from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
     StagedOutputs,
@@ -414,8 +415,10 @@ class ConcatMemberCuration(
             boundaries=boundaries,
             n_samples=n_samples,
             member_position=member_position,
-            recording_abs_path=AnalysisNwbfile.get_abs_path(
-                recording_row["analysis_file_name"]
+            recording_abs_path=ensure_artifact_file(
+                Recording,
+                {"recording_id": snapshot["recording_id"]},
+                recording_row["analysis_file_name"],
             ),
             recording_electrical_series_path=recording_row[
                 "electrical_series_path"

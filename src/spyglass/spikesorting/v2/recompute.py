@@ -1596,7 +1596,8 @@ def _recompute_analyzer_hashes(inputs: AnalyzerRegenInputs, rounding: int):
 def _artifact_created_at(rec_key: dict):
     """Return the recording artifact file mtime (now() if missing)."""
     fname = (Recording & rec_key).fetch1("analysis_file_name")
-    abs_path = Path(AnalysisNwbfile.get_abs_path(fname))
+    # Only the mtime is read, so skip get_abs_path's whole-file checksum.
+    abs_path = Path(AnalysisNwbfile.get_abs_path(fname, from_schema=True))
     if not abs_path.exists():
         return dt.datetime.now()
     return dt.datetime.fromtimestamp(abs_path.stat().st_mtime)
@@ -1853,7 +1854,10 @@ def _reclaimable_disk(query) -> str:
         (query & "matched=1 AND deleted=0").fetch("analysis_file_name")
     )
     for file_name in file_names:
-        abs_path = Path(AnalysisNwbfile.get_abs_path(file_name))
+        # Only the size is read, so skip get_abs_path's whole-file checksum.
+        abs_path = Path(
+            AnalysisNwbfile.get_abs_path(file_name, from_schema=True)
+        )
         if abs_path.exists():
             total += abs_path.stat().st_size
     return f"Total: {bytes_to_human_readable(total)}"
