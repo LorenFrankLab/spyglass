@@ -106,14 +106,11 @@ class NWBFileCache(BaseMixin):
         return (opened for opened, _, _ in self._cache.values())
 
     def close_all(self):
-        """Close every open IO handle and clear the cache."""
-        held = [p for p, (_, _, is_held) in self._cache.items() if is_held]
-        if held:
-            self._warn_msg(
-                f"Closing {len(held)} NWB file(s) that are still held. "
-                "Pending lazy h5py reads from these will fail: "
-                + ", ".join(held)
-            )
+        """Close every open IO handle and clear the cache.
+
+        Held files are closed without warning: the only way here is an
+        explicit ``close_nwb_files()``, which states the caller is finished.
+        """
         for opened, _, _ in self._cache.values():
             opened.io.close()
         self._cache.clear()

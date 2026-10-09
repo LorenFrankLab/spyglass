@@ -637,8 +637,13 @@ def test_low_ram_never_closes_held_file(NWBFileCache):
     assert set(cache) == {"/a.nwb", "/b.nwb"}
 
 
-def test_close_all_warns_on_held(NWBFileCache):
-    """close_all emits a warning when files are still held."""
+def test_close_all_does_not_warn_on_held(NWBFileCache):
+    """close_all closes held files silently.
+
+    Reaching it means the caller said they were finished, so warning that
+    their reads will fail is wrong -- and a per-session loop would warn on
+    every pass.
+    """
     cache = NWBFileCache()
     io_a = _make_io()
 
@@ -649,7 +654,7 @@ def test_close_all_warns_on_held(NWBFileCache):
 
     with patch.object(NWBFileCache, "_warn_msg") as mock_warn:
         cache.close_all()
-        assert any("still held" in w for w in _warn_texts(mock_warn))
+        mock_warn.assert_not_called()
 
     io_a.close.assert_called_once()
     assert len(cache) == 0
