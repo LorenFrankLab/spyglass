@@ -1,4 +1,3 @@
-from contextlib import nullcontext
 from itertools import compress
 from typing import Optional, Union
 
@@ -175,11 +174,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
         parts_insert = [{**key, **group_key} for key in keys]
 
-        with (
-            nullcontext()
-            if self.connection.in_transaction
-            else self.connection.transaction
-        ):
+        with self._safe_context():
             self.insert1(group_key)
             self.Units.insert(parts_insert)
             self.UnitSelection.insert(

@@ -162,16 +162,11 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
                 self.insert1(unit_key)
             self.Annotation().insert1(key, **kwargs)
 
-        if self.connection.in_transaction:
-            # DataJoint refuses a nested transaction and cancels the open one
-            # on the way out, so a batch of annotations under a caller's
-            # ``with connection.transaction`` would lose the caller's work.
-            # Participate instead: the caller's transaction already gives
-            # these three inserts the same all-or-nothing guarantee.
-            _write_marked()
-            return
-
-        with self.connection.transaction:
+        # DataJoint refuses a nested transaction and cancels the open one on
+        # the way out, so under a caller's ``with connection.transaction``
+        # participate in it instead: it already gives these three inserts the
+        # same all-or-nothing guarantee.
+        with self._safe_context():
             _write_marked()
 
     @classmethod
