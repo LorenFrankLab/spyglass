@@ -1,6 +1,7 @@
 """NWB helper functions for finding processing modules and data interfaces."""
 
 import atexit
+import errno
 import os
 import os.path
 import time
@@ -84,7 +85,7 @@ class NWBFileCache(BaseMixin):
         """Add an ``Opened`` record, closing LRU files if resources are tight."""
         if path in self._cache:
             self._cache[path][0].io.close()
-        self._evict_if_needed()
+        self.make_room()
         self._cache[path] = (opened, time.monotonic(), False)
 
     def __contains__(self, path):
@@ -154,10 +155,16 @@ class NWBFileCache(BaseMixin):
             # Counts descriptors held outside the cache -- sockets, pipes, GPU
             # handles -- and files opened more than once via external links.
             # A fresh Process() so forked workers count their own, not the
-            # parent's. POSIX-only; falls back to the cache's own size.
+            # parent's.
             num_open = psutil.Process().num_fds()
-        except (AttributeError, NotImplementedError, psutil.Error, OSError):
+        except OSError as err:
+            if err.errno in (errno.EMFILE, errno.ENFILE):
+                # psutil reads /proc, which itself needs a descriptor. Failing
+                # that way *is* the answer: there are none left to spare.
+                return False
             num_open = len(self._cache)
+        except (AttributeError, NotImplementedError, psutil.Error):
+            num_open = len(self._cache)  # POSIX-only; fall back
         return num_open < sg_config.nwb_max_file_fraction * soft_limit
 
     def _unheld(self) -> set:
@@ -211,8 +218,13 @@ class NWBFileCache(BaseMixin):
             return
         self._close_lru(self._unheld())
 
-    def _evict_if_needed(self) -> None:
-        """Make room before an insert: descriptors first, then RAM."""
+    def make_room(self) -> None:
+        """Close cached files until this process is inside both limits.
+
+        Descriptors first, then RAM. Called before a file is opened as well as
+        before it is inserted: an open that exceeds the descriptor limit raises
+        ``EMFILE``, which no amount of closing afterwards can undo.
+        """
         self._make_fd_room()
         self._make_ram_room()
 
@@ -263,6 +275,10 @@ def _open_nwb_file(nwb_file_path, source=None):
         The NWB file object.
     """
     backend = source or LocalBackend()
+
+    # Close what we can before opening: once the descriptor limit is reached
+    # the open itself raises, and the cache never gets the chance to free one.
+    __open_nwb_files.make_room()
 
     opened = backend.open(nwb_file_path)
     __open_nwb_files[nwb_file_path] = opened

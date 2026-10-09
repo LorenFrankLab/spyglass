@@ -1,5 +1,6 @@
 """Unit tests for NWBFileCache LRU memory management."""
 
+import errno
 import time
 from unittest.mock import MagicMock, patch
 
@@ -389,6 +390,25 @@ def test_fd_count_falls_back_to_cache_size(NWBFileCache):
     assert "/b.nwb" in cache
 
 
+def test_emfile_from_num_fds_counts_as_over_budget(NWBFileCache):
+    """A descriptor-exhaustion error from num_fds means "no room", not "unknown".
+
+    psutil reads /proc, which needs a descriptor. Falling back to the cache's
+    own size here would report headroom at the one moment there is none.
+    """
+    cache = NWBFileCache()
+    exhausted = MagicMock()
+    exhausted.num_fds = MagicMock(
+        side_effect=OSError(errno.EMFILE, "Too many open files")
+    )
+
+    with (
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=exhausted),
+    ):
+        assert not cache._num_open_ok()
+
+
 def test_fd_check_skipped_without_resource(NWBFileCache, nwb_mod):
     """Without `resource`, only the RAM check governs eviction."""
     cache = NWBFileCache()
@@ -423,6 +443,38 @@ def test_warns_once_when_fd_pressure_outlives_cache(NWBFileCache):
     assert len(warnings) == 1  # one warning despite two inserts
     assert "ulimit" in warnings[0]
     assert len(cache) == 1  # /a evicted on /b's insert, /b still added
+
+
+# ── room made before the open ─────────────────────────────────────────────────
+
+
+def test_room_made_before_open(NWBFileCache, nwb_mod):
+    """At the descriptor budget, a cached file closes before the next open.
+
+    Closing after the open is too late: the open is what raises ``EMFILE``.
+    """
+    cache = NWBFileCache()
+    io_a = _make_io()
+    with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
+        cache["/a.nwb"] = _opened(io_a)
+
+    def open_asserting_room_exists(path):
+        io_a.close.assert_called_once()  # /a closed before this open ran
+        return _opened()
+
+    backend = MagicMock()
+    backend.open.side_effect = open_asserting_room_exists
+
+    with (
+        patch.dict(vars(nwb_mod), {"__open_nwb_files": cache}),
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=_fake_proc([1020, 800, 800])),
+    ):
+        nwb_mod._open_nwb_file("/b.nwb", source=backend)
+
+    backend.open.assert_called_once()
+    assert set(cache) == {"/b.nwb"}
 
 
 # ── threshold settings ────────────────────────────────────────────────────────
