@@ -187,6 +187,8 @@ or `log_export` positionally must pass them by keyword.
     secondary attribute with the parent, as v2's `ConcatMemberCuration` does;
     which rows count as orphans is otherwise unchanged. Add
     `spyglass.utils.dj_helper_fn.get_child_references` #1609
+- `cautious_delete` honors an explicit `force_masters=False` instead of
+    always forcing master deletion #1609
 - `spyglass.utils.nwb_helper_fn.get_raw_eseries_path` accepts `object_id=`; add
     `raw_eseries_path_and_timestamp_mode` #1609
 - Add `spyglass.utils.nwb_hash.get_namespace_versions`, shared by v1 and v2
