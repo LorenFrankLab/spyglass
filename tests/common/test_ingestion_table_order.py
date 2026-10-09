@@ -105,3 +105,67 @@ def test_targets_carry_a_real_heading(common, declared):
         instance = table.as_instance
         assert instance.heading.names, f"{table} has no heading"
         assert instance.primary_key, f"{table} has no primary key"
+
+
+def test_no_foreign_key_renames_nwb_file_name(common, declared):
+    """`VirtualKeySpace` scopes its reads to one file; this is why it may.
+
+    `_scope` narrows every read of a file-keyed table to the file being
+    planned, which replaced an unrestricted `fetch("KEY")` per table and per
+    parent. That is only sound while a parent row this plan refers to is
+    always in this plan's file.
+
+    A foreign key that renamed `nwb_file_name` on the child side would break
+    it: the child could then point at a parent row belonging to another file,
+    the scoped read would not return it, and the plan would report
+    `missing_parent` for a row that exists. Asserted rather than assumed,
+    because a table added later is what would break it.
+    """
+    renamed = []
+    for table in (t for group in declared.values() for t in group):
+        instance = table.as_instance
+        for parent, props in instance.parents(
+            as_objects=True, foreign_key_info=True
+        ):
+            for parent_attr, child_attr in (
+                props.get("attr_map") or {}
+            ).items():
+                if parent_attr == "nwb_file_name" != child_attr:
+                    renamed.append(
+                        f"{instance.camel_name} -> {parent.full_table_name} "
+                        f"({parent_attr} as {child_attr})"
+                    )
+
+    assert not renamed, (
+        "a foreign key renames nwb_file_name, so VirtualKeySpace._scope can no "
+        "longer narrow reads to one file: " + "; ".join(renamed)
+    )
+
+
+def test_no_file_scoped_parent_is_reached_from_an_unscoped_child(
+    common, declared
+):
+    """The other half of what makes `_scope` sound.
+
+    A child without `nwb_file_name` in its own key cannot say which file a
+    file-keyed parent's row belongs to, so scoping the parent read to the
+    plan's file could miss it. No such pair exists today; this fails if one
+    is introduced.
+    """
+    unscoped = []
+    for table in (t for group in declared.values() for t in group):
+        instance = table.as_instance
+        if "nwb_file_name" in instance.primary_key:
+            continue
+        for parent, _ in instance.parents(
+            as_objects=True, foreign_key_info=True
+        ):
+            if "nwb_file_name" in parent.primary_key:
+                unscoped.append(
+                    f"{instance.camel_name} -> {parent.full_table_name}"
+                )
+
+    assert not unscoped, (
+        "a table without nwb_file_name depends on one with it, so a scoped "
+        "parent read may miss the row: " + "; ".join(unscoped)
+    )

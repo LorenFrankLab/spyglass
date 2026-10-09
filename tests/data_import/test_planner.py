@@ -717,3 +717,59 @@ def test_electrode_config_reaches_the_plan(common, mini_copy_name, mini_insert):
         "the config override did not reach the planned row: "
         f"{rows[0].get('filtering')!r}"
     )
+
+
+def test_planning_never_reads_a_file_keyed_table_whole(
+    common, mini_copy_name, mini_insert
+):
+    """Every read of a file-keyed table is narrowed to the file being planned.
+
+    `existing_keys` used to issue an unrestricted `fetch("KEY")` for each
+    table the plan touched *and each parent of each* — 29 tables on a median
+    file, scaling with the whole database rather than the file, and paid by a
+    dry run too. On a shared server that is the dominant cost of planning.
+
+    Asserted on the restriction each read carries rather than on timing, which
+    says nothing on a near-empty test database: a read of a file-keyed table
+    that carries no restriction is unbounded however fast it happens to be
+    here.
+
+    The shared metadata tables (`Task`, `Institution`, `ProbeType`, …) are
+    expected to be read whole — they carry no `nwb_file_name` to narrow by and
+    stay small by nature — so the assertion is scoped to tables that do.
+    """
+    from spyglass.data_import import planner
+
+    unrestricted = []
+    original_keys = planner.stored_keys
+    original_rows = planner.VirtualKeySpace.rows_for
+
+    def watched_keys(table, restriction=True):
+        if restriction is True and "nwb_file_name" in table.primary_key:
+            unrestricted.append(f"stored_keys({table.full_table_name})")
+        return original_keys(table, restriction)
+
+    def watched_rows(self, table, restriction=None):
+        if (
+            self._scope(table) is True
+            and not restriction
+            and "nwb_file_name" in table.primary_key
+        ):
+            unrestricted.append(f"rows_for({table.full_table_name})")
+        return original_rows(self, table, restriction)
+
+    planner.stored_keys = watched_keys
+    planner.VirtualKeySpace.rows_for = watched_rows
+    try:
+        plan = planner.plan_nwbfile(
+            mini_copy_name, config={}, force_replan=True
+        )
+    finally:
+        planner.stored_keys = original_keys
+        planner.VirtualKeySpace.rows_for = original_rows
+
+    assert plan.entry_count, "premise: the plan read something"
+    assert not unrestricted, (
+        "planning read a file-keyed table without narrowing to the file: "
+        + ", ".join(sorted(set(unrestricted)))
+    )

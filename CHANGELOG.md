@@ -21,6 +21,18 @@ stopping at the first failure, is gone.
 
 See `ForDevelopers/IngestionPlans` for the full breakdown.
 
+#### Spyglass Decides Primary Key Identity, Not the Database (#1685)
+
+Whether two primary keys name the same row is now Spyglass's decision. Spyglass
+previously deferred to MySQL to trigger duplicate entry errors, which may vary
+in case-sensitivity depending on table collation. To prevent this backend
+variability across deployments, Spyglass added rules that are deliberately
+stricter than any collation, removing whitespace and normalizing case (e.g.,
+`sleep` vs ` Sleep`).
+
+Accents are deliberately not normalized in this adjustment (e.g., `Müller` vs.
+`Muller`).
+
 ### Infrastructure
 
 - Prevent errors during update for dandi standard from propagating to other

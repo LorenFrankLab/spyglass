@@ -24,21 +24,87 @@ from spyglass.utils.ingestion_plan import (
 from spyglass.utils.logging import logger
 
 
+def stored_keys(table, restriction=True) -> Optional[set]:
+    """Return the primary keys a table holds, within `restriction`.
+
+    `fetch("KEY")` rather than `fetch()`: only the primary key is ever
+    compared, and fetching whole rows drags every blob along with them --
+    one `IntervalList.valid_times` per interval in the file, to answer a
+    question about identity.
+
+    The one place the database is read for key identity, so the restriction
+    cannot be forgotten at one of two call sites.
+
+    Parameters
+    ----------
+    table : dj.Table
+        An instanced table.
+    restriction : optional
+        Any DataJoint restriction. Default True, the whole table.
+
+    Returns
+    -------
+    set or None
+        `None` when the table could not be read, which is *unknown* rather
+        than *empty*: the two callers want opposite fallbacks for it, so
+        neither may be handed a bare set.
+    """
+    try:
+        return {
+            row_key(table, key)
+            for key in (table & restriction).fetch("KEY", as_dict=True)
+        }
+    except Exception as err:  # table not declared, or unreadable
+        logger.debug(f"Could not read keys for {table.full_table_name}: {err}")
+        return None
+
+
 class VirtualKeySpace:
     """The primary keys a table would hold once a plan is inserted.
 
     `existing ∪ planned`: the union of what the database holds now and what
     the plan intends to add. Lazily read, and never written -- the only
     database access the planning pass makes.
+
+    Reads are scoped to the file being planned wherever the table is keyed by
+    one. **By scope, never by key:** restricting to the keys the plan happens
+    to name would hand identity back to the server, whose equivalence is a
+    *subset* of Spyglass's -- see `collated`. A file restriction narrows how
+    much is read without touching which rows count as the same.
     """
 
-    def __init__(self):
+    def __init__(self, nwb_file_name: str = None):
+        """
+        Parameters
+        ----------
+        nwb_file_name : str, optional
+            The file being planned. Default None, reading tables whole --
+            correct but unbounded, so pass it from any real pass.
+        """
+        self._nwb_file_name = nwb_file_name
         self._existing: Dict[str, set] = {}
         self._planned: Dict[str, set] = {}
         self._planned_rows: Dict[str, Dict[tuple, dict]] = {}
 
+    def _scope(self, table):
+        """Return a restriction narrowing reads of `table` to this file.
+
+        Sound because no foreign key renames `nwb_file_name` and no
+        file-scoped parent is reached from a child without it, so a parent row
+        this plan refers to is always in this plan's file --
+        `tests/common/test_ingestion_table_order.py` asserts both.
+
+        The tables this matters for are the ones that grow with the database:
+        `Electrode`, `IntervalList`, `Session`, every per-session table. The
+        ones it does not apply to are the shared metadata tables (`Task`,
+        `Institution`, `ProbeType`) which stay small by nature.
+        """
+        if self._nwb_file_name and "nwb_file_name" in table.primary_key:
+            return {"nwb_file_name": self._nwb_file_name}
+        return True
+
     def existing_keys(self, table) -> set:
-        """Return the primary keys this table already holds.
+        """Return the primary keys this table already holds, for this file.
 
         Takes an instance -- see `_as_table`, which normalizes once at the
         boundary rather than in every method here.
@@ -46,14 +112,11 @@ class VirtualKeySpace:
         name = table.full_table_name
 
         if name not in self._existing:
-            try:
-                self._existing[name] = {
-                    row_key(table, key)
-                    for key in table.fetch("KEY", as_dict=True)
-                }
-            except Exception as err:  # table not declared, or unreadable
-                logger.debug(f"Could not read keys for {name}: {err}")
-                self._existing[name] = set()
+            found = stored_keys(table, self._scope(table))
+            # Unreadable reads as empty here, which can only over-report:
+            # a parent then looks missing and is said so, rather than a
+            # plan being quietly built on a row nobody confirmed.
+            self._existing[name] = set() if found is None else found
 
         return self._existing[name]
 
@@ -94,8 +157,9 @@ class VirtualKeySpace:
             An instanced table.
         restriction : dict, optional
             Attribute values every returned row must match. Default None, no
-            filter. Applied to stored rows as a query and to planned rows in
-            memory, since the planned ones are not queryable.
+            filter beyond this file's scope. Applied to stored rows as a query
+            and to planned rows in memory, since the planned ones are not
+            queryable.
 
         Returns
         -------
@@ -109,7 +173,13 @@ class VirtualKeySpace:
         ]
 
         try:
-            stored = (table & (restriction or True)).fetch(as_dict=True)
+            # Scoped as well as restricted: a caller that passes no
+            # restriction wants this file's rows, not the whole table. Every
+            # caller does in fact pass one, which is why the unbounded read
+            # went unnoticed.
+            stored = (table & self._scope(table) & (restriction or True)).fetch(
+                as_dict=True
+            )
         except Exception as err:  # undeclared, or unreadable
             logger.debug(f"Could not read rows for {name}: {err}")
             stored = []
@@ -267,7 +337,7 @@ def plan_nwbfile(
         if staged:
             declared = _declared_targets()
 
-    key_space = VirtualKeySpace()
+    key_space = VirtualKeySpace(nwb_file_name)
     file_problems: List[Problem] = []
 
     if not registered:
@@ -915,13 +985,8 @@ def _novel_rows(table, rows) -> List[dict]:
         if names:
             restriction = [{"nwb_file_name": name} for name in names]
 
-    try:
-        stored = {
-            row_key(table, existing)
-            for existing in (table & restriction).fetch(as_dict=True)
-        }
-    except Exception as err:  # unreadable: insert and let the table object
-        logger.debug(f"Could not read existing keys for {table}: {err}")
+    stored = stored_keys(table, restriction)
+    if stored is None:  # unreadable: insert and let the table object
         return list(rows)
 
     return [row for row in rows if row_key(table, row) not in stored]
