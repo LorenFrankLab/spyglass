@@ -521,7 +521,7 @@ def test_clusterless_noise_levels_length_guard():
 
     ``_assert_noise_levels_length`` lives in the import-pure ``utils``
     module (no ``dj.schema``), so this is a pure unit test of the guard
-    the runtime applies at ``Sorting._run_clusterless_thresholder``
+    the runtime applies at ``run_clusterless_thresholder``
     before broadcasting / indexing ``noise_levels`` per channel. An
     explicit array must be length 1 (broadcast) or ``n_channels``; any
     other explicit length is a configuration error; ``None`` is always

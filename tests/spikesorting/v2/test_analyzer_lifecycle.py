@@ -30,7 +30,7 @@ def _fresh_unit_producing_selection(populated_sorting):
     recording+artifact (NOT yet populated); return its ``{"sorting_id"}``.
 
     The destructive delete / make_compute-failure tests need a sort that
-    actually yields units so ``_build_analyzer`` writes an analyzer folder on
+    actually yields units so ``build_analyzer`` writes an analyzer folder on
     disk -- the clusterless ``default`` row finds zero peaks on the MEArec smoke
     fixture (no folder, vacuous assertions). MS5 produces units.
 
@@ -624,16 +624,17 @@ def test_make_compute_failure_discards_private_analyzer(
     populated_sorting, monkeypatch
 ):
     """A units-NWB failure discards the attempt's analyzer before publication."""
+    from spyglass.spikesorting.v2._storage import units_nwb
     from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     sort_pk = _fresh_unit_producing_selection(populated_sorting)
     folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
 
-    def _boom_write(self, **kwargs):
+    def _boom_write(**kwargs):
         raise RuntimeError("units NWB write blew up")
 
-    monkeypatch.setattr(Sorting, "_write_units_nwb", _boom_write)
+    monkeypatch.setattr(units_nwb, "write_sorting_units_nwb", _boom_write)
 
     try:
         with pytest.raises(Exception, match="units NWB write blew up"):
@@ -1189,7 +1190,7 @@ def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
     """A zero-unit Sorting row is NOT a DB-side orphan even though its
     computed analyzer cache path does not exist on disk.
 
-    ``_build_analyzer`` short-circuits before writing a folder and
+    ``build_analyzer`` short-circuits before writing a folder and
     ``get_analyzer`` raises ``ZeroUnitAnalyzerError`` before reading the path,
     so a missing folder for a zero-unit row is expected, not a leak. The
     carve-out is keyed on ``n_units == 0`` (the cache path is computed from

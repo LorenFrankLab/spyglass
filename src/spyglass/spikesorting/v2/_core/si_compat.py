@@ -67,7 +67,7 @@ def sorter_runtime_state(sorter: str, job_kwargs: dict):
                     si.set_global_job_kwargs(**previous_global)
                 except Exception as restore_exc:
                     logger.warning(
-                        "Sorting._run_si_sorter: failed to restore SI "
+                        "run_si_sorter: failed to restore SI "
                         f"global job kwargs to {previous_global!r}: "
                         f"{restore_exc!r}. Original sort exception (if "
                         "any) preserved."

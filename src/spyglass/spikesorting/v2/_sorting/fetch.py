@@ -127,8 +127,9 @@ def fetch_sorting_inputs(key) -> SortingFetched:
     nwb_file_name = anchor.nwb_file_name
     preprocessing_params_name = anchor.preprocessing_params_name
     if source.kind == "recording":
-        # Pre-fetch the observation-interval window so ``_write_units_nwb``
-        # can write ``obs_intervals=`` on every ``add_unit`` call.
+        # Pre-fetch the observation-interval window so
+        # ``write_sorting_units_nwb`` can write ``obs_intervals=`` on every
+        # ``add_unit`` call.
         # Downstream firing-rate computations need the artifact-removed
         # valid_times to know which segments of the recording the sort
         # actually observed -- without it the units NWB looks like the unit

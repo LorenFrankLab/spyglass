@@ -56,7 +56,7 @@ class RecordingTruncatedError(RuntimeError):
 class EmptyArtifactValidTimesError(RuntimeError):
     """Raise when artifact detection keeps zero seconds of the recording.
 
-    ``_apply_artifact_mask`` received an empty ``valid_times`` array --
+    ``apply_artifact_mask`` received an empty ``valid_times`` array --
     the artifact-detection pass kept zero seconds of the recording.
     Masking would zero the entire recording and the sort would run over
     all-zeros, emitting a misleading "zero units" result. Message names the

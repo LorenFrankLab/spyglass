@@ -45,7 +45,7 @@ def _synth_recording_with_transient():
     on all channels (gain 1.0 so counts == uV).
 
     A linear probe is attached because ``Sorting.make_compute`` ->
-    ``_build_analyzer`` -> ``estimate_sparsity`` requires probe geometry;
+    ``build_analyzer`` -> ``estimate_sparsity`` requires probe geometry;
     the artifact-detection path does not, but Sorting (which loads the same
     monkeypatched recording) does.
     """
@@ -411,7 +411,9 @@ def test_artifact_masking_preserves_clean_gt_spikes(
         RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
 
     session, recording_id = gt60_recording
     nwb_file_name = session["nwb_file_name"]
@@ -507,9 +509,7 @@ def test_artifact_masking_preserves_clean_gt_spikes(
             "valid interval)"
         )
 
-    masked = Sorting._apply_artifact_mask(
-        recording=inj_rec, valid_times=valid_times
-    )
+    masked = apply_artifact_mask(recording=inj_rec, valid_times=valid_times)
     masked_traces = np.asarray(masked.get_traces())
 
     # (a) GT spikes inside artifact windows are zeroed.

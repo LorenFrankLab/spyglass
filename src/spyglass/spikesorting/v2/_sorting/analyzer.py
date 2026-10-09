@@ -656,7 +656,7 @@ def rebuild_analyzer_folder(
     bit-equivalent to the one ``Sorting.make`` wrote -- not a fresh, possibly
     nondeterministic, sort. Resolves the recipe NAME to its params dict here
     (outside ``make_compute``, where a DB read is allowed) and threads BOTH the
-    resolved cache folder and the params dict into ``_build_analyzer`` so the
+    resolved cache folder and the params dict into :func:`build_analyzer` so the
     rebuilt analyzer is byte-comparable to the cached one for the same recipe.
 
     ``key`` must carry a literal ``sorting_id`` because the path policy and
@@ -714,7 +714,7 @@ def rebuild_analyzer_folder(
         with analyzer_cache_lock(key["sorting_id"]):
             publish_analyzer_atomically(
                 folder,
-                lambda temp_folder: sorting_table._build_analyzer(
+                lambda temp_folder: build_analyzer(
                     sorting=sorting_obj,
                     recording=recording,
                     key=key,
@@ -869,7 +869,7 @@ def build_analyzer(
     # no filesystem I/O here.
     if sorting.get_num_units() == 0:
         logger.warning(
-            "Sorting._build_analyzer: sorting_id="
+            "build_analyzer: sorting_id="
             f"{key.get('sorting_id')!r} has zero units; skipping "
             "analyzer build. Check ``detect_threshold`` / "
             "artifact masking if you expected non-zero output."
@@ -1025,7 +1025,7 @@ def build_analyzer(
                 shutil.rmtree(folder, ignore_errors=False)
         except Exception as cleanup_exc:  # pragma: no cover -- defensive
             logger.error(
-                "Sorting._build_analyzer: failed to remove partial "
+                "build_analyzer: failed to remove partial "
                 f"analyzer folder {folder!r}: {cleanup_exc!r}"
             )
         raise

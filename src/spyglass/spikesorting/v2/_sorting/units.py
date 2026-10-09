@@ -138,7 +138,7 @@ def build_unit_rows_from_analyzer(
 
     Run once in ``make_compute`` after upstream inputs are resolved in
     ``make_fetch``; this helper performs no DB writes. The analyzer folder
-    ``_build_analyzer`` just wrote is loaded here, each unit's peak channel
+    :func:`._sorting.analyzer.build_analyzer` just wrote is loaded here, each unit's peak channel
     + amplitude is resolved under the sorter's configured detection
     polarity (clusterless ``peak_sign`` / MountainSort ``detect_sign``, not
     SI's ``"neg"`` default, so a positive-going detection attributes each
@@ -148,7 +148,7 @@ def build_unit_rows_from_analyzer(
     unit columns and the ``Sorting.Unit`` insert, so the file and the DB
     cannot drift.
 
-    Empty for a zero-unit sort: ``_build_analyzer`` skips the
+    Empty for a zero-unit sort: ``build_analyzer`` skips the
     ``create_sorting_analyzer`` call when ``sorting.get_num_units() == 0``
     (SI's ``estimate_sparsity`` crashes on empty sortings), so the analyzer
     folder does not exist; there is nothing to load or insert.

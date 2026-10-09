@@ -40,11 +40,9 @@ from spyglass.spikesorting.v2._core.recipe_catalog import (
     waveform_params_default_contents,
 )
 from spyglass.spikesorting.v2._sorting.analyzer import (
-    build_analyzer,
     load_or_rebuild_analyzer,
 )
 from spyglass.spikesorting.v2._sorting.artifact_mask import (
-    apply_artifact_mask,
     sorting_statistics_spans,
 )
 from spyglass.spikesorting.v2._sorting.dispatch import (
@@ -53,8 +51,12 @@ from spyglass.spikesorting.v2._sorting.dispatch import (
     run_si_sorter,
     sort_runtime_versions,
 )
-from spyglass.spikesorting.v2._storage import analyzer_cache as _analyzer_cache
+from spyglass.spikesorting.v2._storage import (
+    analyzer_cache as _analyzer_cache,
+    units_nwb as _units_nwb,
+)
 from spyglass.spikesorting.v2._sorting import (
+    analyzer as _sorting_analyzer,
     parameters as _sorter_parameters,
     fetch as _sorting_fetch,
     selection as _sorting_selection_insert,
@@ -81,7 +83,6 @@ from spyglass.spikesorting.v2._storage.units_nwb import (
     read_units_abs_spike_times,
     read_sorting_statistics_spans,
     sorting_from_units_nwb,
-    write_sorting_units_nwb,
 )
 from spyglass.spikesorting.v2.artifact_output import (
     ArtifactDetectionOutput,
@@ -153,8 +154,9 @@ class SortingFetched(NamedTuple):
         The DISPLAY ``AnalyzerWaveformParameters`` recipe resolved from the
         source preprocessing recipe (region), stored on the ``Sorting`` row.
     display_waveform_params : dict
-        That recipe's resolved params blob, threaded into ``_build_analyzer``
-        so ``make_compute`` receives the resolved parameter input.
+        That recipe's resolved params blob, threaded into
+        :func:`._sorting.analyzer.build_analyzer` so ``make_compute`` receives
+        the resolved parameter input.
     execution_params : dict
         The validated ``SorterParameters.execution_params`` blob (sorter
         execution backend + container provenance), resolved here so
@@ -1191,10 +1193,11 @@ class Sorting(
         """Sort, build analyzer, stage Units NWB outside any DB transaction.
 
         Reads only the inputs ``make_fetch`` resolved; the one DB access left
-        is staging the units NWB file (see :mod:`._recording_nwb`). Loads the
+        is staging the units NWB file
+        (:func:`._storage.units_nwb.write_sorting_units_nwb`). Loads the
         effective traces, silences a single recording's artifact frames at
         0 uV and resolves the statistics spans
-        (:func:`._sorting_artifact_mask.sorting_statistics_spans`), runs the
+        (:func:`._sorting.artifact_mask.sorting_statistics_spans`), runs the
         sorter, removes excess spikes, builds the analyzer in a private staged
         folder, and stages the units NWB without registering it.
 
@@ -1226,7 +1229,8 @@ class Sorting(
             The DISPLAY recipe; selects the analyzer cache folder and is
             persisted by ``make_insert``.
         display_waveform_params : dict
-            That recipe's resolved params blob, passed to ``_build_analyzer``.
+            That recipe's resolved params blob, passed to
+            :func:`._sorting.analyzer.build_analyzer`.
         execution_params : dict
             The validated sorter execution backend / container provenance,
             passed to the sorter dispatch.
@@ -1328,7 +1332,7 @@ class Sorting(
         spikeinterface_version, sorter_version = sort_runtime_versions(
             sorting_obj, sorter, execution_params
         )
-        sorting_obj = self._remove_excess_spikes(sorting_obj, recording)
+        sorting_obj = remove_excess_spikes(sorting_obj, recording)
 
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
             StagedAnalyzer,
@@ -1341,7 +1345,7 @@ class Sorting(
             analyzer_path(key["sorting_id"], display_waveform_params_name)
         )
         try:
-            self._build_analyzer(
+            _sorting_analyzer.build_analyzer(
                 sorting=sorting_obj,
                 recording=recording,
                 key=key,
@@ -1415,13 +1419,18 @@ class Sorting(
                     job_kwargs=job_kwargs, execution_params=execution_params
                 )
             )
-            analysis_file_name, units_object_id = self._stage_sorting_artifact(
-                sorting=sorting_obj,
-                recording=recording,
-                nwb_file_name=nwb_file_name,
-                obs_intervals=obs_intervals,
-                unit_metadata=unit_metadata,
-                source_provenance=source_provenance,
+            # Stages the units NWB without registering it; a failed write
+            # removes its own file, and the except below discards the
+            # private analyzer.
+            analysis_file_name, units_object_id = (
+                _units_nwb.write_sorting_units_nwb(
+                    sorting=sorting_obj,
+                    recording=recording,
+                    nwb_file_name=nwb_file_name,
+                    obs_intervals=obs_intervals,
+                    unit_metadata=unit_metadata,
+                    source_provenance=source_provenance,
+                )
             )
 
             return SortingComputed(
@@ -1528,33 +1537,6 @@ class Sorting(
         finally:
             staged_analyzer.close()
 
-    def _stage_sorting_artifact(
-        self,
-        *,
-        sorting,
-        recording,
-        nwb_file_name,
-        obs_intervals,
-        unit_metadata=None,
-        source_provenance,
-    ):
-        """Stage the units NWB; return ``(analysis_file_name, units_object_id)``.
-
-        ``_write_units_nwb`` self-cleans its staged file on a write failure;
-        ``make_compute`` discards the private analyzer on that failure.
-        ``unit_metadata`` /
-        ``source_provenance`` are the compute-once per-unit columns + source
-        header embedded in the NWB.
-        """
-        return self._write_units_nwb(
-            sorting=sorting,
-            recording=recording,
-            nwb_file_name=nwb_file_name,
-            obs_intervals=obs_intervals,
-            unit_metadata=unit_metadata,
-            source_provenance=source_provenance,
-        )
-
     def _insert_sorting_rows_transaction(
         self,
         *,
@@ -1607,7 +1589,8 @@ class Sorting(
     ) -> "si.BaseSorting | pd.DataFrame":
         """Return the SpikeInterface BaseSorting backed by the units NWB.
 
-        Spike times are persisted by ``_write_units_nwb`` in two forms:
+        Spike times are persisted by
+        :func:`._storage.units_nwb.write_sorting_units_nwb` in two forms:
         absolute ``spike_times`` for NWB interoperability, and Spyglass's
         ``spike_sample_index`` sidecar for efficient frame-based readback.
         Readback uses the stored sample frames directly. Populated v2 Units
@@ -2083,9 +2066,10 @@ class Sorting(
           the supported shared-filesystem locking contract.
 
         **Zero-unit carve-out.** Rows with ``n_units == 0`` are NOT DB-side
-        orphans: ``_build_analyzer`` short-circuits before writing a folder and
-        ``get_analyzer`` raises ``ZeroUnitAnalyzerError`` before reading the
-        path, so an absent folder is expected. The cache path is COMPUTED from
+        orphans: :func:`._sorting.analyzer.build_analyzer` short-circuits
+        before writing a folder and ``get_analyzer`` raises
+        ``ZeroUnitAnalyzerError`` before reading the path, so an absent folder
+        is expected. The cache path is COMPUTED from
         ``sorting_id`` (not a stored column), so the carve-out is
         keyed on ``(Sorting & {"n_units": 0})``, NOT on any column value.
 
@@ -2165,31 +2149,6 @@ class Sorting(
     # ---- Implementation helpers -----------------------------------------
 
     @staticmethod
-    def _apply_artifact_mask(
-        recording, valid_times, *, artifact_detection_id=None, recording_id=None
-    ):
-        """Zero out the complement of ``valid_times`` on the recording.
-
-        Thin delegator to :func:`._sorting_artifact_mask.apply_artifact_mask`;
-        kept as a ``Sorting`` staticmethod because the v2 tests call
-        ``Sorting._apply_artifact_mask`` directly. The analyzer reconstruction
-        paths mask through
-        :func:`._source_resolution.load_effective_recording`.
-        ``make_compute`` masks through
-        :func:`._sorting_artifact_mask.sorting_statistics_spans`
-        (``artifact_frame_ranges`` / ``silence_frame_ranges``) so it keeps the
-        excluded ranges for the statistics spans. The complement-walk
-        masking + input validation (empty/shape/order checks, the
-        disjoint-gap boundary carve-out) live in the service module.
-        """
-        return apply_artifact_mask(
-            recording,
-            valid_times,
-            artifact_detection_id=artifact_detection_id,
-            recording_id=recording_id,
-        )
-
-    @staticmethod
     def _run_sorter(
         sorter,
         sorter_params,
@@ -2212,68 +2171,12 @@ class Sorting(
         the clusterless MAD and the external whitening estimate from them.
         """
         if sorter == "clusterless_thresholder":
-            return Sorting._run_clusterless_thresholder(
+            return run_clusterless_thresholder(
                 sorter_params=sorter_params,
                 recording=recording,
                 job_kwargs=job_kwargs,
                 statistics_spans=statistics_spans,
             )
-        return Sorting._run_si_sorter(
-            sorter=sorter,
-            sorter_params=sorter_params,
-            recording=recording,
-            sorting_id=sorting_id,
-            job_kwargs=job_kwargs,
-            execution_params=execution_params,
-            statistics_spans=statistics_spans,
-        )
-
-    @staticmethod
-    def _run_clusterless_thresholder(
-        sorter_params,
-        recording,
-        job_kwargs,
-        statistics_spans=None,
-    ):
-        """Run Spyglass's clusterless-thresholder peak-detection path.
-
-        Thin delegator to
-        :func:`._sorting_dispatch.run_clusterless_thresholder`; kept as a
-        ``Sorting`` staticmethod because ``_run_sorter`` dispatches to
-        ``Sorting._run_clusterless_thresholder`` and the v2 tests call it
-        directly. The detect_peaks pipeline -- noise_levels/threshold_unit
-        precedence and validation, the uV ``scale_to_uV`` carve-out, and
-        the deterministic seeding -- lives in the service module.
-        """
-        return run_clusterless_thresholder(
-            sorter_params=sorter_params,
-            recording=recording,
-            job_kwargs=job_kwargs,
-            statistics_spans=statistics_spans,
-        )
-
-    @staticmethod
-    def _run_si_sorter(
-        sorter,
-        sorter_params,
-        recording,
-        sorting_id,
-        job_kwargs,
-        execution_params=None,
-        statistics_spans=None,
-    ):
-        """Run an SI registered sorter under a managed scratch dir.
-
-        Thin delegator to :func:`._sorting_dispatch.run_si_sorter`; kept as
-        a ``Sorting`` staticmethod because ``_run_sorter`` dispatches to
-        ``Sorting._run_si_sorter`` and the v2 tests call it directly. The
-        managed ``TemporaryDirectory`` scratch, external float64 whitening,
-        scoped ``np.Inf`` patch, container-execution backend (local vs
-        Docker/Singularity + the MATLAB-sorter container policy), and the
-        global-job-kwargs save/restore live in the service module.
-        ``execution_params`` defaults to ``None`` (resolved to local) so direct
-        test callers and the clusterless path stay unchanged.
-        """
         return run_si_sorter(
             sorter=sorter,
             sorter_params=sorter_params,
@@ -2282,81 +2185,6 @@ class Sorting(
             job_kwargs=job_kwargs,
             execution_params=execution_params,
             statistics_spans=statistics_spans,
-        )
-
-    @staticmethod
-    def _remove_excess_spikes(sorting, recording):
-        """Drop spikes whose sample index is outside the recording window.
-
-        Thin delegator to :func:`._sorting_dispatch.remove_excess_spikes`;
-        kept as a ``Sorting`` staticmethod because ``make_compute`` calls
-        ``self._remove_excess_spikes(...)``.
-        """
-        return remove_excess_spikes(sorting, recording)
-
-    @staticmethod
-    def _build_analyzer(
-        sorting,
-        recording,
-        key,
-        *,
-        sorter_row,
-        job_kwargs,
-        analyzer_folder=None,
-        waveform_params=None,
-        statistics_spans=None,
-    ):
-        """Build the binary-folder SortingAnalyzer + base extensions.
-
-        Thin delegator to :func:`._sorting_analyzer.build_analyzer`; kept as
-        a ``Sorting`` staticmethod because ``make_compute`` calls
-        ``self._build_analyzer(...)`` and the v2 tests call it directly. The analyzer creation, seeded
-        extension compute, zero-unit short-circuit, and partial-folder
-        cleanup live in the service module. All database inputs and execution
-        kwargs must be resolved before this call. ``waveform_params`` is the
-        resolved analyzer-waveform params blob (window / subsample); ``None``
-        is invalid and the service raises ``ValueError``.
-        """
-        return build_analyzer(
-            sorting,
-            recording,
-            key,
-            sorter_row=sorter_row,
-            job_kwargs=job_kwargs,
-            analyzer_folder=analyzer_folder,
-            waveform_params=waveform_params,
-            statistics_spans=statistics_spans,
-        )
-
-    @staticmethod
-    def _write_units_nwb(
-        sorting,
-        recording,
-        nwb_file_name,
-        obs_intervals=None,
-        *,
-        unit_metadata=None,
-        source_provenance,
-    ):
-        """Write a fresh AnalysisNwbfile containing only the v2 Units table.
-
-        Thin delegator to :func:`._units_nwb.write_sorting_units_nwb`;
-        kept as a ``Sorting`` staticmethod because ``make_insert`` calls
-        ``self._write_units_nwb(...)`` and the v2 tests both monkeypatch
-        ``Sorting._write_units_nwb`` (to check analyzer cleanup when the units
-        write fails) and call it directly (the zero-unit guard test). The NWB staging
-        IO -- absolute-timeline spike times, the ``obs_intervals`` +
-        ``curation_label`` columns, the per-unit metadata + source-provenance
-        scratch, and the zero-unit empty-Units guard -- lives in the service
-        module.
-        """
-        return write_sorting_units_nwb(
-            sorting=sorting,
-            recording=recording,
-            nwb_file_name=nwb_file_name,
-            obs_intervals=obs_intervals,
-            unit_metadata=unit_metadata,
-            source_provenance=source_provenance,
         )
 
     @staticmethod

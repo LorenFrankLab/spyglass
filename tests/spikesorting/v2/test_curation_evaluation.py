@@ -107,7 +107,10 @@ def test_effective_recording_load_matches_table_accessor(populated_sorting):
         load_effective_recording,
     )
     from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
 
     sorting_key = dict(populated_sorting)
     lineage, traces = SortingSelection.resolve_effective_source(sorting_key)
@@ -120,7 +123,7 @@ def test_effective_recording_load_matches_table_accessor(populated_sorting):
             {"artifact_detection_id": lineage.artifact_detection_id},
             as_dict=True,
         )[nwb]
-        ref_rec = Sorting._apply_artifact_mask(ref_rec, valid_times)
+        ref_rec = apply_artifact_mask(ref_rec, valid_times)
 
     out_rec = load_effective_recording(
         traces,

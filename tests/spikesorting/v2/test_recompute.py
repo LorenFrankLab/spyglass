@@ -92,15 +92,17 @@ def test_rebuild_refreshes_existing_analyzer_inventory(
         lambda _sorting_id, _name: events.append("repopulate"),
     )
 
+    def _record_build(**kwargs):
+        assert kwargs["statistics_spans"] == [(0, 10), (10, 20)]
+        assert kwargs["sorter_row"] is sorter_row
+        assert kwargs["job_kwargs"] is job_kwargs
+        events.append("build")
+
+    monkeypatch.setattr(service, "build_analyzer", _record_build)
+
     class _SortingTable:
         def get_statistics_spans(self, _key):
             return [(0, 10), (10, 20)]
-
-        def _build_analyzer(self, **kwargs):
-            assert kwargs["statistics_spans"] == [(0, 10), (10, 20)]
-            assert kwargs["sorter_row"] is sorter_row
-            assert kwargs["job_kwargs"] is job_kwargs
-            events.append("build")
 
     service.rebuild_analyzer_folder(
         _SortingTable(), {"sorting_id": "sort"}, "display_recipe"

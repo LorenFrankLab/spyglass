@@ -53,7 +53,7 @@ def _validate_artifact_intervals(
         )
     if valid_times.ndim != 2 or valid_times.shape[1] != 2:
         raise ValueError(
-            "_apply_artifact_mask: valid_times must be an (n, 2) array "
+            "apply_artifact_mask: valid_times must be an (n, 2) array "
             f"of (start, end) seconds; got shape {valid_times.shape}."
         )
     # Reject NaN/Inf before any comparison. NaN slips silently through
@@ -70,7 +70,7 @@ def _validate_artifact_intervals(
     ends = valid_times[:, 1]
     if np.any(ends < starts):
         raise ValueError(
-            "_apply_artifact_mask: valid_times has an interval whose "
+            "apply_artifact_mask: valid_times has an interval whose "
             "end precedes its start; each interval must be "
             "(start <= end)."
         )
@@ -78,7 +78,7 @@ def _validate_artifact_intervals(
         np.any(np.diff(starts) < 0) or np.any(starts[1:] < ends[:-1])
     ):
         raise ValueError(
-            "_apply_artifact_mask: valid_times must be sorted by start "
+            "apply_artifact_mask: valid_times must be sorted by start "
             "time and non-overlapping (the complement walker assumes "
             f"monotonic, disjoint input); got {valid_times.tolist()!r}. "
             "Sort and merge the intervals before passing them."

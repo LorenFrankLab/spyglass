@@ -559,7 +559,7 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
     # only holds if the recording was pre-scaled to uV, so this test makes
     # no amplitude-vs-threshold assertion. The
     # template peak (post-gain-applied via channel_gains in
-    # _build_analyzer) being ~0.6 uV is consistent with a 5-count
+    # build_analyzer) being ~0.6 uV is consistent with a 5-count
     # detection threshold on a ~0.2 uV/count probe.
     assert unit_row["peak_amplitude_uv"] > 0, (
         f"Clusterless reported non-positive peak_amplitude_uv="
@@ -844,7 +844,7 @@ def test_changed_second_fetch_leaves_no_staged_sort_outputs(
 
 
 def test_run_si_sorter_restores_global_job_kwargs(dj_conn, monkeypatch):
-    """``_run_si_sorter`` leaves SI's global job kwargs byte-identical to
+    """``run_si_sorter`` leaves SI's global job kwargs byte-identical to
     their pre-sort state.
 
     ``set_global_job_kwargs`` UPDATES the global rather than replacing it,
@@ -857,7 +857,7 @@ def test_run_si_sorter_restores_global_job_kwargs(dj_conn, monkeypatch):
     import spikeinterface as si
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
     si.reset_global_job_kwargs()
     before = dict(si.get_global_job_kwargs())
@@ -873,7 +873,7 @@ def test_run_si_sorter_restores_global_job_kwargs(dj_conn, monkeypatch):
     monkeypatch.setattr(sis, "run_sorter", lambda **kw: stub_sorting)
 
     rec = _build_synthetic_rec(np.zeros((1000, 4), dtype=np.float32))
-    out = Sorting._run_si_sorter(
+    out = run_si_sorter(
         sorter="mountainsort5",
         sorter_params={"whiten": False},
         recording=rec,
@@ -894,7 +894,7 @@ def test_run_si_sorter_restores_global_job_kwargs(dj_conn, monkeypatch):
 
 
 def test_clusterless_detect_peaks_strips_random_seed(dj_conn, monkeypatch):
-    """``_run_clusterless_thresholder`` strips ``random_seed`` from the
+    """``run_clusterless_thresholder`` strips ``random_seed`` from the
     job kwargs before calling ``detect_peaks``.
 
     ``random_seed`` is a Spyglass-side knob (already threaded into
@@ -906,7 +906,9 @@ def test_clusterless_detect_peaks_strips_random_seed(dj_conn, monkeypatch):
     import numpy as np
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import (
+        run_clusterless_thresholder,
+    )
 
     captured = {}
 
@@ -919,7 +921,7 @@ def test_clusterless_detect_peaks_strips_random_seed(dj_conn, monkeypatch):
     monkeypatch.setattr(pd_mod, "detect_peaks", _fake_detect_peaks)
 
     rec = _build_synthetic_rec(np.zeros((1000, 4), dtype=np.float32))
-    Sorting._run_clusterless_thresholder(
+    run_clusterless_thresholder(
         sorter_params={"detect_threshold": 5.0, "noise_levels": [1.0]},
         recording=rec,
         job_kwargs={"random_seed": 7, "n_jobs": 1},
@@ -935,7 +937,7 @@ def test_clusterless_detect_peaks_strips_random_seed(dj_conn, monkeypatch):
 
 @pytest.mark.slow
 def test_clusterless_detect_peaks_strips_threshold_unit(dj_conn, monkeypatch):
-    """``_run_clusterless_thresholder`` strips ``threshold_unit`` before
+    """``run_clusterless_thresholder`` strips ``threshold_unit`` before
     calling ``detect_peaks``.
 
     ``threshold_unit`` is a Spyglass-side knob (it selects how
@@ -948,7 +950,9 @@ def test_clusterless_detect_peaks_strips_threshold_unit(dj_conn, monkeypatch):
     import numpy as np
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import (
+        run_clusterless_thresholder,
+    )
 
     captured = {}
 
@@ -961,7 +965,7 @@ def test_clusterless_detect_peaks_strips_threshold_unit(dj_conn, monkeypatch):
     monkeypatch.setattr(pd_mod, "detect_peaks", _fake_detect_peaks)
 
     rec = _build_synthetic_rec(np.zeros((1000, 4), dtype=np.float32))
-    Sorting._run_clusterless_thresholder(
+    run_clusterless_thresholder(
         sorter_params={
             "detect_threshold": 5.0,
             "threshold_unit": "uv",
@@ -983,8 +987,8 @@ def test_clusterless_detect_peaks_strips_threshold_unit(dj_conn, monkeypatch):
 def _stub_recording_with_2d_probe():
     """Two-channel recording with a planar probe for the tests below.
 
-    These ``_build_analyzer`` tests stub the analyzer factory, so the recording
-    only has to pass the checks ``_build_analyzer`` runs before building:
+    These ``build_analyzer`` tests stub the analyzer factory, so the recording
+    only has to pass the checks ``build_analyzer`` runs before building:
     distinct 2D contact positions (``assert_unique_contact_positions``) and an
     already-planar probe (``ndim == 2``), so the 2D projection step is skipped.
     """
@@ -1001,7 +1005,7 @@ def _stub_recording_with_2d_probe():
 
 
 def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
-    """``_build_analyzer`` strips ``random_seed`` before
+    """``build_analyzer`` strips ``random_seed`` before
     ``SortingAnalyzer.compute``.
 
     ``random_seed`` is a Spyglass-side knob (consumed by the sorter and
@@ -1012,7 +1016,7 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
 
     captured = {}
 
@@ -1028,7 +1032,7 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
         def get_num_units(self):
             return 2
 
-    Sorting._build_analyzer(
+    build_analyzer(
         _FakeSorting(),
         _stub_recording_with_2d_probe(),
         {"sorting_id": "test-sorting-id"},
@@ -1046,7 +1050,7 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
 
 
 def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
-    """``_build_analyzer`` requests the right extensions + analyzer kwargs.
+    """``build_analyzer`` requests the right extensions + analyzer kwargs.
 
     ``test_build_analyzer_strips_random_seed`` captures only the
     ``compute`` job-kwargs; the analyzer factory kwargs and the extension
@@ -1063,7 +1067,7 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
 
     captured = {}
 
@@ -1082,7 +1086,7 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
         def get_num_units(self):
             return 2
 
-    Sorting._build_analyzer(
+    build_analyzer(
         _FakeSorting(),
         _stub_recording_with_2d_probe(),
         {"sorting_id": "test-sorting-id"},
@@ -1156,7 +1160,7 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
         ({"method": "dense"}, {"sparse": False}),
     ):
         captured.clear()
-        Sorting._build_analyzer(
+        build_analyzer(
             _FakeSorting(),
             _stub_recording_with_2d_probe(),
             {"sorting_id": "test-sorting-id"},
@@ -1178,14 +1182,14 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
 def test_analyzer_rebuild_is_seeded_reproducible(
     dj_conn, monkeypatch, tmp_path
 ):
-    """``_build_analyzer`` seeds ``random_spikes`` so rebuilds are stable.
+    """``build_analyzer`` seeds ``random_spikes`` so rebuilds are stable.
 
     The ``random_spikes`` extension uniformly subsamples each unit's
     spikes down to ``max_spikes_per_unit=500`` before computing
     templates; the SI 0.104 default is ``seed=None`` (verified against
     ``ComputeRandomSpikes._set_params``), so without a pinned seed two
     builds of the same sort pick different subsets and the persisted
-    peak amplitude / peak channel drift. ``_build_analyzer`` passes
+    peak amplitude / peak channel drift. ``build_analyzer`` passes
     ``seed=0``.
 
     CRITICAL: the seed only changes anything for units with MORE than
@@ -1195,7 +1199,7 @@ def test_analyzer_rebuild_is_seeded_reproducible(
     the pinned seed (false confidence). This test therefore uses a
     synthetic 40 s, 20 Hz recording whose every unit fires >500 spikes,
     and asserts subsampling actually fired. It drives the real
-    ``Sorting._build_analyzer`` (not SI directly) so removing the pinned
+    ``build_analyzer`` (not SI directly) so removing the pinned
     seed makes it fail.
     """
     import numpy as np
@@ -1206,7 +1210,7 @@ def test_analyzer_rebuild_is_seeded_reproducible(
         template_tools,
     )
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
 
     recording, sorting = generate_ground_truth_recording(
         durations=[40.0],
@@ -1230,7 +1234,7 @@ def test_analyzer_rebuild_is_seeded_reproducible(
     def _build_and_read(folder):
         # Pass the explicit cache folder and the cap-500 display recipe so the
         # build subsamples (the seed is observable only when subsampling fires).
-        Sorting._build_analyzer(
+        build_analyzer(
             sorting,
             recording,
             {"sorting_id": "repro-test"},
@@ -1279,7 +1283,7 @@ def test_analyzer_rebuild_is_seeded_reproducible(
 def test_analyzer_random_seed_override_is_honored(
     dj_conn, monkeypatch, tmp_path
 ):
-    """``_build_analyzer`` honors the per-row ``random_seed`` override.
+    """``build_analyzer`` honors the per-row ``random_seed`` override.
 
     ``random_seed`` in ``job_kwargs`` is the established per-row knob that
     the whitening / clusterless-noise pins read
@@ -1295,7 +1299,7 @@ def test_analyzer_random_seed_override_is_honored(
     import spikeinterface as si
     from spikeinterface.core import generate_ground_truth_recording
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
 
     recording, sorting = generate_ground_truth_recording(
         durations=[40.0],
@@ -1312,7 +1316,7 @@ def test_analyzer_random_seed_override_is_honored(
     )
 
     def _selection_for_seed(folder, random_seed):
-        Sorting._build_analyzer(
+        build_analyzer(
             sorting,
             recording,
             {"sorting_id": "seed-override-test"},
@@ -1487,12 +1491,12 @@ def test_sorting_selection_artifact_detection_source_part_shape(
     assert resolved.key == {"recording_id": populated_recording["recording_id"]}
 
 
-# ---------- _write_units_nwb zero-unit guard (sorting layer) -------------
+# ---------- write_sorting_units_nwb zero-unit guard (sorting layer) ------
 
 
 @pytest.mark.slow
 def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
-    """``Sorting._write_units_nwb`` initializes an empty Units NWB
+    """``write_sorting_units_nwb`` initializes an empty Units NWB
     when the sorter produces zero unit ids.
 
     The guard at ``sorting.py:1690-1698`` is the sorting-layer analog
@@ -1509,7 +1513,9 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        write_sorting_units_nwb,
+    )
 
     recording = Recording().get_recording(
         {"recording_id": populated_recording["recording_id"]}
@@ -1528,7 +1534,7 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
 
     from tests.spikesorting.v2._provenance_helpers import sorting_provenance
 
-    analysis_file_name, units_object_id = Sorting._write_units_nwb(
+    analysis_file_name, units_object_id = write_sorting_units_nwb(
         sorting=empty_sorting,
         recording=recording,
         nwb_file_name=nwb_file_name,
@@ -1555,7 +1561,7 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
                 len(nwbf.units.id[:]) == 0
             ), f"Expected empty Units table; got {len(nwbf.units.id[:])} rows."
     finally:
-        # Tidy up the staged file. _write_units_nwb does not register
+        # Tidy up the staged file. write_sorting_units_nwb does not register
         # the file (the caller does so inside a transaction); we
         # unlink the bare file since no DJ row was registered.
         import pathlib
@@ -1630,7 +1636,7 @@ def test_sorting_delete_removes_analyzer_folder(populated_sorting):
     from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
 
     folder = analyzer_path(populated_sorting["sorting_id"], _DISPLAY)
-    # ``_build_analyzer`` runs at populate time, so the folder is a
+    # ``build_analyzer`` runs at populate time, so the folder is a
     # precondition of this test. Treat absence as a FAILURE rather than a
     # vacuous skip: if it is missing, the populate path is broken and the
     # delete-cleanup assertion below would pass without exercising the

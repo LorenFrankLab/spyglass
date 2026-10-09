@@ -426,7 +426,7 @@ def test_artifact_detection_delete_removes_interval_list_row(
 
 @pytest.mark.slow
 def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
-    """``Sorting._apply_artifact_mask`` actually zeros artifact frames.
+    """``apply_artifact_mask`` actually zeros artifact frames.
 
     Existing artifact tests only verify the ``IntervalList`` row was
     written. The ``sip.remove_artifacts`` branch (the actual signal
@@ -436,7 +436,7 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
     1. Writes a synthetic IntervalList row whose ``valid_times``
        exclude a known frame range so the artifact "gap" is the
        known range.
-    2. Calls ``_apply_artifact_mask`` against the populated_recording's
+    2. Calls ``apply_artifact_mask`` against the populated_recording's
        preprocessed SI recording.
     3. Asserts traces are zero inside the gap and unchanged outside.
 
@@ -453,7 +453,9 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
         Recording,
         RecordingSelection,
     )
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
 
     recording = Recording().get_recording(
         {"recording_id": populated_recording["recording_id"]}
@@ -487,11 +489,11 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
         }
     )
     try:
-        # _apply_artifact_mask now takes valid_times directly (no
+        # apply_artifact_mask now takes valid_times directly (no
         # DB I/O inside Sorting.make_compute per the tri-part
         # contract). Pass the same valid_times the IntervalList row
         # carries.
-        masked = Sorting._apply_artifact_mask(
+        masked = apply_artifact_mask(
             recording=recording,
             valid_times=valid_times,
         )

@@ -40,7 +40,9 @@ def test_clusterless_uv_threshold_scales_input_to_microvolts(
     threshold; ``"mad"`` leaves the input in native (count) units."""
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import (
+        run_clusterless_thresholder,
+    )
 
     gain = 0.5  # uV/count, so 200 counts == 100 uV (gain != 1 is the point)
     rec = _rec_with_gain(np.full((200, 2), 200.0), gain)
@@ -65,7 +67,7 @@ def test_clusterless_uv_threshold_scales_input_to_microvolts(
     params = {"detect_threshold": 5.0, "threshold_unit": threshold_unit}
     if threshold_unit == "uv":
         params["noise_levels"] = [1.0]
-    Sorting._run_clusterless_thresholder(
+    run_clusterless_thresholder(
         sorter_params=params, recording=rec, job_kwargs=None
     )
 
@@ -95,7 +97,9 @@ def test_clusterless_missing_threshold_unit_defaults_to_uv(
     """
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import (
+        run_clusterless_thresholder,
+    )
 
     rec = _rec_with_gain(np.full((200, 2), 200.0), gain=0.5)
     captured = {}
@@ -112,7 +116,7 @@ def test_clusterless_missing_threshold_unit_defaults_to_uv(
     )
 
     # No threshold_unit -> must default to 'uv' and scale to microvolts.
-    Sorting._run_clusterless_thresholder(
+    run_clusterless_thresholder(
         sorter_params={"detect_threshold": 100.0, "noise_levels": [1.0]},
         recording=rec,
         job_kwargs=None,
@@ -138,7 +142,9 @@ def test_clusterless_runtime_rejects_invalid_threshold_unit(
     """
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import (
+        run_clusterless_thresholder,
+    )
 
     rec = _rec_with_gain(np.full((200, 2), 200.0), gain=0.5)
     # detect_peaks must never be reached: the guard fires first.
@@ -151,7 +157,7 @@ def test_clusterless_runtime_rejects_invalid_threshold_unit(
     )
 
     with pytest.raises(ValueError, match="threshold_unit must be 'uv' or"):
-        Sorting._run_clusterless_thresholder(
+        run_clusterless_thresholder(
             sorter_params={
                 "detect_threshold": 5.0,
                 "threshold_unit": "microvolts",
@@ -169,7 +175,9 @@ def test_clusterless_uv_requires_channel_gains(monkeypatch, dj_conn):
     import spikeinterface as si
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import (
+        run_clusterless_thresholder,
+    )
 
     rec = si.NumpyRecording(
         [np.zeros((100, 2), dtype="float32")], sampling_frequency=30000.0
@@ -177,7 +185,7 @@ def test_clusterless_uv_requires_channel_gains(monkeypatch, dj_conn):
     monkeypatch.setattr(pd_mod, "detect_peaks", lambda *a, **k: None)
 
     with pytest.raises(ValueError, match="requires the recording to carry"):
-        Sorting._run_clusterless_thresholder(
+        run_clusterless_thresholder(
             sorter_params={
                 "detect_threshold": 100.0,
                 "threshold_unit": "uv",
@@ -296,7 +304,9 @@ def test_clusterless_singleton_noise_levels_broadcast(monkeypatch):
     import spikeinterface as si
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import (
+        run_clusterless_thresholder,
+    )
 
     n_channels = 6
     rec = si.generate_recording(
@@ -325,7 +335,7 @@ def test_clusterless_singleton_noise_levels_broadcast(monkeypatch):
         _capture_detect,
     )
 
-    Sorting._run_clusterless_thresholder(
+    run_clusterless_thresholder(
         sorter_params={"noise_levels": [1.0], "threshold_unit": "uv"},
         recording=rec,
         job_kwargs=None,
@@ -371,18 +381,20 @@ def test_clusterless_runtime_rejects_bypassed_mad_footgun():
     detect_threshold left in MAD units with no noise_levels raises rather
     than running a silent ~zero-detection sort. The runtime consumes the
     fetched blob without re-validating the schema, so the guard must live in
-    ``_run_clusterless_thresholder`` too.
+    ``run_clusterless_thresholder`` too.
     """
     import spikeinterface.core as sc
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import (
+        run_clusterless_thresholder,
+    )
 
     rec = sc.generate_recording(
         num_channels=4, durations=[0.5], sampling_frequency=30000.0
     )
     # The footgun combo: detect_threshold=100 in MAD units, no noise_levels.
     with pytest.raises(ValueError, match="MAD multiplier"):
-        Sorting._run_clusterless_thresholder(
+        run_clusterless_thresholder(
             sorter_params={"detect_threshold": 100.0, "threshold_unit": "mad"},
             recording=rec,
             job_kwargs=None,
@@ -403,7 +415,9 @@ def test_clusterless_runtime_strips_stale_fields(monkeypatch):
     import spikeinterface as si
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import (
+        run_clusterless_thresholder,
+    )
 
     rec = si.generate_recording(
         num_channels=4, durations=[1.0], sampling_frequency=30_000.0
@@ -430,7 +444,7 @@ def test_clusterless_runtime_strips_stale_fields(monkeypatch):
 
     # Stale fields that the Pydantic schema would forbid, planted as if a raw
     # insert bypassed validation.
-    Sorting._run_clusterless_thresholder(
+    run_clusterless_thresholder(
         sorter_params={
             "detect_threshold": 100.0,
             "threshold_unit": "uv",

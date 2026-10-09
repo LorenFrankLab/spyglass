@@ -452,7 +452,7 @@ def test_make_fetch_resolves_hippocampus_display_blob(dj_conn, monkeypatch):
             fetched.display_waveform_params_name
             == "franklab_hippocampus_actual_waveforms"
         )
-        # The fetched blob (threaded into make_compute -> _build_analyzer) is
+        # The fetched blob (threaded into make_compute -> build_analyzer) is
         # the hippocampus 0.5/0.5 window, not the cortex fallback.
         assert fetched.display_waveform_params["ms_before"] == 0.5
         assert fetched.display_waveform_params["ms_after"] == 0.5

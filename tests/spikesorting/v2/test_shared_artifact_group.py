@@ -272,7 +272,7 @@ def test_detect_artifacts_empty_sliver_filter_returns_empty():
     ``min_length_s`` drops every surviving valid sliver. The return must be
     a real (0, 2) float array -- the shape downstream ``_apply_artifact_
     mask`` expects -- not an empty 1-D array. Pairs with the
-    ``_apply_artifact_mask`` empty-valid-times raise.
+    ``apply_artifact_mask`` empty-valid-times raise.
     """
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,

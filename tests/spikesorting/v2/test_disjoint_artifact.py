@@ -11,7 +11,7 @@ subtracts artifacts per chunk (v1 subtracts from the explicit
 ``sort_interval_valid_times``).
 
 The hermetic tests here pin the discontinuity-split helper; the
-DB-gated tests exercise ``_detect_artifacts`` / ``_apply_artifact_mask``
+DB-gated tests exercise ``_detect_artifacts`` / ``apply_artifact_mask``
 on a synthetic disjoint recording. A full-pipeline integration test
 lives in ``single_session/test_disjoint_intervals.py``.
 """
@@ -224,7 +224,7 @@ def test_detect_artifacts_valid_times_never_cross_gap():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_apply_artifact_mask_preserves_chunk_boundary_frame():
-    """``_apply_artifact_mask`` zeros artifacts but not the gap boundary.
+    """``apply_artifact_mask`` zeros artifacts but not the gap boundary.
 
     With gap-respecting valid_times, the complement between chunk 1's last
     frame and chunk 2's first frame is a pure wall-clock gap (zero real
@@ -232,7 +232,9 @@ def test_apply_artifact_mask_preserves_chunk_boundary_frame():
     chunk-boundary sample untouched -- masking it would zero a good sample
     per gap.
     """
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
 
     rec, traces, fs, chunk_len, gap_s = _disjoint_recording()
     times = rec.get_times()
@@ -249,9 +251,7 @@ def test_apply_artifact_mask_preserves_chunk_boundary_frame():
             [times[k + 1], times[-1]],  # chunk 2
         ]
     )
-    masked = Sorting._apply_artifact_mask(
-        recording=rec, valid_times=valid_times
-    )
+    masked = apply_artifact_mask(recording=rec, valid_times=valid_times)
     mt = masked.get_traces(return_in_uV=False)
 
     assert np.all(mt[50:60, :] == 0), "artifact frames must be zeroed"

@@ -1,4 +1,4 @@
-"""``Sorting._run_si_sorter`` dispatch invariants.
+"""``run_si_sorter`` dispatch invariants.
 
 Covers the MS4 ``numpy.Inf`` global shim teardown, tempdir-cleanup not masking
 the real sort exception, SI global ``job_kwargs`` set/restore, the tracked
@@ -31,7 +31,7 @@ def _tiny_numpy_sorting():
 
 
 def _run_si_sorter_with_patched_run_sorter(monkeypatch, run_sorter_impl):
-    """Drive Sorting._run_si_sorter with a cheap recording and a patched
+    """Drive run_si_sorter with a cheap recording and a patched
     sis.run_sorter, returning (before_global, after_global, result_or_exc).
 
     Passes a non-empty job_kwargs ({"n_jobs": 2, ...}) so the global
@@ -44,7 +44,7 @@ def _run_si_sorter_with_patched_run_sorter(monkeypatch, run_sorter_impl):
     import spikeinterface as si
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
     rec = si.generate_recording(
         num_channels=4, durations=[1.0], sampling_frequency=30_000.0
@@ -52,7 +52,7 @@ def _run_si_sorter_with_patched_run_sorter(monkeypatch, run_sorter_impl):
     monkeypatch.setattr(sis, "run_sorter", run_sorter_impl)
 
     before = dict(si.get_global_job_kwargs())
-    result = Sorting._run_si_sorter(
+    result = run_si_sorter(
         "mountainsort5",
         {},
         rec,
@@ -69,7 +69,7 @@ def test_run_si_sorter_does_not_leak_numpy_inf(monkeypatch):
     """The MS4 ``np.Inf`` shim is scoped and torn down.
 
     The MS4 wrapper (via spikeextractors) references the numpy-2.0-removed
-    ``np.Inf`` alias, so ``_run_si_sorter`` restores it for the MS4 call.
+    ``np.Inf`` alias, so ``run_si_sorter`` restores it for the MS4 call.
     The restore must be deleted afterward; a persistent global mutation
     would leak a different numpy into every later module that probes
     ``hasattr(np, "Inf")``.
@@ -83,7 +83,7 @@ def test_run_si_sorter_does_not_leak_numpy_inf(monkeypatch):
     import numpy as np_mod
     import spikeinterface.core as sc
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
     monkeypatch.delattr(np_mod, "Inf", raising=False)
     assert not hasattr(np_mod, "Inf"), "baseline not clean"
@@ -92,7 +92,7 @@ def test_run_si_sorter_does_not_leak_numpy_inf(monkeypatch):
         num_channels=4, durations=[0.5], sampling_frequency=30000.0
     )
     try:
-        Sorting._run_si_sorter(
+        run_si_sorter(
             sorter="mountainsort4",
             sorter_params={},
             recording=rec,
@@ -127,7 +127,7 @@ def test_sorter_tempdir_cleanup_does_not_mask_sort_exception(
     import spikeinterface.core as sc
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
     class _SortBoom(RuntimeError):
         pass
@@ -147,7 +147,7 @@ def test_sorter_tempdir_cleanup_does_not_mask_sort_exception(
     with caplog.at_level("WARNING", logger="spyglass"):
         # tridesclous2: non-MS4 (no np.Inf patch), non-MATLAB sorter.
         with pytest.raises(_SortBoom):
-            Sorting._run_si_sorter(
+            run_si_sorter(
                 sorter="tridesclous2",
                 sorter_params={},
                 recording=rec,
@@ -165,7 +165,7 @@ def test_run_si_sorter_restores_global_job_kwargs_on_raise(
 ):
     """SI's global job_kwargs are restored after the sort raises.
 
-    ``_run_si_sorter`` installs the per-row job_kwargs into SI's process-global
+    ``run_si_sorter`` installs the per-row job_kwargs into SI's process-global
     state via ``set_global_job_kwargs`` and restores the prior global in a
     ``finally`` (reset-then-reapply, so keys absent from the prior global do
     not leak). A regression removing the restore would leak the mutated global
@@ -183,13 +183,13 @@ def test_run_si_sorter_restores_global_job_kwargs_on_raise(
     )
     monkeypatch.setattr(sis, "run_sorter", _boom)
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
     before = dict(si.get_global_job_kwargs())
     import uuid
 
     with pytest.raises(RuntimeError, match="sorter blew up"):
-        Sorting._run_si_sorter(
+        run_si_sorter(
             "mountainsort5",
             {},
             rec,
@@ -240,7 +240,7 @@ def test_matlab_sorters_require_explicit_container_backend(monkeypatch):
     import spikeinterface as si
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
     def _must_not_run(**kwargs):
         raise AssertionError(
@@ -254,7 +254,7 @@ def test_matlab_sorters_require_explicit_container_backend(monkeypatch):
     for sorter in ("kilosort2_5", "kilosort3", "ironclust"):
         # execution_params omitted -> default local -> must raise.
         with pytest.raises(ValueError, match="container"):
-            Sorting._run_si_sorter(sorter, {}, rec, uuid.uuid4(), {})
+            run_si_sorter(sorter, {}, rec, uuid.uuid4(), {})
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -275,7 +275,7 @@ def test_run_si_sorter_passes_container_kwargs(monkeypatch):
     from spyglass.spikesorting.v2._sorting import (
         container as _container_sorting,
     )
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
     captured: dict = {}
 
@@ -295,7 +295,7 @@ def test_run_si_sorter_passes_container_kwargs(monkeypatch):
 
     # Singularity MATLAB row: image + install controls passed; strip applied.
     captured.clear()
-    Sorting._run_si_sorter(
+    run_si_sorter(
         "kilosort2_5",
         {
             "tempdir": "/strip/me",
@@ -330,7 +330,7 @@ def test_run_si_sorter_passes_container_kwargs(monkeypatch):
 
     # Docker MS4 row: docker_image passed (no MATLAB strip -- MS4 is not MATLAB).
     captured.clear()
-    Sorting._run_si_sorter(
+    run_si_sorter(
         "mountainsort4",
         {"adjacency_radius": 100.0},
         rec,
@@ -349,7 +349,7 @@ def test_run_si_sorter_passes_container_kwargs(monkeypatch):
 
     # Local row: no container kwargs at all.
     captured.clear()
-    Sorting._run_si_sorter(
+    run_si_sorter(
         "mountainsort5", {"tempdir": "/keep/me"}, rec, uuid.uuid4(), {}
     )
     assert "singularity_image" not in captured
@@ -374,7 +374,7 @@ def test_run_si_sorter_keeps_job_kwargs_out_of_sorter_params(monkeypatch):
     from spyglass.spikesorting.v2._sorting import (
         container as _container_sorting,
     )
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
     captured: dict = {}
     monkeypatch.setattr(
@@ -390,7 +390,7 @@ def test_run_si_sorter_keeps_job_kwargs_out_of_sorter_params(monkeypatch):
     rec = si.generate_recording(
         num_channels=4, durations=[1.0], sampling_frequency=30_000.0
     )
-    Sorting._run_si_sorter(
+    run_si_sorter(
         "mountainsort4",
         {"adjacency_radius": 100.0},
         rec,
@@ -498,14 +498,14 @@ def test_run_si_sorter_output_survives_tempdir_cleanup():
 
     ``sis.run_sorter`` returns a sorting that READS from the sorter temp dir,
     which ``run_si_sorter`` cleans up in its finally; downstream
-    ``_build_analyzer`` / ``_stage_sorting_artifact`` would then read freed
+    ``build_analyzer`` / ``write_sorting_units_nwb`` would then read freed
     files. The fix materializes the spike trains into an in-memory
     ``NumpySorting`` before cleanup. Use a real MountainSort5 run (a stub can't
     reproduce the file backing).
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
     rec, _gt = si.generate_ground_truth_recording(
         durations=[10.0],
@@ -514,9 +514,7 @@ def test_run_si_sorter_output_survives_tempdir_cleanup():
         seed=0,
         sampling_frequency=30000.0,
     )
-    result = Sorting._run_si_sorter(
-        "mountainsort5", {}, rec, "r4-tempdir-survival", {}
-    )
+    result = run_si_sorter("mountainsort5", {}, rec, "r4-tempdir-survival", {})
     # Severed from the temp dir: an in-memory NumpySorting, not file-backed.
     assert isinstance(result, si.NumpySorting)
     # Spike trains still read back after the temp dir is gone.
@@ -571,7 +569,7 @@ def test_ms5_non_default_params_reach_run_sorter_unchanged(monkeypatch):
 
     from spyglass.spikesorting.v2._params.sorter import MountainSort5Schema
     from spyglass.spikesorting.v2._sorting.dispatch import resolve_sort_config
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
     captured: dict = {}
     monkeypatch.setattr(
@@ -590,9 +588,7 @@ def test_ms5_non_default_params_reach_run_sorter_unchanged(monkeypatch):
     ).model_dump()
     params.pop("schema_version")
     job_kwargs = {"n_jobs": 2, "random_seed": 3}
-    Sorting._run_si_sorter(
-        "mountainsort5", params, rec, uuid.uuid4(), job_kwargs
-    )
+    run_si_sorter("mountainsort5", params, rec, uuid.uuid4(), job_kwargs)
     assert captured["scheme"] == "3"
     assert captured["scheme3_block_duration_sec"] == 300.0
     assert captured["scheme2_training_duration_sec"] == 120.0
@@ -1126,7 +1122,7 @@ def test_span_estimators_without_spans_accept_multi_segment_recordings():
 def test_sorting_wrappers_forward_statistics_spans(
     clean_ground_truth, monkeypatch, tmp_path
 ):
-    """``Sorting``'s dispatch and analyzer wrappers hand the statistics spans
+    """``Sorting._run_sorter`` and ``build_analyzer`` hand the statistics spans
     to the estimators: the clusterless MAD, the SI sorter's external whitening
     and the analyzer's noise levels all come from the span samples."""
     import uuid
@@ -1140,6 +1136,7 @@ def test_sorting_wrappers_forward_statistics_spans(
         cache_span_noise_levels,
     )
     from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
     from tests.spikesorting.v2._masked_statistics_helpers import masked_twin
 
     traces, probe, sorting = clean_ground_truth
@@ -1182,7 +1179,7 @@ def test_sorting_wrappers_forward_statistics_spans(
         w, _span_whitening_matrix(masked, spans, random_seed=2)
     )
 
-    folder = Sorting._build_analyzer(
+    folder = build_analyzer(
         sorting,
         masked,
         {"sorting_id": "wrapper-spans"},

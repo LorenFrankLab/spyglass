@@ -895,7 +895,7 @@ def run_si_sorter(
             sorter_temp_dir.cleanup()
         except Exception as cleanup_exc:
             logger.warning(
-                "Sorting._run_si_sorter: sorter_temp_dir cleanup "
+                "run_si_sorter: sorter_temp_dir cleanup "
                 f"failed for sorting_id={sorting_id}: {cleanup_exc!r}. "
                 "Original sort exception (if any) preserved."
             )
@@ -935,7 +935,7 @@ def remove_excess_spikes(sorting, recording):
     dropped = np.setdiff1d(before_ids, result.unit_ids)
     if dropped.size:
         logger.info(
-            "Sorting._remove_excess_spikes: dropped unit(s) "
+            "remove_excess_spikes: dropped unit(s) "
             f"{dropped.tolist()} with zero spikes (empty from the sorter or "
             "emptied by removing spikes outside the recording window)."
         )

@@ -83,6 +83,7 @@ def corrected_sorts(drift_recording):
     Both sorts are populated with the planted sorter; the sorter inputs and
     the recordings the initial analyzers were built from are recorded.
     """
+    from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
     from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
@@ -134,7 +135,7 @@ def corrected_sorts(drift_recording):
         {**base, **corrected_key}
     )
     sorter_inputs, analyzer_inputs = {}, {}
-    build_analyzer = Sorting._build_analyzer
+    build_analyzer = _sorting_analyzer.build_analyzer
 
     def _observe_build(*args, **kwargs):
         analyzer_inputs[str(kwargs["key"]["sorting_id"])] = kwargs["recording"]
@@ -143,7 +144,7 @@ def corrected_sorts(drift_recording):
     mp = pytest.MonkeyPatch()
     try:
         plant_sorter(mp, _planted_sorter(sorter_inputs))
-        mp.setattr(Sorting, "_build_analyzer", staticmethod(_observe_build))
+        mp.setattr(_sorting_analyzer, "build_analyzer", _observe_build)
         Sorting.populate([uncorrected_sort, corrected_sort], reserve_jobs=False)
     finally:
         mp.undo()

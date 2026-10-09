@@ -17,7 +17,7 @@ def test_boundary_spike_round_trip_does_not_raise(
 ):
     """A spike at the recording's final sample survives the v2 NWB round-trip.
 
-    Regression guard for the final-sample boundary. ``_write_units_nwb``
+    Regression guard for the final-sample boundary. ``write_sorting_units_nwb``
     stores ``timestamps[sample_index]`` as the absolute spike time;
     ``get_sorting`` reads it back by mapping absolute time -> frame with
     ``np.searchsorted`` (``_spike_times_to_frames``), which clips any
@@ -33,8 +33,8 @@ def test_boundary_spike_round_trip_does_not_raise(
     hand-built ``NumpySorting`` with one unit whose spike train
     includes ``n_samples - 1`` and one earlier in-bounds spike. The
     rest of ``Sorting.make`` runs normally:
-    ``_remove_excess_spikes`` should keep both samples
-    (``n_samples - 1 < n_samples``), ``_write_units_nwb`` writes
+    ``remove_excess_spikes`` should keep both samples
+    (``n_samples - 1 < n_samples``), ``write_sorting_units_nwb`` writes
     ``timestamps[sample_index]`` as the absolute time, and
     ``Sorting().get_sorting`` reads back via the searchsorted map.
     The round-trip is also exercised through
@@ -137,7 +137,7 @@ def test_boundary_spike_round_trip_does_not_raise(
     assert Sorting & sort_pk, (
         "Sorting.populate failed when the synthetic sorter produced "
         "a boundary spike; this is the boundary failure mode, inside "
-        "_write_units_nwb rather than at read time."
+        "write_sorting_units_nwb rather than at read time."
     )
 
     # First read path: Sorting.get_sorting -> searchsorted frame map
@@ -156,7 +156,7 @@ def test_boundary_spike_round_trip_does_not_raise(
 
     # Second read path: CurationV2 + CurationV2.get_sorting. The
     # curated NWB write goes through a different code path than
-    # Sorting._write_units_nwb but reads back via the same
+    # write_sorting_units_nwb but reads back via the same
     # searchsorted frame map. Pass labels={} so insert_curation
     # accepts the call on the strict signature.
     curation_pk = CurationV2.insert_curation(
@@ -360,7 +360,7 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
     """No-artifact obs_intervals split at the gap on a disjoint recording.
 
     When a sort has NO artifact pass (``artifact_detection_id`` is None),
-    ``_write_units_nwb`` falls back to the recording's recorded window(s)
+    ``write_sorting_units_nwb`` falls back to the recording's recorded window(s)
     for each unit's ``obs_intervals``. On a DISJOINT recording that must
     be one interval per recorded chunk, NOT a single envelope spanning the
     wall-clock gap (which would inflate the observation duration /

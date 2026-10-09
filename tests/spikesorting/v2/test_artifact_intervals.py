@@ -1,7 +1,7 @@
 """Artifact-mask input validation + artifact valid-times output structure.
 
 Locks two contracts a silent error would corrupt:
-* ``Sorting._apply_artifact_mask`` REJECTS malformed valid_times (empty,
+* ``apply_artifact_mask`` REJECTS malformed valid_times (empty,
   wrong-shape, end<start, unsorted/overlapping) instead of under-masking;
 * ``RecordingArtifactDetection._detect_artifacts`` returns valid_times that are
   start-sorted, non-overlapping, within the recording bounds, >= min_length_s,
@@ -54,7 +54,7 @@ def _artifact_params(**overrides):
 
 
 # --------------------------------------------------------------------------- #
-# _apply_artifact_mask input validation
+# apply_artifact_mask input validation
 # --------------------------------------------------------------------------- #
 
 
@@ -63,31 +63,35 @@ def test_apply_artifact_mask_rejects_empty_valid_times():
     from spyglass.spikesorting.v2.exceptions import (
         EmptyArtifactValidTimesError,
     )
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
 
     rec = _rec(np.zeros((100, 2)))
     with pytest.raises(EmptyArtifactValidTimesError):
-        Sorting._apply_artifact_mask(rec, np.empty((0, 2)))
+        apply_artifact_mask(rec, np.empty((0, 2)))
 
 
 @pytest.mark.usefixtures("dj_conn")
 def test_apply_artifact_mask_rejects_wrong_shape():
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
 
     rec = _rec(np.zeros((100, 2)))
     with pytest.raises(ValueError, match=r"\(n, 2\)"):
-        Sorting._apply_artifact_mask(rec, np.array([0.0, 1.0, 2.0]))
+        apply_artifact_mask(rec, np.array([0.0, 1.0, 2.0]))
 
 
 @pytest.mark.usefixtures("dj_conn")
 def test_apply_artifact_mask_rejects_end_before_start():
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
 
     rec = _rec(np.zeros((100, 2)))
     with pytest.raises(ValueError, match="end precedes its start"):
-        Sorting._apply_artifact_mask(
-            rec, np.array([[0.0, 0.001], [0.005, 0.003]])
-        )
+        apply_artifact_mask(rec, np.array([[0.0, 0.001], [0.005, 0.003]]))
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -99,11 +103,13 @@ def test_apply_artifact_mask_rejects_end_before_start():
     ],
 )
 def test_apply_artifact_mask_rejects_unsorted_or_overlapping(valid_times):
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
 
     rec = _rec(np.zeros((100, 2)))
     with pytest.raises(ValueError, match="sorted by start"):
-        Sorting._apply_artifact_mask(rec, np.array(valid_times))
+        apply_artifact_mask(rec, np.array(valid_times))
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -112,7 +118,9 @@ def test_apply_artifact_mask_zeros_complement_frames():
     frames) and leaves the kept frames untouched. Pins the masking semantics so
     the interval-native silence_periods path zeros the same samples a
     per-frame remove_artifacts pass would."""
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
 
     fs = 30000.0
     rec = _rec(np.ones((10, 2), dtype="float32"), fs=fs)
@@ -121,7 +129,7 @@ def test_apply_artifact_mask_zeros_complement_frames():
     # (last sample at 9/fs, +/- one sample-period of tolerance = 10/fs); an
     # out-of-envelope end is rejected by apply_artifact_mask's boundary guard.
     valid_times = np.array([[0.0, 3.0 / fs], [6.0 / fs, 10.0 / fs]])
-    out = Sorting._apply_artifact_mask(rec, valid_times).get_traces()
+    out = apply_artifact_mask(rec, valid_times).get_traces()
     assert np.all(out[3:6] == 0.0), "artifact (complement) frames not zeroed"
     assert np.all(out[0:3] == 1.0), "kept frames before the artifact altered"
     assert np.all(out[6:10] == 1.0), "kept frames after the artifact altered"
@@ -225,7 +233,7 @@ def _removed_intervals(valid_times, t0, t_end):
     """Complement of ``valid_times`` within ``[t0, t_end]``.
 
     The removed (artifact) intervals, as an ``(n, 2)`` array -- exactly what
-    ``Sorting._apply_artifact_mask`` excises before a sort. ``valid_times`` is
+    ``apply_artifact_mask`` excises before a sort. ``valid_times`` is
     assumed start-sorted and disjoint (the detector's contract, checked
     separately by ``_assert_valid_times_well_formed``).
     """
@@ -489,7 +497,7 @@ def test_apply_artifact_mask_raises_when_valid_times_keep_almost_nothing():
 #
 # Covers the chunked ``_scan_artifact_frames`` (frame-identical to a
 # whole-recording in-memory reference, job_kwargs propagation, default chunking,
-# multiprocess worker path, bounded peak memory) and ``_apply_artifact_mask``
+# multiprocess worker path, bounded peak memory) and ``apply_artifact_mask``
 # input strictness (empty / unsorted valid_times raise; full coverage
 # short-circuits).
 # --------------------------------------------------------------------------- #
@@ -986,13 +994,15 @@ def test_apply_artifact_mask_empty_valid_times_raises():
     from spyglass.spikesorting.v2.exceptions import (
         EmptyArtifactValidTimesError,
     )
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
 
     rec = sc.generate_recording(
         num_channels=4, durations=[0.5], sampling_frequency=30000.0
     )
     with pytest.raises(EmptyArtifactValidTimesError) as excinfo:
-        Sorting._apply_artifact_mask(
+        apply_artifact_mask(
             rec,
             np_mod.zeros((0, 2)),
             artifact_detection_id="art-123",
@@ -1019,7 +1029,9 @@ def test_apply_artifact_mask_unsorted_valid_times_raises():
     import numpy as np_mod
     import spikeinterface.core as sc
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
 
     rec = sc.generate_recording(
         num_channels=4, durations=[1.0], sampling_frequency=30000.0
@@ -1027,16 +1039,12 @@ def test_apply_artifact_mask_unsorted_valid_times_raises():
 
     # Unsorted by start time.
     with pytest.raises(ValueError, match="sorted by start"):
-        Sorting._apply_artifact_mask(
-            rec, np_mod.array([[0.6, 0.8], [0.1, 0.3]])
-        )
+        apply_artifact_mask(rec, np_mod.array([[0.6, 0.8], [0.1, 0.3]]))
     # Sorted by start but overlapping.
     with pytest.raises(ValueError, match="non-overlapping"):
-        Sorting._apply_artifact_mask(
-            rec, np_mod.array([[0.1, 0.5], [0.3, 0.8]])
-        )
+        apply_artifact_mask(rec, np_mod.array([[0.1, 0.5], [0.3, 0.8]]))
     # A single well-formed interval still masks normally (no raise).
-    masked = Sorting._apply_artifact_mask(rec, np_mod.array([[0.1, 0.9]]))
+    masked = apply_artifact_mask(rec, np_mod.array([[0.1, 0.9]]))
     assert masked.get_num_samples() == rec.get_num_samples()
 
 
@@ -1053,7 +1061,9 @@ def test_apply_artifact_mask_full_coverage_short_circuits():
     import numpy as np
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
 
     rec = si.generate_recording(
         num_channels=4, durations=[1.0], sampling_frequency=30_000.0
@@ -1061,7 +1071,7 @@ def test_apply_artifact_mask_full_coverage_short_circuits():
     ts = rec.get_times()
 
     full = np.asarray([[ts[0], ts[-1]]])
-    out_full = Sorting._apply_artifact_mask(rec, full)
+    out_full = apply_artifact_mask(rec, full)
     assert out_full is rec, (
         "full-coverage valid_times must short-circuit to the original "
         "recording (no remove_artifacts wrapper)"
@@ -1070,7 +1080,7 @@ def test_apply_artifact_mask_full_coverage_short_circuits():
     # Contrast: dropping the second half leaves an artifact gap -> a wrapped
     # recording, not the original object.
     partial = np.asarray([[ts[0], ts[len(ts) // 2]]])
-    out_partial = Sorting._apply_artifact_mask(rec, partial)
+    out_partial = apply_artifact_mask(rec, partial)
     assert out_partial is not rec
 
 
