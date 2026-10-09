@@ -142,10 +142,8 @@ class ConcatMemberCuration(
         return dj.U("sorting_id", "curation_id", "member_index") & joined
 
     @classmethod
-    def _delete_inventory(cls, rows: list[dict], *, context: str) -> None:
-        """Log member, merge, and analysis rows affected by a dry-run delete."""
-        if not rows:
-            return
+    def _merge_ids(cls, rows: list[dict]) -> list:
+        """Return the ``SpikeSortingOutput`` merge ids of member rows."""
         from spyglass.spikesorting.spikesorting_merge import (
             SpikeSortingOutput,
         )
@@ -153,11 +151,21 @@ class ConcatMemberCuration(
         member_keys = [
             {name: row[name] for name in cls.primary_key} for row in rows
         ]
-        merge_ids = list(
+        return list(
             (SpikeSortingOutput.ConcatMemberCuration & member_keys).fetch(
                 "merge_id"
             )
         )
+
+    @classmethod
+    def _delete_inventory(cls, rows: list[dict], *, context: str) -> None:
+        """Log member, merge, and analysis rows affected by a dry-run delete."""
+        if not rows:
+            return
+        member_keys = [
+            {name: row[name] for name in cls.primary_key} for row in rows
+        ]
+        merge_ids = cls._merge_ids(rows)
         analysis_file_names = sorted(
             {str(row["analysis_file_name"]) for row in rows}
         )
@@ -279,25 +287,72 @@ class ConcatMemberCuration(
             return target.delete(*args, **kwargs)
 
         rows = self.fetch(as_dict=True)
-        dry_run = bool(kwargs.get("dry_run", False))
-        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-
-        member_keys = [
-            {name: row[name] for name in self.primary_key} for row in rows
-        ]
-        merge_ids = list(
-            (SpikeSortingOutput.ConcatMemberCuration & member_keys).fetch(
-                "merge_id"
-            )
+        return self._delete_and_reclaim(
+            super().delete,
+            args,
+            kwargs,
+            member_rows=rows,
+            merge_ids=self._merge_ids(rows),
+            context="ConcatMemberCuration.delete",
         )
+
+    @classmethod
+    def _delete_and_reclaim(
+        cls,
+        delete,
+        args: tuple,
+        kwargs: dict,
+        *,
+        member_rows: list[dict],
+        merge_ids: list,
+        context: str,
+    ):
+        """Run a cascading curation delete, then reclaim what it orphaned.
+
+        The shared body of :meth:`delete` and ``CurationV2.delete``. A dry run
+        only logs the member inventory. Otherwise, after the cascade, merge
+        masters left without a source part and member ``AnalysisNwbfile`` rows
+        left without a reference are removed (a safemode cancellation deletes
+        nothing, so nothing is reclaimed).
+
+        Parameters
+        ----------
+        delete : callable
+            The cautious delete to run (the caller's ``super().delete``).
+        args : tuple
+            Positional arguments for ``delete``.
+        kwargs : dict
+            Keyword arguments for ``delete``. ``force_masters`` and
+            ``force_parts`` are overridden.
+        member_rows : list[dict]
+            Full ``ConcatMemberCuration`` rows the cascade can reach, fetched
+            before it runs.
+        merge_ids : list
+            ``SpikeSortingOutput`` merge ids of the rows being deleted,
+            fetched before the cascade.
+        context : str
+            Caller name for the dry-run log.
+
+        Returns
+        -------
+        object
+            Whatever ``delete`` returns.
+        """
+        dry_run = bool(kwargs.get("dry_run", False))
         if dry_run:
-            self._delete_inventory(rows, context="ConcatMemberCuration.delete")
-        kwargs["force_masters"] = False
-        kwargs["force_parts"] = True
-        result = super().delete(*args, **kwargs)
+            cls._delete_inventory(member_rows, context=context)
+        # ``force_masters=True`` is normally how cautious deletion removes a
+        # merge master through its source part. CurationV2 has nested parts,
+        # though, and DataJoint 0.14 can then revisit/delete CurationV2 through
+        # a grandchild before the outer cascade reaches it. The outer delete
+        # reports zero rows and rolls the whole transaction back. Opt out for
+        # this cascade and remove only proven-orphan merge masters afterwards.
+        result = delete(
+            *args, **{**kwargs, "force_masters": False, "force_parts": True}
+        )
         if not dry_run:
-            self._cleanup_orphaned_merge_masters(merge_ids)
-            self._cleanup_deleted_analysis_rows(rows)
+            cls._cleanup_orphaned_merge_masters(merge_ids)
+            cls._cleanup_deleted_analysis_rows(member_rows)
         return result
 
     @staticmethod

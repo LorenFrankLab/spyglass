@@ -380,18 +380,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
         merge_ids = list(
             (SpikeSortingOutput.CurationV2 & list(rows)).fetch("merge_id")
-        ) + list(
-            (
-                SpikeSortingOutput.ConcatMemberCuration
-                & [
-                    {
-                        name: row[name]
-                        for name in ConcatMemberCuration.primary_key
-                    }
-                    for row in concat_member_rows
-                ]
-            ).fetch("merge_id")
-        )
+        ) + ConcatMemberCuration._merge_ids(concat_member_rows)
         in_delete_set = {tuple(sorted(row.items())) for row in rows}
         orphaned: list[tuple[int, int]] = []
         for row in rows:
@@ -412,29 +401,16 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 f"(parent_curation_id, child_curation_id) pairs: {orphaned}. "
                 "Delete the descendant curations first (leaf-up)."
             )
-        dry_run = bool(kwargs.get("dry_run", False))
-        if dry_run:
-            ConcatMemberCuration._delete_inventory(
-                concat_member_rows, context=f"{cls.__name__}.delete"
-            )
-        # ``force_masters=True`` is normally how cautious deletion removes a
-        # merge master through its source part. CurationV2 has nested parts,
-        # though, and DataJoint 0.14 can then revisit/delete CurationV2 through
-        # a grandchild before the outer cascade reaches it. The outer delete
-        # reports zero rows and rolls the whole transaction back. Opt out for
-        # this cascade and remove only proven-orphan merge masters afterwards.
-        kwargs["force_masters"] = False
-        kwargs["force_parts"] = True
-        if safemode is None:
-            result = super().delete(*args, **kwargs)
-        else:
-            result = super().delete(*args, safemode=safemode, **kwargs)
-        if not dry_run:
-            ConcatMemberCuration._cleanup_orphaned_merge_masters(merge_ids)
-            ConcatMemberCuration._cleanup_deleted_analysis_rows(
-                concat_member_rows
-            )
-        return result
+        if safemode is not None:
+            kwargs["safemode"] = safemode
+        return ConcatMemberCuration._delete_and_reclaim(
+            super().delete,
+            args,
+            kwargs,
+            member_rows=concat_member_rows,
+            merge_ids=merge_ids,
+            context=f"{cls.__name__}.delete",
+        )
 
     @classmethod
     def audit_orphaned_lineage(cls, *, sorting_id=None) -> list[dict]:
