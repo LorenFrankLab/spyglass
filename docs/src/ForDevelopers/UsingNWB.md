@@ -56,17 +56,23 @@ arr = lfp.data[:]  # .data is the h5py.Dataset; read into RAM here
 NWB files are backed by HDF5 and use *lazy loading*: objects like `lfp.data` are
 `h5py.Dataset` handles that do not read from disk until you slice them, as in
 `lfp.data[:]`. Spyglass keeps files open between calls to avoid reopening them,
-and closes the least recently used (LRU) files when either resource runs low:
+and closes files when either resource runs low. A file you may still read from
+is *held*, and the two limits treat a hold differently:
 
-- **Free RAM**, below `min_free_gb` gigabytes or `min_free_pct` of total,
-    whichever is larger.
 - **File descriptors**, above `max_file_fraction` of the limit your OS places on
-    how many files one process may hold open at once. On Unix-based systems,
-    Spyglass counts **every** descriptor the process holds, not just its own NWB
-    files, because sockets, pipes, and GPU device handles draw on the same
-    budget. The default of `0.8` starts closing at roughly 820 files where the
-    OS limit is the common 1024. Windows has no equivalent limit to read, so
-    only the RAM check applies there.
+    how many files one process may hold open at once. Spyglass closes files,
+    least recently used first, until the process is back inside the budget —
+    including a held file if nothing else is left, because the alternative is
+    the next open failing outright. On Unix-based systems it counts **every**
+    descriptor the process holds, not just its own NWB files, because sockets,
+    pipes, and GPU device handles draw on the same budget. The default of `0.8`
+    starts closing at roughly 820 files where the OS limit is the common 1024.
+    Windows has no equivalent limit to read, so only the RAM check applies
+    there.
+- **Free RAM**, below `min_free_gb` gigabytes or `min_free_pct` of total,
+    whichever is larger. Spyglass closes at most one unheld file per check and
+    never a held one. Closing an NWB file returns little memory to the OS, so
+    this nudges usage down rather than trying to reach a target.
 
 Set any of these under `custom.nwb_cache` in your `dj_local_conf.json`:
 
@@ -94,8 +100,20 @@ restricted.close_nwb()  # then release the hold
 ```
 
 `close_nwb()` does not close the file immediately, but flags it as a good
-candidate once space is needed. Omitting it is safe, but the file then stays
-open until Spyglass needs the room for another.
+candidate once space is needed. One call is enough however many times you
+fetched, because a hold is a flag on the file rather than a count per caller.
+
+#### What a hold does and does not promise
+
+While you hold a file, low memory will not close it. Descriptor pressure still
+can, as a last resort, when every cached file is held and the process would
+otherwise fail its next open. A hold is therefore a strong preference, not a
+guarantee: for a job that opens many files, raise the open-file limit (see
+below) rather than relying on holds alone.
+
+That same flag means a library method calling `close_nwb()` releases *your* hold
+as well — `LFPV1.fetch1_dataframe()` does exactly this. If you still need a file
+after such a call, read what you need beforehand, or fetch it again afterwards.
 
 #### Releasing every file at once
 
@@ -111,13 +129,14 @@ for session in sessions:
     close_nwb_files()  # then release, before the next session
 ```
 
-Unlike `close_nwb()`, this closes the files immediately. It warns if any file
-still has unfinished lazy reads, since those reads will fail once the file is
-closed.
+Unlike `close_nwb()`, this closes the files immediately, held or not, and
+without warning — making the call is itself a statement that your reads are
+finished.
 
-If low memory forces Spyglass to close a file you were still using, it warns
-once, then reports the total when files are closed or Python exits. Treat that
-total as a prompt to add `close_nwb_files()` calls, not as an error.
+If descriptor pressure forces Spyglass to close a file you were still holding,
+it warns once and reports the total when files are closed or Python exits. Treat
+that total as a prompt to release earlier, or to raise the open-file limit — not
+as an error.
 
 #### Open file limits
 
