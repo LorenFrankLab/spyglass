@@ -34,6 +34,7 @@ from spyglass.spikesorting.v2._core.selection_identity import (
 )
 from spyglass.spikesorting.v2.exceptions import PreflightError
 from spyglass.spikesorting.v2.pipeline import (
+    PreflightCheck,
     PreflightReport,
     preflight_v2_pipeline,
     run_v2_pipeline,
@@ -68,8 +69,6 @@ def test_preflight_summary_distinguishes_selection_from_completed_output(
 
     monkeypatch.setattr(dj.Connection, "query", no_query)
     report = PreflightReport(
-        ok=not blocked,
-        errors=["Install the sorter runtime."] if blocked else [],
         warnings=["Review the reference choice."],
         resolved_pipeline_preset="test_recipe",
         expected_ids={
@@ -89,7 +88,13 @@ def test_preflight_summary_distinguishes_selection_from_completed_output(
                 "computed_exists": False,
             },
         },
-        checks=[],
+        checks=[
+            PreflightCheck(
+                "sorter_installed",
+                not blocked,
+                "Install the sorter runtime." if blocked else "",
+            )
+        ],
         effective_config={
             "sorter": "mountainsort5",
             "execution_backend": "local",
@@ -109,6 +114,36 @@ def test_preflight_summary_distinguishes_selection_from_completed_output(
     assert "'n_jobs': 2" in summary and "'chunk_duration': '1s'" in summary
     assert "Sorter scratch: /scratch/sorting" in summary
     assert ("ERROR: Install the sorter runtime." in summary) == blocked
+
+
+@pytest.mark.unit
+def test_installed_sorters_probed_once_per_reuse_block():
+    """A session preflight probes the installed sorters once, not per group.
+
+    Outside a reuse block every lookup probes afresh, so a long-lived kernel
+    sees a sorter installed after an earlier preflight.
+    """
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2._orchestration.preflight import (
+        _installed_sorters,
+        _installed_sorters_reused,
+    )
+
+    probes = []
+
+    def installed_sorters():
+        probes.append(None)
+        return ["mountainsort5"]
+
+    sis = SimpleNamespace(installed_sorters=installed_sorters)
+    with _installed_sorters_reused():
+        assert _installed_sorters(sis) == {"mountainsort5"}
+        assert _installed_sorters(sis) == {"mountainsort5"}
+    assert len(probes) == 1
+    _installed_sorters(sis)
+    _installed_sorters(sis)
+    assert len(probes) == 3
 
 
 @pytest.mark.unit
@@ -1532,12 +1567,11 @@ def test_container_runtime_probes_return_bool_detail_unmocked():
     asserts the contract shape (either truth value is fine in any environment).
     """
     from spyglass.spikesorting.v2._orchestration.preflight import (
-        _docker_runtime_available,
-        _singularity_runtime_available,
+        _container_runtime_available,
     )
 
-    for probe in (_docker_runtime_available, _singularity_runtime_available):
-        ok, detail = probe()
+    for backend in ("docker", "singularity"):
+        ok, detail = _container_runtime_available(backend)
         assert isinstance(ok, bool)
         assert isinstance(detail, str) and detail
 
@@ -1555,8 +1589,8 @@ def test_preflight_container_runtime_errors(preflight_inputs, monkeypatch):
 
     monkeypatch.setattr(
         pf,
-        "_singularity_runtime_available",
-        lambda: (False, "Singularity/Apptainer was not found"),
+        "_container_runtime_available",
+        lambda backend: (False, "Singularity/Apptainer was not found"),
     )
 
     report = preflight_v2_pipeline(
@@ -1590,8 +1624,11 @@ def test_preflight_reports_container_ms4_modern_host_path(
 
     monkeypatch.setattr(
         pf,
-        "_singularity_runtime_available",
-        lambda: (True, "Singularity + Python `spython` package available"),
+        "_container_runtime_available",
+        lambda backend: (
+            True,
+            "Singularity + Python `spython` package available",
+        ),
     )
 
     report = preflight_v2_pipeline(
@@ -1761,26 +1798,23 @@ def test_assert_preset_compute_rows_container_backend_checks_runtime(
     bundle = _PIPELINE_PRESETS[_CONTAINER_PRESET]
 
     # Runtime unavailable -> a blocking PreflightError (no silent local
-    # fallback). Both engines are patched so the test is backend-agnostic.
+    # fallback). The probe is patched for every backend so the test is
+    # backend-agnostic.
     monkeypatch.setattr(
         preflight_mod,
-        "_singularity_runtime_available",
-        lambda: (False, "singularity not installed"),
+        "_container_runtime_available",
+        lambda backend: (False, f"{backend} not installed"),
     )
-    monkeypatch.setattr(
-        preflight_mod,
-        "_docker_runtime_available",
-        lambda: (False, "docker not installed"),
-    )
-    with pytest.raises(PreflightError, match="not runnable here"):
+    with pytest.raises(
+        PreflightError, match="^run_v2_pipeline: .*not runnable here"
+    ):
         assert_preset_compute_rows(bundle)
 
     # Runtime available -> the container check passes (no local install needed).
     monkeypatch.setattr(
-        preflight_mod, "_singularity_runtime_available", lambda: (True, "ok")
-    )
-    monkeypatch.setattr(
-        preflight_mod, "_docker_runtime_available", lambda: (True, "ok")
+        preflight_mod,
+        "_container_runtime_available",
+        lambda backend: (True, "ok"),
     )
     assert_preset_compute_rows(bundle)
 

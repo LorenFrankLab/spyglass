@@ -72,8 +72,6 @@ def _no_db(monkeypatch) -> None:
 def _ok_report(sort_group_id: int, pipeline_preset: str) -> PreflightReport:
     """A passing single-group ``PreflightReport`` stub."""
     return PreflightReport(
-        ok=True,
-        errors=[],
         warnings=[],
         resolved_pipeline_preset=pipeline_preset,
         expected_ids={
@@ -256,12 +254,14 @@ def test_preflight_session_collects_group_errors(monkeypatch):
     def fake_preflight(*, sort_group_id, pipeline_preset, **kw):
         if sort_group_id == 1:
             return PreflightReport(
-                ok=False,
-                errors=["LabTeam 't' does not exist."],
                 warnings=["heads up"],
                 resolved_pipeline_preset=pipeline_preset,
                 expected_ids={},
-                checks=[PreflightCheck("team_exists", False, "create it")],
+                checks=[
+                    PreflightCheck(
+                        "team_exists", False, "LabTeam 't' does not exist."
+                    )
+                ],
             )
         return _ok_report(sort_group_id, pipeline_preset)
 

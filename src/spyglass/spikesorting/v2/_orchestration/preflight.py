@@ -13,6 +13,8 @@ inside the functions that query them. ``_orchestration.run`` imports this module
 from __future__ import annotations
 
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pprint import pformat
 from typing import TYPE_CHECKING, Any, NamedTuple, get_args
@@ -27,7 +29,7 @@ from spyglass.spikesorting.v2._core.recipe_catalog import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     import pandas as pd
 
@@ -116,62 +118,110 @@ def _motion_mode_problem(
     return None
 
 
-def _docker_runtime_available() -> tuple[bool, str]:
-    """Return ``(ok, detail)`` for the Docker container runtime.
+# Per container backend: the SpikeInterface probes ``run_sorter`` itself checks
+# before dispatching to a container (the engine, then its Python package), each
+# with the detail reported when it fails, and the detail reported when both
+# pass.
+_CONTAINER_RUNTIME_PROBES: dict[
+    str, tuple[tuple[tuple[str, str], ...], str]
+] = {
+    "docker": (
+        (
+            ("has_docker", "the Docker engine (`docker` CLI) was not found"),
+            (
+                "has_docker_python",
+                "the Python `docker` package is not installed "
+                "(`pip install docker`)",
+            ),
+        ),
+        "Docker engine + Python `docker` package available",
+    ),
+    "singularity": (
+        (
+            ("has_singularity", "Singularity/Apptainer was not found"),
+            (
+                "has_spython",
+                "the Python `spython` package is not installed "
+                "(`pip install spython`)",
+            ),
+        ),
+        "Singularity + Python `spython` package available",
+    ),
+}
 
-    A container-backed (``backend="docker"``) preset needs both the Docker
-    engine and the Python ``docker`` package -- the two things SpikeInterface's
-    ``run_sorter`` itself checks before dispatching to a Docker container.
-    Defined as a module-level function so tests can monkeypatch the runtime
-    probe without a real Docker install.
+
+def _container_runtime_available(backend: str) -> tuple[bool, str]:
+    """Return ``(ok, detail)`` for a container execution backend's runtime.
+
+    A container-backed preset needs both the container engine (Docker, or
+    Singularity/Apptainer) and its Python package (``docker`` / ``spython``)
+    -- the two things SpikeInterface's ``run_sorter`` itself checks before
+    dispatching to a container. Defined as a module-level function so tests
+    can monkeypatch the runtime probe without a real container install.
+
+    Parameters
+    ----------
+    backend : {"docker", "singularity"}
+        The ``execution_params["backend"]`` of a container-backed row.
+
+    Returns
+    -------
+    ok : bool
+        True when both the engine and its Python package are available.
+    detail : str
+        What is missing, or what was found when ``ok``.
     """
-    from spikeinterface.sorters.runsorter import (
-        has_docker,
-        has_docker_python,
-    )
+    from spikeinterface.sorters import runsorter
 
-    if not has_docker():
-        return False, "the Docker engine (`docker` CLI) was not found"
-    if not has_docker_python():
-        return (
-            False,
-            "the Python `docker` package is not installed "
-            "(`pip install docker`)",
-        )
-    return True, "Docker engine + Python `docker` package available"
+    probes, available_detail = _CONTAINER_RUNTIME_PROBES[backend]
+    for probe_name, missing_detail in probes:
+        if not getattr(runsorter, probe_name)():
+            return False, missing_detail
+    return True, available_detail
 
 
-def _singularity_runtime_available() -> tuple[bool, str]:
-    """Return ``(ok, detail)`` for the Singularity/Apptainer container runtime.
+# The sorter names ``spikeinterface.sorters.installed_sorters()`` returned
+# within an :func:`_installed_sorters_reused` block, so a multi-group preflight
+# probes the installs once rather than once per group (the probe takes
+# seconds). ``None`` outside such a block: every call probes afresh, because
+# installs can change in a long-lived kernel.
+_installed_sorters_memo: ContextVar["dict[str, frozenset[str]] | None"] = (
+    ContextVar("_installed_sorters_memo", default=None)
+)
 
-    A container-backed (``backend="singularity"``) preset needs both Singularity
-    (or Apptainer) and the Python ``spython`` package -- the two things
-    SpikeInterface's ``run_sorter`` checks before dispatching to a Singularity
-    container. Defined as a module-level function so tests can monkeypatch the
-    runtime probe without a real Singularity install.
+
+@contextmanager
+def _installed_sorters_reused() -> "Iterator[None]":
+    """Probe the installed sorters at most once within this block."""
+    token = _installed_sorters_memo.set({})
+    try:
+        yield
+    finally:
+        _installed_sorters_memo.reset(token)
+
+
+def _installed_sorters(sis) -> frozenset[str]:
+    """Return ``sis.installed_sorters()``, reused inside a reuse block.
+
+    Parameters
+    ----------
+    sis : module
+        ``spikeinterface.sorters``.
     """
-    from spikeinterface.sorters.runsorter import (
-        has_singularity,
-        has_spython,
-    )
-
-    if not has_singularity():
-        return False, "Singularity/Apptainer was not found"
-    if not has_spython():
-        return (
-            False,
-            "the Python `spython` package is not installed "
-            "(`pip install spython`)",
-        )
-    return True, "Singularity + Python `spython` package available"
+    memo = _installed_sorters_memo.get()
+    if memo is None:
+        return frozenset(sis.installed_sorters())
+    if "names" not in memo:
+        memo["names"] = frozenset(sis.installed_sorters())
+    return memo["names"]
 
 
 def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
     """Run the LOCAL-execution sorter checks (installed + runtime backend).
 
-    Shared by :func:`_check_sorter_execution`, whose execution-backend
+    Called by :func:`_check_sorter_execution`, whose execution-backend
     dispatch is a flat three-arm choice (MATLAB-local error / local checks /
-    container runtime), and by :func:`assert_preset_compute_rows`.
+    container runtime).
 
     Parameters
     ----------
@@ -191,7 +241,7 @@ def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
     # "misspelled / unknown" for the fix message.
     sorter_installed_ok = (
         bundle.sorter in non_si_sorters
-        or bundle.sorter in set(sis.installed_sorters())
+        or bundle.sorter in _installed_sorters(sis)
     )
     if sorter_installed_ok:
         check("sorter_installed", True, "")
@@ -269,7 +319,8 @@ class PreflightReport:
     ok
         True when no blocking problem was found (``errors`` is empty).
     errors
-        Blocking-problem messages; non-empty iff ``ok`` is False.
+        Blocking-problem messages (the ``fix`` of each failed check in
+        ``checks``); non-empty iff ``ok`` is False.
     warnings
         Non-blocking advisories (e.g. ``artifact_detection_params_name="none"``).
     resolved_pipeline_preset
@@ -313,8 +364,6 @@ class PreflightReport:
         missing (``sorter_params_exist`` then reports the fix).
     """
 
-    ok: bool
-    errors: list[str]
     warnings: list[str]
     resolved_pipeline_preset: str
     expected_ids: dict
@@ -322,6 +371,16 @@ class PreflightReport:
     effective_config: "dict | None" = None
     resource_notes: list[str] = field(default_factory=list)
     scientific_config: dict = field(default_factory=dict)
+
+    @property
+    def errors(self) -> list[str]:
+        """The fix of each failed check, in check order."""
+        return [c.fix for c in self.checks if not c.ok]
+
+    @property
+    def ok(self) -> bool:
+        """``True`` when no check failed."""
+        return not self.errors
 
     def __bool__(self) -> bool:
         """Return ``True`` when the configuration is runnable (``ok``)."""
@@ -651,24 +710,12 @@ def assert_preset_compute_rows(
     preflight calls this, including its member artifact recipe, so a concat
     run fails fast on a missing row instead of deep
     in the member/concat populate, matching the single-session preflight. The
-    param-row checks run ``preflight_v2_pipeline``'s own ``_check_*`` helpers
-    through :func:`_raising_check`, so the first failing check raises with its
-    fix prefixed by ``caller``. ``sort_checks=False`` stops after the
+    checks run ``preflight_v2_pipeline``'s own ``_check_*`` helpers through
+    :func:`_raising_check`, so the first failing check raises with its fix
+    prefixed by ``caller``. ``sort_checks=False`` stops after the
     preprocessing and artifact rows (a caller that builds the source without
     sorting it).
     """
-    import spikeinterface.sorters as sis
-
-    from spyglass.spikesorting.v2._params.sorter import (
-        validate_execution_params,
-    )
-    from spyglass.spikesorting.v2._sorting.dispatch import (
-        MATLAB_SORTERS,
-        matlab_container_required_message,
-    )
-    from spyglass.spikesorting.v2.exceptions import PreflightError
-    from spyglass.spikesorting.v2.sorting import SorterParameters
-
     check = _raising_check(caller)
     _check_source_param_rows(check, bundle)
     if not sort_checks:
@@ -677,42 +724,18 @@ def assert_preset_compute_rows(
         check, bundle, sort_checks=True
     )[0]
     _check_display_waveform_params(check, bundle, sort_checks=True)
-
-    # Sorter binary/runtime, dispatched on the execution backend like the
-    # single-session ``_check_sorter_execution``: a LOCAL backend needs the
-    # sorter installed here; a CONTAINER backend needs the container runtime
-    # (the sorter runtime lives in the image, so a missing LOCAL install is
-    # irrelevant, but a missing container runtime is a blocking failure --
-    # preflight never falls back to local execution). The MATLAB and local
-    # runtime messages carry no ``caller`` prefix; the container message does
-    # and, unlike the single-session one, names no preset.
-    execution_params = validate_execution_params(
-        sorter_params_query.fetch1("execution_params")
+    # The sorter binary/runtime on the row's execution backend, through the
+    # single-session check (the row exists: the check above raised otherwise).
+    # The bundle carries no preset name, so the messages name none, and a
+    # runnable container backend's advisory is dropped.
+    _check_sorter_execution(
+        check,
+        [],
+        bundle,
+        None,
+        sorter_params_query,
+        sorter_params_exist=True,
     )
-    execution_backend = execution_params["backend"]
-    container_image = execution_params["container_image"]
-    if execution_backend == "local":
-        if bundle.sorter.lower() in MATLAB_SORTERS:
-            raise PreflightError(
-                matlab_container_required_message(bundle.sorter)
-            )
-        _check_local_sorter_runtime(
-            bundle, sis, SorterParameters._NON_SI_SORTERS, _raising_check()
-        )
-    else:
-        runtime_ok, runtime_detail = (
-            _docker_runtime_available()
-            if execution_backend == "docker"
-            else _singularity_runtime_available()
-        )
-        if not runtime_ok:
-            raise PreflightError(
-                f"{caller}: the {execution_backend} execution backend "
-                f"(image {container_image!r}) for sorter {bundle.sorter!r} is "
-                f"not runnable here: {runtime_detail}. Install the container "
-                "runtime and its Python package, or pick a local-execution "
-                "preset. Preflight does not fall back to local execution."
-            )
 
 
 def assert_concat_preflight(
@@ -1914,7 +1937,6 @@ def preflight_v2_pipeline(
             motion_estimate_id=motion_estimate_id,
         )
 
-    errors = [c.fix for c in checks if not c.ok]
     resource_notes = _group_resource_notes(
         display_waveform_params_name,
         nwb_file_name=nwb_file_name,
@@ -1922,8 +1944,6 @@ def preflight_v2_pipeline(
         effective_config=effective_config,
     )
     return PreflightReport(
-        ok=not errors,
-        errors=errors,
         warnings=warnings,
         resolved_pipeline_preset=pipeline_preset,
         expected_ids=expected_ids,
@@ -1946,8 +1966,6 @@ def _blocked_preflight_report(
 ) -> PreflightReport:
     """The report of a request that fails before any database check."""
     return PreflightReport(
-        ok=False,
-        errors=[c.fix for c in checks if not c.ok],
         warnings=warnings,
         resolved_pipeline_preset=pipeline_preset,
         expected_ids={},
@@ -2287,7 +2305,7 @@ def _check_sorter_execution(
     check: "Callable[[str, Any, str], bool]",
     warnings: list[str],
     bundle,
-    pipeline_preset: str,
+    pipeline_preset: "str | None",
     sorter_params_query,
     sorter_params_exist: bool,
 ) -> None:
@@ -2300,6 +2318,8 @@ def _check_sorter_execution(
     container / MATLAB-policy checks are skipped; the sorter NAME is still
     validated as a local sorter so a misspelled sorter keeps its spelling
     hint. A runnable container backend appends an advisory to ``warnings``.
+    A ``pipeline_preset`` of ``None`` (a caller holding only the resolved
+    bundle) names no preset in the container messages.
     """
     import spikeinterface.sorters as sis
 
@@ -2346,15 +2366,18 @@ def _check_sorter_execution(
             # missing CONTAINER runtime is an actionable, blocking
             # selected-preset error -- preflight never silently falls back to
             # local execution.
-            runtime_ok, runtime_detail = (
-                _docker_runtime_available()
-                if execution_backend == "docker"
-                else _singularity_runtime_available()
+            runtime_ok, runtime_detail = _container_runtime_available(
+                execution_backend
+            )
+            preset_label = (
+                "the preset"
+                if pipeline_preset is None
+                else f"pipeline_preset {pipeline_preset!r}"
             )
             check(
                 "container_runtime_available",
                 runtime_ok,
-                f"pipeline_preset {pipeline_preset!r} selects the "
+                f"{preset_label} selects the "
                 f"{execution_backend} execution backend (image "
                 f"{container_image!r}) for sorter {bundle.sorter!r}, but it is "
                 f"not runnable here: {runtime_detail}. Install the container "
@@ -2367,7 +2390,7 @@ def _check_sorter_execution(
             # container, not on the host.
             if runtime_ok:
                 warnings.append(
-                    f"pipeline_preset {pipeline_preset!r} runs sorter "
+                    f"{preset_label} runs sorter "
                     f"{bundle.sorter!r} inside the {execution_backend} image "
                     f"{container_image!r}: the host can stay on the v2 numpy>=2 "
                     "environment because the sorter runtime lives in the "
@@ -2916,37 +2939,40 @@ def preflight_v2_pipeline_session(
     group_reports: list[dict[str, Any]] = []
     errors: list[str] = []
     warnings: list[str] = []
-    for sort_group_id in targets:
-        report = preflight_v2_pipeline(
-            nwb_file_name=nwb_file_name,
-            sort_group_id=sort_group_id,
-            interval_list_name=interval_list_name,
-            team_name=team_name,
-            pipeline_preset=pipeline_preset,
-            auto_curate=auto_curate,
-            manual_excluded_times=manual_excluded_times,
-            motion_mode=motion_mode,
-            motion_correction_params_name=motion_correction_params_name,
-        )
-        group_reports.append(
-            {
-                "sort_group_id": sort_group_id,
-                "ok": report.ok,
-                "errors": report.errors,
-                "warnings": report.warnings,
-                "expected_ids": report.expected_ids,
-                "checks": report.checks,
-                "effective_config": report.effective_config,
-                "resource_notes": report.resource_notes,
-                "scientific_config": report.scientific_config,
-            }
-        )
-        errors.extend(
-            f"sort_group_id={sort_group_id}: {e}" for e in report.errors
-        )
-        warnings.extend(
-            f"sort_group_id={sort_group_id}: {w}" for w in report.warnings
-        )
+    # Every group checks the same preset's sorter, so probe the installed
+    # sorters once for the whole session rather than once per group.
+    with _installed_sorters_reused():
+        for sort_group_id in targets:
+            report = preflight_v2_pipeline(
+                nwb_file_name=nwb_file_name,
+                sort_group_id=sort_group_id,
+                interval_list_name=interval_list_name,
+                team_name=team_name,
+                pipeline_preset=pipeline_preset,
+                auto_curate=auto_curate,
+                manual_excluded_times=manual_excluded_times,
+                motion_mode=motion_mode,
+                motion_correction_params_name=motion_correction_params_name,
+            )
+            group_reports.append(
+                {
+                    "sort_group_id": sort_group_id,
+                    "ok": report.ok,
+                    "errors": report.errors,
+                    "warnings": report.warnings,
+                    "expected_ids": report.expected_ids,
+                    "checks": report.checks,
+                    "effective_config": report.effective_config,
+                    "resource_notes": report.resource_notes,
+                    "scientific_config": report.scientific_config,
+                }
+            )
+            errors.extend(
+                f"sort_group_id={sort_group_id}: {e}" for e in report.errors
+            )
+            warnings.extend(
+                f"sort_group_id={sort_group_id}: {w}" for w in report.warnings
+            )
 
     return PreflightSessionReport(
         ok=not errors,
