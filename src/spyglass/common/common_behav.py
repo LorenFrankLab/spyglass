@@ -1081,9 +1081,28 @@ def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
 
 
 def get_position_interval_epoch(
-    nwb_file_name: str, position_interval_name: str
+    nwb_file_name: str,
+    position_interval_name: str,
+    populate_missing: bool = True,
 ) -> int:
-    """Return the epoch number for a given position interval name."""
+    """Return the epoch number for a given position interval name.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        Name of the NWB file.
+    position_interval_name : str
+        Name of the position interval.
+    populate_missing : bool
+        Whether to populate PositionIntervalMap when the key has no mapping.
+        Must be False when called from another table's `make_fetch`, which is
+        not permitted to write. Defaults to True.
+
+    Returns
+    -------
+    int or None
+        The epoch number, or None if no mapping exists.
+    """
     # look up the epoch
     key = dict(
         nwb_file_name=nwb_file_name,
@@ -1092,6 +1111,8 @@ def get_position_interval_epoch(
     query = PositionIntervalMap * TaskEpoch & key
     if query:
         return query.fetch1("epoch")
+    if not populate_missing:
+        return None
     # if no match, make sure all epoch interval names are mapped
     for epoch_key in (TaskEpoch() & key).fetch(
         "nwb_file_name", "interval_list_name", as_dict=True

@@ -1,5 +1,66 @@
 # Change Log
 
+## [0.6.1] (Unreleased)
+
+<!--
+### Release notes
+
+```python
+# Add alters here
+# from spyglass.location import Each Table Needed To Resolve FKRef
+
+# Table.alter()
+```
+-->
+
+### Documentation
+
+- Add LFP artifact detection to the LFP notebook #1641
+- Add File Backends developer page #1662
+
+### Infrastructure
+
+- Prevent errors during update for dandi standard from propagating to other
+    files #1677
+- Refactor `get_nwb_file` fallbacks into a pluggable `FileBackend` protocol
+    #1662
+- Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
+- Add `prefer_download` custom config for stream-capable backends #1662
+- Pin `deeplabcut[tf]<3`; 3.x drops the TensorFlow backend the DLC pipeline
+    targets #1679
+- Fix handler loss in the DLC `file_log` decorator, which dropped the outer
+    call's file handler when these calls nested #1679
+- Correct `Populate.md` on `_parallel_make`, the double `make_fetch` call, and
+    the `None` return from `make_compute` #1679
+
+### Pipelines
+
+- Position
+
+    - Separate `DLCPosVideo`, `TrodesPosVideo`, and `PositionVideo` to tri-part
+        `make`; `PositionVideo` also closes the video NWB file handle it
+        previously left open #1679
+    - `DLCPosVideo` and `TrodesPosVideo` set `_parallel_make`, so
+        `populate(processes=N)` no longer fails on `VideoMaker`'s process pool
+        under DataJoint's daemonic workers #1679
+    - `TrodesPosVideo` and `PositionVideo` raise on an unmapped epoch instead of
+        committing `has_video=False`, and no longer repair `PositionIntervalMap`
+        or `VideoFile` from `make_fetch` #1679
+    - `DLCPosVideo` raises when a render writes no file, instead of reporting
+        success and inserting no row #1679
+    - `DLCPosVideo` sorts bodyparts, making video color assignment reproducible
+        across databases #1679
+    - `VideoMaker` raises on a failed partial render #1679
+
+- Spike Sorting
+
+    - Store `hash` on `SpikeSortingRecording` insert, and fix the `Path`/`str`
+        comparison that skipped hash verification on recompute. A recompute that
+        does not match the stored hash now deletes the new files and raises. Rows
+        written before this have a null hash; a recompute of one warns and is
+        accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
+        #1662
+
 ## [0.6.0] (Sep 1st 2026)
 
 ### Breaking Changes
