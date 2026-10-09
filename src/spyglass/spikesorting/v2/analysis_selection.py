@@ -433,9 +433,11 @@ def select_units_for_analysis(
     from spyglass.spikesorting.v2._storage.observation_io import (
         selection_observations,
     )
+    from spyglass.spikesorting._observed_time import (
+        normalize_observation_provenance,
+    )
     from spyglass.spikesorting.v2._core.observed_time import (
         OBSERVATION_VERSION,
-        normalize_observation_provenance,
     )
 
     provenance = {

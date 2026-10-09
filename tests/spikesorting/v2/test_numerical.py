@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2._core.numerical import (
+from spyglass.spikesorting._numerical import (
     finite_intervals,
     finite_scalar,
     finite_vector,

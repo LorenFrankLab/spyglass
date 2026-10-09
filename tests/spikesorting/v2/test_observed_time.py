@@ -3,12 +3,14 @@
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2._core.observed_time import (
+from spyglass.spikesorting._observed_time import (
     ObservationAvailability,
     contains_times,
+    population_availability,
+)
+from spyglass.spikesorting.v2._core.observed_time import (
     observed_intervals,
     observed_metrics,
-    population_availability,
 )
 
 
@@ -139,7 +141,7 @@ def test_observed_metrics_weight_partial_bins_and_ignore_excluded_spikes():
 
 
 def test_intersect_intervals_normalizes_duplicates_and_order():
-    from spyglass.spikesorting.v2._core.signal_math import intersect_intervals
+    from spyglass.spikesorting._intervals import intersect_intervals
 
     duplicated = np.array([[0.0, 10.0], [0.0, 10.0]])
     result = intersect_intervals(duplicated, duplicated)
@@ -387,7 +389,7 @@ def test_shared_masks_are_stored_once_and_keep_original_fingerprint(
     import json
 
     from spyglass.spikesorting.v2._storage import observation_io as io
-    from spyglass.spikesorting.v2._core import observed_time as math
+    from spyglass.spikesorting import _observed_time as math
 
     calls = []
 
@@ -493,7 +495,7 @@ def test_review_timeline_cache_is_pinned_to_curation_generation(
 )
 def test_observation_boundaries_reject_malformed_windows(intervals, boundary):
     """Bad windows cannot be reshaped or dropped into apparently valid exposure."""
-    from spyglass.spikesorting.v2._core.observed_time import (
+    from spyglass.spikesorting._observed_time import (
         compact_observation_intervals,
     )
 

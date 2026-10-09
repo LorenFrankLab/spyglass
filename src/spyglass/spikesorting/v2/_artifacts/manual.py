@@ -38,9 +38,7 @@ def normalize_manual_exclusions(intervals):
     """Sorted union of finite [start, stop) intervals in session seconds."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._core.signal_math import (
-        merge_sorted_intervals,
-    )
+    from spyglass.spikesorting._intervals import merge_sorted_intervals
 
     if intervals is None:
         return []

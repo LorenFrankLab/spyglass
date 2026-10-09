@@ -79,13 +79,14 @@ remain valid. Sorting and curation writers validate complete provenance before
 allocating an output, including the curation generation UUID on member exports.
 Matching rows and NWB headers require producer provenance.
 
-Scientific boundaries use `_core.numerical` to reject fractional or overflowing
-identifiers, malformed shapes, nonfinite observations and misaligned event
-arrays before conversion. Sample-frame bounds apply equally to affine and
-explicit clocks. Legal event order and repeated frames are preserved. Metric
-indexes require unique native integer unit IDs; unavailable metric values may
-still be NaN. Observation windows reject reversed endpoints while metrics
-continue merging overlaps and ignoring zero-length exposure.
+Scientific boundaries use `spyglass.spikesorting._numerical` to reject
+fractional or overflowing identifiers, malformed shapes, nonfinite observations
+and misaligned event arrays before conversion. Sample-frame bounds apply
+equally to affine and explicit clocks. Legal event order and repeated frames
+are preserved. Metric indexes require unique native integer unit IDs;
+unavailable metric values may still be NaN. Observation windows reject reversed
+endpoints while metrics continue merging overlaps and ignoring zero-length
+exposure.
 
 Sorting, curation, member exports, evaluation and matching provenance carry
 structured runtime receipts from `_core.runtime`: code bytes and checkout

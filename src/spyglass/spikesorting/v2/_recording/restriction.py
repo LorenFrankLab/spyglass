@@ -269,9 +269,7 @@ def _consolidate_regular_intervals(
     """
     import numpy as np
 
-    from spyglass.spikesorting.v2._core.signal_math import (
-        merge_sorted_intervals,
-    )
+    from spyglass.spikesorting._intervals import merge_sorted_intervals
 
     intervals = np.asarray(intervals)
     if intervals.ndim == 1:
@@ -389,10 +387,10 @@ def restrict_recording_times(recording, valid_times):
     import numpy as np
     from spikeinterface import concatenate_recordings
 
+    from spyglass.spikesorting._intervals import merge_sorted_intervals
     from spyglass.spikesorting.v2._core.signal_math import (
         base_intervals_and_gaps,
         frames_for_times,
-        merge_sorted_intervals,
     )
 
     intervals = np.asarray(valid_times, dtype=float).reshape(-1, 2)

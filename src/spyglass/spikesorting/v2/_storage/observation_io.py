@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
-from spyglass.spikesorting.v2._core.observed_time import (
+from spyglass.spikesorting._observed_time import (
     compact_observation_intervals,
-    observed_intervals,
 )
+from spyglass.spikesorting.v2._core.observed_time import observed_intervals
 
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2._recording.source import EffectiveTraces

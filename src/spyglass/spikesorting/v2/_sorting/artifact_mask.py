@@ -450,9 +450,7 @@ def complement_frame_ranges(
         Sorted, disjoint, half-open valid frame ranges. ``[(0, n_samples)]``
         when ``excluded_ranges`` is empty.
     """
-    from spyglass.spikesorting.v2._core.signal_math import (
-        merge_sorted_intervals,
-    )
+    from spyglass.spikesorting._intervals import merge_sorted_intervals
 
     n_samples = int(n_samples)
     merged = merge_sorted_intervals(
@@ -595,7 +593,7 @@ def statistics_spans(
     ValueError
         If no artifact-free frame lies inside any boundary span.
     """
-    from spyglass.spikesorting.v2._core.signal_math import intersect_intervals
+    from spyglass.spikesorting._intervals import intersect_intervals
     from spyglass.utils import logger
 
     n_samples = int(n_samples)

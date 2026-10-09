@@ -155,9 +155,7 @@ def observed_population(
     pop_spikes_group,
 ):
     """Use real population reads with independently indexed availability oracles."""
-    from spyglass.spikesorting.v2._core.observed_time import (
-        ObservationAvailability,
-    )
+    from spyglass.spikesorting._observed_time import ObservationAvailability
 
     mod = decode_v1.sorted_spikes
     key = {
@@ -400,9 +398,7 @@ def test_make_applies_exact_observation_and_encoding_masks(
 def test_empty_training_rejects_populate_before_decoder_or_results(
     observed_population, recording_detector, reason
 ):
-    from spyglass.spikesorting.v2._core.observed_time import (
-        ObservationAvailability,
-    )
+    from spyglass.spikesorting._observed_time import ObservationAvailability
 
     case = observed_population
     mod = case["mod"]
@@ -440,9 +436,7 @@ def test_empty_training_rejects_populate_before_decoder_or_results(
 def test_unknown_coverage_preserves_explicit_none_training(
     observed_population, recording_detector, estimate
 ):
-    from spyglass.spikesorting.v2._core.observed_time import (
-        ObservationAvailability,
-    )
+    from spyglass.spikesorting._observed_time import ObservationAvailability
 
     case = observed_population
     case["availability"]["value"] = ObservationAvailability(
