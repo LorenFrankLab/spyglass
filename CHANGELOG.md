@@ -397,7 +397,11 @@ for label, interval_data in results.groupby("interval_labels"):
     - Add `unit_criteria` to `UnitSelectionParams` #1670
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
-    - Add `all_electrodes` option to `get_sort_group_info` #1678
+    - **BREAKING**: `get_sort_group_info` returns one row per electrode of each
+        sort group, on `CurationV1`, `CuratedSpikeSorting` and
+        `SpikeSortingOutput`. It previously returned a single representative
+        electrode, which the method name did not suggest. Callers that assumed one
+        row should restrict to the electrode they want #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
         #1678
 

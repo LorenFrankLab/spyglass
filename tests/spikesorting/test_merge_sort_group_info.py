@@ -1,11 +1,10 @@
 """Tests for ``SpikeSortingOutput.get_sort_group_info`` electrode coverage.
 
 Issue #1394: ``get_sort_group_info`` reported a single electrode per sort
-group. The source tables (``CurationV1`` and ``CuratedSpikeSorting``) gained
-an ``all_electrodes`` opt-in, but the merge table -- the entry point used by
-the ``10_Spike_SortingV1`` tutorial -- did not forward it, so users of the
-merge table could not opt in. These tests pin the passthrough, the unchanged
-default, and the merge-id join that is the whole point of the method.
+group, which is not what the method name promises. It now returns every
+electrode of each sort group, with no opt-out -- see the PR #1678 review
+discussion. These tests pin that return shape, the merge-id join that is the
+whole point of the method, and the signature parity the dispatch relies on.
 """
 
 from inspect import signature
@@ -51,53 +50,24 @@ def merge_electrode_ids(spike_v1, merge_sort_group_key):
     yield ids
 
 
-def test_merge_sort_group_info_default_unchanged(spike_merge, pop_spike_merge):
-    """Default call still returns one representative electrode row."""
-    info = spike_merge.get_sort_group_info(pop_spike_merge)
-
-    assert len(info) == 1, (
-        "Default SpikeSortingOutput.get_sort_group_info should return a "
-        f"single row per sort group; got {len(info)}"
-    )
-    assert (
-        info.fetch1("merge_id") == pop_spike_merge["merge_id"]
-    ), "Default get_sort_group_info lost the merge id it is meant to join"
-
-
-def test_merge_sort_group_info_explicit_default_matches(
-    spike_merge, pop_spike_merge
-):
-    """``all_electrodes=False`` reproduces the default return exactly."""
-    implicit = spike_merge.get_sort_group_info(pop_spike_merge).fetch(
-        as_dict=True, order_by="electrode_id"
-    )
-    explicit = spike_merge.get_sort_group_info(
-        pop_spike_merge, all_electrodes=False
-    ).fetch(as_dict=True, order_by="electrode_id")
-
-    assert (
-        implicit == explicit
-    ), "all_electrodes=False must reproduce the default return exactly"
-
-
-def test_merge_sort_group_info_all_electrodes(
+def test_merge_sort_group_info_returns_all_electrodes(
     spike_merge, pop_spike_merge, merge_electrode_ids
 ):
-    """``all_electrodes=True`` returns every electrode of the sort group."""
-    info = spike_merge.get_sort_group_info(pop_spike_merge, all_electrodes=True)
+    """Every electrode of the sort group is returned."""
+    info = spike_merge.get_sort_group_info(pop_spike_merge)
 
     returned = sorted(info.fetch("electrode_id"))
     assert returned == merge_electrode_ids, (
-        "all_electrodes=True should return every electrode in the sort "
+        "get_sort_group_info should return every electrode in the sort "
         f"group. Expected {merge_electrode_ids}, got {returned}"
     )
 
 
-def test_merge_sort_group_info_all_electrodes_keeps_merge_id(
+def test_merge_sort_group_info_keeps_merge_id(
     spike_merge, pop_spike_merge, merge_electrode_ids
 ):
-    """The merge-id join survives the ``all_electrodes=True`` path."""
-    info = spike_merge.get_sort_group_info(pop_spike_merge, all_electrodes=True)
+    """The merge-id join survives the multi-electrode return."""
+    info = spike_merge.get_sort_group_info(pop_spike_merge)
 
     assert isinstance(info, dj.expression.QueryExpression), (
         f"get_sort_group_info returned {type(info)}, not a DataJoint "
@@ -105,7 +75,7 @@ def test_merge_sort_group_info_all_electrodes_keeps_merge_id(
     )
     assert (
         "merge_id" in info.heading.names
-    ), "all_electrodes=True dropped the merge_id column"
+    ), "get_sort_group_info dropped the merge_id column"
 
     merge_ids = set(info.fetch("merge_id"))
     assert merge_ids == {pop_spike_merge["merge_id"]}, (
@@ -118,37 +88,35 @@ def test_merge_sort_group_info_all_electrodes_keeps_merge_id(
     )
 
 
-def test_merge_sort_group_info_signature():
-    """The merge method exposes the same opt-in as its source tables."""
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+def test_merge_sort_group_info_takes_only_key():
+    """No electrode-coverage opt-out, on the merge table or its sources.
 
-    params = signature(SpikeSortingOutput.get_sort_group_info).parameters
-    assert (
-        "all_electrodes" in params
-    ), "SpikeSortingOutput.get_sort_group_info is missing all_electrodes"
-    assert (
-        params["all_electrodes"].default is False
-    ), "all_electrodes must default to False on the merge table"
-
-
-def test_merge_source_classes_accept_all_electrodes():
-    """Every dispatch target that defines the method accepts the kwarg.
-
-    ``get_sort_group_info`` dispatches through ``source_class_dict``. A
-    source class that defines the method without ``all_electrodes`` would
-    fail only at runtime, for that one source.
+    ``get_sort_group_info`` dispatches through ``source_class_dict``, so the
+    merge table and every source that defines the method must agree on the
+    signature. Reintroducing a coverage flag on one of them would fail only
+    at runtime, for that one source.
     """
-    from spyglass.spikesorting.spikesorting_merge import source_class_dict
+    from spyglass.spikesorting.spikesorting_merge import (
+        SpikeSortingOutput,
+        source_class_dict,
+    )
 
-    for name, source in source_class_dict.items():
-        method = getattr(source, "get_sort_group_info", None)
-        if method is None:  # source does not support the method at all
-            continue
-        params = signature(method).parameters
-        assert "all_electrodes" in params, (
-            f"{name}.get_sort_group_info cannot accept all_electrodes, so "
-            "the merge passthrough would fail for this source"
+    targets = {"SpikeSortingOutput": SpikeSortingOutput}
+    targets.update(
+        {
+            name: source
+            for name, source in source_class_dict.items()
+            if getattr(source, "get_sort_group_info", None) is not None
+        }
+    )
+
+    for name, target in targets.items():
+        params = signature(target.get_sort_group_info).parameters
+        assert "all_electrodes" not in params, (
+            f"{name}.get_sort_group_info reintroduced all_electrodes; the "
+            "method returns every electrode unconditionally"
         )
-        assert (
-            params["all_electrodes"].default is False
-        ), f"{name}.get_sort_group_info must default all_electrodes to False"
+        assert list(params) == ["key"], (
+            f"{name}.get_sort_group_info takes {list(params)}, breaking the "
+            "merge dispatch, which passes only a key"
+        )

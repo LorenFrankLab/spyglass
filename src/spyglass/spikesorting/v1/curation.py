@@ -266,21 +266,16 @@ class CurationV1(SpyglassMixin, dj.Manual):
         return si_sorting
 
     @classmethod
-    def get_sort_group_info(
-        cls, key: dict, all_electrodes: bool = False
-    ) -> dj.Table:
+    def get_sort_group_info(cls, key: dict) -> dj.Table:
         """Returns the sort group information for the curation
         (e.g. brain region, electrode placement, etc.)
+
+        One row per electrode of each sort group.
 
         Parameters
         ----------
         key : dict
             restriction on CuratedSpikeSorting table
-        all_electrodes : bool, optional
-            If False (default), return one representative electrode per sort
-            group. If True, return every electrode belonging to each sort
-            group, so a multi-electrode sort group is described by all of its
-            electrodes.
 
         Returns
         -------
@@ -293,20 +288,8 @@ class CurationV1(SpyglassMixin, dj.Manual):
             "recording_id", "sort_group_id"
         )
 
-        electrodes = Electrode()
-        if not all_electrodes:
-            electrode_restrict_list = []
-            for entry in table:
-                # pull just one electrode from each sort group for info
-                electrode_restrict_list.extend(
-                    (
-                        (SortGroup.SortGroupElectrode() & entry) * Electrode
-                    ).fetch(limit=1)
-                )
-            electrodes = Electrode & electrode_restrict_list
-
         sort_group_info = (
-            electrodes * table * SortGroup.SortGroupElectrode()
+            Electrode() * table * SortGroup.SortGroupElectrode()
         ) * BrainRegion()
         return (cls & key).proj() * sort_group_info
 
