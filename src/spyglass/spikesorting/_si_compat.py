@@ -9,6 +9,28 @@ selects the available implementation.
 from __future__ import annotations
 
 
+def quality_metrics_module():
+    """Return SpikeInterface's quality-metrics namespace for either generation.
+
+    SpikeInterface 0.10x split ``qualitymetrics`` into the ``metrics``
+    package. Its parent namespace re-exports both metrics v0/v1 use
+    (``compute_isi_violations`` from ``metrics.quality`` and
+    ``compute_num_spikes`` from ``metrics.spiketrain``), so it is returned
+    rather than the quality submodule, which lacks ``compute_num_spikes``.
+
+    Returns
+    -------
+    module
+        ``spikeinterface.metrics``, or ``spikeinterface.qualitymetrics`` under
+        SpikeInterface 0.99.
+    """
+    try:
+        import spikeinterface.metrics as sq
+    except ModuleNotFoundError:  # SI 0.99 (legacy v0/v1 runtime env)
+        import spikeinterface.qualitymetrics as sq
+    return sq
+
+
 def load_extractor(source):
     """Load a saved SpikeInterface recording or sorting.
 

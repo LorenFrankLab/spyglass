@@ -16,15 +16,6 @@ import numpy as np
 import spikeinterface as si
 import spikeinterface.preprocessing as sip
 
-# SI >= 0.10x split qualitymetrics into the ``metrics`` package; the parent
-# namespace re-exports both metrics v0/v1 use (``compute_isi_violations`` from
-# metrics.quality, ``compute_num_spikes`` from metrics.spiketrain), so import
-# it rather than the quality submodule (which lacks compute_num_spikes).
-try:
-    import spikeinterface.metrics as sq
-except ModuleNotFoundError:  # SI 0.99 (legacy v0/v1 runtime env)
-    import spikeinterface.qualitymetrics as sq
-
 from spyglass.common import BrainRegion, Electrode
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -44,6 +35,8 @@ from spyglass.utils import SpyglassMixin, logger
 
 from .spikesorting_recording import SortGroup
 from .spikesorting_sorting import SpikeSorting
+
+sq = _si_compat.quality_metrics_module()
 
 schema = dj.schema("spikesorting_curation")
 
