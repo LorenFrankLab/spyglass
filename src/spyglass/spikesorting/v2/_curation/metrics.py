@@ -912,7 +912,6 @@ def _requested_pc_metrics(metric_names) -> list[str]:
 
 
 def evaluate_analyzers(
-    table,
     display_analyzer,
     metric_analyzer,
     *,
@@ -923,22 +922,20 @@ def evaluate_analyzers(
 ):
     """Compute metrics / labels / merge suggestions and enforce namespace.
 
-    Reuses ``table._compute_metrics`` (the ``CurationEvaluation``
-    staticmethod, called on the table so a patched one takes effect) /
-    :func:`compute_merge_groups` and ``apply_label_rules`` over the
-    curation's analyzers, then enforces
-    the unit-namespace invariant BEFORE labels/merges are returned (and
+    Reuses :func:`compute_metrics` / :func:`compute_merge_groups` and
+    ``apply_label_rules`` over the curation's analyzers, then enforces the
+    unit-namespace invariant BEFORE labels/merges are returned (and
     before the NWB write): the metric index must equal the curation's unit
     set, and every suggested merge member must be a unit in that set. This
     catches a stale temp analyzer, accidental raw-sort analyzer reuse, or a
     preview row that slipped past selection. ``statistics_spans`` (the
     sort's persisted spans; ``None`` = the whole recording) are forwarded
-    to ``_compute_metrics``. ``metric_inputs`` is the
+    to :func:`compute_metrics`. ``metric_inputs`` is the
     ``CurationEvaluation`` ``EvaluationMetricInputs`` carrier (metric set,
     auto-merge settings and label rules).
 
     Rule-referenced metrics must be computed wherever SpikeInterface can
-    compute them: a metric SpikeInterface failed (``_compute_metrics``'s
+    compute them: a metric SpikeInterface failed (``compute_metrics``'s
     ``rule_columns``), or a non-finite value for a unit that meets the
     metric's preconditions (``expected_missing_units``), raises
     ``ValueError`` instead of leaving the rule silently inert. A NaN for a
@@ -965,7 +962,7 @@ def evaluate_analyzers(
     rule_rows = metric_inputs.rule_rows
     with SI_METRIC_STATE_LOCK:
         rule_columns = frozenset(row["metric_name"] for row in rule_rows)
-        metrics_df = table._compute_metrics(
+        metrics_df = compute_metrics(
             display_analyzer,
             metric_analyzer,
             metric_inputs.metric_names,
@@ -1335,7 +1332,7 @@ def compute_metrics(
 
     if not frames:
         raise ValueError(
-            "_compute_metrics: no metrics to compute -- metric_names "
+            "compute_metrics: no metrics to compute -- metric_names "
             f"{sorted(metric_names)} contains only PC/NN metrics but "
             "skip_pc_metrics=True. Set skip_pc_metrics=False to compute "
             "them, or include a voltage-based metric."

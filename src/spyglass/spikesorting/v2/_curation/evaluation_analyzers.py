@@ -7,12 +7,10 @@ analyzer-cache lock. A committed applied-merge curation does not, so
 :func:`evaluate_temporary_analyzers` builds curation-scoped analyzers over the
 merged sorting in a temporary directory and evaluates them before that
 directory is removed. Both evaluate through
-:func:`._metric_curation.evaluate_analyzers`, passing the
-``CurationEvaluation`` instance so its ``_compute_metrics`` dispatches through
-the table.
+:func:`._curation.metrics.evaluate_analyzers`.
 
 These functions read and write analyzer folders on disk, so they are kept out
-of the pure :mod:`._metric_curation`. The module imports without the DB
+of the pure :mod:`._curation.metrics`. The module imports without the DB
 layer. The analyzer-cache, analyzer-build and settings names are imported
 inside the functions so that patches applied to those modules take effect.
 """
@@ -29,7 +27,6 @@ if TYPE_CHECKING:
     import spikeinterface as si
 
     from spyglass.spikesorting.v2.metric_curation import (
-        CurationEvaluation,
         EvaluationAnalyzerInputs,
         EvaluationMetricInputs,
         EvaluationSortingInputs,
@@ -37,7 +34,6 @@ if TYPE_CHECKING:
 
 
 def evaluate_cached_analyzers(
-    table: CurationEvaluation,
     recording: si.BaseRecording,
     *,
     sorting_inputs: EvaluationSortingInputs,
@@ -51,8 +47,6 @@ def evaluate_cached_analyzers(
 
     Parameters
     ----------
-    table : CurationEvaluation
-        The table whose ``_compute_metrics`` computes the metrics.
     recording : si.BaseRecording
         The sort's effective recording, used to rebuild a missing analyzer.
     sorting_inputs, analyzer_inputs, metric_inputs
@@ -90,7 +84,7 @@ def evaluate_cached_analyzers(
     # this curation's unit set. Hold the per-sort lock around the
     # canonical-folder load/rebuild, metric-extension mutation and source
     # hashing so the snapshot describes the same protected cache generation.
-    # (_compute_metrics / _metric_curation.compute_merge_groups
+    # (_metric_curation.compute_metrics / compute_merge_groups
     # mutate the shared analyzer in place).
     raw_sorting = read_stored_units(sorting_inputs.raw_units)
     with analyzer_cache_lock(sorting_inputs.sorting_id):
@@ -120,7 +114,6 @@ def evaluate_cached_analyzers(
             )
         metrics_df, labels_by_unit, merge_groups = (
             _metric_curation.evaluate_analyzers(
-                table,
                 display_analyzer,
                 metric_analyzer,
                 metric_inputs=metric_inputs,
@@ -142,7 +135,6 @@ def evaluate_cached_analyzers(
 
 
 def evaluate_temporary_analyzers(
-    table: CurationEvaluation,
     recording: si.BaseRecording,
     *,
     sorting_inputs: EvaluationSortingInputs,
@@ -156,8 +148,6 @@ def evaluate_temporary_analyzers(
 
     Parameters
     ----------
-    table : CurationEvaluation
-        The table whose ``_compute_metrics`` computes the metrics.
     recording : si.BaseRecording
         The sort's effective recording.
     sorting_inputs, analyzer_inputs, metric_inputs
@@ -231,7 +221,6 @@ def evaluate_temporary_analyzers(
             metric_analyzer = load_analyzer_folder(metric_folder)
         metrics_df, labels_by_unit, merge_groups = (
             _metric_curation.evaluate_analyzers(
-                table,
                 display_analyzer,
                 metric_analyzer,
                 metric_inputs=metric_inputs,

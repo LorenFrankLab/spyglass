@@ -544,6 +544,7 @@ def test_insert_curation_retry_reuses_concurrent_winner(
     yet), the id allocation collides with the winner's id, and the retry's
     reuse re-check then finds the winner.
     """
+    from spyglass.spikesorting.v2._curation import insert as _curation_insert
     from spyglass.spikesorting.v2.curation import CurationV2
 
     sort_pk = planted_three_unit_sort
@@ -560,19 +561,17 @@ def test_insert_curation_retry_reuses_concurrent_winner(
 
         # Pre-loop reuse check MISSES (as if the winner is not yet visible);
         # the retry's re-check finds it via the real implementation.
-        real_find = CurationV2._find_matching_child_curation.__func__
+        real_find = _curation_insert.find_matching_child_curation
         find_calls = {"n": 0}
 
-        def fake_find(cls, **kwargs):
+        def fake_find(table_cls, **kwargs):
             find_calls["n"] += 1
             if find_calls["n"] == 1:
                 return None
-            return real_find(cls, **kwargs)
+            return real_find(table_cls, **kwargs)
 
         monkeypatch.setattr(
-            CurationV2,
-            "_find_matching_child_curation",
-            classmethod(fake_find),
+            _curation_insert, "find_matching_child_curation", fake_find
         )
         # Force the id allocation to collide with the winner (1).
         id_calls = {"n": 0}

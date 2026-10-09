@@ -652,7 +652,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             )
         )
         if parent_curation_id != -1 and reuse_existing:
-            existing_child = cls._find_matching_child_curation(
+            existing_child = _curation_insert.find_matching_child_curation(
+                cls,
                 sorting_id=sorting_id,
                 parent_curation_id=parent_curation_id,
                 labels=labels,
@@ -776,17 +777,20 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                     # logical child (the likely cause of the collision), return
                     # it rather than staging a duplicate under a fresh id.
                     if reuse_existing:
-                        existing_child = cls._find_matching_child_curation(
-                            sorting_id=sorting_id,
-                            parent_curation_id=parent_curation_id,
-                            labels=labels,
-                            unit_rows=unit_rows,
-                            kept_unit_to_contributors=(
-                                kept_unit_to_contributors
-                            ),
-                            apply_merge=apply_merge,
-                            description=description,
-                            curation_source=curation_source,
+                        existing_child = (
+                            _curation_insert.find_matching_child_curation(
+                                cls,
+                                sorting_id=sorting_id,
+                                parent_curation_id=parent_curation_id,
+                                labels=labels,
+                                unit_rows=unit_rows,
+                                kept_unit_to_contributors=(
+                                    kept_unit_to_contributors
+                                ),
+                                apply_merge=apply_merge,
+                                description=description,
+                                curation_source=curation_source,
+                            )
                         )
                         if existing_child is not None:
                             logger.warning(
@@ -837,37 +841,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 for group in groups
                 if len(group) >= 2
             )
-        )
-
-    @classmethod
-    def _find_matching_child_curation(
-        cls,
-        *,
-        sorting_id,
-        parent_curation_id: int,
-        labels: dict,
-        unit_rows: list[dict],
-        kept_unit_to_contributors: dict[int, list[int]],
-        apply_merge: bool,
-        description: str,
-        curation_source: str,
-    ) -> dict | None:
-        """Return an existing child with the same committed curation content.
-
-        See :func:`._curation_insert.find_matching_child_curation`. Tests patch
-        it, so it stays on the class and ``insert_curation`` calls it through
-        the class.
-        """
-        return _curation_insert.find_matching_child_curation(
-            cls,
-            sorting_id=sorting_id,
-            parent_curation_id=parent_curation_id,
-            labels=labels,
-            unit_rows=unit_rows,
-            kept_unit_to_contributors=kept_unit_to_contributors,
-            apply_merge=apply_merge,
-            description=description,
-            curation_source=curation_source,
         )
 
     @classmethod

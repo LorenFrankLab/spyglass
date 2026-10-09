@@ -430,13 +430,12 @@ def test_single_low_level_analyzer_builder(tmp_path, monkeypatch, wants_pc):
     )
     metrics, labels, merges = object(), {17: ["accept"]}, []
 
-    def evaluate(table, display, metric, **kwargs):
+    def evaluate(display, metric, **kwargs):
         evaluations.append((display, metric))
         return metrics, labels, merges
 
     monkeypatch.setattr(_metric_curation, "evaluate_analyzers", evaluate)
     result = _evaluation_analyzers.evaluate_temporary_analyzers(
-        object(),
         recording,
         sorting_inputs=SimpleNamespace(
             sorting_id=sorting_id,

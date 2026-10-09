@@ -900,7 +900,7 @@ def test_compute_metrics_scopes_noise_cluster_spans_to_metric_computes(
 
     The voltage-metric compute (``sd_ratio``'s template correction) and the
     PC-metric compute (the nn noise cluster) both see the spans passed to
-    ``_compute_metrics``; afterwards -- whether the PC compute returned or
+    ``compute_metrics``; afterwards -- whether the PC compute returned or
     raised -- the ContextVar is back to ``None``.
     """
     import spikeinterface.metrics.quality as sqm
@@ -908,7 +908,7 @@ def test_compute_metrics_scopes_noise_cluster_spans_to_metric_computes(
     from spyglass.spikesorting.v2._core.si_metric_patches import (
         _NOISE_CLUSTER_SPANS,
     )
-    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+    from spyglass.spikesorting.v2._curation.metrics import compute_metrics
 
     analyzer = _small_in_memory_analyzer()
     spans = [(0, 100_000), (100_000, analyzer.get_num_samples())]
@@ -924,7 +924,7 @@ def test_compute_metrics_scopes_noise_cluster_spans_to_metric_computes(
     monkeypatch.setattr(sqm, "compute_quality_metrics", spy)
 
     def compute():
-        return CurationEvaluation._compute_metrics(
+        return compute_metrics(
             analyzer,
             analyzer,
             ["firing_rate", "nn_advanced"],
@@ -949,7 +949,7 @@ def test_compute_metrics_leaves_si_metric_defaults_unchanged(dj_conn):
     """A row's metric kwargs do not become SI's defaults for later computes.
 
     Called directly, SI merges ``metric_params`` into its class-level
-    defaults; ``_compute_metrics`` must leave them as they were, for both
+    defaults; ``compute_metrics`` must leave them as they were, for both
     the voltage and the PC/NN compute, while still applying the kwargs.
     """
     import copy
@@ -958,7 +958,7 @@ def test_compute_metrics_leaves_si_metric_defaults_unchanged(dj_conn):
         get_default_quality_metrics_params,
     )
 
-    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+    from spyglass.spikesorting.v2._curation.metrics import compute_metrics
 
     names = ["presence_ratio", "nn_advanced"]
     before = copy.deepcopy(get_default_quality_metrics_params(names))
@@ -967,9 +967,7 @@ def test_compute_metrics_leaves_si_metric_defaults_unchanged(dj_conn):
         "nn_advanced": {"min_spikes": 1_000_000, "seed": 0},
     }
     analyzer = _small_in_memory_analyzer()
-    metrics = CurationEvaluation._compute_metrics(
-        analyzer, analyzer, names, kwargs, False, {}
-    )
+    metrics = compute_metrics(analyzer, analyzer, names, kwargs, False, {})
     # The kwargs were applied: 2 s bins give a finite presence ratio on a
     # 10 s recording (60 s bins would not), and no unit reaches min_spikes.
     assert metrics["presence_ratio"].notna().all()
@@ -1023,14 +1021,14 @@ def test_compute_metrics_escalates_si_metric_errors_on_rule_columns(
     """A metric SI swallows raises only when a rule thresholds its column.
 
     SI turns a raising metric into a warning and all-NaN columns. With the
-    column among ``rule_columns`` ``_compute_metrics`` raises naming the
+    column among ``rule_columns`` ``compute_metrics`` raises naming the
     metric, the column and SI's error; without, it returns the NaN column
     and logs the failure.
     """
     from spikeinterface.metrics.quality import ComputeQualityMetrics
     from spikeinterface.metrics.template import ComputeTemplateMetrics
 
-    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+    from spyglass.spikesorting.v2._curation.metrics import compute_metrics
 
     extension = (
         ComputeTemplateMetrics
@@ -1047,7 +1045,7 @@ def test_compute_metrics_escalates_si_metric_errors_on_rule_columns(
     monkeypatch.setattr(metric_class, "metric_function", planted)
 
     def compute(rule_columns):
-        return CurationEvaluation._compute_metrics(
+        return compute_metrics(
             _small_in_memory_analyzer(),
             _small_in_memory_analyzer(),
             metric_names,
@@ -1140,7 +1138,7 @@ def test_compute_metrics_sd_ratio_ignores_excluded_samples(dj_conn):
     """``sd_ratio``'s noise comes only from the statistics spans.
 
     With the spans fixed, the excluded frames are filled with zeros, then
-    +/-10 mV, then NaN: ``sd_ratio`` from ``_compute_metrics`` must be
+    +/-10 mV, then NaN: ``sd_ratio`` from ``compute_metrics`` must be
     bit-identical and finite across the three. The std it divides by is
     the per-channel std of the span samples (SI's default 20 x 500 ms budget,
     the job's ``random_seed``), cached on the display analyzer's recording,
@@ -1156,12 +1154,12 @@ def test_compute_metrics_sd_ratio_ignores_excluded_samples(dj_conn):
         noise_cluster_spans,
     )
     from spyglass.spikesorting.v2._sorting.artifact_mask import sample_span_data
-    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+    from spyglass.spikesorting.v2._curation.metrics import compute_metrics
 
     results = {}
     for fill in ("zeros", "10mV", "nan"):
         analyzer, spans = _sd_ratio_analyzer(fill)
-        metrics = CurationEvaluation._compute_metrics(
+        metrics = compute_metrics(
             analyzer,
             None,
             ["sd_ratio"],
@@ -1214,7 +1212,7 @@ def test_compute_metrics_sd_ratio_covering_spans_is_spikeinterface(dj_conn):
     import numpy as np
     from spikeinterface.metrics.quality import compute_quality_metrics
 
-    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+    from spyglass.spikesorting.v2._curation.metrics import compute_metrics
 
     seeded = {"sd_ratio": {"random_slices_kwargs": {"seed": 0}}}
     reference_analyzer, _ = _sd_ratio_analyzer("zeros")
@@ -1229,7 +1227,7 @@ def test_compute_metrics_sd_ratio_covering_spans_is_spikeinterface(dj_conn):
     n_samples = reference_analyzer.get_num_samples()
     for spans in (None, [(0, n_samples)]):
         analyzer, _ = _sd_ratio_analyzer("zeros")
-        metrics = CurationEvaluation._compute_metrics(
+        metrics = compute_metrics(
             analyzer,
             None,
             ["sd_ratio"],
@@ -1248,22 +1246,21 @@ def test_evaluation_passes_statistics_spans_to_metric_compute(
 ):
     """``make_compute`` hands the sort's persisted statistics spans to the
     metric compute, where they select the nn noise cluster's frames."""
+    from spyglass.spikesorting.v2._curation import metrics as _metric_curation
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
         CurationEvaluationSelection,
     )
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    real_compute_metrics = CurationEvaluation._compute_metrics
+    real_compute_metrics = _metric_curation.compute_metrics
     received = []
 
     def spy(*args, **kwargs):
         received.append(kwargs.get("statistics_spans"))
         return real_compute_metrics(*args, **kwargs)
 
-    monkeypatch.setattr(
-        CurationEvaluation, "_compute_metrics", staticmethod(spy)
-    )
+    monkeypatch.setattr(_metric_curation, "compute_metrics", spy)
     sel = CurationEvaluationSelection.insert_selection(
         {
             **populated_sorting_with_curation,
@@ -1338,7 +1335,7 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
 
     Drives the exact compute path CurationEvaluation uses for an applied-merge
     curation -- ``build_analyzer`` over the merged sorting, then
-    ``CurationEvaluation._compute_metrics`` -- with two planted contributors whose
+    ``compute_metrics`` -- with two planted contributors whose
     distinct templates make the merged-template extremum predictable. The merged
     unit's snr must differ from BOTH contributors' pre-merge snr (it cannot have
     been inherited) and be smaller (the merged template extremum is diluted).
@@ -1346,7 +1343,7 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
     import spikeinterface as si
 
     from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
-    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+    from spyglass.spikesorting.v2._curation.metrics import compute_metrics
 
     rec, two, merged = _two_distinct_template_inputs()
     waveform_params = {
@@ -1375,7 +1372,7 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
         # and persist into the folder, so the real path needs no reattach (the
         # DB-backed merged tests cover that).
         analyzer.set_temporary_recording(rec)
-        df = CurationEvaluation._compute_metrics(
+        df = compute_metrics(
             analyzer,
             None,
             ["snr"],

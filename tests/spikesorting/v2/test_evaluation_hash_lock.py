@@ -79,7 +79,6 @@ def test_hash_reads_share_cache_generation(
         def work():
             return evaluation.evaluate_cached_analyzers(
                 object(),
-                object(),
                 sorting_inputs=SimpleNamespace(
                     sorting_id=sorting_id,
                     raw_units=object(),

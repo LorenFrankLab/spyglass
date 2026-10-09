@@ -37,7 +37,6 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v2._curation import (
     evaluation_acceptance as _evaluation_acceptance,
     evaluation_analyzers as _evaluation_analyzers,
-    metrics as _metric_curation,
     metric_fetch as _metric_curation_fetch,
 )
 from spyglass.spikesorting.v2._curation.metrics import (
@@ -352,7 +351,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     Each rule persists a Spyglass ``missing_policy`` for units SpikeInterface
     cannot assess for the rule's metric (e.g. fewer spikes than
     ``nn_advanced``'s ``min_spikes``; ``expected_missing_units`` in
-    ``_metric_curation`` lists every registered column and condition):
+    :mod:`._curation.metrics` lists every registered column and condition):
     ``error`` raises, ``fail`` applies the rule label, and ``pass`` leaves the
     unit unlabelled by that rule. Any other non-finite value raises regardless
     of the policy: a NaN for a unit that meets the metric's conditions, and
@@ -985,7 +984,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             )
             metrics_df, labels_by_unit, merge_groups, source_analyzer_hashes = (
                 evaluate(
-                    self,
                     recording,
                     sorting_inputs=sorting_inputs,
                     analyzer_inputs=analyzer_inputs,
@@ -1368,35 +1366,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
 
     # ---- compute helpers (DB-light; SI work) -----------------------------
-
-    @staticmethod
-    def _compute_metrics(
-        display_analyzer,
-        metric_analyzer,
-        metric_names,
-        metric_kwargs,
-        skip_pc_metrics,
-        job_kwargs=None,
-        template_metric_columns=None,
-        statistics_spans=None,
-        rule_columns=frozenset(),
-    ):
-        """Compute quality metrics, routing PC/NN metrics to the whitened one.
-
-        See :func:`._metric_curation.compute_metrics`. Tests patch it, so it
-        stays on the class and the evaluation calls it through the table.
-        """
-        return _metric_curation.compute_metrics(
-            display_analyzer,
-            metric_analyzer,
-            metric_names,
-            metric_kwargs,
-            skip_pc_metrics,
-            job_kwargs=job_kwargs,
-            template_metric_columns=template_metric_columns,
-            statistics_spans=statistics_spans,
-            rule_columns=rule_columns,
-        )
 
     @staticmethod
     def _write_empty(abs_path, *, provenance_tables=None):
