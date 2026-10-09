@@ -1194,6 +1194,28 @@ def test_no_log_on_search_placeholder(TableChain, Nwbfile, caplog):
     ), "Reported the placeholder restriction of an unfinished search."
 
 
+def test_log_survives_shared_search_graph(
+    RestrGraph, TableChain, Nwbfile, caplog
+):
+    """Suppression must not follow a searching chain's graph to another graph.
+
+    A graph built with `graph=` inherits node attributes other than the cascade
+    keys, so a gate reading the chain's `find_restr` marker silenced the log
+    here, where the restriction is a real whole-table ask.
+    """
+    chain = TableChain(
+        child=Nwbfile, search_restr="nwb_file_name LIKE '%.nwb'", cascade=False
+    )
+    graph = RestrGraph(seed_table=Nwbfile, graph=chain.graph, verbose=True)
+
+    with caplog.at_level("INFO", logger="spyglass"):
+        graph._set_restr(Nwbfile.full_table_name, True)
+
+    assert (
+        WHOLE_TABLE_LOG in caplog.text
+    ), "A chain's search marker suppressed the log on an unrelated graph."
+
+
 # ----------------------------- Edge resolution ----------------------------------
 
 

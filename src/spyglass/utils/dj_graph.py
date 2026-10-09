@@ -370,10 +370,12 @@ class AbstractGraph(ABC):
         restriction : str | QueryExpression
             The restriction, already coerced to a condition.
         """
-        # `TableChain.__init__` uses True placeholder. Hold pending 'found'
+        # `TableChain.__init__` uses True placeholder. Hold pending 'found'.
+        # Instance state, not the node's `find_restr`: that is not stripped by
+        # a `graph=` copy, so it silenced unrelated graphs
         if (
             restriction is True
-            and self._get_node(table).get("find_restr")
+            and getattr(self, "search_restr", None)
             and not getattr(self, "found_restr", False)
         ):
             return
