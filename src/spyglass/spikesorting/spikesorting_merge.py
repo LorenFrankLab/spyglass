@@ -1,3 +1,4 @@
+import uuid
 from typing import Union
 
 import datajoint as dj
@@ -448,6 +449,65 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         return getattr(query, accessor)(query.fetch("KEY"))
 
     @classmethod
+    def _v2_preview_states(cls, merge_ids):
+        """Yield the v2 curation behind each merge_id and its preview state.
+
+        Resolves every merge_id with one fetch per v2 merge part rather than
+        probing the parts id by id, then yields ``(merge_id, source_name,
+        cur_key, member_index, is_preview)`` in ``merge_ids`` order. v0/v1
+        sources are skipped. ``cur_key`` is the ``CurationV2`` key
+        ``{"sorting_id", "curation_id"}`` (a concat member's parent
+        curation), ``member_index`` is ``None`` for a ``CurationV2`` output,
+        and ``is_preview`` is ``CurationV2.has_unapplied_proposed_merges``.
+        It is evaluated one id at a time, so a consumer that stops at the
+        first preview reads no further curations.
+        """
+        merge_ids = list(merge_ids)
+        if not merge_ids:
+            return
+        restriction = [{"merge_id": mid} for mid in merge_ids]
+        merges_applied = CurationV2.proj("merges_applied")
+        fields = ("merge_id", "sorting_id", "curation_id", "merges_applied")
+        sources = {
+            row["merge_id"]: ("CurationV2", row)
+            for row in (cls.CurationV2 * merges_applied & restriction).fetch(
+                *fields, as_dict=True
+            )
+        }
+        if ConcatMemberCuration is not None:
+            member_rows = (
+                cls.ConcatMemberCuration * merges_applied & restriction
+            ).fetch(*fields, "member_index", as_dict=True)
+            sources.update(
+                (row["merge_id"], ("ConcatMemberCuration", row))
+                for row in member_rows
+            )
+        for mid in merge_ids:
+            if mid is None:
+                continue
+            # Fetched merge_ids are UUIDs; DataJoint restricts by a UUID
+            # string the same way, so look strings up as UUIDs too.
+            source = sources.get(
+                mid if isinstance(mid, uuid.UUID) else uuid.UUID(mid)
+            )
+            if source is None:
+                continue  # v0/v1 source
+            source_name, row = source
+            cur_key = {
+                "sorting_id": row["sorting_id"],
+                "curation_id": row["curation_id"],
+            }
+            yield (
+                mid,
+                source_name,
+                cur_key,
+                row.get("member_index"),
+                CurationV2.has_unapplied_proposed_merges(
+                    cur_key, merges_applied=row["merges_applied"]
+                ),
+            )
+
+    @classmethod
     def assert_decoding_merge_ids_ok(cls, merge_ids) -> None:
         """Validate merge_ids destined for a decoding group/consumer.
 
@@ -474,31 +534,20 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         if CurationV2 is None:
             return
         source_to_merges: dict = {}
-        for mid in merge_ids:
-            part = cls.CurationV2 & {"merge_id": mid}
-            source_identity = None
-            source_name = "CurationV2"
-            if part:
-                # The merge part's PK is ``merge_id``; the CurationV2 PK
-                # (sorting_id, curation_id) lives as secondary FK columns.
-                sorting_id, curation_id = part.fetch1(
-                    "sorting_id", "curation_id"
-                )
-                source_identity = str(sorting_id)
-            elif ConcatMemberCuration is not None:
-                part = cls.ConcatMemberCuration & {"merge_id": mid}
-                if part:
-                    sorting_id, curation_id, member_index = part.fetch1(
-                        "sorting_id", "curation_id", "member_index"
-                    )
-                    source_identity = f"{sorting_id}:member={member_index}"
-                    source_name = "ConcatMemberCuration"
-            if source_identity is None:
-                continue  # v0/v1 source
-
-            cur_key = {"sorting_id": sorting_id, "curation_id": curation_id}
+        for (
+            mid,
+            source_name,
+            cur_key,
+            member_index,
+            is_preview,
+        ) in cls._v2_preview_states(merge_ids):
+            source_identity = (
+                str(cur_key["sorting_id"])
+                if member_index is None
+                else f"{cur_key['sorting_id']}:member={member_index}"
+            )
             source_to_merges.setdefault(source_identity, []).append(mid)
-            if CurationV2.has_unapplied_proposed_merges(cur_key):
+            if is_preview:
                 raise ValueError(
                     f"merge_id {mid} is a {source_name} output "
                     f"(sorting_id={cur_key['sorting_id']}, "
@@ -575,29 +624,18 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         """
         if CurationV2 is None:
             return
-        for mid in merge_ids:
-            part = cls.CurationV2 & {"merge_id": mid}
-            source_name = "CurationV2"
-            if part:
-                sorting_id, curation_id = part.fetch1(
-                    "sorting_id", "curation_id"
-                )
-            elif ConcatMemberCuration is not None:
-                part = cls.ConcatMemberCuration & {"merge_id": mid}
-                if not part:
-                    continue  # v0/v1 source
-                sorting_id, curation_id = part.fetch1(
-                    "sorting_id", "curation_id"
-                )
-                source_name = "ConcatMemberCuration"
-            else:
-                continue
-            if CurationV2.has_unapplied_proposed_merges(
-                {"sorting_id": sorting_id, "curation_id": curation_id}
-            ):
+        for (
+            mid,
+            source_name,
+            cur_key,
+            _,
+            is_preview,
+        ) in cls._v2_preview_states(merge_ids):
+            if is_preview:
                 logger.warning(
                     f"merge_id {mid} is a {source_name} output "
-                    f"(sorting_id={sorting_id}, curation_id={curation_id}) "
+                    f"(sorting_id={cur_key['sorting_id']}, "
+                    f"curation_id={cur_key['curation_id']}) "
                     "created with apply_merge=False whose proposed merges are "
                     "NOT applied; the returned spike times are for the UNMERGED "
                     "(oversplit) units. Re-curate with apply_merge=True (or pick "
@@ -647,11 +685,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         """
         if len(merge_ids) < 2:
             return
-        sources = set(
-            (self & [{"merge_id": mid} for mid in merge_ids]).fetch(
-                self._reserved_sk
-            )
-        )
+        sources = set(self._merge_source_map(merge_ids).values())
         if len(sources) > 1:
             logger.warning(
                 "get_spike_times is aggregating spike trains across "
