@@ -737,11 +737,12 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             # V1 uses 'object_id', V0 uses 'units'
             file_loc = "object_id" if "object_id" in nwb_file else "units"
             units = nwb_file[file_loc]
-            # A zero-unit curation (v2 ``require_units=False`` path) writes an
-            # empty Units table with no ``spike_times`` column; indexing it
-            # would raise ``KeyError: 'spike_times'``. Such a row contributes
-            # no spike trains, so skip it. Populated v0/v1/v2 units tables
-            # always carry the column, so this never changes their behavior.
+            # A zero-unit sorting or curation (v1 with no units, or v2's
+            # ``require_units=False`` path) writes an empty Units table with
+            # no ``spike_times`` column; indexing it would raise
+            # ``KeyError: 'spike_times'``. Such a row contributes no spike
+            # trains, so skip it. Populated v0/v1/v2 units tables always
+            # carry the column, so this never changes their behavior.
             if "spike_times" not in units:
                 continue
             spike_times.extend(units["spike_times"].to_list())

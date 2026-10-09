@@ -407,8 +407,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 continue
 
             units_df = nwb_file[nwb_field_name]
-            # A zero-unit curation has a real, empty Units table but no
-            # ``spike_times`` column. It contributes no units to the group.
+            # A zero-unit sorting or curation (v1 or v2) has a real, empty
+            # Units table but no ``spike_times`` column. It contributes no
+            # units to the group.
             if "spike_times" not in units_df:
                 continue
 

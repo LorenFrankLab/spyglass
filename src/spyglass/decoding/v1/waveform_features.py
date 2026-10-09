@@ -257,10 +257,11 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
 
         nwb = SpikeSortingOutput().fetch_nwb(merge_key)[0]
         units = nwb.get(analysis_nwb_key)
-        # A zero-unit curation (v2 ``require_units=False`` path) writes an
-        # empty Units table with no ``spike_times`` column; indexing it would
-        # raise ``KeyError: 'spike_times'``. Guard on the column, not just the
-        # key, so a zero-unit v2 source yields an empty-but-valid feature row
+        # A zero-unit sorting or curation (v1 with no units, or v2's
+        # ``require_units=False`` path) writes an empty Units table with no
+        # ``spike_times`` column; indexing it would raise
+        # ``KeyError: 'spike_times'``. Guard on the column, not just the key,
+        # so a zero-unit source yields an empty-but-valid feature row
         # (matches the ``SpikeSortingOutput.get_spike_times`` zero-unit guard).
         spike_times = (
             units["spike_times"]
