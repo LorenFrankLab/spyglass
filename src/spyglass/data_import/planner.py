@@ -179,7 +179,9 @@ def plan_nwbfile(
     nwb_file_name : str
         The copy file registered in Nwbfile.
     config : dict, optional
-        Per-table config, as `populate_all_common` assembles it.
+        The whole config mapping, `{TableName: [rows]}`, as `merged_config`
+        assembles it. Handed to every table unsliced, because each one indexes
+        it by the name it declares.
     tables : list, optional
         Tables to plan. Default: every ingestion table, in dependency order.
     nwb_file : pynwb.NWBFile, optional
@@ -294,7 +296,6 @@ def plan_nwbfile(
 
     for table in tables:
         instance = table.as_instance
-        table_config = config.get(instance.camel_name, dict())
 
         blocked_by = _blocking_parents(instance, failed_tables)
         if blocked_by:
@@ -316,9 +317,17 @@ def plan_nwbfile(
             # The key space goes in, so a table resolving a reference to one
             # this ingestion also fills sees the planned rows. Tables are
             # planned in dependency order, so a parent's rows are already in it.
+            #
+            # The *whole* config, not `config[camel_name]`: every consumer
+            # indexes it by name itself -- the generic hook reads
+            # `config[self.camel_name]` and its parts, and an override reads
+            # whatever key it declares (`TaskEpoch` reads `Tasks`). Slicing
+            # here handed `Electrode` its own row list, so `list.get` raised
+            # and the table planned as `failed`, and handed `TaskEpoch` an
+            # empty dict, so config-declared tasks were silently dropped.
             plan = instance.plan_from_nwbfile(
                 nwb_file_name,
-                config=table_config,
+                config=config,
                 nwb_file=nwb_file,
                 key_space=key_space,
             )

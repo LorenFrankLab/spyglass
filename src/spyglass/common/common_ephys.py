@@ -166,36 +166,28 @@ class Electrode(SpyglassIngestion, dj.Imported):
             return [nwb_file.electrodes]
         return []
 
-    _cached_config = None
-
-    def insert_from_nwbfile(
-        self,
-        nwb_file_name: str,
-        config: dict = None,
-        dry_run: bool = False,
-    ):
-        """Insert Electrode entries from NWB file, using config for overrides."""
-        self._cached_config = config
-        try:
-            return_val = super().insert_from_nwbfile(
-                nwb_file_name, config, dry_run
-            )
-        finally:
-            self._cached_config = None
-        return return_val
-
     def generate_entries_from_nwb_object(
-        self, nwb_obj, base_key=None
+        self, nwb_obj, base_key=None, ctx=None
     ) -> IngestionEntries:
         """Generates a list of table entries from an NWB object.
 
-        Overrides Base to allow integrating info from config YAML for non-default columns.
-        """
-        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        Overrides Base to allow integrating info from config YAML for
+        non-default columns.
 
-        if (self._cached_config is None) or not (
-            electrode_config := self._cached_config.get("Electrode", None)
-        ):
+        The config comes from `ctx`, not from a cache on `self`. It was held on
+        `self` by an `insert_from_nwbfile` override, which the plan path never
+        calls -- so every config override was dropped while planning, which is
+        now the only ingest path.
+        """
+        # `ctx` forwarded: the electrodes table is a DynamicTable, so super()
+        # loops its rows and calls back into this method per row. Dropping it
+        # here would leave every per-row call without the config.
+        entries = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
+
+        config = ctx.config if ctx is not None else dict()
+        if not (electrode_config := config.get("Electrode", None)):
             return entries
         # map electrode id to dictof electrode information from config YAML
         for entry in entries.get(self, []):

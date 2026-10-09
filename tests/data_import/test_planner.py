@@ -633,3 +633,87 @@ def test_nothing_prompts_on_a_divergence(common, mini_copy_name, monkeypatch):
     plan = _divergent_plan(common, mini_copy_name)
     for policy in ("report", "raise"):
         planner._refuse(plan, allow_partial=False, on_divergence=policy)
+
+
+def test_a_table_is_handed_the_whole_config_not_its_own_slice(
+    common, mini_copy_name, mini_insert
+):
+    """Every config consumer indexes the mapping by a name it chooses.
+
+    The generic hook reads `config[self.camel_name]` and its parts; an
+    override reads whatever key it declares, so `TaskEpoch` reads `Tasks`.
+    Handing a table `config[camel_name]` instead gave `Electrode` its own row
+    list -- `list.get` raised, and the table planned as `failed` with zero
+    entries, blocking everything beneath it -- while `TaskEpoch` got an empty
+    dict and dropped config-declared tasks without a word.
+
+    Asserted on the shape each table receives, not on the entries it yields,
+    because the two defects had opposite symptoms and only the shape is
+    common to both.
+    """
+    from spyglass.utils.mixins.ingestion import IngestionMixin
+
+    config = {
+        "Electrode": [{"electrode_id": 0}],
+        "Tasks": [{"task_name": "whole_config_probe", "task_epochs": [99]}],
+    }
+
+    received = {}
+    original = IngestionMixin._parse
+
+    def capture(self, ctx):
+        received[self.camel_name] = ctx.config
+        return original(self, ctx)
+
+    IngestionMixin._parse = capture
+    try:
+        plan_nwbfile(
+            mini_copy_name,
+            config=config,
+            tables=[common.Electrode, common.TaskEpoch],
+            force_replan=True,
+        )
+    finally:
+        IngestionMixin._parse = original
+
+    for name in ("Electrode", "TaskEpoch"):
+        assert name in received, f"{name} never parsed"
+        assert received[name] == config, (
+            f"{name} was handed {received[name]!r} rather than the whole "
+            "config; it indexes the mapping by its own key"
+        )
+
+
+def test_electrode_config_reaches_the_plan(common, mini_copy_name, mini_insert):
+    """A config override must land on the planned row, not only on an insert.
+
+    `Electrode` held the config on `self` via an `insert_from_nwbfile`
+    override, which the plan path never calls -- so on the only ingest path
+    there is, every override was dropped. Nothing failed; the rows were just
+    quietly wrong.
+    """
+    target = 0
+    config = {"Electrode": [{"electrode_id": target, "filtering": "probe"}]}
+
+    plan = plan_nwbfile(
+        mini_copy_name,
+        config=config,
+        tables=[common.Electrode],
+        force_replan=True,
+    )
+
+    electrode = common.Electrode().full_table_name
+    rows = [
+        row
+        for table_plan in plan.table_plans
+        for tbl, planned in table_plan.entries
+        if getattr(tbl, "full_table_name", None) == electrode
+        for row in planned
+        if row.get("electrode_id") == target
+    ]
+
+    assert rows, f"Electrode planned no row for electrode_id {target}"
+    assert rows[0]["filtering"] == "probe", (
+        "the config override did not reach the planned row: "
+        f"{rows[0].get('filtering')!r}"
+    )
