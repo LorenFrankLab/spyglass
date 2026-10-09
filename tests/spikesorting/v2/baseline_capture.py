@@ -568,6 +568,10 @@ def _compute_invariant_fingerprints(
             & {"sorter": sorter, "sorter_param_name": sorter_param_name}
         ).fetch1("sorter_params"),
     )
+    if sorter == "clusterless_thresholder":
+        # v1 detects peaks with MAD-multiplier thresholds only, so its rows
+        # carry no ``threshold_unit``; record the unit v2 rows state.
+        canonical_sorter_params.setdefault("threshold_unit", "mad")
 
     return {
         "nwb_sha256": nwb_sha256,
@@ -930,8 +934,13 @@ def _ensure_smoke_sorter_param_row(sorter_param_name: str) -> None:
     # non-int of type 'float'``. v1's ``SpikeSorterParameters``
     # schema also expects the legacy ``outputs`` / ``random_chunk_kwargs``
     # keys that v2's pydantic-validated schema drops; supply them
-    # here only.
+    # here only. v2's ``threshold_unit`` is not a SpikeInterface 0.99
+    # ``detect_peaks`` argument: v1's threshold is always a MAD multiplier,
+    # so the v1 row omits it (``_compute_invariant_fingerprints`` restores it
+    # for parity).
     v1_payload = dict(SMOKE_CLUSTERLESS_PARAMS)
+    threshold_unit = v1_payload.pop("threshold_unit")
+    assert threshold_unit == "mad", threshold_unit
     v1_payload.update({"outputs": "sorting", "random_chunk_kwargs": {}})
 
     # v1 ``SpikeSorterParameters`` lives in a schema that does NOT honor
