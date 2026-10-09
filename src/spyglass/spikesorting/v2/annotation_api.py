@@ -7,7 +7,6 @@ database connection at import time.
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -18,10 +17,6 @@ from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
 from spyglass.spikesorting.v2.curation_api import CurationRef, EvaluationResult
 
 AnnotationValueType = Literal["float", "int", "bool", "text"]
-
-
-def _uuid(value) -> uuid.UUID:
-    return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
 
 
 @dataclass(frozen=True)

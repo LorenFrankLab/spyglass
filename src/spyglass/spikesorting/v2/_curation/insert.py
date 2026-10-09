@@ -353,12 +353,12 @@ def assert_child_reuse_for_merge_wrapper(
     reuse_existing: bool,
     wrapper_name: str,
 ) -> None:
-    """Prevent merge wrappers from reusing an unrelated root curation."""
+    """Prevent child-curation wrappers from reusing an unrelated root."""
     if not reuse_existing or parent_curation_id != -1:
         return
     raise ValueError(
         f"CurationV2.{wrapper_name}(reuse_existing=True) requires an "
         "explicit parent_curation_id. Root curation reuse returns the "
-        "existing root row and would ignore the requested merge/proposal; "
+        "existing root row and would ignore the requested edits; "
         "branch from an existing curation instead."
     )

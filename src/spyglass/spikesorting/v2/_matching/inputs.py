@@ -834,10 +834,8 @@ def _input_anchor_sort_group(sorting_id) -> tuple[str, int]:
     The recording of a single-recording sort, or the first member of a
     concatenation sort.
     """
+    from spyglass.spikesorting.v2._sorting.fetch import first_concat_member
     from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecordingSelection,
-    )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     source = SortingSelection.resolve_source({"sorting_id": sorting_id})
@@ -846,17 +844,7 @@ def _input_anchor_sort_group(sorting_id) -> tuple[str, int]:
             "nwb_file_name", "sort_group_id"
         )
     else:
-        first = (
-            ConcatenatedRecordingSelection.MemberSnapshot & source.key
-        ).fetch(
-            "nwb_file_name",
-            "sort_group_id",
-            as_dict=True,
-            order_by="member_index",
-            limit=1,
-        )[
-            0
-        ]
+        first, _ = first_concat_member(source.key)
         nwb_file_name, sort_group_id = (
             first["nwb_file_name"],
             first["sort_group_id"],

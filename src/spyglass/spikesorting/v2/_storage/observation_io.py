@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from itertools import pairwise
 from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
@@ -232,12 +231,10 @@ def review_timeline_from_inputs(inputs: ReviewTimelineInputs):
     from pynwb import NWBHDF5IO
 
     from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _segment_times_at,
-        base_intervals_and_gaps,
-    )
+    from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
         artifact_frame_ranges,
+        boundary_spans_from_timestamps,
     )
     from spyglass.spikesorting.v2._recording.source import read_persisted_traces
 
@@ -257,12 +254,7 @@ def review_timeline_from_inputs(inputs: ReviewTimelineInputs):
     mappings = []
 
     def add_member(member, name, offset):
-        boundaries = np.r_[
-            0,
-            base_intervals_and_gaps(member).gap_after + 1,
-            member.get_num_samples(),
-        ]
-        for start, stop in pairwise(boundaries):
+        for start, stop in boundary_spans_from_timestamps(member):
             original = float(_segment_times_at(member, np.array([start]))[0])
             mappings.append(
                 (

@@ -8,15 +8,13 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, get_args
 
 from spyglass.spikesorting.v2._core.db_locking import advisory_key_lock
 from spyglass.spikesorting.v2._orchestration.types import StageStatus
 
 # Closed vocabulary for stage receipts: work created, reused, or omitted.
-_STAGE_STATUSES: frozenset[StageStatus] = frozenset(
-    {"computed", "reused", "skipped"}
-)
+_STAGE_STATUSES: frozenset[StageStatus] = frozenset(get_args(StageStatus))
 
 
 def _run_stage(

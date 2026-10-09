@@ -31,6 +31,7 @@ from spyglass.spikesorting.v2.curation_api import (
     CurationRef,
     EvaluationResult,
     EvaluationSpec,
+    _uuid,
 )
 from spyglass.spikesorting.v2.exceptions import (
     FigPackIdentityError,
@@ -49,10 +50,6 @@ if TYPE_CHECKING:
     from spyglass.spikesorting.v2._review.notebook import ReviewCommitPanel
 
 ReviewStageState = Literal["computed", "reused", "complete"]
-
-
-def _uuid(value) -> uuid.UUID:
-    return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
 
 
 def _label_snapshot(

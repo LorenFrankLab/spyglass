@@ -1324,12 +1324,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         )
         apply_merge = manual_curation_applies_merges(merge_action, merge_groups)
 
-        if reuse_existing and parent_curation_id == -1:
-            raise ValueError(
-                "CurationV2.save_manual_curation(reuse_existing=True) requires "
-                "an explicit parent_curation_id; root reuse would return the "
-                "existing root row and ignore the manual edits."
-            )
+        _curation_insert.assert_child_reuse_for_merge_wrapper(
+            parent_curation_id=parent_curation_id,
+            reuse_existing=reuse_existing,
+            wrapper_name="save_manual_curation",
+        )
 
         return cls.insert_curation(
             sorting_key=sorting_key,
