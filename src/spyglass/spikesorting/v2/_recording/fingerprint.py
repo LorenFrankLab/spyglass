@@ -239,44 +239,25 @@ def recording_content_fingerprint(
 
 
 def recording_artifact_lock(recording_id, *, timeout: float = -1):
-    """Return a cross-process lock serializing one recording's artifact slot.
+    """Return the cross-process lock for one recording's artifact slot.
 
-    Mirrors :func:`._analyzer_cache.analyzer_cache_lock`: a per-
-    ``recording_id`` ``filelock.FileLock`` so a rebuild (``get_recording`` read-
-    repair / ``_rebuild_nwb_artifact``) and a reclamation
-    (``RecordingArtifactRecompute.delete_files``) of the *same* recording can
-    never interleave -- no unlink racing a write, no reader seeing a
-    half-written HDF5. Different recordings stay free to run in parallel.
-
-    The lock file lives under the shared analyzer/lock root
-    (:func:`._analyzer_cache.analyzer_cache_root`), a stable per-install path --
-    NOT a per-worker temp. On multiple hosts the directory must be shared and
-    its mount must provide cross-host POSIX file locking, as required by
-    ``analyzer_cache_lock``. Validate that deployment contract before enabling
-    shared-storage workers; lock-acquisition errors propagate.
+    See :func:`._storage.analyzer_cache.artifact_slot_lock`.
 
     Parameters
     ----------
     recording_id
         The recording whose canonical artifact the caller will mutate.
     timeout : float, optional
-        Seconds to wait before raising ``filelock.Timeout``. Default ``-1``
-        blocks indefinitely (serialize-don't-fail); the lock releases when the
-        holding process exits, so a crashed job cannot wedge the next one.
+        Seconds to wait before raising ``filelock.Timeout``; ``-1`` (default)
+        blocks.
 
     Returns
     -------
     filelock.FileLock
-        An unacquired lock; use it as a context manager or call ``.acquire()``.
+        An unacquired lock.
     """
-    from filelock import FileLock
-
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        analyzer_cache_root,
+        artifact_slot_lock,
     )
 
-    root = analyzer_cache_root()
-    root.mkdir(parents=True, exist_ok=True)
-    return FileLock(
-        str(root / f"recording_{recording_id}.artifact.lock"), timeout=timeout
-    )
+    return artifact_slot_lock("recording", recording_id, timeout=timeout)

@@ -504,6 +504,51 @@ def analyzer_cache_lock(sorting_id):
     )
 
 
+def artifact_slot_lock(prefix: str, slot_id, *, timeout: float = -1):
+    """Return a cross-process lock serializing one trace artifact's slot.
+
+    A per-artifact ``filelock.FileLock`` so a rebuild (``get_recording``
+    read-repair / ``_rebuild_nwb_artifact``) and a reclamation
+    (``RecordingArtifactRecompute.delete_files``) of the *same* artifact can
+    never interleave -- no unlink racing a write, no reader seeing a
+    half-written HDF5. Different artifacts stay free to run in parallel. The
+    ``prefix`` names the artifact kind, so a single-session, concatenated and
+    motion-corrected recording never share a lock file even if their ids
+    shared a UUID.
+
+    The lock file ``{prefix}_{slot_id}.artifact.lock`` lives under
+    :func:`analyzer_cache_root`, a stable per-install path -- NOT a per-worker
+    temp. On multiple hosts the directory must be shared and its mount must
+    provide cross-host POSIX file locking, as required by
+    :func:`analyzer_cache_lock`. Validate that deployment contract before
+    enabling shared-storage workers; lock-acquisition errors propagate.
+
+    Parameters
+    ----------
+    prefix : str
+        Artifact kind, e.g. ``"recording"``, ``"concat_recording"`` or
+        ``"motion_corrected"``.
+    slot_id
+        The id of the artifact whose canonical file the caller will mutate.
+    timeout : float, optional
+        Seconds to wait before raising ``filelock.Timeout``. Default ``-1``
+        blocks indefinitely (serialize-don't-fail); the lock releases when the
+        holding process exits, so a crashed job cannot wedge the next one.
+
+    Returns
+    -------
+    filelock.FileLock
+        An unacquired lock; use it as a context manager or call ``.acquire()``.
+    """
+    from filelock import FileLock
+
+    root = analyzer_cache_root()
+    root.mkdir(parents=True, exist_ok=True)
+    return FileLock(
+        str(root / f"{prefix}_{slot_id}.artifact.lock"), timeout=timeout
+    )
+
+
 _POPULATING_SORTING_IDS: ContextVar[tuple[str, ...]] = ContextVar(
     "analyzer_populating_sorting_ids", default=()
 )

@@ -156,49 +156,29 @@ def member_set_hash(snapshot_rows: list[dict]) -> str:
 
 
 def concat_recording_artifact_lock(concat_recording_id, *, timeout: float = -1):
-    """Return a cross-process lock serializing one concat artifact's slot.
+    """Return the cross-process lock for one concat artifact's slot.
 
-    The concat analog of :func:`spyglass.spikesorting.v2._recording.fingerprint.recording_artifact_lock`:
-    a per-``concat_recording_id`` ``filelock.FileLock`` so a rebuild
-    (``ConcatenatedRecording.get_recording`` read-repair /
-    ``_rebuild_nwb_artifact``) of the *same* concat can never interleave with
-    another -- no unlink racing a write, no reader seeing a half-written HDF5.
-    Different concats stay free to run in parallel. A distinct filename prefix
-    (``concat_recording_*``) keeps it from colliding with the single-session
-    recording lock even if a ``recording_id`` and a ``concat_recording_id`` ever
-    shared a UUID.
-
-    The lock file lives under the shared analyzer/lock root
-    (:func:`._analyzer_cache.analyzer_cache_root`), a stable per-install path, so
-    all workers must resolve the same file. Multi-host deployments require
-    cross-host POSIX file locking on that mount, as documented for the recording
-    and analyzer locks. Lock-acquisition errors propagate.
+    See :func:`._storage.analyzer_cache.artifact_slot_lock`.
 
     Parameters
     ----------
     concat_recording_id
         The concat whose canonical artifact the caller will mutate.
     timeout : float, optional
-        Seconds to wait before raising ``filelock.Timeout``. Default ``-1``
-        blocks indefinitely (serialize-don't-fail); the lock releases when the
-        holding process exits, so a crashed job cannot wedge the next one.
+        Seconds to wait before raising ``filelock.Timeout``; ``-1`` (default)
+        blocks.
 
     Returns
     -------
     filelock.FileLock
-        An unacquired lock; use it as a context manager or call ``.acquire()``.
+        An unacquired lock.
     """
-    from filelock import FileLock
-
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        analyzer_cache_root,
+        artifact_slot_lock,
     )
 
-    root = analyzer_cache_root()
-    root.mkdir(parents=True, exist_ok=True)
-    return FileLock(
-        str(root / f"concat_recording_{concat_recording_id}.artifact.lock"),
-        timeout=timeout,
+    return artifact_slot_lock(
+        "concat_recording", concat_recording_id, timeout=timeout
     )
 
 

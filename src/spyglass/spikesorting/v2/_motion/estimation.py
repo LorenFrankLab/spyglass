@@ -1788,12 +1788,9 @@ def motion_corrected_identity_payload(
 def motion_corrected_recording_artifact_lock(
     motion_corrected_recording_id, *, timeout: float = -1
 ):
-    """Return a cross-process lock serializing one corrected artifact's slot.
+    """Return the cross-process lock for one corrected artifact's slot.
 
-    The analog of :func:`spyglass.spikesorting.v2._recording.fingerprint.recording_artifact_lock`
-    for a motion-corrected recording: a rebuild of the same artifact never
-    interleaves with another. Its filename prefix keeps it apart from the
-    recording and concat locks.
+    See :func:`._storage.analyzer_cache.artifact_slot_lock`.
 
     Parameters
     ----------
@@ -1808,20 +1805,12 @@ def motion_corrected_recording_artifact_lock(
     filelock.FileLock
         An unacquired lock.
     """
-    from filelock import FileLock
-
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        analyzer_cache_root,
+        artifact_slot_lock,
     )
 
-    root = analyzer_cache_root()
-    root.mkdir(parents=True, exist_ok=True)
-    return FileLock(
-        str(
-            root
-            / f"motion_corrected_{motion_corrected_recording_id}.artifact.lock"
-        ),
-        timeout=timeout,
+    return artifact_slot_lock(
+        "motion_corrected", motion_corrected_recording_id, timeout=timeout
     )
 
 
