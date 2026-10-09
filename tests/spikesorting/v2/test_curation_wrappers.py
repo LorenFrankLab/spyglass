@@ -1,11 +1,11 @@
-"""Tests for the friendly CurationV2 wrappers + summarize_curation.
+"""Tests for the friendly curation writers + summarize_curation.
 
-The three write wrappers (create_initial_curation / propose_merge_curation /
-create_merged_curation) are thin intent-first sugar over the expert
-``insert_curation``; these tests pin that they pre-fill the right arguments,
-inherit its validation (not re-implement it), and thread ``parent_curation_id``
-so merges branch off an initial curation. ``summarize_curation`` is a pure read
-accessor whose fields are checked against the underlying parts/registration.
+``create_initial_curation`` / ``save_manual_curation`` and the public merge
+functions (``preview_merges`` / ``commit_merges``) are thin sugar over the
+expert ``insert_curation``; these tests pin that they pre-fill the right
+arguments, inherit its validation (not re-implement it), and branch merges off
+the parent curation. ``summarize_curation`` is a pure read accessor whose
+fields are checked against the underlying parts/registration.
 
 All DB-tier; the single-unit checks reuse the shared package-scoped
 ``populated_sorting`` fixture, while the merge checks use a module-scoped sort
@@ -38,7 +38,7 @@ _POLYMER_60S_PATH = (
 def polymer_60s_sort(dj_conn):
     """A MountainSort5 sort that yields several well-isolated single units.
 
-    The merge wrappers operate on distinct single units (e.g. merging an
+    The merge tests operate on distinct single units (e.g. merging an
     oversplit cluster back together), so they need a sort with at least two
     units. The smoke sort yields only one; the 60s polymer shank reliably
     yields several. Module-scoped so the one 60s sort is shared across the
@@ -103,14 +103,18 @@ def test_create_initial_curation_equiv(populated_sorting):
 
 @pytest.mark.database
 @pytest.mark.slow
-def test_propose_merge_records_not_applies(polymer_60s_sort):
-    """``propose_merge_curation`` records merges without applying them."""
+def test_preview_merges_records_not_applies(polymer_60s_sort):
+    """``preview_merges`` records merges without applying them."""
     from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import create_initial_curation
 
     a, b = _two_unit_ids(polymer_60s_sort)
     clear_curations_for(polymer_60s_sort)
-    key = CurationV2.propose_merge_curation(
-        polymer_60s_sort, merge_groups=[[a, b]]
+    root = create_initial_curation(polymer_60s_sort)
+    key = root.preview_merges([[a, b]]).as_key()
+    assert key["curation_id"] != root.curation_id
+    assert (
+        int((CurationV2 & key).fetch1("parent_curation_id")) == root.curation_id
     )
     assert bool((CurationV2 & key).fetch1("merges_applied")) is False
     # Preview keeps every original unit (no contributors absorbed).
@@ -124,15 +128,18 @@ def test_propose_merge_records_not_applies(polymer_60s_sort):
 
 @pytest.mark.database
 @pytest.mark.slow
-def test_create_merged_curation_commits(polymer_60s_sort):
-    """``create_merged_curation`` commits the merged unit set."""
+def test_commit_merges_commits(polymer_60s_sort):
+    """``commit_merges`` commits the merged unit set."""
     from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import create_initial_curation
 
     a, b = _two_unit_ids(polymer_60s_sort)
     n_sort_units = len(_unit_ids(polymer_60s_sort))
     clear_curations_for(polymer_60s_sort)
-    key = CurationV2.create_merged_curation(
-        polymer_60s_sort, merge_groups=[[a, b]]
+    root = create_initial_curation(polymer_60s_sort)
+    key = root.commit_merges([[a, b]]).as_key()
+    assert (
+        int((CurationV2 & key).fetch1("parent_curation_id")) == root.curation_id
     )
     assert bool((CurationV2 & key).fetch1("merges_applied")) is True
     assert CurationV2.summarize_curation(key)["is_merge_preview"] is False
@@ -142,31 +149,26 @@ def test_create_merged_curation_commits(polymer_60s_sort):
 
 @pytest.mark.database
 @pytest.mark.slow
-def test_create_merged_curation_reuses_matching_child(polymer_60s_sort):
-    """``reuse_existing=True`` makes a manual-merge notebook cell rerunnable."""
+def test_commit_merges_reuses_matching_child(polymer_60s_sort):
+    """Reuse by default makes a manual-merge notebook cell rerunnable."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2._core.enums import CurationLabel
+    from spyglass.spikesorting.v2.curation_api import create_initial_curation
 
     a, b = _two_unit_ids(polymer_60s_sort)
     all_unit_ids = _unit_ids(polymer_60s_sort)
     merged_unit_id = max(all_unit_ids) + 1
     clear_curations_for(polymer_60s_sort)
-    root = CurationV2.create_initial_curation(polymer_60s_sort)
-    kwargs = {
-        "sorting_key": polymer_60s_sort,
-        "parent_curation_id": root["curation_id"],
-        "description": "manual burst-pair merge",
-        "reuse_existing": True,
-    }
+    root = create_initial_curation(polymer_60s_sort)
 
-    first = CurationV2.create_merged_curation(
-        merge_groups=[[a, b]],
+    first = root.commit_merges(
+        [[a, b]],
         labels={merged_unit_id: [CurationLabel.accept]},
-        **kwargs,
+        description="manual burst-pair merge",
     )
     child_restriction = CurationV2 & {
-        "sorting_id": first["sorting_id"],
-        "parent_curation_id": root["curation_id"],
+        "sorting_id": first.sorting_id,
+        "parent_curation_id": root.curation_id,
         "description": "manual burst-pair merge",
         "merges_applied": True,
     }
@@ -176,99 +178,49 @@ def test_create_merged_curation_reuses_matching_child(polymer_60s_sort):
     # instead of creating a new curation / merge_id on notebook re-run.
     # Enum and string labels are semantically equivalent at insert time, so
     # reuse_existing compares them through the same canonicalization.
-    second = CurationV2.create_merged_curation(
-        merge_groups=[[b, a]],
+    second = root.commit_merges(
+        [[b, a]],
         labels={merged_unit_id: ["accept"]},
-        **kwargs,
+        description="manual burst-pair merge",
     )
     assert second == first
     assert len(child_restriction) == n_children
 
 
 @pytest.mark.database
-@pytest.mark.parametrize(
-    "wrapper_name", ["propose_merge_curation", "create_merged_curation"]
-)
-def test_merge_wrappers_reject_root_reuse_existing(
-    populated_sorting, wrapper_name
-):
-    """Merge-wrapper reuse must branch from an explicit parent curation."""
-    from spyglass.spikesorting.v2.curation import CurationV2
+def test_merge_facade_forwards_to_insert_curation(planted_two_unit_sort):
+    """``preview_merges`` / ``commit_merges`` forward apply_merge and parent.
 
-    clear_curations_for(populated_sorting)
-    CurationV2.create_initial_curation(populated_sorting)
-    wrapper = getattr(CurationV2, wrapper_name)
-
-    with pytest.raises(
-        ValueError, match="reuse_existing=True.*parent_curation_id"
-    ):
-        wrapper(populated_sorting, merge_groups=[], reuse_existing=True)
-
-
-@pytest.mark.database
-def test_wrappers_inherit_singleton_rejection(populated_sorting):
-    """A singleton merge group raises the SAME error ``insert_curation`` does.
-
-    Proves the wrapper does not bypass or weaken the >=2-member validation.
+    Pins the forwarding contract -- the only thing that distinguishes a
+    preview from a commit, plus the parent threading -- on the planted
+    two-unit sort, so it runs without the 60s fixture; the merge BEHAVIOR on
+    real units is covered by the 60s-fixture tests above.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
-
-    ids = _unit_ids(populated_sorting)
-    if not ids:
-        pytest.skip("need >=1 sort unit")
-    a = ids[0]
-    clear_curations_for(populated_sorting)
-
-    with pytest.raises(ValueError) as wrap_exc:
-        CurationV2.propose_merge_curation(populated_sorting, merge_groups=[[a]])
-    with pytest.raises(ValueError) as expert_exc:
-        CurationV2.insert_curation(
-            sorting_key=populated_sorting,
-            merge_groups=[[a]],
-            apply_merge=False,
-        )
-    assert str(wrap_exc.value) == str(expert_exc.value)
-
-
-@pytest.mark.database
-def test_merge_wrappers_forward_args(populated_sorting):
-    """The merge wrappers forward apply_merge and parent_curation_id.
-
-    Pins the forwarding contract -- the only thing that distinguishes
-    ``propose_merge_curation`` from ``create_merged_curation``, plus the
-    DAG-branch threading -- on the always-present smoke fixture. An empty
-    ``merge_groups`` (no merges) isolates the forwarding without needing >=2
-    units, so this runs on every PR; the apply-vs-preview merge BEHAVIOR
-    (which needs multiple units) is covered by the 60s-fixture tests.
-    """
-    from spyglass.spikesorting.v2.curation import CurationV2
-
-    # apply_merge forwarding: propose -> not applied, create_merged -> applied.
-    clear_curations_for(populated_sorting)
-    preview = CurationV2.propose_merge_curation(
-        populated_sorting, merge_groups=[]
+    from spyglass.spikesorting.v2.curation_api import (
+        commit_merges,
+        create_initial_curation,
+        preview_merges,
     )
-    assert bool((CurationV2 & preview).fetch1("merges_applied")) is False
 
-    clear_curations_for(populated_sorting)
-    applied = CurationV2.create_merged_curation(
-        populated_sorting, merge_groups=[]
-    )
-    assert bool((CurationV2 & applied).fetch1("merges_applied")) is True
-
-    # parent_curation_id forwarding: a proposal branches off an initial root.
-    clear_curations_for(populated_sorting)
-    root = CurationV2.create_initial_curation(populated_sorting)
-    child = CurationV2.propose_merge_curation(
-        populated_sorting,
-        merge_groups=[],
-        parent_curation_id=root["curation_id"],
-    )
-    assert child["curation_id"] != root["curation_id"]
-    assert (
-        int((CurationV2 & child).fetch1("parent_curation_id"))
-        == root["curation_id"]
-    )
+    sorting_key = dict(planted_two_unit_sort)
+    a, b = _two_unit_ids(sorting_key)
+    clear_curations_for(sorting_key)
+    try:
+        root = create_initial_curation(sorting_key)
+        for merge, applied in ((preview_merges, False), (commit_merges, True)):
+            child = merge(
+                parent_curation=root,
+                groups=[[a, b]],
+                description=f"{merge.__name__} child",
+            ).as_key()
+            row = (CurationV2 & child).fetch1()
+            assert row["sorting_id"] == root.sorting_id
+            assert int(row["parent_curation_id"]) == root.curation_id
+            assert bool(row["merges_applied"]) is applied
+            assert row["description"] == f"{merge.__name__} child"
+    finally:
+        clear_curations_for(sorting_key)
 
 
 @pytest.mark.database
@@ -429,27 +381,6 @@ def test_save_manual_curation_rejects_root_reuse(
 
 @pytest.mark.database
 @pytest.mark.slow
-def test_propose_merge_off_existing_initial_curation(polymer_60s_sort):
-    """A merge proposal branches off an initial curation (DAG child)."""
-    from spyglass.spikesorting.v2.curation import CurationV2
-
-    a, b = _two_unit_ids(polymer_60s_sort)
-    clear_curations_for(polymer_60s_sort)
-    root = CurationV2.create_initial_curation(polymer_60s_sort)
-    child = CurationV2.propose_merge_curation(
-        polymer_60s_sort,
-        merge_groups=[[a, b]],
-        parent_curation_id=root["curation_id"],
-    )
-    assert child["curation_id"] != root["curation_id"]
-    assert (
-        int((CurationV2 & child).fetch1("parent_curation_id"))
-        == root["curation_id"]
-    )
-
-
-@pytest.mark.database
-@pytest.mark.slow
 def test_summarize_curation_fields(populated_sorting):
     """``summarize_curation`` reports the curation's fields from the parts.
 
@@ -569,11 +500,12 @@ def test_summarize_curation_pk_guard_runs_before_schema_access(
 
 @pytest.mark.database
 @pytest.mark.slow
-def test_merge_wrappers_forward_allow_custom_labels(planted_two_unit_sort):
-    """The merge wrappers forward allow_custom_labels, so a child inheriting a
+def test_commit_merges_forwards_allow_custom_labels(planted_two_unit_sort):
+    """``commit_merges`` forwards allow_custom_labels, so a child inheriting a
     custom (non-canonical) parent label does not fail the child insert.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import create_initial_curation
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sorting_key = dict(planted_two_unit_sort)
@@ -583,7 +515,7 @@ def test_merge_wrappers_forward_allow_custom_labels(planted_two_unit_sort):
     clear_curations_for(planted_two_unit_sort)
     try:
         # A root carrying a CUSTOM label on unit 0 (needs the flag here too).
-        root = CurationV2.create_initial_curation(
+        root = create_initial_curation(
             sorting_key,
             labels={unit_ids[0]: ["my_custom"]},
             allow_custom_labels=True,
@@ -591,20 +523,15 @@ def test_merge_wrappers_forward_allow_custom_labels(planted_two_unit_sort):
         # Merging [0, 1] inherits unit 0's custom label onto the merged unit;
         # without forwarding the flag the child insert re-rejects it.
         with pytest.raises(ValueError, match="not in CurationLabel"):
-            CurationV2.create_merged_curation(
-                sorting_key,
-                merge_groups=[[unit_ids[0], unit_ids[1]]],
-                parent_curation_id=root["curation_id"],
-            )
-        merged = CurationV2.create_merged_curation(
-            sorting_key,
-            merge_groups=[[unit_ids[0], unit_ids[1]]],
-            parent_curation_id=root["curation_id"],
-            allow_custom_labels=True,
+            root.commit_merges([[unit_ids[0], unit_ids[1]]])
+        merged = root.commit_merges(
+            [[unit_ids[0], unit_ids[1]]], allow_custom_labels=True
         )
         merged_labels = {
             r["curation_label"]
-            for r in (CurationV2.UnitLabel & merged).fetch(as_dict=True)
+            for r in (CurationV2.UnitLabel & merged.as_key()).fetch(
+                as_dict=True
+            )
         }
         assert "my_custom" in merged_labels
     finally:

@@ -1098,142 +1098,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def propose_merge_curation(
-        cls,
-        sorting_key: dict,
-        merge_groups: list[list[int]],
-        labels: dict | None = None,
-        parent_curation_id: int = -1,
-        description: str = "",
-        reuse_existing: bool = False,
-        label_policy: str = "inherit",
-        allow_custom_labels: bool = False,
-    ) -> dict:
-        """Record proposed merges WITHOUT applying them (reviewable).
-
-        Intent-first sugar over :meth:`insert_curation` that pre-fills
-        ``apply_merge=False`` with ``merge_groups``. Every original unit keeps
-        its id; the proposed merges live in ``CurationV2.MergeGroup`` and are
-        applied lazily by ``get_merged_sorting``. ``parent_curation_id``
-        (default ``-1``) lets the proposal branch off an existing initial
-        curation rather than always rooting a new one. The ≥2-member-per-group
-        rule is enforced by ``insert_curation`` (not re-implemented here).
-
-        Parameters
-        ----------
-        sorting_key
-            ``{sorting_id}`` of the upstream Sorting row.
-        merge_groups
-            List of merge groups, each a list of ``unit_id`` ints (≥2 each).
-        labels
-            Optional ``unit_id -> [label, ...]`` dict.
-        parent_curation_id
-            ``-1`` to root a new curation, or an existing ``curation_id`` of
-            the same sort to branch off it.
-        description
-            Free-text description.
-        reuse_existing
-            If True, reuse an existing child with the same parent, labels,
-            proposed merge groups, description, and provenance. Requires an
-            explicit ``parent_curation_id``; root reuse would return the
-            existing root and ignore the proposed merge.
-
-        Returns
-        -------
-        dict
-            ``{"sorting_id", "curation_id"}`` of the curation.
-
-        See Also
-        --------
-        insert_curation : the full expert API this wraps.
-        create_merged_curation : commit the merges instead of proposing them.
-        """
-        _curation_insert.assert_child_reuse_for_merge_wrapper(
-            parent_curation_id=parent_curation_id,
-            reuse_existing=reuse_existing,
-            wrapper_name="propose_merge_curation",
-        )
-        return cls.insert_curation(
-            sorting_key=sorting_key,
-            labels=labels,
-            merge_groups=merge_groups,
-            apply_merge=False,
-            parent_curation_id=parent_curation_id,
-            description=description,
-            reuse_existing=reuse_existing,
-            label_policy=label_policy,
-            allow_custom_labels=allow_custom_labels,
-        )
-
-    @classmethod
-    def create_merged_curation(
-        cls,
-        sorting_key: dict,
-        merge_groups: list[list[int]],
-        labels: dict | None = None,
-        parent_curation_id: int = -1,
-        description: str = "",
-        reuse_existing: bool = False,
-        label_policy: str = "inherit",
-        allow_custom_labels: bool = False,
-    ) -> dict:
-        """Create a new curation with merges applied (committed unit set).
-
-        Intent-first sugar over :meth:`insert_curation` that pre-fills
-        ``apply_merge=True`` with ``merge_groups``: each merged unit's spike
-        train is the union of its contributors and the contributors are
-        absorbed (the curated unit set shrinks). ``parent_curation_id``
-        (default ``-1``) lets the merged curation branch off an existing
-        initial curation. The ≥2-member-per-group rule is enforced by
-        ``insert_curation`` (not re-implemented here).
-
-        Parameters
-        ----------
-        sorting_key
-            ``{sorting_id}`` of the upstream Sorting row.
-        merge_groups
-            List of merge groups, each a list of ``unit_id`` ints (≥2 each).
-        labels
-            Optional ``unit_id -> [label, ...]`` dict.
-        parent_curation_id
-            ``-1`` to root a new curation, or an existing ``curation_id`` of
-            the same sort to branch off it.
-        description
-            Free-text description.
-        reuse_existing
-            If True, reuse an existing child with the same parent, labels,
-            applied merge groups, description, and provenance. Requires an
-            explicit ``parent_curation_id``; root reuse would return the
-            existing root and ignore the requested merge.
-
-        Returns
-        -------
-        dict
-            ``{"sorting_id", "curation_id"}`` of the curation.
-
-        See Also
-        --------
-        insert_curation : the full expert API this wraps.
-        propose_merge_curation : record the merges without applying them.
-        """
-        _curation_insert.assert_child_reuse_for_merge_wrapper(
-            parent_curation_id=parent_curation_id,
-            reuse_existing=reuse_existing,
-            wrapper_name="create_merged_curation",
-        )
-        return cls.insert_curation(
-            sorting_key=sorting_key,
-            labels=labels,
-            merge_groups=merge_groups,
-            apply_merge=True,
-            parent_curation_id=parent_curation_id,
-            description=description,
-            reuse_existing=reuse_existing,
-            label_policy=label_policy,
-            allow_custom_labels=allow_custom_labels,
-        )
-
-    @classmethod
     def save_manual_curation(
         cls,
         sorting_key: dict,
@@ -1273,10 +1137,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         )
         apply_merge = manual_curation_applies_merges(merge_action, merge_groups)
 
-        _curation_insert.assert_child_reuse_for_merge_wrapper(
+        _curation_insert.assert_child_reuse_has_parent(
             parent_curation_id=parent_curation_id,
             reuse_existing=reuse_existing,
-            wrapper_name="save_manual_curation",
+            caller="save_manual_curation",
         )
 
         return cls.insert_curation(
@@ -1801,7 +1665,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             "(apply_merge=False with a proposed merge group that has not been "
             "applied), not a committed curation state. Evaluating it would "
             "score the UNMERGED preview units instead of the final merged unit "
-            "set. Commit the merge first (create_merged_curation / "
+            "set. Commit the merge first (commit_merges / "
             "insert_curation(apply_merge=True)), then evaluate that curation."
         )
 

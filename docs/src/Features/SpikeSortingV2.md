@@ -879,7 +879,7 @@ A root or label-only curation reuses the raw-sort analyzer; a merged curation
 resolves a generation-pinned, read-only analyzer over the merged sorting. A
 **preview** curation (`apply_merge=False` with an unapplied merge group) is
 rejected by `CurationEvaluation`; commit the merge first
-(`create_merged_curation` / `insert_curation(..., apply_merge=True)`).
+(`commit_merges` / `insert_curation(..., apply_merge=True)`).
 
 #### Parent-state composition and label inheritance
 

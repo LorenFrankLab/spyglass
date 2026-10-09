@@ -269,23 +269,17 @@ def test_presets_notebook_runs(dj_conn, subset, monkeypatch, smoke_nwb):
     assert namespace["population_key"] is not None
     if not subset:
         from spyglass.spikesorting.v2.curation import CurationV2
-        from spyglass.spikesorting.v2.curation_api import CurationRef
 
         assert len(expected_ids) >= 2
         run = namespace["successful_runs"][expected_ids[0]]
-        child = CurationV2.create_merged_curation(
-            sorting_key={"sorting_id": run["sorting_id"]},
-            parent_curation_id=run.root_curation.curation_id,
-            merge_groups=[[0, 1]],
-        )
-        ref = CurationRef.from_key(child)
+        ref = run.root_curation.commit_merges([[0, 1]])
         namespace["final_curations"][expected_ids[0]] = ref
         with pytest.raises(ValueError, match="different members or policy"):
             namespace["assemble_population"]()
         namespace["population_name"] = "v2_session_after_merge"
         key, _, _, identities = namespace["assemble_population"]()
         merged_unit = (
-            set((CurationV2.Unit & child).fetch("unit_id")) - {0, 1, 2}
+            set((CurationV2.Unit & ref.as_key()).fetch("unit_id")) - {0, 1, 2}
         ).pop()
         assert {
             "spikesorting_merge_id": ref.merge_id,
@@ -531,13 +525,8 @@ def test_targeted_inspection_and_metric_filter_use_final_units(
     clear_curations_for(planted_three_unit_sort)
     try:
         root = CurationV2.insert_curation(sorting_key=planted_three_unit_sort)
-        child = CurationV2.create_merged_curation(
-            sorting_key=planted_three_unit_sort,
-            parent_curation_id=root["curation_id"],
-            merge_groups=[[0, 1]],
-        )
-        ref = CurationRef.from_key(child)
-        units = sorted((CurationV2.Unit & child).fetch("unit_id"))
+        ref = CurationRef.from_key(root).commit_merges([[0, 1]])
+        units = sorted((CurationV2.Unit & ref.as_key()).fetch("unit_id"))
         spikes, identities = select_units_for_analysis(
             ref, policy="all_units"
         ).fetch_spike_data(return_unit_ids=True)

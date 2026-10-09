@@ -340,13 +340,13 @@
     "test_curation_wrappers.py": {
       "tier": "pipeline",
       "overrides": {
-        "test_create_merged_curation_commits": "regression_gate",
-        "test_create_merged_curation_reuses_matching_child": "regression_gate",
+        "test_commit_merges_commits": "regression_gate",
+        "test_commit_merges_forwards_allow_custom_labels": "stage",
+        "test_commit_merges_reuses_matching_child": "regression_gate",
         "test_curation_rejects_lossy_unit_ids": "stage",
         "test_insert_curation_dedupes_repeated_labels": "stage",
-        "test_merge_wrappers_forward_allow_custom_labels": "stage",
-        "test_propose_merge_off_existing_initial_curation": "regression_gate",
-        "test_propose_merge_records_not_applies": "regression_gate",
+        "test_merge_facade_forwards_to_insert_curation": "stage",
+        "test_preview_merges_records_not_applies": "regression_gate",
         "test_save_manual_curation_commit_merge_inherits_parent_labels": "regression_gate",
         "test_save_manual_curation_preview_merge": "regression_gate",
         "test_summarize_curation_pk_guard_runs_before_schema_access": "db_unit",

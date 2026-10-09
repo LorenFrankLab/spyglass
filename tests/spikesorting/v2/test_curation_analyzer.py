@@ -557,10 +557,11 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
             "spike_locations"
         )
 
-        merged = CurationV2.create_merged_curation(
+        merged = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[unit_ids[:2]],
             parent_curation_id=root["curation_id"],
+            apply_merge=True,
         )
         merged_id = int(merged["curation_id"])
         merged_uuid = str((CurationV2 & merged).fetch1("curation_uuid"))
@@ -793,10 +794,11 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         # and reclaimed through the one raw+curation cache entry point.
         clear_curations_for(sorting_key)
         recreated_root = CurationV2.insert_curation(sorting_key)
-        recreated = CurationV2.create_merged_curation(
+        recreated = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[unit_ids[:2]],
             parent_curation_id=recreated_root["curation_id"],
+            apply_merge=True,
         )
         assert int(recreated["curation_id"]) == merged_id
         assert (
@@ -843,10 +845,11 @@ def test_preview_curation_requires_commit(
     clear_curations_for(sorting_key)
     try:
         root = CurationV2.insert_curation(sorting_key)
-        preview = CurationV2.propose_merge_curation(
+        preview = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[unit_ids[:2]],
             parent_curation_id=root["curation_id"],
+            apply_merge=False,
         )
         recipe = (Sorting & sorting_key).fetch1("display_waveform_params_name")
         with pytest.raises(ValueError, match="Commit the merge first"):

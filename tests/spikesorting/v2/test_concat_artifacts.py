@@ -496,10 +496,11 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     root = CurationV2.insert_curation(
         sorting_key=sorting_key, labels={0: ["accept"], 1: ["accept"]}
     )
-    merged = CurationV2.create_merged_curation(
+    merged = CurationV2.insert_curation(
         sorting_key=sorting_key,
         parent_curation_id=root["curation_id"],
         merge_groups=[[0, 1]],
+        apply_merge=True,
     )
     for table, table_key in [
         (Sorting, sorting_key),

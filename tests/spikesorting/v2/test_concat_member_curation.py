@@ -111,11 +111,12 @@ def concat_member_curation(chronic_2_session_minirec):
         labels={0: ["accept"], 1: ["mua"]},
         description="concat member labeled root",
     )
-    curation_key = CurationV2.create_merged_curation(
+    curation_key = CurationV2.insert_curation(
         sorting_key=sorting_key,
         merge_groups=[[0, 1]],
         parent_curation_id=root_curation_key["curation_id"],
         description="concat member applied-merge test",
+        apply_merge=True,
     )
     ConcatMemberCuration.populate(curation_key, reserve_jobs=False)
     rows = (ConcatMemberCuration & curation_key).fetch(
@@ -540,11 +541,12 @@ def test_preview_member_output_is_rejected_for_decoding(
     from spyglass.spikesorting.v2.curation import CurationV2
 
     ctx = concat_member_curation
-    preview = CurationV2.propose_merge_curation(
+    preview = CurationV2.insert_curation(
         sorting_key=ctx["sorting_key"],
         merge_groups=[[0, 1]],
         parent_curation_id=ctx["root_curation_key"]["curation_id"],
         description="concat member preview guard test",
+        apply_merge=False,
     )
     member_key = {**preview, "member_index": 0}
     ConcatMemberCuration.populate(member_key, reserve_jobs=False)

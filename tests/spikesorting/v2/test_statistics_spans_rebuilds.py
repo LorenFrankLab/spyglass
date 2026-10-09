@@ -252,10 +252,11 @@ def test_curation_evaluation_builds_reuse_persisted_spans(
 
         # Applied merge: curation-scoped temp analyzers.
         built.clear()
-        merged = CurationV2.create_merged_curation(
+        merged = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[[0, 1]],
             parent_curation_id=root["curation_id"],
+            apply_merge=True,
         )
         merged_sel = CurationEvaluationSelection.insert_selection(
             {
@@ -288,8 +289,11 @@ def test_merged_curation_analyzer_reuses_persisted_spans(
     sort = masked_planted_sort
     clear_curations_for(sort["sort_key"])
     try:
-        merged = CurationV2.create_merged_curation(
-            sort["sort_key"], merge_groups=[[0, 1]], parent_curation_id=-1
+        merged = CurationV2.insert_curation(
+            sort["sort_key"],
+            merge_groups=[[0, 1]],
+            parent_curation_id=-1,
+            apply_merge=True,
         )
         analyzer = build_merged_analyzer(
             merged,

@@ -1375,6 +1375,42 @@ def _validate_merge_groups(
     return normalized
 
 
+def _insert_merge_child(
+    parent_curation: CurationRef,
+    groups: Sequence[Sequence[int]],
+    *,
+    caller: str,
+    apply_merge: bool,
+    labels: dict[int, list[str]] | None = None,
+    description: str = "",
+    reuse_existing: bool = True,
+    label_policy: str = "inherit",
+    allow_custom_labels: bool = False,
+) -> CurationRef:
+    """Insert a preview or committed merge child of a typed parent.
+
+    The shared body of :func:`preview_merges` (``apply_merge=False``) and
+    :func:`commit_merges` (``apply_merge=True``). The parent always supplies
+    ``parent_curation_id``, so ``reuse_existing`` can only match a child of
+    that parent, never an unrelated root curation.
+    """
+    parent = _require_parent_ref(parent_curation, caller=caller)
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    child = CurationV2.insert_curation(
+        {"sorting_id": parent.sorting_id},
+        labels=labels,
+        parent_curation_id=parent.curation_id,
+        merge_groups=_validate_merge_groups(parent, groups),
+        apply_merge=apply_merge,
+        description=description,
+        reuse_existing=reuse_existing,
+        label_policy=label_policy,
+        allow_custom_labels=allow_custom_labels,
+    )
+    return CurationRef.from_key(child)
+
+
 def _evaluate_curation(
     curation: CurationRef, spec: EvaluationSpec
 ) -> EvaluationResult:
@@ -1510,9 +1546,10 @@ def preview_merges(
     Records ``groups`` as proposed merges without applying them: every
     parent unit keeps its id in the child, and the proposals are stored in
     ``CurationV2.MergeGroup`` for review. ``groups`` are checked against the
-    parent's units before any write. Forwards to
-    ``CurationV2.propose_merge_curation`` with ``reuse_existing`` defaulting
-    to ``True``, so repeating the call returns the matching existing child.
+    parent's units before any write. Inserts through
+    ``CurationV2.insert_curation`` with ``apply_merge=False`` and
+    ``reuse_existing`` defaulting to ``True``, so repeating the call returns
+    the matching existing child.
 
     Parameters
     ----------
@@ -1522,7 +1559,7 @@ def preview_merges(
         Disjoint merge groups of ``parent_curation`` unit ids, each with at
         least two distinct ids.
     **kwargs
-        Forwarded to ``CurationV2.propose_merge_curation``: ``labels``,
+        Forwarded to ``CurationV2.insert_curation``: ``labels``,
         ``description``, ``reuse_existing`` (default ``True`` here),
         ``label_policy`` (``"inherit"`` or ``"replace"``), and
         ``allow_custom_labels``. The sorting key, ``merge_groups``, and
@@ -1547,18 +1584,13 @@ def preview_merges(
         references unit ids absent from ``parent_curation``, or if
         ``parent_curation`` is itself an uncommitted preview.
     """
-    parent = _require_parent_ref(parent_curation, caller="preview_merges")
-    from spyglass.spikesorting.v2.curation import CurationV2
-
-    normalized = _validate_merge_groups(parent, groups)
-    kwargs.setdefault("reuse_existing", True)
-    child = CurationV2.propose_merge_curation(
-        {"sorting_id": parent.sorting_id},
-        merge_groups=normalized,
-        parent_curation_id=parent.curation_id,
+    return _insert_merge_child(
+        parent_curation,
+        groups,
+        caller="preview_merges",
+        apply_merge=False,
         **kwargs,
     )
-    return CurationRef.from_key(child)
 
 
 def commit_merges(
@@ -1574,9 +1606,9 @@ def commit_merges(
     absorbed, so the child has fewer units than the parent. The child is
     not evaluated; use :func:`merge_and_evaluate` to commit and evaluate in
     one call. ``groups`` are checked against the parent's units before any
-    write. Forwards to ``CurationV2.create_merged_curation`` with
-    ``reuse_existing`` defaulting to ``True``, so repeating the call returns
-    the matching existing child.
+    write. Inserts through ``CurationV2.insert_curation`` with
+    ``apply_merge=True`` and ``reuse_existing`` defaulting to ``True``, so
+    repeating the call returns the matching existing child.
 
     Parameters
     ----------
@@ -1586,7 +1618,7 @@ def commit_merges(
         Disjoint merge groups of ``parent_curation`` unit ids, each with at
         least two distinct ids.
     **kwargs
-        Forwarded to ``CurationV2.create_merged_curation``: ``labels``,
+        Forwarded to ``CurationV2.insert_curation``: ``labels``,
         ``description``, ``reuse_existing`` (default ``True`` here),
         ``label_policy`` (``"inherit"`` or ``"replace"``), and
         ``allow_custom_labels``. The sorting key, ``merge_groups``, and
@@ -1611,18 +1643,13 @@ def commit_merges(
         references unit ids absent from ``parent_curation``, or if
         ``parent_curation`` is itself an uncommitted preview.
     """
-    parent = _require_parent_ref(parent_curation, caller="commit_merges")
-    from spyglass.spikesorting.v2.curation import CurationV2
-
-    normalized = _validate_merge_groups(parent, groups)
-    kwargs.setdefault("reuse_existing", True)
-    child = CurationV2.create_merged_curation(
-        {"sorting_id": parent.sorting_id},
-        merge_groups=normalized,
-        parent_curation_id=parent.curation_id,
+    return _insert_merge_child(
+        parent_curation,
+        groups,
+        caller="commit_merges",
+        apply_merge=True,
         **kwargs,
     )
-    return CurationRef.from_key(child)
 
 
 def save_manual_curation(

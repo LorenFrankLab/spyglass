@@ -762,8 +762,10 @@ def test_downstream_consumer_reads_applied_merge_unit_set(
 
     _drop_output_and_curations()
     try:
-        merged = CurationV2.create_merged_curation(
-            sorting_key, merge_groups=[[unit_ids[0], unit_ids[1]]]
+        merged = CurationV2.insert_curation(
+            sorting_key,
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+            apply_merge=True,
         )
         merged_unit_ids = sorted(
             int(u) for u in (CurationV2.Unit & merged).fetch("unit_id")

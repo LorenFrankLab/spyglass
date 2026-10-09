@@ -177,7 +177,7 @@ def validate_parent_or_reuse_root(
         # AND its raw MergeGroup would inherit the parent's UNAPPLIED
         # proposed merge as though it had been applied. Either way the
         # draft is silently laundered into a committed-looking curation.
-        # Commit the draft (create_merged_curation /
+        # Commit the draft (commit_merges /
         # insert_curation(apply_merge=True) on the proposed groups) or
         # discard it, then branch from the committed curation.
         if not table_cls.is_committed_curation(parent_key):
@@ -187,8 +187,8 @@ def validate_parent_or_reuse_root(
                 "preview/draft curation (apply_merge=False with an "
                 "unapplied proposed merge); a child cannot branch from a "
                 "preview. Commit the proposed merge first "
-                "(create_merged_curation / insert_curation(apply_merge="
-                "True)) or discard the preview, then branch from the "
+                "(commit_merges / insert_curation(apply_merge=True)) or "
+                "discard the preview, then branch from the "
                 "committed curation."
             )
     else:
@@ -345,17 +345,17 @@ def plan_curation_insert(
     )
 
 
-def assert_child_reuse_for_merge_wrapper(
+def assert_child_reuse_has_parent(
     *,
     parent_curation_id: int,
     reuse_existing: bool,
-    wrapper_name: str,
+    caller: str,
 ) -> None:
-    """Prevent child-curation wrappers from reusing an unrelated root."""
+    """Refuse ``reuse_existing`` without a parent; it would reuse the root."""
     if not reuse_existing or parent_curation_id != -1:
         return
     raise ValueError(
-        f"CurationV2.{wrapper_name}(reuse_existing=True) requires an "
+        f"CurationV2.{caller}(reuse_existing=True) requires an "
         "explicit parent_curation_id. Root curation reuse returns the "
         "existing root row and would ignore the requested edits; "
         "branch from an existing curation instead."

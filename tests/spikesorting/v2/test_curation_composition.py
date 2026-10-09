@@ -40,10 +40,11 @@ def merged_parent(planted_three_unit_sort):
     assert raw_units == [0, 1, 2], raw_units
     merged_id = max(raw_units) + 1  # 3
 
-    parent = CurationV2.create_merged_curation(
+    parent = CurationV2.insert_curation(
         sort_pk,
         merge_groups=[[0, 1]],
         description="merged parent (raw [0,1] -> fresh 3)",
+        apply_merge=True,
     )
     parent_units = sorted(
         int(u) for u in (CurationV2.Unit & parent).fetch("unit_id")
@@ -120,11 +121,12 @@ def test_child_merge_groups_are_parent_namespace(merged_parent):
     # the parent, absent from Sorting.Unit. The new merged id is
     # max(parent units) + 1 = 4.
     child_merged_id = max(merged_parent["parent_units"]) + 1  # 4
-    child = CurationV2.create_merged_curation(
+    child = CurationV2.insert_curation(
         sort_pk,
         merge_groups=[[2, merged_id]],
         parent_curation_id=parent["curation_id"],
         description="child merge in parent namespace",
+        apply_merge=True,
     )
 
     child_units = set(
@@ -178,10 +180,11 @@ def test_parent_operation_provenance_records_parent_units(merged_parent):
     merged_id = merged_parent["merged_id"]  # 3
     child_merged_id = max(merged_parent["parent_units"]) + 1  # 4
 
-    child = CurationV2.create_merged_curation(
+    child = CurationV2.insert_curation(
         sort_pk,
         merge_groups=[[2, merged_id]],
         parent_curation_id=parent["curation_id"],
+        apply_merge=True,
     )
 
     parent_op = {
@@ -265,11 +268,12 @@ def test_preview_child_of_merged_parent_lazy_merges_in_parent_namespace(
     merged_id = merged_parent["merged_id"]  # 3
     child_merged_id = max(merged_parent["parent_units"]) + 1  # 4
 
-    preview = CurationV2.propose_merge_curation(
+    preview = CurationV2.insert_curation(
         sort_pk,
         merge_groups=[[2, merged_id]],
         parent_curation_id=parent["curation_id"],
         description="preview further-merge of a merged parent",
+        apply_merge=False,
     )
 
     # Preview keeps every parent unit; the own-namespace merge view is the
@@ -320,17 +324,19 @@ def test_grandchild_composition_chains_raw_and_parent_provenance(
     try:
         root = CurationV2.insert_curation(sorting_key=sort_pk)
         # Child A merges raw [0,1] -> 3; units {2, 3}.
-        child_a = CurationV2.create_merged_curation(
+        child_a = CurationV2.insert_curation(
             sort_pk,
             merge_groups=[[0, 1]],
             parent_curation_id=root["curation_id"],
+            apply_merge=True,
         )
         # Grandchild B merges A's units [2, 3] -> 4; units {4}. Unit 3 is a
         # fresh A-namespace id absent from Sorting.Unit.
-        grandchild_b = CurationV2.create_merged_curation(
+        grandchild_b = CurationV2.insert_curation(
             sort_pk,
             merge_groups=[[2, 3]],
             parent_curation_id=child_a["curation_id"],
+            apply_merge=True,
         )
         assert set(
             int(u) for u in (CurationV2.Unit & grandchild_b).fetch("unit_id")
@@ -371,11 +377,12 @@ def test_child_labels_inherit_and_merge(planted_three_unit_sort):
     try:
         # A committed, LABELED parent: merge raw [0,1]->3, label unit 2 "mua"
         # and the merged unit 3 "noise".
-        labeled_parent = CurationV2.create_merged_curation(
+        labeled_parent = CurationV2.insert_curation(
             sort_pk,
             merge_groups=[[0, 1]],
             labels={2: ["mua"], 3: ["noise"]},
             description="labeled merged parent",
+            apply_merge=True,
         )
 
         def labels_of(key):
@@ -399,23 +406,25 @@ def test_child_labels_inherit_and_merge(planted_three_unit_sort):
 
         # (2) A committed merge of the labeled parent units inherits the UNION
         # of contributor labels on the merged unit.
-        merge_child = CurationV2.create_merged_curation(
+        merge_child = CurationV2.insert_curation(
             sort_pk,
             merge_groups=[[2, 3]],
             parent_curation_id=labeled_parent["curation_id"],
             description="merge inherits union",
+            apply_merge=True,
         )
         child_merged_id = 4
         assert labels_of(merge_child) == {child_merged_id: {"mua", "noise"}}
 
         # (3) An explicit override on the merged unit replaces the inherited
         # union for that unit only.
-        override_child = CurationV2.create_merged_curation(
+        override_child = CurationV2.insert_curation(
             sort_pk,
             merge_groups=[[2, 3]],
             labels={4: ["accept"]},
             parent_curation_id=labeled_parent["curation_id"],
             description="merge override",
+            apply_merge=True,
         )
         assert labels_of(override_child) == {child_merged_id: {"accept"}}
 
@@ -455,10 +464,11 @@ def test_insert_curation_rejects_preview_parent(planted_two_unit_sort):
     clear_curations_for(planted_two_unit_sort)
     try:
         root = CurationV2.insert_curation(sorting_key=sorting_key)
-        preview = CurationV2.propose_merge_curation(
+        preview = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
             parent_curation_id=root["curation_id"],
+            apply_merge=False,
         )
         assert not CurationV2.is_committed_curation(preview)
         with pytest.raises(ValueError, match="preview/draft"):

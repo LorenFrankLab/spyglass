@@ -1310,9 +1310,10 @@ def test_unitmatch_accepts_committed_merged_child_member(
 
     clear_curations_for(two_unit_sort)
     try:
-        merged0 = CurationV2.create_merged_curation(
+        merged0 = CurationV2.insert_curation(
             {"sorting_id": two_unit_sort["sorting_id"]},
             merge_groups=[[unit_ids[0], unit_ids[1]]],
+            apply_merge=True,
         )
         assert CurationV2.is_committed_curation(merged0)
         merged_choice = {
@@ -2428,9 +2429,10 @@ def test_unitmatch_populate_with_committed_merged_child_member(
     seen_unit_ids: list[list[int]] = []
     saved_registry = None
     try:
-        merged0 = CurationV2.create_merged_curation(
+        merged0 = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
+            apply_merge=True,
         )
         assert CurationV2.is_committed_curation(merged0)
         merged_choice = {

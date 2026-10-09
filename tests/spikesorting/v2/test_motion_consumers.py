@@ -390,8 +390,11 @@ def test_all_consumers_resolve_selected_correction(
 
     # Merged and derivative curation analyzers.
     root = CurationV2.insert_curation(sorting_key=sort)
-    merged = CurationV2.create_merged_curation(
-        sort, merge_groups=[[0, 1]], parent_curation_id=root["curation_id"]
+    merged = CurationV2.insert_curation(
+        sort,
+        merge_groups=[[0, 1]],
+        parent_curation_id=root["curation_id"],
+        apply_merge=True,
     )
     merged_analyzer = _resolve_curation_analyzer(merged, display, "display")
     assert len(merged_analyzer.unit_ids) == 1

@@ -2185,8 +2185,10 @@ def test_concat_applied_merge_through_curation_and_evaluation(
 
     _drop_output_and_curations()
     try:
-        merged = CurationV2.create_merged_curation(
-            sorting_key, merge_groups=[[unit_ids[0], unit_ids[1]]]
+        merged = CurationV2.insert_curation(
+            sorting_key,
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+            apply_merge=True,
         )
         merged_units = sorted(
             int(u) for u in (CurationV2.Unit & merged).fetch("unit_id")

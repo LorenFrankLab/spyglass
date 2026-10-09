@@ -58,18 +58,20 @@ def test_is_committed_curation_distinguishes_preview(planted_two_unit_sort):
         assert CurationV2.is_committed_curation(label_only) is True
         CurationV2.assert_committed_curation(label_only)
 
-        merged = CurationV2.create_merged_curation(
+        merged = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
             parent_curation_id=root["curation_id"],
+            apply_merge=True,
         )
         assert CurationV2.is_committed_curation(merged) is True
         CurationV2.assert_committed_curation(merged)
 
-        preview = CurationV2.propose_merge_curation(
+        preview = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
             parent_curation_id=root["curation_id"],
+            apply_merge=False,
         )
         assert CurationV2.is_committed_curation(preview) is False
         with pytest.raises(ValueError, match="preview"):
@@ -235,10 +237,11 @@ def test_curation_evaluation_selection_rejects_preview(
     clear_curations_for(planted_two_unit_sort)
     try:
         root = CurationV2.insert_curation(sorting_key=sorting_key)
-        preview = CurationV2.propose_merge_curation(
+        preview = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
             parent_curation_id=root["curation_id"],
+            apply_merge=False,
         )
         with pytest.raises(ValueError, match="preview"):
             CurationEvaluationSelection.insert_selection(
@@ -249,10 +252,11 @@ def test_curation_evaluation_selection_rejects_preview(
                 }
             )
         # A committed (applied-merge) curation is accepted.
-        merged = CurationV2.create_merged_curation(
+        merged = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
             parent_curation_id=root["curation_id"],
+            apply_merge=True,
         )
         sel = CurationEvaluationSelection.insert_selection(
             {
@@ -317,10 +321,11 @@ def test_final_metrics_recomputed_for_merged_unit(
     clear_curations_for(planted_two_unit_sort)
     try:
         root = CurationV2.insert_curation(sorting_key=sorting_key)
-        merged = CurationV2.create_merged_curation(
+        merged = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
             parent_curation_id=root["curation_id"],
+            apply_merge=True,
         )
         merged_units = (CurationV2.Unit & merged).fetch(
             "unit_id", "n_spikes", as_dict=True
@@ -1428,10 +1433,11 @@ def test_curation_evaluation_rejects_preview_at_make_fetch(
     clear_curations_for(planted_two_unit_sort)
     try:
         root = CurationV2.insert_curation(sorting_key=sorting_key)
-        preview = CurationV2.propose_merge_curation(
+        preview = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
             parent_curation_id=root["curation_id"],
+            apply_merge=False,
         )
         identity = {
             "sorting_id": preview["sorting_id"],
@@ -1480,10 +1486,11 @@ def test_metric_namespace_matches_curation_units(
             parent_curation_id=root["curation_id"],
             labels={unit_ids[0]: ["noise"]},
         )
-        merged = CurationV2.create_merged_curation(
+        merged = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
             parent_curation_id=root["curation_id"],
+            apply_merge=True,
         )
         for curation in (root, label_only, merged):
             sel = CurationEvaluationSelection.insert_selection(
@@ -1585,10 +1592,11 @@ def test_root_curation_uses_cached_raw_analyzer_fast_path(
 
         # Merged path: temp analyzer (build_analyzer), NOT the resolved loader.
         calls["resolved"] = 0
-        merged = CurationV2.create_merged_curation(
+        merged = CurationV2.insert_curation(
             sorting_key,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
             parent_curation_id=root["curation_id"],
+            apply_merge=True,
         )
         merged_sel = CurationEvaluationSelection.insert_selection(
             {
@@ -1732,10 +1740,11 @@ def test_make_compute_rejects_incomplete_units_without_the_db(
             unit_ids = sorted(
                 int(u) for u in (CurationV2.Unit & curation).fetch("unit_id")
             )
-            curation = CurationV2.create_merged_curation(
+            curation = CurationV2.insert_curation(
                 sorting_key,
                 merge_groups=[unit_ids[:2]],
                 parent_curation_id=curation["curation_id"],
+                apply_merge=True,
             )
         sel = CurationEvaluationSelection.insert_selection(
             {
