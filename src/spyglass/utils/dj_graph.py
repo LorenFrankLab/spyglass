@@ -357,8 +357,8 @@ class AbstractGraph(ABC):
         if isinstance(r, QueryExpression):
             return r.proj(*ft.primary_key)  # keep relational
 
-        # dict/list → condition (fallback)
-        return make_condition(ft, r, set())
+        # dict/list → condition (fallback), stored and restricted by later
+        return AbstractGraph._literal_condition(ft, r)
 
     def _log_if_trivially_true(self, table, restriction) -> None:
         """Log that a shared table is being restricted to all of its rows.
@@ -533,6 +533,62 @@ class AbstractGraph(ABC):
             logger.warning(f"Skipping unimported: {table}")  # pragma: no cover
         return True
 
+    @staticmethod
+    def _fix_double_quotes(restr: Any) -> Any:
+        """Double any `"` in a string value, recursing into keys.
+
+        `prep_value` wraps a value in `"` without escaping one inside it, so
+        the literal ends early. MySQL reads `""` within a `"`-quoted string as
+        one `"`, and the pair also keeps `extract_column_names` from reading
+        the tail as a column name.
+
+        Parameters
+        ----------
+        restr : Any
+            Keys or a key-like restriction. Anything that is not a dict, list
+            or tuple is returned unchanged.
+
+        Returns
+        -------
+        Any
+            The restriction with `"` doubled in every string value.
+        """
+        if isinstance(restr, dict):
+            return {
+                k: v.replace('"', '""') if isinstance(v, str) else v
+                for k, v in restr.items()
+            }
+        if isinstance(restr, (list, tuple)):
+            return [AbstractGraph._fix_double_quotes(r) for r in restr]
+        return restr
+
+    @staticmethod
+    def _literal_condition(ft: FreeTable, restr: Any) -> Union[str, bool]:
+        """Build a condition safe to store and later restrict by.
+
+        Parameters
+        ----------
+        ft : FreeTable
+            Table the restriction applies to.
+        restr : Any
+            Keys or a key-like restriction -- a dict, or a list of them.
+
+        Returns
+        -------
+        str | bool
+            The condition, or the bool `make_condition` gives for a
+            restriction that selects everything or nothing.
+        """
+        condition = make_condition(
+            ft, AbstractGraph._fix_double_quotes(restr), set()
+        )
+        if not isinstance(condition, str):
+            return condition  # False for no keys, which prunes the node
+        # `make_condition` doubles `%` for immediate use in a query, but this
+        # string is stored and restricted by later, which doubles it again. A
+        # column name cannot hold `%`, so every `%%` here came from a value
+        return condition.replace("%%", "%")
+
     def enforce_restr_strings(self):
         """Ensure all restrictions are strings.
 
@@ -543,7 +599,7 @@ class AbstractGraph(ABC):
             if not restr or isinstance(restr, str):
                 continue
             ft = self._get_ft(table)
-            new_restr = make_condition(ft, (ft & restr).fetch("KEY"), set())
+            new_restr = self._literal_condition(ft, (ft & restr).fetch("KEY"))
             self._set_node(table, "restr", new_restr)
 
     # ---------------------------- Graph Traversal -----------------------------
@@ -1412,8 +1468,8 @@ class RestrGraph(AbstractGraph):
             table_dicts.append(
                 {
                     "table_name": table,
-                    "restriction": make_condition(
-                        ft, intersect_restriction.fetch("KEY"), set()
+                    "restriction": self._literal_condition(
+                        ft, intersect_restriction.fetch("KEY")
                     ),
                 }
             )

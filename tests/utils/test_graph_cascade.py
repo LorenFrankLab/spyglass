@@ -600,6 +600,100 @@ def test_merged_string_restrs_stay_strings(RestrGraph, graph_tables):
     assert len(Parent & got) == 2, "Union of conditions lost rows."
 
 
+def test_enforce_strings_keeps_percent(RestrGraph, quoted_key_tables):
+    """Stringifying a relational restriction must leave `%` single.
+
+    `Export.Table.restriction` is a varchar, so this path has to produce a
+    string; it cannot keep the relational form the way flattening does.
+
+    Scoped to the `%` key: a `"` key still cannot be stringified at all, which
+    is a separate, pre-existing defect in this path.
+    """
+    parent = quoted_key_tables["DqParent"]
+    child = quoted_key_tables["DqChild"]
+    graph = RestrGraph(
+        seed_table=child,
+        leaves=[
+            {
+                "table_name": child.full_table_name,
+                "restriction": "dq_child_attr > 11",  # the `%` row alone
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+    assert not isinstance(
+        graph._get_restr(parent.full_table_name), str
+    ), "Fixture assumption changed; nothing was left to stringify."
+
+    graph.enforce_restr_strings()
+    got = graph._get_restr(parent.full_table_name)
+
+    assert isinstance(got, str), f"Restriction not stringified: {got}"
+    assert "%%" not in got, f"Percent escaped twice over: {got}"
+    assert set((parent & got).fetch("dq_name")) == {
+        "has%pct"
+    }, f"Stringifying dropped the percent row: {got}"
+
+
+def test_enforce_strings_keeps_quote(RestrGraph, quoted_key_tables):
+    """Stringifying must survive a `"` in a key, alongside `%` and plain.
+
+    Unescaped, the literal `` `dq_name`="has"quote" `` ends early and
+    `extract_column_names` reads the tail as a column, so restricting by the
+    stored condition raised rather than returning rows.
+    """
+    parent = quoted_key_tables["DqParent"]
+    child = quoted_key_tables["DqChild"]
+    graph = RestrGraph(
+        seed_table=child,
+        leaves=[
+            {
+                "table_name": child.full_table_name,
+                "restriction": "dq_child_attr > 9",  # every row
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+
+    graph.enforce_restr_strings()
+    got = graph._get_restr(parent.full_table_name)
+
+    assert isinstance(got, str), f"Restriction not stringified: {got}"
+    assert set((parent & got).fetch("dq_name")) == {
+        "plain",
+        'has"quote',
+        "has%pct",
+    }, f"Stringifying lost a key: {got}"
+
+
+def test_intersect_keeps_percent(RestrGraph, quoted_key_tables):
+    """An intersection must not lose a row whose key holds a `%`."""
+    parent = quoted_key_tables["DqParent"]
+
+    def build(restr):
+        return RestrGraph(
+            seed_table=parent,
+            leaves=[
+                {"table_name": parent.full_table_name, "restriction": restr}
+            ],
+            direction="down",
+            cascade=True,
+            verbose=False,
+        )
+
+    narrowed = build("dq_parent_attr > 0") & build("dq_name = 'has%pct'")
+    got = narrowed._get_restr(parent.full_table_name)
+
+    assert "%%" not in got, f"Percent escaped twice over: {got}"
+    assert set((parent & got).fetch("dq_name")) == {
+        "has%pct"
+    }, f"Intersection lost the percent row: {got}"
+
+
 def test_merged_restrs_keep_percent(RestrGraph, quoted_key_tables):
     """A `%` in a merged condition must survive as one `%`.
 
