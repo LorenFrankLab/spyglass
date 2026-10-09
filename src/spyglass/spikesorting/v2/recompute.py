@@ -32,6 +32,7 @@ import datajoint as dj
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_user import UserEnvironment
+from spyglass.spikesorting.v2._storage import analyzer_cache as _analyzer_cache
 from spyglass.spikesorting.v2._storage.analyzer_cache import (
     analyzer_cache_lock,
     analyzer_folder_storage_fingerprint,
@@ -1023,7 +1024,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         analyzer_folder = (
             _validated_analyzer_recipe(sorting_id, name).analyzer_folder
             if n_units > 0
-            else str(_analyzer_folder(sorting_id, name))
+            else str(_analyzer_cache.analyzer_path(sorting_id, name))
         )
         return AnalyzerVersionsFetched(
             n_units=n_units, analyzer_folder=analyzer_folder
@@ -1130,7 +1131,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         refreshed = 0
         for row in (cls & restriction).fetch(as_dict=True):
             key = {field: row[field] for field in cls.primary_key}
-            folder = _analyzer_folder(
+            folder = _analyzer_cache.analyzer_path(
                 key["sorting_id"], key["waveform_params_name"]
             )
             # A folder freed by ``delete_files`` is absent ON PURPOSE; its
@@ -1327,7 +1328,7 @@ class SortingAnalyzerRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
             (key["sorting_id"], key["waveform_params_name"])
             for key in reclaimable.fetch("KEY", as_dict=True)
         }:
-            folder = _analyzer_folder(sid, name)
+            folder = _analyzer_cache.analyzer_path(sid, name)
             if folder.exists():
                 total += sum(
                     f.stat().st_size for f in folder.rglob("*") if f.is_file()
@@ -1359,21 +1360,9 @@ class SortingAnalyzerRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
             dry_run=dry_run,
             force_stale_env=force_stale_env,
             days_since_creation=days_since_creation,
-            folder_fn=_analyzer_folder,
+            folder_fn=_analyzer_cache.analyzer_path,
             artifact_pk=SortingAnalyzerVersions.primary_key,
         )
-
-
-def _analyzer_folder(sorting_id, waveform_params_name):
-    """Return the analyzer cache folder for a (sort, recipe).
-
-    Recompute inventories one folder per (sort, recipe); the folder-size
-    accounting and delete target resolve the explicit ``waveform_params_name``
-    (display or whitened metric), keyed ``{sorting_id}__{name}.analyzer``.
-    """
-    from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
-
-    return analyzer_path(sorting_id, waveform_params_name)
 
 
 def _validated_analyzer_recipe(
@@ -1392,7 +1381,9 @@ def _validated_analyzer_recipe(
 
     assert_path_safe_waveform_params_name(waveform_params_name)
     return AnalyzerRecipe(
-        analyzer_folder=str(_analyzer_folder(sorting_id, waveform_params_name)),
+        analyzer_folder=str(
+            _analyzer_cache.analyzer_path(sorting_id, waveform_params_name)
+        ),
         waveform_params=fetch_waveform_params(waveform_params_name),
     )
 

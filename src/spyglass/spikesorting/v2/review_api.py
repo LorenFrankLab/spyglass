@@ -479,15 +479,15 @@ class FigPackReview:
     @classmethod
     def resume(cls, review_id) -> "FigPackReview":
         """Reconstruct a review from its selection, bundle, and profile."""
+        from spyglass.spikesorting.v2._review.view import require_figpack
         from spyglass.spikesorting.v2.figpack_curation import (
             FigPackCuration,
             FigPackCurationSelection,
             _assert_figure_identity,
             _assert_selection_identity,
-            _require_figpack,
         )
 
-        _require_figpack()
+        require_figpack()
         key = {"figpack_curation_id": _uuid(review_id)}
         selections = (FigPackCurationSelection & key).fetch(as_dict=True)
         if len(selections) != 1 or not (FigPackCuration & key):
@@ -957,17 +957,17 @@ def start_review(
         hosted view is reused without uploading).
     """
     resolved_display = ReviewDisplayOptions.from_mapping(display_options)
+    from spyglass.spikesorting.v2._review.view import require_figpack
     from spyglass.spikesorting.v2.figpack_curation import (
         FigPackCuration,
         FigPackCurationSelection,
-        _require_figpack,
     )
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
         CurationEvaluationSelection,
     )
 
-    _require_figpack()
+    require_figpack()
     if not isinstance(parent, CurationRef):
         raise TypeError(
             "start_review requires parent=CurationRef; resolve a key with "

@@ -95,11 +95,6 @@ class FigPackBuildResult:
 # ---- figpack access + storage helpers (lazy / DB-light) ------------------
 
 
-def _require_figpack():
-    """Return ``(figpack.views, figpack_spike_sorting.views)`` or raise."""
-    return require_figpack()
-
-
 def figpack_cache_root() -> Path:
     """Return the configured root directory for saved FigPack bundles.
 
@@ -312,7 +307,7 @@ def _resolve_curation_view_inputs(
     )
     from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
 
-    _require_figpack()
+    require_figpack()
     ReviewDisplayOptions.from_mapping(display_options)
 
     sorting_key = {"sorting_id": curation_key["sorting_id"]}
