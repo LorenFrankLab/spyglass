@@ -50,7 +50,7 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
     with pytest.raises(_StopAfterTempDir):
         extract_and_match(
             input_plan=[],
-            matcher_name="unitmatchpy",
+            matcher_name="unitmatch",
             params={},
             job_kwargs=None,
         )

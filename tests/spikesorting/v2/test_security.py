@@ -75,11 +75,12 @@ def test_create_rejects_unsafe_recompute_file_name(bad_recompute_name):
 
 
 def _scratch_mode_for_backend(monkeypatch, execution_params):
-    """Run ``run_si_sorter`` with a stubbed ``run_sorter`` that
-    records the mode of the per-sort scratch dir, and return that mode."""
+    """Run ``run_si_sorter`` with stubbed local and container sorter calls
+    that record the mode of the per-sort scratch dir, and return that mode."""
     import spikeinterface as si
     import spikeinterface.sorters as sis
 
+    from spyglass.spikesorting.v2._sorting import container
     from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
     from tests.spikesorting.v2.test_sorting_dispatch import _tiny_numpy_sorting
 
@@ -95,6 +96,7 @@ def _scratch_mode_for_backend(monkeypatch, execution_params):
         return _tiny_numpy_sorting()
 
     monkeypatch.setattr(sis, "run_sorter", _capture)
+    monkeypatch.setattr(container, "run_sorter_container", _capture)
     run_si_sorter(
         "mountainsort5", {}, rec, uuid.uuid4(), None, execution_params
     )
