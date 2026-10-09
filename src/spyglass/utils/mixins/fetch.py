@@ -278,7 +278,12 @@ class FetchMixin(BaseMixin):
 
         ret = []
         for rec_dict in rec_dicts:
-            nwbf = get_nwb_file(rec_dict.pop("nwb2load_filepath"))
+            path = rec_dict.pop("nwb2load_filepath")
+            nwbf = get_nwb_file(path)
+            # Hold the file now, keyed on the path that cached it, so it is
+            # protected before the next iteration opens another. Acquiring
+            # ahead of the open would be a no-op on a cache miss.
+            _acquire_nwb_file(path)
             # for each attr that contains substring 'object_id', store key-value:
             # attr name to NWB object
             # remove '_object_id' from attr name
@@ -352,12 +357,8 @@ class FetchMixin(BaseMixin):
         # Execute query and get records
         rec_dicts = self._execute_nwb_query(table, tbl_attr, *attrs, **kwargs)
 
-        # Protect each file from LRU eviction while caller holds lazy handles.
-        # Release by calling close_nwb() on the same restriction.
-        for f in nwb_files:
-            _acquire_nwb_file(file_path_fn(f, from_schema=True))
-
-        # Process object_id fields if present
+        # Process object_id fields if present. Each file is held as it opens;
+        # release by calling close_nwb() on the same restriction.
         return self._process_object_ids(rec_dicts, *attrs)
 
     def close_nwb(self) -> None:
