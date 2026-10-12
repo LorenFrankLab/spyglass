@@ -32,6 +32,8 @@
     call's file handler when these calls nested #1679
 - Correct `Populate.md` on `_parallel_make`, the double `make_fetch` call, and
     the `None` return from `make_compute` #1679
+- Active management of memory resources for open NWBs: open files are cached and
+    closed under RAM or file-descriptor pressure #1606
 
 ### Pipelines
 

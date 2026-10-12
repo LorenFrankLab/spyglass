@@ -63,6 +63,7 @@ dependencies = [
   "panel>=1.4",
   "position-tools>=0.1",
   "probeinterface<0.3",           # Bc some probes fail space checks
+  "psutil",                       # Detects available RAM for the NWB cache
   "pubnub<6.4",                   # TODO: remove this when sortingview is updated
   "pydotplus",
   "pynwb>=3.1.3",

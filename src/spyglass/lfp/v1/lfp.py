@@ -195,7 +195,9 @@ class LFPV1(SpyglassMixin, dj.Computed):
         """Fetch a single dataframe."""
         _ = self.ensure_single_entry()
         nwb_lfp = self.fetch_nwb()[0]
-        return pd.DataFrame(
+        result = pd.DataFrame(
             nwb_lfp["lfp"].data,
             index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
         )
+        self.close_nwb()
+        return result
