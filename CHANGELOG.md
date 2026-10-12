@@ -32,6 +32,9 @@
     call's file handler when these calls nested #1679
 - Correct `Populate.md` on `_parallel_make`, the double `make_fetch` call, and
     the `None` return from `make_compute` #1679
+- Optimize `RestrGraph` generation during export #1673
+- Export logs an unrestricted fetch of a shared table as keys. `Export.populate`
+    rejects older log rows that match a whole shared table. #1673
 
 ### Pipelines
 

@@ -61,3 +61,44 @@ def test_chain_str_no_link(no_link_chain):
 def test_invalid_chain(TableChain):
     with pytest.raises(ValueError):
         TableChain()
+
+
+def test_chain_directed_path(TableChain, graph_tables):
+    """A parent/child pair linked by foreign keys resolves a directed path."""
+    chain = TableChain(
+        parent=graph_tables["ParentNode"](), child=graph_tables["PkNode"]()
+    )
+    assert chain.has_link, "No link found between ParentNode and PkNode."
+    assert chain.link_type == "directed", "Expected a directed link."
+    assert (
+        graph_tables["IntermediateNode"].full_table_name in chain.path
+    ), "Directed path skipped the intervening table."
+
+
+def test_chain_undirected_path(TableChain, graph_tables):
+    """Part-parent to master requires traversing an edge against its direction.
+
+    `MergeOutput.PkNode` is a child of both `PkNode` and `MergeOutput`, so
+    reaching `MergeChild` from `PkNode` is only possible on the undirected
+    graph.
+    """
+    chain = TableChain(
+        parent=graph_tables["PkNode"](), child=graph_tables["MergeChild"]()
+    )
+    assert chain.has_link, "No link found between PkNode and MergeChild."
+    assert (
+        "undirected" in chain.link_type
+    ), f"Expected an undirected link, got {chain.link_type}."
+    assert (
+        graph_tables["MergeOutput"].full_table_name in chain.path
+    ), "Undirected path skipped the merge master."
+
+
+def test_chain_banned_table(TableChain, graph_tables):
+    """Banning the only intervening table must break the link."""
+    chain = TableChain(
+        parent=graph_tables["ParentNode"](),
+        child=graph_tables["PkNode"](),
+        banned_tables=[graph_tables["IntermediateNode"]()],
+    )
+    assert not chain.has_link, "Banned table still reachable in path."

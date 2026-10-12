@@ -45,6 +45,36 @@ def test_deprecation_factory(caplog, common):
 
 
 @pytest.fixture(scope="module")
+def is_trivially_true():
+    from spyglass.utils.dj_helper_fn import is_trivially_true
+
+    return is_trivially_true
+
+
+@pytest.mark.parametrize(
+    "restriction, expected, msg",
+    [
+        (True, True, "the bool itself"),
+        ("TRUE", True, "as logged by the export"),
+        ("(True)", True, "one layer of make_condition parens"),
+        ("((TRUE))", True, "`Table & 'TRUE'` wraps in an AndList first"),
+        ("  ( ( true ) )  ", True, "whitespace between the layers"),
+        ("1", True, "the older pre-string form"),
+        ("(1)", True, "the older form, parenthesized"),
+        ("(a) OR (b)", False, "outer parens that are not a wrapper"),
+        ("nwb_file_name = 'x.nwb'", False, "an ordinary condition"),
+        (False, False, "the false bool"),
+        (["a = 1"], False, "a list, whatever it selects"),
+        (None, False, "no restriction object at all"),
+    ],
+)
+def test_is_trivially_true(is_trivially_true, restriction, expected, msg):
+    """Whole-table forms are recognized through any paren wrapping."""
+    got = is_trivially_true(restriction)
+    assert got is expected, f"Misjudged {msg}: {restriction!r} gave {got}"
+
+
+@pytest.fixture(scope="module")
 def str_to_bool():
     from spyglass.utils.dj_helper_fn import str_to_bool
 

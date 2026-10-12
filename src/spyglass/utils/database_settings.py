@@ -5,6 +5,7 @@ import sys
 import tempfile
 from functools import cached_property
 from pathlib import Path
+from typing import Union
 
 import datajoint as dj
 
@@ -24,6 +25,37 @@ SHARED_MODULES = [
     "spikesorting",
     # EDIT: waveform not used as a spyglass schema prefix
 ]
+
+
+def table_is_shared(table: Union[str, dj.Table]) -> bool:
+    """Whether a table lives in a spyglass-managed schema.
+
+    Distinguishes data shared with everyone on the server from a user's own
+    tables, which matters wherever the two warrant different treatment --
+    what a cascade may traverse, or whether exporting a whole table is
+    reasonable.
+
+    Deliberately strict: prefixes that merely identify a schema as *known*,
+    such as the connecting user's own prefix or "temp"/"test", are not
+    shared. Callers asking "should I recognize this schema?" want a different
+    question than "does this hold other people's data?".
+
+    Parameters
+    ----------
+    table : str or dj.Table
+        A datajoint table, a full table name (``` `schema`.`table` ```), or a
+        bare schema name.
+
+    Returns
+    -------
+    bool
+        True if the schema's prefix is one of SHARED_MODULES.
+    """
+    name = getattr(table, "full_table_name", None) or str(table)
+    schema = name.split(".")[0].strip("`")
+    return schema.split("_")[0] in SHARED_MODULES
+
+
 GRANT_ALL = "GRANT ALL PRIVILEGES ON "
 GRANT_SEL = "GRANT SELECT ON "
 GRANT_SHOW = "GRANT SHOW DATABASES ON "
