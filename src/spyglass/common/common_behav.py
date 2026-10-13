@@ -400,7 +400,9 @@ class RawCompassDirection(SpyglassIngestion, dj.Manual):
 
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
         """Insert entries from NWB file, generating interval list names ordered by time."""
-        self._compass_import_enumerator = 1  # reset enumerator
+        # For `populate`, which reuses one instance; planning builds a fresh
+        # one per file, so the count already starts at 1 there.
+        self._compass_import_enumerator = 1
         return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
 

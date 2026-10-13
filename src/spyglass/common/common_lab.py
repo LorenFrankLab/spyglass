@@ -47,7 +47,7 @@ class LabMember(SpyglassIngestion, dj.Manual):
     _source_nwb_object_type = pynwb.NWBFile
 
     def generate_entries_from_nwb_object(
-        self, nwb_obj: pynwb.NWBFile, base_key=None
+        self, nwb_obj: pynwb.NWBFile, base_key=None, ctx=None
     ) -> Dict["SpyglassIngestion", list]:
         """Override SpyglassIngestion to make entry for each experimenter."""
         base_key = base_key or dict()

@@ -1045,10 +1045,35 @@ def _insert_rows(target, rows, nwb_file_name: str) -> None:
     # A target may be a plain SpyglassMixin -- Task, say, which TaskEpoch
     # plans rows for but which ingests nothing itself.
     insert = getattr(table, "_insert_plan", None)
-    if insert is None:
-        table.insert(rows, skip_duplicates=False, allow_direct_insert=True)
-    else:
-        insert(rows, nwb_file_name=nwb_file_name)
+
+    for batch in _by_field_set(rows):
+        if insert is None:
+            table.insert(batch, skip_duplicates=False, allow_direct_insert=True)
+        else:
+            insert(batch, nwb_file_name=nwb_file_name)
+
+
+def _by_field_set(rows) -> List[list]:
+    """Group rows by the attributes they name, in first-seen order.
+
+    DataJoint refuses one insert of rows whose fields differ, and merging a
+    target's rows across every table that emits them routinely produces a
+    mix: `IntervalList` arrives with `pipeline` from one emitter and without
+    it from another. Only visible against a database holding none of them,
+    where no row is filtered out before the insert.
+
+    Parameters
+    ----------
+    rows : sequence of dict
+
+    Returns
+    -------
+    list of list of dict
+    """
+    batches: Dict[frozenset, list] = {}
+    for row in rows:
+        batches.setdefault(frozenset(row), []).append(row)
+    return list(batches.values())
 
 
 def _targets(plan):
