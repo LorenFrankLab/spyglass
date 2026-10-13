@@ -27,6 +27,7 @@ class Task(SpyglassMixin, dj.Manual):
     # TaskEpoch is validated rather than reinserted.
     _expected_duplicates = True
 
+    # TODO: Remove? Not directly inserted. Managed by TaskEpoch
     def insert_from_nwbfile(self, nwbf: pynwb.NWBFile):
         """Insert tasks from an NWB file.
 
