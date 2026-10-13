@@ -117,9 +117,9 @@ or `log_export` positionally must pass them by keyword.
 - `UnitAnnotation.unit_id` stores the NWB unit id. Reads and `add_annotation`
     refuse an unmarked merge whose NWB unit ids differ from their positions
     until its annotations are audited and migrated. `add_annotation` now runs
-    inside a caller's open transaction, so the caller must roll back if it fails.
-    A new
-    `UnitAnnotationPositionalIdMigration` table records the migration.
+    inside a caller's open transaction, so the caller must roll back if it
+    fails. A new `UnitAnnotationPositionalIdMigration` table records the
+    migration.
 - V2 specific and global-median referencing require uniform finite channel
     offsets and uniform finite positive gains across all contributing channels,
     including a specific reference electrode. Unsupported calibration raises
@@ -160,10 +160,9 @@ or `log_export` positionally must pass them by keyword.
 - Update dependency pins: `numpy>=1.26,<3` (was `<2`), `scipy>=1.13` (was
     `<1.13`), `spikeinterface==0.104.3`, `probeinterface>=0.3.2` (was `<0.3`),
     `jax<0.10` (was `<0.7.2`), `non-local-detector==0.6.9`,
-    `ripple-detection>=1.7`, `deeplabcut[tf]>=3.0`, `keypoint-moseq>=0.6`;
-    declare `networkx`, `numba` and `pydantic>=2`; drop the `panel>=1.4` pin,
-    which Spyglass does not import and which blocked `keypoint-moseq` 0.6 (it
-    pins `panel==0.14.4`) #1609
+    `ripple-detection>=1.7`, `keypoint-moseq>=0.6`; declare `networkx`, `numba`
+    and `pydantic>=2`; drop the `panel>=1.4` pin, which Spyglass does not import
+    and which blocked `keypoint-moseq` 0.6 (it pins `panel==0.14.4`) #1609
 - `environment.yml` and `environment_min.yml` move to NumPy 2 and `scipy>=1.13`;
     `environment.yml` installs `torch>=2` from pip instead of conda
     `pytorch<1.12` and no longer installs `mountainsort4`, which does not run on
@@ -187,8 +186,8 @@ or `log_export` positionally must pass them by keyword.
     secondary attribute with the parent, as v2's `ConcatMemberCuration` does;
     which rows count as orphans is otherwise unchanged. Add
     `spyglass.utils.dj_helper_fn.get_child_references` #1609
-- `cautious_delete` honors an explicit `force_masters=False` instead of
-    always forcing master deletion #1609
+- `cautious_delete` honors an explicit `force_masters=False` instead of always
+    forcing master deletion #1609
 - `spyglass.utils.nwb_helper_fn.get_raw_eseries_path` accepts `object_id=`; add
     `raw_eseries_path_and_timestamp_mode` #1609
 - Add `spyglass.utils.nwb_hash.get_namespace_versions`, shared by v1 and v2
@@ -201,6 +200,12 @@ or `log_export` positionally must pass them by keyword.
     #1662
 - Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
 - Add `prefer_download` custom config for stream-capable backends #1662
+- Pin `deeplabcut[tf]<3`; 3.x drops the TensorFlow backend the DLC pipeline
+    targets #1679
+- Fix handler loss in the DLC `file_log` decorator, which dropped the outer
+    call's file handler when these calls nested #1679
+- Correct `Populate.md` on `_parallel_make`, the double `make_fetch` call, and
+    the `None` return from `make_compute` #1679
 
 ### Pipelines
 
@@ -218,6 +223,23 @@ or `log_export` positionally must pass them by keyword.
     - `UnitWaveformFeatures` accepts v2 sorts, with amplitudes in µV. v0/v1
         amplitudes are raw counts, so do not mix v0/v1 and v2 marks in one decoder
         #1609
+
+- Position
+
+    - Separate `DLCPosVideo`, `TrodesPosVideo`, and `PositionVideo` to tri-part
+        `make`; `PositionVideo` also closes the video NWB file handle it
+        previously left open #1679
+    - `DLCPosVideo` and `TrodesPosVideo` set `_parallel_make`, so
+        `populate(processes=N)` no longer fails on `VideoMaker`'s process pool
+        under DataJoint's daemonic workers #1679
+    - `TrodesPosVideo` and `PositionVideo` raise on an unmapped epoch instead of
+        committing `has_video=False`, and no longer repair `PositionIntervalMap`
+        or `VideoFile` from `make_fetch` #1679
+    - `DLCPosVideo` raises when a render writes no file, instead of reporting
+        success and inserting no row #1679
+    - `DLCPosVideo` sorts bodyparts, making video color assignment reproducible
+        across databases #1679
+    - `VideoMaker` raises on a failed partial render #1679
 
 - Spike Sorting
 

@@ -60,7 +60,7 @@ dependencies = [
   "numba",                          # SI locally_exclusive peak detection
                                     # (clusterless) and burst-curation correlograms
   # The v2 SpikeInterface 0.104 stack pins numpy>=2 through the
-  # `spikesorting-v2` / `spikesorting-v2-matching` extras; DeepLabCut 3.x and
+  # `spikesorting-v2` / `spikesorting-v2-matching` extras; DeepLabCut and
   # keypoint-moseq 0.6 require numpy<2, so the base floor admits both lines.
   # Admitting numpy 1.x here does NOT select the legacy SpikeInterface lane:
   # that lane is still produced only by the pytest-legacy CI sed and
@@ -91,7 +91,7 @@ dependencies = [
 ]
 
 optional-dependencies.dlc = [
-  "deeplabcut[tf]>=3.0", # floor only, so tf/numba need no pins of their own
+  "deeplabcut[tf]<3", # Pending position V2
   "ffmpeg",
 ]
 optional-dependencies.docs = [

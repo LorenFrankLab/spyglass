@@ -119,7 +119,7 @@ def test_v2_runtime_extras_declare_reentrant_analyzer_locks():
 
 def test_base_numpy_floor_allows_numpy_1x():
     """The base numpy floor admits the 1.x line the numpy<2 pipelines
-    (DeepLabCut 3.x, keypoint-moseq 0.6) need, while keeping the upper bound
+    (DeepLabCut, keypoint-moseq 0.6) need, while keeping the upper bound
     that holds the resolver off a future numpy 3."""
     numpy = _base_requirements()["numpy"].specifier
     assert numpy.contains("1.26.4"), (
