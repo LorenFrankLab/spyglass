@@ -32,9 +32,13 @@ class _Stand_in(IngestionMixin):
     def table_key_to_obj_attr(self):
         return {"self": self._mapping}
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Emit self's entries, plus a second table's when configured."""
-        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        entries = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
         if self._extra is not None and not hasattr(nwb_obj, "to_dataframe"):
             table, rows = self._extra
             entries.setdefault(table, []).extend(rows)
@@ -89,14 +93,16 @@ def test_row_loop_preserves_first_seen_order():
     """
 
     class _ParentFirst(_Stand_in):
-        def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        def generate_entries_from_nwb_object(
+            self, nwb_obj, base_key=None, ctx=None
+        ):
             if hasattr(nwb_obj, "to_dataframe"):
                 return super(_Stand_in, self).generate_entries_from_nwb_object(
-                    nwb_obj, base_key
+                    nwb_obj, base_key, ctx
                 )
             self_entries = super(
                 _Stand_in, self
-            ).generate_entries_from_nwb_object(nwb_obj, base_key)
+            ).generate_entries_from_nwb_object(nwb_obj, base_key, ctx)
             return {"parent": [{"p": 1}], **self_entries}
 
     table = _ParentFirst()

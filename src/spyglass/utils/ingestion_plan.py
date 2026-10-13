@@ -472,6 +472,10 @@ REMEDIES = {
         "This table needs an NWB extension the file does not declare. Convert "
         "the file with that extension, or ingest without this table."
     ),
+    "missing_camera": (
+        "No CameraDevice supplies the camera this video names. Add the camera "
+        "to the file or its _spyglass_config.yaml, or the video stays unplaced."
+    ),
     "planner_miss": (
         "The plan said these rows were insertable and they were not, which is "
         "a gap in the planner rather than in the file. Please report it."

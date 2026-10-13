@@ -161,6 +161,7 @@ def test_entry_too_large_stages_hashes_without_the_payload(
             "file_not_registered",
             "file_unreadable",
             "missing_attribute",
+            "missing_camera",
             "missing_parent",
             "parse_error",
             "planner_miss",

@@ -437,14 +437,15 @@ def test_video_partial_import_counts_source_series(common, monkeypatch):
     table._video_count = 0
     table._placed_videos = 0
 
-    def fake_validate(video_obj, valid_times, key, ctx=None):
-        # `ctx` because the real method takes it: the camera is looked up among
-        # the rows this ingestion will hold, not only those already stored.
+    def fake_validate(video_obj, valid_times, key):
         if video_obj.name == "spans two epochs":
             return [dict(key, video_file_num=0)], None, 1.0
         return [], "no timestamp overlap with epoch", 0.0
 
     monkeypatch.setattr(table, "_validate_video_timestamps", fake_validate)
+    # The subject here is the counting, not the camera: these stand-in videos
+    # carry no device for `_camera_missing` to resolve.
+    monkeypatch.setattr(table, "_camera_missing", lambda nwb_obj, ctx: False)
 
     base_key = {"nwb_file_name": "fake_.nwb"}
     placed = table.generate_entries_from_nwb_object(

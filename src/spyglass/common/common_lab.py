@@ -175,7 +175,9 @@ class LabTeam(SpyglassIngestion, dj.Manual):
 
     _source_nwb_object_type = pynwb.NWBFile
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         base_key = base_key or dict()
         experimenter_list = nwb_obj.experimenter
         if not experimenter_list:

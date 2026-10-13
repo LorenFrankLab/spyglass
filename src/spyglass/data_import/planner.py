@@ -800,9 +800,7 @@ def _refuse(
 
     # A divergence is `soft`, so it never reaches `blocking`; the only thing
     # left to decide is whether a caller asked for it to be an error.
-    if on_divergence == "raise" and any(
-        problem.code == "divergence" for problem in plan.problems
-    ):
+    if on_divergence == "raise" and diverges:
         logger.error(plan.report(log=False))
         return plan
 

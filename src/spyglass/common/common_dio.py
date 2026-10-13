@@ -62,21 +62,11 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
 
         # Times for these events correspond to the valid times for the raw
         # data; with no raw data, these events get an interval of their own.
-        #
-        # Asked of the context, not of `Raw` directly: the same ingestion fills
-        # `Raw`, so while planning a file that row exists only in the plan.
-        # Querying made this branch turn on *when* the plan was built -- absent
-        # `Raw` it takes the fallback, planning a different
-        # `interval_list_name` and an extra IntervalList row than the insert
-        # would write. That is a plan disagreeing with its own insert, which is
-        # worse than either branch.
-        raw_restr = {"nwb_file_name": nwb_file_name}
-        raw_interval = (
-            ctx.value_for(Raw(), "interval_list_name", raw_restr)
-            if ctx is not None
-            else next(
-                iter((Raw() & raw_restr).fetch("interval_list_name")), None
-            )
+        # Asked of the context, which holds the `Raw` row this same ingestion
+        # plans -- a query would make the branch below turn on *when* the plan
+        # was built.
+        raw_interval = ctx.value_for(
+            Raw(), "interval_list_name", {"nwb_file_name": nwb_file_name}
         )
 
         has_raw = raw_interval is not None

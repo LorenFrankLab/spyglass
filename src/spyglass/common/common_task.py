@@ -249,22 +249,20 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
 
         return camera_names
 
-    def _session_intervals(self, nwb_file_name, ctx=None) -> list:
+    def _session_intervals(self, nwb_file_name, ctx) -> list:
         """Return the interval names a file will hold, resolved once.
 
-        Asked of the context where there is one: `IntervalList` is filled by
-        the same ingestion -- `Raw` and `PositionSource` both emit rows into it
-        before this table is planned -- so querying it while planning a file
-        that is not ingested yet finds nothing, and every epoch then resolves
-        to no interval and yields no row.
+        Asked of the context: `IntervalList` is filled by the same ingestion
+        -- `Raw` and `PositionSource` both emit rows into it before this table
+        is planned -- so querying it while planning a file that is not ingested
+        yet finds nothing, and every epoch resolves to no interval.
 
         Parameters
         ----------
         nwb_file_name : str
             The file being ingested.
-        ctx : FileContext, optional
-            Parse context. Default None, querying the database, which is
-            correct on a plain insert where those rows are written first.
+        ctx : FileContext
+            Parse context.
 
         Returns
         -------
@@ -272,15 +270,12 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
             Interval names this file will have in IntervalList.
         """
         if nwb_file_name not in self._interval_cache:
-            restr = {"nwb_file_name": nwb_file_name}
-            self._interval_cache[nwb_file_name] = (
-                [
-                    row["interval_list_name"]
-                    for row in ctx.rows_for(IntervalList(), restr)
-                ]
-                if ctx is not None
-                else list((IntervalList & restr).fetch("interval_list_name"))
-            )
+            self._interval_cache[nwb_file_name] = [
+                row["interval_list_name"]
+                for row in ctx.rows_for(
+                    IntervalList(), {"nwb_file_name": nwb_file_name}
+                )
+            ]
         return self._interval_cache[nwb_file_name]
 
     def generate_entries_from_nwb_object(

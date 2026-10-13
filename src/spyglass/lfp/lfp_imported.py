@@ -161,7 +161,9 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
 
         return group_key, entries
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Add the electrode group and interval one electrical series needs."""
         timestamps = nwb_obj.get_timestamps()
         if len(timestamps) == 0:
@@ -180,7 +182,9 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
                 self: [],
             }
 
-        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        entries = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
         self_key = entries[self][0]
         session_key = {"nwb_file_name": self_key["nwb_file_name"]}
 

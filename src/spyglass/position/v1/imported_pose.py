@@ -50,7 +50,9 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
         "skeleton": {"skeleton_object_id": "object_id"},
     }
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Generate the interval, the pose entry, and one entry per body part.
 
         The interval comes first: it is this table's parent, derived from the
@@ -86,7 +88,9 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
                     "pipeline": "ImportedPose",
                 }
             ],
-            **super().generate_entries_from_nwb_object(nwb_obj, interval_pk),
+            **super().generate_entries_from_nwb_object(
+                nwb_obj, interval_pk, ctx
+            ),
             self.BodyPart: [
                 dict(
                     interval_pk,

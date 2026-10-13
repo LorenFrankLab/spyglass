@@ -106,7 +106,7 @@ class IngestionMixin(BaseMixin):
         return {tbl: [dict(base_key, **entry) for entry in entries]}
 
     def generate_entries_from_config(
-        self, config: dict, base_key=None
+        self, config: dict, base_key=None, ctx=None
     ) -> IngestionEntries:
         """Generates a list of table entries from a config dictionary."""
         base_key = base_key or dict()
@@ -126,27 +126,13 @@ class IngestionMixin(BaseMixin):
         return entries
 
     def _generate_entries(self, nwb_obj, base_key, ctx=None):
-        """Call the generate hook, handing it `ctx` if it declares one.
+        """Call the generate hook with this file's context.
 
-        The hook is overridden by most ingestion tables, and only the few that
-        resolve a reference to a table this same ingestion fills need the
-        context. Passing it conditionally keeps the rest on the two-argument
-        signature they were written with -- and passing it through *every*
-        call site, including the per-row recursion below, is what stops a
-        table's context from silently becoming None halfway down.
+        Every override takes `ctx`, so it is passed at every call site --
+        including the per-row recursion below, which is what stops a table's
+        context from becoming None halfway down.
         """
-        kwargs = dict()
-        if (
-            "ctx"
-            in inspect.signature(
-                self.generate_entries_from_nwb_object
-            ).parameters
-        ):
-            kwargs["ctx"] = ctx
-
-        return self.generate_entries_from_nwb_object(
-            nwb_obj, base_key, **kwargs
-        )
+        return self.generate_entries_from_nwb_object(nwb_obj, base_key, ctx)
 
     def generate_entries_from_nwb_object(
         self, nwb_obj, base_key=None, ctx=None
@@ -157,7 +143,6 @@ class IngestionMixin(BaseMixin):
         returned before the child in the IngestionEntries dict.
         """
         base_key = base_key or dict()
-        base_key = base_key.copy()  # avoid modifying original
 
         # For table objects, generate entry(s) for each row
         if (
@@ -179,39 +164,7 @@ class IngestionMixin(BaseMixin):
                     entries.setdefault(table, []).extend(table_entries)
             return entries
 
-        obj_ = None
-        for object_name, mapping in self.table_key_to_obj_attr.items():
-            obj_ = (
-                nwb_obj
-                if object_name == "self"
-                else getattr(nwb_obj, object_name)
-            )
-
-            if obj_ is None:
-                raise ValueError(
-                    f"NWB object {object_name} not found in {nwb_obj}."
-                )
-
-            for k, v in mapping.items():
-                # attribute name as string
-                if isinstance(v, str):
-                    base_key[k] = getattr(obj_, v)
-                # attribute with default value as tuple (attr_name, default_val)
-                elif (
-                    isinstance(v, tuple)
-                    and len(v) == 2
-                    and isinstance(v[0], str)
-                ):
-                    base_key[k] = getattr(obj_, v[0], v[1])
-                # callable function
-                elif callable(v):
-                    base_key[k] = v(obj_)
-                else:
-                    raise ValueError(
-                        f"Invalid mapping for {k}: {v}. Must be str, "
-                        + "tuple of (str, default), or callable."
-                    )
-        return {self: [base_key]}
+        return self._entries_from_mapping(nwb_obj, base_key)
 
     def _entries_from_mapping(self, nwb_obj, base_key=None) -> IngestionEntries:
         """Apply `table_key_to_obj_attr` to one object, yielding one entry.
@@ -526,19 +479,8 @@ class IngestionMixin(BaseMixin):
         if not ctx.config:
             return PlannedEntries()
 
-        # As with the NWB-object hook: an override that resolves a reference to
-        # a table this ingestion also fills declares `ctx` and receives it.
-        kwargs = dict()
-        if (
-            "ctx"
-            in inspect.signature(self.generate_entries_from_config).parameters
-        ):
-            kwargs["ctx"] = ctx
-
         return PlannedEntries.from_dict(
-            self.generate_entries_from_config(
-                ctx.config, ctx.base_key, **kwargs
-            )
+            self.generate_entries_from_config(ctx.config, ctx.base_key, ctx)
         )
 
     def after_insert(self, ctx, inserted) -> None:
@@ -800,6 +742,27 @@ class IngestionMixin(BaseMixin):
         # By default, checks that all non-nullable keys present
         return [key for key in keys if self._key_has_required_attrs(key)]
 
+    def _adjust_for(self, tbl, rows: List[dict]) -> List[dict]:
+        """Adjust rows the way their own table wants them adjusted.
+
+        A table generated alongside this one may be a plain `SpyglassMixin`
+        with no adjustment of its own, hence the fallback.
+
+        Parameters
+        ----------
+        tbl : dj.Table
+            The table the rows are destined for, instanced.
+        rows : list of dict
+
+        Returns
+        -------
+        list of dict
+        """
+        adjust = getattr(
+            tbl, "_adjust_keys_for_entry", self._remove_null_from_dicts
+        )
+        return adjust(rows)
+
     def _remove_null_from_dicts(self, keys: List[dict]) -> List[dict]:
         """Remove null-valued items from each key in a list.
 
@@ -845,15 +808,9 @@ class IngestionMixin(BaseMixin):
 
         for table, table_entries in entries.items():
             # ensure instanced
-            tbl = table() if inspect.isclass(table) else table
+            tbl = table.as_instance
 
-            # Allow children to adjust keys before comparing. A parent
-            # generated alongside this table is a plain SpyglassMixin, with no
-            # adjustment of its own.
-            adjust_func = getattr(
-                tbl, "_adjust_keys_for_entry", self._remove_null_from_dicts
-            )
-            adjusted_entries = adjust_func(table_entries)
+            adjusted_entries = self._adjust_for(tbl, table_entries)
 
             if not any(adjusted_entries):
                 null_keys[table] = tbl  # mark for removal from dict
@@ -967,7 +924,7 @@ class IngestionMixin(BaseMixin):
         reports, and neither row is stored, so there is no value to defer to.
         """
         for table, rows in entries.items():
-            tbl = table() if inspect.isclass(table) else table
+            tbl = table.as_instance
             kept, conflicts = self._collapse_by_primary_key(tbl, rows)
 
             for key, differing in conflicts:
@@ -1039,14 +996,9 @@ class IngestionMixin(BaseMixin):
             The new entry to insert after validation, or None if the entry
             already exists and is consistent.
         """
-        # NOTE: `tbl` rather than `self` so that a table generated alongside
-        # this one is validated against itself, not against this table.
-        # Same fallback as _adjust_entries: tbl may be a plain SpyglassMixin
-        # table generated alongside this one, with no adjustment of its own.
-        adjust_func = getattr(
-            tbl, "_adjust_keys_for_entry", self._remove_null_from_dicts
-        )
-        adjusted_entries = adjust_func([new_key])
+        # `tbl` rather than `self`, so a table generated alongside this one
+        # is validated against itself.
+        adjusted_entries = self._adjust_for(tbl, [new_key])
         if not adjusted_entries:
             return  # entry filtered out by adjustment
 
@@ -1131,30 +1083,17 @@ class IngestionMixin(BaseMixin):
         Returns
         -------
         tuple of Problem
+
+        Notes
+        -----
+        Same-key rows are not checked here: `_dedup_planned` collapsed them
+        inside `_parse`, through the same `row_key`, so no input can reach
+        this with two.
         """
         table = self if table is None else table
         problems: List[Problem] = []
-        seen: set = set()
 
         for row in rows:
-            key = row_key(table, row)
-
-            if key in seen:
-                # The row's own values, not `key`, which is folded for
-                # comparison and would name a key the reader never wrote.
-                shown = {
-                    attr: row.get(attr) for attr in sorted(table.primary_key)
-                }
-                problems.append(
-                    Problem(
-                        severity="hard",
-                        code="duplicate_key",
-                        message=f"Two planned entries share the key {shown}",
-                        table=table.full_table_name,
-                    )
-                )
-            seen.add(key)
-
             problems.extend(self._required_attribute_problems(table, row))
             problems.extend(self._attribute_fit_problems(table, row))
             problems.extend(self._foreign_key_problems(table, row, key_space))

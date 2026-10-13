@@ -70,7 +70,9 @@ class PositionSource(SpyglassIngestion, dj.Manual):
         pos_interface = get_position_obj(nwb_file)
         return [pos_interface] if pos_interface is not None else []
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Group the file's spatial series into one source entry per epoch.
 
         Each epoch yields an IntervalList entry (the parent, first), a source
@@ -377,9 +379,13 @@ class RawCompassDirection(SpyglassIngestion, dj.Manual):
         )
         return valid_times
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Add IntervalList entry to the generated entries."""
-        super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        super_ins = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
         self_key = super_ins[self][0]
         interval_insert = {
             k: v for k, v in self_key.items() if k in IntervalList.heading.names
@@ -416,14 +422,18 @@ class StateScriptFile(SpyglassIngestion, dj.Imported):
 
     table_key_to_obj_attr = {"self": {"file_object_id": "object_id"}}
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Expand one associated file into an entry per task epoch.
 
         The file names its epochs in a comma-separated string. Only epochs
         already present in TaskEpoch yield an entry, matching the previous
         implementation, which ran once per existing TaskEpoch key.
         """
-        super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        super_ins = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
         self_key = super_ins[self][0]
 
         # TODO: update associated_file_obj.task_epochs to be an array of
@@ -483,7 +493,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
     # Entries are built per epoch in the override, not per column.
     table_key_to_obj_attr = {"self": dict()}
 
-    def _epoch_intervals(self, nwb_file_name, ctx=None) -> dict:
+    def _epoch_intervals(self, nwb_file_name, ctx) -> dict:
         """Return the valid times of each task epoch, resolved once per file.
 
         A video belongs to whichever epoch its timestamps fall inside, so
@@ -500,9 +510,8 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         ----------
         nwb_file_name : str
             The file being ingested.
-        ctx : FileContext, optional
-            Parse context. Default None, querying the database, which is
-            correct on a plain insert where those rows are written first.
+        ctx : FileContext
+            Parse context.
 
         Returns
         -------
@@ -513,32 +522,21 @@ class VideoFile(SpyglassIngestion, dj.Imported):
             return self._epoch_cache[nwb_file_name]
 
         restr = {"nwb_file_name": nwb_file_name}
+        by_name = {
+            row["interval_list_name"]: row
+            for row in ctx.rows_for(IntervalList(), restr)
+        }
 
-        if ctx is not None:
-            by_name = {
-                row["interval_list_name"]: row
-                for row in ctx.rows_for(IntervalList(), restr)
-            }
-            # The valid times, not the row: `Interval(dict)` treats a dict as
-            # a key and looks it up, which is the very query being avoided --
-            # for a planned row there is nothing to find.
-            self._epoch_cache[nwb_file_name] = {
-                row["epoch"]: Interval(
-                    by_name[row["interval_list_name"]]["valid_times"]
-                )
-                for row in ctx.rows_for(TaskEpoch(), restr)
-                if row.get("interval_list_name") in by_name
-            }
-        else:
-            self._epoch_cache[nwb_file_name] = {
-                epoch: (
-                    IntervalList
-                    & dict(restr, interval_list_name=interval_list_name)
-                ).fetch_interval()
-                for epoch, interval_list_name in zip(
-                    *(TaskEpoch & restr).fetch("epoch", "interval_list_name")
-                )
-            }
+        # The valid times, not the row: `Interval(dict)` treats a dict as a
+        # key and looks it up, which is the very query being avoided -- for a
+        # planned row there is nothing to find.
+        self._epoch_cache[nwb_file_name] = {
+            row["epoch"]: Interval(
+                by_name[row["interval_list_name"]]["valid_times"]
+            )
+            for row in ctx.rows_for(TaskEpoch(), restr)
+            if row.get("interval_list_name") in by_name
+        }
 
         return self._epoch_cache[nwb_file_name]
 
@@ -555,27 +553,19 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         entries = []
         mismatches = []  # kept only if the video places in no epoch
 
+        # Once per video, not once per epoch: a camera no CameraDevice
+        # supplies is missing for every epoch this video could land in.
+        if self._camera_missing(nwb_obj, ctx):
+            return {self: []}
+
         for epoch, valid_times in self._epoch_intervals(
             base_key["nwb_file_name"], ctx
         ).items():
             key = dict(base_key, epoch=epoch)
             try:
                 rows, failure_reason, overlap_percent = (
-                    self._validate_video_timestamps(
-                        nwb_obj, valid_times, key, ctx=ctx
-                    )
+                    self._validate_video_timestamps(nwb_obj, valid_times, key)
                 )
-            except KeyError as err:  # camera device not in CameraDevice
-                self._failed_videos["missing_camera"].append(
-                    {
-                        "name": nwb_obj.name,
-                        "camera": getattr(
-                            nwb_obj.device, "camera_name", "unknown"
-                        ),
-                        "error": str(err),
-                    }
-                )
-                break  # the camera is missing for every epoch
             except Exception as err:
                 self._failed_videos["other"].append(
                     {
@@ -608,6 +598,46 @@ class VideoFile(SpyglassIngestion, dj.Imported):
             self._failed_videos["timestamp_mismatch"].extend(mismatches)
 
         return {self: entries}
+
+    def _camera_missing(self, nwb_obj, ctx) -> bool:
+        """Whether no CameraDevice supplies this video's camera, reporting it.
+
+        Reported rather than raised: the videos naming the camera are skipped
+        and the rest of the file is planned, so this is news rather than a
+        failure. `soft`, because a plan that cannot place a video is still a
+        plan worth inserting.
+
+        Parameters
+        ----------
+        nwb_obj : pynwb.image.ImageSeries
+            The video object from the NWB file.
+        ctx : FileContext
+            Parse context, so a camera this same ingestion plans counts.
+
+        Returns
+        -------
+        bool
+        """
+        camera_name = getattr(nwb_obj.device, "camera_name", None)
+        if ctx.rows_for(CameraDevice(), {"camera_name": camera_name}):
+            return False
+
+        self._failed_videos["missing_camera"].append(
+            {
+                "name": nwb_obj.name,
+                "camera": camera_name or "unknown",
+                "error": f"No CameraDevice named {camera_name!r}",
+            }
+        )
+        ctx.problem(
+            "soft",
+            "missing_camera",
+            f"{nwb_obj.name} names camera {camera_name!r}, which neither the "
+            + "file nor the database supplies; it was not placed",
+            table=self.full_table_name,
+            nwb_object_id=getattr(nwb_obj, "object_id", None),
+        )
+        return True
 
     def before_parse(self, ctx) -> None:
         """Clear the per-file bookkeeping, for planning as well as inserting.
@@ -647,9 +677,11 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         key,
         video_obj,
         cam_device_regex: str = r"camera_device (\d+)",
-        ctx=None,
     ):
         """Prepare a VideoFile entry dict for a given video object.
+
+        The camera is known to exist by here -- `_camera_missing` answered
+        that once for the whole video.
 
         Parameters
         ----------
@@ -660,41 +692,14 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         cam_device_regex : str, optional
             Regular expression pattern to extract camera device number.
             Default: r"camera_device (\\d+)"
-        ctx : FileContext, optional
-            Parse context, used to find the camera among the rows this
-            ingestion will hold rather than only those already stored. Default
-            None, consulting the database alone.
 
         Returns
         -------
         dict
             Prepared entry dict ready for insertion
-
-        Raises
-        ------
-        KeyError
-            If camera_name is not found in CameraDevice table
         """
         nwb_cam_device = video_obj.device.name
         camera_name = video_obj.device.camera_name
-
-        # The same ingestion fills CameraDevice, so on a first pass over a file
-        # the camera exists only in the plan. Querying here found nothing and
-        # this method raised, which the caller records as a missing camera and
-        # stops placing videos -- so a from-scratch ingestion planned no videos
-        # at all, while one against a database that already held the cameras
-        # planned them fine.
-        cam_restr = {"camera_name": camera_name}
-        known = (
-            ctx.rows_for(CameraDevice(), cam_restr)
-            if ctx is not None
-            else (CameraDevice & cam_restr)
-        )
-        if not known:
-            raise KeyError(
-                f"No camera with camera_name: {camera_name} found "
-                "in CameraDevice table."
-            )
 
         match = re.match(cam_device_regex, nwb_cam_device)
         if not match:
@@ -710,7 +715,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
             video_file_object_id=video_obj.object_id,
         )
 
-    def _validate_video_timestamps(self, video_obj, valid_times, key, ctx=None):
+    def _validate_video_timestamps(self, video_obj, valid_times, key):
         """Validate video timestamps and return entries or failure reason.
 
         Handles both single-file and multi-file ImageSeries. Validates that
@@ -738,7 +743,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         # Multi-file ImageSeries
         if starting_frame is not None and len(starting_frame) > 1:
             entries, overlap_pct = self._validate_multifile_timestamps(
-                video_obj, timestamps, starting_frame, valid_times, key, ctx=ctx
+                video_obj, timestamps, starting_frame, valid_times, key
             )
             if not entries:
                 threshold_pct = self._timestamp_overlap_threshold * 100
@@ -790,7 +795,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
             )
 
         return (
-            [self._prepare_video_entry(key, video_obj, ctx=ctx)],
+            [self._prepare_video_entry(key, video_obj)],
             None,
             overlap_pct,
         )
@@ -802,7 +807,6 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         starting_frame,
         valid_times,
         key,
-        ctx=None,
     ):
         """Validate each segment of multi-file ImageSeries timestamps.
 
@@ -851,7 +855,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
                 continue
 
             # This file segment matches the epoch - prepare VideoFile entry
-            entry = self._prepare_video_entry(key.copy(), video_obj, ctx=ctx)
+            entry = self._prepare_video_entry(key.copy(), video_obj)
             entries.append(entry)
 
         return entries, max_overlap_pct

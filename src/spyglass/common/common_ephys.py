@@ -186,7 +186,7 @@ class Electrode(SpyglassIngestion, dj.Imported):
             nwb_obj, base_key, ctx
         )
 
-        config = ctx.config if ctx is not None else dict()
+        config = ctx.config
         if not (electrode_config := config.get("Electrode", None)):
             return entries
         # map electrode id to dictof electrode information from config YAML
@@ -322,9 +322,13 @@ class Raw(SpyglassIngestion, dj.Imported):
             warn=not self._test_mode,
         )
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Add IntervalList entry to the generated entries."""
-        super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        super_ins = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
         self_key = super_ins[self][0]
         valid_times = self_key.pop("valid_times")  # remove from self key
         interval_insert = {
