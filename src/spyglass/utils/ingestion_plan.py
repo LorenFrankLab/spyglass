@@ -179,6 +179,26 @@ def entry_digest(entry: dict) -> str:
     return hashed.hexdigest()
 
 
+def rows_digest(rows) -> str:
+    """Digest over a set of rows, order-independent.
+
+    Order-independent because a fetch promises no order.
+
+    Parameters
+    ----------
+    rows : iterable of dict
+
+    Returns
+    -------
+    str
+        32-character hex digest.
+    """
+    rolled = md5()
+    for digest in sorted(entry_digest(row) for row in rows):
+        rolled.update(digest.encode())
+    return rolled.hexdigest()
+
+
 def collated(value):
     """Reduce a string key value to Spyglass's notion of one identity.
 
@@ -229,21 +249,38 @@ def collated(value):
     return value.strip().casefold()
 
 
+def normalized(table, attr: str, value):
+    """Return one attribute value as Spyglass compares it.
+
+    The single definition of a comparable value: declared type via `coerced`,
+    representation via `hashable`, case and surrounding whitespace via
+    `collated`.
+
+    Parameters
+    ----------
+    table : dj.Table
+        The table the value belongs to.
+    attr : str
+        Column name.
+    value : Any
+        A planned or fetched value.
+
+    Returns
+    -------
+    Any
+        An identity, not a record of what the row said -- show a reader the
+        row's own value, never this.
+    """
+    return collated(hashable(coerced(table, attr, value)))
+
+
 def row_key(table, row) -> tuple:
     """Return a row's primary key as Spyglass identifies it.
 
-    Two reductions, because comparing raw values answers the wrong question:
-
-    - **Type**, via `coerced`. The database coerces on insert -- a planned
-      `'0'` for an integer column is stored as `0` -- so a raw comparison
-      reports an entry as new, or a parent as missing, when it is neither.
-    - **Case and surrounding whitespace**, via `collated`. A Spyglass rule,
-      stricter than the backend: see that function for why erring strict is
-      the safe direction, and for the one gap it leaves.
-
-    This is the single definition of row identity. Novelty, foreign-key
-    presence, same-key collapsing and the staged `key_hash` all come through
-    here, so none of them can drift from the others.
+    Each value through `normalized`. This is the single definition of row
+    identity. Novelty, foreign-key presence, same-key collapsing and the
+    staged `key_hash` all come through here, so none of them can drift from
+    the others.
 
     Parameters
     ----------
@@ -255,12 +292,10 @@ def row_key(table, row) -> tuple:
     Returns
     -------
     tuple
-        (attribute, value) pairs, sorted by attribute. Reduced, so it is an
-        identity rather than a record of what the row said -- show a reader
-        the row's own values, never this.
+        (attribute, value) pairs, sorted by attribute.
     """
     return tuple(
-        (attr, collated(hashable(coerced(table, attr, row.get(attr)))))
+        (attr, normalized(table, attr, row.get(attr)))
         for attr in sorted(table.primary_key)
     )
 
@@ -482,6 +517,9 @@ class TablePlan:
     # reused. None when the file could not be hashed, which means "unknown",
     # never "unchanged".
     read_set_digest: Optional[str] = None
+    # The rest of the reuse key: what the parse read from other tables, which
+    # the digest above cannot cover. See `FileContext.xrefs`.
+    xrefs: Tuple[dict, ...] = ()
 
     @property
     def entry_count(self) -> int:
@@ -521,6 +559,10 @@ class IngestionPlan:
     nwb_hash: Optional[str] = None
     spyglass_version: Optional[str] = None
     config_hash: Optional[str] = None
+    # Digest over the file's set of NWB object ids: the whole-file gate on
+    # reuse, since no per-table digest can notice an object appearing. None
+    # means unknown.
+    id_set_digest: Optional[str] = None
     # {table_name: count} for entries not already in the database
     novel: Dict[str, int] = field(default_factory=dict)
 
@@ -772,6 +814,10 @@ class FileContext:
     base_key: dict = field(default_factory=dict)
     cache: dict = field(default_factory=dict)
     reads: List[str] = field(default_factory=list)
+    # What this parse resolved out of other tables, as `{table, restriction,
+    # attr, value}`. Part of the reuse key: `reads` covers NWB objects, so
+    # without these a parse is replayable after a row it read has changed.
+    xrefs: List[dict] = field(default_factory=list)
     problems: List[Problem] = field(default_factory=list)
     # The keys and rows the whole plan will hold, when one is being built.
     # None on a plain insert, where the database is authoritative because
@@ -807,10 +853,10 @@ class FileContext:
         -------
         tuple of dict
         """
-        if self.key_space is not None:
-            return self.key_space.rows_for(table, restriction)
-
-        return tuple((table & (restriction or True)).fetch(as_dict=True))
+        rows = self._resolve(table, restriction)
+        # Digested whole: a caller handed rows may read any column of them.
+        self._record_xref(table, restriction, None, rows_digest(rows))
+        return rows
 
     def value_for(self, table, attr: str, restriction: dict = None):
         """Return one attribute of one row a table will hold, or None.
@@ -831,9 +877,58 @@ class FileContext:
         -------
         Any or None
         """
-        rows = self.rows_for(table, restriction)
+        rows = self._resolve(table, restriction)
+        value = rows[0].get(attr) if rows else None
 
-        return rows[0].get(attr) if rows else None
+        # The value, not the rows it came from: a lookup of one attribute
+        # must not be re-run because a column it never read moved.
+        self._record_xref(
+            table, restriction, attr, normalized(table, attr, value)
+        )
+
+        return value
+
+    def _resolve(self, table, restriction: dict = None) -> tuple:
+        """Return a table's rows, from the plan where there is one.
+
+        Shared by `rows_for` and `value_for`, so neither records the other's
+        cross-reference on top of its own.
+        """
+        if self.key_space is not None:
+            return self.key_space.rows_for(table, restriction)
+
+        return tuple((table & (restriction or True)).fetch(as_dict=True))
+
+    def _record_xref(self, table, restriction, attr, value) -> None:
+        """Note what a lookup into another table resolved to.
+
+        Parameters
+        ----------
+        table : dj.Table
+            The table read. Ignored if it does not name itself.
+        restriction : dict or None
+            The equalities the lookup was narrowed by.
+        attr : str or None
+            The attribute read, or None when whole rows were.
+        value : Any
+            What it resolved to: a normalized value, or a rows digest.
+        """
+        name = getattr(table, "full_table_name", None)
+        if name is None:  # pragma: no cover - not a table
+            return
+
+        restriction = dict(restriction) if restriction else None
+        if any(
+            xref["table"] == name
+            and xref["attr"] == attr
+            and xref["restriction"] == restriction
+            for xref in self.xrefs
+        ):
+            return  # the same lookup twice in one parse resolves the same
+
+        self.xrefs.append(
+            dict(table=name, restriction=restriction, attr=attr, value=value)
+        )
 
     def record_read(self, nwb_object) -> None:
         """Note that an NWB object was read while parsing.

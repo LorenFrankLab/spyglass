@@ -499,6 +499,23 @@ class NwbfileHasher:
         found = self.obj_ids.get(str(object_id))
         return found[1] if found else None
 
+    @property
+    def id_set_digest(self) -> Optional[str]:
+        """Return one digest over the *set* of object ids this file holds.
+
+        Ids only, never contents: this answers whether an object appeared or
+        vanished, which no per-object digest can.
+
+        Returns
+        -------
+        str or None
+            None when no object index was built, which reads as "unknown"
+            and never as "unchanged".
+        """
+        if not self.object_ids:
+            return None
+        return md5("".join(sorted(self.obj_ids)).encode()).hexdigest()
+
     def read_set_digest(self, object_ids) -> str:
         """Return one digest over the objects a table read.
 

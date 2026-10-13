@@ -7,15 +7,12 @@
 #### Ingestion Plans the File Before Writing (#1685)
 
 `insert_sessions` and `populate_all_common` parse the whole file, report every
-problem, then insert what was checked. The per-table path that wrote as it went,
-stopping at the first failure, is gone.
+problem, then insert what was checked.
 
-- A file with a blocking problem now writes **nothing**; `allow_partial=True`
-    takes what can be taken.
-- The return value is the plan: falsy when nothing blocked, prints as the
-    report. `if result:` still works; expecting `None` on success does not.
-- `InsertError` is no longer written. It still reads, warning once; current
-    records are in `IngestionPlanLog`.
+- A file with a blocking problem now writes nothing unless `allow_partial=True`.
+- The insert runs in one transaction, removing the need for `rollback_on_fail`.
+- The return value is the plan, prints as the report.
+- `InsertError` is no longer written. Readable for backwards compatibility.
 - Mismatched metadata is reported rather than prompted. The stored value is kept
     and the run continues; `on_divergence="raise"` declines instead.
 
@@ -23,15 +20,12 @@ See `ForDevelopers/IngestionPlans` for the full breakdown.
 
 #### Spyglass Decides Primary Key Identity, Not the Database (#1685)
 
-Whether two primary keys name the same row is now Spyglass's decision. Spyglass
-previously deferred to MySQL to trigger duplicate entry errors, which may vary
-in case-sensitivity depending on table collation. To prevent this backend
-variability across deployments, Spyglass added rules that are deliberately
-stricter than any collation, removing whitespace and normalizing case (e.g.,
-`sleep` vs ` Sleep`).
-
-Accents are deliberately not normalized in this adjustment (e.g., `Müller` vs.
-`Muller`).
+Spyglass previously deferred to MySQL to trigger duplicate entry errors, which
+may vary in case-sensitivity depending on table collation. To prevent this
+backend variability across deployments, Spyglass added rules that are
+deliberately stricter than any collation, removing whitespace and normalizing
+case (e.g., `sleep` vs ` Sleep`). Accents are deliberately not normalized in
+this adjustment (e.g., `Müller` vs. `Muller`).
 
 ### Infrastructure
 

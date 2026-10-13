@@ -129,9 +129,7 @@ def test_interval_list_accepts_all_tag_formats(
     """Test that IntervalList accepts all epoch tag formats."""
 
     # Insert the session
-    _ = data_import.insert_sessions(
-        epoch_tag_nwb, raise_err=True, rollback_on_fail=True
-    )
+    _ = data_import.insert_sessions(epoch_tag_nwb, raise_err=True)
     nwb_copy_file_name = epoch_tag_nwb.replace(".", "_.")
 
     # Fetch interval list names

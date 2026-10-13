@@ -57,7 +57,6 @@ def _plan_raw_file(copy_name: str, raw_path: Path):
 
 def insert_sessions(
     nwb_file_names: Union[str, List[str]],
-    rollback_on_fail: bool = False,
     raise_err: bool = False,
     reinsert: bool = False,
     dry_run: bool = False,
@@ -72,8 +71,6 @@ def insert_sessions(
         existing .nwb files. Each file represents a session. Also accepts
         strings with glob wildcards (e.g., *) so long as the wildcard specifies
         exactly one file.
-    rollback_on_fail : bool, optional
-        If True, undo all inserts if an error occurs. Default is False.
     raise_err : bool, optional
         If True, raise an error if an error occurs. Default is False.
     reinsert : bool, optional
@@ -195,7 +192,6 @@ def insert_sessions(
         results.append(
             populate_all_common(
                 out_nwb_file_name,
-                rollback_on_fail=rollback_on_fail,
                 raise_err=raise_err,
                 on_divergence=on_divergence,
             )

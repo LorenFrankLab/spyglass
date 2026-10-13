@@ -351,6 +351,7 @@ class IngestionMixin(BaseMixin):
                     ),
                 ),
                 reads=tuple(ctx.reads),
+                xrefs=tuple(ctx.xrefs),
             )
 
         return TablePlan(
@@ -359,6 +360,7 @@ class IngestionMixin(BaseMixin):
             status="ok" if planned else "skipped",
             problems=tuple(ctx.problems),
             reads=tuple(ctx.reads),
+            xrefs=tuple(ctx.xrefs),
         )
 
     def _parse(self, ctx) -> PlannedEntries:

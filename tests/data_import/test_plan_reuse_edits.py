@@ -223,6 +223,54 @@ def test_an_unrelated_edit_re_parses_nothing(
     )
 
 
+def test_an_object_appearing_invalidates_every_reuse(
+    common, editable_copy, parse_counter, hasher_for
+):
+    """An object that *appeared* must stop every table reusing its parse.
+
+    The case no other test here covers: every edit above modifies an object
+    that was already there. The premise below asserts that no per-table
+    digest moves, without which this would pass for the wrong reason.
+
+    The appearance is an empty group with a fresh `object_id`, not a cloned
+    device: a clone duplicates a primary key and so blocks its table, and a
+    blocked table never parses, which reads here the same as reuse.
+    """
+    from uuid import uuid4
+
+    from spyglass.data_import.planner import plan_nwbfile
+
+    name, path = editable_copy
+    _, first = _stage(name)
+    productive = _productive(first)
+    assert productive, "Premise: the mini file fills some tables"
+
+    with _edit(path) as file:
+        appeared = file.create_group("ffi_appeared")
+        appeared.attrs["object_id"] = str(uuid4())
+
+    hasher = hasher_for(name)
+    moved = {
+        tp.table_name
+        for tp in first.table_plans
+        if tp.read_set_digest
+        and hasher.read_set_digest(tp.reads) != tp.read_set_digest
+    }
+    assert not moved, (
+        "Premise: an appearance moves no per-table digest, so the per-table "
+        + f"check alone reuses everything; moved: {sorted(moved)}"
+    )
+
+    parse_counter.clear()
+    plan_nwbfile(name)
+
+    reused = productive - set(parse_counter)
+    assert not reused, (
+        "An object appearing must invalidate every reuse, since no table's "
+        + f"read-set can describe it; reused instead: {sorted(reused)}"
+    )
+
+
 def test_fixing_a_defect_on_disk_re_plans_only_the_affected_table(
     common, editable_copy, parse_counter, hasher_for
 ):

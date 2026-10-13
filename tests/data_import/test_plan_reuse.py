@@ -211,6 +211,82 @@ def test_a_plan_from_another_spyglass_version_is_not_reused(
     assert plan.entry_count > 0, "and the re-parse must still describe the file"
 
 
+def test_a_changed_stored_row_re_parses_the_table_that_read_it(
+    common, mini_copy_name, mini_insert, parse_counter
+):
+    """A cross-reference resolved out of another table joins the reuse key.
+
+    `DIOEvents` reads `Raw.interval_list_name` and writes it into every one
+    of its own entries, so reuse here does not merely cost nothing -- it
+    serves a plan naming an interval the insert would not write.
+
+    Planned for `DIOEvents` alone so the lookup resolves against the stored
+    `Raw` row: with `Raw` in the same pass its *planned* row wins, and no
+    edit to storage could be seen.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.data_import.planner import plan_nwbfile
+
+    log = IngestionPlanLog()
+    file_restr = {"nwb_file_name": mini_copy_name}
+    raw = common.Raw() & file_restr
+    assert raw, "Premise: the mini file's Raw row is stored"
+
+    was = raw.fetch1("interval_list_name")
+    names = (common.IntervalList & file_restr).fetch("interval_list_name")
+    other = next(name for name in names if name != was)
+
+    def plan_dio():
+        log.clear(mini_copy_name)
+        plan = plan_nwbfile(mini_copy_name, tables=[common.DIOEvents])
+        log.stage(plan)
+        return plan
+
+    first = plan_dio()
+    dio = common.DIOEvents().full_table_name
+    staged = {tp.table_name: tp for tp in first.table_plans}[dio]
+    assert staged.status == "ok" and staged.entry_count, (
+        "Premise: DIOEvents plans entries on its own, so there is something "
+        + f"to reuse; status {staged.status}, {staged.entry_count} entries"
+    )
+
+    def intervals_named(plan):
+        return {
+            row.get("interval_list_name")
+            for tp in plan.table_plans
+            for target, rows in tp.entries
+            for row in rows
+            if getattr(target, "full_table_name", None) == dio
+        }
+
+    assert intervals_named(first) == {was}, (
+        "Premise: DIOEvents writes the interval it read from Raw into its "
+        + "own entries"
+    )
+    assert staged.xrefs, (
+        "Premise: the parse recorded what it resolved out of Raw -- without "
+        + "it this test cannot distinguish the fix from its absence"
+    )
+
+    try:
+        common.Raw().update1({**raw.fetch1("KEY"), "interval_list_name": other})
+
+        parse_counter.clear()
+        second = plan_nwbfile(mini_copy_name, tables=[common.DIOEvents])
+
+        assert dio in set(parse_counter), (
+            "A table whose cross-reference now resolves differently must "
+            + "re-parse; the file alone cannot say so"
+        )
+        assert intervals_named(second) == {other}, (
+            "and the re-planned entries must name the interval Raw holds "
+            + f"now, not {was}"
+        )
+    finally:
+        common.Raw().update1({**raw.fetch1("KEY"), "interval_list_name": was})
+        log.clear(mini_copy_name)
+
+
 def test_a_staged_plan_records_its_provenance(
     common, mini_copy_name, mini_insert
 ):

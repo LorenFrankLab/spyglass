@@ -11,7 +11,7 @@ missing object would be reported once per dependent table rather than once.
 """
 
 from dataclasses import replace
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from typing import Dict, List, Optional, Tuple
 
 from spyglass.utils.ingestion_plan import (
@@ -19,7 +19,9 @@ from spyglass.utils.ingestion_plan import (
     PlannedEntries,
     Problem,
     TablePlan,
+    normalized,
     row_key,
+    rows_digest,
 )
 from spyglass.utils.logging import logger
 
@@ -281,8 +283,8 @@ def plan_nwbfile(
     nwb_key = {"nwb_file_name": nwb_file_name}
     registered = bool(Nwbfile & nwb_key)
 
-    # Recorded as provenance
-    nwb_hash = config_hash = None
+    # Recorded as provenance, except `id_set_digest`, which gates reuse
+    nwb_hash = config_hash = id_set_digest = None
 
     if nwb_file is None:
         if not registered:
@@ -324,6 +326,7 @@ def plan_nwbfile(
     hasher = _object_hasher(nwb_file_name, nwb_path, registered)
     if hasher is not None:
         nwb_hash = hasher.hash
+        id_set_digest = hasher.id_set_digest
 
     # Loaded once for the whole file, not per table: asking per table cost two
     # round trips each and made reuse slower than parsing. See `staged_plan`.
@@ -332,7 +335,7 @@ def plan_nwbfile(
         from spyglass.common.common_usage import IngestionPlanLog
 
         staged = IngestionPlanLog().staged_plan(
-            nwb_file_name, for_version=version
+            nwb_file_name, for_version=version, for_id_set=id_set_digest
         )
         if staged:
             declared = _declared_targets()
@@ -381,7 +384,7 @@ def plan_nwbfile(
 
         plan = None
         if staged:
-            plan = _reused_plan(instance, staged, hasher, declared)
+            plan = _reused_plan(instance, staged, hasher, declared, key_space)
 
         if plan is None:
             # The key space goes in, so a table resolving a reference to one
@@ -437,6 +440,7 @@ def plan_nwbfile(
                 read_set_digest=(
                     hasher.read_set_digest(plan.reads) if hasher else None
                 ),
+                xrefs=plan.xrefs,
             )
         )
 
@@ -447,19 +451,20 @@ def plan_nwbfile(
         novel=novel,
         nwb_hash=nwb_hash,
         config_hash=config_hash,
+        id_set_digest=id_set_digest,
         spyglass_version=version,
     )
 
     return plan
 
 
-def _reused_plan(instance, staged: dict, hasher, targets: dict):
+def _reused_plan(instance, staged: dict, hasher, targets: dict, key_space):
     """Return a TablePlan rebuilt from storage, or None to parse.
 
-    Reusable when the objects this table read are unchanged: the last attempt
-    recorded them and a digest over them, so re-hashing the same set answers
-    it. Returns None for any doubt -- reuse has to be provably safe, while
-    re-parsing is only slow.
+    Reusable when nothing the table read has changed -- neither the NWB
+    objects, by digest, nor the values it resolved out of other tables, by
+    re-resolving them. Returns None for any doubt: reuse has to be provably
+    safe, while re-parsing is only slow.
 
     Parameters
     ----------
@@ -472,6 +477,9 @@ def _reused_plan(instance, staged: dict, hasher, targets: dict):
         hashed, which is never grounds for reuse.
     targets : dict
         `{full_table_name: table class}`, from `_declared_targets`.
+    key_space : VirtualKeySpace
+        The plan so far, for re-resolving cross-references the same way the
+        parse did.
 
     Returns
     -------
@@ -501,6 +509,9 @@ def _reused_plan(instance, staged: dict, hasher, targets: dict):
     if digest is None or digest != record["read_set_digest"]:
         return None
 
+    if not _xrefs_hold(record.get("xrefs"), targets, key_space):
+        return None
+
     rehydrated = PlannedEntries()
     for target_name, rows in record["entries"].items():
         target = targets.get(target_name)
@@ -525,7 +536,56 @@ def _reused_plan(instance, staged: dict, hasher, targets: dict):
         problems=(),
         reads=tuple(record["reads"]),
         read_set_digest=digest,
+        # Carried through: a reused plan is staged again, and staging it
+        # without these loses the gate for every attempt after this one.
+        xrefs=tuple(record.get("xrefs") or ()),
     )
+
+
+def _xrefs_hold(xrefs, targets: dict, key_space) -> bool:
+    """Whether every value this parse read from another table still holds.
+
+    Re-resolved rather than re-hashed, since each is one lookup, and compared
+    through `normalized` so a difference the identity rule calls no
+    difference does not cost a re-parse.
+
+    Parameters
+    ----------
+    xrefs : iterable of dict or None
+        `{table, restriction, attr, value}`, as staged.
+    targets : dict
+        `{full_table_name: table class}`, from `_declared_targets`.
+    key_space : VirtualKeySpace
+        The plan so far, read the same way the parse read it.
+
+    Returns
+    -------
+    bool
+        False for any doubt, including a table no longer declared.
+    """
+    for xref in xrefs or ():
+        target = targets.get(xref["table"])
+        if target is None:
+            return False  # undeclared now: parse rather than guess
+
+        table = _as_table(target)
+        rows = key_space.rows_for(table, xref["restriction"] or None)
+
+        if (attr := xref["attr"]) is None:
+            current = rows_digest(rows)
+        else:
+            current = normalized(
+                table, attr, rows[0].get(attr) if rows else None
+            )
+
+        if current != xref["value"]:
+            logger.debug(
+                f"{xref['table']}.{attr or '*'} resolved differently than "
+                + "the staged plan recorded; re-parsing."
+            )
+            return False
+
+    return True
 
 
 def _declared_targets() -> Dict[str, object]:
@@ -628,14 +688,14 @@ def insert_plan(
     plan: IngestionPlan,
     allow_partial: bool = False,
     on_divergence: str = "report",
-    rollback_on_miss: bool = False,
 ) -> IngestionPlan:
     """Insert what a plan worked out, re-deriving nothing.
 
     The plan already holds every intended row, already checked. This applies
-    the divergence policy, then writes those rows in dependency order. No
-    file is reopened and no mapping is re-run: if a row is wrong here, the
-    plan was wrong, which is a planner gap rather than an ingestion error.
+    the divergence policy, then writes those rows in dependency order, in one
+    transaction. No file is reopened and no mapping is re-run: if a row is
+    wrong here, the plan was wrong, which is a planner gap rather than an
+    ingestion error, and the transaction undoes it.
 
     Freshness is judged per entry, never by comparing the file's hash to the
     one recorded when the plan was made. The expected workflow edits the file
@@ -656,13 +716,6 @@ def insert_plan(
         `raise` declines the run and logs the report. Default `report`.
         Nothing prompts, and neither value raises an exception: `raise`
         returns the plan truthy, carrying what stopped it.
-    rollback_on_miss : bool, optional
-        Delete the session when a `planner_miss` leaves the file part
-        inserted. Default False. This is the *only* case a rollback is for
-        now: a plan is checked before anything is written, so a failure here
-        means the planner was wrong, not the file. Everything the old
-        `rollback_on_fail` guarded against is now caught at plan time, and a
-        blanket rollback would throw away good rows to undo a bug.
 
     Returns
     -------
@@ -676,9 +729,6 @@ def insert_plan(
         return refused
 
     inserted, existing, conflicting, misses = _write_plan(plan)
-
-    if misses and rollback_on_miss:
-        _rollback(plan.nwb_file_name)
 
     if skipped := sum(len(rows) for _, _, rows in existing):
         logger.info(f"{plan.nwb_file_name}: {skipped} entries already stored")
@@ -775,10 +825,7 @@ def _refuse(
 
 
 def _write_plan(plan: IngestionPlan):
-    """Insert every target a plan holds, in the order it holds them.
-
-    Stops at the first `planner_miss`: a validated plan that fails halfway
-    is a bug, and carrying on would pile consequences on top of the cause.
+    """Insert every target a plan holds, reading first and writing once.
 
     Parameters
     ----------
@@ -786,15 +833,132 @@ def _write_plan(plan: IngestionPlan):
 
     Returns
     -------
-    tuple of (list, list, list)
+    tuple of (list, list, list, list)
         `(inserted, existing, conflicting, misses)`. The first three hold
         `(table_name, target, rows)`; the last holds `planner_miss` problems.
     """
-    inserted, existing, conflicting, misses = [], [], [], []
+    diverged = _diverged_keys(plan)
+    existing, conflicting, pending = [], [], []
 
-    # Which stored rows the file disagreed with, so they stage as `conflict`
-    # keeping their planned value rather than as `exists` losing it.
-    # Built from the plan: the planner already compared every row.
+    # Every query first, so the transaction below holds one run of inserts
+    # rather than a parse's worth of round trips: production is shared.
+    for name, target, rows in _merge_targets(plan):
+        novel, stored = _split_stored(target, rows)
+
+        matched, clashed = _classify_stored(name, target, stored, diverged)
+        if matched:
+            existing.append((name, target, matched))
+        if clashed:
+            conflicting.append((name, target, clashed))
+        if novel:
+            pending.append((name, target, novel))
+
+    if not pending:
+        return [], existing, conflicting, []
+
+    writing = None  # which target, so a miss still names one after the undo
+    try:
+        # Dependency order is also a consistent lock order across concurrent
+        # sessions, which is what keeps them from deadlocking.
+        with _one_transaction(pending[0][1]):
+            for name, target, rows in pending:
+                writing = name
+                _insert_rows(target, rows, plan.nwb_file_name)
+    except Exception as err:
+        # The plan said these rows were insertable and they were not: a gap
+        # in the planner rather than a user error, so it is coded distinctly
+        # to stay findable. Nothing is marked, and the staging area stays
+        # open for the next attempt.
+        logger.error(f"planner_miss in {writing}: {err}")
+        return (
+            [],
+            existing,
+            conflicting,
+            [
+                Problem(
+                    severity="hard",
+                    code="planner_miss",
+                    message=f"{type(err).__name__}: {err}",
+                    table=writing,
+                    exc_type=type(err).__name__,
+                )
+            ],
+        )
+
+    return pending, existing, conflicting, []
+
+
+def _merge_targets(plan: IngestionPlan):
+    """Return one `(table_name, target, rows)` per target, parents first.
+
+    Required, not tidying: `IntervalList` is emitted by more than one table
+    plan, and novelty is filtered before anything is written, so without
+    merging the same row is retained twice and the insert fails on itself.
+    Merged on `row_key`, so two emitters differing only in the case of a
+    shared key collapse too.
+
+    Keyed by the *target*, not the plan that emitted it: a table routinely
+    plans rows for another, and a staged entry belongs to where the row is
+    going.
+
+    Parameters
+    ----------
+    plan : IngestionPlan
+
+    Returns
+    -------
+    list of (str, dj.Table, list of dict)
+    """
+    merged = PlannedEntries()
+    for table_plan in plan.table_plans:
+        if table_plan.status != "ok":
+            continue  # failed or blocked: its rows were never validated
+        merged.extend(table_plan.entries)
+
+    found = []
+    for target, rows in merged.in_dependency_order():
+        if not rows:
+            continue
+        table = _as_table(target)
+
+        seen, unique = set(), []
+        for row in rows:
+            key = row_key(table, row)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(row)
+
+        found.append(
+            (getattr(target, "full_table_name", str(target)), target, unique)
+        )
+
+    return found
+
+
+def _one_transaction(target):
+    """Return a transaction over the connection a plan writes through.
+
+    A no-op when the caller already opened one, so an outer transaction stays
+    the unit of work.
+
+    Parameters
+    ----------
+    target : type or dj.Table
+        Any of the plan's targets; they share one connection.
+    """
+    connection = _as_table(target).connection
+    if connection.in_transaction:
+        return nullcontext()
+    return connection.transaction
+
+
+def _diverged_keys(plan: IngestionPlan) -> set:
+    """Return the stored rows the file disagreed with, as `(name, key)`.
+
+    So they stage as `conflict`, keeping their planned value, rather than as
+    `exists`, losing it.
+    """
     diverged = set()
     for problem in plan.problems:
         if problem.code == "divergence" and problem.primary_key:
@@ -802,73 +966,15 @@ def _write_plan(plan: IngestionPlan):
                 diverged.add(
                     (problem.table, tuple(sorted(problem.primary_key.items())))
                 )
-
-    for table_plan in plan.table_plans:
-        if table_plan.status != "ok":
-            continue  # failed or blocked: its rows were never validated
-
-        for target, rows in table_plan.entries:
-            if not rows:
-                continue
-            # The *target's* name, not the owning plan's: a table routinely
-            # emits rows for another, and the staged entry is keyed by where
-            # the row is going. Using the owner's name here matched nothing
-            # for every secondary target, silently leaving them staged.
-            name = getattr(target, "full_table_name", str(target))
-
-            try:
-                novel, stored = _insert_target(target, rows, plan.nwb_file_name)
-            except Exception as err:
-                # The plan said these rows were insertable and they were not.
-                # That is a gap in the planner, not a user error, so it is
-                # coded distinctly to stay findable. Whatever this target had
-                # already stored goes unmarked; the staging area stays open,
-                # so the next attempt marks it.
-                misses.append(
-                    Problem(
-                        severity="hard",
-                        code="planner_miss",
-                        message=f"{type(err).__name__}: {err}",
-                        table=table_plan.table_name,
-                        exc_type=type(err).__name__,
-                    )
-                )
-                logger.error(f"planner_miss in {table_plan.table_name}: {err}")
-                break
-
-            if stored:
-                matched, clashed = [], []
-                for row in stored:
-                    key = None
-                    with suppress(Exception):
-                        key = (
-                            name,
-                            tuple(
-                                sorted(
-                                    (attr, row.get(attr))
-                                    for attr in target.as_instance.primary_key
-                                )
-                            ),
-                        )
-                    target_list = clashed if key in diverged else matched
-                    target_list.append(row)
-                if matched:
-                    existing.append((name, target, matched))
-                if clashed:
-                    conflicting.append((name, target, clashed))
-            if novel:
-                inserted.append((name, target, novel))
-
-    return inserted, existing, conflicting, misses
+    return diverged
 
 
-def _insert_target(target, rows, nwb_file_name: str):
-    """Insert one target's novel rows, and say which were already there.
+def _split_stored(target, rows):
+    """Split a target's planned rows into the novel and the already stored.
 
     A plan describes what the file holds, not what is missing from the
     database, so a partial re-run legitimately replans rows that already
-    landed. Those are filtered out rather than inserted: a duplicate error
-    for work already done tells the user nothing they can act on.
+    landed.
 
     Parameters
     ----------
@@ -876,60 +982,80 @@ def _insert_target(target, rows, nwb_file_name: str):
         Where the rows are going.
     rows : sequence of dict
         Planned entries for it.
-    nwb_file_name : str
-        The file these rows came from.
 
     Returns
     -------
     tuple of (list of dict, list of dict)
-        `(novel, stored)` -- what was inserted, and what was already there.
+        `(novel, stored)`.
     """
-    table = target.as_instance
-    novel = _novel_rows(table, rows)
+    novel = _novel_rows(_as_table(target), rows)
 
     # By identity, not equality: `_novel_rows` returns the very dicts it was
     # given, and comparing two rows that hold arrays raises rather than
     # answering.
     novel_ids = {id(row) for row in novel}
-    stored = [row for row in rows if id(row) not in novel_ids]
 
-    if novel:
-        # A target may be a plain SpyglassMixin -- Task, say, which TaskEpoch
-        # plans rows for but which ingests nothing itself.
-        insert = getattr(table, "_insert_plan", None)
-        if insert is None:
-            table.insert(novel, skip_duplicates=False, allow_direct_insert=True)
-        else:
-            insert(novel, nwb_file_name=nwb_file_name)
-
-    return novel, stored
+    return novel, [row for row in rows if id(row) not in novel_ids]
 
 
-def _rollback(nwb_file_name: str) -> None:
-    """Delete a session after a planner miss left it part inserted.
-
-    The fallback of last resort, and deliberately not the default: it throws
-    away rows that inserted correctly in order to undo the ones that did not.
-    Worth it only when a validated plan failed halfway, because then the
-    partial state is not something the user chose.
+def _classify_stored(name: str, target, stored, diverged: set):
+    """Split already-stored rows into those that match and those that clash.
 
     Parameters
     ----------
-    nwb_file_name : str
-        The file to roll back.
+    name : str
+        The target's full table name.
+    target : type or dj.Table
+    stored : sequence of dict
+        Rows the database already holds, from `_split_stored`.
+    diverged : set
+        From `_diverged_keys`.
+
+    Returns
+    -------
+    tuple of (list of dict, list of dict)
+        `(matched, clashed)`.
     """
-    from spyglass.common.common_nwbfile import Nwbfile
+    matched, clashed = [], []
 
-    query = Nwbfile & {"nwb_file_name": nwb_file_name}
-    if not query:
-        return
+    for row in stored:
+        key = None
+        with suppress(Exception):
+            key = (
+                name,
+                tuple(
+                    sorted(
+                        (attr, row.get(attr))
+                        for attr in _as_table(target).primary_key
+                    )
+                ),
+            )
+        (clashed if key in diverged else matched).append(row)
 
-    logger.error(
-        f"Rolling back {nwb_file_name} after a planner miss. "
-        + "This deletes rows that inserted correctly; the miss is a bug "
-        + "worth reporting."
-    )
-    query.super_delete(warn=False)
+    return matched, clashed
+
+
+def _insert_rows(target, rows, nwb_file_name: str) -> None:
+    """Insert one target's rows, deriving nothing.
+
+    Parameters
+    ----------
+    target : type or dj.Table
+        Where the rows are going.
+    rows : sequence of dict
+        Novel entries for it, from `_split_stored`.
+    nwb_file_name : str
+        The file these rows came from.
+    """
+    table = _as_table(target)
+
+    # A target may be a plain SpyglassMixin -- Task, say, which TaskEpoch
+    # plans rows for but which ingests nothing itself.
+    insert = getattr(table, "_insert_plan", None)
+    if insert is None:
+        table.insert(rows, skip_duplicates=False, allow_direct_insert=True)
+    else:
+        insert(rows, nwb_file_name=nwb_file_name)
 
 
 def _targets(plan):

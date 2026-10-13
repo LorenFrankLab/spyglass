@@ -92,7 +92,6 @@ def _insert_from_plan(
     raise_err: bool = False,
     on_divergence: str = "report",
     allow_partial: bool = False,
-    rollback_on_miss: bool = False,
 ):
     """Plan the whole file, then insert what the plan worked out.
 
@@ -114,8 +113,6 @@ def _insert_from_plan(
         Default `report`.
     allow_partial : bool, optional
         Insert the tables that planned cleanly even though others did not.
-    rollback_on_miss : bool, optional
-        Delete the session if a validated plan fails halfway.
 
     Returns
     -------
@@ -135,7 +132,6 @@ def _insert_from_plan(
         plan,
         allow_partial=allow_partial,
         on_divergence=on_divergence,
-        rollback_on_miss=rollback_on_miss,
     )
 
     if raise_err and result:
@@ -304,7 +300,6 @@ def merged_config(nwb_file_name: str, config: dict = None) -> dict:
 
 def populate_all_common(
     nwb_file_name,
-    rollback_on_fail=False,
     raise_err=False,
     dry_run=False,
     on_divergence="report",
@@ -313,16 +308,14 @@ def populate_all_common(
     """Insert all common tables for a given NWB file.
 
     Checks the whole file, reports every problem, then writes what was
-    checked. Nothing is written unless the plan is clean, so a file does not
-    half-ingest before failing, and a re-attempt skips what is already stored.
+    checked in one transaction. Nothing is written unless the plan is clean,
+    so a file does not half-ingest before failing, and a re-attempt skips
+    what is already stored.
 
     Parameters
     ----------
     nwb_file_name : str
         The name of the NWB file to populate.
-    rollback_on_fail : bool, optional
-        Delete the session if a validated plan fails halfway -- a
-        `planner_miss`, the one case a rollback is still for. Default False.
     raise_err : bool, optional
         Raise at the end if anything blocked. Default False, returning the
         plan for the caller to test. Nothing raises mid-pass either way.
@@ -354,5 +347,4 @@ def populate_all_common(
         raise_err=raise_err,
         on_divergence=on_divergence,
         allow_partial=allow_partial,
-        rollback_on_miss=rollback_on_fail,
     )

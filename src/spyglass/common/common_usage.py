@@ -97,6 +97,10 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     the file hash differs on every attempt by construction; gating freshness
     on it would discard the whole plan exactly when it is most useful.
     Validity is per entry, via the read-set object digests.
+
+    `id_set_digest` *is* a gate, and the only whole-file one. It covers the
+    file's set of object ids, not their contents, so the retry loop above
+    does not disturb it.
     """
 
     definition = """
@@ -106,6 +110,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     status = "open": enum("open", "complete")
     attempt = 1: int                     # how many times this file was planned
     nwb_hash = NULL: varchar(32)         # provenance only, never a gate
+    id_set_digest = NULL: varchar(32)    # over the file's set of object ids
     spyglass_version = NULL: varchar(32)
     dj_user: varchar(64)
     timestamp = CURRENT_TIMESTAMP: timestamp
@@ -148,6 +153,9 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         *unknown*, never "unchanged": a file that could not be hashed must
         re-parse rather than silently reuse.
 
+        It covers the *file* only, so `xrefs` carries the other half: what the
+        parse resolved out of other tables.
+
         `table_name` is a plain string, for the same reason as on `Entry`.
         """
 
@@ -158,6 +166,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         status: varchar(16)                  # ok|skipped|failed|blocked
         read_set_digest = NULL: varchar(32)  # NULL means unknown, not unchanged
         reads = NULL: blob                   # object ids the digest covers
+        xrefs = NULL: blob                   # values resolved from other tables
         entry_count = 0: int
         """
 
@@ -207,8 +216,10 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         with self._safe_context():
             self._clear({"nwb_file_name": nwb_file_name})
 
-    def staged_plan(self, nwb_file_name: str, for_version=None) -> dict:
-        """Return everything staged for a file, in two queries.
+    def staged_plan(
+        self, nwb_file_name: str, for_version=None, for_id_set=None
+    ) -> dict:
+        """Return everything staged for a file, in three queries.
 
         Per-table reuse asks the same two questions of every table -- what was
         this table's read-set digest, and what did it plan -- and asking them
@@ -224,11 +235,16 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         for_version : str, optional
             The Spyglass version about to do the planning. If updated,
             invalidates previous plans and returns none.
+        for_id_set : str, optional
+            Digest over the file's current set of NWB object ids. Returns
+            none unless it matches what was staged. Default None, which
+            matches only a plan staged without one.
 
         Returns
         -------
         dict
-            `{table_name: {"status", "read_set_digest", "reads", "entries"}}`,
+            `{table_name: {"status", "read_set_digest", "reads", "xrefs",
+            "entries"}}`,
             where `entries` is `{target_table_name: [rows]}`. Empty when
             nothing is staged. A table whose payload was dropped -- cleared on
             migration, or never kept because it exceeded the cap -- is omitted,
@@ -236,16 +252,32 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         """
         master_key = {"nwb_file_name": nwb_file_name}
 
-        if for_version is not None:
-            staged_version = (self & master_key).fetch("spyglass_version")
-            if len(staged_version) and staged_version[0] != for_version:
-                # Updated version means potentially updated ingestion code
-                logger.info(
-                    f"{nwb_file_name}: staged plan was built by "
-                    + f"{staged_version[0] or 'an unrecorded version'}, "
-                    + f"not {for_version}; re-planning from scratch."
-                )
-                return {}
+        staged_master = (self & master_key).fetch(as_dict=True)
+        if not staged_master:
+            return {}
+        master = staged_master[0]
+
+        if (
+            for_version is not None
+            and master["spyglass_version"] != for_version
+        ):
+            # Updated version means potentially updated ingestion code
+            logger.info(
+                f"{nwb_file_name}: staged plan was built by "
+                + f"{master['spyglass_version'] or 'an unrecorded version'}, "
+                + f"not {for_version}; re-planning from scratch."
+            )
+            return {}
+
+        # Ahead of every per-table check: an id that appeared or vanished
+        # means no table's recorded read-set still describes this file,
+        # however unchanged each object in it is.
+        if master["id_set_digest"] != for_id_set:
+            logger.info(
+                f"{nwb_file_name}: the file holds a different set of NWB "
+                + "objects than the staged plan; re-planning from scratch."
+            )
+            return {}
 
         tables = (self.Table & master_key).fetch(as_dict=True)
         if not tables:
@@ -256,6 +288,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
                 "status": row["status"],
                 "read_set_digest": row["read_set_digest"],
                 "reads": list(row["reads"] or []),
+                "xrefs": list(row["xrefs"] or []),
                 "entries": {},
             }
             for row in tables
@@ -306,6 +339,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             status="open",
             attempt=attempt,
             nwb_hash=plan.nwb_hash,
+            id_set_digest=plan.id_set_digest,
             spyglass_version=plan.spyglass_version,
             dj_user=dj.config["database.user"],
         )
@@ -323,6 +357,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
                     # cannot be recomputed without knowing what went into it,
                     # and what a table reads is only known after it parses.
                     reads=list(table_plan.reads),
+                    xrefs=list(table_plan.xrefs),
                     entry_count=table_plan.entry_count,
                 )
             )

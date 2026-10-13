@@ -360,15 +360,14 @@ def test_unknown_divergence_policy_is_refused(common, mini_copy_name):
         )
 
 
-def test_rollback_is_off_by_default_and_scoped_to_a_miss(
+def test_a_planner_miss_leaves_nothing_behind(
     common, mini_copy_name, monkeypatch
 ):
-    """A rollback undoes good rows to fix a bug, so it must be asked for.
+    """A validated plan that fails partway through writes nothing.
 
-    Everything the old blanket `rollback_on_fail` guarded against is caught
-    at plan time now. The only state worth undoing is a `planner_miss`: a
-    plan that validated and then failed halfway, leaving a partial file the
-    user never chose.
+    Two targets, with the second insert raising, so there is a row already
+    written when the failure arrives; `calls` pins that premise, because an
+    assertion that two rows are absent is satisfied by never inserting either.
     """
     from spyglass.data_import import planner
     from spyglass.utils.ingestion_plan import (
@@ -377,37 +376,59 @@ def test_rollback_is_off_by_default_and_scoped_to_a_miss(
         TablePlan,
     )
 
-    rolled = []
-    monkeypatch.setattr(planner, "_rollback", lambda name: rolled.append(name))
+    institution, lab = "_ffi txn institution", "_ffi txn lab"
+    planned = []
+    for table, row in (
+        (common.Institution, {"institution_name": institution}),
+        (common.Lab, {"lab_name": lab}),
+    ):
+        entries = PlannedEntries()
+        entries.add(table, [row])
+        planned.append(
+            TablePlan(table_name=table().full_table_name, entries=entries)
+        )
 
-    # A plan with one novel row, so the insert path is actually entered.
-    entries = PlannedEntries()
-    entries.add(common.Institution, [{"institution_name": "_miss test"}])
     plan = IngestionPlan(
         nwb_file_name=mini_copy_name,
-        novel={"`common_lab`.`institution`": 1},
-        table_plans=(
-            TablePlan(
-                table_name="`common_lab`.`institution`",
-                entries=entries,
-            ),
-        ),
+        novel={tp.table_name: 1 for tp in planned},
+        table_plans=tuple(planned),
     )
 
-    monkeypatch.setattr(
-        planner,
-        "_novel_rows",
-        lambda table, rows: (_ for _ in ()).throw(RuntimeError("boom")),
+    wrote = (common.Institution & {"institution_name": institution}) or (
+        common.Lab & {"lab_name": lab}
     )
-    result = planner.insert_plan(plan, on_divergence="report")
+    assert not wrote, "Premise: neither row is stored before this runs"
 
-    assert any(
-        problem.code == "planner_miss" for problem in result
-    ), f"A failure inserting a validated plan is a planner_miss: {result!r}"
-    assert not rolled, "rollback_on_miss defaults to False"
+    calls = []
+    insert_rows = planner._insert_rows
 
-    planner.insert_plan(plan, on_divergence="report", rollback_on_miss=True)
-    assert rolled == [mini_copy_name], "Asked for, it rolls back that file"
+    def failing(target, rows, nwb_file_name):
+        calls.append(target)
+        if len(calls) > 1:  # whichever target the order puts second
+            raise RuntimeError("boom")
+        return insert_rows(target, rows, nwb_file_name)
+
+    monkeypatch.setattr(planner, "_insert_rows", failing)
+
+    try:
+        result = planner.insert_plan(plan, on_divergence="report")
+
+        assert any(
+            problem.code == "planner_miss" for problem in result
+        ), f"A failure inserting a validated plan is a planner_miss: {result!r}"
+        assert len(calls) > 1, "Premise: one target inserted before the failure"
+        assert not (common.Institution & {"institution_name": institution}), (
+            "A row written before the failure must be rolled back with it, "
+            + "not left for the caller to delete"
+        )
+        assert not (common.Lab & {"lab_name": lab})
+    finally:
+        for query in (
+            common.Institution & {"institution_name": institution},
+            common.Lab & {"lab_name": lab},
+        ):
+            if query:  # only reachable if the rollback did not happen
+                query.delete_quick()
 
 
 def _divergent_plan(common, nwb_file_name):
