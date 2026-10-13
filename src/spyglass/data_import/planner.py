@@ -139,10 +139,6 @@ class VirtualKeySpace:
             table.full_table_name, set()
         )
 
-    def planned_keys(self, table) -> set:
-        """Return the keys planned for a table in this pass."""
-        return self._planned.get(table.full_table_name, set())
-
     def rows_for(self, table, restriction: dict = None) -> Tuple[dict, ...]:
         """Return the rows a table will hold once this plan is inserted.
 
@@ -284,7 +280,7 @@ def plan_nwbfile(
     registered = bool(Nwbfile & nwb_key)
 
     # Recorded as provenance, except `id_set_digest`, which gates reuse
-    nwb_hash = config_hash = id_set_digest = None
+    nwb_hash = id_set_digest = None
 
     if nwb_file is None:
         if not registered:
@@ -315,9 +311,9 @@ def plan_nwbfile(
             )
 
     if tables is None:
-        from spyglass.common.populate_all_common import ingestion_table_list
+        from spyglass.common.populate_all_common import ingestion_tables
 
-        tables = ingestion_table_list()
+        tables = ingestion_tables()["ingest"]
 
     # One hashing pass over the file yields a digest per object, so each
     # table's read-set can be fingerprinted without re-reading anything.
@@ -450,7 +446,6 @@ def plan_nwbfile(
         fatal=tuple(file_problems),  # file-level, not any one table's
         novel=novel,
         nwb_hash=nwb_hash,
-        config_hash=config_hash,
         id_set_digest=id_set_digest,
         spyglass_version=version,
     )

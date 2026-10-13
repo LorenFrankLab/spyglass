@@ -35,8 +35,6 @@ class IngestionMixin(BaseMixin):
     _expected_duplicates : bool
         If true, checks that pre-existing entries are consistent in secondary
         keys with inserted, entries and allows for skipping duplicates on insert
-    _prompt_insert : bool
-        If true, prompts user before inserting new table entries from NWB file.
     _only_ingest_first : bool
         If true, only ingests the first matching NWB object from the file.
     _source_nwb_object_name : str, optional
@@ -67,7 +65,6 @@ class IngestionMixin(BaseMixin):
     """
 
     _expected_duplicates = False  # If True, rows to be shared across sessions
-    _prompt_insert = False
     _only_ingest_first = False
     _source_nwb_object_name = None  # Optional filter on object name
     _source_nwb_object_description = None  # Optional filter on description

@@ -365,10 +365,6 @@ class PlannedEntries:
         entry = self._entries.get(_target_key(table))
         return tuple(entry[1]) if entry else ()
 
-    def targets(self) -> Tuple[Any, ...]:
-        """Return the target tables, in first-seen order."""
-        return tuple(target for target, _ in self._entries.values())
-
     def in_dependency_order(self) -> Tuple[Tuple[Any, Tuple[dict, ...]], ...]:
         """Return (target, rows) pairs sorted so parents precede children.
 
@@ -558,7 +554,6 @@ class IngestionPlan:
     fatal: Tuple[Problem, ...] = ()
     nwb_hash: Optional[str] = None
     spyglass_version: Optional[str] = None
-    config_hash: Optional[str] = None
     # Digest over the file's set of NWB object ids: the whole-file gate on
     # reuse, since no per-table digest can notice an object appearing. None
     # means unknown.
@@ -780,21 +775,6 @@ class IngestionPlan:
             f"IngestionPlan({self.nwb_file_name}, {verdict}, "
             + f"{self.entry_count} entries, {len(self.problems)} problems)"
         )
-
-
-def _jsonable(value):
-    """Coerce a value into something JSON can hold."""
-    if isinstance(value, dict):
-        return {k: _jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(v) for v in value]
-    if hasattr(value, "tolist"):  # numpy array or scalar
-        return value.tolist()
-    if hasattr(value, "isoformat"):
-        return value.isoformat()
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
 
 
 @dataclass

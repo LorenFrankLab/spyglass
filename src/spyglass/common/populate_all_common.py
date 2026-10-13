@@ -236,20 +236,6 @@ def ingestion_tables() -> Dict[str, List[dj.Table]]:
     return {"ingest": ingest, "targets": targets}
 
 
-def ingestion_table_list() -> List[dj.Table]:
-    """Return the tables that parse a file, in dependency order.
-
-    Deprecated shim for `ingestion_tables()["ingest"]`; kept because the
-    ordered parse list is what most callers want and the name says so.
-
-    Returns
-    -------
-    list
-        SpyglassIngestion table classes, in dependency order.
-    """
-    return ingestion_tables()["ingest"]
-
-
 def lab_config() -> dict:
     """Return the lab-wide config entries, from `entries.yaml` in base_dir.
 

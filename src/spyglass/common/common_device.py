@@ -25,7 +25,6 @@ class DataAcquisitionDeviceSystem(SpyglassIngestion, dj.Manual):
     """
 
     _expected_duplicates = True
-    _prompt_insert = True
 
     @property
     def table_key_to_obj_attr(self):
@@ -44,7 +43,6 @@ class DataAcquisitionDeviceAmplifier(SpyglassIngestion, dj.Manual):
     """
 
     _expected_duplicates = True
-    _prompt_insert = True
 
     @property
     def table_key_to_obj_attr(self):
@@ -423,7 +421,7 @@ class Probe(SpyglassIngestion, dj.Manual):
 
         def _adjust_keys_for_entry(self, keys):
             """Adjust key to ensure correct types/formats."""
-            # Avoids triggering 'accept_divergence' on reinsert
+            # So a reinsert is not reported as a divergence
             adjusted = []
             for key in keys.copy():
                 key["probe_shank"] = int(key.get("probe_shank", -1))
