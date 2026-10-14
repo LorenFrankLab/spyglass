@@ -44,6 +44,8 @@ from spyglass.spikesorting.v2._core.selection_identity import sha256_json
 from spyglass.spikesorting.v2._sorting.analyzer import (
     BASE_ANALYZER_EXTENSIONS,
     STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
+    _AnalyzerSparsityInputsError,
+    analyzer_sparsity_validator,
 )
 from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
 
@@ -409,7 +411,9 @@ def _write_manifest(folder: Path, manifest: CurationAnalyzerManifest) -> None:
     )
 
 
-def _load_valid_cached_analyzer(folder: Path, expected_prefix: dict, role: str):
+def _load_valid_cached_analyzer(
+    folder: Path, expected_prefix: dict, role: str, *, validate_analyzer=None
+):
     """Return a validated cached analyzer, or ``None`` on any corruption."""
     from spyglass.utils import logger
 
@@ -445,6 +449,8 @@ def _load_valid_cached_analyzer(folder: Path, expected_prefix: dict, role: str):
             )
             return None
         analyzer = load_analyzer_folder(folder)
+        if validate_analyzer is not None:
+            validate_analyzer(analyzer)
         current_inventory = _extension_inventory(
             analyzer, role, extra, exact=not is_derivative
         )
@@ -468,6 +474,8 @@ def _load_valid_cached_analyzer(folder: Path, expected_prefix: dict, role: str):
             )
             return None
         return analyzer
+    except _AnalyzerSparsityInputsError:
+        raise
     except Exception as exc:  # noqa: BLE001 - cache is regeneratable
         logger.warning(
             "Curation analyzer validation failed at %s: %r.", folder, exc
@@ -481,6 +489,8 @@ def _resolve_published_analyzer(
     expected_prefix: dict,
     role: str,
     build_into,
+    *,
+    validate_analyzer=None,
 ):
     """Build or reuse one validated cache slot under the per-sort lock."""
     from spyglass.utils import logger
@@ -488,7 +498,10 @@ def _resolve_published_analyzer(
     with analyzer_cache_lock(sorting_id):
         if folder.exists():
             analyzer = _load_valid_cached_analyzer(
-                folder, expected_prefix, role
+                folder,
+                expected_prefix,
+                role,
+                validate_analyzer=validate_analyzer,
             )
             if analyzer is not None:
                 return analyzer
@@ -499,7 +512,9 @@ def _resolve_published_analyzer(
             )
 
         publish_analyzer_atomically(folder, build_into)
-        analyzer = _load_valid_cached_analyzer(folder, expected_prefix, role)
+        analyzer = _load_valid_cached_analyzer(
+            folder, expected_prefix, role, validate_analyzer=validate_analyzer
+        )
         if analyzer is None:  # pragma: no cover - publish validation defense
             raise RuntimeError(
                 "curation analyzer cache failed validation immediately after "
@@ -547,6 +562,7 @@ def build_merged_analyzer(
             "SortingAnalyzer exists."
         )
     recipe_row = _resolve_recipe(waveform_recipe, role)
+
     recording, _raw_sorting = reconstruct_recording_and_sorting(
         Sorting(), {"sorting_id": row["sorting_id"]}
     )
@@ -630,6 +646,20 @@ def _resolve_curation_analyzer(
             "SortingAnalyzer exists."
         )
     recipe_row = _resolve_recipe(waveform_recipe, role)
+
+    def sorter_params():
+        from spyglass.spikesorting.v2._sorting.fetch import (
+            fetch_sorter_analyzer_inputs,
+        )
+
+        sorter_row, _jobs = fetch_sorter_analyzer_inputs(
+            {"sorting_id": row["sorting_id"]}
+        )
+        return sorter_row.get("params")
+
+    validate_analyzer = analyzer_sparsity_validator(
+        recipe_row["params"], sorter_params
+    )
     # The COMPLETE normalized request is the derivative's identity and its
     # required result; the subset that actually needs computing is a separate
     # local (``needs_compute``) so a later, larger request never reuses a
@@ -701,6 +731,7 @@ def _resolve_curation_analyzer(
             expected_prefix,
             role,
             _build_base,
+            validate_analyzer=validate_analyzer,
         )
 
     needs_compute = {
@@ -776,6 +807,7 @@ def _resolve_curation_analyzer(
         derived_prefix,
         role,
         _build_derivative,
+        validate_analyzer=validate_analyzer,
     )
 
 

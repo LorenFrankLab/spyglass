@@ -242,6 +242,15 @@ display (unwhitened, preserving shape/amplitude) and metrics (whitened, for
 PC/nearest-neighbour metrics); hippocampal rows use a 0.5/0.5 ms window and
 sample up to 20000 spikes per unit.
 
+Sparse analyzers estimate their channel masks with the sorter's detection
+polarity (`peak_sign` or `detect_sign`), so positive and bidirectional detections
+retain their peak channels before waveform extraction. This applies to the
+initial build, cache rebuilds, and curated analyzers. The historical
+`sparsity.peak_sign` field remains accepted in waveform recipes for compatibility;
+the pipeline derives its effective value from the sorter parameters.
+Cached sparse analyzers built with a conflicting polarity rebuild automatically
+when opened. Compatible legacy masks and dense analyzers remain reusable.
+
 #### Reading `recommendation_status`
 
 - **`production`** -- Frank Lab validated and recommended; the default choice

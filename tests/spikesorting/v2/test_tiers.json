@@ -128,6 +128,9 @@
     "test_analyzer_cache_completeness.py": {
       "tier": "unit"
     },
+    "test_analyzer_sparsity_cache.py": {
+      "tier": "unit"
+    },
     "test_analyzer_commit_scope.py": {
       "tier": "unit"
     },
@@ -1049,7 +1052,8 @@
     "test_unit_peak_amplitude.py": {
       "tier": "pipeline",
       "overrides": {
-        "test_row_producer_uses_off_alignment_extremum_and_configured_sign": "unit"
+        "test_row_producer_uses_off_alignment_extremum_and_configured_sign": "unit",
+        "test_sparse_analyzer_retains_the_sorter_polarity_peak": "unit"
       }
     },
     "test_unitmatch.py": {

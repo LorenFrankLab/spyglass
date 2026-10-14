@@ -13,9 +13,12 @@ channel, SpikeInterface's default and the shipped recipes' setting),
 ``"best_channels"`` (the ``num_channels`` largest-amplitude channels -- the
 bounded choice for dense probes), or ``"dense"`` (every channel; only sensible
 for tetrodes / small groups). The SI ``estimate_sparsity`` sampling settings
-(``num_spikes_for_sparsity``, its own ``ms_before`` / ``ms_after`` snippet
-window, ``peak_sign``) are recorded explicitly so the effective configuration
--- including SI defaults -- is in the row, not implied by the SI version.
+(``num_spikes_for_sparsity`` and its own ``ms_before`` / ``ms_after`` snippet
+window) are recorded explicitly. The pipeline derives sparsity's polarity
+from the tracked ``SorterParameters.params`` blob, just as it derives the
+unit's peak channel and amplitude. The serialized ``peak_sign`` field is
+retained for compatibility with existing recipes and standalone conversion;
+pipeline builds override it with the sorter's resolved polarity.
 
 ``return_in_uV`` is intentionally NOT a field: it is derived from ``whiten`` at
 build time (an unwhitened display recipe returns real microvolts; a whitened
@@ -50,7 +53,10 @@ class SparsityParams(BaseModel):
     so a row cannot record a value the build does not use. Defaults
     equal SpikeInterface 0.104.3's ``estimate_sparsity`` defaults
     (``radius`` / 100 um / ``"neg"`` / 100 spikes / 1.0-2.5 ms snippets), so a
-    recipe that omits ``sparsity`` gets SpikeInterface's default sparsity.
+    recipe that omits ``sparsity`` keeps the negative-sort baseline. Pipeline
+    builds derive ``peak_sign`` from the sorter params before estimating
+    radius or best-channel sparsity. The stored field remains accepted for
+    compatibility, but does not override the pipeline's detection polarity.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -92,7 +98,7 @@ class SparsityParams(BaseModel):
         return self
 
     def si_create_kwargs(self) -> dict:
-        """Return the ``create_sorting_analyzer`` sparsity kwargs this recipe means."""
+        """Return recipe kwargs; pipeline builds then resolve sorter polarity."""
         if self.method == "dense":
             return {"sparse": False}
         kwargs = {

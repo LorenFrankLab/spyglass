@@ -177,3 +177,93 @@ def test_row_producer_uses_off_alignment_extremum_and_configured_sign(
             "n_spikes": 3,
         }
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "sorter_params, sign",
+    [
+        ({"peak_sign": "pos"}, 1),
+        ({"detect_sign": 1}, 1),
+        ({"peak_sign": "both"}, 1),
+        ({"detect_sign": 0}, 1),
+        ({"peak_sign": "neg"}, -1),
+        ({"detect_sign": -1}, -1),
+        ({}, -1),
+    ],
+)
+@pytest.mark.parametrize(
+    "sparsity",
+    [
+        {},  # The shipped radius/100 um recipe, with its legacy neg field.
+        {"method": "best_channels", "num_channels": 1},
+        {"method": "radius", "peak_sign": "pos"},
+        {"method": "dense"},
+    ],
+)
+def test_sparse_analyzer_retains_the_sorter_polarity_peak(
+    tmp_path, sorter_params, sign, sparsity
+):
+    """Sparse extraction keeps the true peak before unit attribution runs.
+
+    The other electrode is outside the radius and has a deflection of the
+    opposite sign, so estimating sparsity with the wrong polarity drops the
+    true peak. The actual build and row producer must retain its 100 uV peak,
+    including when a legacy recipe field disagrees with the sorter.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._params.analyzer_waveform import (
+        AnalyzerWaveformParamsSchema,
+    )
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting.units import (
+        build_unit_rows_from_analyzer,
+    )
+
+    frames = np.array([1000, 3000, 5000, 7000, 9000])
+    traces = np.zeros((10_000, 2), dtype=np.float32)
+    traces[frames, 0] = sign * 100
+    traces[frames, 1] = -sign * 20
+    traces[frames + 1, 1] = sign * 5
+    recording = si.NumpyRecording(traces, 30_000, channel_ids=[12, 24])
+    recording.set_dummy_probe_from_locations(np.array([[0, 0], [0, 500]]))
+    recording.set_channel_gains(1.0)
+    recording.set_channel_offsets(0.0)
+    recording = recording.save(
+        folder=tmp_path / "recording", n_jobs=1, progress_bar=False
+    )
+    sorting = si.NumpySorting.from_unit_dict({17: frames}, 30_000)
+    waveform_params = AnalyzerWaveformParamsSchema(
+        sparsity=sparsity
+    ).model_dump()
+    original_params = waveform_params["sparsity"].copy()
+    folder = tmp_path / "polarity.analyzer"
+    build_analyzer(
+        sorting,
+        recording,
+        {"sorting_id": "polarity"},
+        sorter_row={"params": sorter_params},
+        job_kwargs={"n_jobs": 1, "progress_bar": False, "random_seed": 0},
+        analyzer_folder=folder,
+        waveform_params=waveform_params,
+    )
+    rows = build_unit_rows_from_analyzer(
+        sorting=sorting,
+        analyzer_folder=folder,
+        sorter_row={"params": sorter_params},
+        electrode_by_id={
+            electrode_id: {
+                "nwb_file_name": "synthetic.nwb",
+                "electrode_group_name": "probe",
+                "electrode_id": electrode_id,
+            }
+            for electrode_id in (12, 24)
+        },
+        sort_group_id=0,
+        nwb_file_name="synthetic.nwb",
+        key={"sorting_id": "polarity"},
+    )
+    assert rows[0]["electrode_id"] == 12
+    assert rows[0]["peak_amplitude_uv"] == 100.0
+    assert waveform_params["sparsity"] == original_params

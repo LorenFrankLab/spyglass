@@ -43,6 +43,10 @@ STANDARD_DISPLAY_ANALYZER_EXTENSIONS = (
 )
 
 
+class _AnalyzerSparsityInputsError(RuntimeError):
+    """Unavailable sorter parameters do not establish that a cache is invalid."""
+
+
 def ensure_extensions(
     analyzer, names, *, job_kwargs=None, extension_params=None
 ):
@@ -160,6 +164,7 @@ def _load_analyzer_folder_or_rebuild(
     recipe_label,
     sorting_id,
     load_extensions=True,
+    validate_analyzer=None,
 ):
     """Load an analyzer folder; rebuild via ``rebuild_fn`` on missing/invalid.
 
@@ -191,6 +196,8 @@ def _load_analyzer_folder_or_rebuild(
     def load():
         analyzer = load_analyzer_folder(folder)
         _assert_complete_base_extensions(analyzer)
+        if validate_analyzer is not None:
+            validate_analyzer(analyzer)
         return (
             load_analyzer_extensions(analyzer) if load_extensions else analyzer
         )
@@ -205,6 +212,8 @@ def _load_analyzer_folder_or_rebuild(
         if folder.exists():
             try:
                 return load()
+            except _AnalyzerSparsityInputsError:
+                raise
             except Exception as exc:
                 message = (
                     "Sorting.get_analyzer: analyzer folder for "
@@ -246,6 +255,35 @@ def _load_analyzer_folder_or_rebuild(
                 )
             rebuild_fn()
         return load()
+
+
+def analyzer_sparsity_validator(waveform_params, sorter_params_fn):
+    """Validate sparse cache polarity, resolving sorter params only when needed."""
+    sorter_params = None
+
+    def validate(analyzer):
+        nonlocal sorter_params
+        if not analyzer.is_sparse():
+            return
+        if sorter_params is None:
+            try:
+                sorter_params = dict(sorter_params_fn() or {})
+            except Exception as exc:
+                raise _AnalyzerSparsityInputsError(
+                    "Could not resolve sorter parameters for analyzer sparsity "
+                    "validation; the existing cache has not been invalidated."
+                ) from exc
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
+            assert_analyzer_sparsity_polarity,
+        )
+
+        assert_analyzer_sparsity_polarity(
+            analyzer,
+            waveform_params=waveform_params,
+            sorter_params=sorter_params,
+        )
+
+    return validate
 
 
 def _assert_complete_base_extensions(analyzer) -> None:
@@ -382,7 +420,16 @@ def load_or_rebuild_analyzer(
     )
 
     assert_path_safe_waveform_params_name(waveform_params_name)
-    fetch_waveform_params(waveform_params_name)
+    waveform_params = fetch_waveform_params(waveform_params_name)
+
+    def sorter_params():
+        from spyglass.spikesorting.v2._sorting.fetch import (
+            fetch_sorter_analyzer_inputs,
+        )
+
+        return fetch_sorter_analyzer_inputs({"sorting_id": sorting_id})[0].get(
+            "params"
+        )
 
     folder = analyzer_path(sorting_id, waveform_params_name)
     return _load_analyzer_folder_or_rebuild(
@@ -396,6 +443,9 @@ def load_or_rebuild_analyzer(
         ),
         recipe_label=waveform_params_name,
         sorting_id=sorting_id,
+        validate_analyzer=analyzer_sparsity_validator(
+            waveform_params, sorter_params
+        ),
     )
 
 
@@ -515,6 +565,9 @@ def load_or_rebuild_analyzer_from_resolved(
         ),
         recipe_label=analyzer_folder.name,
         sorting_id=sorting_id,
+        validate_analyzer=analyzer_sparsity_validator(
+            waveform_params, lambda: sorter_row.get("params")
+        ),
     )
 
 
@@ -769,8 +822,9 @@ def build_analyzer(
     memmapped ``waveforms.npy`` instead of a shared-memory buffer sized for
     the whole waveform volume, so the extraction peak is bounded by the
     worker chunk buffers. The recipe's ``sparsity`` block selects the
-    channel-sparsity estimation (or a dense analyzer); every effective value,
-    including SI defaults, comes from the tracked row.
+    channel-sparsity estimation (or a dense analyzer). Its polarity comes from
+    the tracked sorter params, matching unit attribution; the other settings,
+    including SI defaults, come from the waveform recipe.
 
     Inside ``make_compute`` (no DB reads) the caller passes the fetched
     ``sorter_row`` and resolved ``job_kwargs``. The rebuild adapter resolves
@@ -852,8 +906,10 @@ def build_analyzer(
     # (PC/NN cluster-separation metrics).
     whiten = bool(waveform_params.get("whiten"))
     # Channel sparsity comes from the tracked recipe (``SparsityParams``); a
-    # blob without the field means SI's radius/100 um default, which the
-    # schema default reproduces exactly.
+    # blob without the field means radius/100 um. Resolve the polarity before
+    # estimating sparsity, while all channels are still available: otherwise
+    # a legacy neg recipe can discard a positive/bidirectional sort's actual
+    # peak, which later unit attribution cannot recover from sparse templates.
     from spyglass.spikesorting.v2._params.analyzer_waveform import (
         SparsityParams,
     )
@@ -861,6 +917,12 @@ def build_analyzer(
     sparsity_kwargs = SparsityParams.model_validate(
         waveform_params.get("sparsity") or {}
     ).si_create_kwargs()
+    if sparsity_kwargs["sparse"]:
+        from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
+
+        sparsity_kwargs["peak_sign"] = resolve_peak_sign(
+            sorter_row.get("params")
+        )
 
     # SI's sparse analyzer build crashes on an empty sorting
     # (``np.concatenate([])`` in ``random_spikes_selection``). The folder is
@@ -1019,6 +1081,14 @@ def build_analyzer(
             },
             **analyzer_job_kwargs,
         )
+        if sparsity_kwargs["sparse"]:
+            from spyglass.spikesorting.v2._storage.analyzer_cache import (
+                write_analyzer_sparsity_receipt,
+            )
+
+            write_analyzer_sparsity_receipt(
+                folder, peak_sign=sparsity_kwargs["peak_sign"]
+            )
     except Exception:
         try:
             if folder.exists():

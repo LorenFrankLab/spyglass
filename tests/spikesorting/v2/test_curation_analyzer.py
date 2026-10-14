@@ -26,7 +26,7 @@ def _concurrent_cache_resolve_worker(
 
     dj.config["custom"]["spikesorting_v2_analyzer_dir"] = cache_root
 
-    def _load(candidate, _expected, _role):
+    def _load(candidate, _expected, _role, **kwargs):
         marker = Path(candidate) / "complete.txt"
         return marker.read_text() if marker.exists() else None
 

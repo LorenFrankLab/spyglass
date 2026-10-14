@@ -258,6 +258,10 @@ or `log_export` positionally must pass them by keyword.
         experimental motion correction, browser-based review with FigPack, and
         cross-session unit tracking with UnitMatch. See the Spike Sorting v2 docs
         #1609
+    - v2 sparse analyzers select channels using the sorter's spike polarity,
+        preserving positive and bidirectional peak electrode/amplitude metadata.
+        Incompatible existing analyzer caches rebuild on access. Already
+        persisted affected development sort metadata needs regeneration #1609
     - v2 `isi_violation` uses original spike timestamps and excludes artificial
         concatenation joins, preventing acquisition gaps from creating false
         refractory violations. Already persisted affected development curation

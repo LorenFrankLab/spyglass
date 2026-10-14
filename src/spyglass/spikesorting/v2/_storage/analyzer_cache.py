@@ -44,6 +44,7 @@ call time.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -57,6 +58,47 @@ from pathlib import Path
 #: store). Not ``.zarr``: SI's loader treats a ``.zarr`` suffix as the zarr
 #: format, and the cache is deliberately binary_folder (see the module doc).
 ANALYZER_FOLDER_SUFFIX = ".analyzer"
+ANALYZER_SPARSITY_RECEIPT = "spyglass_sparsity.json"
+
+
+def write_analyzer_sparsity_receipt(folder, *, peak_sign: str) -> None:
+    """Record the polarity that actually selected a sparse analyzer's channels."""
+    (Path(folder) / ANALYZER_SPARSITY_RECEIPT).write_text(
+        json.dumps({"version": 1, "peak_sign": peak_sign}, sort_keys=True)
+        + "\n"
+    )
+
+
+def assert_analyzer_sparsity_polarity(
+    analyzer, *, waveform_params, sorter_params
+) -> None:
+    """Reject cached sparse masks estimated with another detection polarity.
+
+    An unmarked legacy cache used the waveform recipe's ``peak_sign`` (neg
+    when absent). It is still usable when that equals the sorter's polarity.
+    New builds record their effective polarity; this also survives derivative
+    copies. Dense caches need no polarity check because no channels were lost.
+    """
+    if not analyzer.is_sparse():
+        return
+    from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
+
+    expected = resolve_peak_sign(sorter_params)
+    receipt = Path(analyzer.folder) / ANALYZER_SPARSITY_RECEIPT
+    if receipt.exists():
+        recorded = json.loads(receipt.read_text())
+        if not isinstance(recorded, dict) or recorded.get("version") != 1:
+            raise ValueError(f"Unknown analyzer sparsity receipt: {receipt}")
+        actual = recorded.get("peak_sign")
+    else:
+        actual = (waveform_params.get("sparsity") or {}).get("peak_sign", "neg")
+    if actual != expected:
+        raise ValueError(
+            "Analyzer sparsity polarity is incompatible with its sorter: "
+            f"cached={actual!r}, expected={expected!r}. Rebuild the analyzer "
+            "to retain the sorter's peak channels."
+        )
+
 
 # The recipe name is embedded in the analyzer cache folder
 # ``{sorting_id}__{waveform_params_name}.analyzer`` (see ``analyzer_path``), so it
@@ -331,6 +373,9 @@ def copy_analyzer_folder(analyzer, folder):
         Path(folder) / "extensions",
         dirs_exist_ok=True,
     )
+    receipt = Path(analyzer.folder) / ANALYZER_SPARSITY_RECEIPT
+    if receipt.is_file():
+        shutil.copyfile(receipt, Path(folder) / ANALYZER_SPARSITY_RECEIPT)
     return load_analyzer_folder(folder, recording=recording)
 
 
