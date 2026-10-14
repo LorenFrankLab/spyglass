@@ -1,8 +1,8 @@
 # Spike Sorting v1 → v2 Migration Guide
 
-A short, task-oriented guide for notebook users porting a v1 spike-sorting
-workflow to `spyglass.spikesorting.v2`. It covers the deltas you actually
-touch in a notebook; for changes to existing v0/v1 behavior, see the
+A guide for notebook users porting a v1 spike-sorting workflow to
+`spyglass.spikesorting.v2`. It covers the deltas you actually touch in a
+notebook; for changes to existing v0/v1 behavior, see the
 [CHANGELOG](../CHANGELOG.md). For the pipeline overview, see
 [Spike Sorting v2](./SpikeSortingV2.md).
 
@@ -21,9 +21,9 @@ Spyglass environment. These entry points raise a clear `RuntimeError` under SI
 populate; v1 `ArtifactDetection` / `MetricCuration` / `BurstPair` populate and
 `MetricCuration.get_waveforms` when it must extract waveforms; clusterless
 `UnitMarks` and `UnitWaveformFeatures` for v0/v1 sorts; and loading a
-Zarr-format waveform folder. v2 does not auto-migrate v1 rows, and there is no one-shot
-"convert a `CurationV1` row to `CurationV2`" tool, so a v1 sort you want under
-v2 is re-run through `run_v2_pipeline` from its selection.
+Zarr-format waveform folder. v2 does not auto-migrate v1 rows, and there is no
+one-shot "convert a `CurationV1` row to `CurationV2`" tool, so a v1 sort you
+want under v2 is re-run through `run_v2_pipeline` from its selection.
 
 Externally-curated or ground-truth NWB Units are neither a v1 nor a v2 sort:
 ingest them with the existing `ImportedSpikeSorting` workflow. They surface in
@@ -35,28 +35,29 @@ downstream code keys off `merge_id` regardless of which produced the sort.
 
 ### Two environments, one database
 
-|                  | Modern (supported v2 install)                                                                                  | Legacy (v0/v1 runtime)                                                       |
-| ---------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Install          | `pip install -e ".[spikesorting-v2]"` (or `environments/environment_spikesorting_v2.yml`); SI 0.104.3, NumPy 2 | `environments/environment_spikesorting_legacy.yml`, SI 0.99, NumPy < 2       |
-| Runs             | v2 sort / review / curation / selection; **reads** v0/v1 outputs (`SpikeSortingOutput`, `SortedSpikesGroup`)   | v0/v1 populate / `MetricCuration` / `BurstPair` / `Waveforms`; MountainSort4 |
-| Sorters that run | MountainSort4 (hippocampus default; native or container), MountainSort5 (alternative), Kilosort4 (with its GPU runtime installed), SpykingCircus2 / Tridesclous2 | MountainSort4 and the v1 sorter set |
-| Check            | `pip check`; `preflight_v2_pipeline(...)` reports `sorter_installed` / `sorter_runtime_available`              | `pip check`; the v1 tutorials                                                |
+|                  | Modern (supported v2 install)                                                                                                                                    | Legacy (v0/v1 runtime)                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Install          | `pip install -e ".[spikesorting-v2]"` (or `environments/environment_spikesorting_v2.yml`); SI 0.104.3, NumPy 2                                                   | `environments/environment_spikesorting_legacy.yml`, SI 0.99, NumPy < 2       |
+| Runs             | v2 sort / review / curation / selection; **reads** v0/v1 outputs (`SpikeSortingOutput`, `SortedSpikesGroup`)                                                     | v0/v1 populate / `MetricCuration` / `BurstPair` / `Waveforms`; MountainSort4 |
+| Sorters that run | MountainSort4 (hippocampus default; native or container), MountainSort5 (alternative), Kilosort4 (with its GPU runtime installed), SpykingCircus2 / Tridesclous2 | MountainSort4 and the v1 sorter set                                          |
+| Check            | `pip check`; `preflight_v2_pipeline(...)` reports `sorter_installed` / `sorter_runtime_available`                                                                | `pip check`; the v1 tutorials                                                |
 
 Both environments share the same MySQL database and the same `SPYGLASS_BASE_DIR`
 artifacts. The modern `spikesorting-v2` extra includes `mountainsort4==1.0.7`,
 which bundles the algorithm and runs natively on NumPy 2 through v2's scoped
 `spikeextractors` compatibility shim. Use the native MS4 preset
 (`franklab_probe_hippocampus_30khz_ms4_2026_06`) or the containerized variant
-(`franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`). The separate legacy
-environment is needed for producing new v0/v1 output, not for native MS4 in v2.
+(`franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`). The separate
+legacy environment is needed for producing new v0/v1 output, not for native MS4
+in v2.
 
-The legacy environment file currently requires relaxing the SI/probeinterface pins in
-`pyproject.toml` before the environment build (see the comments at the top of
-that file). That is a development-time procedure for the legacy suite, **not**
-the normal user path: users who only need to *read* v0/v1 results use the modern
-install; users who must *produce* new v0/v1 output should follow the legacy file
-verbatim and restore `pyproject.toml` afterwards. Packaging both stacks as
-installable profiles from unchanged metadata is not yet supported.
+The legacy environment file currently requires relaxing the SI/probeinterface
+pins in `pyproject.toml` before the environment build (see the comments at the
+top of that file). That is a development-time procedure for the legacy suite,
+**not** the normal user path: users who only need to *read* v0/v1 results use
+the modern install; users who must *produce* new v0/v1 output should follow the
+legacy file verbatim and restore `pyproject.toml` afterwards. Packaging both
+stacks as installable profiles from unchanged metadata is not yet supported.
 
 ### Upgrading a preproduction v2 database
 
@@ -65,22 +66,23 @@ preproduction v2 environment from the current pipeline and rerun its inputs;
 there is no in-place migration of retained v2 results.
 
 1. Create a fresh, isolated development database and storage directory using the
-   current checkout. Keep any existing v1/production database separate.
+    current checkout. Keep any existing v1/production database separate.
 2. Ingest the original source NWB files, initialize the current v2 defaults, and
-   recreate the required sort groups, intervals, and selections.
-3. Rerun recording, artifact detection, sorting, curation, and matching as needed.
-   Create new reviews for the resulting curation generations. Saved review drafts
-   identify their original `curation_uuid` and cannot be attached to a newly
-   created generation.
+    recreate the required sort groups, intervals, and selections.
+3. Rerun recording, artifact detection, sorting, curation, and matching as
+    needed. Create new reviews for the resulting curation generations. Saved
+    review drafts identify their original `curation_uuid` and cannot be
+    attached to a newly created generation.
 
-Populated v2 Units tables require `spike_sample_index` and `obs_intervals` alongside
-`spike_times`. Readback uses stored sample frames; missing columns fail rather than
-being reconstructed from recording timestamps. Empty outputs remain valid.
-Sorting and curation writers require complete provenance, including the sort and
-source identities and the curation generation UUID on regular and member exports.
-Matching runs require both backend and input-preparer identities on the `UnitMatch`
-row and in the pairs NWB header. Unknown external package versions may be `None`;
-the metadata container and producer identities are required.
+Populated v2 Units tables require `spike_sample_index` and `obs_intervals`
+alongside `spike_times`. Readback uses stored sample frames; missing columns
+fail rather than being reconstructed from recording timestamps. Empty outputs
+remain valid. Sorting and curation writers require complete provenance,
+including the sort and source identities and the curation generation UUID on
+regular and member exports. Matching runs require both backend and
+input-preparer identities on the `UnitMatch` row and in the pairs NWB header.
+Unknown external package versions may be `None`; the metadata container and
+producer identities are required.
 
 Adding or altering database columns does not regenerate these NWB columns or
 headers. Rerunning the current pipeline produces the artifacts required by the
@@ -127,13 +129,16 @@ are still needed for reference.
 - **Renamed fields and tags.** `SpikeSorterParameters.sorter_param_name` is
     `SorterParameters.sorter_params_name` in v2, so a v1 restriction
     `{"sorter_param_name": ...}` matches nothing on v2 tables. Artifact
-    `IntervalList` rows are tagged `pipeline="spikesorting_artifact_detection_v2"`
-    (v1: `spikesorting_artifact_v1`). The artifact amplitude threshold is
+    `IntervalList` rows are tagged
+    `pipeline="spikesorting_artifact_detection_v2"` (v1:
+    `spikesorting_artifact_v1`). The artifact amplitude threshold is
     `amplitude_threshold_uv` (default 500), compared against gain- and
     offset-scaled microvolt traces. v1's `amplitude_thresh_uV` (default 3000)
-    was compared against unscaled traces, so it is in the recording's raw
-    units despite its name; to port a v1 threshold, multiply it by the
-    recording's gain in µV per unit.
+    was compared against unscaled traces, so it is in the recording's raw units
+    despite its name. Inspect the per-channel gains and offsets before
+    translating a v1 threshold: with uniform gain and zero offset, multiply it
+    by that gain in µV per raw unit. Unequal gains or nonzero offsets do not
+    have a single equivalent amplitude threshold in µV.
 
 - **Parameter rows are named differently — no back-compat aliases.** Every
     Frank-lab row has a dated, content-stable name, and no alias maps the v1
@@ -175,19 +180,19 @@ are still needed for reference.
     `reference_mode` — `-1` / `None` → `"none"`, `-2` → `"global_median"`, a
     non-negative id → `"specific"` (that electrode). Override knobs:
     `set_group_by_shank` accepts v1's per-group
-    `references={electrode_group: ref_id}` dict, and
-    both helpers accept a call-wide `reference_mode=` (with
-    `reference_electrode_id=` for `"specific"`) that forces one mode on every
-    group; the two are mutually exclusive. **Three things fail loud at group
-    creation that v1 tolerated:** electrodes in one group with *mixed*
-    configured references raise instead of silently mis-referencing (v1 built a
-    `ValueError` but never raised it); a `"specific"` reference that is itself a
-    member of the sort group raises (it would be subtracted then dropped,
-    silently shrinking the group) — use `omit_ref_electrode_group=True` or a
-    cross-group reference; and a `"specific"` reference electrode that does not
-    exist in the session, or whose owning electrode group is ambiguous (the same
-    `electrode_id` under two electrode groups), raises here instead of failing
-    later inside `Recording.populate`.
+    `references={electrode_group: ref_id}` dict, and both helpers accept a
+    call-wide `reference_mode=` (with `reference_electrode_id=` for
+    `"specific"`) that forces one mode on every group; the two are mutually
+    exclusive. **Three things fail loud at group creation that v1 tolerated:**
+    electrodes in one group with *mixed* configured references raise instead of
+    silently mis-referencing (v1 built a `ValueError` but never raised it); a
+    `"specific"` reference that is itself a member of the sort group raises (it
+    would be subtracted then dropped, silently shrinking the group) — use
+    `omit_ref_electrode_group=True` or a cross-group reference; and a
+    `"specific"` reference electrode that does not exist in the session, or
+    whose owning electrode group is ambiguous (the same `electrode_id` under two
+    electrode groups), raises here instead of failing later inside
+    `Recording.populate`.
 
 - **Porting a non-curated sorter by name?** Call the opt-in helper once:
 
@@ -207,23 +212,26 @@ are still needed for reference.
 
 ### Resuming reviews and rebuilding populations
 
-Complete the [database upgrade/recreation sequence](#upgrading-a-preproduction-v2-database)
+Complete the
+[database upgrade/recreation sequence](#upgrading-a-preproduction-v2-database)
 first. Existing named profiles remain unchanged; start a new review with
-`franklab_hippocampus_2026_09_17` for current observed-time columns and view composition
-(view version 4).
+`franklab_hippocampus_2026_09_17` for current observed-time columns and view
+composition (view version 4).
 
 - Saved display version 1 retains its explicit fixed point caps when resumed.
-  New display version 2 uses duration-scaled 50 Hz budgets, optionally limited
-  by explicit caps. Resume/import an old draft through its original review,
-  commit it, then review that committed child with the new profile.
+    New display version 2 uses duration-scaled 50 Hz budgets, optionally limited
+    by explicit caps. Resume/import an old draft through its original review,
+    commit it, then review that committed child with the new profile.
 - Newly created `SortedSpikesGroup.UnitSelection` snapshots include observed
-  intervals in `selection_provenance`. Use a new group name to create a snapshot
-  for a previously selected curation. Existing groups retain their frozen
-  membership and report unknown coverage where observation snapshots are absent.
+    intervals in `selection_provenance`. Use a new group name to create a
+    snapshot for a previously selected curation. Existing groups retain their
+    frozen membership and report unknown coverage where observation snapshots
+    are absent.
 
 The connected local browser writes operation/result journals beside the saved
 bundle, without a workflow-status table. Hosted bundles still require the
-notebook import path. See [observed-time behavior](./SpikeSortingV2.md#observed-time-metrics-and-downstream-analysis)
+notebook import path. See
+[observed-time behavior](./SpikeSortingV2.md#observed-time-metrics-and-downstream-analysis)
 for metric definitions, bin validity, and decoder restrictions.
 
 - **No `recording_id`-keyed `IntervalList` row.** v2 does not persist the
@@ -299,10 +307,10 @@ for metric definitions, bin validity, and decoder restrictions.
     shipped-default parameter row whose content has diverged from the shipped
     content (e.g. a hand-edited blob); `initialize_v2_defaults` runs it and
     warns.
-- **Tracked, region-specific analyzer waveform window.** The analyzer window
-    and subsample come from a named, DB-tracked `AnalyzerWaveformParameters`
-    row resolved from the sort's preprocessing recipe (hippocampus
-    `0.5/0.5 ms`, cortex `1.0/2.0 ms`; both 20000 spikes), recorded on
+- **Tracked, region-specific analyzer waveform window.** The analyzer window and
+    subsample come from a named, DB-tracked `AnalyzerWaveformParameters` row
+    resolved from the sort's preprocessing recipe (hippocampus `0.5/0.5 ms`,
+    cortex `1.0/2.0 ms`; both 20000 spikes), recorded on
     `Sorting.display_waveform_params_name`. Template-derived values —
     `peak_amplitude_uv`, SNR, amplitude — depend on that window and subsample;
     spike-train metrics (firing rate, ISI, presence ratio) do not. Pre-release
@@ -317,25 +325,23 @@ The post-sort (curation / metric) surfaces have v2 replacements. The only
 surface that stays v1-only is the stored per-pair burst metrics
 (`BurstPairUnit`); everything else below has a v2 path.
 
-- **Available in v2** — `metric_curation` provides
-    `QualityMetricParameters`, `AutoCurationRules`,
-    `CurationEvaluationSelection`, and `CurationEvaluation`. This replaces v1
-    `MetricCuration` for SI quality metrics, auto-labels, and merge suggestions.
-    Both score a curated sorting (v1 `MetricCurationSelection` keys on
-    `CurationV1`); what changes in v2 is that `CurationEvaluation` scores a
-    **committed `CurationV2`** generation in that curation's own unit namespace
-    (merged units included), records the exact recipe pair it used, and its
-    `accept_evaluation_outputs` / `use_evaluation_labels` helpers accept the
-    proposals into a committed child rather than mutating the scored row. Like
-    v1's `WaveformParameters` whitened/unwhitened split, PC / cluster-separation
-    metrics (`nn_advanced`, `d_prime`, `nearest_neighbor`, `mahalanobis`,
-    `silhouette`) are computed on a **whitened** metric analyzer (decorrelated
-    space), while amplitudes and voltage/spike-train metrics (`snr`,
-    `amplitude_cutoff`, `firing_rate`, `isi_violation`, …) stay on the
-    unwhitened display analyzer — so PC/NN values differ from those of
-    pre-release v2 runs that used a single analyzer (re-curate against the
-    current scores). The
-    metric recipe is tracked on
+- **Available in v2** — `metric_curation` provides `QualityMetricParameters`,
+    `AutoCurationRules`, `CurationEvaluationSelection`, and
+    `CurationEvaluation`. This replaces v1 `MetricCuration` for SI quality
+    metrics, auto-labels, and merge suggestions. Both score a curated sorting
+    (v1 `MetricCurationSelection` keys on `CurationV1`); what changes in v2 is
+    that `CurationEvaluation` scores a **committed `CurationV2`** generation in
+    that curation's own unit namespace (merged units included), records the
+    exact recipe pair it used, and its `accept_evaluation_outputs` /
+    `use_evaluation_labels` helpers accept the proposals into a committed child
+    rather than mutating the scored row. Like v1's `WaveformParameters`
+    whitened/unwhitened split, PC / cluster-separation metrics (`nn_advanced`,
+    `d_prime`, `nearest_neighbor`, `mahalanobis`, `silhouette`) are computed on
+    a **whitened** metric analyzer (decorrelated space), while amplitudes and
+    voltage/spike-train metrics (`snr`, `amplitude_cutoff`, `firing_rate`,
+    `isi_violation`, …) stay on the unwhitened display analyzer — so PC/NN
+    values differ from those of pre-release v2 runs that used a single analyzer
+    (re-curate against the current scores). The metric recipe is tracked on
     `CurationEvaluationSelection.metric_waveform_params_name`. Quality-metric
     curation is provided by `CurationEvaluation`.
 - **Folded into CurationEvaluation** — the v1 `BurstPair` table was not cloned
@@ -350,27 +356,28 @@ surface that stays v1-only is the stored per-pair burst metrics
 - **Available in v2** — `RecordingRecompute` is replaced by two explicit
     verification families: `RecordingArtifactRecompute*` for recording/artifact
     NWB files and `SortingAnalyzerRecompute*` for analyzer folders.
-- **Available in v2** — cross-session unit matching:
-    `unit_matching` and `matcher_protocol` back the `UnitMatch` / `TrackedUnit`
-    tables, and `ConcatenatedRecording` / `SessionGroup` implement same-day
-    chronic concatenate-and-sort.
+- **Available in v2** — cross-session unit matching: `unit_matching` and
+    `matcher_protocol` back the `UnitMatch` / `TrackedUnit` tables, and
+    `ConcatenatedRecording` / `SessionGroup` implement same-day chronic
+    concatenate-and-sort.
 - **Available in v2** — `RunResult.start_review(...)` is the browser-first v1
     FigURL replacement. One immutable review profile evaluates the selected
     curation, seeds current labels, puts its metrics and suggestions in the
     selectable unit table, and returns a resumable FigPack handle.
-    `review.open()` serves the saved bundle at `http://localhost:<port>/bundles/<id>/` (the
-    v1 FigURL link becomes a local URL; saves land in the bundle's
-    `annotations.json`). `preview_import()` shows the exact diff; `commit()`
-    verifies the figure's immutable parent UUID and creates a sibling child; a
-    merge is automatically re-evaluated and `continue_review()` opens its actual
-    merged analyzer for an explicit verification commit. Local delivery is the
-    default; `upload=True` publishes the identical seeded bundle
-    (a FigPack API key, or `ephemeral=True`). Connected local reviews offer
-    **Preview and commit** and open merged-child verification in the browser;
-    hosted reviews use `review.commit_panel()` in the notebook. All local review
-    and inspection URLs in one Python process share a port. Needs the
-    `spikesorting-v2-curation` extra. The table-level `FigPackCurationSelection`
-    and `FigPackCuration` APIs remain the expert layer.
+    `review.open()` serves the saved bundle at
+    `http://localhost:<port>/bundles/<id>/` (the v1 FigURL link becomes a local
+    URL; saves land in the bundle's `annotations.json`). `preview_import()` shows
+    the exact diff; `commit()` verifies the figure's immutable parent UUID and
+    creates a sibling child; a merge is automatically re-evaluated and
+    `continue_review()` opens its actual merged analyzer for an explicit
+    verification commit. Local delivery is the default; `upload=True` publishes
+    the identical seeded bundle (a FigPack API key, or `ephemeral=True`).
+    Connected local reviews offer **Preview and commit** and open merged-child
+    verification in the browser; hosted reviews use `review.commit_panel()` in
+    the notebook. All local review and inspection URLs in one Python process
+    share a port. Needs the `spikesorting-v2-curation` extra. The table-level
+    `FigPackCurationSelection` and `FigPackCuration` APIs remain the expert
+    layer.
 - **Available in v2** — lab-specific computed unit properties use immutable
     `CurationUnitAnnotationSet` rows over exact curated-unit namespaces. Reads
     and FigPack display require explicit set references; annotations are not
@@ -396,12 +403,19 @@ correct** differences:
     band-limited spike signal, so out-of-band drift and DC offset are filtered
     out first and do not leak into the reference subtracted from every channel —
     the signal-processing-preferred order, an intentional divergence from v1.
-    The two orders are *not* commutative only on the **`global_median` common
-    reference** (the per-sample median is non-linear), so the preprocessed — and
-    therefore sorted — output differs from v1 **only** for global-median sort
-    groups. `specific`-electrode and `none` references (and a global *average*
-    reference — `global_median` with `operator="average"`, where the mean is
-    linear) commute with the filter, so they are numerically identical to v1.
+    Changing this order affects the **`global_median` common reference** because
+    the per-sample median is non-linear. `specific`-electrode and `none`
+    references (and a global *average* reference — `global_median` with
+    `operator="average"`) commute with the filter in exact arithmetic when the
+    filter settings, channels, and temporal context match. This does not
+    guarantee identical v1/v2 recordings: other recipe and interval-handling
+    changes also affect preprocessing.
+- **Filtering preserves acquisition context at selected interval edges.** v2
+    filters each continuous acquisition span before selecting and concatenating
+    intervals. Filter margins use the original neighboring samples and never
+    cross a real acquisition gap. v1 filtered after time restriction, so
+    selected edges and joins between disjoint intervals can produce different
+    traces and detections even with `specific` or `none` referencing.
 - **Small spike-count delta near artifact-mask edges.** v2 fixes v1's off-by-one
     interval consolidation. A few spikes per disjoint interval boundary differ;
     v2 is correct.
@@ -431,10 +445,11 @@ correct** differences:
     spike-by-spike equality. The deterministic `clusterless_thresholder` path is
     the tight parity reference.
 
-The whole-session and curation notebooks show the complete population
-handoff and detailed inspection routes. Metric predicates passed to `select_units_for_analysis` with an explicit
-evaluation persist the selected population; decoding reads the same membership. Native split/per-spike edits and Phy edit re-import
-remain unsupported.
+The whole-session and curation notebooks show the complete population handoff
+and detailed inspection routes. Metric predicates passed to
+`select_units_for_analysis` with an explicit evaluation persist the selected
+population; decoding reads the same membership. Native split/per-spike edits and
+Phy edit re-import remain unsupported.
 
 Concat selections require explicit per-member artifact detection IDs (or
 explicit `None` values). The standard runner resolves these automatically from
@@ -444,11 +459,12 @@ itself does not correct motion -- that is a separate, optional stage (see
 [Optional motion correction](./SpikeSortingV2.md#optional-motion-correction))
 that can layer on top of either a single-session `Recording` or a
 `ConcatenatedRecording`; if you apply it to a concat, its estimate/correction
-reads the same masks. Concat materializations from a pre-release database
-cannot satisfy this selection; follow the
-[preproduction database sequence](#upgrading-a-preproduction-v2-database),
-which drops and redeclares the concat tables, and rerun them. Raw SI duration metrics
-retain SI definitions. V2 `observed_*` metrics and
+reads the same masks. Concat materializations from a pre-release database cannot
+satisfy this selection; follow the
+[preproduction database sequence](#upgrading-a-preproduction-v2-database), which
+recreates the current tables in an isolated development environment, and rerun
+them. Raw SI duration metrics retain SI definitions. V2 `observed_*` metrics and
 sorted-spikes decoding through populations with observation snapshots honor
 usable time; legacy populations without snapshots report unknown coverage.
-Custom downstream analyses must use the exposed observation intervals explicitly.
+Custom downstream analyses must use the exposed observation intervals
+explicitly.

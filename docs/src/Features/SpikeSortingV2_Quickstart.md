@@ -8,15 +8,25 @@ curation, concatenation, and cross-session matching, see the full
 [Spike Sorting v2](./SpikeSortingV2.md) reference and the
 [notebooks](../notebooks/10_Spike_SortingV2.ipynb).
 
-This assumes you have already ingested the session with `insert_sessions` (see
-[Insert Data](../notebooks/02_Insert_Data.ipynb)).
+Before you start:
+
+- Install the v2 runtime and browser-review dependencies. From the current
+    checkout, run
+    `python -m pip install -e ".[spikesorting-v2,spikesorting-v2-curation]"`.
+- Configure your DataJoint connection and `SPYGLASS_BASE_DIR` (see
+    [Setup](../notebooks/00_Setup.ipynb)).
+- Ingest the session with `insert_sessions` (see
+    [Insert Data](../notebooks/02_Insert_Data.ipynb)).
+
+You will finish with a reviewed `CurationRef`, a unit-selection receipt, and
+spike times from the exact `SortedSpikesGroup` used by downstream analysis.
 
 ## 1. Review channels and references, then create sort groups
 
 ```python
 import pandas as pd
 
-from spyglass.common import Electrode, LabTeam
+from spyglass.common import Electrode, IntervalList, LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
     describe_pipeline_preset,
@@ -109,7 +119,7 @@ recipe for hippocampus:
 | ----------------------------------------- | ------------------------------------------------------- |
 | Local MountainSort4 production preset     | Standard v2 environment (`spikesorting-v2` extra)       |
 | Container MountainSort4 production preset | Singularity/Apptainer and the catalog's container image |
-| MountainSort5 alternative                | Standard v2 environment                                 |
+| MountainSort5 alternative                 | Standard v2 environment                                 |
 
 Use `describe_pipeline_presets()` to match the region, sampling rate, and probe
 type and read each recipe's runtime notes. Selecting a preset never silently
@@ -128,6 +138,14 @@ child curation in the same call. For the preset below the rules are
 `isi_violation > 0.02` → `reject`); call
 `describe_pipeline_preset("franklab_probe_hippocampus_30khz_ms4_2026_06")` to
 inspect them before running.
+
+Choose an interval that exists for this session. The example below uses
+`"raw data valid times"` for the full session; inspect the available names
+first:
+
+```python
+IntervalList & {"nwb_file_name": nwb_file_name}
+```
 
 ```python
 run_kwargs = dict(
@@ -170,13 +188,13 @@ without `auto_curate=True` leaves it `None` and gives you only
 
 ### Optional: motion correction
 
-Off by default. Add `motion_mode="apply"` and a
-`motion_correction_params_name` to sort a motion-corrected recording instead
-(`"estimate"` saves a `MotionEstimate` for inspection without changing the
-sort). **EXPERIMENTAL** -- no shipped recipe is validated for a probe; see
-[Optional motion correction](./SpikeSortingV2.md#optional-motion-correction)
-for the modes, the resolved presets, and the development findings before
-relying on it.
+Off by default. Add `motion_mode="apply"` and a `motion_correction_params_name`
+to sort a motion-corrected recording instead (`"estimate"` saves a
+`MotionEstimate` for inspection without changing the sort). **EXPERIMENTAL** --
+no shipped recipe is validated for a probe; see
+[Optional motion correction](./SpikeSortingV2.md#optional-motion-correction) for
+the modes, the resolved presets, and the development findings before relying on
+it.
 
 ```python
 motion_run = run_v2_pipeline(
@@ -192,20 +210,24 @@ print(motion_run["motion_estimate_id"], motion_run["motion_corrected_recording_i
 `start_review` evaluates the pinned curation with a named review profile and
 saves a seeded FigPack bundle (local by default). `review.open()` serves that
 exact bundle from your kernel at `http://localhost:<port>/bundles/<id>/` and
-returns the URL.
-In the browser: select units in the unit table (its columns
-are the profile's official metrics and the rule set's proposals for the curation
+returns the URL. In the browser: select units in the unit table (its columns are
+the profile's official metrics and the rule set's proposals for the curation
 under review), tick labels or **Merge Selected** in the Curation pane, then
-**Preview and commit**. **Save draft** keeps unfinished edits. Hosted figures use **Curate Figure** and **Save Annotations**
-for authenticated draft saving. Requires the `spikesorting-v2-curation` extra.
+**Preview and commit**. **Save draft** keeps unfinished edits. Hosted figures
+use **Curate Figure** and **Save Annotations** for authenticated draft saving.
+Requires the `spikesorting-v2-curation` extra.
 
-If two tabs edit the same local draft, a stale save is rejected without discarding
-the tab's edits. Use **Open latest draft in a new tab** to review the saved
-changes and reapply your edits there.
+If two tabs edit the same local draft, a stale save is rejected without
+discarding the tab's edits. Use **Open latest draft in a new tab** to review the
+saved changes and reapply your edits there.
+
+If a progress request fails, the browser retries automatically. After repeated
+connection failures, use **Reconnect review** to check the existing operation.
+If the kernel ended, resume the saved review ID, run `review.open()`, and open
+the returned URL. Draft edits and commit stay disabled while an operation is
+still reported as running.
 
 ```python
-from spyglass.spikesorting.v2.pipeline import FigPackReview
-
 review = run.start_review(
     "franklab_hippocampus_2026_09_17",  # review profile: metrics + rules + columns
     source="auto_labeled",
@@ -213,19 +235,24 @@ review = run.start_review(
 )
 url = review.open()  # serves the bundle; opens the browser
 print(review.review_id, url)  # open_browser=False just returns the URL
+```
 
-# Later, in a fresh notebook: the same parent generation, profile, evaluation
-# and display budget come back from the persisted identity, and open() serves
-# the same bundle again -- saved edits included.
-review = FigPackReview.resume(review.review_id)
+Save the printed review ID. Later, in a fresh notebook connected to the same
+database and storage, resume that ID to recover the parent generation, profile,
+evaluation, display budget, and saved draft:
+
+```python
+from spyglass.spikesorting.v2.pipeline import FigPackReview
+
+review = FigPackReview.resume("paste-the-printed-review-uuid-here")
 review.open()
 ```
 
 In the local browser, click **Preview and commit**, then **Commit curation**,
-**Commit and inspect merged units**, or **Record reviewed — no changes**.
-For conflicting merge labels, the preview shows the
-contributor IDs and lets you choose the final labels. A merge is reevaluated
-with the same profile and opens a new review focused on the merged units.
+**Commit and inspect merged units**, or **Record reviewed — no changes**. For
+conflicting merge labels, the preview shows the contributor IDs and lets you
+choose the final labels. A merge is reevaluated with the same profile and opens
+a new review focused on the merged units.
 
 Inspect that child and record its review in the browser. Further merges repeat
 the same sequence. Use **Review parent branch** to recover a mistaken merge,
@@ -238,15 +265,16 @@ final_curation = review.result()
 This accessor follows the recorded verification chain and refuses an unfinished
 review. It survives reloads and resuming the review in a new Python process.
 Hosted bundles have no compute service: use `panel = review.commit_panel()`
-after saving their draft, then follow `panel.receipt` and any verification review.
-The same panel and explicit `preview_import()` / `commit()` API remain available
-as local alternatives.
+after saving their draft, then follow `panel.receipt` and any verification
+review. The same panel and explicit `preview_import()` / `commit()` API remain
+available as local alternatives.
 
 Select units and use **Inspect selected units / pairs** for every selected CCG
 pair; enter a time window for an exact raster and, up to 10 seconds, spikes on
 traces. **Time and sampling** explains the display coordinates and original
-session mapping. Raster and amplitude budgets default to `floor(duration_s * 50)`
-points per unit, matching v1. Large time plots load only when explicitly requested.
+session mapping. Raster and amplitude budgets default to
+`floor(duration_s * 50)` points per unit, matching v1. Large time plots load
+only when explicitly requested.
 
 Remote kernel: forward the printed port (`ssh -L <port>:localhost:<port> host`)
 and open the full returned `localhost` URL locally, including its bundle path.
@@ -336,24 +364,24 @@ For a concatenated (multi-member) sort the receipt holds one per-member group
     entry points and their import paths.
 
 For multiple shanks/tetrodes, continue with the
-[whole-session notebook](../../../notebooks/10_Spike_SortingV2_Presets.ipynb):
-review each group, choose an exact final curation, and assemble one population
-with a consistent label policy. It reports failed/omitted groups and checks
-membership when rerun. For pair diagnostics, rasters, early/late traces, and an
-additional SNR filter on returned data, use the
-[curation notebook](../../../notebooks/10_Spike_SortingV2_Curation.ipynb).
+[whole-session notebook](../notebooks/10_Spike_SortingV2_Presets.ipynb): review
+each group, choose an exact final curation, and assemble one population with a
+consistent label policy. It reports failed/omitted groups and checks membership
+when rerun. For pair diagnostics, rasters, early/late traces, and an additional
+SNR filter on returned data, use the
+[curation notebook](../notebooks/10_Spike_SortingV2_Curation.ipynb).
 
 Inspect the scientific setup in preflight/`describe_run`: artifact masking,
 drift QC (`DriftEstimate`), and the optional motion stage are different
-operations. Concat detects and masks each member before concatenation, not
-before motion correction (concatenation never corrects motion itself);
-Kilosort's shipped no-mask preset does not reject artifacts merely by
-correcting drift internally.
+operations. Concat detects and masks each member before concatenation and
+optional motion correction (concatenation never corrects motion itself);
+Kilosort's shipped no-mask preset does not reject artifacts merely by correcting
+drift internally.
 
 Use `review.summary()` before opening the browser. Save draft saves bundle
-edits; Preview and commit creates the curation in a connected local browser.
-The notebook commit panel remains an alternative.
-Pending merges still show parent metrics. Inspect the reevaluated child before
-choosing it for analysis. `unavailable_qc` names missing inputs for enabled
-rules; missing-policy pass means unflagged, not good. `accept` plus a deny label
-such as `noise` is excluded by the accepted-unit policies.
+edits; Preview and commit creates the curation in a connected local browser. The
+notebook commit panel remains an alternative. Pending merges still show parent
+metrics. Inspect the reevaluated child before choosing it for analysis.
+`unavailable_qc` names missing inputs for enabled rules; missing-policy pass
+means unflagged, not good. `accept` plus a deny label such as `noise` is
+excluded by the accepted-unit policies.

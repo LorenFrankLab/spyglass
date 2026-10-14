@@ -165,12 +165,13 @@ or `log_export` positionally must pass them by keyword.
     and which blocked `keypoint-moseq` 0.6 (it pins `panel==0.14.4`) #1609
 - `environment.yml` and `environment_min.yml` move to NumPy 2 and `scipy>=1.13`;
     `environment.yml` installs `torch>=2` from pip instead of conda
-    `pytorch<1.12` and no longer installs `mountainsort4`, which does not run on
-    NumPy 2. The DLC and MoSeq environments stay on NumPy < 2 and drop their
-    conda `pytorch` and `jax` pins #1609
+    `pytorch<1.12`; native MountainSort4 1.0.7 is installed through the v2 extra
+    and runs on NumPy 2 with the v2 compatibility path. The DLC and MoSeq
+    environments stay on NumPy < 2 and drop their conda `pytorch` and `jax` pins
+    #1609
 - Add `environments/environment_spikesorting_v2.yml` and
     `environments/environment_spikesorting_legacy.yml` #1609
-- Add optional extras `spikesorting-v2` (MountainSort5, torch),
+- Add optional extras `spikesorting-v2` (MountainSort4, MountainSort5, torch),
     `spikesorting-v2-matching` (UnitMatchPy), `spikesorting-v2-curation`
     (FigPack browser review, ipywidgets), and the test-only
     `spikesorting-v2-curation-test` and `spikesorting-v2-validation` #1609
@@ -251,17 +252,17 @@ or `log_export` positionally must pass them by keyword.
         #1662
     - Add Spike Sorting v2 (`spyglass.spikesorting.v2`). `run_v2_pipeline` runs
         preprocessing, artifact detection, sorting and curation from a named
-        preset and registers the result in `SpikeSortingOutput`. It adds
-        MountainSort5 as the default sorter (Kilosort4, SpykingCircus2 and
-        Tridesclous2 also supported), content-addressed parameters and selections,
-        hash-verified recompute, same-day concatenate-and-sort, optional
-        experimental motion correction, browser-based review with FigPack, and
-        cross-session unit tracking with UnitMatch. See the Spike Sorting v2 docs
-        #1609
+        preset and registers the result in `SpikeSortingOutput`. It adds native
+        MountainSort4 as the default sorter (MountainSort5, Kilosort4,
+        SpykingCircus2 and Tridesclous2 also supported), content-addressed
+        parameters and selections, hash-verified recompute, same-day
+        concatenate-and-sort, optional experimental motion correction, browser-based
+        review with FigPack, and cross-session unit tracking with UnitMatch. See
+        the Spike Sorting v2 docs #1609
     - v2 sparse analyzers select channels using the sorter's spike polarity,
         preserving positive and bidirectional peak electrode/amplitude metadata.
-        Incompatible existing analyzer caches rebuild on access. Already
-        persisted affected development sort metadata needs regeneration #1609
+        Incompatible existing analyzer caches rebuild on access. Already persisted
+        affected development sort metadata needs regeneration #1609
     - v2 `isi_violation` uses original spike timestamps and excludes artificial
         concatenation joins, preventing acquisition gaps from creating false
         refractory violations. Already persisted affected development curation

@@ -134,14 +134,18 @@ the recommended path for new sorts under SpikeInterface 0.104: one call
 preprocesses the recording, detects artifacts, runs the sorter, writes the
 initial curation, and registers the result on the spike-sorting merge table.
 
-One prerequisite for the snippet below: install the `spikesorting-v2` extra
+Install the `spikesorting-v2` extra
 (`pip install "spyglass-neuro[spikesorting-v2]"`), which provides the default
-MountainSort5 sorter.
+native MountainSort4 sorter and the MountainSort5 alternative. Configure the
+database connection and ingest your session first. Review bad channels and
+reference metadata before grouping, as shown in the
+[v2 quickstart](https://lorenfranklab.github.io/spyglass/latest/Features/SpikeSortingV2_Quickstart/).
 
 ```python
 from spyglass.common.common_lab import LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
+    describe_sort_groups,
     run_v2_pipeline,
     select_units_for_analysis,
 )
@@ -154,40 +158,38 @@ LabTeam.insert1(
     {"team_name": "my_team", "team_description": "..."}, skip_duplicates=True
 )
 # set_group_by_shank refuses to overwrite existing sort groups, so guard the
-# re-run (or delete the groups first; see the docs).
+# re-run. Review existing groups before explicitly recreating them.
 if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
-run_summary = run_v2_pipeline(
-    nwb_file_name=nwb_file_name,
-    sort_group_id=0,  # pick the shank you want to sort
-    interval_list_name="raw data valid times",
-    team_name="my_team",
-    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
-)
-# A default run stops at the UNCURATED root. run_summary["root_merge_id"] is
-# fine for a quick look, but is NOT analysis-ready, and
-# run_summary["auto_labeled_merge_id"] is None -- there is deliberately nothing
-# called "merge_id" to copy straight into a decode.
-root_merge_id = run_summary["root_merge_id"]  # quick inspection only
+sort_groups = describe_sort_groups(nwb_file_name)
+print(sort_groups)
+sort_group_id = None  # replace with a reviewed ID from the table above
+if sort_group_id not in list(sort_groups["sort_group_id"]):
+    raise ValueError("Choose a sort_group_id from the displayed table before sorting.")
 
-# For downstream science, curate first. auto_curate=True commits an
-# auto-labeled child and fills auto_labeled_merge_id. That child still holds
-# every unit (its labels are suggestions), so choose the analysis population
-# explicitly before decoding:
+# Run this cell after reviewing the group and matching its region/rate to a preset.
 analysis_summary = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
-    sort_group_id=0,
+    sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms4_2026_06",
     auto_curate=True,
 )
+# Auto-labeling commits suggestions and keeps every unit in the child.
+# This explicitly selects an unreviewed, rule-passing population. For human
+# review, follow the quickstart and select review.result() instead.
 receipt = select_units_for_analysis(
     analysis_summary.auto_labeled_curation, policy="v2_unflagged_units"
 )
 spike_times, unit_ids = receipt.fetch_spike_data(return_unit_ids=True)
+print(receipt.summary())  # selected/excluded counts and reasons if empty
 ```
+
+Without `auto_curate=True`, a run stops at the uncurated root and
+`auto_labeled_merge_id` is `None`. A `root_merge_id` identifies every root unit;
+choose a curated generation and an explicit selection policy before decoding.
 
 See
 [Spike Sorting v2](https://lorenfranklab.github.io/spyglass/latest/Features/SpikeSortingV2/)

@@ -27,6 +27,22 @@ This series of notebooks covers the process of spike sorting, from automated
 spike sorting to optional manual curation of the output of the automated
 sorting.
 
+For v2, choose a notebook for the task you want to complete:
+
+- [First single-session sort](./10_Spike_SortingV2.ipynb): inspect channels and
+    references, choose a preset, run preflight, sort, and select a population
+    for analysis.
+- [Curation and browser review](./10_Spike_SortingV2_Curation.ipynb): review
+    units, save drafts, commit changes, and verify merged units.
+- [Presets and whole-session sorting](./10_Spike_SortingV2_Presets.ipynb):
+    customize a recipe and run all or selected sort groups.
+- [Concatenation and cross-session matching](./10_Spike_SortingV2_CrossSession.ipynb):
+    sort same-day recordings together or track units across sessions.
+
+The [v0](./10_Spike_SortingV0.ipynb) and [v1](./10_Spike_SortingV1.ipynb)
+notebooks cover legacy workflows and require the legacy spike-sorting
+environment to compute new results.
+
 Spikesorting results from any pipeline can then be organized and tracked using
 tools in [Spikesorting Analysis](./11_Spike_Sorting_Analysis.ipynb).
 

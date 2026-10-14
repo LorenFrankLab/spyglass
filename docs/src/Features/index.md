@@ -20,6 +20,8 @@ Spyglass.
     path from an ingested NWB file to reviewed, selected spike times.
 - [Spike Sorting v2](./SpikeSortingV2.md) - Modern SpikeInterface 0.104-based
     spike sorting pipeline (`spyglass.spikesorting.v2`).
+- [Spike Sorting v2 API map](./SpikeSortingV2_API.md) - Supported import paths
+    and entry points, with links to signatures and parameter documentation.
 - [Spike Sorting v1→v2 Migration](./SpikeSortingV2_Migration.md) - Task-oriented
     guide for porting a v1 notebook workflow to v2.
 - [Spike Sorting v2 Storage Management](./SpikeSortingV2StorageManagement.md) -

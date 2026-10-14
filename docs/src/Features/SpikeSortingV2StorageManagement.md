@@ -39,13 +39,13 @@ extension comparison.
 Analyzer extension hashes use the version-tagged `array-v2` format: array
 shapes, dtypes, and boundaries are hashed with canonical little-endian values.
 Hashing streams bounded buffers, including for memory-mapped waveforms.
-Inventories from the earlier byte-only format are refreshed when their folder
-is present; a new recompute verdict is required before reclamation. Their audit
-is retained when the folder was already reclaimed. Existing evaluation
-snapshots remain readable, but `detect_stale_source()` reports
-`source_analyzer_hash_format:<role>` until they are reevaluated.
-Evaluation calls reuse existing rows, so recreate the affected evaluation
-result before repopulating it.
+Inventories from the earlier byte-only format are refreshed when their folder is
+present; a new recompute verdict is required before reclamation. Their audit is
+retained when the folder was already reclaimed. Existing evaluation snapshots
+remain readable, but `detect_stale_source()` reports
+`source_analyzer_hash_format:<role>` until they are reevaluated. Evaluation
+calls reuse existing rows, so recreate the affected evaluation result before
+repopulating it.
 
 ## Workflow
 
@@ -67,15 +67,21 @@ RecordingArtifactRecomputeSelection.attempt_all(rec_key)
 # 3. Regenerate + compare.
 RecordingArtifactRecompute.populate(rec_key)
 
-# 4. See what can be reclaimed.
+# 4. Estimate the size of matched files still on disk.
 RecordingArtifactRecompute().get_disk_space(rec_key)
 
-# 5. Reclaim (matched=1 + current environment + > days_since_creation old).
-RecordingArtifactRecompute().delete_files(rec_key, dry_run=True)  # preview
+# 5. Preview eligibility (match + current environment + age), then reclaim.
+files = RecordingArtifactRecompute().delete_files(rec_key, dry_run=True)
+print(files)  # review the eligible paths before the next call
 RecordingArtifactRecompute().delete_files(rec_key, dry_run=False)  # delete
 
 # Later: get_recording() rebuilds + reconciles the deleted artifact on demand.
 ```
+
+`get_disk_space()` counts matched, not-yet-deleted files across environments; it
+does not apply the environment or age checks. Use
+`delete_files(..., dry_run=True)` to preview the paths eligible under those
+checks.
 
 The `SortingAnalyzer*` trio mirrors this for analyzer folders; deletion removes
 the folder, which `Sorting.get_analyzer()` rebuilds on the next access. A
@@ -95,7 +101,12 @@ path/size/mtime fingerprint, without reading waveform payloads.
     current environment can regenerate the artifact. The default raises
     `StaleEnvMatchedError` naming the stale env(s). Pass `force_stale_env=True`
     (audit-logged) to override deliberately.
-- Recently-created artifacts are skipped (`days_since_creation`, default 7).
+- The authorizing recompute rows must have a known `created_at` at least
+    `days_since_creation` days old (default 7). For recordings, that timestamp
+    comes from the artifact file's modification time; for analyzers, it is the
+    recompute result's populate time. A newly verified analyzer therefore waits
+    seven days by default even when its folder is older. Unknown timestamps are
+    skipped.
 
 A completed comparison with `matched=0` records which objects differ in the
 `Name` (missing-from-old/new) and `Hash` (differing) part tables. Attempts that
@@ -127,12 +138,12 @@ costs ~0.17x versus >= 1x for an eager load. The scientific waveform sample
 memory target -- the savings come only from the storage format and load path.
 
 The analyzer's recording reference is saved as `recording.pickle`, including
-artifact exclusions and recipe preprocessing. This avoids SI 0.104.3's JSON
-loss of structured artifact intervals, including after probe projection. It
-stores extractor parameters and source paths; it does not copy the recording's
-trace data. Reopened derivative analyzers use the same serialization policy.
-An older cache whose recording cannot reload is treated as invalid and rebuilt
-through the usual cache recovery path.
+artifact exclusions and recipe preprocessing. This avoids SI 0.104.3's JSON loss
+of structured artifact intervals, including after probe projection. It stores
+extractor parameters and source paths; it does not copy the recording's trace
+data. Reopened derivative analyzers use the same serialization policy. An older
+cache whose recording cannot reload is treated as invalid and rebuilt through
+the usual cache recovery path.
 
 Folders written under the pre-launch `.zarr` convention are not read; they are
 disposable and rebuild on first access. Delete stale `*.zarr` folders under the
@@ -141,13 +152,15 @@ analyzer root by hand.
 Scratch disk: budget for the preprocessed recording (`Recording`), the sorter's
 own scratch under `temp_dir` while it runs, the display and (when PC metrics are
 requested) metric analyzers, plus one per-generation cache (and its derivatives)
-per committed merged curation you review. The `SortingAnalyzerRecompute` tables
-report folder sizes.
+per committed merged curation you review.
+`SortingAnalyzerRecompute.get_disk_space()` reports matched raw-sort
+display/metric folders only; it does not include the per-curation caches or
+extension derivatives in a total scratch-disk budget.
 
 Sorting computes its analyzer in a private build directory and derives unit
 metadata from that same build. Only the successful database insert can install
-it in the canonical slot. A competing attempt that loses its insert discards
-its own build and leaves the committed sorting's analyzer unchanged. Analyzer
+it in the canonical slot. A competing attempt that loses its insert discards its
+own build and leaves the committed sorting's analyzer unchanged. Analyzer
 extraction runs outside the database transaction; publication uses directory
 renames. During a rebuild, budget space for both the old and new cache.
 
@@ -171,8 +184,8 @@ one host while the other evaluates or publishes it (no incomplete store may be
 exposed); and terminate a worker, or interrupt its database connection, before
 publication, then retry from the other host (the retry must adopt the committed
 result and clean up). A successful local-filesystem test does not establish
-shared-mount behavior.
-Lock errors propagate rather than allowing unprotected cache writes.
+shared-mount behavior. Lock errors propagate rather than allowing unprotected
+cache writes.
 
 ## Release workload measurement
 
@@ -242,8 +255,8 @@ The cross-session `ConcatenatedRecording` cache (a masked, unwhitened
 never corrects motion itself -- see
 [Motion-correction artifacts](#motion-correction-artifacts) below for the
 optional stage on top of it) is a third regeneratable family, with the same
-fail-closed lifecycle as the single-session recording — plus a frozen member
-set tied into its identity.
+fail-closed lifecycle as the single-session recording — plus a frozen member set
+tied into its identity.
 
 - **Identity = the ordered member set.** `concat_recording_id` is content-
     addressed from the group + parameter names **and** a SHA-256 of the ordered
@@ -266,9 +279,9 @@ set tied into its identity.
 - **Artifact dependencies and valid time are preserved.** The selected member
     detections are foreign-key dependencies; ordinary deletion refuses
     referenced detections, while explicit `cascade_delete()` removes dependent
-    concat and sorting outputs. Materialization and rebuild apply the same
-    masks before concatenation and preserve masked samples afterward.
-    `obs_intervals` stores valid time on the concat timeline;
+    concat and sorting outputs. Materialization and rebuild apply the same masks
+    before concatenation and preserve masked samples afterward. `obs_intervals`
+    stores valid time on the concat timeline;
     `MemberBoundary.member_valid_times` stores it in original session timestamps
     for member exports.
 - **Checksum-validated reads + content-verified rebuild-on-missing.**
@@ -278,8 +291,8 @@ set tied into its identity.
     locked (`concat_recording_artifact_lock`), atomic (`os.replace`),
     content-`hash`-verified path, raising `RecordingContentDriftError` on a
     fingerprint mismatch instead of installing drifted bytes (the canonical slot
-    is left untouched); an irreproducible rebuild fails loudly here rather
-    than silently.
+    is left untouched); an irreproducible rebuild fails loudly here rather than
+    silently.
 - **Split-back conserves spikes.** `split_sorting_by_session()` back-maps a
     concat-frame sorting into per-member local frames; it asserts one strictly-
     increasing boundary per frozen member and that every input spike lands in
@@ -300,56 +313,53 @@ set tied into its identity.
     `ConcatenatedRecordingArtifact*` recompute trio — a concat cache that is
     deleted out of band is rebuilt and verified on demand by `get_recording()`,
     which covers correctness. There is no dedicated audit + `delete_files`
-    reclamation surface (the analogue of the recording trio above); one is
-    worth adding once concat outputs are retained at scale, and it should reuse
-    the shared recompute helpers rather than a bespoke table family.
+    reclamation surface (the analogue of the recording trio above); one is worth
+    adding once concat outputs are retained at scale, and it should reuse the
+    shared recompute helpers rather than a bespoke table family.
 
 ## Motion-correction artifacts
 
 The optional motion stage (see
 [Optional motion correction](./SpikeSortingV2.md#optional-motion-correction))
-adds two opt-in artifact families -- nothing is written unless a run
-passes `motion_mode="estimate"` or `"apply"`.
+adds two opt-in artifact families -- nothing is written unless a run passes
+`motion_mode="estimate"` or `"apply"`.
 
 - **`MotionEstimate`** -- a relational row per saved estimate: the
-    SpikeInterface `Motion` blob, resolved configuration, spans, and
-    peak-count diagnostics (never a raw peak array). This is DataJoint blob
-    storage, not a separate NWB artifact, so it has no `AnalysisNwbfile`
-    lifecycle of its own.
+    SpikeInterface `Motion` blob, resolved configuration, spans, and peak-count
+    diagnostics (never a raw peak array). This is DataJoint blob storage, not a
+    separate NWB artifact, so it has no `AnalysisNwbfile` lifecycle of its own.
 - **`MotionCorrectedRecording`** -- a full NWB-resident `ElectricalSeries`
     artifact, one **AnalysisNwbfile-sized cost per corrected recording**: it
-    persists the corrected, masked, unwhitened traces at the source's own
-    sample count and rate, i.e. roughly the same disk footprint as the
-    `Recording` (or `ConcatenatedRecording`) it was computed from. A
-    single-session sort in `"apply"` mode therefore keeps both the original
-    `Recording` artifact (other consumers still read it) and the corrected
-    one on disk.
+    persists the corrected, masked, unwhitened traces at the source's own sample
+    count and rate, i.e. roughly the same disk footprint as the `Recording` (or
+    `ConcatenatedRecording`) it was computed from. A single-session sort in
+    `"apply"` mode therefore keeps both the original `Recording` artifact (other
+    consumers still read it) and the corrected one on disk.
 - **Write-buffer memory (transient, not disk).** Applying motion is lazy but
-    still holds about two float64 copies of each write buffer (the parent
-    read plus the interpolation output) while writing: roughly
-    2 x n_channels x 8 bytes/frame for a ~30 s buffer, i.e. **~1.9 GB at 128
-    channels and ~5.5 GB at 384 channels** (plus a smaller per-frame cost for
-    chunk times/bin indices). Size `write_buffer_gb` accordingly on a
-    high-channel-count probe.
+    still holds about two float64 copies of each write buffer (the parent read
+    plus the interpolation output) while writing: roughly 2 x n_channels x 8
+    bytes/frame for a ~30 s buffer, i.e. **~1.9 GB at 128 channels and ~5.5 GB
+    at 384 channels** (plus a smaller per-frame cost for chunk times/bin
+    indices). Size `write_buffer_gb` accordingly on a high-channel-count probe.
 - **Rebuild reapplies the saved motion, never re-estimates.** A missing
     `MotionCorrectedRecording` file is rebuilt from its saved `MotionEstimate`
     (never by estimating again), through the same locked, atomic,
     content-hash-verified path as `Recording`/`ConcatenatedRecording`; a
-    fingerprint mismatch raises `RecordingContentDriftError` and never
-    installs drifted bytes. The content hash is the guard: a rebuild under a
-    SpikeInterface version other than the selection's is
-    installed when it reproduces the stored hash (a new compute still
-    refuses a SpikeInterface version change).
+    fingerprint mismatch raises `RecordingContentDriftError` and never installs
+    drifted bytes. The content hash is the guard: a rebuild under a
+    SpikeInterface version other than the selection's is installed when it
+    reproduces the stored hash (a new compute still refuses a SpikeInterface
+    version change).
 - **Deletion protection.** `SortingSelection.MotionCorrectionSource` is a
-    foreign key onto `MotionCorrectedRecording`: `delete_quick` on a
-    referenced `MotionCorrectedRecording` fails on the constraint, and an
-    ordinary DataJoint delete without `force_masters` is refused ("Attempt to
-    delete part table ... before deleting from its master"). Spyglass's
-    `cautious_delete` sets `force_masters=True`, so deleting a corrected
-    recording that a sort reads cascades up through that sort's
-    `SortingSelection`/`Sorting` -- a sort can never end up pointing at a
-    deleted corrected recording. The same protection covers a
-    `MotionEstimate` a `MotionCorrectedRecordingSelection` still references.
+    foreign key onto `MotionCorrectedRecording`: `delete_quick` on a referenced
+    `MotionCorrectedRecording` fails on the constraint, and an ordinary
+    DataJoint delete without `force_masters` is refused ("Attempt to delete part
+    table ... before deleting from its master"). Spyglass's `cautious_delete`
+    sets `force_masters=True`, so deleting a corrected recording that a sort
+    reads cascades up through that sort's `SortingSelection`/`Sorting` -- a sort
+    can never end up pointing at a deleted corrected recording. The same
+    protection covers a `MotionEstimate` a `MotionCorrectedRecordingSelection`
+    still references.
 - **Recompute/reclamation: not provided, like concat.** There is no
     `MotionCorrectedRecordingArtifact*` recompute trio; a missing artifact is
     rebuilt and verified on demand as above, which covers correctness. As for

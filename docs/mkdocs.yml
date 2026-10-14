@@ -5,7 +5,7 @@ site_author: CBroz1
 
 repo_url: https://github.com/LorenFrankLab/spyglass
 docs_dir: ./src/
-edit_uri: blob/main/docs/src/
+edit_uri: edit/master/docs/src/
 
 copyright: Copyright (c) 2020-present Loren Frank
 

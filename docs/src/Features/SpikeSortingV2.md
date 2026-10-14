@@ -1,5 +1,20 @@
 # Spike Sorting v2
 
+Start with the [Quickstart](./SpikeSortingV2_Quickstart.md) to prepare a
+session, sort it, review the units, and select them for analysis. This page is
+the full workflow reference; use the [API map](./SpikeSortingV2_API.md) to find
+import paths and the generated API reference.
+
+| Task                                                   | Go to                                                                                                                                               |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Review or correct a curation                           | [Browser review](#browser-first-curation-review) and [merge recovery](#where-am-i-and-how-do-i-undo-a-merge)                                        |
+| Automate evaluation and curation                       | [Scripted curation](#scripted-curation-facade-automation-and-debugging) and [quality metrics](#quality-metrics-and-the-scripted-evaluatemerge-loop) |
+| Sort a whole session                                   | [Session runner](#sort-a-whole-session)                                                                                                             |
+| Combine same-day blocks or track units across days     | [Concatenation](#chronic-same-day-recordings) and [unit tracking](#cross-session-unit-tracking)                                                     |
+| Select reviewed units for downstream analysis          | [Downstream consumers](#downstream-consumers)                                                                                                       |
+| Reclaim disk space or recover a missing cache          | [Storage management](./SpikeSortingV2StorageManagement.md)                                                                                          |
+| Upgrade an existing v1 or preproduction v2 environment | [Migration guide](./SpikeSortingV2_Migration.md)                                                                                                    |
+
 ## Why
 
 `spyglass.spikesorting.v2` is the spike-sorting pipeline for SpikeInterface
@@ -113,13 +128,13 @@ For import paths, see the [API map](./SpikeSortingV2_API.md#tables).
     y-z; including the `tetrode_12.5` repair) and persisted in the artifact's
     `rel_x`/`rel_y`/`rel_z` electrode rows; a sort group whose contacts still
     share a 2D position raises. `make` raises `RecordingTruncatedError` if the
-    raw timestamps do not span the requested interval. Specific and global-median
-    referencing require uniform finite channel offsets and uniform finite positive
-    gains across the contributing channels, including a specific reference
-    electrode. Referencing raises when calibration differs between channels:
-    subtracting raw counts would change the result in physical units. This check
-    uses the current preprocessing calibration; a bandpass filter already clears
-    offsets before the reference stage.
+    raw timestamps do not span the requested interval. Specific and
+    global-median referencing require uniform finite channel offsets and uniform
+    finite positive gains across the contributing channels, including a specific
+    reference electrode. Referencing raises when calibration differs between
+    channels: subtracting raw counts would change the result in physical units.
+    This check uses the current preprocessing calibration; a bandpass filter
+    already clears offsets before the reference stage.
 - **`DriftEstimate`** -- per-`Recording` probe-motion QC estimate, populated on
     demand; never applied. See
     [Drift QC](#drift-qc-motion-estimate-never-applied).
@@ -203,12 +218,11 @@ The shipped presets (all dated `_2026_06`):
     MountainSort4 (hippocampus 600 Hz high-pass, 30 kHz), with
     `recommendation_status="production"`. The tetrode-labeled MS4 preset uses
     the same parameter rows (`probe_type` is informational).
-- `franklab_probe_hippocampus_30khz_ms5_2026_06` -- MountainSort5
-    alternative for the same region and rate, with
-    `recommendation_status="alternative"`.
-- `franklab_probe_hippocampus_30khz_ms4_singularity_2026_06` -- the
-    container execution option for the production MountainSort4 recipe: MS4
-    runs in a pinned Singularity container. Preflight gates it on
+- `franklab_probe_hippocampus_30khz_ms5_2026_06` -- MountainSort5 alternative
+    for the same region and rate, with `recommendation_status="alternative"`.
+- `franklab_probe_hippocampus_30khz_ms4_singularity_2026_06` -- the container
+    execution option for the production MountainSort4 recipe: MS4 runs in a
+    pinned Singularity container. Preflight gates it on
     `container_runtime_available` and never falls back to a local run. A Docker
     row (or other rates) is a user-inserted `SorterParameters` row using the
     same `execution_params` mechanism.
@@ -243,13 +257,14 @@ PC/nearest-neighbour metrics); hippocampal rows use a 0.5/0.5 ms window and
 sample up to 20000 spikes per unit.
 
 Sparse analyzers estimate their channel masks with the sorter's detection
-polarity (`peak_sign` or `detect_sign`), so positive and bidirectional detections
-retain their peak channels before waveform extraction. This applies to the
-initial build, cache rebuilds, and curated analyzers. The historical
-`sparsity.peak_sign` field remains accepted in waveform recipes for compatibility;
-the pipeline derives its effective value from the sorter parameters.
-Cached sparse analyzers built with a conflicting polarity rebuild automatically
-when opened. Compatible legacy masks and dense analyzers remain reusable.
+polarity (`peak_sign` or `detect_sign`), so positive and bidirectional
+detections retain their peak channels before waveform extraction. This applies
+to the initial build, cache rebuilds, and curated analyzers. The historical
+`sparsity.peak_sign` field remains accepted in waveform recipes for
+compatibility; the pipeline derives its effective value from the sorter
+parameters. Cached sparse analyzers built with a conflicting polarity rebuild
+automatically when opened. Compatible legacy masks and dense analyzers remain
+reusable.
 
 #### Reading `recommendation_status`
 
@@ -518,6 +533,12 @@ same local draft, an older tab's save is rejected without discarding its edits;
 use **Open latest draft in a new tab** and reapply them there. A reopened local
 bundle gets the installed Spyglass review controls; its scientific data and
 saved annotations stay as saved.
+
+Progress requests retry automatically after a lost connection. If retries stop,
+use **Reconnect review** to read the current operation without submitting it
+again. If the kernel ended, resume the saved review ID and open the URL returned
+by `review.open()`. Draft edits and commit stay disabled while the recorded
+operation is running.
 
 **Browser operations** run one at a time in a worker with its own DataJoint
 connection. Progress and committed identities persist in the local bundle, so
@@ -809,9 +830,8 @@ child = save_manual_curation(
 ```
 
 `FigPackCuration.save_curation_from_uri(uri, parent_curation_key)` verifies the
-figure's embedded `curation_uuid` and decodes its JSON annotations before writing
-a child; identity-less figures
-fail closed.
+figure's embedded `curation_uuid` and decodes its JSON annotations before
+writing a child; identity-less figures fail closed.
 
 #### Metric and rule semantics
 
@@ -821,10 +841,10 @@ fail closed.
     and threshold its `nn_noise_overlap` output column in a rule.
 - `isi_violation` is Spyglass's bounded `count / (n_spikes - 1)` fraction with
     the evaluation recipe's refractory window -- not SI's
-    `isi_violations_ratio`, and not a contamination estimate. It counts intervals
-    using the retained spikes' original timestamps. For concatenated sources,
-    intervals spanning a member or acquisition join are excluded; artifact masks
-    preserve elapsed time between retained spikes. The raw SI
+    `isi_violations_ratio`, and not a contamination estimate. It counts
+    intervals using the retained spikes' original timestamps. For concatenated
+    sources, intervals spanning a member or acquisition join are excluded;
+    artifact masks preserve elapsed time between retained spikes. The raw SI
     `isi_violations_count` and `isi_violations_ratio` columns retain their sample
     clock definitions.
 - `AutoCurationRules` is inserted via `insert_rules(master, rule_rows)` (direct
@@ -892,8 +912,8 @@ resurrected:
 A root or label-only curation reuses the raw-sort analyzer; a merged curation
 resolves a generation-pinned, read-only analyzer over the merged sorting. A
 **preview** curation (`apply_merge=False` with an unapplied merge group) is
-rejected by `CurationEvaluation`; commit the merge first
-(`commit_merges` / `insert_curation(..., apply_merge=True)`).
+rejected by `CurationEvaluation`; commit the merge first (`commit_merges` /
+`insert_curation(..., apply_merge=True)`).
 
 #### Parent-state composition and label inheritance
 
@@ -1559,12 +1579,12 @@ writes the frozen matchable-unit universe and an empty `Pair` table without
 calling the matcher.
 
 **Chronic electrode-space contract.** The built-in UnitMatch backend **rejects**
-a channel-geometry mismatch across inputs. The pipeline **warns** when electrode identity
-(`(electrode_group_name, electrode_id, brain_region)`) differs, since ingestion
-naming is not guaranteed stable across labs. Keep a stable electrode-group name
-across sessions of one implant; a genuine probe mix-up also shows as poor
-matcher AUC / few pairs. (Concatenation rejects mismatched electrode spaces
-outright.)
+a channel-geometry mismatch across inputs. The pipeline **warns** when electrode
+identity (`(electrode_group_name, electrode_id, brain_region)`) differs, since
+ingestion naming is not guaranteed stable across labs. Keep a stable
+electrode-group name across sessions of one implant; a genuine probe mix-up also
+shows as poor matcher AUC / few pairs. (Concatenation rejects mismatched
+electrode spaces outright.)
 
 Matching uses [UnitMatch](https://github.com/EnnyvanBeest/UnitMatch)
 (`matcher="unitmatch"`, the built-in backend); its reference probe is the
@@ -1574,26 +1594,28 @@ Matching uses [UnitMatch](https://github.com/EnnyvanBeest/UnitMatch)
 pip install -e ".[spikesorting-v2-matching]"   # UnitMatchPy + mat73
 ```
 
-Custom matchers register through `matcher_protocol.register_matcher(backend,
-schema, input_preparer=preparer)`. Preparation and inference have separate
-contracts: `MatcherInputPreparer.prepare(source, directory, params, job_kwargs)`
-receives a `MatcherInputSource` containing the artifact-masked recording,
-curated sorting, frozen statistics spans, curation identity and date. It returns
-a `PreparedMatcherInput` containing the `SessionMatcherInput` consumed by the
+Custom matchers register through
+`matcher_protocol.register_matcher(backend, schema, input_preparer=preparer)`.
+Preparation and inference have separate contracts:
+`MatcherInputPreparer.prepare(source, directory, params, job_kwargs)` receives a
+`MatcherInputSource` containing the artifact-masked recording, curated sorting,
+frozen statistics spans, curation identity and date. It returns a
+`PreparedMatcherInput` containing the `SessionMatcherInput` consumed by the
 backend and any excluded unit IDs. Preparation must preserve the frozen identity
 and date; excluded units remain in the matchable universe as unmatched units.
 Returned pairs must use integer curation and unit IDs and can reference only
-units retained by preparation; invalid pairs fail before writing the pairs table.
-Prepared files live through inference and are then removed, including on failure.
-`SessionMatcherInput` describes a `bundle_dir`, a `layout` name and positive
-`layout_version`, and an optional `geometry_path`. A backend owns its formats
-and must validate the layout/version it consumes. The shared preparer declares
-`split_half_waveforms` version 1, which UnitMatch requires together with geometry.
-Other preparers can declare feature or spike-train layouts and omit geometry.
-Omitting `input_preparer` uses the shared dense split-half waveform layout, which
-requires SpikeInterface and NumPy but does not import UnitMatchPy. Supply a
-preparer when a backend needs another layout. Register a distinct matcher name
-when changing the preparation or inference contract for persisted parameters.
+units retained by preparation; invalid pairs fail before writing the pairs
+table. Prepared files live through inference and are then removed, including on
+failure. `SessionMatcherInput` describes a `bundle_dir`, a `layout` name and
+positive `layout_version`, and an optional `geometry_path`. A backend owns its
+formats and must validate the layout/version it consumes. The shared preparer
+declares `split_half_waveforms` version 1, which UnitMatch requires together
+with geometry. Other preparers can declare feature or spike-train layouts and
+omit geometry. Omitting `input_preparer` uses the shared dense split-half
+waveform layout, which requires SpikeInterface and NumPy but does not import
+UnitMatchPy. Supply a preparer when a backend needs another layout. Register a
+distinct matcher name when changing the preparation or inference contract for
+persisted parameters.
 
 `UnitMatch.matcher_provenance` and the pairs NWB header record each producer's
 qualified class name and version, plus the Spyglass version. Backends can supply
@@ -1601,8 +1623,8 @@ qualified class name and version, plus the Spyglass version. Backends can supply
 stored as `None`. Either producer can also implement
 `provenance_fingerprints(params)` returning named model or feature-definition
 fingerprints as strings. These are observational metadata: include any
-result-determining asset fingerprint in the immutable params schema as well,
-and verify the loaded asset against it before use. These hooks also run for
+result-determining asset fingerprint in the immutable params schema as well, and
+verify the loaded asset against it before use. These hooks also run for
 single-input selections, which skip preparation and inference.
 
 Geometry requirements belong to the backend. It can implement
@@ -1612,9 +1634,9 @@ passed with input labels in chronological order, together with the validated
 matcher parameters. Raise `ValueError` for unsupported geometry. UnitMatch uses
 this hook to require identical probe geometry and checks the prepared geometry
 again during inference. A backend without the hook does not trigger geometry
-reads or comparisons during selection. It remains responsible for validating
-the prepared inputs it consumes. Frozen-input identity, session-overlap checks,
-and pair validation apply to every backend.
+reads or comparisons during selection. It remains responsible for validating the
+prepared inputs it consumes. Frozen-input identity, session-overlap checks, and
+pair validation apply to every backend.
 
 The recommended path is **plan-then-run**: pin curations by a named curation
 strategy, review the plan, then run. Group-based planning uses a `SessionGroup`
@@ -1728,12 +1750,10 @@ Key behaviors and caveats:
     A and C land in different tracked units. An unmatched unit is a singleton
     (`n_matching_inputs == 1`, `median_match_probability` NULL). A universe
     larger than `max_strict_nodes` (default 2000) raises
-    `TrackedUnitBudgetExceededError`.
-    These grouping controls belong to the backend-independent
-    `TrackingParamsSchema`, which custom matcher schemas can inherit. Recipes
-    without them use the same defaults. The existing flat parameter names
-    `tracked_unit_threshold` and `max_strict_nodes` remain unchanged; grouping
-    explicitly selects the `strict` policy regardless of the matching backend.
+    `TrackedUnitBudgetExceededError`. Custom matcher parameter schemas can
+    define `tracked_unit_threshold` and `max_strict_nodes`; recipes without
+    those fields use the same defaults. Grouping explicitly selects the `strict`
+    policy regardless of the matching backend.
 - **`n_matching_inputs` vs. `n_sessions_detected`.** `n_matching_inputs` counts
     distinct matching inputs (2 for a two-day match, concatenated or not).
     `n_sessions_detected` counts distinct original sessions (`nwb_file_name`)
@@ -1852,7 +1872,7 @@ unsupported; Phy export is for inspection only.
 | Curation summary (the curated result)           | `CurationV2.summarize_curation(auto_summary.auto_labeled_curation.as_key())` (`auto_summary.root_curation.as_key()` inspects the uncurated root)          |
 | Unit-level plots / exports of an exact curation | `ssviz.plot_waveforms(curation, unit_ids=[...])`, `ssviz.export_to_phy(curation, folder)`                                                                 |
 | Analyzer/debug internals                        | `Sorting().get_analyzer({"sorting_id": run_summary["sorting_id"]})` (raw sort); `open_curation_analyzer(curation, recipe)` for a disk-backed working copy |
-| v2 merge ids for a restriction                  | `get_spike_sorting_v2_merge_ids(restriction)` (`spyglass.spikesorting.v2.curation_api`)                                                                    |
+| v2 merge ids for a restriction                  | `get_spike_sorting_v2_merge_ids(restriction)` (`spyglass.spikesorting.v2.curation_api`)                                                                   |
 
 `SpikeSortingOutput.get_restricted_merge_ids` includes v2 by default. With an
 explicit `sources=` list the v2 resolver is strict: an unknown restriction key
@@ -1934,9 +1954,11 @@ with pynwb.NWBHDF5IO(abs_path, "r", load_namespaces=True) as io:
 
 ### Environment
 
-The v2 pipeline requires SpikeInterface 0.104+ and, for MountainSort, the
-`spikesorting-v2` extra. Browser review needs `spikesorting-v2-curation`;
-cross-session matching needs `spikesorting-v2-matching`:
+The supported v2 environment pins SpikeInterface to **0.104.3** in
+`pyproject.toml`; its compatibility adapters and analyzer serialization are
+validated against that version. Install the `spikesorting-v2` extra for the
+sorting runtime. Browser review needs `spikesorting-v2-curation`; cross-session
+matching needs `spikesorting-v2-matching`:
 
 ```bash
 pip install "spyglass-neuro[spikesorting-v2]"
