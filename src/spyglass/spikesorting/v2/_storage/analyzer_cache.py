@@ -70,9 +70,9 @@ def write_analyzer_sparsity_receipt(folder, *, peak_sign: str) -> None:
 
 
 def assert_analyzer_sparsity_polarity(
-    analyzer, *, waveform_params, sorter_params
+    analyzer, *, waveform_params, expected_peak_sign: str
 ) -> None:
-    """Reject cached sparse masks estimated with another detection polarity.
+    """Compare cached polarity with the sorter's already-resolved peak sign.
 
     An unmarked legacy cache used the waveform recipe's ``peak_sign`` (neg
     when absent). It is still usable when that equals the sorter's polarity.
@@ -81,9 +81,6 @@ def assert_analyzer_sparsity_polarity(
     """
     if not analyzer.is_sparse():
         return
-    from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
-
-    expected = resolve_peak_sign(sorter_params)
     receipt = Path(analyzer.folder) / ANALYZER_SPARSITY_RECEIPT
     if receipt.exists():
         recorded = json.loads(receipt.read_text())
@@ -92,11 +89,11 @@ def assert_analyzer_sparsity_polarity(
         actual = recorded.get("peak_sign")
     else:
         actual = (waveform_params.get("sparsity") or {}).get("peak_sign", "neg")
-    if actual != expected:
+    if actual != expected_peak_sign:
         raise ValueError(
             "Analyzer sparsity polarity is incompatible with its sorter: "
-            f"cached={actual!r}, expected={expected!r}. Rebuild the analyzer "
-            "to retain the sorter's peak channels."
+            f"cached={actual!r}, expected={expected_peak_sign!r}. "
+            "Rebuild the analyzer to retain the sorter's peak channels."
         )
 
 

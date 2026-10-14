@@ -12,6 +12,7 @@ from spyglass.spikesorting.v2._params.analyzer_waveform import (
 )
 from spyglass.spikesorting.v2._sorting import analyzer as analyzer_service
 from spyglass.spikesorting.v2._storage import analyzer_cache
+from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
 
 pytestmark = pytest.mark.unit
 
@@ -65,6 +66,48 @@ def _legacy_cache(tmp_path, *, sign, sparsity):
     }
 
 
+def _build_cache(inputs, folder, sorter_params):
+    """Build a fixture through the shared analyzer service, with its receipt."""
+    analyzer_service.build_analyzer(
+        inputs["sorting"],
+        inputs["recording"],
+        {"sorting_id": inputs["sorting_id"]},
+        sorter_row={"params": sorter_params},
+        job_kwargs=inputs["job_kwargs"],
+        analyzer_folder=folder,
+        waveform_params=inputs["waveform_params"],
+    )
+    return analyzer_cache.load_analyzer_folder(folder)
+
+
+def _write_curation_manifest(inputs, analyzer):
+    """Give the real fixture a valid curation manifest; return its identity."""
+    from spyglass.spikesorting.v2._curation import analyzer as curation_service
+
+    folder = analyzer.folder
+    expected = {
+        "curated_unit_ids": (17,),
+        "merged_spike_content_hash": curation_service.hash_sorting_spike_content(
+            inputs["sorting"]
+        ),
+        "extension_request": {},
+    }
+    manifest = {
+        **expected,
+        "curated_unit_ids": [17],
+        "extension_inventory": curation_service._extension_inventory(
+            analyzer, "metric"
+        ),
+        "storage_fingerprint": curation_service._folder_storage_fingerprint(
+            folder
+        ),
+    }
+    (folder / curation_service.CURATION_ANALYZER_MANIFEST).write_text(
+        json.dumps(manifest)
+    )
+    return expected
+
+
 @pytest.mark.parametrize(
     "sorter_params, sign, sparsity",
     [
@@ -112,7 +155,7 @@ def test_incompatible_legacy_sparse_cache_is_rejected_then_rebuilt(
     analyzer_cache.assert_analyzer_sparsity_polarity(
         copied,
         waveform_params=inputs["waveform_params"],
-        sorter_params=sorter_params,
+        expected_peak_sign=resolve_peak_sign(sorter_params),
     )
     assert (copied.folder / analyzer_cache.ANALYZER_SPARSITY_RECEIPT).is_file()
 
@@ -164,15 +207,7 @@ def test_public_sort_analyzer_rebuilds_incompatible_legacy_cache(
 
     def rebuild(table, key, waveform_params_name):
         builds.append(key)
-        analyzer_service.build_analyzer(
-            inputs["sorting"],
-            inputs["recording"],
-            key,
-            sorter_row=sorter_row,
-            job_kwargs=inputs["job_kwargs"],
-            analyzer_folder=inputs["analyzer_folder"],
-            waveform_params=inputs["waveform_params"],
-        )
+        _build_cache(inputs, inputs["analyzer_folder"], sorter_row["params"])
 
     monkeypatch.setattr(
         analyzer_cache, "analyzer_path", lambda *args: inputs["analyzer_folder"]
@@ -202,30 +237,9 @@ def test_curation_manifest_cache_rebuilds_incompatible_legacy_mask(tmp_path):
 
     inputs = _legacy_cache(tmp_path, sign=1, sparsity={})
     folder = inputs["analyzer_folder"]
-    expected = {
-        "curated_unit_ids": (17,),
-        "merged_spike_content_hash": curation_service.hash_sorting_spike_content(
-            inputs["sorting"]
-        ),
-        "extension_request": {},
-    }
-
-    def write_manifest(analyzer, target):
-        manifest = {
-            **expected,
-            "curated_unit_ids": [17],
-            "extension_inventory": curation_service._extension_inventory(
-                analyzer, "metric"
-            ),
-            "storage_fingerprint": curation_service._folder_storage_fingerprint(
-                target
-            ),
-        }
-        (target / curation_service.CURATION_ANALYZER_MANIFEST).write_text(
-            json.dumps(manifest)
-        )
-
-    write_manifest(analyzer_cache.load_analyzer_folder(folder), folder)
+    expected = _write_curation_manifest(
+        inputs, analyzer_cache.load_analyzer_folder(folder)
+    )
     validate = analyzer_service.analyzer_sparsity_validator(
         inputs["waveform_params"], lambda: {"peak_sign": "pos"}
     )
@@ -244,16 +258,9 @@ def test_curation_manifest_cache_rebuilds_incompatible_legacy_mask(tmp_path):
 
     def build(target):
         builds.append(target)
-        analyzer_service.build_analyzer(
-            inputs["sorting"],
-            inputs["recording"],
-            {"sorting_id": inputs["sorting_id"]},
-            sorter_row={"params": {"peak_sign": "pos"}},
-            job_kwargs=inputs["job_kwargs"],
-            analyzer_folder=target,
-            waveform_params=inputs["waveform_params"],
+        _write_curation_manifest(
+            inputs, _build_cache(inputs, target, {"peak_sign": "pos"})
         )
-        write_manifest(analyzer_cache.load_analyzer_folder(target), target)
 
     for _ in range(2):
         cached = curation_service._resolve_published_analyzer(
@@ -289,27 +296,8 @@ def test_unavailable_sorter_params_do_not_invalidate_a_sparse_cache(
         inputs["waveform_params"], unavailable_params
     )
     if curation_cache:
-        cached = analyzer_cache.load_analyzer_folder(folder)
-        expected = {
-            "curated_unit_ids": (17,),
-            "merged_spike_content_hash": curation_service.hash_sorting_spike_content(
-                inputs["sorting"]
-            ),
-            "extension_request": {},
-        }
-        (folder / curation_service.CURATION_ANALYZER_MANIFEST).write_text(
-            json.dumps(
-                {
-                    **expected,
-                    "curated_unit_ids": [17],
-                    "extension_inventory": curation_service._extension_inventory(
-                        cached, "metric"
-                    ),
-                    "storage_fingerprint": curation_service._folder_storage_fingerprint(
-                        folder
-                    ),
-                }
-            )
+        expected = _write_curation_manifest(
+            inputs, analyzer_cache.load_analyzer_folder(folder)
         )
 
         def load():

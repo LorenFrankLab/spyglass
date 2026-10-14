@@ -258,14 +258,14 @@ def _load_analyzer_folder_or_rebuild(
 
 
 def analyzer_sparsity_validator(waveform_params, sorter_params_fn):
-    """Validate sparse cache polarity, resolving sorter params only when needed."""
-    sorter_params = None
+    """Resolve sorter polarity once, on the first sparse-cache validation."""
+    peak_sign = None
 
     def validate(analyzer):
-        nonlocal sorter_params
+        nonlocal peak_sign
         if not analyzer.is_sparse():
             return
-        if sorter_params is None:
+        if peak_sign is None:
             try:
                 sorter_params = dict(sorter_params_fn() or {})
             except Exception as exc:
@@ -273,6 +273,11 @@ def analyzer_sparsity_validator(waveform_params, sorter_params_fn):
                     "Could not resolve sorter parameters for analyzer sparsity "
                     "validation; the existing cache has not been invalidated."
                 ) from exc
+            from spyglass.spikesorting.v2._core.signal_math import (
+                resolve_peak_sign,
+            )
+
+            peak_sign = resolve_peak_sign(sorter_params)
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
             assert_analyzer_sparsity_polarity,
         )
@@ -280,7 +285,7 @@ def analyzer_sparsity_validator(waveform_params, sorter_params_fn):
         assert_analyzer_sparsity_polarity(
             analyzer,
             waveform_params=waveform_params,
-            sorter_params=sorter_params,
+            expected_peak_sign=peak_sign,
         )
 
     return validate
