@@ -350,8 +350,9 @@ def pytest_sessionstart(session):
     Downloads the required set (``SPYGLASS_V2_REQUIRE_FIXTURES``, or every
     fixture under ``SPYGLASS_V2_FETCH_FULL=1``) and checks it is present. The
     per-PR smoke fixture is fetched by explicit fixture dependencies, so a
-    pure-helper run starts no download. ``ensure_fixture`` is a no-op when the file is
-    already present (e.g. generated locally) or when no URL is configured.
+    pure-helper run starts no download. Existing files are verified against
+    their manifest hashes before reuse; an absent fixture with no URL is
+    left for the required-fixture check or its consumer's skip guard.
     """
     if session.config.getoption("v2_tier", default=None) == "unit":
         return
@@ -361,12 +362,17 @@ def pytest_sessionstart(session):
 
     from tests.spikesorting.v2.fixtures._fetch import (
         FixtureFetchError,
+        FixtureIntegrityError,
         ensure_fixture,
     )
 
     for name in _eager_fetch_names():
         try:
             ensure_fixture(name, required=False)
+        except FixtureIntegrityError as exc:
+            # An existing invalid file would satisfy the existence checks
+            # below and in consumers; it must never reach the tests.
+            pytest.exit(f"[v2 fixtures] {exc}", returncode=1)
         except FixtureFetchError as exc:
             # Don't abort the whole session on a fetch failure -- dependent
             # tests skip via their own ``_PATH.exists()`` guard. Surface it.

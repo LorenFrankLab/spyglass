@@ -13,8 +13,8 @@ import pytest
 
 # A receipt variable in the README example: ``run_summary``,
 # ``analysis_summary``, ...
-_SUMMARY_SUBSCRIPT = re.compile(r"\b(\w*summary)\[\"(\w+)\"\]")
-_SUMMARY_ATTRIBUTE = re.compile(r"\b(\w*summary)\.(\w+)\b")
+_SUMMARY_SUBSCRIPT = re.compile(r"\b\w*summary\[\s*[\"'](\w+)[\"']\s*\]")
+_SUMMARY_ATTRIBUTE = re.compile(r"\b\w*summary\.(\w+)\b")
 
 
 @pytest.fixture(scope="module")
@@ -24,9 +24,10 @@ def readme_python() -> str:
     return "\n".join(blocks)
 
 
-def test_readme_receipt_keys_exist(readme_python):
-    """Every ``*summary["key"]`` in the README is a run_v2_pipeline key."""
+def _check_receipt_accessors(python):
+    """Check both supported receipt access styles without accepting an empty example."""
     from spyglass.spikesorting.v2._orchestration import types as _pipeline_types
+    from spyglass.spikesorting.v2.curation_api import RunResult
 
     documented = set()
     for summary_type in (
@@ -36,15 +37,41 @@ def test_readme_receipt_keys_exist(readme_python):
         documented |= summary_type.__required_keys__
         documented |= summary_type.__optional_keys__
 
-    used = {key for _, key in _SUMMARY_SUBSCRIPT.findall(readme_python)}
-    assert used, "found no receipt keys in the README; the pattern is stale"
-    assert used <= documented, f"unknown receipt keys: {used - documented}"
-
-
-def test_readme_receipt_attributes_exist(readme_python):
-    """Every ``*summary.attr`` in the README is a RunResult attribute."""
-    from spyglass.spikesorting.v2.curation_api import RunResult
-
-    used = {attr for _, attr in _SUMMARY_ATTRIBUTE.findall(readme_python)}
-    missing = {attr for attr in used if not hasattr(RunResult, attr)}
+    keys = set(_SUMMARY_SUBSCRIPT.findall(python))
+    attributes = set(_SUMMARY_ATTRIBUTE.findall(python))
+    assert (
+        keys or attributes
+    ), "found no receipt accessors; the pattern is stale"
+    assert keys <= documented, f"unknown receipt keys: {keys - documented}"
+    missing = {attr for attr in attributes if not hasattr(RunResult, attr)}
     assert not missing, f"unknown RunResult attributes: {missing}"
+
+
+def test_readme_receipt_accessors_exist(readme_python):
+    """The README uses valid dictionary keys or RunResult attributes."""
+    _check_receipt_accessors(readme_python)
+
+
+@pytest.mark.parametrize(
+    "python",
+    [
+        'run_summary["root_curation_id"]',
+        "run_summary['root_curation_id']",
+        "analysis_summary.auto_labeled_curation",
+    ],
+)
+def test_receipt_check_accepts_supported_access_styles(python):
+    _check_receipt_accessors(python)
+
+
+@pytest.mark.parametrize(
+    "python, message",
+    [
+        ("print('no receipt example')", "found no receipt accessors"),
+        ('run_summary["unknown_key"]', "unknown receipt keys"),
+        ("analysis_summary.unknown_attribute", "unknown RunResult attributes"),
+    ],
+)
+def test_receipt_check_rejects_missing_or_unknown_accessors(python, message):
+    with pytest.raises(AssertionError, match=message):
+        _check_receipt_accessors(python)

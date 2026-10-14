@@ -100,10 +100,12 @@ keep generate-or-skip behaviour for that fixture.
 
 **How it's consumed:**
 
-- **Locally** — the v2 `conftest.py` `pytest_sessionstart` hook calls
-  `ensure_fixture("mearec_polymer_smoke")` before any test, so a configured URL
-  auto-downloads + verifies the per-PR fixture. Set `SPYGLASS_V2_FETCH_FULL=1`
-  to also pull the larger nightly fixtures. No-op when the file already exists.
+- **Locally** — tests that request `smoke_nwb` download and verify the per-PR
+  fixture. The `pytest_sessionstart` hook also fetches fixtures named in
+  `SPYGLASS_V2_REQUIRE_FIXTURES`; set `SPYGLASS_V2_FETCH_FULL=1` to pull all
+  configured fixtures. Existing files are hashed before reuse. A cached hash
+  mismatch fails the run; remove the stale file to fetch the canonical artifact
+  or intentionally regenerate it and update the manifest.
 - **In CI** — the `pytest-v2` job downloads via
   `python tests/spikesorting/v2/fixtures/_fetch.py <name>` (smoke per-PR; the 60s
   polymer on nightly/manual), behind an `actions/cache` step so unchanged
@@ -148,7 +150,8 @@ When the probe layout or a fixture spec changes (or you intentionally refresh):
    [`_fetch.py`](_fetch.py) with the new Box download URL (resolve the `/s/`
    share link to the `box_download_shared_file` form shown above).
 3. Commit the regenerated `fixtures_manifest.json` (its `nwb_sha256` now matches
-   the uploaded bytes — this is the gate `_fetch.py` enforces on download).
+   the uploaded bytes — this is the gate `_fetch.py` enforces on download and
+   cache reuse).
    The CI cache auto-busts: its key hashes `fixtures_manifest.json` + `_fetch.py`,
    so a fixture refresh or URL change invalidates it with no manual bump.
 

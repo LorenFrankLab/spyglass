@@ -26,19 +26,19 @@
 #                      AttributeError, ...); setup or collection errored; the
 #                      test was skipped; or the report held no single test.
 #
-#   1. src/spyglass/spikesorting/v2/_sorting_dispatch.py -- drop
+#   1. src/spyglass/spikesorting/v2/_sorting/dispatch.py -- drop
 #      ``seed=random_seed`` from ``pinned_whiten``'s ``sip.whiten`` call, so
 #      SpikeInterface draws its random data-fitting chunks unseeded.
-#   2. src/spyglass/spikesorting/v2/_concat_recording.py -- reverse the
+#   2. src/spyglass/spikesorting/v2/_recording/concat.py -- reverse the
 #      member order passed into ``concatenate_recordings`` inside
 #      ``build_concatenated_recording``.
-#   3. src/spyglass/spikesorting/v2/_observed_time.py -- restore the interval
+#   3. src/spyglass/spikesorting/v2/_core/observed_time.py -- restore the interval
 #      end formula ``observed_intervals`` used before commit 81b32b14
 #      ("derive observed-interval ends from recorded timestamps"): the end
 #      of a segment was the nominal sampling rate applied from its first
 #      timestamp (``t + (end - first) / fs``), rather than the recording's
 #      own timestamp at the last sample plus one nominal period.
-#   4. src/spyglass/spikesorting/v2/_recording_nwb.py -- skip the
+#   4. src/spyglass/spikesorting/v2/_storage/nwb.py -- skip the
 #      ``_persist_channel_geometry(...)`` call after the pre-motion NWB
 #      write, so the reloaded recording's channel geometry is never
 #      persisted.
@@ -103,10 +103,10 @@ done
 
 # Parallel arrays (indices 0-3), one entry per regression.
 FILES=(
-  "src/spyglass/spikesorting/v2/_sorting_dispatch.py"
-  "src/spyglass/spikesorting/v2/_concat_recording.py"
-  "src/spyglass/spikesorting/v2/_observed_time.py"
-  "src/spyglass/spikesorting/v2/_recording_nwb.py"
+  "src/spyglass/spikesorting/v2/_sorting/dispatch.py"
+  "src/spyglass/spikesorting/v2/_recording/concat.py"
+  "src/spyglass/spikesorting/v2/_core/observed_time.py"
+  "src/spyglass/spikesorting/v2/_storage/nwb.py"
 )
 TEST_NODES=(
   "tests/spikesorting/v2/test_sorting_dispatch.py::test_pinned_whiten_is_deterministic_across_calls"
@@ -118,7 +118,7 @@ DESCRIPTIONS=(
   "pinned_whiten: drop the seed=random_seed forwarding to sip.whiten"
   "build_concatenated_recording: reverse the member order"
   "observed_intervals: restore the pre-81b32b14 nominal-rate interval end"
-  "_recording_nwb: skip the _persist_channel_geometry(...) call"
+  "pre-motion NWB: skip the _persist_channel_geometry(...) call"
 )
 
 # ---------------------------------------------------------------------------
@@ -225,18 +225,18 @@ apply_revert() { # index
       ;;
     1)
       replace_once "${FILES[1]}" \
-        "concatenate_recordings(recordings, ignore_times=True)" \
-        "concatenate_recordings(recordings[::-1], ignore_times=True)"
+        $'concatenate_recordings(\n        recordings,\n' \
+        $'concatenate_recordings(\n        recordings[::-1],\n'
       ;;
     2)
       local old_end
-      old_end=$'                t1 = (\n'
-      old_end+=$'                    float(_segment_times_at(recording, '
+      old_end=$'            t1 = (\n'
+      old_end+=$'                float(_segment_times_at(recording, '
       old_end+=$'np.array([end - 1]))[0])\n'
-      old_end+=$'                    + 1.0 / fs\n'
-      old_end+=$'                )\n'
+      old_end+=$'                + 1.0 / fs\n'
+      old_end+=$'            )\n'
       replace_once "${FILES[2]}" "$old_end" \
-        $'                t1 = t0 + (end - first) / fs\n'
+        $'            t1 = t0 + (end - first) / fs\n'
       ;;
     3)
       replace_once "${FILES[3]}" \

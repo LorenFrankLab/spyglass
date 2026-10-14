@@ -354,6 +354,47 @@ def test_score_run_flags_a_tracked_unit_holding_one_input_twice():
     assert counts["pair_precision"] == [0, 0]
 
 
+@pytest.mark.parametrize(
+    "invalid_members, violation",
+    [
+        (
+            [("day1", 10), ("day2", 20), ("day3", 30)],
+            "duplicated=.*day1.*10.*day2.*20.*day3.*30",
+        ),
+        ([("day1", 10), ("day1", 10)], "duplicated=.*day1.*10"),
+        ([], "missing=.*day2.*24"),
+        ([("day1", 999)], "unexpected=.*day1.*999"),
+    ],
+    ids=["duplicate-track", "duplicate-member", "missing-unit", "unknown-unit"],
+)
+def test_score_run_requires_an_exact_partition(invalid_members, violation):
+    """Perfect identities cannot hide duplicated, lost or invented inputs."""
+    dataset = _hand_dataset()
+    tracked = [
+        _tracked(
+            [(dataset.days[d].label, uid) for d, uid in n["unit_ids"].items()],
+            sum(
+                sum(count > 0 for count in dataset.days[d].planted_counts[uid])
+                for d, uid in n["unit_ids"].items()
+            ),
+        )
+        for n in dataset.neurons
+    ]
+    if invalid_members:
+        tracked.append(_tracked(invalid_members, 0))
+    else:
+        tracked.pop()  # Drop the distractor singleton, invisible to recall.
+    recording_counts = {d.label: dict(d.planted_counts) for d in dataset.days}
+    with pytest.raises(ValueError, match=violation):
+        bench.score_run(
+            dataset,
+            [],
+            tracked,
+            {d.label: [] for d in dataset.days},
+            recording_counts,
+        )
+
+
 def _records(scenario, per_seed_counts):
     """Hand-built run records: one ``counts`` dict per seed."""
     return [

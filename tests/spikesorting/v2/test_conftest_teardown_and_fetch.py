@@ -205,6 +205,89 @@ def test_smoke_fixture_download_failure_is_an_error(tmp_path, monkeypatch):
         smoke_nwb.__wrapped__()
 
 
+def test_smoke_fixture_reuses_verified_cached_artifact(tmp_path, monkeypatch):
+    """Cache reuse verifies the bytes without starting a network request."""
+    import hashlib
+
+    from tests.spikesorting.v2.conftest import smoke_nwb
+    from tests.spikesorting.v2.fixtures import _fetch
+
+    payload = b"canonical cached smoke fixture"
+    cached = tmp_path / "mearec_polymer_smoke.nwb"
+    cached.write_bytes(payload)
+    monkeypatch.setattr(_fetch, "_THIS_DIR", tmp_path)
+    monkeypatch.setattr(
+        _fetch,
+        "_manifest_nwb_sha256",
+        lambda name: hashlib.sha256(payload).hexdigest(),
+    )
+    monkeypatch.setattr(
+        _fetch,
+        "_download_http",
+        lambda *args: pytest.fail("verified cache triggered a download"),
+    )
+    assert smoke_nwb.__wrapped__() == cached
+    assert cached.read_bytes() == payload
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_fixture_rejects_stale_cached_bytes(tmp_path, monkeypatch, required):
+    """An existing file cannot bypass its manifest, even with no download URL."""
+    import hashlib
+
+    from tests.spikesorting.v2.fixtures import _fetch
+
+    cached = tmp_path / "mearec_polymer_smoke.nwb"
+    cached.write_bytes(b"stale cached fixture")
+    monkeypatch.setattr(_fetch, "_THIS_DIR", tmp_path)
+    monkeypatch.setattr(
+        _fetch,
+        "_manifest_nwb_sha256",
+        lambda name: hashlib.sha256(b"canonical fixture").hexdigest(),
+    )
+    monkeypatch.setitem(_fetch.FIXTURE_URLS, "mearec_polymer_smoke", None)
+    monkeypatch.setattr(
+        _fetch,
+        "_download_http",
+        lambda *args: pytest.fail("stale cache triggered a download"),
+    )
+    with pytest.raises(_fetch.FixtureIntegrityError, match="cached nwb_sha256"):
+        _fetch.ensure_fixture("mearec_polymer_smoke", required=required)
+    assert cached.read_bytes() == b"stale cached fixture"
+    assert _fetch.main(["mearec_polymer_smoke"]) == 1
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_session_start_rejects_stale_cached_fixture(
+    tmp_path, monkeypatch, required
+):
+    """A failed cache check cannot become a warning followed by an existence pass."""
+    import hashlib
+    from types import SimpleNamespace
+
+    from tests.spikesorting.v2.conftest import pytest_sessionstart
+    from tests.spikesorting.v2.fixtures import _fetch
+
+    (tmp_path / "mearec_polymer_smoke.nwb").write_bytes(b"stale fixture")
+    monkeypatch.setattr(_fetch, "_THIS_DIR", tmp_path)
+    monkeypatch.setattr(
+        _fetch,
+        "_manifest_nwb_sha256",
+        lambda name: hashlib.sha256(b"canonical fixture").hexdigest(),
+    )
+    monkeypatch.setenv(
+        "SPYGLASS_V2_REQUIRE_FIXTURES",
+        "mearec_polymer_smoke" if required else "",
+    )
+    monkeypatch.setenv("SPYGLASS_V2_FETCH_FULL", "0" if required else "1")
+    session = SimpleNamespace(
+        config=SimpleNamespace(getoption=lambda *args, **kwargs: None)
+    )
+    with pytest.raises(pytest.exit.Exception, match="cached nwb_sha256") as exc:
+        pytest_sessionstart(session)
+    assert exc.value.returncode == 1
+
+
 @pytest.mark.parametrize(
     "fixture_name",
     ["populated_sorting", "planted_two_unit_sort", "planted_three_unit_sort"],

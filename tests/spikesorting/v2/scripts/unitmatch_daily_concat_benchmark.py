@@ -172,6 +172,7 @@ import json
 import tempfile
 import time
 import warnings
+from collections import Counter
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
@@ -942,6 +943,11 @@ def score_run(
     -------
     dict[str, list[int]]
         ``{metric: [numerator, denominator]}``; see the module docstring.
+
+    Raises
+    ------
+    ValueError
+        Tracked members do not contain every planted input unit exactly once.
     """
     counts: dict[str, list[int]] = {}
     neuron_of = dataset.neuron_of()
@@ -958,6 +964,18 @@ def score_run(
         )
         for p in oriented_pairs
     }
+    membership = Counter(
+        (label, uid) for tu in tracked for label, _, uid in tu["members"]
+    )
+    duplicated = sorted(unit for unit, count in membership.items() if count > 1)
+    missing = sorted(neuron_of.keys() - membership.keys())
+    unexpected = sorted(membership.keys() - neuron_of.keys())
+    if duplicated or missing or unexpected:
+        raise ValueError(
+            "Tracked units must contain each planted input unit exactly once: "
+            f"duplicated={duplicated}, missing={missing}, "
+            f"unexpected={unexpected}"
+        )
     group_of = {
         (label, uid): index
         for index, tu in enumerate(tracked)

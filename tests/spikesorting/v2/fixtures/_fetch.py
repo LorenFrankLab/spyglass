@@ -14,7 +14,7 @@ Usage
 As a library (e.g. from ``conftest.py``)::
 
     from tests.spikesorting.v2.fixtures._fetch import ensure_fixture
-    path = ensure_fixture("mearec_polymer_smoke")   # downloads if missing, else None
+    path = ensure_fixture("mearec_polymer_smoke")   # verifies cached or downloaded bytes
 
 As a CLI (e.g. in CI -- exits non-zero if a requested fixture can't be
 produced)::
@@ -101,6 +101,10 @@ class FixtureFetchError(RuntimeError):
     """A required fixture could not be downloaded or failed verification."""
 
 
+class FixtureIntegrityError(FixtureFetchError):
+    """An existing fixture does not match its pinned manifest hash."""
+
+
 def _manifest_nwb_sha256(name: str) -> str | None:
     """Return the committed ``nwb_sha256`` for ``name``, or None if unknown."""
     if not _MANIFEST.exists():
@@ -131,7 +135,7 @@ def _download_http(url: str, dest_tmp: Path) -> None:
 
 
 def ensure_fixture(name: str, *, required: bool = False) -> Path | None:
-    """Return the local path to fixture ``name``, downloading it if missing.
+    """Verify fixture ``name`` against its manifest, downloading it if missing.
 
     Parameters
     ----------
@@ -151,8 +155,9 @@ def ensure_fixture(name: str, *, required: bool = False) -> Path | None:
     Raises
     ------
     FixtureFetchError
-        On a configured-but-failed download, a sha256 mismatch against the
-        manifest, or an absent ``required`` fixture with no URL.
+        On a configured-but-failed download, a cached or downloaded sha256
+        mismatch against the manifest, or an absent ``required`` fixture
+        with no URL.
     """
     if name not in FIXTURE_URLS:
         raise FixtureFetchError(
@@ -160,7 +165,17 @@ def ensure_fixture(name: str, *, required: bool = False) -> Path | None:
         )
 
     dest = _THIS_DIR / f"{name}.nwb"
+    expected = _manifest_nwb_sha256(name)
     if dest.exists():
+        if expected:
+            actual = _sha256(dest)
+            if actual != expected:
+                raise FixtureIntegrityError(
+                    f"{name}: cached nwb_sha256 {actual} != manifest "
+                    f"{expected}. Remove the stale fixture to fetch the "
+                    "canonical artifact, or regenerate it with an updated "
+                    "fixtures_manifest.json."
+                )
         return dest
 
     url = FIXTURE_URLS.get(name)
@@ -174,7 +189,6 @@ def ensure_fixture(name: str, *, required: bool = False) -> Path | None:
             )
         return None
 
-    expected = _manifest_nwb_sha256(name)
     tmp = dest.with_name(dest.name + ".part")
     last_err: Exception | None = None
     for attempt in range(1, _RETRIES + 1):

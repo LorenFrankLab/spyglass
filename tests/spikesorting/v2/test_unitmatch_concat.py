@@ -3178,7 +3178,7 @@ _WORKFLOW_PRESET = "franklab_concat_hippocampus_30khz_ms5_2026_09"
 _WORKFLOW_MOTION_RECIPE = "dredge_fast_v1"
 #: The recovery floor: the benchmark's two-day recall gate (0.78,
 #: ``scripts/unitmatch_daily_concat_benchmark.py``) applied to the 22 neurons
-#: planted on both days, rounded down -- at least 17. The benchmark's probe
+#: planted on both days, rounded up -- at least 18. The benchmark's probe
 #: layout differs (16 contacts in two columns at 20 um pitch; here one column
 #: of 32 contacts at 26 um), so this is a carried-over number, not a property
 #: measured on this geometry, and it was chosen independently of the DB-free
@@ -3757,8 +3757,8 @@ def test_daily_concat_workflow_matches_planted_neurons_end_to_end(
         # Identities: design properties for both runs, the floor for apply.
         _assert_design_identities(control)
         _assert_design_identities(record)
-        floor = int(np.floor(_WORKFLOW_RECALL_FLOOR * len(both)))
-        assert floor == 17
+        floor = int(np.ceil(_WORKFLOW_RECALL_FLOOR * len(both)))
+        assert floor == 18
         missed = sorted(set(both) - set(record["matched"]))
         assert len(record["matched"]) >= floor, (
             f"recovered {len(record['matched'])} of {len(both)} neurons "
