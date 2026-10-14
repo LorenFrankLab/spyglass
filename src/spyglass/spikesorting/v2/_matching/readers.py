@@ -17,6 +17,8 @@ functions.
 
 from __future__ import annotations
 
+import copy
+import json
 import uuid
 from typing import TYPE_CHECKING
 
@@ -45,6 +47,7 @@ _INPUT_PROVENANCE_COLUMNS = (
     "waveform_traces",
     "motion_corrected",
     "motion_corrected_recording_id",
+    "selection_snapshot",
 )
 
 
@@ -59,6 +62,7 @@ _INPUT_RECORDING_PROVENANCE_COLUMNS = (
     "session_start_time",
     "start_sample",
     "end_sample",
+    "source_coverage",
 )
 
 
@@ -106,6 +110,9 @@ def get_input_provenance(
                 "motion_corrected_recording_id": _uuid(
                     row["motion_corrected_recording_id"]
                 ),
+                "selection_snapshot": json.loads(
+                    row["selection_snapshot_json"]
+                ),
             }
             for row in input_rows
         ]
@@ -116,6 +123,7 @@ def get_input_provenance(
                 "session_start_time": utc_datetime(
                     datetime.fromisoformat(row["session_start_time"])
                 ),
+                "source_coverage": json.loads(row["source_coverage_json"]),
             }
             for row in recording_rows
         ]
@@ -142,6 +150,9 @@ def get_input_provenance(
                     ),
                     "motion_corrected": corrected_id is not None,
                     "motion_corrected_recording_id": corrected_id,
+                    "selection_snapshot": copy.deepcopy(
+                        row["selection_snapshot"]
+                    ),
                 }
             )
         recordings = [
@@ -157,6 +168,7 @@ def get_input_provenance(
                 "sort_group_id": int(row["sort_group_id"]),
                 "recording_content_hash": row["recording_content_hash"],
                 "valid_times": row["valid_times"],
+                "source_coverage": copy.deepcopy(row["source_coverage"]),
             }
             for row in (UnitMatchSelection.InputRecording & restriction).fetch(
                 as_dict=True, order_by=("input_index", "recording_index")

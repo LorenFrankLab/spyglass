@@ -35,6 +35,7 @@ from spyglass.spikesorting.v2._core.selection_identity import sha256_json
 from spyglass.spikesorting.v2.exceptions import (
     TrackedUnitBudgetExceededError,
 )
+from spyglass.spikesorting.v2._matching.coverage import validate_source_coverage
 
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2.matcher_protocol import MatchPair
@@ -89,18 +90,21 @@ def input_set_hash(input_rows, recording_rows) -> str:
     """
     recordings_by_input: dict[int, list] = {}
     for row in recording_rows:
+        record = [
+            int(row["recording_index"]),
+            str(row["recording_id"]),
+            str(row["recording_content_hash"]),
+            utc_datetime(row["session_start_time"]).isoformat(),
+            int(row["start_sample"]),
+            int(row["end_sample"]),
+            np.asarray(row["valid_times"], dtype=np.float64)
+            .reshape(-1, 2)
+            .tolist(),
+        ]
+        if row.get("source_coverage") is not None:
+            record.append(validate_source_coverage(row["source_coverage"]))
         recordings_by_input.setdefault(int(row["input_index"]), []).append(
-            [
-                int(row["recording_index"]),
-                str(row["recording_id"]),
-                str(row["recording_content_hash"]),
-                utc_datetime(row["session_start_time"]).isoformat(),
-                int(row["start_sample"]),
-                int(row["end_sample"]),
-                np.asarray(row["valid_times"], dtype=np.float64)
-                .reshape(-1, 2)
-                .tolist(),
-            ]
+            record
         )
     canonical = []
     for row in sorted(input_rows, key=lambda r: int(r["input_index"])):
@@ -120,6 +124,8 @@ def input_set_hash(input_rows, recording_rows) -> str:
                 "recordings": sorted(recordings_by_input.get(index, [])),
             }
         )
+        if row.get("selection_snapshot") is not None:
+            canonical[-1]["selection_snapshot"] = row["selection_snapshot"]
     return sha256_json(canonical, separators=(", ", ": "))
 
 
@@ -186,11 +192,13 @@ def utc_datetime(value: datetime) -> datetime:
 def chronological_input_order(inputs: list[dict]) -> list[dict]:
     """Order matching inputs chronologically, the order ``input_index`` freezes.
 
-    Sorts by ``(input_start_time, str(sorting_id), curation_id)``:
+    Sorts by session start, same-source epoch start, then sorting/curation ID:
     ``input_start_time`` is the earliest session start among an input's
-    constituent recordings, and the sorting and curation ids break ties
-    deterministically, so any caller order of the same inputs yields the same
-    order. UnitMatchPy aligns each session's drift to the previous session in
+    constituent recordings. Epoch inputs sharing one NWB are ordered by their
+    earliest actual source sample before the UUID tie-break. Disjoint-NWB
+    inputs retain the historical sorting/curation-ID tie-break, so any caller
+    order of the same inputs yields the same order. UnitMatchPy aligns each
+    input's drift to the previous input in
     feed order, so the matcher is fed in this order.
 
     Parameters
@@ -204,10 +212,38 @@ def chronological_input_order(inputs: list[dict]) -> list[dict]:
     list of dict
         The same dicts, chronologically ordered.
     """
+    # Epochs of one acquisition share its session start. Use their original
+    # source position before the UUID tie-break; historic inputs without source
+    # coverage retain their previous ordering.
+    shared = {}
+    for item in inputs:
+        for row in item.get("recordings", ()):
+            shared.setdefault(str(row.get("nwb_file_name")), set()).add(
+                (str(item["sorting_id"]), int(item["curation_id"]))
+            )
+    shared = {name for name, owners in shared.items() if len(owners) > 1}
+
+    def epoch_start(item):
+        values = []
+        for row in item.get("recordings", ()):
+            if (
+                str(row.get("nwb_file_name")) not in shared
+                or row.get("source_coverage") is None
+            ):
+                continue
+            if "session_start_time" in row and utc_datetime(
+                row["session_start_time"]
+            ) != utc_datetime(item["input_start_time"]):
+                continue
+            coverage = validate_source_coverage(row["source_coverage"])
+            values.append(coverage["time_ranges"][0][0])
+        return min(values) if values else 0.0
+
     return sorted(
         inputs,
         key=lambda item: (
             utc_datetime(item["input_start_time"]),
+            epoch_start(item),
             str(item["sorting_id"]),
             int(item["curation_id"]),
         ),
@@ -246,6 +282,7 @@ def frozen_order_errors(input_rows, recording_rows) -> list[str]:
         One message per defect; empty when the frozen order holds.
     """
     input_rows = list(input_rows)
+    recording_rows = list(recording_rows)
     starts_by_input: dict[int, list] = {}
     for row in recording_rows:
         starts_by_input.setdefault(int(row["input_index"]), []).append(
@@ -262,8 +299,19 @@ def frozen_order_errors(input_rows, recording_rows) -> list[str]:
                 f"its earliest session start {earliest.isoformat()}"
             )
     stored = sorted(int(row["input_index"]) for row in input_rows)
+    enriched = [
+        {
+            **row,
+            "recordings": [
+                r
+                for r in recording_rows
+                if int(r["input_index"]) == int(row["input_index"])
+            ],
+        }
+        for row in input_rows
+    ]
     chronological = [
-        int(row["input_index"]) for row in chronological_input_order(input_rows)
+        int(row["input_index"]) for row in chronological_input_order(enriched)
     ]
     if chronological != stored:
         errors.append(
@@ -450,51 +498,52 @@ def canonicalize_match_pairs(
     return [oriented[identity] for identity in sorted(oriented)]
 
 
-def assert_disjoint_input_sessions(nwb_files_by_input: dict) -> None:
-    """Reject matching inputs that share a recording session.
+def assert_disjoint_source_coverage(inputs) -> None:
+    """Allow disjoint epochs while refusing shared original acquisition samples.
 
-    Cross-session matching tracks a unit ACROSS recording sessions, so no two
-    matching inputs may draw on the same session (``nwb_file_name``). This
-    rejects two single-recording sorts of one nwb, a concatenation together
-    with a sort of one of its own members, two concatenations sharing a
-    constituent session, and any overlap in acquisition, since two spans of
-    one acquisition share its nwb. Matching within one session is out of
-    scope.
-
-    Parameters
-    ----------
-    nwb_files_by_input : dict
-        ``{input_label: iterable of nwb_file_name}``; the label names the
-        input in the error (e.g. its ``(sorting_id, curation_id)``).
-
-    Raises
-    ------
-    SameSessionMatchError
-        If an ``nwb_file_name`` belongs to two or more inputs.
+    Inputs contain resolved/frozen ``recordings`` with ``source_coverage``.
+    Artifact masks are absent from this check. Validate constituent members too:
+    a concatenation must not silently include the same raw samples twice.
     """
-    from spyglass.spikesorting.v2.exceptions import SameSessionMatchError
+    from spyglass.spikesorting.v2.exceptions import OverlappingMatchInputError
 
-    inputs_by_session: dict = {}
-    for label, nwb_file_names in nwb_files_by_input.items():
-        for nwb_file_name in set(nwb_file_names):
-            inputs_by_session.setdefault(nwb_file_name, []).append(label)
-    collisions = {
-        nwb: labels
-        for nwb, labels in inputs_by_session.items()
-        if len(labels) > 1
-    }
-    if collisions:
-        detail = "; ".join(
-            f"{nwb!r}: inputs {labels}"
-            for nwb, labels in sorted(collisions.items())
+    by_source = {}
+    for input_index, item in enumerate(inputs):
+        label = (
+            f"sorting {item.get('sorting_id', item.get('input_index', input_index))}, "
+            f"curation {item.get('curation_id', '?')}"
         )
-        raise SameSessionMatchError(
-            "UnitMatchSelection: cross-session matching requires every "
-            "matching input to come from its own recording sessions, but "
-            "these inputs share the same recording session (nwb_file_name) "
-            f"-- {detail}. A concatenation already contains its members' "
-            "sessions; match it against sorts of other sessions only."
-        )
+        for row in item["recordings"]:
+            coverage = validate_source_coverage(row.get("source_coverage"))
+            name = str(row["nwb_file_name"])
+            source = (name, coverage["source_object_id"])
+            member = f"{label}, interval {row.get('interval_list_name', '?')!r}, member {row.get('recording_index', 0)}"
+            for sample_range, time_range in zip(
+                coverage["sample_ranges"], coverage["time_ranges"], strict=True
+            ):
+                by_source.setdefault(source, []).append(
+                    (*sample_range, member, time_range)
+                )
+    for (name, source_id), spans in sorted(by_source.items()):
+        spans.sort(key=lambda item: (item[0], item[1], item[2]))
+        active = None
+        for start, stop, member, times in spans:
+            if active is not None and start < active[1]:
+                (
+                    previous_start,
+                    previous_stop,
+                    previous_member,
+                    previous_times,
+                ) = active
+                raise OverlappingMatchInputError(
+                    f"UnitMatchSelection: {name!r} acquisition {source_id!r} "
+                    f"reuses raw samples [{max(start, previous_start)}, "
+                    f"{min(stop, previous_stop)}): {previous_member} "
+                    f"(original times {previous_times}) and {member} "
+                    f"(original times {times}). Choose disjoint epoch intervals; "
+                    "artifact masks do not make overlapping source data independent."
+                )
+            active = (start, stop, member, times)
 
 
 def divergent_electrode_space_members(signatures_by_member) -> list:

@@ -27,6 +27,8 @@ from spyglass.spikesorting.v2._matching.inputs import (
     _session_start_mismatches,
     _session_start_times,
     _snapshot_mismatches,
+    _validate_frozen_source_coverage,
+    _validate_frozen_unit_selections,
 )
 from spyglass.spikesorting.v2.exceptions import (
     UnitMatchSelectionIntegrityError,
@@ -81,6 +83,8 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
             f"InputRecording parts ({'; '.join(structure_errors)}). A "
             "direct insert bypassed UnitMatchSelection.insert_inputs()."
         )
+    _validate_frozen_unit_selections(input_rows, exc_class)
+    _validate_frozen_source_coverage(recording_rows, exc_class)
     recordings_by_input: dict[int, list[dict]] = {}
     for row in recording_rows:
         recordings_by_input.setdefault(int(row["input_index"]), []).append(row)
@@ -139,6 +143,13 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
         )
         if extracts_bundles:
             _add_single_recording_frames(live)
+            from spyglass.spikesorting.v2._matching.coverage import (
+                enrich_recording_source_coverage,
+            )
+
+            enrich_recording_source_coverage(
+                live["recordings"], allow_rebuild=True
+            )
         frozen_recordings = recordings_by_input[int(row["input_index"])]
         mismatches = _snapshot_mismatches(
             row, frozen_recordings, live
@@ -191,6 +202,7 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
                 ).isoformat(),
                 "start_sample": int(recording["start_sample"]),
                 "end_sample": int(recording["end_sample"]),
+                "source_coverage": recording["source_coverage"],
                 "valid_times": [
                     [float(start), float(stop)]
                     for start, stop in recording["valid_times"]
@@ -198,16 +210,22 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
             }
             for recording in recordings_by_input[input_index]
         ]
-        matchable = [
-            int(u) for u in CurationV2().get_matchable_unit_ids(curation_key)
-        ]
+        snapshot = row["selection_snapshot"]
+        matchable = [int(u) for u in snapshot["included_unit_ids"]]
+        known_units = set(
+            map(int, (CurationV2.Unit & curation_key).fetch("unit_id"))
+        )
+        if set(map(int, snapshot["labels_by_unit"])) != known_units:
+            raise exc_class(
+                "Frozen unit selection universe differs from the pinned curation."
+            )
         if not matchable:
             raise ValueError(
                 f"UnitMatch.make: input_index {input_index} "
                 f"{_input_label(sorting_id, curation_id)} has no matchable "
-                "units (all curated units are excluded labels); a matcher "
-                "cannot run on an empty input. Re-curate so at least one "
-                "unit survives the exclude filter, or drop the input."
+                "units under its frozen selection policy; a matcher "
+                "cannot run on an empty input. Review the population selection "
+                "and create a new match selection, or drop the input."
             )
         source = SortingSelection.resolve_effective_source(
             {"sorting_id": sorting_id}
@@ -225,6 +243,7 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
                 ).isoformat(),
                 "recordings": recordings,
                 "matchable_unit_ids": matchable,
+                "selection_snapshot": snapshot,
                 **_member_waveform_traces(source.traces),
             }
         )

@@ -90,8 +90,10 @@ schema = dj.schema("spikesorting_v2_unit_matching")
 
 
 class UnitMatchFetched(NamedTuple):
-    """DB inputs for ``UnitMatch.make_compute`` (no SI/NWB I/O except the
-    self-heal rebuild of a missing traces file).
+    """Validated inputs for ``UnitMatch.make_compute``.
+
+    Fetch checks persisted source timestamps and may rebuild missing traces
+    for multi-input execution. Read-only planning uses the preflight instead.
 
     ``input_plan`` is the ``input_index``-ordered (chronological) list of
     per-input DeepHash-stable dicts built from the selection's FROZEN
@@ -102,8 +104,9 @@ class UnitMatchFetched(NamedTuple):
     per constituent recording: ``recording_index``, ``nwb_file_name``,
     ``sort_group_id``, ``interval_list_name``, ``recording_id`` (str),
     ``recording_content_hash``, ``session_start_time`` (UTC ISO str),
-    ``start_sample``, ``end_sample``, ``valid_times`` (nested list)),
-    "matchable_unit_ids" (sorted list[int]), "waveform_traces" (str),
+    ``start_sample``, ``end_sample``, ``valid_times`` (nested list),
+    ``source_coverage`` (dict)), "selection_snapshot" (dict),
+    "matchable_unit_ids" (the frozen selected list[int]), "waveform_traces" (str),
     "motion_corrected_recording_id" (str or None), "units" (StoredUnits),
     "sorting_input" (CanonicalRecording), "statistics_spans" (list of
     ``[start, end]`` sort frames)}``; the last two are present only for two
@@ -325,6 +328,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         source_id: uuid                   # recording_id or concat_recording_id
         motion_corrected_recording_id=null: uuid
         input_start_time: datetime        # earliest session start among the input's recordings
+        selection_snapshot: longblob     # exact generation, policy and eligible IDs frozen before matching
         """
 
     class InputRecording(SpyglassMixinPart):
@@ -348,6 +352,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         start_sample: bigint              # first frame of this recording in the sort's frame space
         end_sample: bigint                # exclusive end frame in the sort's frame space
         valid_times: longblob             # (n_intervals, 2) kept intervals on the recording's own clock, in seconds
+        source_coverage: longblob         # unmasked original-source sample ranges, separate from observation time
         """
 
     @classmethod
@@ -356,6 +361,9 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         curations,
         matcher_params_name: str,
         session_group: tuple[str, str] | None = None,
+        *,
+        unit_selections=None,
+        expected_input_set_hash: str | None = None,
     ) -> dict:
         """Find-existing-or-insert a match over explicit inputs; return its key.
 
@@ -363,10 +371,11 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         same-day concatenation, given in any order. Before any row is written
         the inputs are validated: at least one input, one curation per
         sorting, every curation exists and has no unapplied proposed merges,
-        no two inputs share a recording session (``nwb_file_name``), and a
+        inputs do not reuse original acquisition samples (different epochs
+        in one NWB are supported), and a
         concatenation input lies within one day. The inputs are then ordered
         chronologically (earliest session start of each input, ties broken by
-        ``sorting_id`` then ``curation_id``) and numbered ``input_index``
+        source epoch time, then ``sorting_id`` / ``curation_id``) and numbered ``input_index``
         ``0..n-1``; each input's source and constituent recordings are
         frozen. The selection id is deterministic over the matcher params and
         the hash of the frozen inputs, so listing the same inputs in another
@@ -388,6 +397,14 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             discovered from, recorded on a new selection as provenance only
             (a selection found for the same inputs keeps what it recorded).
             Default ``None``.
+        unit_selections : sequence, optional
+            Frozen snapshots from ``resolve_unit_selection``, one per input.
+            Without them, the compatibility policy ``v2_unflagged_units``
+            is resolved once and frozen. Reviewed curation plans default to
+            ``v2_accepted_single_units``.
+        expected_input_set_hash : str, optional
+            Reject source or eligibility drift from a reviewed plan before
+            inserting any selection rows.
 
         Returns
         -------
@@ -404,8 +421,8 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             ``ConcatMemberDriftError`` / ``MissingRecordingForConcatError``),
             a multi-day concatenation input, a ``SessionGroup`` that does
             not exist, or geometry the selected backend does not support.
-        SameSessionMatchError
-            If two inputs share a recording session.
+        OverlappingMatchInputError
+            If inputs reuse samples of the same original raw acquisition.
         DuplicateSelectionError
             If a selection row for the identity carries a non-deterministic
             id (a raw insert bypassed this helper).
@@ -414,7 +431,12 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             realize its ``input_set_hash``.
         """
         return _unit_match_inputs.insert_inputs(
-            cls, curations, matcher_params_name, session_group=session_group
+            cls,
+            curations,
+            matcher_params_name,
+            session_group=session_group,
+            unit_selections=unit_selections,
+            expected_input_set_hash=expected_input_set_hash,
         )
 
     @classmethod
@@ -424,6 +446,9 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         session_group_name: str,
         matcher_params_name: str,
         curation_choices: dict,
+        *,
+        unit_selections=None,
+        expected_input_set_hash: str | None = None,
     ) -> dict:
         """Match one curation per ``SessionGroup`` member; return the key.
 
@@ -496,6 +521,8 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             ],
             matcher_params_name,
             session_group=(session_group_owner, session_group_name),
+            unit_selections=unit_selections,
+            expected_input_set_hash=expected_input_set_hash,
         )
 
     @classmethod
@@ -523,7 +550,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         }
 
     @classmethod
-    def _member_channel_positions(cls, curation_key):
+    def _member_channel_positions(cls, curation_key, *, allow_rebuild=True):
         """Channel positions for one pinned input's curated recording.
 
         Loads the curated recording (the same object ``UnitMatch.make`` extracts
@@ -536,11 +563,53 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         thin seam so the geometry preflight is unit-testable by patching this
         rather than building a full SpikeInterface recording.
         """
-        return CurationV2.get_recording(curation_key).get_channel_locations()
+        if allow_rebuild:
+            return CurationV2.get_sorting_input_recording(
+                curation_key
+            ).get_channel_locations()
+        from pathlib import Path
+        from spyglass.spikesorting.v2._matching.coverage import (
+            stored_analysis_path,
+        )
+        from spyglass.spikesorting.v2.sorting import SortingSelection
+        from spyglass.spikesorting.v2.recording import Recording
+        from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+        from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
+        from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
+
+        source = SortingSelection.resolve_effective_source(curation_key).traces
+        table = {
+            "recording": Recording,
+            "concatenated_recording": ConcatenatedRecording,
+            "motion_corrected_recording": MotionCorrectedRecording,
+        }[source.kind]
+        row = (table & source.key).fetch1()
+        path = stored_analysis_path(row["analysis_file_name"])
+        if not Path(path).is_file():
+            raise FileNotFoundError(
+                f"Matching input {curation_key} has a missing trace artifact. "
+                "Rebuild its recording before planning the match."
+            )
+        recording = read_recording_nwb(
+            path, electrical_series_path=row["electrical_series_path"]
+        )
+        from spyglass.spikesorting.v2._storage.spikeinterface import (
+            close_nwb_recording,
+        )
+
+        try:
+            return recording.get_channel_locations()
+        finally:
+            close_nwb_recording(recording)
 
     @classmethod
     def _validate_matcher_geometry(
-        cls, choices_by_input, matcher_name: str, params: dict
+        cls,
+        choices_by_input,
+        matcher_name: str,
+        params: dict,
+        *,
+        allow_rebuild=True,
     ) -> None:
         """Run the selected backend's optional geometry preflight.
 
@@ -567,7 +636,8 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                     {
                         "sorting_id": choices_by_input[label][0],
                         "curation_id": choices_by_input[label][1],
-                    }
+                    },
+                    **({"allow_rebuild": False} if not allow_rebuild else {}),
                 ),
             )
             for label in sorted(choices_by_input)
@@ -873,7 +943,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """The FROZEN matchable-unit universe this match ran over.
 
         Snapshots, per matching input, the ``(sorting_id, curation_id, unit_id)`` triples
-        that survived the exclude-label filter in ``make_fetch`` -- the exact
+        included in the selection's frozen population snapshot -- the exact
         node universe the matcher saw. ``TrackedUnit.make`` reads this instead of
         re-deriving it from CURRENT curation labels, so a relabel between
         ``UnitMatch`` and ``TrackedUnit`` populate cannot silently drop a
@@ -927,8 +997,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         rows before any matcher input is extracted, since a direct insert can
         bypass ``insert_inputs``: the parts are well formed, there is at
         least one input, no sorting is pinned twice, no concatenation input
-        spans two days and no two inputs share a session (on the frozen
-        session times), each ``input_start_time`` is its earliest frozen
+        spans two days and no inputs reuse original raw samples (on the frozen
+        source coverage), each ``input_start_time`` is its earliest frozen
         session start and ``input_index`` follows their chronological order,
         and the stored ``input_set_hash`` is the hash of the parts. Then, per
         input, the pinned curation must still exist with the pinned
@@ -1206,14 +1276,17 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             ``input_start_time`` (UTC), ``waveform_traces`` (the traces the
             input's bundle was read from: ``"motion_corrected_recording"``,
             or the source kind), ``motion_corrected`` and
-            ``motion_corrected_recording_id`` (``None`` when not corrected).
+            ``motion_corrected_recording_id`` (``None`` when not corrected),
+            and ``selection_snapshot`` (the frozen policy, evidence,
+            included/excluded unit IDs, and selection hash).
         recordings : pandas.DataFrame
             One row per constituent original recording in ``(input_index,
             recording_index)`` order: ``input_index``, ``recording_index``,
             ``nwb_file_name``, ``interval_list_name``, ``recording_id``,
             ``session_start_time`` (UTC), and ``start_sample`` /
             ``end_sample`` (the recording's frames in the input sort's frame
-            space). The database form adds ``sort_group_id``,
+            space), and ``source_coverage`` (unmasked raw-sample ranges on
+            the original NWB clock). The database form adds ``sort_group_id``,
             ``recording_content_hash`` and ``valid_times``.
 
         Notes

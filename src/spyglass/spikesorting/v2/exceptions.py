@@ -386,15 +386,20 @@ class UnknownMatcherError(ValueError):
 
 
 class SameSessionMatchError(ValueError):
-    """Raise when two UnitMatch matching inputs share a recording session.
+    """Compatibility superclass for matching inputs that reuse source samples.
 
-    Cross-session matching tracks a unit ACROSS recording sessions, so no two
-    matching inputs may draw on the same session (``nwb_file_name``): not two
-    sorts of one nwb, not a concatenation together with a sort of one of its
-    members, and not two concatenations sharing a constituent session.
-    Matching within one session would be reported as a multi-session
-    identity. Rejected at selection time and again at ``UnitMatch.make``;
-    the message names the offending inputs and ``nwb_file_name`` values.
+    Disjoint epochs in the same NWB are supported. New overlap failures raise
+    ``OverlappingMatchInputError``; existing callers catching this superclass
+    continue to catch them.
+    """
+
+
+class OverlappingMatchInputError(SameSessionMatchError):
+    """Matching inputs reuse original raw acquisition samples.
+
+    Disjoint epochs of the same NWB are supported. Shared sample ranges are
+    rejected regardless of artifact masks, preprocessing or interval names.
+    The superclass preserves callers catching the historical session error.
     """
 
 
@@ -413,8 +418,8 @@ class UnitMatchSelectionIntegrityError(RuntimeError):
     content hash, concatenation membership, frames and kept intervals),
     with every concatenation member ``Recording`` still carrying the content
     hash its concatenation froze; and each frozen session start time equals
-    its live ``Session`` row. (Two inputs sharing a session raise
-    ``SameSessionMatchError`` instead.) ``TrackedUnit.get_member_spike_times``
+    its live ``Session`` row. (Inputs reusing original source samples raise
+    ``OverlappingMatchInputError`` instead.) ``TrackedUnit.get_member_spike_times``
     and ``TrackedUnit.get_unit_brain_regions`` run the curation and source
     part of that check before reading an input of a finished run and raise
     this too. When a concatenation member ``Recording`` changed or is gone,

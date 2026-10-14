@@ -1,8 +1,8 @@
-"""DB-free ordering, identity and session rules for UnitMatch matching inputs.
+"""DB-free ordering, identity and source-coverage rules for matching inputs.
 
 The selection layer numbers matching inputs chronologically, content-addresses
-them, rejects inputs that share a recording session, and orients match pairs
-by ``input_index``. These rules live in ``_matcher_graph`` and are exercised
+them, rejects repeated acquisition samples, and orients match pairs
+by ``input_index``. These rules live in ``_matching.graph`` and are exercised
 here without a database or UnitMatchPy.
 """
 
@@ -259,22 +259,95 @@ def test_input_part_structure_errors_names_each_defect():
     ]
 
 
-def test_assert_disjoint_input_sessions_names_the_shared_session():
-    """Two inputs drawing on one nwb are rejected, naming both inputs."""
-    from spyglass.spikesorting.v2._matching.graph import (
-        assert_disjoint_input_sessions,
-    )
-    from spyglass.spikesorting.v2.exceptions import SameSessionMatchError
+def _covered_input(sorting_id, intervals, *, name="day.nwb", interval="epoch"):
+    return {
+        **_input(sorting_id, 0, _DAY1),
+        "recordings": [
+            {
+                "nwb_file_name": name,
+                "interval_list_name": interval,
+                "recording_index": 0,
+                "session_start_time": _DAY1,
+                "source_coverage": {
+                    "version": 1,
+                    "source_object_id": "raw",
+                    "sample_ranges": intervals,
+                    "time_ranges": [
+                        [a / 10, (b - 1) / 10] for a, b in intervals
+                    ],
+                },
+            }
+        ],
+    }
 
-    assert_disjoint_input_sessions(
-        {"concat": ["day1.nwb", "day1.nwb"], "single": ["day2.nwb"]}
-    )  # one input may hold two intervals of one nwb
-    with pytest.raises(SameSessionMatchError) as err:
-        assert_disjoint_input_sessions(
-            {"concat": ["day1.nwb", "day2.nwb"], "single": ["day2.nwb"]}
+
+def test_matching_disjoint_same_nwb_epochs_and_touching_ranges():
+    from spyglass.spikesorting.v2._matching.graph import (
+        assert_disjoint_source_coverage,
+    )
+
+    assert_disjoint_source_coverage(
+        [
+            _covered_input(_SID_EARLY, [[0, 20], [30, 40]]),
+            _covered_input(_SID_LATE, [[20, 30], [40, 50]]),
+        ]
+    )
+
+
+def test_matching_one_shared_original_sample_is_rejected_even_with_disjoint_masks():
+    from spyglass.spikesorting.v2._matching.graph import (
+        assert_disjoint_source_coverage,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        OverlappingMatchInputError,
+        SameSessionMatchError,
+    )
+
+    early = _covered_input(_SID_EARLY, [[0, 21]], interval="sleep")
+    late = _covered_input(_SID_LATE, [[20, 40]], interval="run")
+    early["recordings"][0]["valid_times"] = [[0, 1]]
+    late["recordings"][0]["valid_times"] = [[3, 4]]
+    with pytest.raises(
+        OverlappingMatchInputError, match=r"raw samples \[20, 21\)"
+    ) as error:
+        assert_disjoint_source_coverage([early, late])
+    assert isinstance(error.value, SameSessionMatchError)
+    assert "sleep" in str(error.value) and "run" in str(error.value)
+
+
+def test_same_nwb_epoch_order_uses_source_time_not_names_or_uuid():
+    earlier = _covered_input(_SID_LATE, [[0, 20]], interval="epoch_10")
+    later = _covered_input(_SID_EARLY, [[20, 40]], interval="epoch_2")
+    assert _order([later, earlier]) == [(_SID_LATE, 0), (_SID_EARLY, 0)]
+    assert _order([earlier, later]) == [(_SID_LATE, 0), (_SID_EARLY, 0)]
+
+
+def test_frozen_epoch_order_uses_coverage_and_hash_pins_it():
+    from spyglass.spikesorting.v2._matching.graph import (
+        frozen_order_errors,
+        input_set_hash,
+    )
+
+    early = _covered_input(_SID_LATE, [[0, 20]])
+    late = _covered_input(_SID_EARLY, [[20, 40]])
+    inputs = []
+    recordings = []
+    base_inputs, base_recordings = _parts()
+    for i, value in enumerate([early, late]):
+        inputs.append({**base_inputs[i], **value, "input_index": i})
+        recordings.append(
+            {**base_recordings[i], **value["recordings"][0], "input_index": i}
         )
-    assert "'day2.nwb': inputs ['concat', 'single']" in str(err.value)
-    assert "day1.nwb" not in str(err.value)
+    assert frozen_order_errors(inputs, recordings) == []
+    digest = input_set_hash(inputs, recordings)
+    recordings[0]["source_coverage"] = {
+        **recordings[0]["source_coverage"],
+        "source_object_id": "changed",
+    }
+    assert input_set_hash(inputs, recordings) != digest
+    coverage_digest = input_set_hash(inputs, recordings)
+    inputs[0]["selection_snapshot"] = {"recording_input_hash": "frozen"}
+    assert input_set_hash(inputs, recordings) != coverage_digest
 
 
 def test_canonicalize_orients_side_a_by_lower_input_index():

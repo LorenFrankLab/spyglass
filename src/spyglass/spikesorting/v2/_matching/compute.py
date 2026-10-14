@@ -284,6 +284,8 @@ def unit_match_provenance_tables(
     list of hdmf.common.DynamicTable
         For ``_unitmatch_nwb.write_pairs_table(provenance_tables=...)``.
     """
+    import json
+
     from spyglass.spikesorting.v2._storage.provenance import (
         UNITMATCH_INPUT_COLUMNS,
         UNITMATCH_INPUT_RECORDING_COLUMNS,
@@ -318,6 +320,9 @@ def unit_match_provenance_tables(
             [
                 {
                     "input_index": int(plan["input_index"]),
+                    "selection_snapshot_json": json.dumps(
+                        plan.get("selection_snapshot", {}), sort_keys=True
+                    ),
                     "sorting_id": str(plan["sorting_id"]),
                     "curation_id": int(plan["curation_id"]),
                     "curation_uuid": str(plan["curation_uuid"]),
@@ -341,6 +346,9 @@ def unit_match_provenance_tables(
                 {
                     "input_index": int(plan["input_index"]),
                     "recording_index": int(recording["recording_index"]),
+                    "source_coverage_json": json.dumps(
+                        recording.get("source_coverage", {}), sort_keys=True
+                    ),
                     "nwb_file_name": str(recording["nwb_file_name"]),
                     "interval_list_name": str(recording["interval_list_name"]),
                     "recording_id": str(recording["recording_id"]),

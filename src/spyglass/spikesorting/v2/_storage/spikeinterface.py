@@ -18,6 +18,26 @@ def retain_pynwb_reader(recording) -> None:
     recording._kwargs["use_pynwb"] = True
 
 
+def close_nwb_recording(recording) -> None:
+    """Close an owned NWB extractor's reader without waiting for collection.
+
+    SI 0.104.3 exposes reader cleanup only through its extractor destructor.
+    Apply this to newly opened extractors, not shared recordings or wrappers.
+    """
+    nwbfile = getattr(recording, "_nwbfile", None)
+    if nwbfile is not None:
+        reader = nwbfile.get_read_io()
+        if reader is not None:
+            reader.close()
+        return
+    file = getattr(recording, "_file", None)
+    if file is not None:
+        store = getattr(file, "store", file)
+        close = getattr(store, "close", None)
+        if close is not None:
+            close()
+
+
 def attach_memmapped_waveforms(analyzer) -> None:
     """Attach a complete saved waveform extension without loading it into RAM."""
     from spikeinterface.core.sortinganalyzer import get_extension_class

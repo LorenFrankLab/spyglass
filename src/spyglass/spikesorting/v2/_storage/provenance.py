@@ -84,6 +84,7 @@ UNITMATCH_INPUT_COLUMNS = [
     ("input_start_time", str),
     ("waveform_traces", str),
     ("motion_corrected_recording_id", str),
+    ("selection_snapshot_json", str),
 ]
 
 #: Columns of ``UNITMATCH_INPUT_RECORDINGS``: one row per constituent original
@@ -98,6 +99,7 @@ UNITMATCH_INPUT_RECORDING_COLUMNS = [
     ("session_start_time", str),
     ("start_sample", int),
     ("end_sample", int),
+    ("source_coverage_json", str),
 ]
 
 #: Columns of ``MOTION_CONTINUITY_SPANS``: each continuity span's frames

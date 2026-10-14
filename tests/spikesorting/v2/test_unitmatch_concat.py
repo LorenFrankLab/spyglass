@@ -4,8 +4,8 @@ A matching input is one complete, independently curated sort -- of a single
 recording or of a same-day concatenation. These tests drive the real
 DataJoint tables over planted minirec sorts (``daily_concat_match_inputs``):
 the frozen ``Input`` / ``InputRecording`` rows must reproduce the upstream
-concatenation provenance exactly, the selection must refuse inputs that share
-a session or span days before any bundle is extracted, and a run must keep
+concatenation provenance exactly, the selection must refuse inputs that reuse
+raw samples or span days before any bundle is extracted, and a run must keep
 its frozen inputs and order when the group, the session times, a curation or
 a source changes underneath it. The last test runs two days of the same
 planted neurons (``planted_matching_days``) through the whole workflow --
@@ -317,7 +317,7 @@ def _analysis_files():
 def test_match_inputs_reject_duplicate_and_overlapping_sources(
     daily_concat_match_inputs, monkeypatch
 ):
-    """Inputs that repeat a sorting, share a session, or span days are refused
+    """Inputs that repeat a sorting, overlap raw samples, or span days are refused
     before any row is written or any bundle is extracted, and a selection
     forged past the insert helper is refused by make() before extraction."""
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -405,6 +405,7 @@ def test_match_inputs_reject_duplicate_and_overlapping_sources(
                         "source_kind": "recording",
                         "source_id": uuid.uuid4(),
                         "input_start_time": "2023-06-22 12:00:00",
+                        "selection_snapshot": {},
                     }
                 )
             assert len(UnitMatchSelection()) == rows_before
@@ -421,7 +422,9 @@ def test_match_inputs_reject_duplicate_and_overlapping_sources(
                     recording_edits={(1, 0): {"nwb_file_name": nwb_a}},
                     rehash=True,
                 )
-                with pytest.raises(SameSessionMatchError, match=nwb_a):
+                with pytest.raises(
+                    UnitMatchSelectionIntegrityError, match="nwb_file_name"
+                ):
                     UnitMatch.populate(pk, reserve_jobs=False)
                 assert len(UnitMatch & pk) == 0
             finally:
