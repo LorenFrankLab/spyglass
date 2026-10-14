@@ -9,6 +9,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from tests.spikesorting.v2._scenario_oracles import _raw_acquisition_clock
+
 pytestmark = pytest.mark.pipeline
 
 _FIGPACK_MISSING = (
@@ -16,14 +18,26 @@ _FIGPACK_MISSING = (
     or importlib.util.find_spec("figpack_spike_sorting") is None
 )
 
+# Declared physical events for the inference stand-in, independent of the
+# source extractor and every production curation/matching reader.
+_EPOCH_SPIKE_FRAMES = {
+    0: np.array([1500, 4000, 6500, 9000, 11500, 14000], dtype=np.int64),
+    1: np.array([1700, 4200, 6700, 9200, 11700, 14200], dtype=np.int64),
+    2: np.array([1900, 4400, 6900, 9400, 11900, 14400], dtype=np.int64),
+}
+
 
 def _plant_three_epoch_units(recording, **kwargs):
     """Replace sorter inference while keeping the public pipeline's NWB writes."""
     import spikeinterface as si
 
-    samples = np.arange(1500, recording.get_num_samples() - 1500, 2500)
-    frames = np.concatenate([samples + 200 * unit for unit in range(3)])
-    labels = np.repeat(np.arange(3), len(samples))
+    frames = np.concatenate(list(_EPOCH_SPIKE_FRAMES.values()))
+    labels = np.concatenate(
+        [
+            np.full(len(frames), unit)
+            for unit, frames in _EPOCH_SPIKE_FRAMES.items()
+        ]
+    )
     order = np.argsort(frames)
     return si.NumpySorting.from_samples_and_labels(
         samples_list=[frames[order].astype(np.int64)],
@@ -67,6 +81,8 @@ def test_public_epoch_matching_journey(
     Only sorter inference and pair inference are substituted. Preprocessing,
     evaluations, optional review commits, dense waveform extraction, original
     clocks, match provenance and tracked-unit persistence are real.
+    Declared events and raw NWB clocks supply the oracle. These inference
+    stand-ins test workflow correctness, not sorter or matcher accuracy.
     """
     from spyglass.spikesorting.v2._orchestration import presets
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -94,6 +110,7 @@ def test_public_epoch_matching_journey(
         install_fixture_pairer,
         restore_matcher_registry,
     )
+    from tests.spikesorting.v2.conftest import DAILY_CONCAT_INTERVALS
 
     fx = daily_concat_match_inputs
     selected = [
@@ -101,10 +118,37 @@ def test_public_epoch_matching_journey(
         for name in ("a_first", "a_second")
     ]
     nwb_name = fx["nwb_file_names"]["a"]
+    raw_clock, source_object_id = _raw_acquisition_clock(nwb_name)
+    interval_names = ["unitmatch_daily_first", "unitmatch_daily_second"]
+    expected_bounds, expected_coverage, expected_events = {}, {}, {}
+    for name, part, row in zip(
+        interval_names, ("first", "second"), selected, strict=True
+    ):
+        assert row["interval_list_name"] == name
+        lo, hi = (
+            raw_clock[0] + offset for offset in DAILY_CONCAT_INTERVALS[part]
+        )
+        expected_bounds[name] = (lo, hi)
+        raw_frames = np.flatnonzero((raw_clock >= lo) & (raw_clock <= hi))
+        assert len(raw_frames) and np.all(np.diff(raw_frames) == 1)
+        expected_coverage[name] = {
+            "version": 1,
+            "source_object_id": source_object_id,
+            "sample_ranges": [[int(raw_frames[0]), int(raw_frames[-1]) + 1]],
+            "time_ranges": [
+                [
+                    float(raw_clock[raw_frames[0]]),
+                    float(raw_clock[raw_frames[-1]]),
+                ]
+            ],
+        }
+        expected_events[name] = {
+            unit: raw_clock[raw_frames[frames]].copy()
+            for unit, frames in _EPOCH_SPIKE_FRAMES.items()
+        }
     epochs = describe_epochs(
         nwb_name, sort_group_id=selected[0]["sort_group_id"]
     ).set_index("interval_list_name")
-    interval_names = [row["interval_list_name"] for row in selected]
     assert epochs.loc[interval_names, "interval_status"].tolist() == [
         "valid",
         "valid",
@@ -112,10 +156,12 @@ def test_public_epoch_matching_journey(
     assert all(
         epochs.loc[name, "ready_recording_keys"] for name in interval_names
     )
-    assert (
-        epochs.loc[interval_names[0], "stop_time"]
-        < epochs.loc[interval_names[1], "start_time"]
-    )
+    for name in interval_names:
+        lo, hi = expected_bounds[name]
+        assert epochs.loc[name, "interval_bounds"] == ((lo, hi),)
+        assert epochs.loc[name, "start_time"] == lo
+        assert epochs.loc[name, "stop_time"] == hi
+        assert epochs.loc[name, "duration_s"] == pytest.approx(hi - lo)
 
     params_name = f"epoch_public_{uuid.uuid4().hex[:10]}"
     register_pipeline_preset(
@@ -129,20 +175,7 @@ def test_public_epoch_matching_journey(
             "artifact_detection_params_name": None,
         },
     )
-    expected_spike_times = {}
-
-    def known_epoch_sorter(recording, sorting_id, **kwargs):
-        sorting = _plant_three_epoch_units(recording, **kwargs)
-        source_times = np.asarray(recording.get_times())
-        # Capture physical event times at the deterministic sorter boundary,
-        # independently of every downstream curation and matching reader.
-        expected_spike_times[str(sorting_id)] = {
-            int(unit): source_times[sorting.get_unit_spike_train(unit)].copy()
-            for unit in sorting.unit_ids
-        }
-        return sorting
-
-    plant_sorter(monkeypatch, known_epoch_sorter)
+    plant_sorter(monkeypatch, _plant_three_epoch_units)
     runs, final_refs = [], []
     saved_matcher, match_key = None, None
     try:
@@ -240,6 +273,11 @@ def test_public_epoch_matching_journey(
         ]
         for selection in plan.unit_selections:
             assert list(selection.included_unit_ids) == expected_units
+            assert selection.snapshot()["labels_by_unit"] == (
+                {"0": ["accept"], "1": ["noise"], "2": ["mua"]}
+                if reviewed
+                else {"0": [], "1": [], "2": []}
+            )
             if reviewed:
                 assert selection.excluded_units == {
                     1: "denied label(s): noise",
@@ -277,27 +315,94 @@ def test_public_epoch_matching_journey(
             (row["n_matching_inputs"], row["n_sessions_detected"]) == (2, 1)
             for row in tracked
         )
+        member_groups = {}
+        for row in (TrackedUnit.Member & match_key).fetch(as_dict=True):
+            member_groups.setdefault(row["tracked_unit_id"], set()).add(
+                (
+                    str(row["sorting_id"]),
+                    int(row["curation_id"]),
+                    int(row["unit_id"]),
+                )
+            )
+        assert {frozenset(members) for members in member_groups.values()} == {
+            frozenset(
+                (str(ref.sorting_id), ref.curation_id, unit)
+                for ref in final_refs
+            )
+            for unit in expected_units
+        }
+        assert {
+            (
+                str(row["session_a_sorting_id"]),
+                int(row["session_a_curation_id"]),
+                int(row["unit_a_id"]),
+                str(row["session_b_sorting_id"]),
+                int(row["session_b_curation_id"]),
+                int(row["unit_b_id"]),
+            )
+            for row in (UnitMatch.Pair & match_key).fetch(as_dict=True)
+        } == {
+            (
+                str(final_refs[0].sorting_id),
+                final_refs[0].curation_id,
+                unit,
+                str(final_refs[1].sorting_id),
+                final_refs[1].curation_id,
+                unit,
+            )
+            for unit in expected_units
+        }
         regions = TrackedUnit().get_unit_brain_regions(match_key)
         assert regions["detected"].all()
         assert set(regions["nwb_file_name"]) == {nwb_name}
+        assert set(regions["n_spikes"]) == {6}
         spikes = TrackedUnit().get_member_spike_times(match_key)
         assert len(spikes) == 2 * len(expected_units)
         assert set(spikes["unit_id"]) == set(expected_units)
+        expected_member_keys = {
+            (str(ref.sorting_id), ref.curation_id, unit, index, name)
+            for index, (ref, name) in enumerate(
+                zip(final_refs, interval_names, strict=True)
+            )
+            for unit in expected_units
+        }
+        assert {
+            (
+                str(row["sorting_id"]),
+                int(row["curation_id"]),
+                int(row["unit_id"]),
+                int(row["input_index"]),
+                row["interval_list_name"],
+            )
+            for row in spikes.to_dict(orient="records")
+        } == expected_member_keys
         for _, member in spikes.iterrows():
-            expected = expected_spike_times[str(member["sorting_id"])][
+            expected = expected_events[member["interval_list_name"]][
                 int(member["unit_id"])
             ]
             assert len(member["spike_times"]) == len(expected) > 0
             np.testing.assert_array_equal(member["spike_times"], expected)
-            epoch = epochs.loc[member["interval_list_name"]]
-            assert np.all(member["spike_times"] >= epoch["start_time"])
-            assert np.all(member["spike_times"] <= epoch["stop_time"])
+            lo, hi = expected_bounds[member["interval_list_name"]]
+            assert np.all(member["spike_times"] >= lo)
+            assert np.all(member["spike_times"] <= hi)
         inputs, recordings = UnitMatch().get_input_provenance(match_key)
         nwb_inputs, nwb_recordings = UnitMatch().get_input_provenance(
             match_key, from_nwb=True
         )
         assert inputs.equals(nwb_inputs)
         assert recordings[list(nwb_recordings.columns)].equals(nwb_recordings)
+        assert nwb_inputs["curation_uuid"].tolist() == [
+            ref.curation_uuid for ref in final_refs
+        ]
+        assert recordings["interval_list_name"].tolist() == interval_names
+        for recording in recordings.to_dict(orient="records"):
+            coverage = expected_coverage[recording["interval_list_name"]]
+            assert recording["source_coverage"] == coverage
+            assert recording["start_sample"] == 0
+            assert recording["end_sample"] == (
+                coverage["sample_ranges"][0][1]
+                - coverage["sample_ranges"][0][0]
+            )
         assert [
             row["included_unit_ids"] for row in inputs["selection_snapshot"]
         ] == [

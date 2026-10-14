@@ -61,16 +61,24 @@ preserve independently expected traces and timestamps; library-version adapters
 for SpikeInterface and DataJoint remain separately tested. See the
 [architecture map](../docs/src/ForDevelopers/SpikeSortingV2Architecture.md).
 
+Integration scenarios declare their expected outcomes before calling the public
+APIs. Unit identities, accepted/excluded populations, original-clock spike
+times, and match memberships come from the fixture specification and raw input
+artifacts. Comparing two production readers is an additional persistence check;
+it cannot establish correctness on its own. A failing scenario is investigated
+against that independent truth, rather than changing expectations to match
+current output. See the [integration test practices](AGENTS.md).
+
 The user scenarios are covered through the public APIs and persisted outputs:
 
-| User scenario                                                         | Integration coverage                                                                                                                                                                                                                      |
-| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sort one epoch, review its units, then use accepted units in analysis | [User curation workflow](spikesorting/v2/test_user_curation_workflow.py): pipeline receipt, empty accepted population before review, completed review, and selected spike data.                                                           |
-| Merge units during review and resume verification                     | [Browser journey](spikesorting/v2/test_review_browser_journey.py): real Chromium edits, save, commit, merged-child verification, restart/resume, and analysis handoff.                                                                    |
-| Sort epochs separately in one NWB, then match                         | [Epoch matching](spikesorting/v2/test_epoch_unitmatch.py): interval discovery, reviewed and explicit automatic-only populations, reversed input order, original-clock readback, and rerun reuse.                                          |
-| Sort same-day recordings together with one shared unit namespace      | [Concat pipeline](spikesorting/v2/test_session_group_concat.py), `test_run_v2_pipeline_concat_mode_routes_session_group`: public run, auto-curation, per-member analysis outputs, and reuse.                                              |
-| Match independent recordings or daily concatenations                  | [Direct curation matching](spikesorting/v2/test_direct_curation_unitmatch.py), `test_direct_reviewed_curation_populations_reach_match_artifact`: exact reviewed generations, evaluation-filtered populations, and database/NWB agreement. |
-| Repair a blocked matching request                                     | [Direct curation matching](spikesorting/v2/test_direct_curation_unitmatch.py): blocks missing artifacts and changed pins before writes; restoring an artifact makes a rebuilt plan ready.                                                 |
+| User scenario                                                         | Integration coverage                                                                                                                                                                                                                                             |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sort one epoch, review its units, then use accepted units in analysis | [User curation workflow](spikesorting/v2/test_user_curation_workflow.py): pipeline receipt, empty accepted population before review, completed review, and selected spike data.                                                                                  |
+| Merge units during review and resume verification                     | [Browser journey](spikesorting/v2/test_review_browser_journey.py): real Chromium edits, save, commit, merged-child verification, restart/resume, and analysis handoff.                                                                                           |
+| Sort epochs separately in one NWB, then match                         | [Epoch matching](spikesorting/v2/test_epoch_unitmatch.py): interval discovery, reviewed and explicit automatic-only populations, reversed input order, original-clock readback, and rerun reuse.                                                                 |
+| Sort same-day recordings together with one shared unit namespace      | [Concat pipeline](spikesorting/v2/test_session_group_concat.py), `test_run_v2_pipeline_concat_mode_routes_session_group`: public run, auto-curation, per-member analysis outputs, and reuse.                                                                     |
+| Match independent recordings or daily concatenations                  | [Direct curation matching](spikesorting/v2/test_direct_curation_unitmatch.py), `test_direct_reviewed_curation_populations_reach_match_artifact`: exact reviewed generations, evaluation-pinned populations, known match memberships, and database/NWB agreement. |
+| Repair a blocked matching request                                     | [Direct curation matching](spikesorting/v2/test_direct_curation_unitmatch.py): blocks missing artifacts and changed pins before writes; restoring an artifact makes a rebuilt plan ready.                                                                        |
 
 Run the focused pipeline scenarios in an environment with the `test`,
 `spikesorting-v2`, and `spikesorting-v2-curation` extras:

@@ -515,6 +515,15 @@ def test_worker_refuses_forged_snapshot_before_artifact_access(
 def test_direct_reviewed_curation_populations_reach_match_artifact(
     daily_concat_match_inputs, monkeypatch, input_names, expected_unit_ids
 ):
+    """Reviewed single-unit populations keep their evidence and known matches.
+
+    The fixture declares one unit per input, firing from frame 1000 every
+    5000 frames. Its original raw clocks and declared member intervals define
+    the expected downstream events. Evaluations are evidence pins here;
+    selective metric filtering and native matcher inference are separate tests.
+    """
+    import numpy as np
+
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.pipeline import (
@@ -524,6 +533,7 @@ def test_direct_reviewed_curation_populations_reach_match_artifact(
     )
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
+        TrackedUnit,
         UnitMatch,
         UnitMatchSelection,
     )
@@ -531,16 +541,76 @@ def test_direct_reviewed_curation_populations_reach_match_artifact(
         install_fixture_pairer,
         restore_matcher_registry,
     )
+    from tests.spikesorting.v2.conftest import (
+        DAILY_CONCAT_INTERVALS,
+        DAILY_CONCAT_UNIT_IDS,
+    )
+    from tests.spikesorting.v2._scenario_oracles import _raw_acquisition_clock
 
-    roots = daily_concat_match_inputs["curations"]
-    chosen = []
+    fx = daily_concat_match_inputs
+    roots = fx["curations"]
+    assert tuple(
+        DAILY_CONCAT_UNIT_IDS.get(name, 0) for name in input_names
+    ) == (expected_unit_ids)
+    member_specs = {
+        "concat_day1": (("a", "first"), ("a", "second")),
+        "concat_day2": (("c", "first"), ("c", "second")),
+        "single_a_first": (("a", "first"),),
+        "single_b": (("b", None),),
+    }
+    raw_clocks = {
+        tag: _raw_acquisition_clock(fx["nwb_file_names"][tag])[0]
+        for tag in {
+            tag for name in input_names for tag, _ in member_specs[name]
+        }
+    }
+    expected_member_events = {}
     for name in input_names:
+        member_clocks = []
+        for tag, part in member_specs[name]:
+            raw_clock = raw_clocks[tag]
+            if part is None:
+                selected_clock = raw_clock
+                interval_name = "raw data valid times"
+            else:
+                start, stop = np.asarray(DAILY_CONCAT_INTERVALS[part]) + (
+                    raw_clock[0]
+                )
+                selected_clock = raw_clock[
+                    (raw_clock >= start) & (raw_clock <= stop)
+                ]
+                interval_name = f"unitmatch_daily_{part}"
+            assert selected_clock.size > 2000
+            member_clocks.append(
+                (fx["nwb_file_names"][tag], interval_name, selected_clock)
+            )
+        # This is the fixture's declared planted train, not a sort/output read.
+        frames = np.arange(
+            1000, sum(len(clock) for _, _, clock in member_clocks) - 1000, 5000
+        )
+        offset = 0
+        for recording_index, (nwb_name, interval_name, clock) in enumerate(
+            member_clocks
+        ):
+            local_frames = (
+                frames[(frames >= offset) & (frames < offset + len(clock))]
+                - offset
+            )
+            assert local_frames.size > 0
+            expected_member_events[name, recording_index] = (
+                nwb_name,
+                interval_name,
+                clock[local_frames],
+            )
+            offset += len(clock)
+
+    chosen = []
+    for name, unit_id in zip(input_names, expected_unit_ids, strict=True):
         root = roots[name]
-        units = (CurationV2.Unit & root).fetch("unit_id")
         child = CurationV2.insert_curation(
             {"sorting_id": root["sorting_id"]},
             parent_curation_id=root["curation_id"],
-            labels={int(unit): ["accept"] for unit in units},
+            labels={unit_id: ["accept"]},
         )
         chosen.append(CurationRef.from_key(child))
     evaluations = [
@@ -553,7 +623,6 @@ def test_direct_reviewed_curation_populations_reach_match_artifact(
         resolve_unit_selection(
             ref,
             evaluation=evaluation,
-            unit_criteria={"observed_firing_rate_hz": {">=": 0}},
         )
         for ref, evaluation in zip(chosen, evaluations, strict=True)
     ]
@@ -568,6 +637,15 @@ def test_direct_reviewed_curation_populations_reach_match_artifact(
     )
     selection_key = None
     try:
+        for ref, unit_id, snapshot in zip(
+            chosen, expected_unit_ids, snapshots, strict=True
+        ):
+            assert snapshot.curation == ref
+            assert snapshot.included_unit_ids == (unit_id,)
+            assert snapshot.excluded_units == {}
+            assert snapshot.labels_by_unit == {unit_id: ("accept",)}
+            assert snapshot.unlabeled_unit_ids == ()
+            assert snapshot.unit_criteria == {}
         plan = plan_v2_unit_match_from_curations(
             list(reversed(chosen)),
             matcher_params_name=params_name,
@@ -592,8 +670,86 @@ def test_direct_reviewed_curation_populations_reach_match_artifact(
         assert [
             row["selection_snapshot"]["included_unit_ids"] for row in rows
         ] == [[unit] for unit in expected_unit_ids]
+        assert [
+            row["selection_snapshot"]["excluded_units"] for row in rows
+        ] == [
+            {},
+            {},
+        ]
+        assert [
+            row["selection_snapshot"]["labels_by_unit"] for row in rows
+        ] == [{str(unit): ["accept"]} for unit in expected_unit_ids]
         assert seen == [[unit] for unit in expected_unit_ids]
-        assert len(UnitMatch.Pair & selection_key) == 1
+        expected_nodes = [
+            (str(ref.sorting_id), ref.curation_id, unit)
+            for ref, unit in zip(chosen, expected_unit_ids, strict=True)
+        ]
+        pairs = (UnitMatch.Pair & selection_key).fetch(as_dict=True)
+        assert len(pairs) == 1
+        pair = pairs[0]
+        assert tuple(
+            (
+                str(pair[f"session_{side}_sorting_id"]),
+                int(pair[f"session_{side}_curation_id"]),
+                int(pair[f"unit_{side}_id"]),
+            )
+            for side in ("a", "b")
+        ) == tuple(expected_nodes)
+        assert pair["match_probability"] == pytest.approx(0.99)
+        matchable = (UnitMatch.MatchableUnit & selection_key).fetch(
+            as_dict=True
+        )
+        assert {
+            (
+                str(row["sorting_id"]),
+                int(row["curation_id"]),
+                int(row["unit_id"]),
+            )
+            for row in matchable
+        } == set(expected_nodes)
+        tracked = (TrackedUnit & selection_key).fetch(as_dict=True)
+        assert len(tracked) == 1
+        assert (
+            tracked[0]["n_matching_inputs"],
+            tracked[0]["n_sessions_detected"],
+        ) == (2, 2)
+        assert {
+            (
+                str(row["sorting_id"]),
+                int(row["curation_id"]),
+                int(row["unit_id"]),
+            )
+            for row in (TrackedUnit.Member & selection_key).fetch(as_dict=True)
+        } == set(expected_nodes)
+        spikes = TrackedUnit().get_member_spike_times(selection_key)
+        input_by_sorting = {
+            str(ref.sorting_id): (name, ref.curation_id, unit)
+            for name, ref, unit in zip(
+                input_names, chosen, expected_unit_ids, strict=True
+            )
+        }
+        observed_members = set()
+        for member in spikes.itertuples():
+            name, curation_id, unit_id = input_by_sorting[
+                str(member.sorting_id)
+            ]
+            assert (member.curation_id, member.unit_id) == (
+                curation_id,
+                unit_id,
+            )
+            identity = (name, member.recording_index)
+            assert identity not in observed_members
+            observed_members.add(identity)
+            nwb_name, interval_name, expected_times = expected_member_events[
+                identity
+            ]
+            assert (member.nwb_file_name, member.interval_list_name) == (
+                nwb_name,
+                interval_name,
+            )
+            assert len(member.spike_times) == len(expected_times) > 0
+            np.testing.assert_array_equal(member.spike_times, expected_times)
+        assert observed_members == set(expected_member_events)
         db_inputs, _ = UnitMatch().get_input_provenance(selection_key)
         nwb_inputs, _ = UnitMatch().get_input_provenance(
             selection_key, from_nwb=True
@@ -612,7 +768,7 @@ def test_direct_reviewed_curation_populations_reach_match_artifact(
             for snapshot in nwb_inputs["selection_snapshot"]
         ] == [str(evaluation.evaluation_id) for evaluation in evaluations]
         assert all(
-            snapshot["unit_criteria"] == {"observed_firing_rate_hz": {">=": 0}}
+            snapshot["unit_criteria"] == {}
             and snapshot["selection_provenance"]["evaluation_recipes"]
             == {
                 "metric_params_name": "minimal",
