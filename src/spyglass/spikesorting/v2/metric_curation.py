@@ -991,6 +991,15 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     wants_pc=wants_pc,
                     observation_metrics=observation_metrics,
                     statistics_spans=statistics_spans,
+                    # Concat traces carry a synthetic clock, including after
+                    # motion correction. Their continuity spans preserve the
+                    # member/acquisition joins that timestamps cannot recover.
+                    continuity_spans=(
+                        recording_inputs.traces.row["continuity_spans"]
+                        if recording_inputs.source_kind
+                        == "concatenated_recording"
+                        else None
+                    ),
                 )
             )
             # Self-describing provenance: the evaluation inputs + the source

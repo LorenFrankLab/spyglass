@@ -292,6 +292,151 @@ def test_isi_violation_fraction_guards_low_spike(n):
     assert np.isnan(frac[0])
 
 
+def _compute_retained_spike_isi(
+    monkeypatch,
+    spike_frames,
+    *,
+    gap_s=0.0,
+    continuity_spans=None,
+    statistics_spans=None,
+    metric_params=None,
+    masked_frames=(),
+):
+    """Run the real SI spike-train metric without unrelated extensions."""
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._curation.metrics import compute_metrics
+    from spyglass.spikesorting.v2._sorting import analyzer as builders
+
+    recording = si.NumpyRecording(
+        np.zeros((6000, 2), dtype=np.float32), sampling_frequency=30_000.0
+    )
+    recording.set_dummy_probe_from_locations(np.array([[0, 0], [0, 20]]))
+    recording.set_channel_gains(1.0)
+    recording.set_channel_offsets(0.0)
+    times = np.arange(6000) / 30_000.0
+    times[3000:] += gap_s
+    recording.set_times(times, with_warning=False)
+    if masked_frames:
+        from spyglass.spikesorting.v2._sorting.artifact_mask import (
+            silence_frame_ranges,
+        )
+
+        recording = silence_frame_ranges(recording, masked_frames)
+    sorting = si.NumpySorting.from_unit_dict(
+        {17: np.asarray(spike_frames, dtype=np.int64)}, 30_000.0
+    )
+    analyzer = si.create_sorting_analyzer(sorting, recording, sparse=False)
+    # ISI has no waveform dependency; leave its real SI compute intact.
+    monkeypatch.setattr(builders, "ensure_extensions", lambda *a, **k: None)
+
+    def refuse_full_times(*args, **kwargs):
+        raise AssertionError(
+            "ISI must read spike timestamps, not the full clock"
+        )
+
+    monkeypatch.setattr(analyzer.recording, "get_times", refuse_full_times)
+    extra = (
+        {}
+        if continuity_spans is None
+        else {"continuity_spans": continuity_spans}
+    )
+    return compute_metrics(
+        analyzer,
+        None,
+        ["isi_violation"],
+        {"isi_violation": metric_params} if metric_params else {},
+        True,
+        statistics_spans=statistics_spans,
+        **extra,
+    )
+
+
+@pytest.mark.parametrize("masked_frames", [(), [(500, 700)]])
+def test_isi_violation_preserves_acquisition_gaps(monkeypatch, masked_frames):
+    """Adjacent sample frames across ten missing seconds must not reject a unit."""
+    metrics = _compute_retained_spike_isi(
+        monkeypatch,
+        [100, 2000, 2999, 3000, 4000, 5900],
+        gap_s=10.0,
+        statistics_spans=[(0, 3000), (3000, 6000)],
+        metric_params={"isi_threshold_ms": 2.0},
+        masked_frames=masked_frames,
+    )
+    # Raw SI diagnostics keep their sample-clock definition.
+    assert metrics.loc[17, "isi_violations_count"] == 1
+    assert metrics.loc[17, "isi_violation"] == 0.0
+    assert (
+        apply_label_rules(
+            metrics, [_rule(0, "isi_violation", ">", 0.02, "reject")]
+        )
+        == {}
+    )
+
+
+def test_isi_violation_excludes_concat_joins(monkeypatch):
+    """The concat's synthetic clock must not create a cross-member violation."""
+    metrics = _compute_retained_spike_isi(
+        monkeypatch,
+        [100, 130, 2000, 2999, 3000, 4000, 5900],
+        continuity_spans=[(0, 3000), (3000, 6000)],
+        metric_params={"isi_threshold_ms": 2.0},
+    )
+    # The 1 ms interval within the first member still counts.
+    assert metrics.loc[17, "isi_violation"] == pytest.approx(1 / 6)
+
+
+def test_isi_violation_keeps_real_intervals_across_artifact_masks(monkeypatch):
+    """An artifact exclusion does not change retained spikes' elapsed time."""
+    metrics = _compute_retained_spike_isi(
+        monkeypatch,
+        [100, 2000, 2989, 3010, 4000, 5900],
+        statistics_spans=[(0, 2990), (3010, 6000)],
+        metric_params={"isi_threshold_ms": 2.0},
+        masked_frames=[(2990, 3010)],
+    )
+    assert metrics.loc[17, "isi_violation"] == pytest.approx(1 / 5)
+
+
+@pytest.mark.parametrize(
+    "params,expected",
+    [
+        ({}, 1 / 6),  # SI's default refractory window is 1.5 ms.
+        ({"isi_threshold_ms": 0.5}, 0.0),
+        ({"isi_threshold_ms": 2.0, "min_isi_ms": 1.1}, 1 / 6),
+    ],
+)
+def test_isi_violation_uses_the_metric_refractory_window(
+    monkeypatch, params, expected
+):
+    metrics = _compute_retained_spike_isi(
+        monkeypatch,
+        [100, 130, 2000, 2999, 3000, 4000, 5900],
+        gap_s=10.0,
+        metric_params=params,
+    )
+    assert metrics.loc[17, "isi_violation"] == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("spike_frames", [[], [100]])
+def test_isi_violation_source_clock_keeps_low_spike_nan(
+    monkeypatch, spike_frames
+):
+    metrics = _compute_retained_spike_isi(monkeypatch, spike_frames, gap_s=10.0)
+    assert np.isnan(metrics.loc[17, "isi_violation"])
+
+
+def test_isi_violation_source_clock_preserves_failed_metric(monkeypatch):
+    """An optional SI failure stays unavailable instead of becoming a zero."""
+    metrics = _compute_retained_spike_isi(
+        monkeypatch,
+        [100, 2000, 2999, 3000, 4000, 5900],
+        metric_params={"isi_threshold_ms": "invalid"},
+    )
+    assert np.isnan(metrics.loc[17, "isi_violations_count"])
+    assert np.isnan(metrics.loc[17, "isi_violation"])
+
+
 # ---------- rules-payload idempotency comparison ----------------------------
 
 

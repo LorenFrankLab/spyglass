@@ -258,6 +258,10 @@ or `log_export` positionally must pass them by keyword.
         experimental motion correction, browser-based review with FigPack, and
         cross-session unit tracking with UnitMatch. See the Spike Sorting v2 docs
         #1609
+    - v2 `isi_violation` uses original spike timestamps and excludes artificial
+        concatenation joins, preventing acquisition gaps from creating false
+        refractory violations. Already persisted affected development curation
+        evaluations need regeneration #1609
     - `SpikeSortingOutput` gains `CurationV2` and `ConcatMemberCuration` parts,
         declared when the v2 module imports; if it cannot import, a warning names
         the cause and the parts are omitted. `get_restricted_merge_ids` now

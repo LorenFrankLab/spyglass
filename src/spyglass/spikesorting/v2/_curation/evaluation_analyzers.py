@@ -42,6 +42,7 @@ def evaluate_cached_analyzers(
     wants_pc: bool,
     observation_metrics: pd.DataFrame,
     statistics_spans: list,
+    continuity_spans=None,
 ) -> tuple[pd.DataFrame, dict, list, dict]:
     """Evaluate a root / label-only curation on the sort's cached analyzers.
 
@@ -58,6 +59,8 @@ def evaluate_cached_analyzers(
         Per-unit observed-time metrics read from the curated units file.
     statistics_spans : list
         The sort's persisted statistics spans.
+    continuity_spans : array_like, optional
+        Concat acquisition/member boundaries for source-clock ISI counts.
 
     Returns
     -------
@@ -120,6 +123,7 @@ def evaluate_cached_analyzers(
                 expected_unit_ids=sorting_inputs.expected_unit_ids,
                 observation_metrics=observation_metrics,
                 statistics_spans=statistics_spans,
+                continuity_spans=continuity_spans,
             )
         )
 
@@ -143,6 +147,7 @@ def evaluate_temporary_analyzers(
     wants_pc: bool,
     observation_metrics: pd.DataFrame,
     statistics_spans: list,
+    continuity_spans=None,
 ) -> tuple[pd.DataFrame, dict, list, None]:
     """Evaluate an applied-merge curation on temporary merged analyzers.
 
@@ -159,6 +164,8 @@ def evaluate_temporary_analyzers(
         Per-unit observed-time metrics read from the curated units file.
     statistics_spans : list
         The sort's persisted statistics spans.
+    continuity_spans : array_like, optional
+        Concat acquisition/member boundaries for source-clock ISI counts.
 
     Returns
     -------
@@ -227,6 +234,7 @@ def evaluate_temporary_analyzers(
                 expected_unit_ids=sorting_inputs.expected_unit_ids,
                 observation_metrics=observation_metrics,
                 statistics_spans=statistics_spans,
+                continuity_spans=continuity_spans,
             )
         )
     return metrics_df, labels_by_unit, merge_groups, None

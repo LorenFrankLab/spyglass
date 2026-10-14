@@ -812,7 +812,12 @@ fail closed.
     and threshold its `nn_noise_overlap` output column in a rule.
 - `isi_violation` is Spyglass's bounded `count / (n_spikes - 1)` fraction with
     the evaluation recipe's refractory window -- not SI's
-    `isi_violations_ratio`, and not a contamination estimate.
+    `isi_violations_ratio`, and not a contamination estimate. It counts intervals
+    using the retained spikes' original timestamps. For concatenated sources,
+    intervals spanning a member or acquisition join are excluded; artifact masks
+    preserve elapsed time between retained spikes. The raw SI
+    `isi_violations_count` and `isi_violations_ratio` columns retain their sample
+    clock definitions.
 - `AutoCurationRules` is inserted via `insert_rules(master, rule_rows)` (direct
     `insert1` is blocked) so the master and its ordered rules validate together.
 - Each rule's `missing_policy` governs units SpikeInterface cannot assess (a NaN

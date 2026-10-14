@@ -318,13 +318,14 @@ def isi_violation_fraction(isi_violations_count, num_spikes) -> np.ndarray:
     Spyglass defines ``isi_violation`` as ``count / (n_spikes - 1)`` -- the
     observed fraction of too-short inter-spike intervals (``v1/metric_utils``).
     This is NOT SpikeInterface's ``isi_violations_ratio`` (the unbounded
-    Hill/UMS2000 contamination estimate), so v2 derives the fraction from
-    SI's raw ``isi_violations_count`` column rather than reading SI's ratio.
+    Hill/UMS2000 contamination estimate). Evaluation counts violations on
+    the retained spikes' original clock; SI's count and ratio remain separate
+    sample-clock diagnostics.
 
     Parameters
     ----------
     isi_violations_count : array-like
-        SpikeInterface's raw per-unit violation counts.
+        Per-unit violation counts on the retained spike trains.
     num_spikes : array-like
         Per-unit spike counts.
 
@@ -342,6 +343,57 @@ def isi_violation_fraction(isi_violations_count, num_spikes) -> np.ndarray:
     valid = n > 1.0
     fraction[valid] = counts[valid] / denom[valid]
     return fraction
+
+
+def _source_clock_isi_counts(analyzer, unit_ids, threshold_s, continuity_spans):
+    """Count short ISIs from spike timestamps without loading the full clock.
+
+    Concat-backed sources replace acquisition clocks with a synthetic clock;
+    their persisted continuity spans identify pairs across unrelated chunks.
+    Artifact exclusions do not split these spans or change elapsed time.
+    """
+    from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
+
+    sorting, recording = analyzer.sorting, analyzer.recording
+    boundaries = None
+    if continuity_spans is not None:
+        spans = np.asarray(continuity_spans)
+        if spans.ndim != 2 or spans.shape[1] != 2 or not len(spans):
+            raise ValueError("ISI continuity_spans must contain frame pairs.")
+        spans = integer_vector(
+            spans.reshape(-1), name="ISI continuity_spans", nonnegative=True
+        ).reshape(-1, 2)
+        if (
+            sorting.get_num_segments() != 1
+            or spans[0, 0] != 0
+            or spans[-1, 1] != recording.get_num_samples()
+            or np.any(spans[:, 1] <= spans[:, 0])
+            or np.any(spans[1:, 0] != spans[:-1, 1])
+        ):
+            raise ValueError(
+                "ISI continuity_spans must partition the single-segment recording."
+            )
+        boundaries = spans[:-1, 1]
+
+    counts = np.zeros(len(unit_ids), dtype=float)
+    for index, unit_id in enumerate(unit_ids):
+        for segment_index in range(sorting.get_num_segments()):
+            frames = sorting.get_unit_spike_train(
+                unit_id=unit_id, segment_index=segment_index
+            )
+            if len(frames) < 2:
+                continue
+            times = _segment_times_at(
+                recording, frames, segment_index=segment_index
+            )
+            violations = np.diff(times) < threshold_s
+            if boundaries is not None:
+                spans_for_spikes = np.searchsorted(
+                    boundaries, frames, side="right"
+                )
+                violations &= spans_for_spikes[1:] == spans_for_spikes[:-1]
+            counts[index] += np.count_nonzero(violations)
+    return counts
 
 
 # ---------- metric eligibility: which NaNs SpikeInterface leaves on purpose --
@@ -653,9 +705,9 @@ def si_quality_metric_output_columns(si_metric: str) -> tuple[str, ...]:
     Read from SI's own metric metadata: the quality metric class's
     ``metric_columns`` (``core/analyzer_extension_core.py:838``), found by
     name through ``BaseMetricExtension.get_metric_by_name`` (1052-1070), in
-    SI's order. Spyglass's ``isi_violation`` fraction is derived from SI's
-    ``isi_violation`` metric, so it leads that metric's columns. A name that
-    is not an SI quality metric maps to no columns.
+    SI's order. Spyglass computes its ``isi_violation`` fraction alongside
+    SI's metric, so it leads that metric's columns. A name that is not an SI
+    quality metric maps to no columns.
     """
     from spikeinterface.metrics.quality import ComputeQualityMetrics
 
@@ -919,6 +971,7 @@ def evaluate_analyzers(
     expected_unit_ids,
     observation_metrics=None,
     statistics_spans=None,
+    continuity_spans=None,
 ):
     """Compute metrics / labels / merge suggestions and enforce namespace.
 
@@ -972,6 +1025,7 @@ def evaluate_analyzers(
             template_metric_columns=metric_inputs.template_metric_columns,
             statistics_spans=statistics_spans,
             rule_columns=rule_columns,
+            continuity_spans=continuity_spans,
         )
         assert_unit_namespace(metrics_df, expected_unit_ids)
         if observation_metrics is not None:
@@ -1111,6 +1165,7 @@ def compute_metrics(
     template_metric_columns=None,
     statistics_spans=None,
     rule_columns=frozenset(),
+    continuity_spans=None,
 ):
     """Compute quality metrics, routing PC/NN metrics to the whitened one.
 
@@ -1121,8 +1176,11 @@ def compute_metrics(
     meaningless. PC / cluster-separation metrics (the SI PCA-metric set)
     compute on the whitened METRIC analyzer, where decorrelated separation
     is meaningful. The two frames are merged by unit id. Spyglass's
-    ``isi_violation`` fraction is added from the (recipe-independent) spike
-    times. ``job_kwargs`` drive the heavy extension computation.
+    ``isi_violation`` fraction counts short intervals using the recording's
+    original spike timestamps. For concat-backed sources, ``continuity_spans``
+    excludes pairs across acquisition/member joins on the synthetic clock.
+    SI's count and contamination ratio keep their sample-clock definitions.
+    ``job_kwargs`` drive the heavy extension computation.
 
     ``template_metric_columns`` (SI output COLUMN names) are surfaced from
     the DISPLAY analyzer's ``template_metrics`` extension -- waveform SHAPE
@@ -1150,7 +1208,10 @@ def compute_metrics(
     """
     import numpy as np
     import pandas as pd
-    from spikeinterface.metrics.quality import compute_quality_metrics
+    from spikeinterface.metrics.quality import (
+        compute_quality_metrics,
+        get_default_quality_metrics_params,
+    )
 
     from spyglass.spikesorting.v2._core.si_metric_patches import (
         isolated_si_metric_defaults,
@@ -1230,6 +1291,14 @@ def compute_metrics(
             isolated_si_metric_defaults(),
             escalate_si_metric_errors(rule_columns),
         ):
+            if "isi_violation" in voltage_names:
+                # Resolve defaults under the same lock as SI's compute, so a
+                # concurrent compute's temporary defaults cannot change this
+                # fraction's refractory window.
+                isi_params = {
+                    **get_default_quality_metrics_params()["isi_violation"],
+                    **(metric_kwargs.get("isi_violation") or {}),
+                }
             voltage_df = compute_quality_metrics(
                 display_analyzer,
                 metric_names=voltage_names,
@@ -1362,7 +1431,17 @@ def compute_metrics(
         "isi_violation" in metric_names
         and "isi_violations_count" in metrics_df.columns
     ):
-        counts = metrics_df["isi_violations_count"].to_numpy()
+        counts = metrics_df["isi_violations_count"].to_numpy(dtype=float).copy()
+        # Preserve SI failures as unavailable values for the rule-error checks;
+        # only successful units have their counts mapped to the source clock.
+        computed = np.isfinite(counts)
+        if computed.any():
+            counts[computed] = _source_clock_isi_counts(
+                display_analyzer,
+                metrics_df.index[computed],
+                float(isi_params["isi_threshold_ms"]) / 1000.0,
+                continuity_spans,
+            )
         n_by_unit = display_analyzer.sorting.count_num_spikes_per_unit()
         n_spikes = np.array(
             [n_by_unit[int(u)] for u in metrics_df.index], dtype=float
