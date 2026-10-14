@@ -222,6 +222,13 @@ class FigPackReview:
     def summary(self) -> str:
         """Identify displayed science, missing rule inputs, and the next action."""
         missing = self.evaluation.missing_qc_inputs()
+        next_action = (
+            "Use Curate Figure and Save Annotations, then run "
+            "review.commit_panel() in the notebook. "
+            if self.is_hosted
+            else "Use Preview and commit in the browser; Save draft keeps "
+            "unfinished edits. "
+        )
         return (
             f"Review {self.review_id}: sorting {self.parent.sorting_id}, "
             f"curation {self.parent.curation_id} ({self.parent.curation_uuid}); "
@@ -229,7 +236,7 @@ class FigPackReview:
             f"QC: {int(missing.ne('').sum())}/{len(missing)} units have "
             "unavailable rule inputs (not a quality pass).\n"
             f"Display: {self.display_options.describe()}.\n"
-            "Save the browser draft, then run review.commit_panel() in the notebook. "
+            f"{next_action}"
             "Pending merges do not update these metrics."
         )
 

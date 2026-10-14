@@ -262,6 +262,132 @@ def test_browser_edits_reach_annotations_and_survive_reload(
         assert "(1, 3)" in browser.row_texts(browser.unit_row(page, 1))[1]
 
 
+def test_keyboard_label_edits_preserve_focus(review_bundle, tmp_path):
+    """Space toggles labels and Tab continues through the curation controls."""
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
+
+    url = serve_review_bundle(review_bundle)
+    with browser.review_page(url, artifacts=tmp_path) as page:
+        browser.select_units(page, 3)
+        accept = browser.label_checkbox(page, "accept")
+        accept.focus()
+        page.keyboard.press("Space")
+        assert accept.is_checked()
+        assert accept.evaluate("node => node === document.activeElement")
+        page.keyboard.press("Tab")
+        mua = browser.label_checkbox(page, "mua")
+        assert mua.evaluate("node => node === document.activeElement")
+        page.keyboard.press("Space")
+        assert mua.is_checked()
+        assert mua.evaluate("node => node === document.activeElement")
+
+
+@pytest.mark.parametrize(
+    "failed_polls, delayed_initial_poll", [(1, False), (4, False), (0, True)]
+)
+def test_connected_review_recovers_polling_without_repeating_action(
+    review_bundle, tmp_path, failed_polls, delayed_initial_poll
+):
+    """Retry progress checks, keeping writes disabled until their result is known."""
+    from threading import Event
+
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
+
+    class Operations:
+        review_id = "browser-poll-recovery"
+
+        def __init__(self):
+            self.started = 0
+            self.current = {}
+            self.status_calls = 0
+            self.initial_poll_started = Event()
+            self.release_initial_poll = Event()
+
+        def start(self, request):
+            assert request["action"] == "preview"
+            self.started += 1
+            self.current = {
+                "status": "complete",
+                "action": "preview",
+                "operation_id": "preview-one",
+                "message": "Review the saved changes before committing.",
+                "preview": {
+                    "annotations_hash": "saved-draft",
+                    "summary": "No changes in this test draft.",
+                    "changed_units": [],
+                    "has_changes": False,
+                    "has_merges": False,
+                    "conflicts": [],
+                },
+            }
+            return {"status": "running", "operation_id": "preview-one"}
+
+        def status(self):
+            self.status_calls += 1
+            if delayed_initial_poll and self.status_calls == 1:
+                self.initial_poll_started.set()
+                self.release_initial_poll.wait(timeout=10)
+                return {}
+            return self.current
+
+        def close(self):
+            self.release_initial_poll.set()
+
+    operations = Operations()
+    url = serve_review_bundle(
+        review_bundle, operation_factory=lambda: operations
+    )
+    with browser.review_page(url, artifacts=tmp_path) as page:
+        browser.select_units(page, 3)
+        failed = []
+
+        def interrupt_poll(route):
+            if (
+                route.request.method == "GET"
+                and operations.started
+                and len(failed) < failed_polls
+            ):
+                failed.append(route.request.url)
+                route.abort("failed")
+            else:
+                route.continue_()
+
+        page.route("**/api/operation", interrupt_poll)
+        preview = page.get_by_role(
+            "button", name="Preview and commit", exact=True
+        )
+        if delayed_initial_poll:
+            assert operations.initial_poll_started.wait(timeout=5)
+        preview.click()
+        if delayed_initial_poll:
+            page.get_by_text(
+                "Preparing review operation…", exact=True
+            ).wait_for()
+        else:
+            page.get_by_text(
+                "Unable to check review progress.", exact=False
+            ).wait_for()
+        assert preview.is_disabled()
+        assert browser.label_checkbox(page, "accept").is_disabled()
+        operations.release_initial_poll.set()
+        if failed_polls == 4:
+            reconnect = page.get_by_role(
+                "button", name="Reconnect review", exact=True
+            )
+            reconnect.wait_for()
+            assert len(failed) == 4
+            assert preview.is_disabled()
+            assert browser.label_checkbox(page, "accept").is_disabled()
+            reconnect.click()
+        page.get_by_role(
+            "button", name="Record reviewed — no changes", exact=True
+        ).wait_for()
+        assert preview.is_enabled()
+        assert browser.label_checkbox(page, "accept").is_enabled()
+        assert len(failed) == failed_polls
+        assert operations.started == 1
+
+
 @pytest.mark.parametrize("n_units", [64, 256])
 def test_large_review_save_reload(n_units, tmp_path):
     """Measure actual browser interactions independently of sorter runtime."""

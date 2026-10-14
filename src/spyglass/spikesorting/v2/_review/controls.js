@@ -3,6 +3,7 @@
  * Hosted figures retain FigPack's authenticated annotation-saving toolbar.
  */
 const reviewSessions = new WeakMap();
+const maxAutomaticPollRetries = 3;
 window.figpack_p1.registerFPViewComponent({
   name: "spyglass.ReviewControls",
   render: async ({container, zarrGroup, contexts}) => {
@@ -18,7 +19,8 @@ window.figpack_p1.registerFPViewComponent({
     if (!session) {
       session = {saved: null, revision: null, conflict: false, saving: false, error: "", loaded: !local, render: () => {},
         connected: false, reviewId: null, operation: {}, preview: null,
-        resolutions: {}, start: "", stop: "", activeOperation: null};
+        resolutions: {}, start: "", stop: "", activeOperation: null,
+        pollFailures: 0, pollError: "", polling: false, pollAgain: false};
       reviewSessions.set(annotations, session);
       annotations.onChange(() => session.render());
       selection.onChange(() => session.render());
@@ -62,8 +64,9 @@ window.figpack_p1.registerFPViewComponent({
       parent.appendChild(node);
       return node;
     };
-    const button = (text, action, disabled) => {
+    const button = (text, action, disabled, controlKey = text) => {
       const node = element("button", text);
+      node.dataset.reviewControl = controlKey;
       node.style.margin = "4px 8px 4px 0";
       node.disabled = disabled;
       node.onclick = action;
@@ -97,17 +100,34 @@ window.figpack_p1.registerFPViewComponent({
       session.render();
     };
     const pollOperation = async () => {
+      if (session.polling) {
+        session.pollAgain = true;
+        return;
+      }
+      session.polling = true;
+      const activeOperation = session.activeOperation;
       try {
         const response = await fetch("api/operation", {cache: "no-store"});
         if (!response.ok) throw new Error("The Python review session is unavailable. Reopen review.open() to reconnect.");
         const operation = await response.json();
-        const changed = JSON.stringify(operation) !== JSON.stringify(session.operation);
+        session.polling = false;
+        // A newly submitted action can overtake the initial status request.
+        // Read again before allowing that older response to change its state.
+        if (session.pollAgain || activeOperation !== session.activeOperation) {
+          session.pollAgain = false;
+          await pollOperation();
+          return;
+        }
+        const operationChanged = JSON.stringify(operation) !== JSON.stringify(session.operation);
+        const needsRender = session.pollError !== "" || operationChanged;
+        session.pollFailures = 0;
+        session.pollError = "";
         session.operation = operation;
-        if (operation.status === "complete" && operation.action === "preview" && changed) {
+        if (operation.status === "complete" && operation.action === "preview" && operationChanged) {
           session.preview = operation.preview;
           session.resolutions = {};
         }
-        if (changed) session.render();
+        if (needsRender) session.render();
         if (operation.status === "running") {
           setTimeout(pollOperation, 600);
         } else if (operation.status === "complete" && operation.url &&
@@ -116,7 +136,16 @@ window.figpack_p1.registerFPViewComponent({
           session.activeOperation = null;
           window.location.assign(operation.url);
         }
-      } catch (error) { reportError(error); }
+      } catch (error) {
+        session.polling = false;
+        session.pollAgain = false;
+        session.pollFailures += 1;
+        const retry = session.pollFailures <= maxAutomaticPollRetries;
+        session.pollError = retry ? `Unable to check review progress. Retrying… ${error.message}` :
+          `Progress checks stopped after repeated connection failures. Use Reconnect review; if the Python session ended, run review.open() and open its returned URL. ${error.message}`;
+        if (retry) setTimeout(pollOperation, 600 * 2 ** (session.pollFailures - 1));
+        session.render();
+      }
     };
     const operate = async request => {
       try {
@@ -136,6 +165,8 @@ window.figpack_p1.registerFPViewComponent({
       } catch (error) { reportError(error); }
     };
     const render = () => {
+      const focused = container.contains(document.activeElement) ?
+        document.activeElement.dataset.reviewControl : null;
       container.replaceChildren();
       const busy = session.operation.status === "running";
       const editable = session.loaded && !busy && (local || state().editingAnnotations);
@@ -147,6 +178,7 @@ window.figpack_p1.registerFPViewComponent({
         wrapper.style.cssText = "display:inline-block;margin:8px 16px 8px 0";
         const checkbox = element("input", undefined, wrapper);
         checkbox.type = "checkbox";
+        checkbox.dataset.reviewControl = `label:${label}`;
         checkbox.disabled = !editable || !ids.length;
         const count = ids.filter(id => (curation().labelsByUnit?.[id] || []).includes(label)).length;
         checkbox.checked = !!ids.length && count === ids.length;
@@ -159,9 +191,10 @@ window.figpack_p1.registerFPViewComponent({
         !editable || !curation().mergeGroups?.some(group => group.some(id => ids.includes(id))));
       if (local) {
         button(session.saving ? "Saving draft…" : "Save draft", () => saveDraft().catch(reportError),
-          !session.loaded || session.saving || session.conflict || busy || payload() === session.saved);
+          !session.loaded || session.saving || session.conflict || busy || payload() === session.saved, "save-draft");
         if (session.conflict) {
           const link = element("a", "Open latest draft in a new tab");
+          link.dataset.reviewControl = "latest-draft";
           link.href = window.location.href;
           link.target = "_blank";
           link.rel = "noopener";
@@ -178,6 +211,7 @@ window.figpack_p1.registerFPViewComponent({
           input.step = "any";
           input.style.width = "90px";
           input.setAttribute("aria-label", name);
+          input.dataset.reviewControl = `inspection:${key}`;
           input.value = session[key];
           input.oninput = () => { session[key] = input.value; };
         }
@@ -210,6 +244,7 @@ window.figpack_p1.registerFPViewComponent({
               wrapper.style.marginRight = "12px";
               const box = element("input", undefined, wrapper);
               box.type = "checkbox";
+              box.dataset.reviewControl = `conflict:${conflict.merged_unit_id}:${label}`;
               box.checked = resolution.labels.includes(label);
               box.disabled = busy;
               box.onchange = () => {
@@ -222,6 +257,7 @@ window.figpack_p1.registerFPViewComponent({
             const wrapper = element("label");
             const confirmation = element("input", undefined, wrapper);
             confirmation.type = "checkbox";
+            confirmation.dataset.reviewControl = `confirm-conflict:${conflict.merged_unit_id}`;
             confirmation.checked = resolution.confirmed;
             confirmation.disabled = busy;
             confirmation.onchange = () => { resolution.confirmed = confirmation.checked; session.render(); };
@@ -231,11 +267,20 @@ window.figpack_p1.registerFPViewComponent({
             () => operate({action: "commit", annotations_hash: preview.annotations_hash,
               confirm_no_changes: !preview.has_changes,
               conflict_resolutions: Object.fromEntries(Object.entries(session.resolutions).map(([id, value]) => [id, value.labels]))}),
-            busy || session.saving || preview.conflicts.some(value => !session.resolutions[value.merged_unit_id]?.confirmed));
+            busy || session.saving || preview.conflicts.some(value => !session.resolutions[value.merged_unit_id]?.confirmed), "commit");
+        }
+        if (session.pollFailures > maxAutomaticPollRetries) {
+          button("Reconnect review", () => {
+            session.pollFailures = 0;
+            session.pollError = "Reconnecting review…";
+            session.render();
+            pollOperation();
+          }, session.polling);
         }
         if (session.operation.message) element("div", session.operation.message).setAttribute("role", "status");
         if (session.operation.status === "complete" && session.operation.url) {
           const link = element("a", session.operation.action === "inspect" ? "Open selected-unit inspection" : "Continue review");
+          link.dataset.reviewControl = "operation-destination";
           link.href = session.operation.url;
           if (session.operation.action === "inspect") { link.target = "_blank"; link.rel = "noopener"; }
         }
@@ -243,7 +288,7 @@ window.figpack_p1.registerFPViewComponent({
           element("div", "Ready for analysis. In Python: final_curation = review.result()");
         }
       }
-      const status = element("div", session.error || (!session.loaded ? "Loading saved draft…" : local ?
+      const status = element("div", session.error || session.pollError || (!session.loaded ? "Loading saved draft…" : local ?
         (payload() === session.saved ? (session.connected ? "Draft saved. Preview and commit when ready." : "Draft saved. Commit in the notebook to create a Spyglass curation.") :
           "Unsaved draft — Save draft or Preview and commit.") :
         "Use Curate Figure, then Save Annotations in the toolbar to save a draft. Commit in the notebook."));
@@ -251,6 +296,10 @@ window.figpack_p1.registerFPViewComponent({
       if (curation().mergeGroups?.length) element("div",
         "Pending merges: displayed waveforms and metrics still describe the original units. Commit and inspect the reevaluated result.");
       if (!session.connected) element("div", "Next: review.commit_panel() previews saved edits and records your review.");
+      if (focused) {
+        [...container.querySelectorAll("[data-review-control]")].find(node =>
+          node.dataset.reviewControl === focused)?.focus({preventScroll: true});
+      }
     };
     if (firstMount) {
       const focus = new URLSearchParams(window.location.search).get("spyglass_units");
