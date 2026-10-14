@@ -172,6 +172,7 @@ class NwbfileHasher:
         keep_obj_hash: bool = False,
         keep_file_open: bool = False,
         object_ids: bool = False,
+        max_dataset_bytes: Optional[int] = None,
         verbose: bool = False,
         legacy_mode: bool = False,
     ):
@@ -218,6 +219,12 @@ class NwbfileHasher:
             "did the objects this table read change?" without re-parsing.
             Implies `keep_obj_hash`. Default False, and additive: `hash` is
             byte-for-byte unchanged either way.
+        max_dataset_bytes : int, optional
+            Hash at most this many bytes of any one dataset -- a head and a
+            tail of that combined size, with shape and dtype as always.
+            Default None, hashing every dataset whole. `hash` is None for a
+            file that had any dataset bounded, since it is then not the file's
+            hash; `obj_ids` and `id_set_digest` are unaffected.
 
         Notes
         -----
@@ -226,6 +233,10 @@ class NwbfileHasher:
         datasets named `version` or `source_script` have their contents
         skipped anywhere in the file. A change confined to those is invisible
         here, as it is to `hash`.
+
+        `max_dataset_bytes` adds one more: an edit inside a bounded dataset
+        that preserves its shape and falls between the head and the tail.
+        `bounded` names those datasets.
         """
         if not legacy_mode:
             _require_h5py_v3()
@@ -246,10 +257,16 @@ class NwbfileHasher:
         # The index is built from self.objs, so it needs the cache kept.
         self.keep_obj_hash = keep_obj_hash or object_ids
         self.object_ids = object_ids
+        self.max_dataset_bytes = max_dataset_bytes
+        self.bounded = []  # datasets `_spans` read only part of
         self.objs = {}
         self.obj_ids = {}
         self.hashed = md5("".encode())
-        self.hash = self.compute_hash()
+
+        digest = self.compute_hash()
+        # `hash` is stored provenance elsewhere, so a partial read must not
+        # pass as it. None rather than a flag the caller can forget to check.
+        self.hash = None if self.bounded else digest
 
         if object_ids:  # before cleanup: reading attrs needs the open file
             # Links first: they add objects the traversal cannot reach, and
@@ -643,22 +660,54 @@ class NwbfileHasher:
         # Hoist dtype check: dataset.dtype is constant across chunks.
         is_numeric = np.issubdtype(dataset.dtype, np.number)
 
-        size = dataset.shape[0]
-        start = 0
+        for start, stop in self._spans(dataset):
+            while start < stop:
+                end = min(start + self.batch_size, stop)
+                data = self._normalize_h5str(dataset[start:end])
+                start = end
 
-        while start < size:
-            end = min(start + self.batch_size, size)
-            data = self._normalize_h5str(dataset[start:end])
-            start = end
-
-            if precision and is_numeric:
-                data = np.round(data, precision)
-            if is_numeric:
-                this_hash.update(self._numeric_array_bytes(data))
-            else:
-                this_hash.update(self.serialize_attr_value(data))
+                if precision and is_numeric:
+                    data = np.round(data, precision)
+                if is_numeric:
+                    this_hash.update(self._numeric_array_bytes(data))
+                else:
+                    this_hash.update(self.serialize_attr_value(data))
 
         return this_hash.hexdigest()
+
+    def _spans(self, dataset: h5py.Dataset):
+        """Return the row ranges of a dataset to hash, as `[(start, stop)]`.
+
+        The whole dataset unless `max_dataset_bytes` is set and this one
+        exceeds it, in which case a head and a tail of that combined size --
+        but never fewer than one row from each end, so a dataset whose single
+        row is larger than the cap still contributes its contents.
+
+        Parameters
+        ----------
+        dataset : h5py.Dataset
+            A dataset with at least one dimension.
+
+        Returns
+        -------
+        list of tuple of int
+        """
+        size = dataset.shape[0]
+
+        if self.max_dataset_bytes is None:
+            return [(0, size)]
+
+        row_bytes = dataset.dtype.itemsize * int(
+            np.prod(dataset.shape[1:], dtype=np.int64)
+        )
+        limit = max(2, self.max_dataset_bytes // max(1, row_bytes))
+
+        if size <= limit:
+            return [(0, size)]
+
+        self.bounded.append(dataset.name)
+        half = limit // 2
+        return [(0, half), (size - half, size)]
 
     def hash_shape_dtype(self, obj: Union[h5py.Dataset, np.ndarray]) -> str:
         if not hasattr(obj, "shape") or not hasattr(obj, "dtype"):

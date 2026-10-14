@@ -54,3 +54,43 @@ def test_set_lfp_electrodes(mini_insert, common_ephys, mini_copy_name):
 @pytest.mark.skip(reason="Not testing V0: common lfp")
 def test_lfp():
     pass
+
+
+def test_one_rate_estimate_serves_the_whole_mapping(
+    common_ephys, mini_copy_name, mini_path, monkeypatch
+):
+    """`sampling_rate` and `valid_times` share one rate estimate.
+
+    `table_key_to_obj_attr` maps `sampling_rate` to `_rate_fallback` and
+    `valid_times` to `_valid_times_from_raw`, which needs the rate too. Each
+    estimate reads a million timestamps off disk, so without the memo the
+    mapping paid for two.
+    """
+    import pynwb
+
+    import spyglass.common.common_ephys as ce
+
+    calls = []
+    original = ce.estimate_sampling_rate
+
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ce, "estimate_sampling_rate", counted)
+
+    copy = mini_path.parent / mini_copy_name
+    with pynwb.NWBHDF5IO(str(copy), mode="r", load_namespaces=True) as io:
+        eseries = io.read().acquisition["e-series"]
+        entries = common_ephys.Raw()._entries_from_mapping(
+            eseries, {"nwb_file_name": mini_copy_name}
+        )
+
+    key = next(iter(entries.values()))[0]
+
+    assert len(calls) == 1, (
+        f"One mapping should estimate the rate once; it ran {len(calls)} "
+        "times -- the memo is not firing"
+    )
+    assert key["sampling_rate"], "The rate still reaches the key"
+    assert len(key["valid_times"]), "And valid_times still computes"

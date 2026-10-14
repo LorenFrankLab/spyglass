@@ -293,16 +293,27 @@ class Raw(SpyglassIngestion, dj.Imported):
         }
 
     def _rate_fallback(self, nwb_object):
-        """Return the rate if available, otherwise None."""
+        """Return the object's rate, estimating it from timestamps if absent."""
         rate = getattr(nwb_object, "rate", None)
         if rate is not None:
             return rate
+
+        # `_valid_times_from_raw` needs this too, and estimating reads a
+        # million timestamps off disk. Compared by identity against a held
+        # reference, so a recycled `id()` cannot serve another object's rate.
+        memo = getattr(self, "_rate_memo", None)
+        if memo is not None and memo[0] is nwb_object:
+            return memo[1]
+
         timestamps = getattr(nwb_object, "timestamps", None)
         if timestamps is None:
             raise ValueError("Neither rate nor timestamps are available.")
-        return estimate_sampling_rate(
+
+        estimated = estimate_sampling_rate(
             np.asarray(timestamps[: int(1e6)]), 1.5, verbose=not self._test_mode
         )
+        self._rate_memo = (nwb_object, estimated)
+        return estimated
 
     def _valid_times_from_raw(self, nwb_object):
         """Return valid times from the raw data."""

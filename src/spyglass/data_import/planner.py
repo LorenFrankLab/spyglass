@@ -25,6 +25,11 @@ from spyglass.utils.ingestion_plan import (
 )
 from spyglass.utils.logging import logger
 
+# Per-dataset ceiling on what a plan's read-set digests hash. Large enough to
+# bound only datasets no metadata edit could produce, so an ordinary file's
+# digests are unaffected by it.
+PLAN_DATASET_BYTES = 64 << 20
+
 
 def stored_keys(table, restriction=True) -> Optional[set]:
     """Return the primary keys a table holds, within `restriction`.
@@ -317,10 +322,9 @@ def plan_nwbfile(
 
     # One hashing pass over the file yields a digest per object, so each
     # table's read-set can be fingerprinted without re-reading anything.
-    # Roughly 14x cheaper than parsing the same file, so it earns its place
-    # even when nothing turns out to be reusable.
     hasher = _object_hasher(nwb_file_name, nwb_path, registered)
     if hasher is not None:
+        # None whenever a dataset was bounded; the column is provenance only.
         nwb_hash = hasher.hash
         id_set_digest = hasher.id_set_digest
 
@@ -658,7 +662,9 @@ def _object_hasher(
         nwb_path = Nwbfile.get_abs_path(nwb_file_name)
 
     try:
-        return NwbfileHasher(nwb_path, object_ids=True)
+        return NwbfileHasher(
+            nwb_path, object_ids=True, max_dataset_bytes=PLAN_DATASET_BYTES
+        )
     except Exception as err:  # unreadable, or a dtype the hasher chokes on
         logger.debug(f"Read-set digests unavailable for {nwb_file_name}: {err}")
         return None

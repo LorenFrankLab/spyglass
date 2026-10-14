@@ -72,9 +72,8 @@ def insert_sessions(
         exactly one file.
     raise_err : bool, optional
         Raise once every file has been planned, if any of them blocked.
-        Default False, returning the plans for the caller to test. A blocked
-        file never stops the ones after it either way, and a dry run never
-        raises -- its whole job is to report.
+        Default False, returning the plans for the caller to test. A dry run
+        never raises.
     reinsert : bool, optional
         If True and the nwb file already exists in the Nwbfile table,
         reinsert the data. Default is False.
@@ -194,9 +193,8 @@ def insert_sessions(
         Nwbfile().insert_from_relative_file_name(out_nwb_file_name)
         results.append(populate_all_common(out_nwb_file_name))
 
-    # The only raise in the ingest path; everything below reports through the
-    # plan. After the loop, so a list is fully reported before it stops, and
-    # never on a dry run -- reporting without raising is what that is for.
+    # After the loop, so a list is fully reported before it stops. Never on a
+    # dry run -- reporting without raising is what that is for.
     if raise_err and not dry_run and (blocked := [p for p in results if p]):
         raise ValueError(
             f"Ingestion did not complete for {len(blocked)} file(s):\n"

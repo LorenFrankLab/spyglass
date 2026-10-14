@@ -405,3 +405,104 @@ def test_a_change_to_the_link_target_moves_the_digest(
         # Restored however the test ends: the corpus is shared, and a stray
         # mtime would invalidate these digests for every later test.
         os.utime(mini_path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+
+
+def test_the_plan_cap_is_inert_on_the_copy_a_plan_hashes(mini_copy_path):
+    """`PLAN_DATASET_BYTES` bounds nothing in an NWB copy.
+
+    The property the production win rests on: the cap bites multi-GB datasets
+    and nothing else, so an ordinary file's digests -- and its stored hash --
+    are unaffected by it being set. The copy is the file a plan hashes; the
+    raw file is the next test.
+    """
+    from spyglass.data_import.planner import PLAN_DATASET_BYTES
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    plain = NwbfileHasher(mini_copy_path, object_ids=True)
+    capped = NwbfileHasher(
+        mini_copy_path, object_ids=True, max_dataset_bytes=PLAN_DATASET_BYTES
+    )
+
+    assert not capped.bounded, "No dataset in the copy reaches the cap"
+    assert capped.hash == plain.hash, (
+        "A cap that bounded nothing read the whole file, so the hash is still "
+        "the file's"
+    )
+    assert capped.obj_ids == plain.obj_ids, "Every object digest is unchanged"
+
+
+def test_the_plan_cap_bounds_raw_ephys(mini_path):
+    """A raw file's ephys *is* over the cap, and that is the intended bite.
+
+    Only `insert_sessions(dry_run=True)` on an unregistered file hashes a raw
+    file; every other plan hashes the copy, where the same data is an external
+    link and was never content-hashed anyway. So the cap costs a dry-run
+    report the ability to notice an in-place, shape-preserving edit to raw
+    ephys -- which is not what a dry run is read for.
+    """
+    from spyglass.data_import.planner import PLAN_DATASET_BYTES
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    capped = NwbfileHasher(
+        mini_path, object_ids=True, max_dataset_bytes=PLAN_DATASET_BYTES
+    )
+
+    assert any(
+        "e-series" in path for path in capped.bounded
+    ), f"Expected raw ephys to be bounded; bounded {capped.bounded}"
+
+
+def test_a_bounded_hash_refuses_to_pass_as_the_file_hash(mini_path):
+    """`hash` is None once anything was bounded.
+
+    `NwbfileHasher.hash` is stored provenance in `SpikeSortingRecording`. A
+    bounded run read part of the file, so handing back a digest that looks
+    like the file's would be silently wrong -- the reuse digests it exists to
+    build are still valid, and `id_set_digest` is untouched.
+    """
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    full = NwbfileHasher(mini_path, object_ids=True)
+    # 64 bytes bounds essentially every dataset, which is the point: the
+    # assertion is about what a bounded run reports, not about any one cap.
+    bounded = NwbfileHasher(mini_path, object_ids=True, max_dataset_bytes=64)
+
+    assert bounded.bounded, "A 64-byte cap must bound something"
+    assert bounded.hash is None, "A partial read must not pass as the hash"
+    assert full.hash is not None, "An unbounded run still reports one"
+    assert (
+        bounded.id_set_digest == full.id_set_digest
+    ), "Bounding contents must not change which objects the file holds"
+
+
+def test_a_bounded_dataset_still_notices_a_shape_change(mini_path, tmp_path):
+    """Shape and dtype are hashed whatever the cap, so a resize is caught.
+
+    What the cap gives up is narrower than it looks: an edit has to preserve
+    the dataset's shape *and* miss both the head and the tail to go unseen.
+    """
+    import shutil
+
+    import h5py
+    import numpy as np
+
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    copy = tmp_path / "copy_.nwb"
+    shutil.copy2(mini_path, copy)
+
+    # `objs` is keyed by the `visititems` name, which carries no leading slash
+    # -- unlike `bounded`, which records `dataset.name`.
+    path = "acquisition/e-series/timestamps"
+    before = NwbfileHasher(copy, object_ids=True, max_dataset_bytes=64)
+
+    with h5py.File(copy, "r+") as file:
+        data = file[path][:]
+        del file[path]
+        file[path] = np.concatenate([data, data[-1:]])
+
+    after = NwbfileHasher(copy, object_ids=True, max_dataset_bytes=64)
+
+    assert (
+        before.objs[path][1] != after.objs[path][1]
+    ), "A resized dataset must hash differently however tight the cap"

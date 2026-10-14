@@ -224,13 +224,8 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     ) -> dict:
         """Return everything staged for a file, in three queries.
 
-        Per-table reuse asks the same two questions of every table -- what was
-        this table's read-set digest, and what did it plan -- and asking them
-        one table at a time cost two round trips each. Measured on the mini
-        file, that made "reuse" 41% *slower* than re-parsing an already-open
-        file: ~36 tables x 2 queries beat parsing 216 entries out of memory.
-        So both questions are answered once, for the whole file, and the
-        per-table check becomes a dict lookup.
+        Three for the whole file, never two per table: asking per table made
+        reuse slower than re-parsing.
 
         Parameters
         ----------
