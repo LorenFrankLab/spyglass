@@ -1041,15 +1041,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             Channels of the corrected recording to show in the trace panel.
             Defaults to the four nearest the middle of the probe's depth.
 
-        Masked-interval and trace-window times inside a continuity span
-        are placed through that span's affine map from frames to its real
-        extent (:func:`._motion_report.source_time_of_frames`), so they are
-        approximate up to the timestamps' own jitter; span starts and ends
-        are exact.
-
-        Each call opens a new figure: close it (``plt.close(fig)``) when
-        reporting many estimates in a loop.
-
         Returns
         -------
         matplotlib.figure.Figure
@@ -1065,6 +1056,16 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             If ``trace_window_s`` is given without ``corrected_key`` or
             selects no frame, if the corrected recording was made from
             another estimate, or if a trace channel is not in it.
+
+        Notes
+        -----
+        Masked-interval and trace-window times inside a continuity span
+        are placed through that span's affine map from frames to its real
+        extent, so they are approximate up to the timestamps' own jitter;
+        span starts and ends are exact.
+
+        Each call opens a new figure: close it (``plt.close(fig)``) when
+        reporting many estimates in a loop.
         """
         return _motion_report_inputs.motion_estimate_report(
             self,

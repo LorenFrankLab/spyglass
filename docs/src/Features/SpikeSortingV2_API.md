@@ -19,10 +19,9 @@ the [Quickstart](./SpikeSortingV2_Quickstart.md), the full
     unless this page lists it. The same goes for the `*Fetched` / `*Computed`
     classes in the table modules: they carry data between a table's
     `make_fetch`, `make_compute`, and `make_insert` steps and are not called
-    directly.
-    Implementations live in private domain packages directly under `v2`, such
-    as `_recording`, `_sorting`, and `_review`, with short module names inside
-    each package. Parameter models live under `_params`; see the
+    directly. Implementations live in private domain packages directly under
+    `v2`, such as `_recording`, `_sorting`, and `_review`, with short module
+    names inside each package. Parameter models live under `_params`; see the
     [developer architecture map](../ForDevelopers/SpikeSortingV2Architecture.md).
 - **Where to start:** most work needs only the package root, the `pipeline`
     facade, and the curation/review handles. Reach for the table classes when
@@ -136,15 +135,31 @@ two reference classes without importing the annotation tables.
 | `select_units_for_analysis`                                           | `spyglass.spikesorting.v2.pipeline`        | The supported handoff: apply a label policy to a curation and build the `SortedSpikesGroup` downstream analyses read. Returns a `UnitSelectionReceipt`. |
 | `UnitSelectionReceipt`, `SelectedGroup`, `V2_UNIT_SELECTION_POLICIES` | `spyglass.spikesorting.v2.pipeline`        | The handoff receipt (`describe`, `fetch_spike_data`, `group_key`), one created group, and the shipped policies.                                         |
 | `SpikeSortingOutput`                                                  | `spyglass.spikesorting.spikesorting_merge` | The merge table v2 curations register on: `get_spike_times`, `get_recording`, `get_sorting`, `get_unit_brain_regions`, ...                              |
-| `get_spike_sorting_v2_merge_ids`                                      | `spyglass.spikesorting.v2.curation_api`     | Resolve the merge ids of v2 curations matching a restriction.                                                                                           |
+| `get_spike_sorting_v2_merge_ids`                                      | `spyglass.spikesorting.v2.curation_api`    | Resolve the merge ids of v2 curations matching a restriction.                                                                                           |
 
 ## Other helpers
 
-| Name                                                            | Import from                                 | Use for                                                                                               |
-| --------------------------------------------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `suggest_bad_channels`                                          | `spyglass.spikesorting.v2.bad_channels`     | Suggest a session's bad channels for review, and optionally persist the reviewed report.              |
-| `detect_bad_channels`                                           | `spyglass.spikesorting.v2.bad_channels`     | Lower-level detection on a filtered SpikeInterface recording: bad channel ids and per-channel labels. |
-| Exception classes (e.g. `PipelineStageError`, `PreflightError`) | `spyglass.spikesorting.v2.exceptions`       | Catch specific v2 failures.                                                                           |
+| Name                                                            | Import from                             | Use for                                                                                               |
+| --------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `suggest_bad_channels`                                          | `spyglass.spikesorting.v2.bad_channels` | Suggest a session's bad channels for review, and optionally persist the reviewed report.              |
+| `detect_bad_channels`                                           | `spyglass.spikesorting.v2.bad_channels` | Lower-level detection on a filtered SpikeInterface recording: bad channel ids and per-channel labels. |
+| Exception classes (e.g. `PipelineStageError`, `PreflightError`) | `spyglass.spikesorting.v2.exceptions`   | Catch specific v2 failures.                                                                           |
+
+### Custom unit matchers
+
+`from spyglass.spikesorting.v2.matcher_protocol import ...`
+
+| Name                                                                 | Use for                                                                                                    |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `register_matcher`, `get_matcher`, `get_input_preparer`              | Register a backend and parameter schema with an optional input preparer; inspect the registered producers. |
+| `MatcherProtocol`, `MatchPair`, `SessionMatcherInput`                | Define the backend contract, returned pairs, and prepared input bundles.                                   |
+| `MatcherInputPreparer`, `MatcherInputSource`, `PreparedMatcherInput` | Prepare a backend's bundle layout from resolved recordings and curated units.                              |
+| `MatcherGeometryValidator`, `MatcherProvenanceProvider`              | Declare optional geometry requirements and model or feature fingerprints.                                  |
+
+See
+[Cross-session unit tracking](./SpikeSortingV2.md#cross-session-unit-tracking)
+for registration, input identity, and layout requirements. Register the backend
+in each worker process before inserting its parameters or populating its runs.
 
 ## Tables
 
@@ -173,6 +188,6 @@ with `attempt_all` instead. Parameter tables provide `insert_default()`. See
 artifact-detection tables; `SortingSelection` resolves it for you, so user code
 does not need it.
 
-The remaining public names in the table modules -- insert guards,
-integrity audits, and helpers the tables call while computing -- support the
-tables themselves and are not entry points.
+The remaining public names in the table modules -- insert guards, integrity
+audits, and helpers the tables call while computing -- support the tables
+themselves and are not entry points.
