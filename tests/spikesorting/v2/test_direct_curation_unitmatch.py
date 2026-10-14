@@ -294,8 +294,35 @@ def test_preflight_blocks_missing_assets_without_a_geometry_hook(
                 "missing its local NWB artifact" in error
                 for error in report.errors
             )
+            blocked_plan = plan_v2_unit_match_from_curations(
+                refs,
+                unit_policy="v2_unflagged_units",
+                matcher_params_name=params_name,
+            )
+            assert not blocked_plan.ok
+            assert not path.exists()
+
+            # The user restores the original artifact, then reviews a new
+            # plan. Historical missing-file findings must not keep fresh
+            # preflight blocked or change the frozen source/population.
+            held.rename(path)
+            repaired_report = preflight_v2_unit_match(blocked_plan)
+            assert repaired_report.ok, repaired_report.errors
+            repaired_plan = plan_v2_unit_match_from_curations(
+                refs,
+                unit_policy="v2_unflagged_units",
+                matcher_params_name=params_name,
+            )
+            assert repaired_plan.ok, repaired_plan.errors
+            assert repaired_plan.input_set_hash == plan.input_set_hash
+            assert [
+                selection.selection_hash
+                for selection in repaired_plan.unit_selections
+            ] == [
+                selection.selection_hash for selection in plan.unit_selections
+            ]
         assert _selection_count() == before
-        assert not path.exists()
+        assert path.exists()
     finally:
         if held.exists():
             held.rename(path)
@@ -474,8 +501,19 @@ def test_worker_refuses_forged_snapshot_before_artifact_access(
 
 
 @pytest.mark.pipeline
-def test_direct_daily_curation_pins_and_population_reach_match_artifact(
-    daily_concat_match_inputs, monkeypatch
+@pytest.mark.parametrize(
+    "input_names, expected_unit_ids",
+    [
+        pytest.param(
+            ("concat_day1", "concat_day2"), (0, 3), id="daily-concatenations"
+        ),
+        pytest.param(
+            ("single_a_first", "single_b"), (0, 0), id="standalone-recordings"
+        ),
+    ],
+)
+def test_direct_reviewed_curation_populations_reach_match_artifact(
+    daily_concat_match_inputs, monkeypatch, input_names, expected_unit_ids
 ):
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.curation_api import CurationRef
@@ -496,7 +534,7 @@ def test_direct_daily_curation_pins_and_population_reach_match_artifact(
 
     roots = daily_concat_match_inputs["curations"]
     chosen = []
-    for name in ("concat_day1", "concat_day2"):
+    for name in input_names:
         root = roots[name]
         units = (CurationV2.Unit & root).fetch("unit_id")
         child = CurationV2.insert_curation(
@@ -520,12 +558,12 @@ def test_direct_daily_curation_pins_and_population_reach_match_artifact(
         for ref, evaluation in zip(chosen, evaluations, strict=True)
     ]
     seen = []
-    params_name = "direct_daily_population_params"
+    params_name = "direct_reviewed_population_params"
     saved = install_fixture_pairer(
         monkeypatch,
-        matcher_name="direct_daily_population_pairer",
+        matcher_name="reviewed_population_pairer",
         matcher_params_name=params_name,
-        pairs=[[0, 3]],
+        pairs=[list(expected_unit_ids)],
         seen_unit_ids=seen,
     )
     selection_key = None
@@ -538,9 +576,9 @@ def test_direct_daily_curation_pins_and_population_reach_match_artifact(
         assert plan.ok, plan.errors
         # A different terminal branch must not replace an explicitly reviewed pin.
         CurationV2.insert_curation(
-            {"sorting_id": roots["concat_day1"]["sorting_id"]},
-            parent_curation_id=roots["concat_day1"]["curation_id"],
-            labels={0: ["reject"]},
+            {"sorting_id": roots[input_names[0]]["sorting_id"]},
+            parent_curation_id=roots[input_names[0]]["curation_id"],
+            labels={expected_unit_ids[0]: ["reject"]},
             description="unselected terminal branch",
         )
         result = run_v2_unit_match(plan)
@@ -553,8 +591,8 @@ def test_direct_daily_curation_pins_and_population_reach_match_artifact(
         ]
         assert [
             row["selection_snapshot"]["included_unit_ids"] for row in rows
-        ] == [[0], [3]]
-        assert seen == [[0], [3]]
+        ] == [[unit] for unit in expected_unit_ids]
+        assert seen == [[unit] for unit in expected_unit_ids]
         assert len(UnitMatch.Pair & selection_key) == 1
         db_inputs, _ = UnitMatch().get_input_provenance(selection_key)
         nwb_inputs, _ = UnitMatch().get_input_provenance(
