@@ -23,6 +23,7 @@ pinned; this module is only the layer that assembles the pins.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -31,6 +32,10 @@ from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
 
 if TYPE_CHECKING:
     import pandas as pd
+
+    from spyglass.spikesorting.v2._matching.preflight import (
+        UnitMatchPreflightReport,
+    )
 
 # Every curation strategy is an explicit declaration of intent; there is
 # deliberately no default (an implicit "latest" is exactly what pinning
@@ -74,6 +79,61 @@ _INPUT_PLAN_COLUMNS = (
     "curation_uuid",
     "status",
 )
+_ELIGIBILITY_PLAN_COLUMNS = (
+    "input_index",
+    "unit_policy",
+    "included_unit_ids",
+    "excluded_units",
+    "n_included_units",
+    "n_excluded_units",
+    "selection_hash",
+    "preflight_status",
+    "checks",
+    "motion_corrected_recording_id",
+    "waveform_traces",
+    "source_coverage",
+)
+
+
+def _plan_summary(plan) -> str:
+    """Describe reviewed pins, frozen eligibility, and outstanding fixes."""
+    rows = plan.as_dataframe()
+    state = (
+        "ready"
+        if plan.ok and plan.preflight is not None
+        else "pinned" if plan.ok else "blocked"
+    )
+    lines = [
+        f"Unit-match plan {state}: "
+        f"{plan.matcher_params_name}; unit policy {plan.unit_policy!r}.",
+        f"Pinned inputs: {len(plan.curations) if isinstance(plan, UnitMatchInputPlan) else len(plan.curation_choices)} "
+        f"of {len(rows)} requested; curation strategy {plan.curation_strategy!r}.",
+    ]
+    for row in plan.rows:
+        included = row.get("included_unit_ids")
+        verdict = (
+            f"{len(included)} included, {len(row.get('excluded_units', {}))} excluded"
+            if included is not None
+            else "eligibility not resolved"
+        )
+        lines.append(
+            f"  sorting {row.get('sorting_id')}, curation "
+            f"{row.get('curation_id')} ({row.get('curation_uuid')}): {verdict}."
+        )
+    lines.extend(f"Warning: {value}" for value in plan.warnings)
+    lines.extend(f"Fix: {value}" for value in plan.errors)
+    if plan.preflight is None:
+        lines.append("Source/frame, geometry, and backend checks have not run.")
+    elif plan.ok:
+        lines.append(
+            "Next: run_v2_unit_match(plan); inputs are revalidated before writes."
+        )
+    elif any(check.status == "not_run" for check in plan.preflight.checks):
+        lines.append(
+            "Some prerequisites were not run; inspect plan.preflight.as_dataframe(), "
+            "repair the findings, and rebuild the plan."
+        )
+    return "\n".join(lines)
 
 
 def member_choices_to_dataframe(members: list[dict]) -> "pd.DataFrame":
@@ -126,6 +186,10 @@ class UnitMatchPlan:
     ``ok`` is then ``False`` and running the plan raises. ``warnings`` are
     advisory (e.g. the ``root`` curation strategy pins uncurated curations).
     ``as_dataframe()`` renders one row per member for review.
+    Public planners also freeze ``unit_selections`` and attach a read-only
+    ``preflight`` report plus ``input_set_hash``. The table exposes policy,
+    included IDs, excluded reasons, and original recording source coverage;
+    the runner revalidates those inputs before inserting a selection.
     """
 
     session_group_owner: str
@@ -136,6 +200,11 @@ class UnitMatchPlan:
     rows: list[dict[str, Any]]
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    curation_resolution_errors: tuple[str, ...] = ()
+    unit_policy: str = "v2_unflagged_units"
+    unit_selections: tuple[Any, ...] = ()
+    input_set_hash: str | None = None
+    preflight: UnitMatchPreflightReport | None = None
 
     @property
     def ok(self) -> bool:
@@ -149,17 +218,28 @@ class UnitMatchPlan:
         """One row per member (``member_index`` order) for notebook review."""
         import pandas as pd
 
-        return pd.DataFrame(
-            self.rows,
-            columns=[
-                "member_index",
-                "nwb_file_name",
-                "sorting_id",
-                "curation_id",
-                "curation_uuid",
-                "status",
-            ],
+        columns = [
+            "member_index",
+            "nwb_file_name",
+            "sorting_id",
+            "curation_id",
+            "curation_uuid",
+            "status",
+        ]
+        if self.preflight is not None:
+            columns.extend(_ELIGIBILITY_PLAN_COLUMNS)
+        frame = pd.DataFrame(
+            deepcopy(self.rows),
+            columns=columns,
         )
+        for column in ("curation_id", "member_index", "input_index"):
+            if column in frame:
+                frame[column] = frame[column].astype("Int64")
+        return frame
+
+    def summary(self) -> str:
+        """Show generation pins, eligibility, advisories, and the next action."""
+        return _plan_summary(self)
 
 
 @dataclass
@@ -175,7 +255,12 @@ class UnitMatchInputPlan:
     which numbers the inputs chronologically. ``errors`` (blocking) is
     non-empty when the curation strategy could not pin exactly one curation
     for some sort; ``ok`` is then ``False`` and running the plan raises.
-    ``warnings`` are advisory. ``as_dataframe()`` renders one row per input.
+    ``warnings`` are advisory. Public planners additionally freeze named unit
+    populations and validate sources/frames, overlap, geometry, and backend
+    prerequisites; these findings also contribute to ``errors``. The
+    ``as_dataframe()`` table uses canonical chronological ``input_index`` order
+    after preflight, while ``curations`` and ``unit_selections`` stay aligned in
+    the supplied order. Pure curation-choice builders retain the named order.
     """
 
     matcher_params_name: str
@@ -184,6 +269,11 @@ class UnitMatchInputPlan:
     rows: list[dict[str, Any]]
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    curation_resolution_errors: tuple[str, ...] = ()
+    unit_policy: str = "v2_unflagged_units"
+    unit_selections: tuple[Any, ...] = ()
+    input_set_hash: str | None = None
+    preflight: UnitMatchPreflightReport | None = None
 
     @property
     def ok(self) -> bool:
@@ -194,10 +284,87 @@ class UnitMatchInputPlan:
         return self.ok
 
     def as_dataframe(self):
-        """One row per matching input (in the order named) for review."""
+        """Review inputs and defensive coverage copies in planned input order."""
         import pandas as pd
 
-        return pd.DataFrame(self.rows, columns=list(_INPUT_PLAN_COLUMNS))
+        columns = list(_INPUT_PLAN_COLUMNS)
+        if self.preflight is not None:
+            columns.extend(_ELIGIBILITY_PLAN_COLUMNS)
+        frame = pd.DataFrame(deepcopy(self.rows), columns=columns)
+        for column in ("curation_id", "member_index", "input_index"):
+            if column in frame:
+                frame[column] = frame[column].astype("Int64")
+        return frame
+
+    def summary(self) -> str:
+        """Show generation pins, eligibility, advisories, and the next action."""
+        return _plan_summary(self)
+
+
+def _reviewed_pin(row) -> tuple[str, int, str]:
+    """Normalize a generation pin without querying its curation."""
+    if any(
+        row.get(name) is None
+        for name in ("sorting_id", "curation_id", "curation_uuid")
+    ):
+        raise ValueError("a sorting, curation ID, or generation pin is missing")
+    return (
+        str(row["sorting_id"]),
+        lossless_int(row["curation_id"], "curation_id"),
+        str(UUID(str(row["curation_uuid"]))),
+    )
+
+
+def unit_match_plan_structure_errors(plan) -> list[str]:
+    """Check original requested inputs and mutable review rows before DB work.
+
+    Strategy resolution errors are distinct from historical resource findings:
+    restoring a missing cache can fix the latter, while choosing a previously
+    unresolved curation requires a rebuilt, reviewed set of generation pins.
+    """
+    errors = list(plan.curation_resolution_errors)
+    declared = bool(errors)
+    reviewed = []
+    for row in plan.rows:
+        try:
+            if row.get("status") == "UNRESOLVED":
+                raise ValueError("its requested curation is unresolved")
+            pin = _reviewed_pin(row)
+            index = (
+                lossless_int(row["member_index"], "member_index")
+                if isinstance(plan, UnitMatchPlan)
+                else None
+            )
+            reviewed.append((index, pin))
+        except (ValueError, TypeError, KeyError) as exc:
+            if not declared:
+                errors.append(
+                    f"Requested matching input {row.get('member_index', row.get('sorting_id'))} "
+                    f"is unresolved or invalid ({exc}); resolve it and rebuild the plan."
+                )
+    try:
+        pinned = (
+            [
+                (lossless_int(index, "member_index"), _reviewed_pin(pin))
+                for index, pin in plan.curation_choices.items()
+            ]
+            if isinstance(plan, UnitMatchPlan)
+            else [(None, _reviewed_pin(pin)) for pin in plan.curations]
+        )
+        if len(pinned) != len(reviewed) or set(pinned) != set(reviewed):
+            errors.append(
+                "Pinned curations no longer exactly match the requested review rows; "
+                "rebuild and review the plan before matching."
+            )
+        elif len(set(pinned)) != len(pinned):
+            errors.append(
+                "The reviewed plan repeats a matching input; rebuild the plan."
+            )
+    except (ValueError, TypeError, KeyError) as exc:
+        errors.append(
+            f"Matching generation pins are invalid ({exc}); rebuild the plan."
+        )
+    return errors
 
 
 def _leaf_keys(choices: list[dict]) -> set[tuple]:
@@ -528,6 +695,7 @@ def build_unit_match_plan(
         rows=rows,
         warnings=warnings,
         errors=errors,
+        curation_resolution_errors=tuple(errors),
     )
 
 
@@ -661,4 +829,5 @@ def build_unit_match_input_plan(
         rows=rows,
         warnings=warnings,
         errors=errors,
+        curation_resolution_errors=tuple(errors),
     )

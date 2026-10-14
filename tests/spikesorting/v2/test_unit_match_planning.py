@@ -516,6 +516,42 @@ def test_input_plan_final_curated_blocks_an_ambiguous_sort_only():
     ]
 
 
+@pytest.mark.parametrize("form", ["sorts", "group"])
+def test_plan_display_keeps_nullable_integer_ids_with_unresolved_inputs(form):
+    import pandas as pd
+
+    from spyglass.spikesorting.v2._matching.preflight import (
+        preflight_v2_unit_match,
+    )
+
+    choices = [_cur(_S0, 0, -1), _cur(_S0, 1, 0)]
+    if form == "group":
+        plan = _plan(
+            [_member(0, "day1.nwb", choices), _member(1, "day2.nwb", [])],
+            "final_curated",
+        )
+    else:
+        plan = _input_plan(
+            [_sort(_S0, choices), _sort(_S1, [])], "final_curated"
+        )
+    frame = plan.as_dataframe()
+    assert str(frame["curation_id"].dtype) == "Int64"
+    assert frame.iloc[0]["curation_id"] == 1
+    assert pd.isna(frame.iloc[1]["curation_id"])
+    if form == "group":
+        assert str(frame["member_index"].dtype) == "Int64"
+        assert frame["member_index"].tolist() == [0, 1]
+
+    # An incomplete input has no canonical input index. A displayed preflight
+    # table must preserve the resolved integer beside its missing placeholder.
+    plan.rows[0]["input_index"] = 0
+    plan.preflight = preflight_v2_unit_match(plan)
+    frame = plan.as_dataframe()
+    assert str(frame["input_index"].dtype) == "Int64"
+    assert frame.iloc[0]["input_index"] == 0
+    assert pd.isna(frame.iloc[1]["input_index"])
+
+
 def test_input_plan_manual_pins_by_sorting_id():
     """manual takes one curation_id per named sort, checked against that
     sort's curations; a missing, foreign, fractional or extra pin is caught."""
@@ -680,3 +716,635 @@ def test_runner_refuses_unpinned_plans_before_loading_tables(monkeypatch, form):
         )
     with pytest.raises(PipelineInputError, match="lacks a curation_uuid"):
         run_v2_unit_match(plan)
+
+
+@pytest.fixture
+def explicit_matching_plan(monkeypatch):
+    """Real immutable snapshots with isolated selection and source boundaries."""
+    import json
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2 import analysis_selection
+    from spyglass.spikesorting.v2._curation.unit_selection import (
+        UnitSelectionSnapshot,
+        unit_selection_hash,
+    )
+    from spyglass.spikesorting.v2._matching import inputs
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+
+    refs = [
+        CurationRef(uuid.UUID(int=index + 10), 3, uuid.UUID(int=index + 100))
+        for index in range(2)
+    ]
+    state = SimpleNamespace(
+        refs=refs,
+        resolved=[],
+        prepared=[],
+        source_hash="checked-sources",
+        preparation_error=None,
+        eligibility_error=None,
+        changed_labels=False,
+        resolver_kwargs=[],
+    )
+
+    def resolve(pin, *, policy, **kwargs):
+        state.resolved.append((pin, policy))
+        state.resolver_kwargs.append(kwargs)
+        if state.eligibility_error is not None:
+            raise state.eligibility_error
+        sorting_id = (
+            pin.sorting_id
+            if isinstance(pin, CurationRef)
+            else pin["sorting_id"]
+        )
+        ref = next(
+            value for value in refs if str(value.sorting_id) == str(sorting_id)
+        )
+        labels = {"1": ["accept"], "2": ["mua"], "3": ["noise"], "4": []}
+        if state.changed_labels:
+            labels["1"] = ["accept", "changed"]
+        label_policy = {
+            key: list(value)
+            for key, value in analysis_selection.V2_UNIT_SELECTION_POLICIES[
+                policy
+            ].items()
+        }
+        included = (
+            [1]
+            if policy == "v2_accepted_single_units"
+            else [1, 2] if policy == "v2_accepted_neural_units" else [1, 2, 4]
+        )
+        criteria = kwargs.get("unit_criteria") or {}
+        excluded = {
+            key: "excluded by reviewed policy"
+            for key in labels
+            if int(key) not in included
+        }
+        data = {
+            "sorting_id": str(ref.sorting_id),
+            "curation_id": ref.curation_id,
+            "curation_uuid": str(ref.curation_uuid),
+            "policy_name": policy,
+            "policy": label_policy,
+            "unit_criteria": criteria,
+            "included_unit_ids": included,
+            "excluded_units": excluded,
+            "labels_by_unit": labels,
+            "selection_provenance": {
+                "curation_uuid": str(ref.curation_uuid),
+                "label_policy": label_policy,
+                "unit_criteria": criteria,
+                "evaluation_id": None,
+                "evaluation_recipes": None,
+                "annotation_sets": [],
+            },
+        }
+        data["selection_hash"] = unit_selection_hash(data)
+        return UnitSelectionSnapshot(
+            ref,
+            json.dumps(data),
+            evaluation=kwargs.get("evaluation"),
+            annotation_sets=tuple(kwargs.get("annotation_sets", ())),
+        )
+
+    def prepare(curations, matcher_params_name, **kwargs):
+        assert kwargs["allow_rebuild"] is False
+        assert kwargs["validate_backend"] is True
+        state.prepared.append((curations, matcher_params_name, kwargs))
+        if state.preparation_error is not None:
+            raise state.preparation_error
+        # Canonical ordering is determined by physical acquisition coverage,
+        # independently of the order in which the user supplied curations.
+        ordered = [
+            {
+                **pin,
+                "input_index": index,
+                "source_kind": "recording",
+                "source_id": uuid.UUID(int=index + 200),
+                "recordings": [
+                    {
+                        "nwb_file_name": f"epoch-{index}.nwb",
+                        "interval_list_name": "selected epoch",
+                        "source_coverage": {
+                            "version": 1,
+                            "source_object_id": f"raw-source-{index}",
+                            "sample_ranges": [[index * 100, index * 100 + 50]],
+                            "time_ranges": [[index * 10, index * 10 + 4.9]],
+                        },
+                    }
+                ],
+            }
+            for index, pin in enumerate(reversed(curations))
+        ]
+        return {
+            "inputs": ordered,
+            "input_rows": [],
+            "recording_rows": [],
+            "unit_selections": kwargs["unit_selections"],
+            "input_set_hash": state.source_hash,
+            "unitmatch_id": uuid.UUID(int=900),
+        }
+
+    monkeypatch.setattr(analysis_selection, "resolve_unit_selection", resolve)
+    monkeypatch.setattr(inputs, "prepare_match_inputs", prepare)
+    return state
+
+
+def test_explicit_curation_plan_freezes_population_and_reviews_source_order(
+    explicit_matching_plan,
+):
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+    )
+
+    state = explicit_matching_plan
+    plan = plan_v2_unit_match_from_curations(state.refs)
+    assert plan.ok, plan.errors
+    assert plan.unit_policy == "v2_accepted_single_units"
+    assert [
+        selection.included_unit_ids for selection in plan.unit_selections
+    ] == [(1,), (1,)]
+    assert plan.curations[0]["curation_uuid"] == str(
+        state.refs[0].curation_uuid
+    )
+    frame = plan.as_dataframe()
+    assert str(frame["curation_id"].dtype) == "Int64"
+    assert str(frame["input_index"].dtype) == "Int64"
+    assert frame["input_index"].tolist() == [0, 1]
+    assert frame["sorting_id"].tolist() == [
+        str(ref.sorting_id) for ref in reversed(state.refs)
+    ]
+    assert frame["n_included_units"].tolist() == [1, 1]
+    assert frame["n_excluded_units"].tolist() == [3, 3]
+    assert frame["preflight_status"].tolist() == ["ready", "ready"]
+    assert plan.input_set_hash == "checked-sources"
+    assert "1 included, 3 excluded" in plan.summary()
+    assert "revalidated before writes" in plan.summary()
+    assert set(plan.preflight.as_dataframe()["status"]) == {"passed"}
+    assert frame.iloc[0]["source_coverage"][0]["sample_ranges"] == [[0, 50]]
+    frame.iloc[0]["source_coverage"][0]["sample_ranges"][0][0] = 999
+    assert plan.as_dataframe().iloc[0]["source_coverage"][0][
+        "sample_ranges"
+    ] == [[0, 50]]
+    # Copying a report never offers a mutable handle to the frozen population.
+    changed = plan.unit_selections[0].snapshot()
+    changed["included_unit_ids"].append(4)
+    assert plan.unit_selections[0].included_unit_ids == (1,)
+
+
+def test_explicit_policy_choice_includes_unreviewed_units_visibly(
+    explicit_matching_plan,
+):
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+    )
+
+    plan = plan_v2_unit_match_from_curations(
+        explicit_matching_plan.refs, unit_policy="v2_unflagged_units"
+    )
+    assert plan.ok
+    assert plan.unit_selections[0].included_unit_ids == (1, 2, 4)
+    assert any(
+        "included units are unlabeled" in value for value in plan.warnings
+    )
+    assert "v2_unflagged_units" in plan.summary()
+
+
+@pytest.mark.parametrize(
+    ("snapshot_policy", "explicit_policy"),
+    [
+        ("v2_unflagged_units", "v2_accepted_single_units"),
+        ("v2_accepted_neural_units", "v2_accepted_single_units"),
+        ("v2_accepted_single_units", "v2_unflagged_units"),
+        ("v2_accepted_single_units", "v2_accepted_neural_units"),
+        ("v2_unflagged_units", "v2_accepted_neural_units"),
+        ("v2_accepted_neural_units", "v2_unflagged_units"),
+    ],
+)
+def test_explicit_policy_conflicts_reject_supplied_populations(
+    explicit_matching_plan, snapshot_policy, explicit_policy
+):
+    from spyglass.spikesorting.v2.analysis_selection import (
+        resolve_unit_selection,
+    )
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+    )
+
+    state = explicit_matching_plan
+    populations = [
+        resolve_unit_selection(ref, policy=snapshot_policy)
+        for ref in state.refs
+    ]
+    with pytest.raises(ValueError, match="unit_policy conflicts"):
+        plan_v2_unit_match_from_curations(
+            state.refs,
+            unit_policy=explicit_policy,
+            unit_selections=populations,
+        )
+    assert not state.prepared
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        "v2_accepted_single_units",
+        "v2_accepted_neural_units",
+        "v2_unflagged_units",
+    ],
+)
+def test_explicit_policy_agrees_with_supplied_populations(
+    explicit_matching_plan, policy
+):
+    from spyglass.spikesorting.v2.analysis_selection import (
+        resolve_unit_selection,
+    )
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+    )
+
+    state = explicit_matching_plan
+    populations = [
+        resolve_unit_selection(ref, policy=policy) for ref in state.refs
+    ]
+    plan = plan_v2_unit_match_from_curations(
+        state.refs, unit_policy=policy, unit_selections=populations
+    )
+    assert plan.ok, plan.errors
+    assert plan.unit_policy == policy
+
+
+def test_omitted_policy_preserves_each_supplied_population_policy(
+    explicit_matching_plan,
+):
+    from spyglass.spikesorting.v2.analysis_selection import (
+        resolve_unit_selection,
+    )
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+    )
+
+    state = explicit_matching_plan
+    policies = ["v2_accepted_single_units", "v2_unflagged_units"]
+    populations = [
+        resolve_unit_selection(ref, policy=policy)
+        for ref, policy in zip(state.refs, policies, strict=True)
+    ]
+    plan = plan_v2_unit_match_from_curations(
+        state.refs, unit_policy=None, unit_selections=populations
+    )
+    assert plan.ok, plan.errors
+    assert plan.unit_policy == "provided selections"
+    assert plan.as_dataframe()["unit_policy"].tolist() == list(
+        reversed(policies)
+    )
+    with pytest.raises(ValueError, match="unit_policy conflicts"):
+        plan_v2_unit_match_from_curations(
+            state.refs,
+            unit_policy="v2_accepted_single_units",
+            unit_selections=populations,
+        )
+
+
+def test_explicit_plan_retains_typed_evidence_populations(
+    explicit_matching_plan,
+):
+    from spyglass.spikesorting.v2.analysis_selection import (
+        resolve_unit_selection,
+    )
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+        preflight_v2_unit_match,
+    )
+
+    state = explicit_matching_plan
+    evaluation = object()
+    annotations = (object(),)
+    criteria = {"observed_firing_rate_hz": {"ge": 0}}
+    populations = [
+        resolve_unit_selection(
+            ref,
+            policy="v2_accepted_neural_units",
+            evaluation=evaluation,
+            unit_criteria=criteria,
+            annotation_sets=annotations,
+        )
+        for ref in state.refs
+    ]
+    plan = plan_v2_unit_match_from_curations(
+        state.refs, unit_selections=populations
+    )
+    assert plan.ok, plan.errors
+    assert plan.unit_policy == "v2_accepted_neural_units"
+    assert plan.unit_selections[0] is populations[0]
+    assert (
+        plan.as_dataframe()["unit_policy"].tolist()
+        == ["v2_accepted_neural_units"] * 2
+    )
+    assert preflight_v2_unit_match(plan).ok
+    for forwarded in state.resolver_kwargs[-2:]:
+        assert forwarded["evaluation"] is evaluation
+        assert forwarded["annotation_sets"] == annotations
+        assert forwarded["unit_criteria"] == criteria
+    with pytest.raises(ValueError, match="exactly one unit selection"):
+        plan_v2_unit_match_from_curations(
+            state.refs, unit_selections=populations[:1]
+        )
+    with pytest.raises(ValueError, match="different curation generation"):
+        plan_v2_unit_match_from_curations(
+            state.refs, unit_selections=list(reversed(populations))
+        )
+    with pytest.raises(TypeError, match="UnitSelectionSnapshot objects"):
+        plan_v2_unit_match_from_curations(
+            state.refs,
+            unit_selections=[value.snapshot() for value in populations],
+        )
+
+
+def test_explicit_plan_reports_missing_assets_without_healing(
+    explicit_matching_plan,
+):
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+    )
+
+    state = explicit_matching_plan
+    state.preparation_error = FileNotFoundError(
+        "Recording cache is missing; explicitly rebuild the recording before matching."
+    )
+    plan = plan_v2_unit_match_from_curations(state.refs)
+    assert not plan.ok
+    assert "Recording cache is missing" in plan.errors[0]
+    checks = plan.preflight.as_dataframe().set_index("check")
+    assert checks.loc["matching_inputs", "status"] == "blocked"
+    for name in ("source_frames_and_coverage", "geometry", "backend"):
+        assert checks.loc[name, "status"] == "not_run"
+    assert "remaining checks not run" in plan.preflight.summary()
+
+
+def test_explicit_plan_collects_input_errors_before_shared_validation(
+    explicit_matching_plan,
+):
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+    )
+
+    state = explicit_matching_plan
+    state.eligibility_error = ValueError(
+        "Curation generation changed; rebuild the plan."
+    )
+    plan = plan_v2_unit_match_from_curations(state.refs)
+    assert not plan.ok
+    assert len(plan.errors) == 2
+    assert "Input 0" in plan.errors[0] and "Input 1" in plan.errors[1]
+    assert not state.prepared
+
+
+def test_stale_ref_finding_retains_generation_recovery_contract(
+    explicit_matching_plan,
+):
+    from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+    )
+
+    state = explicit_matching_plan
+    state.eligibility_error = CurationNotFoundError(
+        "The numeric curation key was replaced."
+    )
+    plan = plan_v2_unit_match_from_curations(state.refs)
+    assert not plan.ok
+    assert all(
+        "changed curation_uuid since planning" in value for value in plan.errors
+    )
+    assert not state.prepared
+
+
+@pytest.mark.parametrize("drift", ["eligibility", "source"])
+def test_matching_preflight_rejects_drift_from_reviewed_plan(
+    explicit_matching_plan, drift
+):
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+        preflight_v2_unit_match,
+    )
+
+    state = explicit_matching_plan
+    plan = plan_v2_unit_match_from_curations(state.refs)
+    assert plan.ok
+    if drift == "eligibility":
+        state.changed_labels = True
+        expected = "Unit selection changed since planning"
+    else:
+        state.source_hash = "different-source-frames"
+        expected = "changed after planning"
+    checked = preflight_v2_unit_match(plan)
+    assert not checked.ok
+    assert any(expected in value for value in checked.errors)
+
+
+def test_explicit_plan_rejects_empty_duplicate_and_untyped_inputs():
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+    )
+
+    ref = CurationRef(uuid.UUID(int=10), 3, uuid.UUID(int=100))
+    with pytest.raises(ValueError, match="at least one curation"):
+        plan_v2_unit_match_from_curations([])
+    with pytest.raises(ValueError, match="one curation generation"):
+        plan_v2_unit_match_from_curations([ref, ref])
+    with pytest.raises(TypeError, match="CurationRef objects"):
+        plan_v2_unit_match_from_curations([{"sorting_id": str(ref.sorting_id)}])
+
+
+def test_public_preflight_refuses_primitive_population_bypass(
+    explicit_matching_plan,
+):
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+        preflight_v2_unit_match,
+    )
+
+    state = explicit_matching_plan
+    plan = plan_v2_unit_match_from_curations(state.refs)
+    plan.unit_selections = tuple(
+        value.snapshot() for value in plan.unit_selections
+    )
+    state.prepared.clear()
+    report = preflight_v2_unit_match(plan)
+    assert not report.ok
+    assert all(
+        "typed UnitSelectionSnapshot objects" in value
+        for value in report.errors
+    )
+    assert not state.prepared
+
+
+@pytest.mark.parametrize("form", ["sorts", "group"])
+def test_public_preflight_blocks_partially_resolved_requested_inputs(
+    explicit_matching_plan,
+    monkeypatch,
+    form,
+):
+    from spyglass.spikesorting.v2._matching import preflight
+    from spyglass.spikesorting.v2._matching.planning import (
+        build_unit_match_input_plan,
+    )
+
+    state = explicit_matching_plan
+    ref = state.refs[0]
+    choice = {
+        "sorting_id": str(ref.sorting_id),
+        "curation_id": ref.curation_id,
+        "curation_uuid": str(ref.curation_uuid),
+        "parent_curation_id": 0,
+        "curation_source": "figpack",
+        "description": "reviewed",
+    }
+    if form == "group":
+        plan = _plan(
+            [
+                _member(0, "epoch-0.nwb", [choice]),
+                _member(1, "epoch-1.nwb", []),
+            ],
+            "final_curated",
+        )
+        monkeypatch.setattr(
+            preflight,
+            "_validate_group_plan",
+            lambda plan: pytest.fail(
+                "An unresolved plan reached DB validation."
+            ),
+        )
+    else:
+        sorts = [
+            {
+                "sorting_id": str(value.sorting_id),
+                "source_kind": "recording",
+                "source_id": str(uuid.UUID(int=200 + index)),
+                "nwb_file_names": (f"epoch-{index}.nwb",),
+                "interval_list_names": ("selected epoch",),
+                "choices": [choice] if index == 0 else [],
+            }
+            for index, value in enumerate(state.refs)
+        ]
+        plan = build_unit_match_input_plan(
+            sorts=sorts,
+            curation_strategy="final_curated",
+            matcher_params_name="unitmatch_default",
+        )
+    assert not plan.ok
+    assert "Pinned inputs: 1 of 2 requested" in plan.summary()
+    report = preflight.preflight_v2_unit_match(plan)
+    assert not report.ok
+    assert "has no" in report.errors[0]
+    assert "remaining checks not run" in report.summary()
+    assert not state.prepared
+
+
+@pytest.mark.parametrize("mutation", ["pins", "rows", "populations"])
+def test_public_preflight_rejects_mutated_plan_review_integrity(
+    explicit_matching_plan,
+    mutation,
+):
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+        preflight_v2_unit_match,
+    )
+
+    state = explicit_matching_plan
+    plan = plan_v2_unit_match_from_curations(state.refs)
+    if mutation == "pins":
+        plan.curations = plan.curations[:1]
+        plan.unit_selections = plan.unit_selections[:1]
+    elif mutation == "rows":
+        plan.rows[0]["curation_uuid"] = str(uuid.UUID(int=9999))
+    else:
+        plan.unit_selections = tuple(reversed(plan.unit_selections))
+    state.prepared.clear()
+    report = preflight_v2_unit_match(plan)
+    assert not report.ok
+    assert any("rebuild" in value.lower() for value in report.errors)
+    assert not state.prepared
+
+
+def test_public_preflight_rechecks_historical_asset_findings(
+    explicit_matching_plan,
+):
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+        preflight_v2_unit_match,
+    )
+
+    state = explicit_matching_plan
+    state.preparation_error = FileNotFoundError(
+        "Restore a missing source cache."
+    )
+    plan = plan_v2_unit_match_from_curations(state.refs)
+    assert not plan.ok
+    assert not plan.curation_resolution_errors
+    state.preparation_error = None
+    assert preflight_v2_unit_match(plan).ok
+
+
+def test_match_runner_passes_frozen_population_and_verified_source_hash(
+    explicit_matching_plan,
+    monkeypatch,
+):
+    import sys
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2._orchestration import matching
+
+    state = explicit_matching_plan
+    plan = matching.plan_v2_unit_match_from_curations(state.refs)
+    inserted = []
+    populated = []
+
+    class Relation:
+        def __and__(self, key):
+            return self
+
+        def __bool__(self):
+            return True
+
+        def __len__(self):
+            return 2
+
+        def fetch1(self, field):
+            assert field == "n_pairs"
+            return 3
+
+    def insert(curations, matcher, **kwargs):
+        inserted.append((curations, matcher, kwargs))
+        return {"unitmatch_id": uuid.UUID(int=900)}
+
+    selections = SimpleNamespace(
+        insert_inputs=insert,
+        pinned_curations=lambda key: {},
+        _divergent_electrode_space_members=lambda pins: [],
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "spyglass.spikesorting.v2.unit_matching",
+        SimpleNamespace(
+            MatcherParameters=Relation(),
+            UnitMatch=Relation(),
+            TrackedUnit=Relation(),
+            UnitMatchSelection=selections,
+        ),
+    )
+    monkeypatch.setattr(
+        matching, "_populate_once", lambda table, key: populated.append(key)
+    )
+    monkeypatch.setattr(matching, "_unit_match_input_summaries", lambda key: ())
+    result = matching.run_v2_unit_match(plan)
+    assert len(inserted) == 1
+    assert inserted[0][0] == plan.curations
+    assert inserted[0][2]["expected_input_set_hash"] == plan.input_set_hash
+    assert inserted[0][2]["unit_selections"] == [
+        value.snapshot() for value in plan.unit_selections
+    ]
+    assert result["n_pairs"] == 3 and result["n_tracked_units"] == 2
+    assert len(populated) == 2

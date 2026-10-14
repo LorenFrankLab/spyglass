@@ -1283,8 +1283,8 @@ def test_named_sort_plan_runs_without_a_group(
             plan_v2_unit_match_from_sorts(
                 [uuid.uuid4()], curation_strategy="root"
             )
-        # Named day 2 first: the plan keeps the named order; the selection
-        # orders the inputs chronologically.
+        # Named day 2 first: the generation pins retain caller order, while
+        # the review table and selection show chronological matching order.
         plan = plan_v2_unit_match_from_sorts(
             [concat["sorting_id"], single["sorting_id"]],
             curation_strategy="root",
@@ -1320,14 +1320,6 @@ def test_named_sort_plan_runs_without_a_group(
             for row in rows
         ] == [
             (
-                str(concat["sorting_id"]),
-                "concatenated_recording",
-                str(fx["concat_keys"]["concat_day2"]["concat_recording_id"]),
-                (nwb["c"], nwb["c"]),
-                concat["curation_id"],
-                "pinned",
-            ),
-            (
                 str(single["sorting_id"]),
                 "recording",
                 str(fx["recording_keys"]["b"]["recording_id"]),
@@ -1335,8 +1327,16 @@ def test_named_sort_plan_runs_without_a_group(
                 single["curation_id"],
                 "pinned",
             ),
+            (
+                str(concat["sorting_id"]),
+                "concatenated_recording",
+                str(fx["concat_keys"]["concat_day2"]["concat_recording_id"]),
+                (nwb["c"], nwb["c"]),
+                concat["curation_id"],
+                "pinned",
+            ),
         ]
-        assert rows[0]["interval_list_names"] == (
+        assert rows[1]["interval_list_names"] == (
             "unitmatch_daily_first",
             "unitmatch_daily_second",
         )
@@ -1511,7 +1511,8 @@ def test_named_plan_checks_every_generation_before_reuse(
         assert pinned[str(replacement["sorting_id"])] == replacement_uuid
         before = UnitMatchSelection.fetch("KEY", as_dict=True, order_by="KEY")
         with pytest.raises(
-            ValueError, match="changed curation_uuid since planning"
+            ValueError,
+            match="CurationRef no longer identifies its CurationV2 generation",
         ):
             run_v2_unit_match(plan)
         assert (

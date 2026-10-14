@@ -1193,6 +1193,7 @@
     "tests/spikesorting/v2/test_curation_evaluation.py:planted_zero_unit_sort": "stage",
     "tests/spikesorting/v2/test_curation_wrappers.py:polymer_60s_sort": "regression_gate",
     "tests/spikesorting/v2/test_delete_cleanup.py:planted_sort": "stage",
+    "tests/spikesorting/v2/test_direct_curation_unitmatch.py:accepted_three_unit_curation": "stage",
     "tests/spikesorting/v2/test_drift_estimate.py:drift_recording_key": "db_unit",
     "tests/spikesorting/v2/test_export_safety.py:export_smoke_session": "db_unit",
     "tests/spikesorting/v2/test_fixture_ingestion.py:mearec_smoke_ingested": "db_unit",

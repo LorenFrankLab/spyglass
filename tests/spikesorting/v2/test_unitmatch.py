@@ -3589,9 +3589,14 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         ]
         assert len(matched) == 1
 
-        # The same-probe chronic fixture diverges in no electrode space, so the
-        # receipt's warnings are empty -- the field is populated, not a dead [].
-        assert summary["warnings"] == []
+        # The same-probe inputs agree in electrode space, while the explicit
+        # auto-only policy reports that both root populations are unlabeled.
+        assert len(summary["warnings"]) == 2
+        assert all(
+            "included units are unlabeled under policy 'v2_unflagged_units'"
+            in warning
+            for warning in summary["warnings"]
+        )
 
         # Surfacing: force a divergence and confirm it reaches the receipt's
         # warnings on the next run (it is also logged in the selection path).

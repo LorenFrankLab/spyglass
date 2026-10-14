@@ -39,6 +39,7 @@ from spyglass.spikesorting.v2._orchestration.geometry import (
     describe_sort_groups,
     plot_sort_group_geometry,
 )
+from spyglass.spikesorting.v2._orchestration.epochs import describe_epochs
 from spyglass.spikesorting.v2._orchestration.preflight import (
     PreflightCheck,
     PreflightReport,
@@ -68,6 +69,7 @@ from spyglass.spikesorting.v2._orchestration.matching import (
     describe_unit_match_choices,
     plan_v2_unit_match,
     plan_v2_unit_match_from_sorts,
+    plan_v2_unit_match_from_curations,
     run_v2_unit_match,
 )
 from spyglass.spikesorting.v2._orchestration.motion import estimate_motion
@@ -79,11 +81,18 @@ from spyglass.spikesorting.v2._matching.planning import (
     UnitMatchInputPlan,
     UnitMatchPlan,
 )
+from spyglass.spikesorting.v2._matching.preflight import (
+    UnitMatchPreflightCheck,
+    UnitMatchPreflightReport,
+    preflight_v2_unit_match,
+)
 from spyglass.spikesorting.v2._curation.analyzer import open_curation_analyzer
 from spyglass.spikesorting.v2.analysis_selection import (
     V2_UNIT_SELECTION_POLICIES,
     SelectedGroup,
     UnitSelectionReceipt,
+    UnitSelectionSnapshot,
+    resolve_unit_selection,
     select_units_for_analysis,
 )
 from spyglass.spikesorting.v2.annotation_api import (

@@ -6,6 +6,7 @@ and tracked-unit derivation remain in their domain table and pure helpers."""
 from __future__ import annotations
 
 import uuid
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any, cast
 
 from spyglass.spikesorting.v2._matching.planning import (
@@ -26,6 +27,11 @@ from spyglass.spikesorting.v2._orchestration.stages import (
 if TYPE_CHECKING:
     import pandas as pd
 
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.analysis_selection import (
+        UnitSelectionSnapshot,
+    )
+
 
 def run_v2_unit_match(
     plan: "UnitMatchPlan | UnitMatchInputPlan | None" = None,
@@ -38,12 +44,15 @@ def run_v2_unit_match(
     """Match units across matching inputs in one call, then track them.
 
     A matching input is one curated sort, of a single recording or of a
-    same-day concatenation. Three call forms:
+    same-day concatenation. Four call forms:
 
     - ``run_v2_unit_match(plan)`` with a :class:`UnitMatchPlan` from
       :func:`plan_v2_unit_match` (the recommended plan-then-run path for a
       ``SessionGroup``; the plan already pinned one curation per member via a
       curation strategy).
+    - ``run_v2_unit_match(plan)`` with a :class:`UnitMatchInputPlan` from
+      :func:`plan_v2_unit_match_from_curations`, using exact reviewed curation
+      handles and frozen named unit populations (the recommended review path).
     - ``run_v2_unit_match(plan)`` with a :class:`UnitMatchInputPlan` from
       :func:`plan_v2_unit_match_from_sorts` (named sorts, no group; the plan
       pinned one curation per sort). The pinned curations go to
@@ -109,13 +118,18 @@ def run_v2_unit_match(
         From ``insert_selection`` (group form) on a missing/extra member
         choice, a non-existent curation, or a curation that does not belong to
         its member; or from ``insert_inputs`` (both forms) on an invalid input
-        set, e.g. a curation with unapplied merges, two inputs sharing a
-        session (``SameSessionMatchError``), a multi-day concatenation input,
+        set, e.g. a curation with unapplied merges, inputs reusing original
+        raw samples (``OverlappingMatchInputError``), a multi-day concatenation input,
         or a channel-geometry mismatch across inputs.
+    PreflightError
+        A planned input's generation, frozen unit population, source/frame
+        coverage, geometry, or matcher availability changed or is unavailable.
+        Raised before any rows or caches are written. Rebuild and review the
+        plan after addressing the findings.
     PipelineStageError
         If ``UnitMatch`` / ``TrackedUnit`` populate fails (names the stage,
-        carries the partial summary). A missing optional matcher backend (e.g.
-        ``UnitMatchPy``) surfaces here with the backend's install hint.
+        carries the partial summary). The plan preflight reports a missing
+        optional backend before these stages run.
     """
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
@@ -124,6 +138,9 @@ def run_v2_unit_match(
     # plan that could not pin every curation (not ok) raises here rather than
     # running a partial match.
     input_curations = None
+    input_unit_selections = None
+    expected_input_set_hash = None
+    preflight_warnings = []
     if plan is not None:
         if not isinstance(plan, (UnitMatchPlan, UnitMatchInputPlan)):
             raise PipelineInputError(
@@ -150,7 +167,7 @@ def run_v2_unit_match(
         is_input_plan = isinstance(plan, UnitMatchInputPlan)
         if not plan.ok:
             raise PipelineInputError(
-                "run_v2_unit_match: the plan could not pin a curation for "
+                "run_v2_unit_match: the plan could not pin curations or validate prerequisites for "
                 f"every {'sort' if is_input_plan else 'member'} "
                 f"(curation_strategy={plan.curation_strategy!r}):\n  - "
                 + "\n  - ".join(plan.errors)
@@ -204,6 +221,22 @@ def run_v2_unit_match(
             "register a custom matcher row first."
         )
 
+    if plan is not None:
+        from spyglass.spikesorting.v2._matching.preflight import (
+            preflight_v2_unit_match,
+        )
+        from spyglass.spikesorting.v2.exceptions import PreflightError
+
+        report = preflight_v2_unit_match(plan)
+        if not report.ok:
+            raise PreflightError(report.summary())
+        input_unit_selections = [
+            value.snapshot() if hasattr(value, "snapshot") else dict(value)
+            for value in report.unit_selections
+        ]
+        expected_input_set_hash = report.input_set_hash
+        preflight_warnings = list(report.warnings)
+
     # Partial receipt accumulated for error reporting: _run_stage snapshots
     # it into PipelineStageError.partial_run_summary when a stage fails. The
     # complete RunV2UnitMatchSummary is assembled explicitly at the end.
@@ -220,7 +253,10 @@ def run_v2_unit_match(
     # in the matcher.
     if input_curations is not None:
         selection = UnitMatchSelection.insert_inputs(
-            input_curations, matcher_params_name
+            input_curations,
+            matcher_params_name,
+            unit_selections=input_unit_selections,
+            expected_input_set_hash=expected_input_set_hash,
         )
     else:
         selection = UnitMatchSelection.insert_selection(
@@ -228,6 +264,8 @@ def run_v2_unit_match(
             session_group_name,
             matcher_params_name,
             curation_choices,
+            unit_selections=input_unit_selections,
+            expected_input_set_hash=expected_input_set_hash,
         )
     # Public orchestration receipts use the clearer ``unit_match_id`` spelling;
     # the DataJoint table PK remains ``unitmatch_id`` for schema stability.
@@ -237,7 +275,7 @@ def run_v2_unit_match(
     # logged inside insert_selection / make_fetch). Recomputed here from the
     # selection's pinned inputs so the summary carries it even on a reused
     # selection.
-    warnings: list[str] = []
+    warnings: list[str] = list(preflight_warnings)
     divergent = UnitMatchSelection._divergent_electrode_space_members(
         UnitMatchSelection.pinned_curations(selection)
     )
@@ -340,6 +378,7 @@ def plan_v2_unit_match(
     curation_strategy: str,
     matcher_params_name: str = "unitmatch_default",
     manual_curation_choices: "dict | None" = None,
+    unit_policy: str = "v2_unflagged_units",
 ) -> "UnitMatchPlan":
     """Build a reviewable plan pinning one curation per member for matching.
 
@@ -377,6 +416,10 @@ def plan_v2_unit_match(
     manual_curation_choices : dict, optional
         Only for ``curation_strategy="manual"``:
         ``{member_index: {"sorting_id": ..., "curation_id": ...}}``.
+    unit_policy : str, optional
+        Named unit eligibility policy. ``"v2_unflagged_units"`` preserves the
+        existing auto-only workflow and makes its included unlabeled units
+        visible. Choose ``"v2_accepted_single_units"`` for reviewed single units.
 
     Returns
     -------
@@ -392,7 +435,7 @@ def plan_v2_unit_match(
     members = _unit_match_member_choices(
         session_group_owner, session_group_name
     )
-    return build_unit_match_plan(
+    plan = build_unit_match_plan(
         session_group_owner=session_group_owner,
         session_group_name=session_group_name,
         matcher_params_name=matcher_params_name,
@@ -400,6 +443,7 @@ def plan_v2_unit_match(
         members=members,
         manual_curation_choices=manual_curation_choices,
     )
+    return _preflight_match_plan(plan, unit_policy=unit_policy)
 
 
 def plan_v2_unit_match_from_sorts(
@@ -408,6 +452,7 @@ def plan_v2_unit_match_from_sorts(
     curation_strategy: str,
     matcher_params_name: str = "unitmatch_default",
     manual_curation_choices: "dict | None" = None,
+    unit_policy: str = "v2_unflagged_units",
 ) -> "UnitMatchInputPlan":
     """Build a reviewable plan pinning one curation per named sort.
 
@@ -423,11 +468,12 @@ def plan_v2_unit_match_from_sorts(
         summary = run_v2_unit_match(plan)
 
     The plan lists each sort's committed curations and applies
-    ``curation_strategy`` within them. It does not check that the sorts can
-    be matched together; ``UnitMatchSelection.insert_inputs`` (run by
-    ``run_v2_unit_match``) validates that (no shared session, a
-    concatenation within one day, shared channel geometry) and orders the
-    inputs chronologically.
+    ``curation_strategy`` within them, freezes named unit eligibility, and
+    checks source/frame coverage, original-sample overlap, chronological
+    ordering, channel geometry, and matcher availability without rebuilding
+    assets or writing rows. Disjoint epochs in one NWB can be matched; repeated
+    original samples cannot. Inspect ``plan.summary()`` and
+    ``plan.preflight.as_dataframe()`` before ``run_v2_unit_match(plan)``.
 
     Parameters
     ----------
@@ -444,6 +490,10 @@ def plan_v2_unit_match_from_sorts(
     manual_curation_choices : dict, optional
         Only for ``curation_strategy="manual"``: ``{sorting_id:
         curation_id}`` for every named sort.
+    unit_policy : str, optional
+        Named unit eligibility policy. Default ``"v2_unflagged_units"`` keeps
+        the existing auto-only population; reviewed single units should use
+        ``"v2_accepted_single_units"`` or the direct curation-handle planner.
 
     Returns
     -------
@@ -464,12 +514,211 @@ def plan_v2_unit_match_from_sorts(
         build_unit_match_input_plan,
     )
 
-    return build_unit_match_input_plan(
+    plan = build_unit_match_input_plan(
         matcher_params_name=matcher_params_name,
         curation_strategy=curation_strategy,
         sorts=_unit_match_sort_choices(sorting_ids),
         manual_curation_choices=manual_curation_choices,
     )
+    return _preflight_match_plan(plan, unit_policy=unit_policy)
+
+
+def plan_v2_unit_match_from_curations(
+    curations: "list[CurationRef]",
+    *,
+    unit_policy: str | None = None,
+    matcher_params_name: str = "unitmatch_default",
+    unit_selections: "list[UnitSelectionSnapshot] | None" = None,
+) -> UnitMatchInputPlan:
+    """Plan matching directly from the exact curations a reviewer selected.
+
+    Each curation pins its immutable generation. The same named eligibility
+    policy used by downstream analysis freezes included units, excluded-unit
+    reasons, committed labels, and policy provenance. Without supplied
+    snapshots, omitted ``unit_policy`` (``None``) defaults to
+    ``'v2_accepted_single_units'``, requiring ``accept`` and excluding MUA and
+    flagged units; auto-only workflows must explicitly choose
+    ``unit_policy='v2_unflagged_units'``.
+
+    Read ``plan.summary()`` and ``plan.as_dataframe()`` before running. The
+    read-only preflight checks source/frame coverage, physical overlap,
+    chronological ordering, channel geometry, and backend availability. Missing
+    assets are reported without rebuilding caches, extracting waveforms, seeding
+    defaults, or writing rows. ``run_v2_unit_match(plan)`` revalidates the frozen
+    selection and source identity before any write.
+
+    ``unit_selections`` optionally supplies exactly one typed
+    :class:`UnitSelectionSnapshot` per curation, as returned by
+    ``resolve_unit_selection`` with explicit evaluation criteria or annotation
+    sets. Each must pin the corresponding curation generation. These reviewed
+    snapshots carry their own policies when ``unit_policy`` is omitted. An
+    explicit ``unit_policy`` must match every supplied snapshot's policy;
+    conflicting policies raise before preflight. Their exact eligibility is
+    revalidated and displayed per input. Plain dictionaries are not accepted
+    here.
+    """
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.analysis_selection import (
+        UnitSelectionSnapshot,
+    )
+
+    refs = list(curations)
+    if not refs:
+        raise ValueError(
+            "plan_v2_unit_match_from_curations needs at least one curation."
+        )
+    if any(not isinstance(ref, CurationRef) for ref in refs):
+        raise TypeError(
+            "plan_v2_unit_match_from_curations requires CurationRef objects. "
+            "Resolve an explicit key with CurationRef.from_key first."
+        )
+    repeated = len({ref.sorting_id for ref in refs}) != len(refs)
+    if repeated:
+        raise ValueError(
+            "Each sorting may be matched through one curation generation only; "
+            "choose one CurationRef per sorting."
+        )
+    selections = ()
+    if unit_selections is not None:
+        selections = tuple(unit_selections)
+        if len(selections) != len(refs):
+            raise ValueError("Supply exactly one unit selection per curation.")
+        for ref, selection in zip(refs, selections, strict=True):
+            if not isinstance(selection, UnitSelectionSnapshot):
+                raise TypeError(
+                    "unit_selections must contain UnitSelectionSnapshot objects."
+                )
+            if selection.curation != ref:
+                raise ValueError(
+                    "A unit selection pins a different curation generation."
+                )
+        policy_names = {selection.policy_name for selection in selections}
+        if unit_policy is not None and policy_names != {unit_policy}:
+            raise ValueError(
+                "unit_policy conflicts with the supplied selection policies."
+            )
+        unit_policy = (
+            next(iter(policy_names))
+            if len(policy_names) == 1
+            else "provided selections"
+        )
+    elif unit_policy is None:
+        unit_policy = "v2_accepted_single_units"
+    # Read-only preflight verifies the generation. Copy the immutable pin here
+    # so a stale ref becomes a reviewable finding rather than repinning it.
+    pins = [
+        {
+            "sorting_id": str(ref.sorting_id),
+            "curation_id": ref.curation_id,
+            "curation_uuid": str(ref.curation_uuid),
+        }
+        for ref in refs
+    ]
+    plan = UnitMatchInputPlan(
+        matcher_params_name=matcher_params_name,
+        curation_strategy="explicit_curations",
+        curations=pins,
+        rows=[{**pin, "status": "pinned"} for pin in pins],
+        unit_selections=selections,
+    )
+    return _preflight_match_plan(plan, unit_policy=unit_policy)
+
+
+def _preflight_match_plan(plan, *, unit_policy: str):
+    """Freeze eligibility and attach the canonical read-only prerequisites."""
+    from spyglass.spikesorting.v2._matching.preflight import (
+        preflight_v2_unit_match,
+    )
+
+    plan.unit_policy = unit_policy
+    if not plan.ok:
+        return plan
+    report = preflight_v2_unit_match(plan)
+    plan.preflight = report
+    plan.unit_selections = report.unit_selections
+    plan.input_set_hash = report.input_set_hash
+    plan.errors.extend(report.errors)
+    plan.warnings.extend(
+        value for value in report.warnings if value not in plan.warnings
+    )
+    selections = {}
+    for selection in report.unit_selections:
+        snapshot = (
+            selection.snapshot()
+            if hasattr(selection, "snapshot")
+            else dict(selection)
+        )
+        selections[
+            (str(snapshot["sorting_id"]), int(snapshot["curation_id"]))
+        ] = snapshot
+    resolved = {
+        (str(item["sorting_id"]), int(item["curation_id"])): item
+        for item in (report._prepared or {}).get("inputs", [])
+    }
+    pins = (
+        plan.curations
+        if isinstance(plan, UnitMatchInputPlan)
+        else [pin for _, pin in sorted(plan.curation_choices.items())]
+    )
+    requested_indices = {
+        (str(pin["sorting_id"]), int(pin["curation_id"])): index
+        for index, pin in enumerate(pins)
+    }
+    for row in plan.rows:
+        identity = (str(row["sorting_id"]), int(row["curation_id"]))
+        snapshot = selections.get(identity)
+        item = resolved.get(identity)
+        input_index = (
+            item["input_index"]
+            if item is not None
+            else requested_indices[identity]
+        )
+        row.update(
+            unit_policy=(
+                snapshot["policy_name"] if snapshot is not None else unit_policy
+            ),
+            preflight_status="ready" if report.ok else "blocked",
+            checks=", ".join(
+                f"{check.name}: {check.status}"
+                for check in report.checks
+                if check.input_index is None or check.input_index == input_index
+            ),
+        )
+        if snapshot is not None:
+            row.update(
+                included_unit_ids=tuple(snapshot["included_unit_ids"]),
+                excluded_units=dict(snapshot["excluded_units"]),
+                n_included_units=len(snapshot["included_unit_ids"]),
+                n_excluded_units=len(snapshot["excluded_units"]),
+                selection_hash=snapshot["selection_hash"],
+            )
+        if item is not None:
+            recordings = item["recordings"]
+            row.update(
+                input_index=int(item["input_index"]),
+                source_kind=item["source_kind"],
+                source_id=str(item["source_id"]),
+                nwb_file_names=tuple(
+                    value["nwb_file_name"] for value in recordings
+                ),
+                interval_list_names=tuple(
+                    value["interval_list_name"] for value in recordings
+                ),
+                motion_corrected_recording_id=item.get(
+                    "motion_corrected_recording_id"
+                ),
+                waveform_traces=(
+                    "motion_corrected_recording"
+                    if item.get("motion_corrected_recording_id")
+                    else item["source_kind"]
+                ),
+                source_coverage=tuple(
+                    deepcopy(value["source_coverage"]) for value in recordings
+                ),
+            )
+    if isinstance(plan, UnitMatchInputPlan) and report.ok:
+        plan.rows.sort(key=lambda row: row["input_index"])
+    return plan
 
 
 def _unit_match_sort_choices(sorting_ids) -> list[dict]:
