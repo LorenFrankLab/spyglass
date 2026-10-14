@@ -371,7 +371,7 @@ auto_labeled
 # walkthrough -- commit, merged-unit verification, and handing the reviewed
 # result to analysis -- is the [Curation](./10_Spike_SortingV2_Curation.ipynb)
 # notebook. The review packages are optional
-# (`pip install "spyglass[spikesorting-v2-curation]"`), so this cell is
+# (`pip install "spyglass-neuro[spikesorting-v2-curation]"`), so this cell is
 # skipped when they are absent.
 
 # +
@@ -379,6 +379,7 @@ import importlib.util
 
 from spyglass.spikesorting.v2.pipeline import FigPackReview
 
+review = None
 if importlib.util.find_spec("figpack") is not None:
     review = auto_summary.start_review(
         "franklab_hippocampus_2026_09_17",
@@ -386,12 +387,27 @@ if importlib.util.find_spec("figpack") is not None:
         upload=False,
     )
     print("Open in a browser:", review.open(open_browser=False))
+    review_id = str(review.review_id)
+    print("Save this review ID to resume after a restart:", review_id)
     reopened = FigPackReview.resume(review.review_id)
     assert reopened.parent == review.parent
     print(reopened.preview_import().summary())
 else:
     print("FigPack not installed; skipping the browser review cell.")
 # -
+
+# To reopen after a kernel restart, connect to the same database and storage
+# and replace the placeholder with the printed review ID:
+#
+# ```python
+# from spyglass.spikesorting.v2.pipeline import FigPackReview
+# review = FigPackReview.resume("paste-the-printed-review-uuid-here")
+# print(review.open(open_browser=False))
+# ```
+#
+# Complete **Preview and commit** and any merged-child verification before
+# choosing the browser result for analysis below. `review.result()` refuses
+# an unfinished review; finish its commit/verification action and retry.
 
 # ## 9. Select the analysis population, then analyze
 #
@@ -415,16 +431,38 @@ else:
 # units in the browser review (section 8) and hand that child over with the
 # default policy, or choose `v2_unflagged_units` to state explicitly that
 # rule-passing, never-reviewed units count. Unlabeled units are excluded by the
-# `accepted` policies and listed on the receipt either way. Pass the curation
-# you actually reviewed: after the browser sequence, use
-# `select_units_for_analysis(review.result())`. The executable example below
-# explicitly selects the automatic, unreviewed population so the notebook can
-# also run without an interactive browser session.
+# `accepted` policies and listed on the receipt either way.
+#
+# Choose the handoff explicitly. Set `use_browser_result=True` after completing
+# section 8 to select `review.result()` with the accepted-single-unit policy.
+# The default `False` keeps this notebook executable without a browser and
+# selects the automatic, **unreviewed** population with `v2_unflagged_units`.
+# That population includes unlabeled units and MUA; browser edits only reach
+# this analysis when you choose the completed browser result.
+
+use_browser_result = False  # True only after the browser review is complete
 
 # +
 from spyglass.spikesorting.v2.pipeline import select_units_for_analysis
 
-receipt = select_units_for_analysis(auto_labeled, policy="v2_unflagged_units")
+if use_browser_result:
+    if globals().get("review") is None:
+        raise RuntimeError(
+            "No browser review is available. Install "
+            "spyglass-neuro[spikesorting-v2-curation] and run section 8, "
+            "or resume the saved review ID with FigPackReview.resume(review_id)."
+        )
+    final_curation = review.result()
+    analysis_policy = "v2_accepted_single_units"
+    print("Analysis source: completed browser review; accepted single units.")
+else:
+    final_curation = auto_labeled
+    analysis_policy = "v2_unflagged_units"
+    print(
+        "Analysis source: automatic labels WITHOUT human review; "
+        "unflagged units, including unlabeled units and MUA."
+    )
+receipt = select_units_for_analysis(final_curation, policy=analysis_policy)
 print(receipt.summary())  # source, policy content, counts, why if empty
 display(receipt.describe())  # per-unit verdict, labels, reason
 # -
