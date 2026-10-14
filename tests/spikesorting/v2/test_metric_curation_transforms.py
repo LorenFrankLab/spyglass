@@ -336,11 +336,6 @@ def _compute_retained_spike_isi(
         )
 
     monkeypatch.setattr(analyzer.recording, "get_times", refuse_full_times)
-    extra = (
-        {}
-        if continuity_spans is None
-        else {"continuity_spans": continuity_spans}
-    )
     return compute_metrics(
         analyzer,
         None,
@@ -348,7 +343,7 @@ def _compute_retained_spike_isi(
         {"isi_violation": metric_params} if metric_params else {},
         True,
         statistics_spans=statistics_spans,
-        **extra,
+        continuity_spans=continuity_spans,
     )
 
 

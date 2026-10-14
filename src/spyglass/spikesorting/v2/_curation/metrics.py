@@ -1295,10 +1295,11 @@ def compute_metrics(
                 # Resolve defaults under the same lock as SI's compute, so a
                 # concurrent compute's temporary defaults cannot change this
                 # fraction's refractory window.
-                isi_params = {
-                    **get_default_quality_metrics_params()["isi_violation"],
-                    **(metric_kwargs.get("isi_violation") or {}),
-                }
+                defaults = get_default_quality_metrics_params()["isi_violation"]
+                isi_kwargs = metric_kwargs.get("isi_violation") or {}
+                isi_threshold_ms = isi_kwargs.get(
+                    "isi_threshold_ms", defaults["isi_threshold_ms"]
+                )
             voltage_df = compute_quality_metrics(
                 display_analyzer,
                 metric_names=voltage_names,
@@ -1431,7 +1432,9 @@ def compute_metrics(
         "isi_violation" in metric_names
         and "isi_violations_count" in metrics_df.columns
     ):
-        counts = metrics_df["isi_violations_count"].to_numpy(dtype=float).copy()
+        counts = metrics_df["isi_violations_count"].to_numpy(
+            dtype=float, copy=True
+        )
         # Preserve SI failures as unavailable values for the rule-error checks;
         # only successful units have their counts mapped to the source clock.
         computed = np.isfinite(counts)
@@ -1439,7 +1442,7 @@ def compute_metrics(
             counts[computed] = _source_clock_isi_counts(
                 display_analyzer,
                 metrics_df.index[computed],
-                float(isi_params["isi_threshold_ms"]) / 1000.0,
+                float(isi_threshold_ms) / 1000.0,
                 continuity_spans,
             )
         n_by_unit = display_analyzer.sorting.count_num_spikes_per_unit()
