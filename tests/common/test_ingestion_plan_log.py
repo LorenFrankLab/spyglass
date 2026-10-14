@@ -235,10 +235,13 @@ def test_a_refused_payload_costs_the_payload_not_the_run(
 
     original = IngestionPlanLog.Entry.insert
 
-    def refuse_payloads(self, rows, *args, **kwargs):
+    def refuse_payloads(*args, **kwargs):
+        # Positionally, not by name: `self.Entry.insert` may arrive bound or
+        # unbound, so the row list is found rather than assumed.
+        rows = next((a for a in args if isinstance(a, (list, tuple))), ())
         if any(row.get("entry_blob") is not None for row in rows):
             raise RuntimeError("pretend the packet is too big")
-        return original(self, rows, *args, **kwargs)
+        return original(*args, **kwargs)
 
     monkeypatch.setattr(IngestionPlanLog.Entry, "insert", refuse_payloads)
 
