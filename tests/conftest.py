@@ -25,15 +25,6 @@ os.environ.setdefault("DISPLAY", ":0")
 # Disable all tqdm progress bars; they pollute test output.
 os.environ.setdefault("TQDM_DISABLE", "1")
 
-# Suppress ResourceWarning at the OS level so datajoint/hash.py unclosed-file
-# warnings don't bleed through even during GC finalisation.
-_existing = os.environ.get("PYTHONWARNINGS", "")
-_rw_filter = "ignore::ResourceWarning"
-if _rw_filter not in _existing:
-    os.environ["PYTHONWARNINGS"] = (
-        f"{_existing},{_rw_filter}" if _existing else _rw_filter
-    )
-
 # ---------------------------------------------------------------------------
 
 import sys
@@ -62,6 +53,18 @@ from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
 
 # ------------------------------- TESTS CONFIG -------------------------------
+
+# Module-level default so `pytest_unconfigure` never references an unbound name.
+# `pytest_configure` sets TEARDOWN early but binds SERVER late (after building
+# the Docker MySQL manager). If configure raises in between -- e.g. Docker is
+# unavailable, so `DockerMySQLManager(...)` raises before the assignment -- pytest
+# still runs `pytest_unconfigure` from `wrap_session`'s finally. Without this
+# default the teardown's `SERVER.stop()` raises `NameError: name 'SERVER' is not
+# defined`, a second traceback that buries the real configuration error. The
+# default + the `SERVER is not None` guard in `pytest_unconfigure` surface the
+# real error instead.
+SERVER = None
+_UNIT_DATABASE_METHODS = {}
 
 
 # ---------- Fix ResourceWarning from datajoint.hash.uuid_from_file -----------
@@ -184,10 +187,11 @@ class _ModuleWarningsProxy:
         return getattr(warnings, name)
 
 
-# (1) Suppress MissingRequiredBuildWarning from hdmf objectmapper.
+# (1) Suppress only the old fixture's missing source_script_file_name warning.
 _hdmf_objectmapper.warnings = _ModuleWarningsProxy(
     lambda msg, *a, **kw: (
-        a
+        "source_script_file_name" in str(msg)
+        and a
         and isinstance(a[0], type)
         and issubclass(a[0], MissingRequiredBuildWarning)
     )
@@ -206,13 +210,13 @@ _sklearn_parallel.warnings = _ModuleWarningsProxy(
 #     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS,
 #     NO_DLC
 
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.simplefilter("ignore", category=ResourceWarning)
-warnings.simplefilter("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", module="tensorflow")
 
 warnings.filterwarnings(
-    "ignore", category=MissingRequiredBuildWarning, module="hdmf"
+    "ignore",
+    message=".*source_script_file_name.*",
+    category=MissingRequiredBuildWarning,
+    module="hdmf",
 )
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
@@ -249,9 +253,8 @@ warnings.filterwarnings(
 # numcodecs/__init__.py registers `atexit.register(blosc.destroy)` where
 # `blosc.destroy` is decorated with @deprecated (PyPI `deprecated` package).
 # This fires a DeprecationWarning at process exit.  We could filter it, but
-# ms4alg.py calls `warnings.resetwarnings()` during sorting — since pytest
-# runs with `-p no:warnings` (no catch_warnings restoration), that clears all
-# our filters and they are not restored before atexit fires.
+# ms4alg.py calls `warnings.resetwarnings()` during sorting; warning-filter
+# restoration during tests does not cover handlers that run at process exit.
 # Unregistering the atexit handler is cleaner: blosc._init() has already run,
 # and skipping _destroy() in the test process is harmless.
 try:
@@ -283,6 +286,15 @@ def pytest_addoption(parser):
         'spyglass-pytest-<branch>'). Docker container name.
     --container-port (str): Default None (uses 330[mysql_version]). Port mapping.
     """
+    parser.addoption(
+        "--v2-tier",
+        choices=("unit", "db_unit", "stage", "pipeline", "regression_gate"),
+        default=None,
+        help=(
+            "Run one spikesorting v2 test tier. The unit tier starts no Docker "
+            "server, fetches no datasets and rejects DataJoint connections."
+        ),
+    )
     parser.addoption(
         "--quiet-spy",
         action="store_true",
@@ -340,6 +352,30 @@ def pytest_addoption(parser):
         dest="container_port",
         help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
     )
+    parser.addoption(  # opt-in for the slow real-chronic memory/runtime test
+        "--run-chronic",
+        action="store_true",
+        dest="run_chronic",
+        default=False,
+        help=(
+            "Run the slow real-chronic-dataset memory/runtime test for "
+            "spike-sorting v2 concatenation. Requires a real dataset via the "
+            "SPIKESORTING_V2_CHRONIC_TEST_PATH env var; skipped by default."
+        ),
+    )
+    parser.addoption(  # opt-in for the v2 end-to-end acceptance probes
+        "--run-acceptance",
+        action="store_true",
+        dest="run_acceptance",
+        default=False,
+        help=(
+            "Run the spike-sorting v2 end-to-end acceptance probes "
+            "(tests marked `acceptance`, in tests/spikesorting/v2/acceptance). "
+            "Requires the MEArec tetrode and smoke fixtures, the "
+            "spikesorting-v2-curation extras and a Chromium for Playwright; "
+            "skipped by default."
+        ),
+    )
     parser.addoption(  # Keeps MySQL data off a potentially small root disk
         "--container-vol-dir",
         action="store",
@@ -377,10 +413,11 @@ def pytest_configure(config):
     global NO_DLC
 
     TEST_FILE = "minirec20230622.nwb"
-    TEARDOWN = not config.option.no_teardown
+    unit_only = getattr(config.option, "v2_tier", None) == "unit"
+    TEARDOWN = not config.option.no_teardown and not unit_only
     VERBOSE = not config.option.quiet_spy
 
-    NO_DLC = config.option.no_dlc
+    NO_DLC = config.option.no_dlc or unit_only
     pytest.NO_DLC = NO_DLC
 
     # Validate the requested base dir before anything is created or
@@ -427,7 +464,7 @@ def pytest_configure(config):
         vol_dir=config.option.container_vol_dir,
         restart=TEARDOWN,
         shutdown=TEARDOWN,
-        null_server=config.option.no_docker,
+        null_server=config.option.no_docker or unit_only,
         verbose=VERBOSE,
     )
     # Apply credentials now so that dj.config["custom"]["test_mode"] = True
@@ -450,6 +487,23 @@ def pytest_configure(config):
         download_dlc=not NO_DLC,
     )
 
+    if unit_only:
+        _block_unit_database_access()
+
+
+def _block_unit_database_access():
+    """Refuse collection- or runtime-time database access in the unit lane."""
+
+    def refuse(*args, **kwargs):
+        raise AssertionError(
+            "The v2 unit tier attempted DataJoint database access. "
+            "Move this test to a database tier or isolate its DB boundary."
+        )
+
+    for name in ("connect", "query"):
+        _UNIT_DATABASE_METHODS[name] = getattr(dj.Connection, name)
+        setattr(dj.Connection, name, refuse)
+
 
 def pytest_sessionfinish(session, exitstatus):
     # Stash the session so pytest_unconfigure (which only receives ``config``)
@@ -461,6 +515,9 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def pytest_unconfigure(config):
+    for name, method in _UNIT_DATABASE_METHODS.items():
+        setattr(dj.Connection, name, method)
+    _UNIT_DATABASE_METHODS.clear()
     server = globals().get("SERVER")
     if server is None:
         return
@@ -717,8 +774,12 @@ def no_dlc(request):
     yield NO_DLC
 
 
+# String condition (evaluated lazily in pytest's namespace, where
+# ``pytest_configure`` sets ``pytest.NO_DLC``). A ``lambda`` here would be a
+# truthy callable that ``skipif`` never calls, so every DLC test skipped
+# unconditionally regardless of ``--no-dlc``.
 skip_if_no_dlc = pytest.mark.skipif(
-    condition=lambda: getattr(pytest, "NO_DLC", False),
+    "getattr(pytest, 'NO_DLC', False)",
     reason="Skipping DLC-dependent tests.",
 )
 

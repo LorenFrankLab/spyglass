@@ -24,6 +24,136 @@ pytest --cov=spyglass --cov-report term-missing
 pytest --no-teardown -v
 ```
 
+### Spike sorting v2
+
+Use the isolated helper tier for a dependable database-free development run:
+
+```bash
+pytest tests/spikesorting/v2 --v2-tier unit --no-cov \
+  -m "not slow and not very_slow and not regenerate"
+```
+
+This command starts no Docker server, fetches no datasets, and rejects
+DataJoint connections and queries during collection and execution. Small
+synthetic recordings and temporary files are allowed. Drop the speed filter to
+run all isolated helper tests. On macOS, add `-p no:xvfb` if pytest-xvfb is
+installed; its virtual display requires Linux's Xvfb executable.
+
+Every collected v2 test has exactly one effective tier:
+
+| Tier | Dependency and behavior |
+| --- | --- |
+| `unit` | Isolated helpers; no database, downloaded datasets, browser, or native sorting run. |
+| `db_unit` | Database metadata, lookups and schema checks without v2 stage computation. |
+| `stage` | A materialized stage, native sorter, browser, or local server; database access when needed. |
+| `pipeline` | The complete sorting chain or session orchestration, including fixtures that already built it. |
+| `regression_gate` | Heavy scientific fixtures, memory, lifecycle acceptance and regeneration gates. |
+
+Run another tier with `--v2-tier stage`, for example. These dependency tiers are
+independent of speed markers; database tiers use the normal Docker/database
+setup. The CI workload shard named `unit` includes light database work to
+balance runtime. It is **not** the isolated `unit` tier. CI continues to run all
+three workload shards, with matching and browser extras in separate lanes.
+
+Architecture checks require canonical owner imports and docstring-only private
+package initializers. Current recording dictionary and pickle round trips must
+preserve independently expected traces and timestamps; library-version adapters
+for SpikeInterface and DataJoint remain separately tested. See the
+[architecture map](../docs/src/ForDevelopers/SpikeSortingV2Architecture.md).
+
+Integration scenarios declare their expected outcomes before calling the public
+APIs. Unit identities, accepted/excluded populations, original-clock spike
+times, and match memberships come from the fixture specification and raw input
+artifacts. Comparing two production readers is an additional persistence check;
+it cannot establish correctness on its own. A failing scenario is investigated
+against that independent truth, rather than changing expectations to match
+current output.
+
+The user scenarios are covered through the public APIs and persisted outputs:
+
+| User scenario                                                                        | Integration coverage                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Curate an oversplit bursting neuron alongside MUA and artifacts                      | [User curation workflow](spikesorting/v2/test_user_curation_workflow.py): waveform-bearing physical sources, known refractory violations, manual/browser merges, postmerge verification, and exact accepted spike data.                                          |
+| Merge units during review and resume verification                                    | [Browser journey](spikesorting/v2/test_review_browser_journey.py): real Chromium edits, save, commit, merged-child verification, restart/resume, and analysis handoff.                                                                                           |
+| Match epochs with changing firing rates and missing/newly detected neurons           | [Epoch matching](spikesorting/v2/test_epoch_unitmatch.py): one stable neuron with different sorter IDs, epoch-specific singletons, reviewed nuisance exclusion, explicit automatic-only populations, original-clock readback, and reuse.                         |
+| Sort same-day recordings together with one shared unit namespace                     | [Concat pipeline](spikesorting/v2/test_session_group_concat.py), `test_run_v2_pipeline_concat_mode_routes_session_group`: public run, auto-curation, per-member analysis outputs, and reuse.                                                                     |
+| Match independent recordings or daily concatenations                                 | [Direct curation matching](spikesorting/v2/test_direct_curation_unitmatch.py), `test_direct_reviewed_curation_populations_reach_match_artifact`: exact reviewed generations, evaluation-pinned populations, known match memberships, and database/NWB agreement. |
+| Repair a blocked matching request                                                    | [Direct curation matching](spikesorting/v2/test_direct_curation_unitmatch.py): blocks missing artifacts and changed pins before writes; restoring an artifact makes a rebuilt plan ready.                                                                        |
+| Track neurons across days, including partial activity and disappearance/reappearance | [Native daily matching](spikesorting/v2/test_unitmatch_daily_concat.py): real waveform extraction and UnitMatch, independently planted identities, unrelated sorter IDs, distractors, and held-out recovery/precision gates.                                     |
+
+Run the focused pipeline scenarios in an environment with the `test`,
+`spikesorting-v2`, and `spikesorting-v2-curation` extras:
+
+```bash
+pytest \
+    tests/spikesorting/v2/test_user_curation_workflow.py \
+    tests/spikesorting/v2/test_epoch_unitmatch.py \
+    tests/spikesorting/v2/test_session_group_concat.py::test_run_v2_pipeline_concat_mode_routes_session_group \
+    tests/spikesorting/v2/test_direct_curation_unitmatch.py::test_direct_reviewed_curation_populations_reach_match_artifact \
+    --v2-tier pipeline --no-dlc --no-cov
+```
+
+The focused review/matching journeys use deterministic sorter and matcher
+fixtures while running the real orchestration, review commits, waveform
+preparation, database writes, NWB serialization, and downstream readers. Native
+sorter tests in `single_session/test_pipeline_run.py`, native UnitMatch recovery
+tests in `test_unitmatch_daily_concat.py`, and the browser journeys
+independently exercise those runtimes. The browser journeys also require
+`spikesorting-v2-curation-test` and Playwright Chromium. CI runs the public
+review journeys in its curation lane and native matching in its matching lane;
+optional review paths can skip in the base environment. Heavy corrected
+daily-matching acceptance runs belong to `regression_gate` and run on the
+nightly/manual lane.
+
+The small user fixtures declare irregular physical spike trains before assigning
+sorter clusters. An oversplit cell shares one waveform across its fragments;
+pooled MUA combines two separately refractory-safe neurons. Bursting and a high
+firing rate alone do not make a unit MUA. Raw waveforms, channel footprints,
+background noise, and broad transients give evaluation and review meaningful
+signals. Expected merge events, refractory fractions, matched identities, and
+unmatched units are fixed independently of pipeline outputs.
+
+The native chronic benchmarks also include gradual template changes and nearby
+neurons with similar templates. Recovery for those two difficult cases is
+reported as diagnostics, without a passing recall requirement. Their presence in
+the fixture does not establish reliable recovery under drift or ambiguity.
+
+The motion acceptance manifests pin benchmark runner/helper files. The
+canonical import migration preserves their scientific AST and refreshes hashes
+that were already stale. A pin's `git_commit` identifies the checkout base;
+`files` identifies exact working-tree bytes, including uncommitted edits. The
+original `279a520` reference remains historical provenance. The refresh changes
+no seeds, thresholds or gates and provides no new acceptance run or evidence
+that historical gates pass the current harness.
+
+The unpinned `_motion_acceptance_reuse.py` wrapper also requires a complete
+runtime receipt and matching fingerprint before reusing results. Python,
+dependency/code versions, platform, BLAS/thread settings and the explicit
+benchmark job/recipe settings must match. Existing results without these
+receipts must be rerun. Failed runs never attach new receipts to old metrics,
+and runtime/source drift during execution leaves results unstamped. The pinned
+scientific runner, manifests, seeds and gates are unchanged by this bookkeeping.
+
+Reviewed module defaults, function overrides and fixture minimums live in
+[`spikesorting/v2/test_tiers.json`](spikesorting/v2/test_tiers.json). Collection
+checks assignments against pytest's resolved fixture graph, including fixture
+overrides. Adding a new unclassified module or a database-dependent fixture
+fails collection. Add its assignment, or declare an explicit tier on a new
+module/test. A test added to an existing module inherits its reviewed default;
+if it introduces a higher-tier fixture, collection fails until its tier is
+updated. Named overrides use `ClassName::test_name` for class methods and omit
+parameter IDs. Use an override when lowering a module default for a pure test.
+
+Lint rules live in `pyproject.toml` and are shared by local pre-commit and CI.
+The initial type-checking gate covers pipeline value types, recording value
+types and the matcher protocol:
+
+```bash
+python -m pip install ruff==0.14.13 mypy==2.3.1
+ruff check .
+mypy --config-file=pyproject.toml
+```
+
 ______________________________________________________________________
 
 ## Test Markers
@@ -82,8 +212,11 @@ ______________________________________________________________________
 
 ## Fixture System
 
-The test suite uses session-scoped fixtures for efficiency. All fixtures are
-defined in `tests/conftest.py`.
+The test suite uses session-scoped fixtures for expensive shared setup and
+function-scoped fixtures for mutable state. Repository fixtures live in
+`tests/conftest.py`; domain and suite fixtures live in their nearest
+`conftest.py`, including `tests/spikesorting/v2/conftest.py` and
+`tests/spikesorting/v2/single_session/conftest.py`.
 
 ### Core Data Fixtures
 
@@ -129,6 +262,8 @@ maintaining coverage.
 2. **Spike Sorting External Calls**
 
     - Mocks: Spikeinterface operations, detector computations
+    - V2 tests isolate external boundaries explicitly; pipeline, persistence,
+        transaction and browser tests exercise real operations where relevant.
 
 ### Using Mocked Fixtures
 
@@ -151,11 +286,19 @@ ______________________________________________________________________
 
 **File**: `.github/workflows/test-conda.yml`
 
-**Trigger Modes:**
+**Trigger Modes** (the `run-tests` job — the general suite):
 
 - `push`: Runs fast tests only (`-m "not slow and not very_slow"`)
 - `pull_request` (closed + merged): Runs full test suite
 - `workflow_dispatch`: Manual trigger with mode selection (fast/full)
+
+The `fast`/`full` selection applies **only to the general `run-tests` job**. The
+separate `pytest-v2` and `pytest-legacy` jobs ignore it and always run their full
+applicable suite; what they cover is keyed on the *event*, not the mode — `push`
+runs the smoke-fixture tier, `schedule` (nightly) adds the 60s fixture, and a
+manual `workflow_dispatch` additionally pulls the scenario fixtures
+(Neuropixels / tetrode) and requires them, so a manual dispatch is the most
+thorough v2 run regardless of the `fast`/`full` choice.
 
 **Optimizations:**
 
@@ -176,7 +319,7 @@ To facilitate headless testing of various Qt-based tools as well as Tensorflow,
 `pyproject.toml` includes environment variables:
 
 - `QT_QPA_PLATFORM`: Set to `offscreen` to prevent the need for a display
-- `TF_ENABLE_ONEDNN_OPTS`: Set to `1` to enable Tensorflow optimizations
+- `TF_ENABLE_ONEDNN_OPTS`: Set to `0` to disable approximate Tensorflow operations
 - `TF_CPP_MIN_LOG_LEVEL`: Set to `2` to suppress Tensorflow warnings
 
 ______________________________________________________________________

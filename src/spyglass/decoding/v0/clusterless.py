@@ -23,6 +23,9 @@ import spikeinterface as si
 import xarray as xr
 
 from spyglass.settings import waveforms_dir
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.utils import logger
 
 try:
@@ -174,6 +177,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
             thresholds the waveform.
         4. Saves the marks as a TimeSeries object in a new AnalysisNwbfile.
         """
+        _require_legacy_si_environment("v0 UnitMarks.make")
         # create a new AnalysisNwbfile and a timeseries for the marks and save
         key["analysis_file_name"] = AnalysisNwbfile().create(
             key["nwb_file_name"]
@@ -194,7 +198,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
         recording = Curation.get_recording(key)
         if recording.get_num_segments() > 1:
             recording = si.concatenate_recordings([recording])
-        sorting = Curation.get_curated_sorting(key)
+        sorting = Curation().get_curated_sorting(key)
         waveform_extractor_name = (
             f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
             f'{key["curation_id"]}_clusterless_waveforms'

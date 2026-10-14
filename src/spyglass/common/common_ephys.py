@@ -15,6 +15,7 @@ from spyglass.settings import test_mode
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.mixins.ingestion import IngestionEntries
 from spyglass.utils.nwb_helper_fn import (
+    RAW_ELECTRICAL_SERIES_NAMES,
     estimate_sampling_rate,
     get_config,
     get_electrode_indices,
@@ -278,12 +279,7 @@ class Raw(SpyglassIngestion, dj.Imported):
 
     _nwb_table = Nwbfile
     _only_ingest_first = True
-    _source_nwb_object_name = [
-        "e-series",
-        "electricalseries",
-        "ephys",
-        "electrophysiology",
-    ]
+    _source_nwb_object_name = list(RAW_ELECTRICAL_SERIES_NAMES)
 
     _source_nwb_object_type = pynwb.ecephys.ElectricalSeries
 

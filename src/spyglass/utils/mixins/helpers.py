@@ -14,7 +14,7 @@ from tqdm import tqdm
 from spyglass.utils.dj_helper_fn import (
     _quick_get_analysis_path,
     bytes_to_human_readable,
-    get_child_tables,
+    get_child_references,
 )
 from spyglass.utils.mixins.base import BaseMixin
 
@@ -182,7 +182,7 @@ class HelperMixin(BaseMixin):
         QueryExpression, optional
             If dry_run, a query expression containing the orphaned entries.
         """
-        orphans = self - get_child_tables(self)
+        orphans = self - get_child_references(self)
         if dry_run:
             return orphans
         orphans.super_delete(warn=False, **kwargs)

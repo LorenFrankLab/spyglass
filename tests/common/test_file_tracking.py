@@ -338,15 +338,38 @@ def test_check1_file_checksum_error(
 
 
 def test_check_path_deleted_file(file_tracking_module):
-    """_check_path returns None for files in the deleted_files set."""
+    """_check_path skips a deleted file ONLY while it is physically absent."""
     result = file_tracking_module._check_path(
-        fname="/irrelevant/path.nwb",
+        fname="/irrelevant/path.nwb",  # absent
         analysis_file_name="path.nwb",
         full_table_name="`test`.`table`",
         deleted_files={"path.nwb"},
         hash_map={},
     )
     assert result is None
+
+
+def test_check_path_deleted_but_rebuilt_is_tracked(
+    file_tracking_module, tmp_path
+):
+    """A recompute-deleted file that is back on disk (an on-demand rebuild) is
+    NOT skipped -- a stale ``deleted=1`` flag must not hide a live, corrupt file.
+    """
+    f = tmp_path / "rebuilt.nwb"
+    f.write_bytes(b"rebuilt-bytes")
+    # Present + flagged deleted + a MISMATCHED stored hash: the presence-aware
+    # skip falls through to checksum tracking instead of hiding the file.
+    result = file_tracking_module._check_path(
+        fname=str(f),
+        analysis_file_name="rebuilt.nwb",
+        full_table_name="`test`.`table`",
+        deleted_files={"rebuilt.nwb"},
+        hash_map={"rebuilt.nwb": "a-different-stored-hash"},
+    )
+    assert (
+        result is not None
+    ), "a rebuilt-but-flagged file must be tracked, not skipped"
+    assert "checksum mismatch" in result["issue"]
 
 
 def test_check_path_missing_file(file_tracking_module, tmp_path):

@@ -1312,3 +1312,22 @@ class TestTestModeSandboxContainment:
         cfg = SpyglassConfig()
         cfg.load_config(base_dir=str(base), test_mode=False, force_reload=True)
         assert cfg.analysis_dir == str(outside)
+
+
+def test_figpack_api_key_prefers_config_over_env(monkeypatch):
+    """The dj.config key wins; FIGPACK_API_KEY is only a fallback."""
+    import datajoint as dj
+
+    from spyglass.settings import SpyglassConfig
+
+    custom = dj.config.setdefault("custom", {})
+    monkeypatch.delitem(custom, "figpack_api_key", raising=False)
+    monkeypatch.delenv("FIGPACK_API_KEY", raising=False)
+    cfg = SpyglassConfig()
+    assert cfg.figpack_api_key is None
+
+    monkeypatch.setenv("FIGPACK_API_KEY", "from-env")
+    assert cfg.figpack_api_key == "from-env"
+
+    monkeypatch.setitem(custom, "figpack_api_key", "from-config")
+    assert cfg.figpack_api_key == "from-config"

@@ -30,8 +30,12 @@ def get_file_namespaces(file_path: Union[str, Path]) -> dict:
     """
     catalog = NamespaceCatalog(NWBGroupSpec, NWBDatasetSpec, NWBNamespace)
     pynwb.NWBHDF5IO.load_namespaces(catalog, file_path)
-    name_cat = TypeMap(catalog).namespace_catalog
+    return get_namespace_versions(TypeMap(catalog))
 
+
+def get_namespace_versions(type_map: TypeMap) -> dict:
+    """Get all namespace versions registered in a type map (e.g. pynwb's)."""
+    name_cat = type_map.namespace_catalog
     return {
         ns_name: name_cat.get_namespace(ns_name).get("version", None)
         for ns_name in name_cat.namespaces

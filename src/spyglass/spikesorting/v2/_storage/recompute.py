@@ -1,0 +1,409 @@
+"""DB-free content-hashing helpers for v2 recompute verification.
+
+A whole-file ``NwbfileHasher`` digest is NOT reproducible across regenerations
+-- it folds in volatile metadata (per-object ``object_id`` attrs, file-creation
+timestamps) -- so it can never confirm a content-identical rebuild. These
+helpers therefore hash reproducible CONTENT: the preprocessed
+``ElectricalSeries`` traces (rounded, little-endian), and the deterministic
+SortingAnalyzer extension data. ``hash_recording_traces`` is the ``traces``
+building block of the recording ``content_hash`` (see
+:mod:`spyglass.spikesorting.v2._recording.fingerprint`); ``hash_extension_data`` backs the analyzer
+recompute comparison, which covers every base extension: ``noise_levels`` is
+seed-pinned (its ``random_slices_kwargs`` seed) so it rebuilds identically and is
+hashed alongside random_spikes / templates / waveforms.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+
+import numpy as np
+
+# Persist the format on each digest. Earlier hashes concatenated raw array
+# bytes, omitting shapes/dtypes; they cannot establish the stronger contract.
+ANALYZER_CONTENT_HASH_VERSION = 2
+ANALYZER_CONTENT_HASH_PREFIX = f"array-v{ANALYZER_CONTENT_HASH_VERSION}:"
+_HASH_CHUNK_BYTES = 1024 * 1024
+
+
+def analyzer_content_hash_is_current(value) -> bool:
+    """Whether a persisted digest uses the current array-content format."""
+    return isinstance(value, str) and value.startswith(
+        ANALYZER_CONTENT_HASH_PREFIX
+    )
+
+
+def _copy_named_fields(destination, source) -> None:
+    """Copy structured values without copying unspecified alignment bytes."""
+    if source.dtype.names is None:
+        np.copyto(destination, source, casting="equiv")
+        return
+    for name in source.dtype.names:
+        # Indexing a subarray field exposes its additional dimensions, so the
+        # same recursion also handles nested records inside subarrays.
+        _copy_named_fields(destination[name], source[name])
+
+
+def _hash_array(digest, array, *, rounding: int) -> None:
+    """Hash array interpretation and C-order values in bounded buffers."""
+    array = np.asarray(array)
+    if array.dtype.hasobject:
+        raise TypeError("Analyzer content hashes require non-object arrays.")
+    dtype = array.dtype.newbyteorder("<")
+    header = json.dumps(
+        {"shape": array.shape, "dtype": np.lib.format.dtype_to_descr(dtype)},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    digest.update(len(header).to_bytes(8, "big"))
+    digest.update(header)
+    # nditer buffers C-order slices, including strided and non-native-endian
+    # inputs, without flattening or converting a whole memmapped waveform.
+    chunks = np.nditer(
+        array,
+        flags=["external_loop", "buffered", "zerosize_ok"],
+        op_flags=["readonly"],
+        op_dtypes=[dtype],
+        casting="equiv",
+        order="C",
+        buffersize=max(1, _HASH_CHUNK_BYTES // max(1, dtype.itemsize)),
+    )
+    for chunk in chunks:
+        if dtype.names is not None:
+            # Padding is storage, not content: copying a complete structured
+            # record can preserve uninitialized bytes. Zero only this bounded
+            # chunk, then recursively copy its named scientific fields.
+            normalized = np.zeros(chunk.shape, dtype=dtype)
+            _copy_named_fields(normalized, chunk)
+            chunk = normalized
+        elif dtype.kind == "f":
+            chunk = np.round(chunk, rounding)
+        digest.update(memoryview(np.ascontiguousarray(chunk)).cast("B"))
+
+
+# Sort-time analyzer extensions hashed for the recompute comparison. All are
+# either seed-pinned (random_spikes via its seed, noise_levels via its
+# random_slices_kwargs seed) or intrinsically deterministic (templates,
+# waveforms), so a rebuild is content-identical and the comparison never reports
+# a spurious mismatch.
+ANALYZER_RECOMPUTE_EXTENSIONS = (
+    "random_spikes",
+    "noise_levels",
+    "templates",
+    "waveforms",
+)
+
+
+def hash_extension_data(
+    analyzer, extensions=ANALYZER_RECOMPUTE_EXTENSIONS, *, rounding: int = 4
+) -> dict[str, str]:
+    """Return ``{extension_name: content_hash}`` for an analyzer's extensions.
+
+    Hashes extension data with shapes, canonical little-endian dtypes and
+    array boundaries. Floats are rounded to ``rounding`` decimals. Streaming
+    buffers bound extra memory independently of waveform volume. Returned
+    digests carry a format tag; legacy byte-only hashes are explicitly stale.
+    Only extensions that are present are hashed.
+    """
+    hashes: dict[str, str] = {}
+    for name in extensions:
+        if not analyzer.has_extension(name):
+            continue
+        data = analyzer.get_extension(name).get_data()
+        arrays = data if isinstance(data, (tuple, list)) else [data]
+        digest = hashlib.sha256()
+        digest.update(ANALYZER_CONTENT_HASH_PREFIX.encode())
+        digest.update(int(rounding).to_bytes(8, "big", signed=True))
+        digest.update(len(arrays).to_bytes(8, "big"))
+        for array in arrays:
+            _hash_array(digest, array, rounding=rounding)
+        hashes[name] = ANALYZER_CONTENT_HASH_PREFIX + digest.hexdigest()
+    return hashes
+
+
+#: Base analyzer extensions ``Sorting.make`` computes, in build order. Used to
+#: report each extension's seed mode in the recompute manifest. Every STOCHASTIC
+#: base extension (random_spikes, noise_levels) is seed-pinned; templates and
+#: waveforms are intrinsically deterministic and carry no seed. This equals
+#: ``ANALYZER_RECOMPUTE_EXTENSIONS`` (the content the recompute hash covers);
+#: kept as a named list because the manifest reports seed modes in build order.
+BASE_ANALYZER_EXTENSIONS = (
+    "random_spikes",
+    "noise_levels",
+    "templates",
+    "waveforms",
+)
+
+
+def analyzer_seed_modes(analyzer) -> dict[str, object]:
+    """Map each present base extension to its effective seed provenance.
+
+    Returns ``{extension: seed}`` when the extension's stored params carry an
+    explicit, non-``None`` seed (e.g. the seed-pinned ``random_spikes``
+    subsample, or ``noise_levels`` whose seed is threaded through
+    ``random_slices_kwargs`` per SI's ``get_noise_levels`` signature), and
+    ``{extension: "unseeded"}`` otherwise -- any extension whose params hold no
+    seed. Surfacing this in the recompute manifest stops it from silently
+    implying a pinned seed for an extension that has none. Absent extensions are
+    omitted.
+    """
+    modes: dict[str, object] = {}
+    for name in BASE_ANALYZER_EXTENSIONS:
+        if not analyzer.has_extension(name):
+            continue
+        params = analyzer.get_extension(name).params or {}
+        seed = params.get("seed")
+        if seed is None:
+            # ``noise_levels`` carries its seed under ``random_slices_kwargs``
+            # (SI's ``get_noise_levels`` signature), not a top-level ``seed``.
+            seed = (params.get("random_slices_kwargs") or {}).get("seed")
+        modes[name] = "unseeded" if seed is None else seed
+    return modes
+
+
+def analyzer_recompute_unverifiable_reason(manifest) -> str | None:
+    """Explain why a legacy analyzer inventory cannot be recompute-verified.
+
+    Older inventories excluded ``noise_levels`` because the extension was not
+    seed-pinned. Comparing such a folder with today's deterministic rebuild
+    would yield an expected mismatch that looks like corruption. Return an
+    explicit reason so the recompute table records a safe ``matched=0`` without
+    attempting that misleading comparison.
+    """
+    if not manifest:
+        return None
+    content_hashes = manifest.get("extension_content_hashes") or {}
+    seed_modes = manifest.get("base_extension_seed_modes") or {}
+    if "noise_levels" not in content_hashes:
+        return (
+            "legacy/unverifiable analyzer inventory: noise_levels was not "
+            "included in the stored content hash"
+        )
+    if seed_modes.get("noise_levels") == "unseeded":
+        return (
+            "legacy/unverifiable analyzer inventory: stored noise_levels "
+            "has no deterministic seed provenance"
+        )
+    if manifest.get("extension_content_hash_version") != (
+        ANALYZER_CONTENT_HASH_VERSION
+    ):
+        return (
+            "legacy/unverifiable analyzer inventory: array-content hashes "
+            "do not record shapes and canonical dtypes; refresh the inventory"
+        )
+    return None
+
+
+def analyzer_inventory_storage_changed(
+    manifest, current_fingerprint: str | None
+) -> bool:
+    """Whether a versions row describes a different folder generation.
+
+    Empty manifests intentionally represent absent or zero-unit analyzers. A
+    nonempty legacy manifest without a storage fingerprint is refreshed once;
+    afterward path/size/mtime drift identifies a rebuild without reading any
+    extension arrays.
+    """
+    manifest = manifest or {}
+    if current_fingerprint is None and not manifest:
+        return False
+    return (
+        "storage_fingerprint" not in manifest
+        or manifest["storage_fingerprint"] != current_fingerprint
+        or (
+            bool(manifest)
+            and current_fingerprint is not None
+            and manifest.get("extension_content_hash_version")
+            != ANALYZER_CONTENT_HASH_VERSION
+        )
+    )
+
+
+def analyzer_inventory_refresh_needed(
+    manifest, current_fingerprint: str | None, *, reclaimed: bool
+) -> bool:
+    """Whether a versions row must be re-inventoried from the current folder.
+
+    Wraps :func:`analyzer_inventory_storage_changed` with the one case a bare
+    fingerprint comparison gets wrong: a folder that is absent because it was
+    deliberately reclaimed. ``delete_files`` frees a verified analyzer and
+    records the reclamation as ``deleted=1``; the inventory row still describes
+    the bytes that were verified, and the audit rows hang off it. Refreshing
+    would invalidate the inventory, cascade the audit away, and re-plan a
+    rebuild against ``_MISSING_HASH``. An absent folder with no reclamation on
+    record is still a real disappearance and does need the refresh.
+    """
+    if reclaimed and current_fingerprint is None:
+        return False
+    return analyzer_inventory_storage_changed(manifest, current_fingerprint)
+
+
+def hash_recording_traces(
+    recording, *, rounding: int = 4, chunk_frames: int = 300_000
+) -> dict[str, str]:
+    """Return ``{segment_i: content_hash}`` of a recording's rounded traces.
+
+    Chunked over frames to bound memory; deterministic given the same
+    preprocessing pipeline, raw data, and SpikeInterface version.
+    """
+    hashes: dict[str, str] = {}
+    for segment in range(recording.get_num_segments()):
+        digest = hashlib.md5()
+        n_frames = recording.get_num_frames(segment_index=segment)
+        for start in range(0, n_frames, chunk_frames):
+            end = min(start + chunk_frames, n_frames)
+            traces = np.asarray(
+                recording.get_traces(
+                    segment_index=segment, start_frame=start, end_frame=end
+                ),
+                dtype=np.float64,
+            )
+            # Serialize explicit little-endian so the digest is byte-stable
+            # across architectures (the content-fingerprint contract). traces
+            # is float64 above; ``<f8`` is a no-op on x86/ARM but defensive.
+            digest.update(
+                np.ascontiguousarray(
+                    np.round(traces, rounding).astype("<f8")
+                ).tobytes()
+            )
+        hashes[f"segment_{segment}"] = digest.hexdigest()
+    return hashes
+
+
+def combined_hash(hash_dict: dict[str, str]) -> str:
+    """Fold a per-object hash dict into one stable 64-char digest."""
+    digest = hashlib.sha256()
+    for key in sorted(hash_dict):
+        digest.update(key.encode())
+        digest.update(hash_dict[key].encode())
+    return digest.hexdigest()
+
+
+#: Extensions hashed for the whitened METRIC analyzer: the base content set plus
+#: ``principal_components``, which PC/NN metrics compute and consume on it. Hashing
+#: only the base set would let a principal_components change on a PC/NN evaluation
+#: drift undetected. ``hash_extension_data`` skips any extension not present.
+METRIC_ANALYZER_HASH_EXTENSIONS = ANALYZER_RECOMPUTE_EXTENSIONS + (
+    "principal_components",
+)
+
+#: Extensions hashed per evaluation analyzer role -- the single source of the
+#: role -> hashed-extensions mapping, shared by the store and stale-check sides.
+_ROLE_HASH_EXTENSIONS = {
+    "display": ANALYZER_RECOMPUTE_EXTENSIONS,
+    "metric": METRIC_ANALYZER_HASH_EXTENSIONS,
+}
+
+
+def analyzer_hash_for_role(analyzer, role: str) -> str:
+    """Content hash of ``analyzer`` over the extensions consumed for ``role``.
+
+    The per-role primitive behind :func:`analyzer_role_hashes` and the
+    stale-check re-hash, so both compute a role's hash identically.
+    """
+    return ANALYZER_CONTENT_HASH_PREFIX + combined_hash(
+        hash_extension_data(analyzer, extensions=_ROLE_HASH_EXTENSIONS[role])
+    )
+
+
+def analyzer_role_hashes(display_analyzer, metric_analyzer=None) -> dict:
+    """Return ``{role: content_hash}`` for the canonical analyzers consumed.
+
+    A ``CurationEvaluation`` always reads the ``"display"`` analyzer and, when it
+    requests PC/NN metrics, the whitened ``"metric"`` analyzer. The hash for each
+    role covers the SEED/PARAM-DRIVEN content surfaces: the base content
+    extensions (``random_spikes``/``templates``/``waveforms`` -- their seed and
+    region waveform window are Spyglass-pinned), plus ``principal_components`` for
+    the metric role (Spyglass-pinned PCA params that recompute on a param
+    mismatch, so it can drift without an SI-version bump).
+
+    The DERIVED display extensions an evaluation also computes
+    (``spike_amplitudes``/``template_metrics``/``template_similarity``/...) are
+    NOT hashed directly: they are computed once with SpikeInterface DEFAULT params
+    (no Spyglass pinning, no param-driven recompute), so they are deterministic
+    given the base extensions (hashed) and the SI version (checked separately by
+    detect_stale_source) -- covered transitively. This keeps the manifest stable
+    (``template_metrics`` is a DataFrame, not cleanly content-hashable) while
+    still flagging every realistic drift path.
+
+    The single source of the role -> hashed-extensions mapping, shared by the
+    store (make_compute) and compare (detect_stale_source) sides so they cannot
+    drift. ``metric_analyzer=None`` (no PC metrics) yields just the display entry.
+    """
+    hashes = {"display": analyzer_hash_for_role(display_analyzer, "display")}
+    if metric_analyzer is not None:
+        hashes["metric"] = analyzer_hash_for_role(metric_analyzer, "metric")
+    return hashes
+
+
+def compare_hash_dicts(
+    old: dict[str, str], new: dict[str, str]
+) -> tuple[bool, list[str], list[str], list[str]]:
+    """Compare two per-object hash dicts.
+
+    Returns ``(matched, missing_from_old, missing_from_new, differing)`` where
+    ``missing_from_old`` are object names present only in ``new`` and vice
+    versa, and ``differing`` are names present in both with unequal hashes.
+    ``matched`` is True only when all three lists are empty.
+    """
+    old_keys, new_keys = set(old), set(new)
+    missing_from_new = sorted(old_keys - new_keys)
+    missing_from_old = sorted(new_keys - old_keys)
+    differing = sorted(k for k in old_keys & new_keys if old[k] != new[k])
+    matched = not (missing_from_new or missing_from_old or differing)
+    return matched, missing_from_old, missing_from_new, differing
+
+
+def current_nwb_namespaces(abs_path: str) -> dict:
+    """Return the pynwb namespace versions embedded in an NWB file."""
+    from spyglass.utils.nwb_hash import get_file_namespaces
+
+    deps = dict(get_file_namespaces(abs_path))
+    deps.pop("version", None)
+    return deps
+
+
+def current_env_namespaces() -> dict:
+    """Return the pynwb namespace versions registered in the current process.
+
+    Reads the live ``pynwb`` type-map catalog (the base NWB/HDMF stack -- and
+    any extension already loaded this session). The counterpart to
+    :func:`current_nwb_namespaces`, which reads versions embedded in a file:
+    comparing the two (see :func:`env_matches`) decides whether a re-preprocess
+    in this environment would write namespace-comparable output.
+    """
+    import pynwb
+
+    from spyglass.utils.nwb_hash import get_namespace_versions
+
+    deps = get_namespace_versions(pynwb.get_manager().type_map)
+    deps.pop("version", None)
+    return deps
+
+
+def env_matches(file_deps: dict | None, env_deps: dict) -> bool:
+    """Whether a file's inventoried namespaces are reproducible in ``env_deps``.
+
+    Compatible iff every namespace the file and the environment have in COMMON
+    agrees on version. Namespaces present only in the file -- e.g. an extension
+    not yet registered in the live catalog (extensions load lazily) -- are not
+    compared, so an unregistered extension never spuriously fails the gate (the
+    lenient half of v1's ``_dicts_match``). Unlike v1, which compared a fixed
+    namespace allowlist, this compares ALL shared namespaces and so is slightly
+    stricter -- acceptable because the env gate is only a pre-filter, not the
+    delete authority (the real authority is the ``content_hash`` recompute
+    match): a false *compatible* here merely costs one failed attempt, and a
+    false *incompatible* only skips a recomputable artifact (recover with
+    ``force_attempt``), never anything unsafe.
+
+    A file with no inventoried deps (absent at inventory time) or no namespace
+    in common with the environment is treated as incompatible -- nothing could
+    be verified.
+    """
+    if not file_deps:
+        return False
+    shared = set(file_deps) & set(env_deps)
+    if not shared:
+        return False
+    return all(file_deps[ns] == env_deps[ns] for ns in shared)

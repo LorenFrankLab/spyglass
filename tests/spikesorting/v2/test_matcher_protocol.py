@@ -1,0 +1,424 @@
+"""Hermetic (no-DB) tests for the cross-session matcher plugin interface.
+
+The matcher protocol + registry is pure Python with no DataJoint dependency,
+so these tests import it directly and exercise registration, lookup, the
+runtime-checkable protocol, and the bundle/pair dataclasses without a database.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+
+@pytest.fixture
+def clean_registry():
+    """Snapshot and restore the module-global matcher registry per test."""
+    from spyglass.spikesorting.v2 import matcher_protocol as mp
+
+    saved_matchers = dict(mp._MATCHER_REGISTRY)
+    saved_schemas = dict(mp._SCHEMA_REGISTRY)
+    saved_preparers = dict(mp._PREPARER_REGISTRY)
+    try:
+        yield mp
+    finally:
+        mp._MATCHER_REGISTRY.clear()
+        mp._MATCHER_REGISTRY.update(saved_matchers)
+        mp._SCHEMA_REGISTRY.clear()
+        mp._SCHEMA_REGISTRY.update(saved_schemas)
+        mp._PREPARER_REGISTRY.clear()
+        mp._PREPARER_REGISTRY.update(saved_preparers)
+
+
+def _dummy_matcher(mp, name="dummy"):
+    """A minimal external matcher (proves the protocol is implementable)."""
+
+    class DummyMatcher:
+        def __init__(self):
+            self.name = name
+
+        def match(self, session_inputs, params):
+            if len(session_inputs) < 2:
+                return []
+            return []
+
+    return DummyMatcher()
+
+
+class DummySchema:
+    """Stand-in per-matcher params schema."""
+
+
+def test_dummy_matcher_satisfies_runtime_protocol(clean_registry):
+    mp = clean_registry
+    matcher = _dummy_matcher(mp)
+    assert isinstance(matcher, mp.MatcherProtocol)
+
+
+def test_register_and_get_matcher_round_trip(clean_registry):
+    mp = clean_registry
+    matcher = _dummy_matcher(mp)
+    mp.register_matcher(matcher, DummySchema)
+    assert mp.get_matcher("dummy") is matcher
+    assert "dummy" in mp._registered_matchers()
+    assert mp._get_matcher_schema("dummy") is DummySchema
+
+
+def test_register_matcher_rejects_non_conforming_object(clean_registry):
+    mp = clean_registry
+    with pytest.raises(TypeError):
+        mp.register_matcher(object(), DummySchema)
+
+
+def test_geometry_validation_is_optional(clean_registry):
+    mp = clean_registry
+    matcher = _dummy_matcher(mp)
+    mp.register_matcher(matcher, DummySchema)
+    assert isinstance(matcher, mp.MatcherProtocol)
+    assert mp.get_geometry_validator("dummy") is None
+
+
+def test_geometry_validation_belongs_to_the_registered_backend(clean_registry):
+    mp = clean_registry
+    matcher = _dummy_matcher(mp)
+    received = []
+
+    def validate_geometry(named_positions, params):
+        received.append((named_positions, params))
+        if not params["allow_remapping"]:
+            raise ValueError("This configuration requires remapping")
+
+    matcher.validate_geometry = validate_geometry
+    mp.register_matcher(matcher, DummySchema)
+    validator = mp.get_geometry_validator("dummy")
+    assert validator is matcher
+    positions = [("input_0", [[0, 0]]), ("input_1", [[0, 0], [0, 20]])]
+    params = {"allow_remapping": True}
+    validator.validate_geometry(positions, params)
+    assert received == [(positions, params)]
+    with pytest.raises(ValueError, match="requires remapping"):
+        validator.validate_geometry(positions, {"allow_remapping": False})
+
+
+def test_register_rejects_noncallable_geometry_validation(clean_registry):
+    mp = clean_registry
+    matcher = _dummy_matcher(mp)
+    matcher.validate_geometry = True
+    with pytest.raises(TypeError, match="validate_geometry must be callable"):
+        mp.register_matcher(matcher, DummySchema)
+    assert not mp.is_registered("dummy")
+
+
+def test_unitmatch_geometry_validation_needs_no_inference_library(
+    clean_registry, monkeypatch
+):
+    from spyglass.spikesorting.v2._matching import (
+        unitmatch_backend as _unitmatch_backend,
+    )
+
+    def unexpected_import():
+        raise AssertionError("Geometry preflight imported UnitMatchPy")
+
+    monkeypatch.setattr(
+        _unitmatch_backend, "_require_unitmatch", unexpected_import
+    )
+    validator = clean_registry.get_geometry_validator("unitmatch")
+    matching = [("input_0", [[0, 0], [0, 20]]), ("input_1", [[0, 0], [0, 20]])]
+    validator.validate_geometry(matching, {})
+    with pytest.raises(ValueError, match="probe geometry"):
+        validator.validate_geometry([matching[0], ("input_1", [[0, 0]])], {})
+
+
+def test_input_preparer_registration_preserves_existing_strategy(
+    clean_registry,
+):
+    mp = clean_registry
+
+    class Preparer:
+        def prepare(self, source, directory, params, jobs):
+            return None
+
+    class OtherPreparer(Preparer):
+        pass
+
+    first = Preparer()
+    mp.register_matcher(_dummy_matcher(mp), DummySchema, input_preparer=first)
+    assert mp.get_input_preparer("dummy") is first
+    # Idempotent registration without a strategy preserves the explicit one.
+    backend = mp.get_matcher("dummy")
+    mp.register_matcher(backend, DummySchema)
+    assert mp.get_input_preparer("dummy") is first
+    with pytest.raises(ValueError, match="different input preparer"):
+        mp.register_matcher(
+            backend, DummySchema, input_preparer=OtherPreparer()
+        )
+    assert mp.get_input_preparer("dummy") is first
+    replacement = OtherPreparer()
+    mp.register_matcher(
+        backend, DummySchema, input_preparer=replacement, replace=True
+    )
+    assert mp.get_input_preparer("dummy") is replacement
+
+
+def test_input_preparer_rejects_incomplete_contract(clean_registry):
+    mp = clean_registry
+    with pytest.raises(TypeError, match="input_preparer"):
+        mp.register_matcher(
+            _dummy_matcher(mp), DummySchema, input_preparer=object()
+        )
+    assert not mp.is_registered("dummy")
+
+
+def test_register_matcher_duplicate_name_raises_unless_replace(clean_registry):
+    """A second backend cannot silently claim an existing matcher name."""
+    mp = clean_registry
+    first = _dummy_matcher(mp, name="collide")
+    second = _dummy_matcher(mp, name="collide")
+    mp.register_matcher(first, DummySchema)
+    with pytest.raises(ValueError, match="already registered"):
+        mp.register_matcher(second, DummySchema)
+    # The original backend is untouched by the rejected registration.
+    assert mp.get_matcher("collide") is first
+    # Explicit opt-in replaces it.
+    mp.register_matcher(second, DummySchema, replace=True)
+    assert mp.get_matcher("collide") is second
+
+
+def test_registry_no_silent_reroute(clean_registry):
+    """The built-in 'unitmatch' name cannot be silently re-pointed at different
+    code: a different backend under that name raises without the explicit
+    maintenance flag, and the resolved backend stays the built-in one."""
+    mp = clean_registry
+    mp.register_default_matchers()  # ensure the built-in is present
+    builtin_cls = type(mp.get_matcher("unitmatch"))
+
+    impostor = _dummy_matcher(mp, name="unitmatch")  # different class
+    with pytest.raises(ValueError, match="already registered"):
+        mp.register_matcher(impostor, DummySchema)
+    # The name still resolves to the built-in backend, not the impostor.
+    resolved = mp.get_matcher("unitmatch")
+    assert type(resolved) is builtin_cls
+    assert resolved is not impostor
+
+
+def test_same_backend_reregisters_idempotently(clean_registry):
+    """Re-registering the SAME backend class is idempotent (no maintenance flag)
+    -- this is how register_default_matchers self-heals, so the built-in path no
+    longer relies on a blunt replace=True that would also mask a real collision.
+    """
+    mp = clean_registry
+    mp.register_default_matchers()
+    builtin_cls = type(mp.get_matcher("unitmatch"))
+    schema = mp._get_matcher_schema("unitmatch")
+    # A fresh instance of the same class registers without raising or a flag.
+    mp.register_matcher(builtin_cls(), schema)
+    assert type(mp.get_matcher("unitmatch")) is builtin_cls
+
+
+def test_lookups_return_one_stable_builtin_instance(clean_registry):
+    """Lookups read the registry; they do not re-install the built-in."""
+    mp = clean_registry
+    first = mp.get_matcher("unitmatch")
+    assert mp.get_matcher("unitmatch") is first
+    mp._registered_matchers()
+    mp._get_matcher_schema("unitmatch")
+    assert mp.get_matcher("unitmatch") is first
+
+
+def test_explicit_builtin_replacement_survives_lookups(clean_registry):
+    """A deliberate replace=True swap of the built-in name is what later
+    lookups return; bootstrap fills only a MISSING name and must not raise a
+    collision against the replacement. After the registry is cleared the
+    built-in is re-installed."""
+    mp = clean_registry
+    mp.register_default_matchers()
+    builtin_cls = type(mp.get_matcher("unitmatch"))
+    replacement = _dummy_matcher(mp, name="unitmatch")
+    mp.register_matcher(replacement, DummySchema, replace=True)
+    assert mp.get_matcher("unitmatch") is replacement
+    assert mp._get_matcher_schema("unitmatch") is DummySchema
+    mp.register_default_matchers()
+    assert mp.get_matcher("unitmatch") is replacement
+
+    mp._MATCHER_REGISTRY.clear()
+    mp._SCHEMA_REGISTRY.clear()
+    assert type(mp.get_matcher("unitmatch")) is builtin_cls
+
+
+_FRESH_PROCESS_CLAIM = """
+import sys
+from spyglass.spikesorting.v2 import matcher_protocol as mp
+
+assert "spyglass.spikesorting.v2._matching.unitmatch_backend" not in sys.modules
+assert not mp.is_registered("unitmatch")
+
+
+class Impostor:
+    name = "unitmatch"
+
+    def match(self, session_inputs, params):
+        return []
+
+
+class Schema:
+    pass
+
+
+replace = sys.argv[1] == "replace"
+try:
+    mp.register_matcher(Impostor(), Schema, replace=replace)
+except ValueError as exc:
+    assert not replace, exc
+    assert "already registered" in str(exc)
+    assert type(mp.get_matcher("unitmatch")).__name__ == "UnitMatchBackend"
+    print("rejected")
+else:
+    assert replace
+    assert isinstance(mp.get_matcher("unitmatch"), Impostor)
+    assert mp._get_matcher_schema("unitmatch") is Schema
+    print("replaced")
+"""
+
+
+@pytest.mark.parametrize("flag", ["noreplace", "replace"])
+def test_builtin_replacement_rule_holds_before_backend_import(flag):
+    """Claiming a built-in name in a fresh process, BEFORE the backend module
+    was ever imported, obeys the same rule as afterwards: refused without
+    ``replace=True`` (the built-in is loaded first and stays installed),
+    honored with it."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-c", _FRESH_PROCESS_CLAIM, flag],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    expected = "replaced" if flag == "replace" else "rejected"
+    assert result.stdout.strip().splitlines()[-1] == expected
+
+
+def test_get_matcher_unknown_raises_with_guidance(clean_registry):
+    mp = clean_registry
+    from spyglass.spikesorting.v2.exceptions import UnknownMatcherError
+
+    with pytest.raises(UnknownMatcherError) as excinfo:
+        mp.get_matcher("nope")
+    message = str(excinfo.value)
+    assert "nope" in message
+    assert "register_matcher" in message
+
+
+def test_get_matcher_schema_unknown_raises(clean_registry):
+    mp = clean_registry
+    from spyglass.spikesorting.v2.exceptions import UnknownMatcherError
+
+    with pytest.raises(UnknownMatcherError):
+        mp._get_matcher_schema("nope")
+
+
+def test_degenerate_single_session_returns_empty(clean_registry):
+    mp = clean_registry
+    matcher = _dummy_matcher(mp)
+    one = mp.SessionMatcherInput(
+        curation_key={"sorting_id": "s", "curation_id": 0},
+        bundle_dir=Path("/tmp/x"),
+        geometry_path=Path("/tmp/x/channel_positions.npy"),
+        recording_date=None,
+    )
+    assert matcher.match([one], {}) == []
+
+
+def test_bundle_metadata_normalizes_paths_and_shared_layout_defaults():
+    from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
+
+    key = {"sorting_id": "s", "curation_id": 0}
+    directory, geometry = Path("/tmp/bundle"), Path("/tmp/bundle/geometry.npy")
+    normalized = SessionMatcherInput(
+        key,
+        str(directory),
+        geometry_path=str(geometry),
+        recording_date="2026-01-01",
+    )
+    canonical = SessionMatcherInput(
+        key,
+        bundle_dir=directory,
+        geometry_path=geometry,
+        layout="split_half_waveforms",
+        layout_version=1,
+        recording_date="2026-01-01",
+    )
+    assert normalized == canonical
+    assert isinstance(normalized.bundle_dir, Path)
+    assert isinstance(normalized.geometry_path, Path)
+    assert normalized.bundle_dir == directory
+    assert normalized.geometry_path == geometry
+
+
+def test_feature_bundle_can_omit_geometry_and_remains_a_frozen_dataclass():
+    from dataclasses import FrozenInstanceError, replace
+
+    from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
+
+    bundle = SessionMatcherInput(
+        {"sorting_id": "s", "curation_id": 0},
+        bundle_dir=Path("/tmp/features"),
+        layout="features",
+        layout_version=2,
+    )
+    assert bundle.geometry_path is None
+    assert replace(bundle, recording_date="2026-01-01").layout_version == 2
+    with pytest.raises(FrozenInstanceError):
+        bundle.bundle_dir = Path("/tmp/other")
+
+
+def test_bundle_metadata_optional_fields_are_keyword_only():
+    from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
+
+    with pytest.raises(TypeError, match="positional"):
+        SessionMatcherInput({}, Path("/tmp/x"), Path("/tmp/x/geometry"))
+
+
+@pytest.mark.parametrize("version", [0, -1, True, 1.5, "1"])
+def test_bundle_metadata_requires_a_positive_integer_version(version):
+    from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
+
+    with pytest.raises(ValueError, match="positive integer"):
+        SessionMatcherInput(
+            {}, bundle_dir=Path("/tmp/x"), layout_version=version
+        )
+
+
+@pytest.mark.parametrize("layout", ["", " ", None, 42])
+def test_bundle_metadata_requires_a_layout_identifier(layout):
+    from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
+
+    with pytest.raises(ValueError, match="nonempty string"):
+        SessionMatcherInput({}, bundle_dir=Path("/tmp/x"), layout=layout)
+
+
+def test_bundle_metadata_requires_a_directory():
+    from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
+
+    with pytest.raises(TypeError, match="bundle_dir"):
+        SessionMatcherInput({})
+    with pytest.raises(TypeError, match="requires bundle_dir"):
+        SessionMatcherInput({}, bundle_dir=None)
+
+
+def test_match_pair_carries_both_side_keys(clean_registry):
+    mp = clean_registry
+    pair = mp.MatchPair(
+        session_a_sorting_id="a",
+        session_a_curation_id=0,
+        unit_a_id=3,
+        session_b_sorting_id="b",
+        session_b_curation_id=1,
+        unit_b_id=7,
+        match_probability=0.9,
+    )
+    assert pair.unit_a_id == 3 and pair.unit_b_id == 7
+    assert pair.drift_estimate_um == 0.0
+    assert pair.fdr_estimate is None

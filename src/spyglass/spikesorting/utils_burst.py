@@ -90,7 +90,12 @@ def plot_burst_pair_peaks(
     pairs: List[Tuple[int, int]], peak_amps: Dict[int, np.ndarray]
 ):
     """Plot peak amplitudes and timestamps for a list of unit pairs."""
-    fig, axes = plt.subplots(len(pairs), 4, figsize=(12, 2 * len(pairs)))
+    n_cols = 4
+    # squeeze=False keeps ``axes`` 2-D even for a single pair (otherwise
+    # ``plt.subplots(1, 4)`` returns a 1-D array and ``axes[ind, i]`` raises).
+    fig, axes = plt.subplots(
+        len(pairs), n_cols, figsize=(12, 2 * len(pairs)), squeeze=False
+    )
 
     def get_kwargs(unit, data):
         return dict(
@@ -105,7 +110,9 @@ def plot_burst_pair_peaks(
         peak2 = peak_amps[u2]
 
         axes[ind, 0].set_ylabel("percent")
-        for i in range(min(peak1.shape[1], peak2.shape[1])):
+        # Cap at ``n_cols`` so a >4-channel (polymer/sparse) unit does not index
+        # past the column grid.
+        for i in range(min(peak1.shape[1], peak2.shape[1], n_cols)):
             data1, data2 = peak1[:, i], peak2[:, i]
             axes[ind, i].hist(data1, **get_kwargs(u1, data1))
             axes[ind, i].hist(data2, **get_kwargs(u2, data2))
@@ -277,11 +284,35 @@ def calculate_ca(bins: np.ndarray, correl: np.ndarray) -> float:
 
 
 def calculate_isi_violation(
-    peak1: np.ndarray, peak2: np.ndarray, isi_threshold_s: float = 1.5
+    peak1: np.ndarray,
+    peak2: np.ndarray,
+    isi_threshold_ms: float = 1.5,
+    *,
+    isi_threshold_s: float | None = None,
 ) -> float:
-    """Calculate isi violation between two spike trains"""
+    """Fraction of refractory violations in the merged two-unit spike train.
+
+    ``peak1`` / ``peak2`` are spike times in SECONDS; ``isi_threshold_ms`` is
+    the refractory window in MILLISECONDS. The v1 arg was named
+    ``isi_threshold_s`` despite being applied as ms via ``* 1e-3``; that name is
+    kept as a deprecated keyword-only alias (same value, same behavior) so
+    external callers do not break. Returns ``violations / total_spikes`` of the
+    concatenated train: low for a clean oversplit (merging recovers a
+    refractory train), higher for two distinct cells (merging manufactures
+    chance coincidences within the refractory window).
+    """
+    if isi_threshold_s is not None:
+        import warnings
+
+        warnings.warn(
+            "calculate_isi_violation(isi_threshold_s=...) is deprecated; the "
+            "value was always applied in milliseconds -- use isi_threshold_ms.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        isi_threshold_ms = isi_threshold_s
     spike_train = np.sort(np.concatenate((peak1, peak2)))
     isis = np.diff(spike_train)
     num_spikes = len(spike_train)
-    num_violations = np.sum(isis < (isi_threshold_s * 1e-3))
+    num_violations = np.sum(isis < (isi_threshold_ms * 1e-3))
     return num_violations / num_spikes

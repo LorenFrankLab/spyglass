@@ -27,7 +27,6 @@ import pynwb
 import spikeinterface.extractors as se
 from datajoint.hash import key_hash
 from h5py import File as h5py_File
-from hdmf.build import TypeMap
 from tqdm import tqdm
 
 from spyglass.common import AnalysisNwbfile
@@ -41,7 +40,11 @@ from spyglass.spikesorting.v1.recording import (
 )
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
-from spyglass.utils.nwb_hash import NwbfileHasher, get_file_namespaces
+from spyglass.utils.nwb_hash import (
+    NwbfileHasher,
+    get_file_namespaces,
+    get_namespace_versions,
+)
 from spyglass.utils.recompute_helper_fn import H5pyComparator, sort_dict
 
 schema = dj.schema("spikesorting_v1_recompute")
@@ -73,7 +76,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     @cached_property
     def nwb_deps(self):
         """Return a restriction of self for the current environment."""
-        return sort_dict(self.namespace_dict(pynwb.get_manager().type_map))
+        return sort_dict(get_namespace_versions(pynwb.get_manager().type_map))
 
     def _dicts_match(
         self,
@@ -114,12 +117,23 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         return bool(self & key)
 
     def _has_matching_env(self, key: dict, show_err=False) -> bool:
-        """Check current env for matching pynwb versions."""
+        """Check current env for matching pynwb versions.
+
+        Compares only the ``_required_matches`` namespaces (core, hdmf-common,
+        hdmf-experimental, ndx-franklab-novela) -- the ones a spike-sorting
+        recording actually embeds -- rather than requiring the live global
+        catalog to equal the file's namespaces exactly. A full ``==`` spuriously
+        fails whenever an OPTIONAL extension (e.g. ``ndx-pose``) is registered
+        in the session but unused by the recording: such a namespace appears in
+        the live ``get_manager()`` catalog but never in the file's
+        ``/specifications``, so the recording could never be recomputed. This
+        matches the lenient comparison ``this_env`` already uses.
+        """
         if not self._has_key(key):
             return False  # # pragma: no cover
 
         need = sort_dict(self.key_env(key))
-        ret = self.nwb_deps == need
+        ret = self._dicts_match(self.nwb_deps, need)
 
         if not ret and show_err:
             logger.warning(  # pragma: no cover
@@ -143,13 +157,9 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         _ = this_env.pop("spyglass", None)  # ignore spyglass version
         return this_env
 
-    def namespace_dict(self, type_map: TypeMap):
+    def namespace_dict(self, type_map):
         """Return a dictionary of namespaces and their versions."""
-        name_cat = type_map.namespace_catalog
-        return {
-            field: name_cat.get_namespace(field).get("version", None)
-            for field in name_cat.namespaces
-        }
+        return get_namespace_versions(type_map)
 
     def make(self, key):
         """Inventory the namespaces present in an analysis file."""
