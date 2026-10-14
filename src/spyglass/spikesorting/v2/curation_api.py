@@ -1051,6 +1051,16 @@ class EvaluationResult:
                 "EvaluationResult selection identity no longer matches its "
                 f"curation: curation_evaluation_id={self.evaluation_id}."
             )
+        if (
+            selected.get("metric_params_name") != self.spec.metric_params_name
+            or selected.get("auto_curation_rules_name")
+            != self.spec.auto_curation_rules_name
+        ):
+            raise LookupError(
+                "EvaluationResult selection recipes no longer match its "
+                f"snapshot: curation_evaluation_id={self.evaluation_id}. "
+                "Resolve a fresh evaluation of the intended recipes."
+            )
         return key
 
     def preview_merges(self, groups: Sequence[Sequence[int]]) -> CurationRef:

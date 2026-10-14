@@ -106,6 +106,84 @@ def test_merge_group_normalization_is_lossless():
         lossless_int(3.5, "curation_id")
 
 
+@pytest.mark.parametrize(
+    "recipe_field", ["metric_params_name", "auto_curation_rules_name"]
+)
+@pytest.mark.parametrize("replacement", ["changed_recipe", None])
+def test_evaluation_facade_refuses_changed_or_missing_recipes(
+    monkeypatch, recipe_field, replacement
+):
+    """Persisted reads must still name the recipes of the cached result."""
+    import sys
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    from spyglass.spikesorting.v2.curation_api import (
+        CurationRef,
+        EvaluationResult,
+        EvaluationSpec,
+    )
+
+    class Rows:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def __and__(self, key):
+            return Rows(
+                [
+                    row
+                    for row in self.rows
+                    if all(
+                        row.get(name) == value for name, value in key.items()
+                    )
+                ]
+            )
+
+        def fetch(self, *, as_dict):
+            assert as_dict
+            return [dict(row) for row in self.rows]
+
+        def __len__(self):
+            return len(self.rows)
+
+    ref = CurationRef(uuid.uuid4(), 1, uuid.uuid4())
+    result = EvaluationResult(
+        curation=ref,
+        spec=EvaluationSpec("minimal", "none"),
+        evaluation_id=uuid.uuid4(),
+        metrics=pd.DataFrame({"snr": [7.0]}, index=[0]),
+        suggested_merges=[],
+        proposed_labels={},
+    )
+    key = {"curation_evaluation_id": result.evaluation_id}
+    row = {
+        **key,
+        "sorting_id": ref.sorting_id,
+        "curation_id": ref.curation_id,
+        "metric_params_name": result.spec.metric_params_name,
+        "auto_curation_rules_name": result.spec.auto_curation_rules_name,
+    }
+    monkeypatch.setattr(
+        CurationRef, "as_key", lambda self: self._unchecked_key()
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "spyglass.spikesorting.v2.metric_curation",
+        SimpleNamespace(
+            CurationEvaluationSelection=Rows([row]),
+            CurationEvaluation=Rows([key]),
+        ),
+    )
+    assert result._current_evaluation_key() == key
+    if replacement is None:
+        row.pop(recipe_field)
+    else:
+        row[recipe_field] = replacement
+    with pytest.raises(LookupError, match="recipes no longer match"):
+        result.plots.metrics()
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_curation_ref_state_operation_lineage_and_merge_id(

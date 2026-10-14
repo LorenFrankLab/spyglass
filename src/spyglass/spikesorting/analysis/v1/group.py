@@ -7,6 +7,12 @@ import numpy as np
 from spyglass.common import Session  # noqa: F401
 from spyglass.settings import test_mode
 from spyglass.spikesorting.analysis.v1._unit_filter import (
+    RANGE_OPERATORS,
+    SCALAR_ONLY_OPERATORS,
+    UNIT_CRITERIA_OPERATORS,
+    _is_list_valued,
+    _isin,
+    filter_units_by_criteria,
     filter_units_by_labels,
 )
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
@@ -19,29 +25,6 @@ from spyglass.utils.spikesorting import (
 
 schema = dj.schema("spikesorting_group_v1")
 
-# Operators accepted in UnitSelectionParams.unit_criteria, each applied
-# elementwise to one column of the units table
-UNIT_CRITERIA_OPERATORS = {
-    ">": np.greater,
-    ">=": np.greater_equal,
-    "<": np.less,
-    "<=": np.less_equal,
-    "==": np.equal,
-    "!=": np.not_equal,
-    "between": lambda vals, target: (vals >= target[0]) & (vals <= target[1]),
-    "outside": lambda vals, target: (vals < target[0]) | (vals > target[1]),
-    "isin": lambda vals, target: _isin(vals, target),
-    "notin": lambda vals, target: ~_isin(vals, target),
-}
-# Only "isin" and "notin" are list-aware, via _isin. The rest compare a
-# unit's value as a whole, so on a column holding a list per unit (e.g. the
-# curation labels) numpy compares the list object itself to the target: a
-# list never equals a string, making "==" all-False and "!=" all-True
-# regardless of the labels. filter_units_by_criteria raises rather than
-# return such a mask
-SCALAR_ONLY_OPERATORS = frozenset(UNIT_CRITERIA_OPERATORS) - {"isin", "notin"}
-# Operators taking a [low, high] pair rather than one value
-RANGE_OPERATORS = ("between", "outside")
 # Curation label columns, v0: "label", v1: "curation_label"
 CURATION_LABEL_COLUMNS = ("label", "curation_label")
 
@@ -264,69 +247,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         skip criteria on missing columns (passing all units for that criterion)
         with a warning instead of erroring.
         """
-        include_mask = np.ones(len(units_df), dtype=bool)
-
-        for column, criterion in (unit_criteria or {}).items():
-            if column not in units_df:
-                if strict:
-                    raise ValueError(
-                        f"Unit criteria column '{column}' not in units table. "
-                        + f"Columns are {list(units_df.columns)}. Pass "
-                        + "strict=False to skip criteria on missing columns."
-                    )
-                logger.warning(
-                    f"Unit criteria column '{column}' not in units table. "
-                    + "Skipping this criterion: every unit of this sorting "
-                    + "passes it unfiltered."
-                )
-                continue
-
-            if not isinstance(criterion, dict):  # shorthand for membership
-                criterion = {"isin": criterion}
-            if not criterion:
-                raise ValueError(
-                    f"Empty criterion for column '{column}': no operator to "
-                    + "apply. Drop the column from the criteria to include "
-                    + "every unit."
-                )
-            values = units_df[column].to_numpy()
-            present = units_df[column].notna().to_numpy(dtype=bool)
-            include_mask &= present
-            # Nullable pandas scalars cannot participate in NumPy comparisons.
-            # Evaluate only present values; missing evidence fails every operator.
-            values = values[present]
-
-            for operator, value in criterion.items():
-                if operator not in UNIT_CRITERIA_OPERATORS:
-                    raise ValueError(
-                        f"Invalid unit criteria operator '{operator}' for "
-                        + f"column '{column}'. Expected one of "
-                        + f"{list(UNIT_CRITERIA_OPERATORS)}"
-                    )
-                if operator in RANGE_OPERATORS and (
-                    not isinstance(value, (list, tuple, np.ndarray))
-                    or len(value) != 2
-                ):
-                    raise ValueError(
-                        f"Unit criteria operator '{operator}' for column "
-                        + f"'{column}' takes a [low, high] pair, got "
-                        + f"{value!r}."
-                    )
-                if operator in SCALAR_ONLY_OPERATORS and _is_list_valued(
-                    values
-                ):
-                    raise ValueError(
-                        f"Unit criteria operator '{operator}' cannot filter "
-                        + f"column '{column}', which holds a list per unit. "
-                        + "Comparing a list to the criterion would mask every "
-                        + "unit in or out at once. Use 'isin' or 'notin', "
-                        + "which match any item of the list."
-                    )
-                include_mask[present] &= UNIT_CRITERIA_OPERATORS[operator](
-                    values, value
-                )
-
-        return include_mask
+        return filter_units_by_criteria(units_df, unit_criteria, strict=strict)
 
     @classmethod
     def fetch_spike_data(
@@ -700,29 +621,6 @@ def _skipped_criteria_error(skipped_by: dict, applied_to: dict) -> ValueError:
         + "\nCorrect the column name in the group's UnitSelectionParams, drop "
         + "the criterion, or drop each sorting whose units table lacks the "
         + "column."
-    )
-
-
-def _isin(values, target):
-    """True where a unit's value, or any item of it, is in target
-
-    Columns of the units table may hold a list per unit (e.g. the curation
-    labels), which np.isin cannot compare against target directly.
-    """
-    target = np.atleast_1d(target)
-
-    if _is_list_valued(values):
-        return np.array(
-            [np.isin(np.atleast_1d(value), target).any() for value in values]
-        )
-
-    return np.isin(values, target)
-
-
-def _is_list_valued(values):
-    """True where a column holds a list per unit, rather than one value"""
-    return values.dtype == object and any(
-        isinstance(value, (list, tuple, np.ndarray)) for value in values
     )
 
 
