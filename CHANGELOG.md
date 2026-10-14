@@ -259,6 +259,13 @@ or `log_export` positionally must pass them by keyword.
         concatenate-and-sort, optional experimental motion correction, browser-based
         review with FigPack, and cross-session unit tracking with UnitMatch. See
         the Spike Sorting v2 docs #1609
+    - v2 unit matching accepts disjoint epochs within one NWB, orders them on the
+        original acquisition clock, and rejects overlapping raw samples. Add
+        `describe_epochs`, `plan_v2_unit_match_from_curations`, and a read-only
+        matching preflight. Matching freezes the selected population's policy,
+        evidence and unit IDs using the same resolver as downstream analysis; the
+        snapshots and source coverage are also stored in the run's NWB. Existing
+        preproduction matching schemas need recreation #1609
     - v2 sparse analyzers select channels using the sorter's spike polarity,
         preserving positive and bidirectional peak electrode/amplitude metadata.
         Incompatible existing analyzer caches rebuild on access. Already persisted

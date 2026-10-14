@@ -385,3 +385,15 @@ metrics. Inspect the reevaluated child before choosing it for analysis.
 `unavailable_qc` names missing inputs for enabled rules; missing-policy pass
 means unflagged, not good. `accept` plus a deny label such as `noise` is
 excluded by the accepted-unit policies.
+
+For matching separately sorted epochs or days, pass the completed review's
+`CurationRef` directly:
+`plan_v2_unit_match_from_curations([review_a.result(), review_b.result()])`. It
+freezes accepted single units by default. Inspect `plan.summary()` and
+`plan.as_dataframe()`, then run `preflight_v2_unit_match(plan)` before
+`run_v2_unit_match(plan)`. Use
+`describe_epochs(nwb_file_name, sort_group_id=...)` to find existing interval
+choices. Same-NWB epochs are supported when they contain disjoint original raw
+samples; different masks do not authorize overlapping source data. Part D of the
+[Cross-Session notebook](../notebooks/10_Spike_SortingV2_CrossSession.ipynb)
+walks through separate sorting, review, matching, and original-clock readback.

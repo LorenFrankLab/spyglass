@@ -84,6 +84,17 @@ input-preparer identities on the `UnitMatch` row and in the pairs NWB header.
 Unknown external package versions may be `None`; the metadata container and
 producer identities are required.
 
+Matching selections now require frozen unit eligibility
+(`Input.selection_snapshot`) and unmasked original-source sample coverage
+(`InputRecording.source_coverage`). Old development rows lack those snapshots
+and must be recreated through the sequence above; adding empty columns does not
+make old match results valid. Disjoint epochs of one NWB can be matched, while
+repeated acquisition samples remain an error. Pass exact completed curation
+handles to `plan_v2_unit_match_from_curations`; its default accepted-single-unit
+policy differs from the compatibility `v2_unflagged_units` default of the older
+group and named-sort planners. Automatic-only matching should name that policy
+explicitly. `final_curated` identifies a committed leaf, not human approval.
+
 Adding or altering database columns does not regenerate these NWB columns or
 headers. Rerunning the current pipeline produces the artifacts required by the
 current contract. Preserve any historical development results separately if they

@@ -1554,29 +1554,46 @@ independently, then match units across sessions. Matching never concatenates raw
 data: it pins one committed curation per **matching input** and reads only the
 traces that sort's sorter read. A matching input is one curated sort -- a
 single-recording `CurationV2` row or a same-day concatenation's parent curation
--- so a two-block daily concatenation contributes one input, not two.
+-- so a two-block daily concatenation contributes one input, not two. Separately
+sorted, disjoint epochs of one NWB can also be matching inputs; see
+[Epoch matching](#matching-separate-epochs-in-one-nwb).
 
 **Overlap restrictions**, enforced by `UnitMatchSelection.insert_inputs` and
 re-checked by `UnitMatch.make`:
 
-- **No two inputs may share a recording session** (`nwb_file_name`):
-    `SameSessionMatchError` rejects two sorts of one session, a concatenation
-    matched with a sort of one of its own members, and two concatenations
-    sharing a session. Matching within one session is therefore out of scope.
+- **No source samples may be reused.** Different epochs in one `nwb_file_name`
+    are allowed when their selected raw acquisition samples are disjoint.
+    `OverlappingMatchInputError` names the inputs, interval names, and
+    conflicting half-open raw-frame range. Different preprocessing recipes,
+    interval names, or artifact masks do not make repeated source samples
+    independent. This also checks a concatenation against another input
+    containing one of its member epochs.
+- **Selected timestamps must identify raw samples uniquely.** Duplicate
+    timestamps within selected samples or at their raw range boundaries block
+    matching. Repair the original acquisition clock and recreate its recordings,
+    or select epochs with unambiguous timestamps. Duplicates elsewhere in the
+    raw acquisition do not block an unambiguous epoch.
 - **A concatenation input must lie within one day.**
 
 **Chronological order and identity.** Inputs are numbered `input_index` `0..n-1`
-by their earliest frozen `session_start_time`, regardless of the order named, so
-the same inputs in any order resolve to the same selection. Each input pins an
-exact `(sorting_id, curation_id)` and `curation_uuid` (no implicit "latest"),
-plus its recordings' identity, content hash, session start time, frame span and
-kept intervals, frozen in `UnitMatchSelection.Input` / `InputRecording` and
-covered by `input_set_hash`. `UnitMatch.make` refuses a run whose frozen
-`nwb_file_name` or `session_start_time` differs from the live rows, so after a
+by their earliest frozen `session_start_time`, with same-session epochs ordered
+by their actual selected source time, regardless of the order named, so the same
+inputs in any order resolve to the same selection. Each input pins an exact
+`(sorting_id, curation_id)` and `curation_uuid` (no implicit "latest"), plus its
+recordings' identity, content hash, session start time, frame span and kept
+intervals, frozen in `UnitMatchSelection.Input` / `InputRecording` and covered
+by `input_set_hash`. `UnitMatch.make` refuses a run whose frozen `nwb_file_name`
+or `session_start_time` differs from the live rows, so after a
 `Session.session_start_time` correction, select again. A `SessionGroup` passed
 to `insert_selection` is provenance only, not a foreign key. A run of one input
 writes the frozen matchable-unit universe and an empty `Pair` table without
 calling the matcher.
+
+Each input also freezes its selected unit IDs, label-policy content, per-unit
+verdicts, and original-source sample coverage. Matching reads that population; a
+later label edit or changed source requires a new plan. Source coverage is
+derived from the unmasked, persisted recording's timestamps, not artifact-free
+observation intervals.
 
 **Chronic electrode-space contract.** The built-in UnitMatch backend **rejects**
 a channel-geometry mismatch across inputs. The pipeline **warns** when electrode
@@ -1635,12 +1652,67 @@ matcher parameters. Raise `ValueError` for unsupported geometry. UnitMatch uses
 this hook to require identical probe geometry and checks the prepared geometry
 again during inference. A backend without the hook does not trigger geometry
 reads or comparisons during selection. It remains responsible for validating the
-prepared inputs it consumes. Frozen-input identity, session-overlap checks, and
-pair validation apply to every backend.
+prepared inputs it consumes. Frozen-input identity, original-source overlap
+checks, and pair validation apply to every backend.
 
-The recommended path is **plan-then-run**: pin curations by a named curation
-strategy, review the plan, then run. Group-based planning uses a `SessionGroup`
-of already sorted and curated members:
+The recommended path after browser review is **exact curation → plan → preflight
+→ run**. Pass the completed `CurationRef` handles directly:
+
+```python
+from spyglass.spikesorting.v2.pipeline import (
+    plan_v2_unit_match_from_curations,
+    preflight_v2_unit_match,
+    run_v2_unit_match,
+)
+
+final_curations = [day1_review.result(), day2_review.result()]
+plan = plan_v2_unit_match_from_curations(final_curations)
+print(plan.summary())
+plan.as_dataframe()  # exact generation, policy, included IDs and exclusions
+report = preflight_v2_unit_match(plan)
+print(report.summary())  # source coverage, geometry, backend, actionable fixes
+summary = run_v2_unit_match(plan)
+```
+
+The direct planner requires `CurationRef` objects. Without supplied population
+snapshots, omitting `unit_policy` selects `"v2_accepted_single_units"`. It
+selects `accept` units and excludes `mua`, `noise`, `reject`, and `artifact`;
+automatic labeling alone normally selects nothing. For automatic-only inputs,
+choose `unit_policy="v2_unflagged_units"` explicitly; that includes unlabeled
+units and MUA. Planning and preflight require local raw NWBs, source recordings,
+and curated Units artifacts. Multi-input runs also require effective waveform
+traces and persisted statistics spans; a singleton run writes zero pairs without
+consuming those waveform assets. Planning and preflight do not rebuild missing
+artifacts or download files. Fix blocking findings and rebuild the plan;
+execution checks the frozen pins, eligibility, and source hash again before
+inserting a selection.
+
+To carry an analysis-specific population into matching, resolve one typed
+snapshot per curation and supply `unit_selections=` in the same order:
+
+```python
+from spyglass.spikesorting.v2.pipeline import resolve_unit_selection
+
+populations = [
+    resolve_unit_selection(
+        curation,
+        evaluation=evaluation,
+        unit_criteria={"snr": {">=": 5}},
+    )
+    for curation, evaluation in zip(final_curations, final_evaluations)
+]
+plan = plan_v2_unit_match_from_curations(final_curations, unit_selections=populations)
+```
+
+With supplied snapshots, leaving `unit_policy` unset (`None`) preserves each
+snapshot's policy; an explicit policy must match every snapshot.
+
+Each evaluation must belong to its curation. Missing metric values fail the
+criterion. An existing analysis receipt exposes the same typed snapshot as
+`receipt.selection_snapshot`; a matching plan can reuse that exact population.
+
+For existing named groups, group-based planning uses a `SessionGroup` of already
+sorted and curated standalone members:
 
 ```python
 from spyglass.spikesorting.v2.pipeline import (
@@ -1649,7 +1721,12 @@ from spyglass.spikesorting.v2.pipeline import (
 )
 
 # curation_strategy is REQUIRED: final_curated / auto_curated / root / manual.
-plan = plan_v2_unit_match("my_team", "implant_week1", curation_strategy="final_curated")
+plan = plan_v2_unit_match(
+    "my_team",
+    "implant_week1",
+    curation_strategy="final_curated",
+    unit_policy="v2_accepted_single_units",
+)
 plan.as_dataframe()  # per-member pins; plan.errors lists unresolved members
 summary = run_v2_unit_match(plan)  # runs UnitMatch + TrackedUnit
 ```
@@ -1669,17 +1746,62 @@ from spyglass.spikesorting.v2.pipeline import (
 plan = plan_v2_unit_match_from_sorts(
     [day1_sorting_id, day2_sorting_id],
     curation_strategy="final_curated",
+    unit_policy="v2_accepted_single_units",
 )
 plan.as_dataframe()  # one row per matching input; review before running
 summary = run_v2_unit_match(plan)  # inputs are ordered chronologically
 ```
 
 `curation_strategy` takes the same values (with
-`manual_curation_choices={sorting_id: curation_id}` for `manual`). The overlap
-and geometry checks run inside `UnitMatchSelection.insert_inputs` when
-`run_v2_unit_match(plan)` executes. A plan that could not pin exactly one
-curation per sort has `plan.ok is False`, and `run_v2_unit_match` raises listing
-`plan.errors`.
+`manual_curation_choices={sorting_id: curation_id}` for `manual`). Plans include
+read-only overlap, geometry, backend, and eligibility findings;
+`run_v2_unit_match` rechecks them before execution. A plan that could not pin
+exactly one curation per sort has `plan.ok is False`, and `run_v2_unit_match`
+raises listing `plan.errors`.
+
+`final_curated` means a unique committed non-root leaf; an automatically labeled
+child can satisfy it. It is not evidence that a person completed browser review.
+The group and named-sort planners retain `unit_policy="v2_unflagged_units"` as
+their compatibility default, so name the desired policy explicitly. Group-based
+discovery searches each member's standalone sorts; use named sorts or exact
+curation handles for daily concatenation parents.
+
+#### Matching separate epochs in one NWB
+
+Use one `IntervalList` containing several spans and sort once when you want a
+shared unit namespace from the outset. To compare independently sorted epochs,
+choose a distinct interval for each run and curate each result separately. The
+interval names identify selections; actual original acquisition samples decide
+whether inputs overlap.
+
+```python
+from spyglass.spikesorting.v2.pipeline import describe_epochs, run_v2_pipeline
+
+describe_epochs(nwb_file_name, sort_group_id=sort_group_id)
+epoch_runs = {
+    name: run_v2_pipeline(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name=name,
+        team_name="my_team",
+        pipeline_preset="franklab_probe_hippocampus_30khz_ms4_2026_06",
+        auto_curate=True,
+    )
+    for name in ["sleep 1", "run 1"]  # choose existing interval names
+}
+```
+
+Review each run, complete any merged-child verification, and pass the exact
+`review.result()` handles to `plan_v2_unit_match_from_curations`. The plan
+orders epochs by their selected acquisition time; it does not sort names
+alphabetically. Two matched epochs of one NWB count as two matching inputs and
+one detected session (`n_matching_inputs=2`, `n_sessions_detected=1`). Read
+their original-clock spikes with `TrackedUnit.get_member_spike_times`; its rows
+include the interval name and input index. The matching result is a pair graph
+and tracked-unit mapping; it does not automatically create a downstream analysis
+population or provide a match-editing GUI. A gated worked example is in Part D
+of the
+[Cross-Session notebook](../notebooks/10_Spike_SortingV2_CrossSession.ipynb).
 
 Either receipt carries `summary["inputs"]`: one `UnitMatchInputSummary` per
 input, in chronological order, with its identity, `source_kind` / `source_id`,

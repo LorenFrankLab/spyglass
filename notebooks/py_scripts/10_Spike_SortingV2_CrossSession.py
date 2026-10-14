@@ -14,10 +14,11 @@
 
 # # Cross-session spike sorting: concatenate and track units across sessions
 #
-# Three cross-session workflows that build on the single-session pipeline from
+# Four chronic workflows that build on the single-session pipeline from
 # [Spike Sorting v2](./10_Spike_SortingV2.ipynb). They compose — a daily
 # concatenation from Part A is a valid matching input for Part B/C — so this
-# notebook keeps them in separate, independently runnable parts:
+# notebook keeps them in separate parts. Part C's demonstration reuses A/B;
+# Part D can run independently:
 #
 # 1. **Concatenate same-day recordings and sort them as one** (Part A). When an
 #    animal was recorded in several blocks on the *same day* on the same probe,
@@ -39,6 +40,10 @@
 #    days' concatenation sorts here), and it also reads back each tracked
 #    unit's spike times and brain regions on each **original recording's own
 #    clock**, not the synthetic concatenation timeline.
+# 4. **Match separate epochs in one NWB** (Part D, off by default). Discover
+#    existing intervals, sort and review each independently, then match the
+#    exact reviewed curations. Disjoint original raw samples are required;
+#    artifact masks cannot make overlapping epochs independent.
 #
 # Parts A and B start from a `SessionGroup`: a named bundle of *members*, where
 # each member is a `(session, sort group, interval)` tuple. Part C names sorts
@@ -56,9 +61,12 @@ from spyglass.common import LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
     describe_run,
+    describe_epochs,
     describe_unit_match_choices,
     plan_v2_unit_match,
     plan_v2_unit_match_from_sorts,
+    plan_v2_unit_match_from_curations,
+    preflight_v2_unit_match,
     run_v2_pipeline,
     run_v2_unit_match,
     select_units_for_analysis,
@@ -123,6 +131,13 @@ matcher_params_name = "unitmatch_default"
 # The two workflows are independent; enable whichever you need.
 run_concat = True
 run_unit_match = True
+
+# Part D is a separate interactive workflow. Leave False for Run All; after
+# selecting existing disjoint intervals, enable it to sort and open reviews.
+run_epoch_match = False
+epoch_nwb_file_name = "day1.nwb"
+epoch_sort_group_id = 0
+epoch_interval_names = ["sleep 1", "run 1"]  # choose with describe_epochs
 # -
 
 initialize_v2_defaults()
@@ -255,8 +270,8 @@ elif run_unit_match:
     )
 
     for member in group_members:
-        # auto_curate=True so each member contributes an ANALYSIS-ready
-        # (auto-labeled) curation to the match, not the uncurated root. To
+        # auto_curate=True so each member contributes label suggestions;
+        # this automatic-only demonstration is not human-reviewed. To
         # match a hand-curated result instead, curate each member (see the
         # Curation how-to) and pin that (sorting_id, curation_id) below.
         summary = run_v2_pipeline(
@@ -305,6 +320,7 @@ if run_unit_match and unitmatch_available:
         match_group_name,
         curation_strategy="auto_curated",
         matcher_params_name=matcher_params_name,
+        unit_policy="v2_unflagged_units",  # explicit automatic-only population
     )
     display(plan.as_dataframe())  # one row per member -- review before running
     for (
@@ -356,9 +372,10 @@ elif run_unit_match:
 # **matching input**; a two-block daily concatenation contributes exactly one
 # input, not two. This is the direct path when each day was independently
 # concatenated (Part A) and sorted: sort and curate every day first, then match
-# the days' `sorting_id`s here. No two matching inputs may share a session
-# (`nwb_file_name`), so a concatenation and one of its own member sessions
-# cannot be matched together, and a concatenation must lie within one day.
+# the days' `sorting_id`s here. Inputs must not reuse original raw samples:
+# a concatenation and its overlapping member sort cannot be matched together.
+# Disjoint same-NWB epochs are supported (Part D), and each concatenation
+# must lie within one day.
 #
 # For a runnable example without a second concatenation to configure, this
 # matches Part A's same-day concatenation directly against one of Part B's
@@ -369,8 +386,8 @@ elif run_unit_match:
 
 run_daily_match = run_concat and run_unit_match and unitmatch_available
 if run_daily_match:
-    # No two matching inputs may share a session: pick a Part B sort of a
-    # session outside Part A's concatenation.
+    # This demonstration picks a different NWB for clarity. Part D demonstrates
+    # the supported alternative: disjoint epochs of one NWB.
     concat_sessions = set(
         (SessionGroup.Member & concat_key).fetch("nwb_file_name")
     )
@@ -384,8 +401,8 @@ if run_daily_match:
         print(
             "Skipping Part C: every Part B session is also in Part A's "
             f"concatenation ({sorted(concat_sessions)}), and no two matching "
-            "inputs may share a session. Add a Part B session recorded "
-            "outside the concatenation to run it."
+            "inputs may reuse source samples. Add a Part B session recorded "
+            "outside the concatenation for this demo, or use Part D's epochs."
         )
 
 if run_daily_match:
@@ -397,6 +414,7 @@ if run_daily_match:
         daily_sorting_ids,
         curation_strategy="auto_curated",
         matcher_params_name=matcher_params_name,
+        unit_policy="v2_unflagged_units",  # includes unlabeled units and MUA
     )
     display(daily_plan.as_dataframe())  # one row per matching input
     for warning in daily_plan.warnings:
@@ -440,6 +458,118 @@ elif run_concat and run_unit_match and not unitmatch_available:
         "UnitMatch extra not installed; skipping Part C. Install the "
         "'spikesorting-v2-matching' extra to match sorts directly."
     )
+
+# ## Part D — Match independently reviewed epochs in one NWB
+#
+# This part is independent of A/B/C and disabled by default. First inspect
+# `describe_epochs(epoch_nwb_file_name, sort_group_id=epoch_sort_group_id)`.
+# `kind`, `epoch_label`, `interval_list_name`, `interval_bounds`, and recording
+# readiness distinguish task epochs from other interval rows. Bounds use the
+# original acquisition clock; a whole-session interval overlaps its epochs.
+# Choose existing interval names above. One combined interval list and one
+# sort remain the simpler path when you want a shared unit namespace upfront.
+
+epoch_runs = {}
+epoch_reviews = {}
+if run_epoch_match:
+    if len(epoch_interval_names) < 2 or len(set(epoch_interval_names)) != len(
+        epoch_interval_names
+    ):
+        raise RuntimeError(
+            "Part D requires at least two distinct epoch intervals."
+        )
+    if not unitmatch_available or importlib.util.find_spec("figpack") is None:
+        raise RuntimeError(
+            "Part D requires spyglass-neuro[spikesorting-v2-matching,"
+            "spikesorting-v2-curation]. Install the extras before sorting."
+        )
+    display(
+        describe_epochs(epoch_nwb_file_name, sort_group_id=epoch_sort_group_id)
+    )
+    for interval_name in epoch_interval_names:
+        epoch_runs[interval_name] = run_v2_pipeline(
+            nwb_file_name=epoch_nwb_file_name,
+            sort_group_id=epoch_sort_group_id,
+            interval_list_name=interval_name,
+            team_name=team_name,
+            pipeline_preset=single_preset,
+            auto_curate=True,
+        )
+        epoch_reviews[interval_name] = epoch_runs[interval_name].start_review(
+            "franklab_hippocampus_2026_09_17",
+            source="auto_labeled",
+            upload=False,
+        )
+        print(
+            interval_name, epoch_reviews[interval_name].open(open_browser=False)
+        )
+        print("Resume review ID:", epoch_reviews[interval_name].review_id)
+
+# Stop here and inspect each browser review. Label intended single units
+# `accept`, commit, and complete any merged-child verification. In a later
+# cell, replace the empty list below with exact completed results:
+#
+# ```python
+# epoch_final_curations = [epoch_reviews[name].result() for name in epoch_interval_names]
+# ```
+#
+# `final_curated` in strategy-based planners only means a non-root leaf; it
+# can be an automatic child. Passing these handles avoids rediscovering a
+# sibling branch and does not silently substitute an automatic result.
+
+# +
+epoch_final_curations = []  # fill only after completing both reviews
+# -
+
+# +
+if run_epoch_match:
+    if not epoch_final_curations:
+        print(
+            "Complete both epoch reviews, set epoch_final_curations, and rerun this cell."
+        )
+    else:
+        if len(epoch_final_curations) != len(epoch_interval_names):
+            raise RuntimeError(
+                "Provide exactly one completed curation for every selected epoch interval."
+            )
+        expected_sortings = {
+            str(epoch_runs[name]["sorting_id"]) for name in epoch_interval_names
+        }
+        if {
+            str(final.sorting_id) for final in epoch_final_curations
+        } != expected_sortings:
+            raise RuntimeError(
+                "Epoch curations must belong to the separate sorts in epoch_runs. "
+                "Choose one completed result per interval; any order is accepted."
+            )
+        epoch_plan = plan_v2_unit_match_from_curations(epoch_final_curations)
+        print(epoch_plan.summary())
+        display(
+            epoch_plan.as_dataframe()
+        )  # exact pins and frozen accepted units
+        epoch_report = preflight_v2_unit_match(epoch_plan)
+        print(epoch_report.summary())  # read-only; never heals missing files
+        if not epoch_report.ok:
+            raise RuntimeError(
+                "Fix epoch preflight findings and rebuild the plan."
+            )
+        epoch_match = run_v2_unit_match(epoch_plan)
+        epoch_key = {"unitmatch_id": epoch_match["unit_match_id"]}
+        display(TrackedUnit & epoch_key)
+        # A match spanning both epochs has 2 matching inputs, 1 NWB session.
+        display(TrackedUnit().get_member_spike_times(epoch_key))
+        display(TrackedUnit().get_unit_brain_regions(epoch_key))
+        # Matching creates identities, not analysis populations. Use each exact
+        # reviewed curation for its own original-clock downstream handoff.
+        epoch_selections = [
+            select_units_for_analysis(final) for final in epoch_final_curations
+        ]
+        for selection in epoch_selections:
+            print(selection.summary())
+# -
+
+# Matching is a computational plan and result readback. There is currently no
+# browser interface for editing match pairs or approving tracked identities.
 
 # ## Next steps
 #

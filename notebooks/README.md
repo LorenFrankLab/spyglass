@@ -37,7 +37,8 @@ For v2, choose a notebook for the task you want to complete:
 - [Presets and whole-session sorting](./10_Spike_SortingV2_Presets.ipynb):
     customize a recipe and run all or selected sort groups.
 - [Concatenation and cross-session matching](./10_Spike_SortingV2_CrossSession.ipynb):
-    sort same-day recordings together or track units across sessions.
+    sort same-day recordings together, track units across days, or match
+    separately reviewed, disjoint epochs of one NWB (optional Part D).
 
 The [v0](./10_Spike_SortingV0.ipynb) and [v1](./10_Spike_SortingV1.ipynb)
 notebooks cover legacy workflows and require the legacy spike-sorting

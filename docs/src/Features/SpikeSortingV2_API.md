@@ -60,14 +60,18 @@ first use, so `import spyglass.spikesorting.v2` stays lightweight.
 | `describe_run`                                            | Render a run summary as a receipt: stages, warnings, effective sorter configuration, merge ids.                                                    |
 | `describe_units`                                          | Per-unit, sort-time quality snapshot for one sort.                                                                                                 |
 | `describe_unit_match_choices`                             | Show which curations can be pinned for each member of a session group.                                                                             |
+| `describe_epochs`                                         | Discover task epochs and interval lists on the original acquisition clock, with candidate recording keys and cache readiness. Read-only.           |
 | `plan_v2_unit_match` / `plan_v2_unit_match_from_sorts`    | Build a reviewable plan that pins one curation per member (or per named sort) for cross-session matching.                                          |
+| `plan_v2_unit_match_from_curations`                       | Plan matching from exact generation-pinned `CurationRef` handles; defaults to accepted single units and freezes the selected population.           |
+| `preflight_v2_unit_match`                                 | Recheck a plan's eligibility, source sample coverage, geometry and backend without rebuilding caches or writing rows.                              |
 | `run_v2_unit_match`                                       | Match units across sessions and derive tracked-unit identities in one call.                                                                        |
 | `select_units_for_analysis`                               | Hand a reviewed curation to downstream analysis under a named label policy (see [Hand off to analysis](#hand-off-to-analysis)).                    |
 | `open_curation_analyzer`                                  | Open a disk-backed working copy of a curation's SpikeInterface analyzer, for debugging.                                                            |
 
 The typed result and plan classes these functions return -- `RunResult`,
 `PreflightReport`, `PreflightSessionReport`, `UnitMatchPlan`,
-`EstimateMotionReceipt`, and the `RunV2*` summaries -- are importable from
+`UnitMatchInputPlan`, `UnitMatchPreflightReport`, `EstimateMotionReceipt`, and
+the `RunV2*` summaries -- are importable from
 `spyglass.spikesorting.v2.pipeline` for type hints and `isinstance` checks.
 
 ## Curate and review
@@ -133,6 +137,7 @@ two reference classes without importing the annotation tables.
 | Name                                                                  | Import from                                | Use for                                                                                                                                                 |
 | --------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `select_units_for_analysis`                                           | `spyglass.spikesorting.v2.pipeline`        | The supported handoff: apply a label policy to a curation and build the `SortedSpikesGroup` downstream analyses read. Returns a `UnitSelectionReceipt`. |
+| `resolve_unit_selection`, `UnitSelectionSnapshot`                     | `spyglass.spikesorting.v2.pipeline`        | Resolve a read-only population snapshot with policy/evaluation criteria for a matching plan; no analysis group is created.                              |
 | `UnitSelectionReceipt`, `SelectedGroup`, `V2_UNIT_SELECTION_POLICIES` | `spyglass.spikesorting.v2.pipeline`        | The handoff receipt (`describe`, `fetch_spike_data`, `group_key`), one created group, and the shipped policies.                                         |
 | `SpikeSortingOutput`                                                  | `spyglass.spikesorting.spikesorting_merge` | The merge table v2 curations register on: `get_spike_times`, `get_recording`, `get_sorting`, `get_unit_brain_regions`, ...                              |
 | `get_spike_sorting_v2_merge_ids`                                      | `spyglass.spikesorting.v2.curation_api`    | Resolve the merge ids of v2 curations matching a restriction.                                                                                           |

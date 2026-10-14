@@ -77,6 +77,15 @@ valid. Sorting and curation writers validate complete provenance before
 allocating an output, including the curation generation UUID on member exports.
 Matching rows and NWB headers require producer provenance.
 
+Matching freezes unit-selection snapshots and original raw sample coverage in
+the `Input` and `InputRecording` parts. `_matching.coverage` maps persisted,
+unmasked recording timestamps to raw-frame ranges using bounded timestamp reads;
+masks never authorize overlapping source data. Same-NWB epochs are allowed when
+those ranges are disjoint and are ordered by source time. Read-only planning
+resolves registered artifact paths without cache healing, downloads, or
+directory creation. Execution revalidates the same snapshots before writing
+results; missing development-schema fields require recreation.
+
 Scientific boundaries use `spyglass.spikesorting._numerical` to reject
 fractional or overflowing identifiers, malformed shapes, nonfinite observations
 and misaligned event arrays before conversion. Sample-frame bounds apply equally
