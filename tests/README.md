@@ -67,7 +67,7 @@ times, and match memberships come from the fixture specification and raw input
 artifacts. Comparing two production readers is an additional persistence check;
 it cannot establish correctness on its own. A failing scenario is investigated
 against that independent truth, rather than changing expectations to match
-current output. See the [integration test practices](AGENTS.md).
+current output.
 
 The user scenarios are covered through the public APIs and persisted outputs:
 
