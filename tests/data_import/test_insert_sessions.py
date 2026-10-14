@@ -105,6 +105,64 @@ def test_insert_sessions_processes_every_file(two_raw_files, common):
         }, f"{copy_name} registered but not ingested"
 
 
+def test_raise_err_raises_once_every_file_has_been_planned(
+    two_raw_files, common, monkeypatch
+):
+    """`raise_err` is the caller's, and it waits for the whole list.
+
+    `insert_sessions` is the only place that raises -- everything below it
+    reports through the plan. Raising at the first blocked file would make the
+    second file's report depend on the first file's luck, so both are named.
+    """
+    from spyglass.data_import import insert_sessions
+    from spyglass.utils.mixins.ingestion import IngestionMixin
+
+    names, copy_names = two_raw_files
+    original = IngestionMixin._parse
+
+    def _parse(self, ctx):
+        if self.camel_name == "Session":
+            raise ValueError("induced failure")
+        return original(self, ctx)
+
+    monkeypatch.setattr(IngestionMixin, "_parse", _parse)
+
+    with pytest.raises(ValueError) as err:
+        insert_sessions(names, raise_err=True)
+
+    message = str(err.value)
+    for copy_name in copy_names:
+        assert copy_name in message, (
+            f"{copy_name} is missing from the exception -- it raised before "
+            + f"planning every file:\n{message}"
+        )
+
+
+def test_a_dry_run_reports_without_raising(two_raw_files, monkeypatch):
+    """`dry_run` never raises, even asked to.
+
+    Reporting without stopping is the whole job; an exception would deny the
+    caller the report it asked for.
+    """
+    from spyglass.data_import import insert_sessions
+    from spyglass.utils.mixins.ingestion import IngestionMixin
+
+    names, _ = two_raw_files
+    original = IngestionMixin._parse
+
+    def _parse(self, ctx):
+        if self.camel_name == "Session":
+            raise ValueError("induced failure")
+        return original(self, ctx)
+
+    monkeypatch.setattr(IngestionMixin, "_parse", _parse)
+
+    results = insert_sessions(names, raise_err=True, dry_run=True)
+
+    assert len(results) == len(names), "One report per file, none skipped"
+    assert all(results), "Each file blocked, so each result is truthy"
+
+
 def test_a_skipped_file_still_returns_a_result(
     common, mini_copy_name, mini_insert
 ):

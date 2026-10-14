@@ -147,14 +147,14 @@ def test_planned_run_writes_nothing_when_the_plan_blocks(
     )
 
 
-def test_raise_err_raises_after_the_whole_file_is_checked(
+def test_every_bad_table_is_reported_not_just_the_first(
     common, mini_copy_name, emptied_leaves, monkeypatch
 ):
-    """`raise_err` still raises, but only once the report is complete.
+    """The pass finishes, so the report carries every problem.
 
-    The difference that matters: the old path raised at the first bad table, so
-    the report named one problem. Here the pass finishes, every problem is
-    collected, and the exception carries the lot.
+    The difference that matters: the old path stopped at the first bad table,
+    so a reader fixed one problem per attempt. Here both failures are named by
+    a single report.
     """
     from spyglass.common.common_usage import IngestionPlanLog
     from spyglass.common.populate_all_common import populate_all_common
@@ -174,17 +174,14 @@ def test_raise_err_raises_after_the_whole_file_is_checked(
 
     monkeypatch.setattr(IngestionMixin, "_parse", _parse)
 
-    with pytest.raises(ValueError) as err:
-        populate_all_common(
-            mini_copy_name,
-            raise_err=True,
-        )
+    result = populate_all_common(mini_copy_name)
 
-    message = str(err.value)
+    assert result, "A file with two broken tables must not report success"
+    report = result.report(log=False)
     for name in broken:
         assert (
-            name.lower() in message.lower() or name in message
-        ), f"The report should name {name}; got:\n{message}"
+            name.lower() in report.lower() or name in report
+        ), f"The report should name {name}; got:\n{report}"
 
 
 def test_the_default_path_inserts_from_a_plan(

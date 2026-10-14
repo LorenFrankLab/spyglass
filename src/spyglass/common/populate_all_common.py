@@ -89,7 +89,6 @@ def _plan_only(nwb_file_name: str):
 
 def _insert_from_plan(
     nwb_file_name: str,
-    raise_err: bool = False,
     allow_partial: bool = False,
 ):
     """Plan the whole file, then insert what the plan worked out.
@@ -104,9 +103,6 @@ def _insert_from_plan(
     ----------
     nwb_file_name : str
         The copy file registered in Nwbfile.
-    raise_err : bool, optional
-        Raise at the end if anything blocked. Default False, returning the plan
-        for the caller to test. Nothing raises mid-pass either way.
     allow_partial : bool, optional
         Insert the tables that planned cleanly even though others did not.
 
@@ -114,25 +110,10 @@ def _insert_from_plan(
     -------
     IngestionPlan
         Falsy when everything asked for was inserted.
-
-    Raises
-    ------
-    ValueError
-        When `raise_err` and the plan blocked, with the report attached.
     """
     from spyglass.data_import.planner import insert_plan
 
-    plan = _plan_only(nwb_file_name)
-
-    result = insert_plan(plan, allow_partial=allow_partial)
-
-    if raise_err and result:
-        raise ValueError(
-            f"Ingestion of {nwb_file_name} did not complete:\n"
-            + result.report(log=False)
-        )
-
-    return result
+    return insert_plan(_plan_only(nwb_file_name), allow_partial=allow_partial)
 
 
 def ingestion_tables() -> Dict[str, List[dj.Table]]:
@@ -278,7 +259,6 @@ def merged_config(nwb_file_name: str, config: dict = None) -> dict:
 
 def populate_all_common(
     nwb_file_name,
-    raise_err=False,
     dry_run=False,
     allow_partial=False,
 ) -> Union[List, None]:
@@ -293,9 +273,6 @@ def populate_all_common(
     ----------
     nwb_file_name : str
         The name of the NWB file to populate.
-    raise_err : bool, optional
-        Raise at the end if anything blocked. Default False, returning the
-        plan for the caller to test. Nothing raises mid-pass either way.
     dry_run : bool, optional
         Plan the file and return the report without inserting anything.
         Default False.
@@ -315,8 +292,4 @@ def populate_all_common(
     if dry_run:
         return _plan_only(nwb_file_name)
 
-    return _insert_from_plan(
-        nwb_file_name,
-        raise_err=raise_err,
-        allow_partial=allow_partial,
-    )
+    return _insert_from_plan(nwb_file_name, allow_partial=allow_partial)

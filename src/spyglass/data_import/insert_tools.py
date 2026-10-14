@@ -71,7 +71,10 @@ def insert_sessions(
         strings with glob wildcards (e.g., *) so long as the wildcard specifies
         exactly one file.
     raise_err : bool, optional
-        If True, raise an error if an error occurs. Default is False.
+        Raise once every file has been planned, if any of them blocked.
+        Default False, returning the plans for the caller to test. A blocked
+        file never stops the ones after it either way, and a dry run never
+        raises -- its whole job is to report.
     reinsert : bool, optional
         If True and the nwb file already exists in the Nwbfile table,
         reinsert the data. Default is False.
@@ -94,6 +97,11 @@ def insert_sessions(
     list
         One `IngestionPlan` per file processed. Files skipped because they are
         already in the Nwbfile table contribute no entry, except on a dry run.
+
+    Raises
+    ------
+    ValueError
+        When `raise_err` and any file blocked, with every report attached.
     """
 
     if not isinstance(nwb_file_names, list):
@@ -184,11 +192,15 @@ def insert_sessions(
         # the raw data in the original file
         copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name)
         Nwbfile().insert_from_relative_file_name(out_nwb_file_name)
-        results.append(
-            populate_all_common(
-                out_nwb_file_name,
-                raise_err=raise_err,
-            )
+        results.append(populate_all_common(out_nwb_file_name))
+
+    # The only raise in the ingest path; everything below reports through the
+    # plan. After the loop, so a list is fully reported before it stops, and
+    # never on a dry run -- reporting without raising is what that is for.
+    if raise_err and not dry_run and (blocked := [p for p in results if p]):
+        raise ValueError(
+            f"Ingestion did not complete for {len(blocked)} file(s):\n"
+            + "\n".join(p.report(log=False) for p in blocked)
         )
 
     # One result per file. Previously returned from inside the loop, so only

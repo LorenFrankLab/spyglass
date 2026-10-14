@@ -255,11 +255,12 @@ print(report.report(verbose=True))  # verbose adds what was resolved
 #
 # Two flags adjust what happens when the news is bad:
 #
-# - `raise_err=True` raises at the end instead of returning the plan. The pass
-#   still completes first, so the exception carries every problem rather than
-#   only the one that stopped it.
-# - `allow_partial=True` inserts the tables that planned cleanly even though
-#   others did not. Off by default, so a half-ingested file is a choice.
+# - `insert_sessions(..., raise_err=True)` raises instead of returning the
+#   plans. Every file is planned first, so the exception carries every file's
+#   report rather than only the one that stopped it. A dry run never raises.
+# - `populate_all_common(..., allow_partial=True)` inserts the tables that
+#   planned cleanly even though others did not. Off by default, so a
+#   half-ingested file is a choice.
 #
 # If the file disagrees with something already stored, the stored value is kept,
 # the rest of the file ingests, and the disagreement is reported for you to act
