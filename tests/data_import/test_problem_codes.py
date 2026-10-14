@@ -117,46 +117,12 @@ def test_file_unreadable_when_the_file_is_not_nwb(common, raw_dir, mini_insert):
         path.unlink(missing_ok=True)
 
 
-def test_entry_too_large_stages_hashes_without_the_payload(
-    common, mini_copy_name, mini_insert, monkeypatch
-):
-    """Over the staging cap, an entry keeps its hashes and loses its blob.
-
-    The cap is driven down rather than the entry inflated: a genuinely
-    oversized row would make the test slow and the fixture unreadable, and
-    the behaviour under test is the comparison, not the size.
-    """
-    from spyglass.common.common_usage import IngestionPlanLog
-    from spyglass.data_import.planner import plan_nwbfile
-
-    log = IngestionPlanLog()
-    monkeypatch.setattr(type(log), "_entry_blob_cap", 8, raising=False)
-
-    log.clear(mini_copy_name)
-    key = log.stage(plan_nwbfile(mini_copy_name, force_replan=True))
-
-    rows = (log.Entry & key).fetch(as_dict=True)
-    assert rows, "Premise: the file stages entries"
-    assert all(
-        row["entry_blob"] is None for row in rows
-    ), "Over the cap, no payload is kept"
-    assert all(
-        row["blob_hash"] for row in rows
-    ), "but the hashes stay, so change detection still works"
-    assert any(
-        row["problem_code"] == "entry_too_large" for row in rows
-    ), "and the entry says why it has no payload"
-
-    log._clear(key)
-
-
 @pytest.mark.parametrize(
     "code",
     sorted(
         {
             "divergence",
             "duplicate_key",
-            "entry_too_large",
             "extension_unmet",
             "file_not_registered",
             "file_unreadable",

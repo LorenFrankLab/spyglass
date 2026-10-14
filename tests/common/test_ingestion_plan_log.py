@@ -86,8 +86,8 @@ def test_entries_carry_their_payload_and_state(staged):
     rows = (log.Entry & key).fetch(as_dict=True)
 
     assert all(
-        row["state"] in {"planned", "blocked", "failed"} for row in rows
-    ), "A freshly staged plan holds no inserted or migrated entries"
+        row["state"] == "planned" for row in rows
+    ), "A freshly staged plan holds nothing that reached its own table"
 
     payloads = [row["entry_blob"] for row in rows if row["entry_blob"]]
     assert payloads, "Entries should keep their blob until they are migrated"
@@ -120,8 +120,7 @@ def test_inserting_a_plan_closes_its_staging_area(common, mini_copy_name):
         len(log.Entry & key & "entry_blob IS NOT NULL") == 0
     ), "A stored entry must not keep its payload"
     assert all(
-        state in {"exists", "inserted"}
-        for state in (log.Entry & key).fetch("state")
+        state == "stored" for state in (log.Entry & key).fetch("state")
     ), "Every entry should be accounted for once the plan is applied"
     assert (log & key).fetch1("status") == "complete"
 
@@ -213,6 +212,51 @@ def test_restaging_replaces_the_table_rows(common, mini_copy_name, mini_insert):
     assert first == second, f"Table rows accumulated: {first} -> {second}"
 
 
+def test_a_refused_payload_costs_the_payload_not_the_run(
+    common, mini_copy_name, mini_insert, monkeypatch
+):
+    """A database that will not take the blobs still gets the report.
+
+    No ingestion payload is expected to reach a database limit -- the largest
+    entry on a 843 GB file is 3.4 KB -- so there is no cap, and a refusal is
+    a bug worth reporting rather than a case to design around. It must still
+    not take the ingestion down with it: the hashes, statuses and problems
+    are what provenance needs, and only reuse wants the payload.
+
+    Induced by refusing exactly the rows that carry one, which is what an
+    oversized entry would do, without building a row big enough to find a
+    real limit.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.data_import.planner import plan_nwbfile
+
+    log = IngestionPlanLog()
+    log.clear(mini_copy_name)
+
+    original = IngestionPlanLog.Entry.insert
+
+    def refuse_payloads(self, rows, *args, **kwargs):
+        if any(row.get("entry_blob") is not None for row in rows):
+            raise RuntimeError("pretend the packet is too big")
+        return original(self, rows, *args, **kwargs)
+
+    monkeypatch.setattr(IngestionPlanLog.Entry, "insert", refuse_payloads)
+
+    key = log.stage(plan_nwbfile(mini_copy_name, force_replan=True))
+
+    rows = (log.Entry & key).fetch(as_dict=True)
+    assert rows, "The plan must still be staged without its payloads"
+    assert all(
+        row["entry_blob"] is None for row in rows
+    ), "Premise: the retry is what succeeded"
+    assert all(
+        row["blob_hash"] for row in rows
+    ), "The hashes stay, so change detection still works"
+    assert len(log.Table & key), "and the per-table report is kept"
+
+    log._clear(key)
+
+
 def test_a_conflicting_entry_keeps_its_payload(
     common, mini_copy_name, mini_insert, monkeypatch
 ):
@@ -269,7 +313,7 @@ def test_a_conflicting_entry_keeps_its_payload(
     assert all(
         r["entry_blob"] is None for r in others
     ), "Everything else still loses its payload"
-    assert {r["state"] for r in others} <= {"exists", "inserted"}
+    assert {r["state"] for r in others} <= {"stored"}
 
     log._clear(key)
 

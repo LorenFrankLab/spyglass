@@ -14,7 +14,7 @@ problem, then insert what was checked.
 - The return value is the plan, prints as the report.
 - `InsertError` is no longer written. Readable for backwards compatibility.
 - Mismatched metadata is reported rather than prompted. The stored value is kept
-    and the run continues; `on_divergence="raise"` declines instead.
+    and the run continues.
 
 See `ForDevelopers/IngestionPlans` for the full breakdown.
 

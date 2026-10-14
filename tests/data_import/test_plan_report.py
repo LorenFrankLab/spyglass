@@ -39,8 +39,8 @@ def _broken(plan_types):
                     ),
                     plan_types.Problem(
                         "soft",
-                        "entry_too_large",
-                        "over the cap",
+                        "extension_unmet",
+                        "the file declares no such extension",
                         table="`common`.`interval_list`",
                     ),
                 ),

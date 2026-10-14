@@ -130,6 +130,12 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         different question from where the row is going: `IntervalList`
         receives rows from four owners on the mini file alone, so it cannot
         be derived from `table_name`.
+
+        `state` answers only what nothing else records: whether the row is in
+        its own table yet, and whether it disagrees with what is there.
+        *Why* an entry is still planned is `Table.status` for its
+        `owner_table`, or this row's own `problem_code`; which run wrote a
+        stored row is the real table's business.
         """
 
         definition = """
@@ -137,7 +143,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         table_name: varchar(128)
         key_hash: varchar(32)            # of the primary key: stable identity
         ---
-        state: enum("planned","blocked","failed","exists","conflict","inserted")
+        state: enum("planned","stored","conflict")
         owner_table = "": varchar(128)   # the table that planned this row
         blob_hash = NULL: varchar(32)    # of the whole entry: change detection
         entry_blob = NULL: longblob      # cleared once migrated
@@ -184,9 +190,6 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         suggested_revision = NULL: blob
         error_raw = NULL: blob
         """
-
-    # Per entry, and transient: blobs are cleared on success.
-    _entry_blob_cap = 1 << 20  # 1 MiB
 
     def _clear(self, master_key: dict) -> None:
         """Remove a file's staged plan, parts before master.
@@ -247,8 +250,8 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             "entries"}}`,
             where `entries` is `{target_table_name: [rows]}`. Empty when
             nothing is staged. A table whose payload was dropped -- cleared on
-            migration, or never kept because it exceeded the cap -- is omitted,
-            so a caller cannot mistake it for reusable.
+            migration, or refused by the database -- is omitted, so a caller
+            cannot mistake it for reusable.
         """
         master_key = {"nwb_file_name": nwb_file_name}
 
@@ -361,14 +364,9 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
                     entry_count=table_plan.entry_count,
                 )
             )
-            # A table that could not be parsed, or was skipped because a
-            # parent failed, stages its entries in that state rather than as
-            # ready-to-insert. `exists` and `conflict` are per-entry
-            # judgements the plan does not carry at entry granularity; they
-            # are set by the insert pass, which checks each row anyway.
-            state = {"failed": "failed", "skipped": "blocked"}.get(
-                table_plan.status, "planned"
-            )
+            # Every staged entry is `planned`, including one whose table
+            # failed or was skipped: not-yet-stored is the whole claim, and
+            # the `Table` row above already says why.
             for target, entries in table_plan.entries:
                 name = getattr(target, "full_table_name", str(target))
                 for entry in entries:
@@ -378,7 +376,6 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
                             target,
                             name,
                             entry,
-                            state,
                             owner_table=table_plan.table_name,
                         )
                     )
@@ -401,14 +398,23 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             for index, problem in enumerate(problems)
         ]
 
-        with self._safe_context():
-            # Replace rather than append: an entry keeps its identity across
-            # attempts, so re-planning updates what is already staged.
-            self._clear(master_key)
-            self.insert1(master)
-            self.Table.insert(table_rows)
-            self.Entry.insert(rows)
-            self.Problem.insert(problem_rows)
+        if not self._write(master_key, master, table_rows, rows, problem_rows):
+            logger.error(
+                "Please report this at "
+                + "github.com/LorenFrankLab/spyglass/issues: no ingestion "
+                + "payload is expected to reach a database limit."
+            )
+            # Payloads are what reuse needs; the report is what provenance
+            # needs. Keep the half that still fits rather than losing both.
+            stripped = [dict(row, entry_blob=None) for row in rows]
+            if not self._write(
+                master_key, master, table_rows, stripped, problem_rows
+            ):
+                logger.error(
+                    f"{plan.nwb_file_name}: nothing staged; the next attempt "
+                    + "re-parses the whole file."
+                )
+                return master_key
 
         blocked = sum(1 for p in problems if p.severity in BLOCKING)
         logger.info(
@@ -416,6 +422,43 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             + f"{len(rows)} entries, {blocked} blocking problems"
         )
         return master_key
+
+    def _write(
+        self, master_key, master, table_rows, rows, problem_rows
+    ) -> bool:
+        """Stage one plan in a transaction, or say it did not fit.
+
+        Staging is an aid, not the ingestion: a plan the database refuses --
+        an entry past `max_allowed_packet`, say -- must cost the payload, not
+        the run.
+
+        Parameters
+        ----------
+        master_key : dict
+        master : dict
+        table_rows, rows, problem_rows : list of dict
+
+        Returns
+        -------
+        bool
+            False when the write was refused.
+        """
+        try:
+            with self._safe_context():
+                # Replace rather than append: an entry keeps its identity
+                # across attempts, so re-planning updates what is staged.
+                self._clear(master_key)
+                self.insert1(master)
+                self.Table.insert(table_rows)
+                self.Entry.insert(rows)
+                self.Problem.insert(problem_rows)
+            return True
+        except Exception as err:
+            logger.error(
+                "Could not stage the plan for "
+                + f"{master_key['nwb_file_name']}: {type(err).__name__}: {err}"
+            )
+            return False
 
     def mark_inserted(
         self,
@@ -474,12 +517,15 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
                     "key_hash": identity,
                 }
 
+        # `written` is for the log line only: the column records that the row
+        # is in its table, not which run put it there -- the table answers
+        # that, and better.
         done = [
-            (entry_key, state)
-            for state, group in (
-                ("inserted", inserted),
-                ("exists", existing),
-                ("conflict", conflicting),
+            (entry_key, state, written)
+            for state, written, group in (
+                ("stored", True, inserted),
+                ("stored", False, existing),
+                ("conflict", False, conflicting),
             )
             for table_name, target, rows in group
             for entry_key in identify(table_name, target, rows)
@@ -488,7 +534,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         # One transaction with the state change: a crash between the data
         # write and this would leave a stale blob claiming work already done.
         with self._safe_context():
-            for entry_key, state in done:
+            for entry_key, state, _ in done:
                 if not (self.Entry & entry_key):
                     continue  # not staged, nothing to migrate
                 # update1 on the table itself: DataJoint refuses it on a
@@ -504,8 +550,8 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             if complete:
                 self.update1({**master_key, "status": "complete"})
 
-        migrated = sum(1 for _, state in done if state == "inserted")
-        clashed = sum(1 for _, state in done if state == "conflict")
+        migrated = sum(1 for _, _, written in done if written)
+        clashed = sum(1 for _, state, _ in done if state == "conflict")
         logger.info(
             f"{plan.nwb_file_name}: {migrated} entries migrated, "
             + f"{len(done) - migrated} already stored"
@@ -519,7 +565,6 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         target,
         table_name: str,
         entry: dict,
-        state: str = "planned",
         owner_table: str = "",
     ):
         """Build one staged row, hashing its key and its whole payload.
@@ -546,9 +591,8 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             Its full table name, as stored.
         entry : dict
             The prospective row.
-        state : str, optional
-            How this entry stands, from its table's plan. Default
-            `planned`.
+        owner_table : str, optional
+            The table whose parse produced it.
         """
         from datajoint.hash import key_hash
 
@@ -571,25 +615,9 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             # Not key_hash: it would abbreviate a large array and miss an
             # edit inside it. See entry_digest.
             blob_hash=entry_digest(blob),
-            state=state,
+            state="planned",
             owner_table=owner_table,
         )
-
-        packed = dj.blob.pack(blob)
-        if len(packed) > self._entry_blob_cap:
-            # Hashes and a problem only. Not stageable, so a later attempt
-            # re-parses it rather than trusting a payload we did not keep.
-            logger.warning(
-                f"{table_name}: entry of {len(packed)} bytes exceeds the "
-                + f"{self._entry_blob_cap} byte staging cap; storing hashes "
-                + "only, it will be re-parsed"
-            )
-            return dict(
-                row,
-                state="failed",
-                problem_code="entry_too_large",
-                message=f"{len(packed)} bytes over the staging cap",
-            )
 
         return dict(row, entry_blob=blob)
 

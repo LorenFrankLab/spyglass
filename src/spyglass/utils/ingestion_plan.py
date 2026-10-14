@@ -484,10 +484,6 @@ REMEDIES = {
         "The stored rows were kept. Edit the file to match, or update the "
         "rows, if the file is right."
     ),
-    "entry_too_large": (
-        "Too large to stage, so it will be re-parsed rather than reused. "
-        "No action needed unless it recurs."
-    ),
 }
 
 # Ordered worst-first, so the first match is the severity that matters.
