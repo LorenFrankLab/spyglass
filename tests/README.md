@@ -71,14 +71,15 @@ current output.
 
 The user scenarios are covered through the public APIs and persisted outputs:
 
-| User scenario                                                         | Integration coverage                                                                                                                                                                                                                                             |
-| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sort one epoch, review its units, then use accepted units in analysis | [User curation workflow](spikesorting/v2/test_user_curation_workflow.py): pipeline receipt, empty accepted population before review, completed review, and selected spike data.                                                                                  |
-| Merge units during review and resume verification                     | [Browser journey](spikesorting/v2/test_review_browser_journey.py): real Chromium edits, save, commit, merged-child verification, restart/resume, and analysis handoff.                                                                                           |
-| Sort epochs separately in one NWB, then match                         | [Epoch matching](spikesorting/v2/test_epoch_unitmatch.py): interval discovery, reviewed and explicit automatic-only populations, reversed input order, original-clock readback, and rerun reuse.                                                                 |
-| Sort same-day recordings together with one shared unit namespace      | [Concat pipeline](spikesorting/v2/test_session_group_concat.py), `test_run_v2_pipeline_concat_mode_routes_session_group`: public run, auto-curation, per-member analysis outputs, and reuse.                                                                     |
-| Match independent recordings or daily concatenations                  | [Direct curation matching](spikesorting/v2/test_direct_curation_unitmatch.py), `test_direct_reviewed_curation_populations_reach_match_artifact`: exact reviewed generations, evaluation-pinned populations, known match memberships, and database/NWB agreement. |
-| Repair a blocked matching request                                     | [Direct curation matching](spikesorting/v2/test_direct_curation_unitmatch.py): blocks missing artifacts and changed pins before writes; restoring an artifact makes a rebuilt plan ready.                                                                        |
+| User scenario                                                                        | Integration coverage                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Curate an oversplit bursting neuron alongside MUA and artifacts                      | [User curation workflow](spikesorting/v2/test_user_curation_workflow.py): waveform-bearing physical sources, known refractory violations, manual/browser merges, postmerge verification, and exact accepted spike data.                                          |
+| Merge units during review and resume verification                                    | [Browser journey](spikesorting/v2/test_review_browser_journey.py): real Chromium edits, save, commit, merged-child verification, restart/resume, and analysis handoff.                                                                                           |
+| Match epochs with changing firing rates and missing/newly detected neurons           | [Epoch matching](spikesorting/v2/test_epoch_unitmatch.py): one stable neuron with different sorter IDs, epoch-specific singletons, reviewed nuisance exclusion, explicit automatic-only populations, original-clock readback, and reuse.                         |
+| Sort same-day recordings together with one shared unit namespace                     | [Concat pipeline](spikesorting/v2/test_session_group_concat.py), `test_run_v2_pipeline_concat_mode_routes_session_group`: public run, auto-curation, per-member analysis outputs, and reuse.                                                                     |
+| Match independent recordings or daily concatenations                                 | [Direct curation matching](spikesorting/v2/test_direct_curation_unitmatch.py), `test_direct_reviewed_curation_populations_reach_match_artifact`: exact reviewed generations, evaluation-pinned populations, known match memberships, and database/NWB agreement. |
+| Repair a blocked matching request                                                    | [Direct curation matching](spikesorting/v2/test_direct_curation_unitmatch.py): blocks missing artifacts and changed pins before writes; restoring an artifact makes a rebuilt plan ready.                                                                        |
+| Track neurons across days, including partial activity and disappearance/reappearance | [Native daily matching](spikesorting/v2/test_unitmatch_daily_concat.py): real waveform extraction and UnitMatch, independently planted identities, unrelated sorter IDs, distractors, and held-out recovery/precision gates.                                     |
 
 Run the focused pipeline scenarios in an environment with the `test`,
 `spikesorting-v2`, and `spikesorting-v2-curation` extras:
@@ -103,6 +104,19 @@ review journeys in its curation lane and native matching in its matching lane;
 optional review paths can skip in the base environment. Heavy corrected
 daily-matching acceptance runs belong to `regression_gate` and run on the
 nightly/manual lane.
+
+The small user fixtures declare irregular physical spike trains before assigning
+sorter clusters. An oversplit cell shares one waveform across its fragments;
+pooled MUA combines two separately refractory-safe neurons. Bursting and a high
+firing rate alone do not make a unit MUA. Raw waveforms, channel footprints,
+background noise, and broad transients give evaluation and review meaningful
+signals. Expected merge events, refractory fractions, matched identities, and
+unmatched units are fixed independently of pipeline outputs.
+
+The native chronic benchmarks also include gradual template changes and nearby
+neurons with similar templates. Recovery for those two difficult cases is
+reported as diagnostics, without a passing recall requirement. Their presence in
+the fixture does not establish reliable recovery under drift or ambiguity.
 
 The motion acceptance manifests pin benchmark runner/helper files. The
 canonical import migration preserves their scientific AST and refreshes hashes
