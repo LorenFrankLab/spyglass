@@ -368,6 +368,9 @@
     "test_describe_run.py": {
       "tier": "unit"
     },
+    "test_direct_curation_unitmatch.py": {
+      "tier": "stage"
+    },
     "test_disjoint_artifact.py": {
       "tier": "unit",
       "overrides": {
@@ -396,6 +399,9 @@
     },
     "test_electrode_table_region.py": {
       "tier": "unit"
+    },
+    "test_epoch_unitmatch.py": {
+      "tier": "pipeline"
     },
     "test_evaluation_hash_lock.py": {
       "tier": "unit"
@@ -593,7 +599,7 @@
       "tier": "pipeline"
     },
     "test_notebook_execution.py": {
-      "tier": "db_unit",
+      "tier": "pipeline",
       "overrides": {
         "test_targeted_inspection_and_metric_filter_use_final_units": "stage"
       }
@@ -1102,7 +1108,7 @@
     "test_unitmatch_concat.py": {
       "tier": "pipeline",
       "overrides": {
-        "test_daily_concat_workflow_matches_planted_neurons_end_to_end": "db_unit"
+        "test_daily_concat_workflow_matches_planted_neurons_end_to_end": "regression_gate"
       }
     },
     "test_unitmatch_daily_concat.py": {
@@ -1125,6 +1131,9 @@
         "test_units_nwb_carries_per_unit_and_source_metadata": "stage",
         "test_write_sorting_units_nwb_unlinks_staged_file_on_failure": "pipeline"
       }
+    },
+    "test_user_curation_workflow.py": {
+      "tier": "pipeline"
     },
     "test_ux_smoke.py": {
       "tier": "pipeline",

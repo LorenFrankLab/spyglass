@@ -16,6 +16,9 @@ from pathlib import Path
 INTEGRATION_MODULES = (
     "test_unitmatch.py",
     "test_unit_match_generation.py",
+    "test_direct_curation_unitmatch.py",
+    "test_epoch_unitmatch.py",
+    "test_user_curation_workflow.py",
     "test_unitmatch_concat.py",
     "test_session_group_concat.py",
     "test_recompute.py",

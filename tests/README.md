@@ -61,6 +61,41 @@ preserve independently expected traces and timestamps; library-version adapters
 for SpikeInterface and DataJoint remain separately tested. See the
 [architecture map](../docs/src/ForDevelopers/SpikeSortingV2Architecture.md).
 
+The user scenarios are covered through the public APIs and persisted outputs:
+
+| User scenario                                                         | Integration coverage                                                                                                                                                                                                                      |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sort one epoch, review its units, then use accepted units in analysis | [User curation workflow](spikesorting/v2/test_user_curation_workflow.py): pipeline receipt, empty accepted population before review, completed review, and selected spike data.                                                           |
+| Merge units during review and resume verification                     | [Browser journey](spikesorting/v2/test_review_browser_journey.py): real Chromium edits, save, commit, merged-child verification, restart/resume, and analysis handoff.                                                                    |
+| Sort epochs separately in one NWB, then match                         | [Epoch matching](spikesorting/v2/test_epoch_unitmatch.py): interval discovery, reviewed and explicit automatic-only populations, reversed input order, original-clock readback, and rerun reuse.                                          |
+| Sort same-day recordings together with one shared unit namespace      | [Concat pipeline](spikesorting/v2/test_session_group_concat.py), `test_run_v2_pipeline_concat_mode_routes_session_group`: public run, auto-curation, per-member analysis outputs, and reuse.                                              |
+| Match independent recordings or daily concatenations                  | [Direct curation matching](spikesorting/v2/test_direct_curation_unitmatch.py), `test_direct_reviewed_curation_populations_reach_match_artifact`: exact reviewed generations, evaluation-filtered populations, and database/NWB agreement. |
+| Repair a blocked matching request                                     | [Direct curation matching](spikesorting/v2/test_direct_curation_unitmatch.py): blocks missing artifacts and changed pins before writes; restoring an artifact makes a rebuilt plan ready.                                                 |
+
+Run the focused pipeline scenarios in an environment with the `test`,
+`spikesorting-v2`, and `spikesorting-v2-curation` extras:
+
+```bash
+pytest \
+    tests/spikesorting/v2/test_user_curation_workflow.py \
+    tests/spikesorting/v2/test_epoch_unitmatch.py \
+    tests/spikesorting/v2/test_session_group_concat.py::test_run_v2_pipeline_concat_mode_routes_session_group \
+    tests/spikesorting/v2/test_direct_curation_unitmatch.py::test_direct_reviewed_curation_populations_reach_match_artifact \
+    --v2-tier pipeline --no-dlc --no-cov
+```
+
+The focused review/matching journeys use deterministic sorter and matcher
+fixtures while running the real orchestration, review commits, waveform
+preparation, database writes, NWB serialization, and downstream readers. Native
+sorter tests in `single_session/test_pipeline_run.py`, native UnitMatch recovery
+tests in `test_unitmatch_daily_concat.py`, and the browser journeys
+independently exercise those runtimes. The browser journeys also require
+`spikesorting-v2-curation-test` and Playwright Chromium. CI runs the public
+review journeys in its curation lane and native matching in its matching lane;
+optional review paths can skip in the base environment. Heavy corrected
+daily-matching acceptance runs belong to `regression_gate` and run on the
+nightly/manual lane.
+
 The motion acceptance manifests pin benchmark runner/helper files. The
 canonical import migration preserves their scientific AST and refreshes hashes
 that were already stale. A pin's `git_commit` identifies the checkout base;
