@@ -178,7 +178,6 @@ def test_raise_err_raises_after_the_whole_file_is_checked(
         populate_all_common(
             mini_copy_name,
             raise_err=True,
-            on_divergence="report",
         )
 
     message = str(err.value)

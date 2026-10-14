@@ -90,7 +90,6 @@ def _plan_only(nwb_file_name: str):
 def _insert_from_plan(
     nwb_file_name: str,
     raise_err: bool = False,
-    on_divergence: str = "report",
     allow_partial: bool = False,
 ):
     """Plan the whole file, then insert what the plan worked out.
@@ -108,9 +107,6 @@ def _insert_from_plan(
     raise_err : bool, optional
         Raise at the end if anything blocked. Default False, returning the plan
         for the caller to test. Nothing raises mid-pass either way.
-    on_divergence : str, optional
-        `report` to warn and keep the stored rows, `raise` to decline.
-        Default `report`.
     allow_partial : bool, optional
         Insert the tables that planned cleanly even though others did not.
 
@@ -128,11 +124,7 @@ def _insert_from_plan(
 
     plan = _plan_only(nwb_file_name)
 
-    result = insert_plan(
-        plan,
-        allow_partial=allow_partial,
-        on_divergence=on_divergence,
-    )
+    result = insert_plan(plan, allow_partial=allow_partial)
 
     if raise_err and result:
         raise ValueError(
@@ -288,7 +280,6 @@ def populate_all_common(
     nwb_file_name,
     raise_err=False,
     dry_run=False,
-    on_divergence="report",
     allow_partial=False,
 ) -> Union[List, None]:
     """Insert all common tables for a given NWB file.
@@ -308,10 +299,6 @@ def populate_all_common(
     dry_run : bool, optional
         Plan the file and return the report without inserting anything.
         Default False.
-    on_divergence : str, optional
-        What to do when the file disagrees with a stored row: `report`
-        keeps the stored rows, warns, and inserts the rest; `raise` declines.
-        Default `report`. Nothing prompts.
     allow_partial : bool, optional
         Insert the tables that planned cleanly even though others did not.
         Default False: a blocking problem inserts nothing, so a half-ingested
@@ -331,6 +318,5 @@ def populate_all_common(
     return _insert_from_plan(
         nwb_file_name,
         raise_err=raise_err,
-        on_divergence=on_divergence,
         allow_partial=allow_partial,
     )

@@ -41,7 +41,7 @@ def clean_plan(common, mini_copy_name, mini_insert):
     plan = plan_nwbfile(mini_copy_name)
 
     if plan.verdict != "no_op":  # repair, then look again
-        insert_plan(plan, on_divergence="report", allow_partial=True)
+        insert_plan(plan, allow_partial=True)
         plan = plan_nwbfile(mini_copy_name)
 
     assert plan.verdict == "no_op", (
@@ -338,26 +338,12 @@ def test_a_fatal_plan_does_not_close_its_staging_area(common, mini_copy_name):
 
     assert plan.verdict == "fatal", f"Expected fatal, got {plan.verdict}"
 
-    result = insert_plan(plan, on_divergence="report")
+    result = insert_plan(plan)
 
     assert result, "A file that could not be planned is not a success"
     assert not (
         IngestionPlanLog & {"nwb_file_name": unregistered}
     ), "Nothing to stage, and certainly nothing to mark complete"
-
-
-def test_unknown_divergence_policy_is_refused(common, mini_copy_name):
-    """A misspelled policy must not silently fall through to a default."""
-    import pytest as _pytest
-
-    from spyglass.utils.ingestion_plan import IngestionPlan
-    from spyglass.data_import.planner import insert_plan
-
-    with _pytest.raises(ValueError, match="on_divergence"):
-        insert_plan(
-            IngestionPlan(nwb_file_name=mini_copy_name),
-            on_divergence="ignore",
-        )
 
 
 def test_a_planner_miss_leaves_nothing_behind(
@@ -411,7 +397,7 @@ def test_a_planner_miss_leaves_nothing_behind(
     monkeypatch.setattr(planner, "_insert_rows", failing)
 
     try:
-        result = planner.insert_plan(plan, on_divergence="report")
+        result = planner.insert_plan(plan)
 
         assert any(
             problem.code == "planner_miss" for problem in result
@@ -505,14 +491,8 @@ def test_a_divergence_does_not_stop_the_run(common, mini_copy_name):
     assert not plan.blocking, "Premise: a divergence is soft, so never blocking"
 
     assert (
-        planner._refuse(plan, allow_partial=False, on_divergence="report")
-        is None
+        planner._refuse(plan, allow_partial=False) is None
     ), "reporting a divergence lets the run proceed"
-
-    assert (
-        planner._refuse(plan, allow_partial=False, on_divergence="raise")
-        is not None
-    ), "raise still declines, so the two are not the same outcome"
 
 
 def test_accepting_a_divergence_does_not_excuse_other_failures(
@@ -560,9 +540,8 @@ def test_accepting_a_divergence_does_not_excuse_other_failures(
     )
 
     assert (
-        planner._refuse(plan, allow_partial=False, on_divergence="report")
-        is not None
-    ), "A missing parent still blocks, whatever was decided about divergence"
+        planner._refuse(plan, allow_partial=False) is not None
+    ), "A missing parent still blocks, divergence alongside it or not"
 
 
 def test_a_soft_problem_is_visible_in_the_default_report(
@@ -611,32 +590,6 @@ def test_a_soft_problem_is_visible_in_the_default_report(
     assert not plan, "A plan with only warnings is falsy"
 
 
-def test_on_divergence_report_proceeds_and_raise_declines(
-    common, mini_copy_name
-):
-    """The two policies left, pinned on the gate.
-
-    `interactive` and `accept` are gone: accept became the default, so the
-    name stopped meaning anything, and the prompt is the behaviour D7
-    removes. What remains is report -- warn and insert the rest -- and raise,
-    for a caller that wants a disagreement to be an error.
-    """
-    from spyglass.data_import import planner
-
-    plan = _divergent_plan(common, mini_copy_name)
-
-    assert (
-        planner._refuse(plan, allow_partial=False, on_divergence="report")
-        is None
-    ), "report proceeds"
-
-    refused = planner._refuse(plan, allow_partial=False, on_divergence="raise")
-    assert refused is not None, "raise declines"
-    assert any(
-        p.code == "divergence" for p in refused.problems
-    ), "and hands back the plan carrying why"
-
-
 def test_nothing_prompts_on_a_divergence(common, mini_copy_name, monkeypatch):
     """No path may read stdin over a disagreement.
 
@@ -652,8 +605,7 @@ def test_nothing_prompts_on_a_divergence(common, mini_copy_name, monkeypatch):
     monkeypatch.setattr("builtins.input", explode)
 
     plan = _divergent_plan(common, mini_copy_name)
-    for policy in ("report", "raise"):
-        planner._refuse(plan, allow_partial=False, on_divergence=policy)
+    planner._refuse(plan, allow_partial=False)
 
 
 def test_a_table_is_handed_the_whole_config_not_its_own_slice(

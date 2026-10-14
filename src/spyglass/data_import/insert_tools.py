@@ -60,7 +60,6 @@ def insert_sessions(
     raise_err: bool = False,
     reinsert: bool = False,
     dry_run: bool = False,
-    on_divergence: str = "report",
 ):
     """Populate the database with new sessions.
 
@@ -89,10 +88,6 @@ def insert_sessions(
         runs tables in the order an insert would, so a table resolving a
         reference to one this ingestion also fills sees the planned rows.
 
-    on_divergence : str, optional
-        What to do when the file disagrees with a stored row: `report`
-        keeps the stored rows, warns, and inserts the rest; `raise` declines.
-        Default `report`. Nothing prompts.
 
     Returns
     -------
@@ -193,7 +188,6 @@ def insert_sessions(
             populate_all_common(
                 out_nwb_file_name,
                 raise_err=raise_err,
-                on_divergence=on_divergence,
             )
         )
 

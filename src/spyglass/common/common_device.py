@@ -190,9 +190,7 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         db_dict = (
             DataAcquisitionDevice & {"data_acquisition_device_name": name}
         ).fetch1()
-        # Keep the stored device and report. A caller that wants a
-        # disagreement to be an error asks for it, the same way
-        # `on_divergence="raise"` does on the plan path.
+        # Keep the stored device and report, as the plan path does.
         if differing := sorted(
             k
             for k, existing_val in db_dict.items()

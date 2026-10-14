@@ -682,15 +682,13 @@ def _blocking_parents(table, failed_tables: set) -> Tuple[str, ...]:
 def insert_plan(
     plan: IngestionPlan,
     allow_partial: bool = False,
-    on_divergence: str = "report",
 ) -> IngestionPlan:
     """Insert what a plan worked out, re-deriving nothing.
 
-    The plan already holds every intended row, already checked. This applies
-    the divergence policy, then writes those rows in dependency order, in one
-    transaction. No file is reopened and no mapping is re-run: if a row is
-    wrong here, the plan was wrong, which is a planner gap rather than an
-    ingestion error, and the transaction undoes it.
+    The plan already holds every intended row, already checked. It writes them
+    in dependency order, in one transaction. No file is reopened and no mapping
+    is re-run: if a row is wrong here, the plan was wrong, which is a planner
+    gap rather than an ingestion error, and the transaction undoes it.
 
     Freshness is judged per entry, never by comparing the file's hash to the
     one recorded when the plan was made. The expected workflow edits the file
@@ -705,12 +703,6 @@ def insert_plan(
         Insert the tables that planned cleanly even though others did not.
         Default False: a plan with blocking problems inserts nothing, so a
         half-ingested file is a choice rather than an accident.
-    on_divergence : str, optional
-        What to do when the file disagrees with a stored row.
-        `report` keeps the stored rows, warns, and inserts everything else;
-        `raise` declines the run and logs the report. Default `report`.
-        Nothing prompts, and neither value raises an exception: `raise`
-        returns the plan truthy, carrying what stopped it.
 
     Returns
     -------
@@ -720,7 +712,7 @@ def insert_plan(
     """
     from spyglass.common.common_usage import IngestionPlanLog
 
-    if (refused := _refuse(plan, allow_partial, on_divergence)) is not None:
+    if (refused := _refuse(plan, allow_partial)) is not None:
         return refused
 
     inserted, existing, conflicting, misses = _write_plan(plan)
@@ -749,21 +741,19 @@ def insert_plan(
 
 
 def _refuse(
-    plan: IngestionPlan, allow_partial: bool, on_divergence: str
+    plan: IngestionPlan, allow_partial: bool
 ) -> Optional[IngestionPlan]:
     """Decide whether this plan gets as far as being written.
 
-    Three ways a run ends before it starts: there is nothing to do, the user
-    declined the divergences, or something blocks and no partial insert was
-    asked for. Each returns the plan the caller should get back.
+    Two ways a run ends before it starts: there is nothing to do, or something
+    blocks and no partial insert was asked for. Each returns the plan the
+    caller should get back.
 
     Parameters
     ----------
     plan : IngestionPlan
     allow_partial : bool
         Insert the tables that planned cleanly even though others did not.
-    on_divergence : str
-        `report` to warn and keep the stored rows, `raise` to decline.
 
     Returns
     -------
@@ -771,12 +761,6 @@ def _refuse(
         None to go on and insert.
     """
     from spyglass.common.common_usage import IngestionPlanLog
-
-    if on_divergence not in ("report", "raise"):
-        raise ValueError(
-            f"Unknown on_divergence {on_divergence!r}. "
-            + "Expected report or raise."
-        )
 
     # `is_clean` as well as the verdict: a plan that failed plans no entries,
     # so nothing is novel, so the count alone reads as "already ingested".
@@ -796,12 +780,6 @@ def _refuse(
         IngestionPlanLog().mark_inserted(
             plan, inserted=(), existing=list(_targets(plan)), complete=True
         )
-        return plan
-
-    # A divergence is `soft`, so it never reaches `blocking`; the only thing
-    # left to decide is whether a caller asked for it to be an error.
-    if on_divergence == "raise" and diverges:
-        logger.error(plan.report(log=False))
         return plan
 
     blocking = plan.blocking

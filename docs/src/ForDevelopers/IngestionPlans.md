@@ -74,9 +74,6 @@ and the report names the row and the columns that differ along with the revision
 that would align them. Read it after the run; the plan is staged, so it is still
 there later.
 
-`on_divergence="raise"` declines the run instead, for a caller that wants a
-disagreement to be an error — a pipeline or a migration script.
-
 ## Planning a file directly
 
 ```python
