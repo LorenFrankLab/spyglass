@@ -348,18 +348,23 @@ def validate_list(
 
 def validate_smoothing_params(
     params: Union["SmoothingParams", dict],
+    require_likelihood_thresh: bool = True,
 ) -> None:
     """Validate smoothing parameters for pose processing.
 
     Accepts either a :class:`SmoothingParams` dataclass or a plain ``dict``.
-    Unified validation for both V1 and V2 smoothing parameter formats.
-    Supports both V1-style (smooth boolean + smoothing_params) and
-    V2-style (nested structure with method validation).
+    Supports both the flat format (``smooth`` boolean plus
+    ``smoothing_params``) and the nested format with method validation.
 
     Parameters
     ----------
     params : SmoothingParams or dict
         Smoothing parameters to validate
+    require_likelihood_thresh : bool, optional
+        Whether ``likelihood_thresh`` must be present when smoothing or
+        interpolation is enabled. Default True. Pass False for a caller that
+        thresholds on likelihood in an earlier step, where the key is
+        legitimately absent from a parameter set.
 
     Raises
     ------
@@ -388,8 +393,10 @@ def validate_smoothing_params(
     )
 
     if (
-        has_smoothing or has_interpolation
-    ) and "likelihood_thresh" not in params:
+        require_likelihood_thresh
+        and (has_smoothing or has_interpolation)
+        and "likelihood_thresh" not in params
+    ):
         raise ValueError("Smoothing params must include 'likelihood_thresh'")
 
     # Check interpolation requirements
@@ -569,13 +576,12 @@ def validate_centroid_params(
             f"got {len(points)}"
         )
 
-    # Validate specific point keys if required
+    # Check the mapping's keys in both formats. Keys are roles and values are
+    # bodypart names -- Centroid looks up points["greenLED"] to learn which
+    # bodypart to read -- so the values are free-form and only the keys are a
+    # fixed vocabulary.
     if spec["required_point_keys"] is not None:
-        # For nested format, check the values in the points dict
-        # For flat format, check the keys
-        point_identifiers = (
-            set(points.values()) if "points" in params else set(points.keys())
-        )
+        point_identifiers = set(points.keys())
         if point_identifiers != spec["required_point_keys"]:
             raise ValueError(
                 f"{method} centroid requires points: {spec['required_point_keys']}. "

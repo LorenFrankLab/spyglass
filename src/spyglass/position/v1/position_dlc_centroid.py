@@ -23,9 +23,11 @@ from spyglass.position.utils.validation import (
 
 
 def validate_smoothing_params(params: dict) -> None:
-    """V1-compatible wrapper for shared validation function.
+    """Validate centroid smoothing params, adapting names for the shared check.
 
-    Converts V1 parameter format to standardized format before validation.
+    ``likelihood_thresh`` is not required here: centroid parameter sets filter
+    on likelihood upstream, in ``DLCSmoothInterp``, so the key is absent from
+    existing sets including the long-standing default.
     """
     if params is None:
         return
@@ -41,13 +43,13 @@ def validate_smoothing_params(params: dict) -> None:
         sp = adapted_params["smoothing_params"].copy()
         if "smooth_method" in sp:
             sp["method"] = sp.pop("smooth_method")
-        # Extract likelihood_thresh to top level for shared validation
+        # Lift a nested likelihood_thresh so a set that does carry one is
+        # still checked against the top-level key.
         if "likelihood_thresh" in sp:
             adapted_params["likelihood_thresh"] = sp["likelihood_thresh"]
         adapted_params["smoothing_params"] = sp
 
-    # Call shared validation with adapted parameters
-    _validate_smoothing_params(adapted_params)
+    _validate_smoothing_params(adapted_params, require_likelihood_thresh=False)
 
 
 from spyglass.position.v1.position_dlc_cohort import DLCSmoothInterpCohort
@@ -110,7 +112,6 @@ class DLCCentroidParams(SpyglassMixin, dj.Manual):
             "interpolate": True,
             "interp_params": {"max_cm_to_interp": 15},
             "smooth": True,
-            "likelihood_thresh": 0.4,
             "smoothing_params": {
                 "smoothing_duration": 0.05,
                 "smooth_method": "moving_avg",
