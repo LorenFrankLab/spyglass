@@ -342,3 +342,32 @@ def test_fixing_a_defect_on_disk_re_plans_only_the_affected_table(
     assert not lost, (
         "Entries staged before the fix must survive it; changed: " + f"{lost}"
     )
+
+
+def test_renaming_a_camera_re_parses_task_epoch(
+    common, editable_copy, parse_counter, hasher_for
+):
+    """A camera's name feeds `TaskEpoch.camera_names`, so it must invalidate it.
+
+    The rename leaves the device's `object_id` alone, so only the recorded
+    read-set can notice it.
+    """
+    from spyglass.data_import.planner import plan_nwbfile
+
+    name, path = editable_copy
+    _, first = _stage(name)
+    assert _productive(first), "Premise: the mini file fills some tables"
+
+    camera = "general/devices/camera_device 0"
+    with _edit(path) as file:
+        if camera not in file:  # pragma: no cover - corpus without cameras
+            pytest.skip("mini file has no camera_device 0")
+        file[camera].attrs["camera_name"] = "renamed_for_reuse_test"
+
+    parse_counter.clear()
+    plan_nwbfile(name)
+
+    assert common.TaskEpoch().full_table_name in set(parse_counter), (
+        "TaskEpoch reads the camera map, so a renamed camera must re-parse it; "
+        f"re-parsed: {sorted(parse_counter)}"
+    )

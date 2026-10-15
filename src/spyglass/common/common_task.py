@@ -165,6 +165,17 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
         # otherwise reading whichever config the last insert happened to leave.
         self._file_config = ctx.config or dict()
 
+        # Built here so the devices it reads join this table's read-set: the
+        # map feeds every `camera_names` value, so a renamed camera must
+        # re-plan this table too.
+        if (nwb_file := ctx.nwb_file) is not None:
+            for device in nwb_file.devices.values():
+                if is_nwb_obj_type(device, "CameraDevice"):
+                    ctx.record_read(device)
+            self._camera_cache[ctx.nwb_file_name] = self._camera_name_map(
+                nwb_file
+            )
+
     def get_nwb_objects(self, nwb_file, nwb_file_name=None):
         """Return the file's task tables."""
         # Take the camera map from the file in hand, before anything can

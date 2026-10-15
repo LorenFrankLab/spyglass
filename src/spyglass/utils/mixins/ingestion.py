@@ -1057,7 +1057,7 @@ class IngestionMixin(BaseMixin):
         Parameters
         ----------
         ctx : FileContext or None
-            Parse context. None on a direct call, which reads the database.
+            Parse context. None reads the database.
         table : dj.Table
             The table to read, instanced.
         attr : str
@@ -1070,8 +1070,7 @@ class IngestionMixin(BaseMixin):
         Any or None
             None when no such row is planned or stored.
         """
-        # The plan first, never "whichever is non-empty": during planning the
-        # stored row may be stale, and the plan is what the insert will write.
+        # The plan first, never whichever is non-empty.
         if ctx is not None:
             return ctx.value_for(table, attr, restriction)
         found = (table & restriction).fetch(attr)
@@ -1083,7 +1082,7 @@ class IngestionMixin(BaseMixin):
         Parameters
         ----------
         ctx : FileContext or None
-            Parse context. None on a direct call, which reads the database.
+            Parse context. None reads the database.
         table : dj.Table
             The table to read, instanced.
         restriction : dict, optional
