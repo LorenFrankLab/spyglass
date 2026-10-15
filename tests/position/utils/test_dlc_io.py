@@ -563,3 +563,102 @@ class TestDoPoseEstimation:
         call_kwargs = mock_torch_analyze.call_args[1]
         assert "TFGPUinference" not in call_kwargs
         assert "gputouse" not in call_kwargs
+
+    def test_runs_with_tf_backend_absent(self, tmp_path):
+        """A torch-only DLC 3.x install must still run a pytorch project.
+
+        The TensorFlow backend is poisoned, so importing it raises. Inference
+        must reach the PyTorch backend regardless.
+        """
+        import sys
+        from unittest.mock import MagicMock, patch
+
+        import yaml
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump({"engine": "pytorch"}, f)
+
+        fake_torch = MagicMock()
+        fake_torch.analyze_videos = MagicMock()
+
+        with (
+            patch(
+                "spyglass.position.utils.dlc_io.save_yaml",
+                return_value=str(config_path),
+            ),
+            patch.dict(
+                sys.modules,
+                {
+                    "deeplabcut.pose_estimation_pytorch": fake_torch,
+                    "deeplabcut.pose_estimation_tensorflow": None,
+                },
+            ),
+        ):
+            from spyglass.position.utils.dlc_io import do_pose_estimation
+
+            do_pose_estimation(
+                video_filepaths=[str(tmp_path / "video.mp4")],
+                dlc_model={
+                    "config_template": {"project_path": str(tmp_path)},
+                    "shuffle": 1,
+                    "trainingsetindex": 0,
+                    "model_prefix": None,
+                },
+                project_path=str(tmp_path),
+                output_dir=str(tmp_path),
+            )
+
+        fake_torch.analyze_videos.assert_called_once()
+
+
+class TestImportAnalyzeVideos:
+    """``import_analyze_videos`` must load only the engine's own backend.
+
+    DLC 2.x ships no PyTorch backend and a torch-only DLC 3.x install ships no
+    TensorFlow one, so each case poisons the backend that would be absent --
+    importing it raises -- and asserts the other one is still reached.
+    """
+
+    @pytest.mark.parametrize(
+        "engine, wanted, poisoned",
+        [
+            ("pytorch", "pytorch", "tensorflow"),
+            ("tensorflow", "tensorflow", "pytorch"),
+            # Every DLC 2.x project predates the key; absent means TF.
+            (None, "tensorflow", "pytorch"),
+        ],
+    )
+    def test_imports_only_selected_backend(self, engine, wanted, poisoned):
+        import sys
+        from unittest.mock import MagicMock, patch
+
+        from spyglass.position.utils.dlc_io import import_analyze_videos
+
+        fake = MagicMock()
+        fake.analyze_videos = "sentinel"
+
+        with patch.dict(
+            sys.modules,
+            {
+                f"deeplabcut.pose_estimation_{wanted}": fake,
+                f"deeplabcut.pose_estimation_{poisoned}": None,
+            },
+        ):
+            assert import_analyze_videos(engine) == "sentinel"
+
+    def test_missing_backend_names_engine_and_module(self):
+        """The error must say which engine wanted which missing module."""
+        import sys
+        from unittest.mock import patch
+
+        from spyglass.position.utils.dlc_io import import_analyze_videos
+
+        with patch.dict(
+            sys.modules, {"deeplabcut.pose_estimation_pytorch": None}
+        ):
+            with pytest.raises(ImportError) as err:
+                import_analyze_videos("pytorch")
+
+        assert "'pytorch'" in str(err.value)
+        assert "deeplabcut.pose_estimation_pytorch" in str(err.value)

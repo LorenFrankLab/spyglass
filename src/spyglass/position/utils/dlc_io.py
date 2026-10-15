@@ -7,8 +7,10 @@ import contextlib
 import csv
 import pickle
 import re
+import sys
+from importlib import import_module
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -712,6 +714,50 @@ def route_gputouse_to_device(
     target["device"] = device
 
 
+def import_analyze_videos(engine: Optional[str]) -> Callable:
+    """Import ``analyze_videos`` for the engine a DLC project selects.
+
+    Parameters
+    ----------
+    engine : str or None
+        A project config's ``engine`` key. ``"pytorch"`` selects DLC 3.x's
+        PyTorch backend; anything else — including None, as in every DLC 2.x
+        project — selects the TensorFlow backend.
+
+    Returns
+    -------
+    Callable
+        The selected backend's ``analyze_videos``.
+
+    Raises
+    ------
+    ImportError
+        If the selected backend is not installed.
+
+    Notes
+    -----
+    Only the selected backend is imported. The two are not both present in a
+    typical install -- DLC 2.x ships no PyTorch backend, and a torch-only DLC
+    3.x install ships no TensorFlow one -- so importing both aborts inference
+    before it reaches the one that would have worked.
+    """
+    module = (
+        "deeplabcut.pose_estimation_pytorch"
+        if engine == "pytorch"
+        else "deeplabcut.pose_estimation_tensorflow"
+    )
+    try:
+        return import_module(module).analyze_videos
+    except ImportError as e:
+        installed = getattr(
+            sys.modules.get("deeplabcut"), "__version__", "unknown"
+        )
+        raise ImportError(
+            f"DLC project engine {engine!r} requires {module}, which this "
+            f"DeepLabCut install (version {installed}) does not provide."
+        ) from e
+
+
 def do_pose_estimation(
     video_filepaths,
     dlc_model,
@@ -740,23 +786,13 @@ def do_pose_estimation(
     project_path: path to project config.yml
     output_dir: where to save output
     """
-    # Conditional import based on engine key in config.yml
     import yaml
-    from deeplabcut.pose_estimation_pytorch import (
-        analyze_videos as analyze_videos_torch,
-    )
-    from deeplabcut.pose_estimation_tensorflow import (
-        analyze_videos as analyze_videos_tf,
-    )
 
+    # Read the engine before importing, so only the selected backend loads.
     config_filepath = Path(project_path) / "config.yaml"
     with open(config_filepath, "r") as config_file:
         config = yaml.safe_load(config_file)
-    analyze_videos = (
-        analyze_videos_torch
-        if config.get("engine") == "pytorch"
-        else analyze_videos_tf
-    )
+    analyze_videos = import_analyze_videos(config.get("engine"))
 
     # ---- Build and save DLC configuration (yaml) file ----
     dlc_config = dlc_model["config_template"]
