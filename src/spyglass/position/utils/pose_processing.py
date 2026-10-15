@@ -32,14 +32,14 @@ def convert_to_cm(
     """
     pose_df = pose_df.copy()
     xy_mask = pose_df.columns.get_level_values(-1).isin(["x", "y"])
-    xy_cols = pose_df.loc[:, xy_mask]
-    # Scalar multiplication upcasts float32 -> float64; cast the result back
-    # to the original per-column dtype before assigning through .loc so we
-    # don't trigger pandas' incompatible-dtype FutureWarning (and don't
-    # silently widen the whole DataFrame to float64 in the process).
-    pose_df.loc[:, xy_mask] = (xy_cols * (meters_per_pixel * 100)).astype(
-        xy_cols.dtypes
-    )
+    # Replace each column positionally rather than assigning through .loc.
+    # Centimetres are fractional, so an integer pixel column must widen to
+    # float; a .loc assignment warns and will stop upcasting in pandas 3,
+    # and casting the result back to int truncates every value to zero.
+    # Multiplying by a Python float already preserves float32, so a float
+    # frame keeps its own precision without an explicit cast.
+    for i in np.flatnonzero(xy_mask):
+        pose_df.isetitem(i, pose_df.iloc[:, i] * (meters_per_pixel * 100))
     return pose_df
 
 
