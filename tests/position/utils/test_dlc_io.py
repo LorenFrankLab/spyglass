@@ -662,3 +662,87 @@ class TestImportAnalyzeVideos:
 
         assert "'pytorch'" in str(err.value)
         assert "deeplabcut.pose_estimation_pytorch" in str(err.value)
+
+
+class TestToLegacyEvalFields:
+    """A DLC 2.x evaluation row must survive untouched.
+
+    V1 handed ``DLCModelEvaluation`` the CSV row verbatim, so the 2.x header
+    spellings *are* the field names it indexes. Renaming unconditionally
+    replaced measured values with whatever the 3.x lookups missed.
+    """
+
+    # A real DLC 2.x evaluation row, as the CSV spells it.
+    LEGACY_ROW = {
+        "Training iterations:": "50000",
+        " Train error(px)": "2.53",
+        " Test error(px)": "3.17",
+        "p-cutoff used": "0.6",
+        "Train error with p-cutoff": "2.41",
+        "Test error with p-cutoff": "3.02",
+    }
+
+    def test_legacy_row_passes_through_unchanged(self):
+        from spyglass.position.utils.dlc_io import to_legacy_eval_fields
+
+        assert to_legacy_eval_fields(dict(self.LEGACY_ROW)) == self.LEGACY_ROW
+
+    def test_legacy_row_survives_a_real_csv_round_trip(self, tmp_path):
+        """Parsed the way `get_dlc_model_eval` parses it.
+
+        Guards the leading space in ``" Train error(px)"``, which a CSV
+        reader could plausibly strip.
+        """
+        import csv
+
+        from spyglass.position.utils.dlc_io import to_legacy_eval_fields
+
+        csv_path = tmp_path / "eval.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(self.LEGACY_ROW))
+            writer.writeheader()
+            writer.writerow(self.LEGACY_ROW)
+
+        with open(csv_path, newline="") as f:
+            parsed = list(csv.DictReader(f, delimiter=","))[0]
+
+        result = to_legacy_eval_fields(parsed)
+        assert result["Training iterations:"] == "50000"
+        assert result["p-cutoff used"] == "0.6"
+        assert result[" Train error(px)"] == "2.53"
+        assert result[" Test error(px)"] == "3.17"
+
+    def test_modern_row_maps_to_legacy_fields(self):
+        from spyglass.position.utils.dlc_io import to_legacy_eval_fields
+
+        assert to_legacy_eval_fields(
+            {
+                "Training epochs": "200",
+                "train rmse": "1.8",
+                "test rmse": "2.4",
+                "pcutoff": "0.4",
+                "train rmse_pcutoff": "1.7",
+                "test rmse_pcutoff": "2.2",
+            }
+        ) == {
+            "Training iterations:": "200",
+            " Train error(px)": "1.8",
+            " Test error(px)": "2.4",
+            "p-cutoff used": "0.4",
+            "Train error with p-cutoff": "1.7",
+            "Test error with p-cutoff": "2.2",
+        }
+
+    def test_absent_modern_column_is_none_not_a_stand_in(self):
+        """A column the file lacks must not acquire a plausible number.
+
+        `DLCModelEvaluation` persists this dict, so a default would be stored
+        as though it had been measured.
+        """
+        from spyglass.position.utils.dlc_io import to_legacy_eval_fields
+
+        result = to_legacy_eval_fields({"train rmse": "1.8"})
+
+        assert result[" Train error(px)"] == "1.8"
+        assert result["Training iterations:"] is None
+        assert result["p-cutoff used"] is None
