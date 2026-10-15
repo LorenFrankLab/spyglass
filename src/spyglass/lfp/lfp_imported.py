@@ -124,7 +124,9 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
 
         return f"imported_lfp_{max(suffixes) + 1 if suffixes else 0:03}"
 
-    def _plan_electrode_group(self, session_key, electrode_ids) -> tuple:
+    def _plan_electrode_group(
+        self, session_key, electrode_ids, ctx=None
+    ) -> tuple:
         """Resolve one series' electrode group without writing it.
 
         Parameters
@@ -133,6 +135,9 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
             The session the group belongs to.
         electrode_ids : array-like
             The electrodes the series was recorded on.
+        ctx : FileContext, optional
+            Parse context, so the group's members resolve against the plan.
+            Default None, resolving against the database alone.
 
         Returns
         -------
@@ -151,6 +156,7 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
             session_key=session_key,
             electrode_ids=electrode_ids,
             group_name=group_name,
+            ctx=ctx,
         )
         self._planned_groups[planned_key] = group_key
         if entries:  # only a name this plan will actually write
@@ -186,7 +192,9 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
         session_key = {"nwb_file_name": self_key["nwb_file_name"]}
 
         group_key, group_entries = self._plan_electrode_group(
-            session_key, nwb_obj.electrodes.to_dataframe().index.values
+            session_key,
+            nwb_obj.electrodes.to_dataframe().index.values,
+            ctx=ctx,
         )
         self_key.update(group_key)
 
