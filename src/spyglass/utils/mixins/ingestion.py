@@ -1051,6 +1051,52 @@ class IngestionMixin(BaseMixin):
             return a_val.lower() != b_val.lower()
         return a_val != b_val
 
+    def value_from_plan(self, ctx, table, attr: str, restriction: dict):
+        """Return one attribute of a row, preferring the plan over storage.
+
+        Parameters
+        ----------
+        ctx : FileContext or None
+            Parse context. None on a direct call, which reads the database.
+        table : dj.Table
+            The table to read, instanced.
+        attr : str
+            Attribute to return.
+        restriction : dict
+            Attribute equalities the row must satisfy.
+
+        Returns
+        -------
+        Any or None
+            None when no such row is planned or stored.
+        """
+        # The plan first, never "whichever is non-empty": during planning the
+        # stored row may be stale, and the plan is what the insert will write.
+        if ctx is not None:
+            return ctx.value_for(table, attr, restriction)
+        found = (table & restriction).fetch(attr)
+        return found[0] if len(found) else None
+
+    def rows_from_plan(self, ctx, table, restriction: dict = None) -> tuple:
+        """Return the rows a table will hold, preferring the plan over storage.
+
+        Parameters
+        ----------
+        ctx : FileContext or None
+            Parse context. None on a direct call, which reads the database.
+        table : dj.Table
+            The table to read, instanced.
+        restriction : dict, optional
+            Attribute equalities every returned row must satisfy.
+
+        Returns
+        -------
+        tuple of dict
+        """
+        if ctx is not None:
+            return ctx.rows_for(table, restriction)
+        return tuple((table & (restriction or True)).fetch(as_dict=True))
+
     def check_planned_rows(
         self, rows, key_space, table=None, first_plan: bool = False
     ) -> tuple:

@@ -106,8 +106,8 @@ class SensorData(SpyglassIngestion, dj.Imported):
         # the raw ephys data. Asked of the context rather than of `Raw`: the
         # same ingestion fills `Raw`, so while planning a file that row is not
         # written yet and a query would raise here instead of reporting.
-        interval_list_name = ctx.value_for(
-            Raw(), "interval_list_name", {"nwb_file_name": nwb_file_name}
+        interval_list_name = self.value_from_plan(
+            ctx, Raw(), "interval_list_name", {"nwb_file_name": nwb_file_name}
         )
 
         if interval_list_name is None:

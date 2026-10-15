@@ -66,8 +66,8 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
         # Asked of the context, which holds the `Raw` row this same ingestion
         # plans. A query would make the branch below turn on *when* the plan
         # was built.
-        raw_interval = ctx.value_for(
-            Raw(), "interval_list_name", {"nwb_file_name": nwb_file_name}
+        raw_interval = self.value_from_plan(
+            ctx, Raw(), "interval_list_name", {"nwb_file_name": nwb_file_name}
         )
 
         has_raw = raw_interval is not None
