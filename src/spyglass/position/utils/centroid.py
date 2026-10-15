@@ -270,7 +270,8 @@ def get_4pt_centroid(
 
     Priority (in order):
     1. If green and center valid → average them
-    2. If green and left/right valid → equal 3-pt average (green, left, right)
+    2. If green and left/right valid → average left/right, then average that
+       midpoint with green, so green carries half the weight
     3. If only left/right valid → average left and right
     4. If green and one side valid → average them
     5. If only center valid → use center
@@ -378,10 +379,13 @@ def get_4pt_centroid(
         ~nans[green] & ~nans[red_C],
     )
 
-    # Priority 2: Green and left/right valid — equal 3-pt average (matches V1)
+    # Priority 2: Green and left/right valid. The red midpoint stands in for
+    # the missing center, so green is averaged against one point, not two --
+    # an equal 3-point mean would shift the centroid toward the red side.
     _set_centroid(
         [green, red_L, red_R],
         ~nans[green] & nans[red_C] & ~nans[red_L] & ~nans[red_R],
+        use_midpoint=(red_L, red_R),
     )
 
     # Priority 3: Only left/right valid
@@ -467,10 +471,13 @@ class Centroid:
         mask: tuple,
         points: list = None,
         replace: bool = False,
-        midpoint: bool = False,
         logical_or: bool = False,
     ):
-        """Calculate the centroid of the points in the mask"""
+        """Calculate the centroid of the points in the mask.
+
+        Three points are weighted unequally: the first two are averaged into
+        a midpoint, which is then averaged with the third.
+        """
         from functools import reduce
         from itertools import combinations
 
@@ -491,7 +498,13 @@ class Centroid:
             self.centroid[mask] = np.nan
             return
 
-        coords = [self.coords[p][mask] for p in (points or self.point_names)]
+        if points is not None and len(points) == 3:
+            midpoint = (self.coords[points[0]] + self.coords[points[1]]) / 2
+            coords = [midpoint[mask], self.coords[points[2]][mask]]
+        else:
+            coords = [
+                self.coords[p][mask] for p in (points or self.point_names)
+            ]
         self.centroid[mask] = np.nanmean(coords, axis=0)
 
     def get_1pt_centroid(self):
@@ -570,5 +583,7 @@ class Centroid:
         if self.max_LED_separation is None or get_distance is None:
             return np.zeros(len(self.pos_df), dtype=bool)
 
+        # >=, not >: a pair sitting exactly at the limit is too separated,
+        # matching the get_*_centroid distance checks.
         dist = get_distance(self.coords[p1], self.coords[p2])
-        return dist > self.max_LED_separation
+        return dist >= self.max_LED_separation
