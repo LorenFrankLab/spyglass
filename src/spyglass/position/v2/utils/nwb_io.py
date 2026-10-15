@@ -1,0 +1,763 @@
+"""NWB I/O helpers and inference runner for pose estimation."""
+
+import contextlib
+import io
+import pickle
+from pathlib import Path
+from typing import Union
+
+import numpy as np
+import pandas as pd
+
+from spyglass.position.utils import suppress_print_from_package
+from spyglass.position.utils.path_helpers import resolve_model_path
+from spyglass.utils.mixins.base import BaseMixin
+
+try:
+    import ndx_pose
+except ImportError:  # pragma: no cover
+    ndx_pose = None  # pragma: no cover
+
+
+def check_gpu_available(device: Union[str, None]) -> None:
+    """Raise fast if a GPU device is requested but none is visible.
+
+    Meant to be called at the top of ``PoseEstim.make_compute``, before any
+    video conversion or model-loading work, so a missing/misconfigured GPU
+    fails immediately with a clear message instead of surfacing deep inside
+    ``torch.load`` as a cryptic ``pickle.UnpicklingError`` after several
+    minutes of setup work (see issue #1676).
+
+    This only checks basic driver/runtime visibility
+    (``torch.cuda.is_available()``); it cannot detect a GPU that is present
+    but locked/busy from another process's exclusive context -- that
+    condition is inherently racy to pre-check (the device can be grabbed
+    between the check and the actual use) and is handled instead by the
+    actionable hint in :meth:`PoseInferenceRunner.run_dlc_inference` if it
+    happens at load time.
+
+    DLC 3.x/PyTorch is the only V2 inference backend (V1's DeepLabCut used
+    TensorFlow instead), so this lives alongside ``PoseInferenceRunner``
+    rather than in the tool-agnostic ``position/utils/`` package -- a bare
+    ``torch.cuda.is_available()`` check would be silently wrong for a
+    TensorFlow caller, and V1 has no comparable ``device="cuda"`` string
+    convention to check (it takes an integer ``gputouse`` instead).
+
+    Parameters
+    ----------
+    device : str or None
+        The requested device string, e.g. ``"cuda"``, ``"cuda:0"``,
+        ``"cpu"``, or ``None``. A no-op unless it requests a CUDA device.
+
+    Raises
+    ------
+    RuntimeError
+        If a CUDA device is requested but ``torch.cuda.is_available()`` is
+        False.
+    """
+    if not device or "cuda" not in str(device).lower():
+        return
+
+    import torch  # pragma: no cover -- CI has no GPU, see below
+
+    if not torch.cuda.is_available():  # pragma: no cover
+        raise RuntimeError(  # pragma: no cover
+            f"Requested device={device!r}, but no CUDA device is visible "
+            "to PyTorch on this machine (torch.cuda.is_available() is "
+            "False). Check GPU drivers and CUDA_VISIBLE_DEVICES, or use a "
+            "CPU-configured PoseEstimParams entry (device='cpu')."
+        )
+
+
+class PoseInferenceRunner(BaseMixin):
+    """Handles pose estimation inference execution for different tools."""
+
+    @staticmethod
+    def _unreadable_video_msg(video_path: str) -> str:
+        """Build the actionable error for a video DLC cannot count frames for."""
+        return (
+            f"Video '{video_path}' reports a non-positive frame count via "
+            "OpenCV metadata (cv2.CAP_PROP_FRAME_COUNT), which crashes "
+            "DeepLabCut with '__len__() should return >= 0'. Automatic "
+            "lossless conversion to mp4 was attempted but did not restore a "
+            "readable frame count (the file is likely an mp4 with stripped "
+            "metadata or is corrupt). Re-encode it, e.g.:\n"
+            f"    ffmpeg -i '{video_path}' -c:v libx264 -pix_fmt yuv420p "
+            "-an fixed.mp4\n"
+            "then register the fixed video and re-run inference."
+        )
+
+    def _assert_countable_videos(self, videos: list) -> None:
+        """Last-resort guard for videos DeepLabCut cannot count frames for.
+
+        Shared :func:`ensure_mp4` already auto-converts every input DLC
+        cannot count — raw elementary streams and containers with unreadable
+        metadata alike — so by the time this runs the videos should be
+        countable. It fires only for the residual case a lossless remux
+        cannot fix in place (an mp4 with stripped metadata, or a corrupt
+        file), turning DLC's opaque ``ValueError: __len__() should return
+        >= 0`` into an actionable message instead of a mid-inference crash.
+
+        Parameters
+        ----------
+        videos : list
+            Video file paths (post-conversion) to validate.
+
+        Raises
+        ------
+        ValueError
+            If OpenCV reports a non-positive frame count for any video.
+        """
+        from spyglass.position.utils.general import dlc_reported_frame_count
+
+        for vp in videos:
+            count = dlc_reported_frame_count(vp)
+            if count is None or count <= 0:
+                raise ValueError(self._unreadable_video_msg(str(vp)))
+
+    def run_dlc_inference(
+        self,
+        model_info: dict,
+        video_path: Union[Path, str, list],
+        save_as_csv: bool = False,
+        destfolder: Union[Path, str, None] = None,
+        **kwargs,
+    ) -> Union[str, list]:
+        """Run DLC inference on video(s).
+
+        Parameters
+        ----------
+        model_info : dict
+            Model table entry with model_path and metadata
+        video_path : Union[Path, str, list]
+            Video path(s) for inference
+        save_as_csv : bool
+            Save output as CSV
+        destfolder : Union[Path, str, None]
+            Destination folder for outputs
+        **kwargs
+            Additional DLC analyze_videos parameters
+
+        Returns
+        -------
+        Union[str, list]
+            Output file path(s)
+        """
+        if not isinstance(video_path, (list, tuple)):
+            video_path = [video_path]
+
+        for vp in video_path:
+            if not Path(vp).exists():
+                raise FileNotFoundError(f"Video not found: {vp}")
+        videos = [str(vp) for vp in video_path]
+
+        # DLC crashes with an opaque "__len__() should return >= 0" when
+        # OpenCV cannot read a video's frame count (e.g. raw .h264 streams).
+        # Auto-convert such videos to mp4 via the shared converter (same path
+        # used at project creation) so inference proceeds without the user
+        # backtracking. Converted mp4s go to pose_video_dir — matching V1; the
+        # source is preserved. The final check is a last-resort guard.
+        from spyglass.position.utils.general import ensure_mp4
+        from spyglass.settings import pose_video_dir
+
+        videos = ensure_mp4(videos, pose_video_dir)
+        self._assert_countable_videos(videos)
+
+        model_path = resolve_model_path(model_info["model_path"])
+        if not model_path.exists():
+            raise FileNotFoundError(f"Model config not found: {model_path}")
+        if model_path.suffix not in [".yaml", ".yml"]:
+            raise ValueError(
+                f"DLC model path must be a config.yaml file, got: {model_path}"
+            )
+
+        analyze_params = {
+            "config": str(model_path),
+            "videos": [videos] if isinstance(videos, str) else videos,
+            "save_as_csv": save_as_csv,
+            "destfolder": str(destfolder) if destfolder else None,
+        }
+        dlc_params = [
+            "shuffle",
+            "trainingsetindex",
+            "videotype",
+            "in_random_order",
+            "snapshot_index",
+            "device",
+            "batch_size",
+            "dynamic",
+            "modelprefix",
+            "robust_nframes",
+            "cropping",
+        ]
+        for param in dlc_params:
+            if param in kwargs:
+                analyze_params[param] = kwargs[param]
+
+        # GPU selection: route a legacy `gputouse` to the v2 `device` selector.
+        from spyglass.position.utils.dlc_io import route_gputouse_to_device
+
+        route_gputouse_to_device(
+            kwargs, analyze_params, self._warn_msg, context="inference"
+        )
+
+        self._info_msg(
+            f"Running DLC inference on {len(videos)} video(s) "
+            f"[model={Path(model_path).parent.name}, "
+            f"device={analyze_params.get('device', 'auto')}, "
+            f"batch_size={analyze_params.get('batch_size', 'default')}]: "
+            f"{videos}"
+        )
+        self._logger.debug("DLC parameters: %s", analyze_params)
+
+        try:
+            from deeplabcut import analyze_videos
+        except ImportError as e:  # pragma: no cover
+            raise ImportError(  # pragma: no cover
+                "DeepLabCut is required for inference. "
+                "Install with: pip install deeplabcut>=3.0"
+            ) from e
+
+        try:
+            with (
+                suppress_print_from_package(),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                analyze_videos(**analyze_params)
+        except (
+            RuntimeError,
+            OSError,
+            ValueError,
+            pickle.UnpicklingError,
+        ) as e:
+            # torch.load's weights_only unpickler wraps ANY failure during
+            # snapshot loading -- including a low-level CUDA driver error --
+            # in a generic UnpicklingError with a scary "arbitrary code
+            # execution" warning that has nothing to do with the real cause.
+            # Detect the common case (GPU busy/unavailable/locked by another
+            # process) and add an actionable hint alongside the original
+            # message, rather than letting it look like a corrupt/untrusted
+            # snapshot file.
+            hint = ""
+            if "cuda" in str(e).lower():
+                hint = (
+                    " This looks like a GPU availability problem (busy, "
+                    "locked by another process, or a driver/visibility "
+                    "issue) rather than a bad model file -- check "
+                    "`nvidia-smi` on the inference host, or retry with a "
+                    "CPU PoseEstimParams entry (device='cpu')."
+                )
+            self._err_msg(f"DLC inference failed: {e}{hint}")
+            raise
+
+        output_folder = Path(destfolder) if destfolder else None
+        output_paths = []
+        for vid_path in videos:
+            vid_path = Path(vid_path)
+            output_dir = output_folder if output_folder else vid_path.parent
+            output_files = list(output_dir.glob(f"{vid_path.stem}DLC_*.h5"))
+            if output_files:
+                latest_output = max(
+                    output_files, key=lambda p: p.stat().st_mtime
+                )
+                output_paths.append(str(latest_output))
+                self._logger.debug(f"DLC created: {latest_output}")
+            else:
+                self._warn_msg(
+                    f"No DLC output found for {vid_path.stem} in {output_dir}"
+                )
+
+        if not output_paths:
+            self._err_msg(f"No output files created for videos: {videos}")
+
+        self._info_msg(f"Inference complete. Output files: {output_paths}")
+        return output_paths if len(output_paths) != 1 else output_paths[0]
+
+    def run_sleap_inference(
+        self,
+        model_info: dict,
+        video_path: Union[Path, str, list],
+        destfolder: Union[Path, str, None] = None,
+        **kwargs,
+    ) -> Union[str, list]:
+        """Run SLEAP inference on video(s).
+
+        Parameters
+        ----------
+        model_info : dict
+            Model table entry; ``model_path`` must point to a SLEAP model
+            directory (contains ``training_config.json`` and
+            ``best_model.h5`` or ``best_model``).
+        video_path : Union[Path, str, list]
+            Path(s) to video file(s) for inference.
+        destfolder : Union[Path, str, None], optional
+            Destination folder for output files. If None, saves alongside
+            the video, by default None.
+        **kwargs
+            Forwarded to ``sleap_nn.predict.run_inference``; relevant keys
+            are ``batch_size``, ``peak_threshold``, ``integral_patch_size``,
+            and ``device``.
+
+        Returns
+        -------
+        Union[str, list]
+            Path(s) to ``.analysis.h5`` file(s) produced by SLEAP. Falls
+            back to ``.predictions.slp`` path if h5 export is unavailable.
+
+        Raises
+        ------
+        FileNotFoundError
+            If any video path or the model directory does not exist.
+        ImportError
+            If SLEAP is not installed in the current environment.
+
+        Notes
+        -----
+        Uses the PyTorch ``sleap-nn`` backend (SLEAP >= 1.5). Legacy
+        TensorFlow model directories (``best_model.h5`` +
+        ``training_config.json``) are loaded by converting the UNet weights
+        to PyTorch automatically. The ``.analysis.h5`` is written via
+        ``sleap_io.save_analysis_h5`` — the same path used to generate the
+        test fixtures (see ``tests/_data/sleap/make_real_analysis_h5.py``).
+        """
+        if not isinstance(video_path, (list, tuple)):
+            video_path = [video_path]
+
+        for vp in video_path:
+            if not Path(vp).exists():
+                raise FileNotFoundError(f"Video not found: {vp}")
+
+        model_path = resolve_model_path(model_info["model_path"])
+        if not model_path.exists():
+            raise FileNotFoundError(
+                f"SLEAP model directory not found: {model_path}"
+            )
+
+        # Deferred import — mirrors the DLC pattern; avoids startup cost.
+        # SLEAP must live in its own env (see environments/environment_sleap
+        # .yml); its NumPy-2 stack conflicts with DeepLabCut 3.x.
+        try:
+            import sleap_io
+            from sleap_nn.predict import run_inference
+        except ImportError as e:
+            raise ImportError(
+                "SLEAP (sleap-nn + sleap-io) is required for inference. "
+                "Install in a dedicated environment:\n"
+                "  mamba env create -f environments/environment_sleap.yml"
+            ) from e
+
+        # Only forward parameters that run_inference accepts.
+        infer_kwargs = {
+            k: kwargs[k]
+            for k in (
+                "batch_size",
+                "peak_threshold",
+                "integral_patch_size",
+                "device",
+            )
+            if k in kwargs
+        }
+        infer_kwargs.setdefault("device", "auto")
+
+        self._info_msg(f"Running SLEAP inference with model {model_path}")
+
+        output_paths = []
+        for vp in video_path:
+            vp = Path(vp)
+            output_folder = Path(destfolder) if destfolder else vp.parent
+            output_folder.mkdir(parents=True, exist_ok=True)
+
+            slp_path = output_folder / f"{vp.stem}.predictions.slp"
+            h5_path = output_folder / f"{vp.stem}.analysis.h5"
+
+            self._info_msg(f"Running SLEAP inference on {vp}")
+            labels = run_inference(
+                data_path=str(vp),
+                model_paths=[str(model_path)],
+                output_path=str(slp_path),
+                make_labels=True,
+                **infer_kwargs,
+            )
+            # run_inference writes the .slp; reload if it did not return Labels.
+            if labels is None:
+                labels = sleap_io.load_file(str(slp_path))
+
+            # Export analysis h5 (preferred downstream format).
+            sleap_io.save_analysis_h5(labels, str(h5_path))
+
+            if h5_path.exists():
+                output_paths.append(str(h5_path))
+                self._info_msg(f"SLEAP analysis created: {h5_path}")
+            elif slp_path.exists():
+                output_paths.append(str(slp_path))
+                self._warn_msg(
+                    f"Analysis h5 not created; falling back to: {slp_path}"
+                )
+            else:
+                self._warn_msg(f"No SLEAP output found for {vp}")
+
+        self._info_msg(
+            f"SLEAP inference complete. Output files: {output_paths}"
+        )
+        return output_paths if len(output_paths) != 1 else output_paths[0]
+
+
+class NDXPoseBuilder(BaseMixin):
+    """Handles building ndx-pose NWB structures."""
+
+    def build_pose_estimation(
+        self,
+        pose_df: pd.DataFrame,
+        bodyparts: list,
+        scorer: str,
+        model_id: str,
+        skeleton_edges: list = None,
+        description: str = None,
+        original_videos: list = None,
+        timestamps: np.ndarray = None,
+        source_software: str = "DeepLabCut",
+        unit: str = "cm",
+        name: str = "PoseEstimation",
+        skeleton_name: str = None,
+    ) -> tuple:
+        """Build ndx-pose PoseEstimation and Skeleton from DLC DataFrame.
+
+        Parameters
+        ----------
+        pose_df : pd.DataFrame
+            DLC output DataFrame with MultiIndex columns
+        bodyparts : list
+            List of bodypart names
+        scorer : str
+            Scorer/model name from DLC output
+        model_id : str
+            Model identifier for naming
+        skeleton_edges : list, optional
+            List of [bodypart1, bodypart2] edge pairs
+        description : str, optional
+            Description for PoseEstimation object
+        original_videos : list, optional
+            List of original video identifiers
+        timestamps : np.ndarray, optional
+            Per-frame timestamps in seconds (required)
+        source_software : str, optional
+            Source software name for ndx-pose metadata, by default
+            "DeepLabCut".
+        unit : str, optional
+            Coordinate unit stored in each PoseEstimationSeries, by default
+            "cm".  Use "pixels" when coordinates have not been converted.
+        name : str, optional
+            Name of the PoseEstimation NWB object, by default "PoseEstimation".
+            Pass a unique name per camera when storing several in one file.
+        skeleton_name : str, optional
+            Name of the Skeleton NWB object.  Defaults to
+            ``f"skeleton_{model_id}"``; pass a unique name per camera to avoid
+            collisions when several pose objects share one file.
+
+        Returns
+        -------
+        tuple
+            (pose_estimation, skeleton) ndx-pose objects
+        """
+        if ndx_pose is None:  # pragma: no cover
+            raise ImportError(  # pragma: no cover
+                "ndx-pose is required to build pose structures. "
+                "Install with: pip install ndx-pose>=0.2.0"
+            )
+
+        bp_index = {bp: i for i, bp in enumerate(bodyparts)}
+        if skeleton_edges:
+            edge_indices = [
+                [bp_index[a], bp_index[b]]
+                for a, b in skeleton_edges
+                if a in bp_index and b in bp_index
+            ]
+            edge_array = (
+                np.array(edge_indices, dtype="uint8")
+                if edge_indices
+                else np.array([], dtype="uint8").reshape(0, 2)
+            )
+        else:
+            edge_array = np.array([], dtype="uint8").reshape(0, 2)
+
+        skeleton = ndx_pose.Skeleton(
+            name=skeleton_name or f"skeleton_{model_id}",
+            nodes=bodyparts,
+            edges=edge_array,
+        )
+
+        if timestamps is None:
+            raise ValueError(
+                "Real video timestamps are required for build_pose_estimation. "
+                "Pass timestamps fetched from VideoFile.fetch_nwb()[0]"
+                "['video_file'].timestamps."
+            )
+        if len(timestamps) != len(pose_df):
+            raise ValueError(
+                f"Timestamp length {len(timestamps)} does not match pose "
+                f"frame count {len(pose_df)}; check video/pose alignment."
+            )
+
+        pose_series_list = []
+        for bodypart in bodyparts:
+            x = pose_df[(scorer, bodypart, "x")].values
+            y = pose_df[(scorer, bodypart, "y")].values
+            likelihood = pose_df[(scorer, bodypart, "likelihood")].values
+            pose_data = np.column_stack([x, y])
+
+            series = ndx_pose.PoseEstimationSeries(
+                name=f"{bodypart}_pose",
+                description=f"Pose estimation for {bodypart}",
+                data=pose_data,
+                unit=unit,
+                reference_frame="(0,0) is top-left corner",
+                timestamps=timestamps,
+                confidence=likelihood,
+                confidence_definition="DLC likelihood score",
+            )
+            pose_series_list.append(series)
+
+        pose_estimation = ndx_pose.PoseEstimation(
+            name=name,
+            pose_estimation_series=pose_series_list,
+            description=description or f"Pose estimation from model {model_id}",
+            original_videos=original_videos or [],
+            source_software=source_software,
+            skeleton=skeleton,
+            scorer=scorer,
+        )
+
+        return pose_estimation, skeleton
+
+    def build_3d_pose_estimation(
+        self,
+        pose_3d_df: pd.DataFrame,
+        bodyparts: list,
+        timestamps: np.ndarray,
+        model_id: str,
+        skeleton_edges: list = None,
+        name: str = "PoseEstimation_3d",
+        description: str = "3D triangulated pose (rig coordinates, metres)",
+        unit: str = "metres",
+    ) -> tuple:
+        """Build a 3-D ndx-pose PoseEstimation from a triangulated DataFrame.
+
+        Parameters
+        ----------
+        pose_3d_df : pd.DataFrame
+            3-level MultiIndex ``(scorer, bodypart, coord)`` DataFrame with
+            ``x``, ``y``, ``z``, ``likelihood`` columns. ``scorer`` is
+            typically ``"triangulated"``.
+        bodyparts : list
+            Ordered bodypart names.
+        timestamps : np.ndarray
+            Per-frame timestamps in seconds.
+        model_id : str
+            Model identifier used for skeleton naming.
+        skeleton_edges : list, optional
+            Edge pairs for the skeleton.
+        name : str, optional
+            Name of the PoseEstimation NWB object.
+        description : str, optional
+            Free-text description.
+        unit : str, optional
+            Coordinate unit, default ``"metres"``.
+
+        Returns
+        -------
+        tuple
+            ``(pose_estimation, skeleton)`` ndx-pose objects.
+        """
+        if ndx_pose is None:  # pragma: no cover
+            raise ImportError(  # pragma: no cover
+                "ndx-pose is required. Install with: pip install ndx-pose>=0.2.0"
+            )
+
+        scorer = pose_3d_df.columns.get_level_values(0)[0]
+
+        bp_index = {bp: i for i, bp in enumerate(bodyparts)}
+        if skeleton_edges:
+            edge_indices = [
+                [bp_index[a], bp_index[b]]
+                for a, b in skeleton_edges
+                if a in bp_index and b in bp_index
+            ]
+            edge_array = (
+                np.array(edge_indices, dtype="uint8")
+                if edge_indices
+                else np.array([], dtype="uint8").reshape(0, 2)
+            )
+        else:
+            edge_array = np.array([], dtype="uint8").reshape(0, 2)
+
+        skeleton = ndx_pose.Skeleton(
+            name=f"skeleton_{model_id}_3d",
+            nodes=bodyparts,
+            edges=edge_array,
+        )
+
+        pose_series_list = []
+        for bp in bodyparts:
+            x = pose_3d_df[(scorer, bp, "x")].values
+            y = pose_3d_df[(scorer, bp, "y")].values
+            z = pose_3d_df[(scorer, bp, "z")].values
+            likelihood = pose_3d_df[(scorer, bp, "likelihood")].values
+            pose_data = np.column_stack([x, y, z])
+
+            series = ndx_pose.PoseEstimationSeries(
+                name=f"{bp}_pose",
+                description=f"3D pose estimation for {bp}",
+                data=pose_data,
+                unit=unit,
+                reference_frame="rig_origin",
+                timestamps=timestamps,
+                confidence=likelihood,
+                confidence_definition="triangulation quality (0=bad, 1=good)",
+            )
+            pose_series_list.append(series)
+
+        pose_estimation = ndx_pose.PoseEstimation(
+            name=name,
+            pose_estimation_series=pose_series_list,
+            description=description,
+            original_videos=[],
+            source_software="triangulation",
+            skeleton=skeleton,
+            scorer=scorer,
+        )
+        return pose_estimation, skeleton
+
+    def store_to_nwb(
+        self, pose_estimation, skeleton, analysis_abs_path: Union[Path, str]
+    ) -> None:
+        """Store pose estimation data to NWB file.
+
+        Parameters
+        ----------
+        pose_estimation : ndx_pose.PoseEstimation
+            Pose estimation object
+        skeleton : ndx_pose.Skeleton
+            Skeleton object
+        analysis_abs_path : Union[Path, str]
+            Absolute path to analysis NWB file
+        """
+        import pynwb
+
+        with pynwb.NWBHDF5IO(
+            path=str(analysis_abs_path), mode="a", load_namespaces=True
+        ) as nwb_io:
+            nwbf = nwb_io.read()
+            if "behavior" not in nwbf.processing:
+                behavior_module = nwbf.create_processing_module(
+                    name="behavior",
+                    description="Behavioral pose estimation data",
+                )
+            else:
+                behavior_module = nwbf.processing["behavior"]
+
+            # A single NWB file may hold several pose objects (e.g. one per
+            # camera plus the 3D result).  ndx-pose stores all skeletons in one
+            # ``Skeletons`` container, so append to it when it already exists
+            # rather than creating a second container with the same name.
+            if "Skeletons" in behavior_module.data_interfaces:
+                behavior_module.data_interfaces["Skeletons"].add_skeletons(
+                    [skeleton]
+                )
+            else:
+                behavior_module.add(ndx_pose.Skeletons(skeletons=[skeleton]))
+            behavior_module.add(pose_estimation)
+            nwb_io.write(nwbf)
+
+        self._logger.debug(
+            f"Stored pose estimation in NWB: {analysis_abs_path}"
+        )
+
+
+def _populate_nwb_pose_estimation(
+    nwbfile,
+    df: pd.DataFrame,
+    scorer: str,
+    bodyparts: list,
+    pose_estimation_name: str,
+    dlc_output_path: Path,
+    timestamps: np.ndarray,
+) -> None:
+    """Populate an NWBFile with a PoseEstimation object built from DLC data.
+
+    Adds (or extends) the ``behavior`` processing module with a
+    ``Skeletons`` container and a ``PoseEstimation`` container holding one
+    ``PoseEstimationSeries`` per body-part.
+
+    Parameters
+    ----------
+    nwbfile : pynwb.NWBFile
+        Open NWB file to modify in-place.
+    df : pd.DataFrame
+        Multi-level DataFrame returned by ``parse_dlc_h5_output``.
+    scorer : str
+        DLC scorer/network name (top-level column label).
+    bodyparts : list[str]
+        Ordered list of body-part names.
+    pose_estimation_name : str
+        Name for the ``PoseEstimation`` NWB object.
+    dlc_output_path : Path
+        Source DLC output file (used for description strings).
+    timestamps : np.ndarray
+        Per-frame timestamps (seconds).
+    """
+    if ndx_pose is None:  # pragma: no cover
+        raise ImportError(  # pragma: no cover
+            "ndx-pose is required. Install with: pip install ndx-pose>=0.2.0"
+        )
+
+    if "behavior" not in nwbfile.processing:
+        behavior_module = nwbfile.create_processing_module(
+            name="behavior",
+            description="Behavioral pose estimation data",
+        )
+    else:
+        behavior_module = nwbfile.processing["behavior"]
+
+    skeleton = ndx_pose.Skeleton(
+        name=f"{pose_estimation_name}_skeleton",
+        nodes=bodyparts,
+        edges=np.array([], dtype="uint8").reshape(0, 2),
+    )
+
+    if "Skeletons" not in behavior_module.data_interfaces:
+        behavior_module.add_data_interface(
+            ndx_pose.Skeletons(skeletons=[skeleton])
+        )
+    else:
+        behavior_module.data_interfaces["Skeletons"].skeletons.append(skeleton)
+
+    pose_series_list = [
+        ndx_pose.PoseEstimationSeries(
+            name=f"{bp}_pose",
+            description=f"Pose estimation for {bp}",
+            data=np.column_stack(
+                [
+                    df[(scorer, bp, "x")].values,
+                    df[(scorer, bp, "y")].values,
+                ]
+            ),
+            unit="pixels",
+            reference_frame="(0,0) is top-left corner",
+            timestamps=timestamps,
+            confidence=df[(scorer, bp, "likelihood")].values,
+            confidence_definition="DLC likelihood score",
+        )
+        for bp in bodyparts
+    ]
+
+    behavior_module.add(
+        ndx_pose.PoseEstimation(
+            name=pose_estimation_name,
+            pose_estimation_series=pose_series_list,
+            description=f"Pose estimation from DLC: {dlc_output_path.name}",
+            original_videos=[str(dlc_output_path.stem)],
+            source_software="DeepLabCut",
+            skeleton=skeleton,
+            scorer=scorer,
+        )
+    )

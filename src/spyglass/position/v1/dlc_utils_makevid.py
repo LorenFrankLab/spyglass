@@ -4,6 +4,7 @@
 import shutil
 import subprocess
 from concurrent.futures import ProcessPoolExecutor, TimeoutError, as_completed
+from fractions import Fraction
 from pathlib import Path
 
 import matplotlib
@@ -12,6 +13,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from spyglass.position.utils.general import ffmpeg_fps_mode_flag
 from spyglass.settings import temp_dir, test_mode
 from spyglass.utils import logger
 from spyglass.utils.position import convert_to_pixels as _to_px
@@ -166,7 +168,7 @@ class VideoMaker:
 
         stats = ret.stdout.strip().split("x")
         self.width, self.height = tuple(map(int, stats[:2]))
-        self.frame_rate = eval(stats[2])
+        self.frame_rate = float(Fraction(stats[2]))
 
         self.frame_size = (
             (self.width, self.height)
@@ -495,7 +497,7 @@ class VideoMaker:
             self.video_filename,
             "-vf",
             f"select=between(n\\,{start_frame}\\,{end_frame})",
-            "-vsync",
+            ffmpeg_fps_mode_flag(),
             "vfr",
             "-start_number",
             str(start_frame),
