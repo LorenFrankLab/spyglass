@@ -186,7 +186,7 @@ class Electrode(SpyglassIngestion, dj.Imported):
             nwb_obj, base_key, ctx
         )
 
-        config = ctx.config
+        config = ctx.config if ctx is not None else dict()
         if not (electrode_config := config.get("Electrode", None)):
             return entries
         # map electrode id to dictof electrode information from config YAML
