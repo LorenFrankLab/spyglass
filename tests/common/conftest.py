@@ -277,9 +277,13 @@ def _analysis_tables(common_nwbfile):
     """Every analysis table a test could have written to."""
     from contextlib import suppress
 
+    import datajoint as dj
+
     tables = [common_nwbfile.AnalysisNwbfile()]
-    with suppress(Exception):  # registry unreadable: the master still sweeps
-        tables.extend(common_nwbfile.AnalysisRegistry().all_classes())
+    # A property, not a method. Calling it raised TypeError, which a broad
+    # `suppress` swallowed, so the sweep only ever reached the master table.
+    with suppress(dj.DataJointError):  # registry unreadable
+        tables.extend(common_nwbfile.AnalysisRegistry().all_classes)
     return tables
 
 
