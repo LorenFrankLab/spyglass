@@ -276,6 +276,9 @@ def test_a_conflicting_entry_keeps_its_payload(
     file produces no divergence, so it asserted "no blob survives, states are
     exists or inserted" and passed for want of a counter-example rather than
     because the rule held.
+
+    Run as a *re-plan*: a divergence blocks a file's first plan, so nothing is
+    inserted and no entry reaches `conflict`.
     """
     from spyglass.common.common_usage import IngestionPlanLog
     from spyglass.data_import.planner import insert_plan, plan_nwbfile
@@ -296,11 +299,18 @@ def test_a_conflicting_entry_keeps_its_payload(
 
     log = IngestionPlanLog()
     log.clear(mini_copy_name)
+    # Staged once so the file counts as planned before, which is what drops a
+    # divergence from blocking to a warning.
+    log.stage(plan_nwbfile(mini_copy_name, force_replan=True))
+
     plan = plan_nwbfile(mini_copy_name, force_replan=True)
 
     assert any(
         p.code == "divergence" and p.table == target for p in plan.problems
     ), "Premise: SampleCount disagrees with the stored row"
+    assert (
+        not plan.blocking
+    ), "Premise: on a re-plan a divergence warns rather than blocking"
 
     key = log.stage(plan)
     result = insert_plan(plan)

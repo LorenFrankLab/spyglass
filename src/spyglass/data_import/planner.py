@@ -305,12 +305,18 @@ def plan_nwbfile(
         nwb_hash = hasher.hash
         id_set_digest = hasher.id_set_digest
 
+    from spyglass.common.common_usage import IngestionPlanLog
+
+    # Whether this file has ever been planned, which decides how loudly a
+    # divergence is reported. Asked of the log master rather than of `staged`:
+    # `force_replan` and the reuse gates both empty `staged` for a file that
+    # has in fact been planned before.
+    first_plan = not (IngestionPlanLog & {"nwb_file_name": nwb_file_name})
+
     # Loaded once for the whole file, not per table: asking per table cost two
     # round trips each and made reuse slower than parsing. See `staged_plan`.
     staged, declared = dict(), dict()
     if not force_replan:
-        from spyglass.common.common_usage import IngestionPlanLog
-
         staged = IngestionPlanLog().staged_plan(
             nwb_file_name, for_version=version, for_id_set=id_set_digest
         )
@@ -391,7 +397,9 @@ def plan_nwbfile(
             # table they are destined for. A target may be an ordinary table,
             # or a FreeTable part declared through config.
             problems.extend(
-                instance.check_planned_rows(rows, key_space, table=table)
+                instance.check_planned_rows(
+                    rows, key_space, table=table, first_plan=first_plan
+                )
             )
 
             # Counted before the rows join the key space, so "new" means new
@@ -403,7 +411,15 @@ def plan_nwbfile(
             key_space.add_planned(table, rows)
 
         status = plan.status
-        if any(problem.severity in ("hard", "fatal") for problem in problems):
+        # A divergence is excluded, at any severity: the row it disagrees with
+        # exists, so every dependent's foreign key still resolves. Counting it
+        # as a failure blocked the tables beneath it and suppressed their own
+        # problems, which is the opposite of reporting everything at once.
+        if any(
+            problem.severity in ("hard", "fatal")
+            and problem.code != "divergence"
+            for problem in problems
+        ):
             status = "failed"
             failed_tables.add(instance.full_table_name)
 

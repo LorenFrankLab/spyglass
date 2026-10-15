@@ -294,6 +294,7 @@ class IngestionMixin(BaseMixin):
                         code="parse_error",
                         message=str(err),
                         table=self.full_table_name,
+                        nwb_object_id=ctx.current_source_id,
                         exc_type=type(err).__name__,
                         traceback=format_exc()[-2000:],
                     ),
@@ -351,7 +352,9 @@ class IngestionMixin(BaseMixin):
 
         for nwb_obj in sources:
             ctx.record_read(nwb_obj)
+            ctx.current_source_id = getattr(nwb_obj, "object_id", None)
             planned.extend(self.entries_for_source(nwb_obj, ctx))
+        ctx.current_source_id = None
 
         planned.extend(self.entries_for_config(ctx))
 
@@ -1048,7 +1051,9 @@ class IngestionMixin(BaseMixin):
             return a_val.lower() != b_val.lower()
         return a_val != b_val
 
-    def check_planned_rows(self, rows, key_space, table=None) -> tuple:
+    def check_planned_rows(
+        self, rows, key_space, table=None, first_plan: bool = False
+    ) -> tuple:
         """Report what would go wrong inserting rows this table planned.
 
         Each failure becomes a `Problem` rather than an exception, so one bad
@@ -1066,6 +1071,9 @@ class IngestionMixin(BaseMixin):
         table : dj.Table, optional
             The table the rows are destined for, as an instance. Default
             None, this table.
+        first_plan : bool, optional
+            Whether this is the file's first plan, which makes a divergence
+            blocking. Default False, reporting it as a warning.
 
         Returns
         -------
@@ -1084,7 +1092,9 @@ class IngestionMixin(BaseMixin):
             problems.extend(self._required_attribute_problems(table, row))
             problems.extend(self._attribute_fit_problems(table, row))
             problems.extend(self._foreign_key_problems(table, row, key_space))
-            problems.extend(self._divergence_problems(table, row))
+            problems.extend(
+                self._divergence_problems(table, row, first_plan=first_plan)
+            )
 
         return tuple(problems)
 
@@ -1168,12 +1178,27 @@ class IngestionMixin(BaseMixin):
 
         return problems
 
-    def _divergence_problems(self, table, row) -> List[Problem]:
+    def _divergence_problems(
+        self, table, row, first_plan: bool = False
+    ) -> List[Problem]:
         """Report a planned entry that exists already with different values.
 
-        A divergence is not novelty: the entry is present, and the plan
-        disagrees with it. Recorded with the revision that would align the
-        two, never resolved here: a dry run does not prompt.
+        Blocking on a file's first plan, so a disagreement is seen and decided
+        before anything is written. A warning on every later plan, since by
+        then the reader has had the report and chose to go ahead.
+
+        Parameters
+        ----------
+        table : dj.Table
+            The table the row is destined for, as an instance.
+        row : dict
+            The planned entry.
+        first_plan : bool, optional
+            Whether this is the file's first plan. Default False.
+
+        Returns
+        -------
+        list of Problem
         """
         primary = {k: v for k, v in row.items() if k in table.primary_key}
         if len(primary) != len(table.primary_key):
@@ -1197,7 +1222,7 @@ class IngestionMixin(BaseMixin):
 
         return [
             Problem(
-                severity="soft",
+                severity="hard" if first_plan else "soft",
                 code="divergence",
                 message=(
                     f"{primary} exists with different values for "

@@ -49,44 +49,49 @@ like this:
 docsdemo20230622_.nwb: partial_new, 190 new entries
 
 New entries:
-      4  `common_behav`.`_raw_position__pos_object`
-      2  `common_behav`.`_raw_position`
-      4  `common_behav`.`position_source__spatial_series`
-      2  `common_behav`.`position_source`
-      3  `common_dio`.`_d_i_o_events`
-     32  `common_ephys`.`_electrode_group`
-    128  `common_ephys`.`_electrode`
-      1  `common_ephys`.`_raw`
-      1  `common_ephys`.`_sample_count`
-      6  `common_interval`.`interval_list`
-      1  `common_sensors`.`_sensor_data`
-      1  `common_session`.`_session__data_acquisition_device`
-      2  `common_session`.`_session__experimenter`
-      1  `common_session`.`_session`
-      1  `lfp_electrode`.`l_f_p_electrode_group`
-      1  `lfp_imported`.`_imported_l_f_p`
+      4  common_behav.RawPosition.PosObject
+      2  common_behav.RawPosition
+      4  common_behav.PositionSource.SpatialSeries
+      2  common_behav.PositionSource
+      3  common_dio.DIOEvents
+     32  common_ephys.ElectrodeGroup
+    128  common_ephys.Electrode
+      1  common_ephys.Raw
+      1  common_ephys.SampleCount
+      6  common_interval.IntervalList
+      1  common_sensors.SensorData
+      1  common_session.Session.DataAcquisitionDevice
+      2  common_session.Session.Experimenter
+      1  common_session.Session
+      1  lfp_electrode.LFPElectrodeGroup
+      1  lfp_imported.ImportedLFP
 
 Disagrees with stored rows (1):
-  `common_device`.`camera_device` (1):
-    {'camera_name': 'test camera 1'} exists with different values for ['manufacturer']
+  common_device.CameraDevice (1):
+    {'camera_name': 'test camera 1'} exists with different values for
+      ['manufacturer']
       stored values: {'manufacturer': 'Allied Vision'}
-  -> The stored rows were kept. Edit the file to match, or update the rows, if the file is right.
+  -> Edit the file to match, or update the rows if the file is right. Re-run to
+     accept the stored values and ingest the rest.
 
 Hard (1):
-  [hard] `common_task`.`_task_epoch`: parse_error: No camera device found with ID [1] in NWB file docsdemo20230622_.nwb. Known camera IDs: [0]
-      -> A table raised while parsing. The traceback names where.
+  [hard] common_task.TaskEpoch: parse_error: No camera device found with ID [1]
+    in NWB file docsdemo20230622_.nwb. Known camera IDs: [0] (object
+    0fe587d1-c276-49c3-8386-90d8a0df18a9)
+      -> A table raised while parsing. Fetch `error_raw` from
+         `IngestionPlanLog.Problem` for the traceback.
 
-Blocked by the above (3): `common_behav`.`_state_script_file`, `common_behav`.`_video_file`, `common_optogenetics`.`optogenetic_protocol`
+Blocked by the above (3): common_behav.StateScriptFile, common_behav.VideoFile,
+  common_optogenetics.OptogeneticProtocol
 ```
 
-One root cause, read top to bottom: the verdict says 190 entries would still be
-written, the counts say which tables they belong to, the disagreement is
-reported without stopping anything, and `TaskEpoch` failing accounts for the
-three tables below it rather than producing three more problems.
+Read top to bottom, the verdict says 190 entries would still be written broken
+down by table. The disagreement is reported without stopping anything.
 
-Each problem names the NWB `object_id` where there is one, so you can find the
-thing in the file. Each *code* gets a one-line remedy, printed once per group
-rather than under every occurrence.
+A `parse_error` and a `missing_camera` name the NWB `object_id` they were
+reading, so you can find it in the file. Problems found while checking a row,
+such as `missing_parent`, name the row's key instead. Each *code* gets a
+one-line remedy, printed once per group rather than under every occurrence.
 
 ### Verdicts
 
@@ -97,39 +102,33 @@ rather than under every occurrence.
 | `all_new`     | Nothing in the file is stored yet        |
 | `partial_new` | Some of it is stored; the rest is new    |
 
-`fatal` is answered before the others. A file that could not be read works out
-no rows, so counting them would say "nothing new". That reads as *already
-ingested*, the opposite of what happened.
-
 ### Severities
 
 | Severity | Blocks? | Means                                                   |
 | -------- | ------- | ------------------------------------------------------- |
 | `fatal`  | yes     | the file itself: unreadable, or not registered          |
-| `hard`   | yes     | one table, and everything that depends on it            |
+| `hard`   | yes     | one table, and usually everything that depends on it    |
 | `soft`   | no      | an absence that is not an error, e.g. an unplaced video |
 | `info`   | no      | something was resolved; shown only with `verbose=True`  |
 
-Soft problems are shown by default: a warning you have to ask for is not a
-warning.
+A divergence is the exception to `hard`: it blocks the write, but the tables
+below it still plan, because the row it disagrees with exists.
 
 ### Blocked tables
 
-A table whose parent could not be planned is reported once, at the end, as
-blocked, not as a failure of its own. One root cause produces one problem,
-rather than one per table downstream of it.
+If a parent table could not be ingested, child tables (with foreign key
+references to that parent) are reported as blocked at the end, pointing to the
+parent table's root cause.
 
-### When the file disagrees with a stored row
+### When the file disagrees with an existing row
 
 An entry whose primary key already exists with different values is a
 **divergence**. A re-ingested camera might give its manufacturer as
 `manufacturer-1` where the stored row says `manufacturer 1`.
 
-Nothing stops to ask. The stored value is kept, the rest of the file ingests,
-and the report names the row, the columns that differ, and the revision that
-would align them. It gets its own section because it does not stop anything, so
-one disagreement does not retitle a file that was otherwise entirely new. The
-record is kept, so you can read it after the run rather than during.
+On a file's first plan this blocks, so nothing is written until you have seen
+it. Edit the file, or update the row if the file is right. Re-running accepts
+the stored values and ingests the rest, reporting the divergence as a warning.
 
 ## NWB to Spyglass table mappings
 
@@ -142,6 +141,6 @@ mappings can also be found [here](../ForDevelopers/UsingNWB.md).
 
 ## Under the hood
 
-How the two passes are arranged, how a table joins in, what makes a parse
-reusable, and what the plan log stores:
+How the two passes are arranged, when the database is touched, what makes a
+parse reusable, and what the log stores:
 [Ingestion Plans](../ForDevelopers/IngestionPlans.md).

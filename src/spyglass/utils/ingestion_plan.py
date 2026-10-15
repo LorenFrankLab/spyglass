@@ -21,6 +21,7 @@ other spyglass module, which is also why it lives here rather than under
 `data_import`, whose package `__init__` reaches `spyglass.common`.
 """
 
+import textwrap
 from dataclasses import dataclass, field
 from hashlib import md5
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -29,6 +30,10 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 # stops one table and blocks its dependents, `soft` is an absence that is not
 # an error, `info` is a resolution worth reporting.
 SEVERITIES = ("fatal", "hard", "soft", "info")
+
+# Report lines wrap here. A problem message carries an exception's text, which
+# has no length limit of its own.
+REPORT_WIDTH = 79
 
 
 @dataclass(frozen=True)
@@ -59,7 +64,7 @@ class Problem:
             )
 
     def __str__(self):
-        where = f"{self.table}: " if self.table else ""
+        where = f"{display_name(self.table)}: " if self.table else ""
         # The object id is how a user finds the thing in the file, so it
         # belongs on the line rather than only in the stored record.
         which = f" (object {self.nwb_object_id})" if self.nwb_object_id else ""
@@ -96,6 +101,72 @@ def _target_key(table) -> str:
         f"Not a table: {table!r}. Entries are planned for tables, which "
         "identify themselves by `full_table_name`."
     )
+
+
+def display_name(full_table_name: str) -> str:
+    """Return a DataJoint table name as `schema.CamelCase` for display.
+
+    `` `common_ephys`.`_electrode` `` reads as `common_ephys.Electrode`, and a
+    part reads as `common_behav.RawPosition.PosObject`. Display only: what is
+    stored and compared is always the full table name.
+
+    Parameters
+    ----------
+    full_table_name : str
+        A DataJoint full table name, backquoted.
+
+    Returns
+    -------
+    str
+        The camel-case form, or the input unchanged if it does not parse.
+    """
+    if not full_table_name or "." not in full_table_name:
+        return full_table_name
+
+    schema, _, table = full_table_name.partition(".")
+    schema = schema.strip("`")
+    table = table.strip("`")
+
+    # A part table is `_master__part`; the tier prefix is ~, #, _ or __.
+    master, sep, part = table.partition("__")
+    camel = _camel(master)
+    if sep and part:
+        camel = f"{camel}.{_camel(part)}"
+    return f"{schema}.{camel}"
+
+
+def wrapped(text: str, indent: str = "", hanging: str = None) -> List[str]:
+    """Return `text` wrapped to the report width, as indented lines.
+
+    Parameters
+    ----------
+    text : str
+        One logical line, unwrapped.
+    indent : str, optional
+        Prefix for the first line. Default none.
+    hanging : str, optional
+        Prefix for continuation lines. Default: `indent` plus two spaces.
+
+    Returns
+    -------
+    list of str
+    """
+    return textwrap.wrap(
+        text,
+        width=REPORT_WIDTH,
+        initial_indent=indent,
+        subsequent_indent=indent + " " * 2 if hanging is None else hanging,
+        break_long_words=False,  # an object id or a path stays one token
+        break_on_hyphens=False,
+    ) or [indent + text]
+
+
+def _camel(name: str) -> str:
+    """Return one DataJoint name component as CamelCase."""
+    stripped = name.lstrip("_~#")
+    if not stripped:
+        return name
+    return "".join(part.title() for part in stripped.split("_"))
 
 
 def coerced(table, attr: str, value):
@@ -422,7 +493,10 @@ class PlannedEntries:
 REMEDIES = {
     "file_not_registered": "Insert the file into Nwbfile before planning it.",
     "file_unreadable": "Check the file opens with pynwb; it may be truncated.",
-    "parse_error": "A table raised while parsing. The traceback names where.",
+    "parse_error": (
+        "A table raised while parsing. Fetch `error_raw` from "
+        "`IngestionPlanLog.Problem` for the traceback."
+    ),
     "missing_attribute": (
         "The NWB file does not supply a required column. Add it to the file, "
         "or declare it in the file's _spyglass_config.yaml."
@@ -453,8 +527,8 @@ REMEDIES = {
         "a gap in the planner rather than in the file. Please report it."
     ),
     "divergence": (
-        "The stored rows were kept. Edit the file to match, or update the "
-        "rows, if the file is right."
+        "Edit the file to match, or update the rows if the file is right. "
+        "Re-run to accept the stored values and ingest the rest."
     ),
 }
 
@@ -590,7 +664,8 @@ class IngestionPlan:
             lines.append("")
             lines.append("New entries:")
             lines.extend(
-                f"  {count:>5}  {name}" for name, count in sorted(novel.items())
+                f"  {count:>5}  {display_name(name)}"
+                for name, count in sorted(novel.items())
             )
 
         lines.extend(self._divergence_lines())
@@ -618,13 +693,19 @@ class IngestionPlan:
                 lines.append(f"{severity.capitalize()} ({len(group)}):")
                 seen_codes = set()
                 for problem in group:
-                    lines.append(f"  {problem}")
+                    lines.extend(wrapped(str(problem), indent=" " * 2))
                     # The remedy is per code, so print it once per group
                     # rather than repeating it under every occurrence.
                     if problem.code not in seen_codes and (
                         remedy := REMEDIES.get(problem.code)
                     ):
-                        lines.append(f"      -> {remedy}")
+                        lines.extend(
+                            wrapped(
+                                f"-> {remedy}",
+                                indent=" " * 6,
+                                hanging=" " * 9,
+                            )
+                        )
                         seen_codes.add(problem.code)
 
             if suggestions := [
@@ -633,7 +714,7 @@ class IngestionPlan:
                 lines.append("")
                 lines.append("Suggested revisions, to apply as-is:")
                 for problem in suggestions:
-                    lines.append(f"  # {problem.table}")
+                    lines.append(f"  # {display_name(problem.table)}")
                     lines.append(f"  {problem.suggested_revision!r}")
 
         if blocked := [
@@ -642,9 +723,11 @@ class IngestionPlan:
             if plan.status == "blocked"
         ]:
             lines.append("")
-            lines.append(
-                f"Blocked by the above ({len(blocked)}): "
-                + ", ".join(sorted(blocked))
+            lines.extend(
+                wrapped(
+                    f"Blocked by the above ({len(blocked)}): "
+                    + ", ".join(sorted(display_name(name) for name in blocked))
+                )
             )
 
         return "\n".join(lines)
@@ -676,8 +759,8 @@ class IngestionPlan:
     def _divergence_lines(self) -> List[str]:
         """Render the rows the file disagrees with, grouped by table.
 
-        Its own section because a divergence is not a failure: nothing is
-        blocked and the run inserts the rest. Grouped and counted so a
+        Its own section, whatever severity the divergence carries, so the
+        rows and their revisions read together. Grouped and counted so a
         re-ingest touching many rows stays skimmable.
         """
         divergences = [p for p in self.problems if p.code == "divergence"]
@@ -691,9 +774,9 @@ class IngestionPlan:
         lines = ["", f"Disagrees with stored rows ({len(divergences)}):"]
         for table in sorted(by_table):
             group = by_table[table]
-            lines.append(f"  {table} ({len(group)}):")
+            lines.append(f"  {display_name(table)} ({len(group)}):")
             for problem in sorted(group, key=lambda p: p.message):
-                lines.append(f"    {problem.message}")
+                lines.extend(wrapped(problem.message, indent=" " * 4))
                 if problem.suggested_revision:
                     # The dict literal, not a prose summary: the point of a
                     # suggested revision is that it can be pasted rather than
@@ -701,7 +784,13 @@ class IngestionPlan:
                     lines.append(
                         f"      stored values: {problem.suggested_revision!r}"
                     )
-        lines.append(f"  -> {REMEDIES['divergence']}")
+        lines.extend(
+            wrapped(
+                f"-> {REMEDIES['divergence']}",
+                indent=" " * 2,
+                hanging=" " * 5,
+            )
+        )
         return lines
 
     @property
@@ -780,6 +869,9 @@ class FileContext:
     # without these a parse is replayable after a row it read has changed.
     xrefs: List[dict] = field(default_factory=list)
     problems: List[Problem] = field(default_factory=list)
+    # The object `_parse` is reading, so a raise can name where it happened.
+    # Only the parse loop sets this; a row-level problem has no object.
+    current_source_id: Optional[str] = None
     # The keys and rows the whole plan will hold, when one is being built.
     # None on a plain insert, where the database is authoritative because
     # rows are written table by table as the pass proceeds.

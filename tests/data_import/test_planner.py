@@ -276,6 +276,7 @@ def test_a_divergence_is_reported_without_changing_the_verdict(
     It used to answer `conflict` ahead of counting novelty, so one trivial
     mismatch headlined a file that was otherwise entirely new.
     """
+    from spyglass.common.common_usage import IngestionPlanLog
 
     def _changed(self, source, ctx):
         from spyglass.utils.ingestion_plan import PlannedEntries
@@ -293,6 +294,12 @@ def test_a_divergence_is_reported_without_changing_the_verdict(
 
     # force_replan: reuse would serve the staged plan and the patched parse
     # above would never run, so the test would assert on an empty problem list.
+    # A divergence warns only once the file has been planned before, and other
+    # tests clear this file's log. Establish that rather than assume it.
+    log = IngestionPlanLog()
+    if not (log & {"nwb_file_name": mini_copy_name}):
+        log.stage(plan_nwbfile(mini_copy_name, force_replan=True))
+
     plan = plan_nwbfile(mini_copy_name, force_replan=True)
 
     assert plan.verdict != "conflict", "conflict left the vocabulary"
@@ -300,7 +307,7 @@ def test_a_divergence_is_reported_without_changing_the_verdict(
     assert divergences, "The disagreement must still be reported"
     assert all(
         p.severity == "soft" for p in divergences
-    ), "A divergence is a warning, not a blocker"
+    ), "On a re-plan a divergence is a warning, not a blocker"
     assert not plan.blocking, "It must not block"
     assert (
         "Disagrees with stored rows" in plan.report()
@@ -488,7 +495,7 @@ def test_a_divergence_does_not_stop_the_run(common, mini_copy_name):
         ),
     )
 
-    assert not plan.blocking, "Premise: a divergence is soft, so never blocking"
+    assert not plan.blocking, "Premise: this divergence is built soft"
 
     assert (
         planner._refuse(plan, allow_partial=False) is None
@@ -746,3 +753,63 @@ def test_planning_never_reads_a_file_keyed_table_whole(
         "planning read a file-keyed table without narrowing to the file: "
         + ", ".join(sorted(set(unrestricted)))
     )
+
+
+def test_a_divergence_blocks_the_first_plan_and_warns_after(
+    common, mini_copy_name, monkeypatch
+):
+    """Severity depends on whether the file has been planned before.
+
+    A disagreement with a stored row is worth stopping for once, so it is seen
+    and decided before anything is written. On every later plan the reader has
+    already had that report, so it drops to a warning and the run proceeds.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+
+    def _changed(self, source, ctx):
+        from spyglass.utils.ingestion_plan import PlannedEntries
+
+        entries = PlannedEntries()
+        entries.add(
+            self,
+            [dict(ctx.base_key, sample_count_object_id="deadbeef" * 5)],
+        )
+        return entries
+
+    monkeypatch.setattr(
+        type(common.SampleCount()), "entries_for_row", _changed, raising=False
+    )
+
+    log = IngestionPlanLog()
+    log.clear(
+        mini_copy_name
+    )  # no record of this file, so the next plan is its first
+
+    first = plan_nwbfile(mini_copy_name, force_replan=True)
+    first_div = [p for p in first.problems if p.code == "divergence"]
+
+    assert first_div, "Premise: the patched parse disagrees with a stored row"
+    assert all(p.severity == "hard" for p in first_div), (
+        "A divergence blocks the first plan of a file; got "
+        f"{[p.severity for p in first_div]}"
+    )
+    assert first.blocking, "so the plan blocks and writes nothing"
+
+    # The table itself is not failed: the row the divergence disagrees with
+    # exists, so every dependent's foreign key still resolves. Failing it
+    # blocked the tables beneath and suppressed their own problems.
+    statuses = first.status_by_table()
+    assert (
+        statuses[common.SampleCount().full_table_name] != "failed"
+    ), "A divergence is not a parse failure"
+    assert "blocked" not in set(statuses.values()), statuses
+
+    log.stage(first)
+    second = plan_nwbfile(mini_copy_name, force_replan=True)
+    second_div = [p for p in second.problems if p.code == "divergence"]
+
+    assert second_div, "The disagreement is still reported"
+    assert all(
+        p.severity == "soft" for p in second_div
+    ), "On a re-plan it is a warning"
+    assert not second.blocking, "so the run proceeds"

@@ -109,7 +109,7 @@ def test_a_divergence_revision_is_pasteable(plan_types):
 
     assert "{'sex': 'M'}" in report, "The revision renders as a dict literal"
     assert "Disagrees with stored rows (1):" in report
-    assert "`common`.`subject`" in report, "grouped under its table"
+    assert "common.Subject" in report, "grouped under its table"
 
 
 def test_the_default_report_shows_warnings_but_not_resolutions(plan_types):
@@ -149,7 +149,7 @@ def test_blocked_tables_are_named_once_at_the_end(plan_types):
     """A blocked table is a consequence, not a separate failure."""
     report = _broken(plan_types).report(verbose=True)
 
-    assert "Blocked by the above (1): `common`.`electrode`" in report
+    assert "Blocked by the above (1): common.Electrode" in report
 
 
 def test_entry_digest_sees_inside_a_large_array(plan_types):
