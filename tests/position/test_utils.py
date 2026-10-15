@@ -300,7 +300,7 @@ def test_estim_class(estim_class):
 
     data = estim_class.data
     data_keys = list(data.keys())
-    bp = estim_class.body_parts.tolist()
+    bp = estim_class.body_parts
     expect = ["tailBase", "tailMid", "tailTip", "whiteLED"]
 
     assert isinstance(data, dict), "Data should be a dictionary"

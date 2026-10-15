@@ -506,6 +506,21 @@ class TestDLCProjectReader:
         bps = reader.body_parts
         assert sorted(bps) == ["nose", "tail"]
 
+    def test_body_parts_is_a_list(self, dlc_output_dir, skip_if_no_dlc):
+        """The annotation promises list[str]; an Index broke downstream use."""
+        from spyglass.position.utils.dlc_io import DLCProjectReader
+
+        assert isinstance(DLCProjectReader(dlc_output_dir).body_parts, list)
+
+    def test_data_property_round_trips(self, dlc_output_dir, skip_if_no_dlc):
+        """`.data` feeds body_parts into reformat_dlc_data; it must not raise."""
+        from spyglass.position.utils.dlc_io import DLCProjectReader
+
+        data = DLCProjectReader(dlc_output_dir).data
+
+        assert sorted(data) == ["nose", "tail"]
+        assert sorted(data["nose"]) == ["likelihood", "x", "y"]
+
 
 class TestDoPoseEstimation:
     """Tests for do_pose_estimation parameter routing."""
@@ -610,6 +625,53 @@ class TestDoPoseEstimation:
             )
 
         fake_torch.analyze_videos.assert_called_once()
+
+
+class TestReformatDlcData:
+    """``bodyparts`` may arrive as a pandas Index, not just a list.
+
+    ``DLCProjectReader.body_parts`` returned ``columns.levels[0]``, and
+    ``bodyparts or <default>`` evaluates that Index for truth, raising
+    "ambiguous truth value" -- which broke ``.data`` and
+    ``.reformat_rawdata()`` for ordinary DLC output.
+    """
+
+    @staticmethod
+    def _df():
+        columns = pd.MultiIndex.from_product(
+            [["scorer"], ["nose", "tail"], ["x", "y", "likelihood"]]
+        )
+        return pd.DataFrame(
+            np.arange(12, dtype=float).reshape(2, 6), columns=columns
+        )
+
+    def test_accepts_a_pandas_index(self):
+        from spyglass.position.utils.dlc_io import reformat_dlc_data
+
+        df = self._df()
+        bodyparts = df.columns.levels[1]  # an Index, not a list
+        assert isinstance(bodyparts, pd.Index)
+
+        result = reformat_dlc_data(df, bodyparts=bodyparts)
+
+        assert sorted(result) == ["nose", "tail"]
+        np.testing.assert_array_equal(
+            result["nose"]["x"], df[("scorer", "nose", "x")].values
+        )
+
+    def test_none_uses_every_bodypart(self):
+        from spyglass.position.utils.dlc_io import reformat_dlc_data
+
+        assert sorted(reformat_dlc_data(self._df(), bodyparts=None)) == [
+            "nose",
+            "tail",
+        ]
+
+    def test_empty_list_selects_nothing(self):
+        """An explicit empty selection is not the same as None."""
+        from spyglass.position.utils.dlc_io import reformat_dlc_data
+
+        assert reformat_dlc_data(self._df(), bodyparts=[]) == {}
 
 
 class TestImportAnalyzeVideos:

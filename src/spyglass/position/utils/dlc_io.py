@@ -242,8 +242,12 @@ def reformat_dlc_data(df: pd.DataFrame, bodyparts: list[str] = None) -> dict:
         Nested dict: {bodypart: {coord: np.array}}
     """
     scorer = df.columns.get_level_values(0)[0]
+    # `is None`, not truthiness: callers pass a pandas Index, whose truth
+    # value is ambiguous and raises.
     available_bodyparts = (
-        bodyparts or df.columns.get_level_values(1).unique().tolist()
+        df.columns.get_level_values(1).unique().tolist()
+        if bodyparts is None
+        else list(bodyparts)
     )
 
     bodypart_data = {}
@@ -572,7 +576,7 @@ class DLCProjectReader:  # Note: simplifying to require only project path
     @property
     def body_parts(self) -> list[str]:
         """List of body parts in the DLC output."""
-        return self.df.columns.levels[0]
+        return self.df.columns.levels[0].tolist()
 
     def reformat_rawdata(self) -> dict:
         """Reformat the rawdata from the h5 file to a more useful dictionary."""
