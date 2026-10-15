@@ -205,6 +205,60 @@ def test_export_selection_tables(gen_export_selection, export_tbls):
     assert len_tbl_2 == 1, "Selection tables not captured correctly"
 
 
+def test_export_restrict_true_keeps_existing_restriction(
+    export_tbls, trodes_pos_v1, teardown
+):
+    """A no-op restriction must not log a whole table after a narrower one."""
+    ExportSelection, _ = export_tbls
+    paper_key = {"paper_id": "restrict_true_regression"}
+    restricted = trodes_pos_v1 & {"interval_list_name": "pos 0 valid times"}
+    trodes_pos_v1._export_cache.clear()
+
+    try:
+        ExportSelection.start_export(**paper_key, analysis_id="position")
+        _ = restricted & True
+    finally:
+        ExportSelection.stop_export()
+
+    logged = (
+        ExportSelection * ExportSelection.Table
+        & paper_key
+        & {"table_name": trodes_pos_v1.full_table_name}
+    ).fetch("restriction")
+    assert len(logged) == 1
+    assert "pos 0 valid times" in logged[0]
+    assert "True" not in logged[0]
+
+    if teardown:
+        (ExportSelection & paper_key).super_delete(warn=False, safemode=False)
+
+
+def test_export_restrict_false_does_not_log_whole_table(
+    export_tbls, trodes_pos_v1, teardown
+):
+    """An empty result must not become an unrestricted export selection."""
+    ExportSelection, _ = export_tbls
+    paper_key = {"paper_id": "restrict_false_regression"}
+    restricted = trodes_pos_v1 & {"interval_list_name": "pos 0 valid times"}
+    trodes_pos_v1._export_cache.clear()
+
+    try:
+        ExportSelection.start_export(**paper_key, analysis_id="position")
+        _ = restricted & False
+    finally:
+        ExportSelection.stop_export()
+
+    logged = (
+        ExportSelection * ExportSelection.Table
+        & paper_key
+        & {"table_name": trodes_pos_v1.full_table_name}
+    ).fetch("restriction")
+    assert len(logged) == 0
+
+    if teardown:
+        (ExportSelection & paper_key).super_delete(warn=False, safemode=False)
+
+
 def test_export_selection_joins(
     gen_export_selection, export_tbls, common, trodes_pos_v1
 ):
