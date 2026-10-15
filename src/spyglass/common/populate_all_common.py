@@ -29,6 +29,7 @@ from spyglass.common.common_ephys import (
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
 from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_region import BrainRegion
 from spyglass.common.common_optogenetics import (
     OpticalFiberDevice,
     OpticalFiberImplant,
@@ -179,6 +180,7 @@ def ingestion_tables() -> Dict[str, List[dj.Table]]:
     # emit rows for something it is related to. They are listed rather than
     # derived so the set is readable and reviewable.
     targets = [
+        BrainRegion,  # from ElectrodeGroup and Electrode
         Task,  # from TaskEpoch
         RawPosition,  # from PositionSource
         RawPosition.PosObject,  # from PositionSource

@@ -60,9 +60,23 @@ class ElectrodeGroup(SpyglassIngestion, dj.Imported):
         return getattr(device, "probe_type", None)
 
     def fetch_add_brain_region(self, nwb_obj):
-        """Fetch or add the brain region from the NWB object."""
-        region_name = nwb_obj.location
-        return BrainRegion.fetch_add(region_name=region_name)
+        """Return the region id for this object's location."""
+        return BrainRegion.reserve_id(region_name=nwb_obj.location)
+
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ) -> IngestionEntries:
+        """Emit the brain regions this group needs alongside its own row.
+
+        Parents first, so the plan writes a new region before the group that
+        references it. Repeats collapse in `PlannedEntries`.
+        """
+        entries = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
+        if rows := BrainRegion.reserved_rows():
+            return {BrainRegion: rows, **entries}
+        return entries
 
     def hemisphere_from_targeted_x(self, nwb_obj):
         """Determine hemisphere from targeted_x coordinate."""
@@ -150,9 +164,8 @@ class Electrode(SpyglassIngestion, dj.Imported):
         return nwb_obj[0]
 
     def fetch_add_brain_region(self, nwb_obj):
-        """Fetch or add the brain region from the NWB object."""
-        region_name = nwb_obj.group.location
-        return BrainRegion.fetch_add(region_name=region_name)
+        """Return the region id for this object's group location."""
+        return BrainRegion.reserve_id(region_name=nwb_obj.group.location)
 
     def device_probe_type_default_none(self, nwb_obj):
         """Fetch the probe type from the NWB object."""
@@ -211,6 +224,8 @@ class Electrode(SpyglassIngestion, dj.Imported):
                     )
                 else:
                     entry.update(cfg)
+        if rows := BrainRegion.reserved_rows():
+            return {BrainRegion: rows, **entries}
         return entries
 
     @classmethod

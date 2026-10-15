@@ -19,6 +19,8 @@ WATCHED = (
     "Subject",
     "Institution",
     "Raw",
+    # Planning used to reach `BrainRegion.fetch_add`, which inserts.
+    "BrainRegion",
 )
 
 

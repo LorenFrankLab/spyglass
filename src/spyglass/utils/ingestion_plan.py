@@ -526,6 +526,10 @@ REMEDIES = {
         "The plan said these rows were insertable and they were not, which is "
         "a gap in the planner rather than in the file. Please report it."
     ),
+    "after_insert_failed": (
+        "The rows were inserted; follow-on work for that table was not. "
+        "A re-run reaches the no-op path, so run that step directly."
+    ),
     "divergence": (
         "Edit the file to match, or update the rows if the file is right. "
         "Re-run to accept the stored values and ingest the rest."

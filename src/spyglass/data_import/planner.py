@@ -23,6 +23,7 @@ from spyglass.utils.ingestion_plan import (
     row_key,
     rows_digest,
 )
+from spyglass.common.common_region import BrainRegion
 from spyglass.utils.logging import logger
 
 # Per-dataset ceiling on what a plan's read-set digests hash. Large enough to
@@ -322,6 +323,10 @@ def plan_nwbfile(
         )
         if staged:
             declared = _declared_targets()
+
+    # One pool of reserved ids per plan, shared by every table that needs a
+    # region, so two of them cannot predict the same id for different regions.
+    BrainRegion.clear_reservations()
 
     key_space = VirtualKeySpace(nwb_file_name)
     file_problems: List[Problem] = []
@@ -705,7 +710,7 @@ def insert_plan(
     if (refused := _refuse(plan, allow_partial)) is not None:
         return refused
 
-    inserted, existing, conflicting, misses = _write_plan(plan)
+    inserted, existing, conflicting, misses, follow_up = _write_plan(plan)
 
     if skipped := sum(len(rows) for _, _, rows in existing):
         logger.info(f"{plan.nwb_file_name}: {skipped} entries already stored")
@@ -724,8 +729,13 @@ def insert_plan(
         complete=not misses,
     )
 
-    if misses:  # attach them, so the caller sees what the plan missed
-        plan = replace(plan, fatal=plan.fatal + tuple(misses))
+    # `complete` is about the data, so a failed `after_insert` does not
+    # reopen the staging area: the rows are in, and a re-run would reach the
+    # no-op path without retrying the hook.
+    if misses or follow_up:
+        plan = replace(
+            plan, fatal=plan.fatal + tuple(misses) + tuple(follow_up)
+        )
 
     return plan
 
@@ -794,9 +804,11 @@ def _write_plan(plan: IngestionPlan):
 
     Returns
     -------
-    tuple of (list, list, list, list)
-        `(inserted, existing, conflicting, misses)`. The first three hold
-        `(table_name, target, rows)`; the last holds `planner_miss` problems.
+    tuple of (list, list, list, list, list)
+        `(inserted, existing, conflicting, misses, follow_up)`. The first
+        three hold `(table_name, target, rows)`; `misses` holds
+        `planner_miss` problems, and `follow_up` the problems from
+        `after_insert` hooks, which do not bear on whether the data landed.
     """
     diverged = _diverged_keys(plan)
     existing, conflicting, pending = [], [], []
@@ -815,15 +827,23 @@ def _write_plan(plan: IngestionPlan):
             pending.append((name, target, novel))
 
     if not pending:
-        return [], existing, conflicting, []
+        return [], existing, conflicting, [], []
 
     writing = None  # which target, so a miss still names one after the undo
     try:
         # Dependency order is also a consistent lock order across concurrent
         # sessions, which is what keeps them from deadlocking.
         with _one_transaction(pending[0][1]):
+            remap = {}
             for name, target, rows in pending:
                 writing = name
+                rows = _remapped(target, rows, remap)
+                # A target that assigns its own keys reconciles them here,
+                # inside the transaction, and says which planned values moved.
+                resolve = getattr(target, "resolve_on_insert", None)
+                if resolve is not None:
+                    remap[name] = resolve(rows)
+                    continue
                 _insert_rows(target, rows, plan.nwb_file_name)
     except Exception as err:
         # The plan said these rows were insertable and they were not: a gap
@@ -844,9 +864,113 @@ def _write_plan(plan: IngestionPlan):
                     exc_type=type(err).__name__,
                 )
             ],
+            [],
         )
 
-    return pending, existing, conflicting, []
+    # After the transaction, not inside it: a hook's own writes are separate
+    # work, and holding the insert open for them lengthens the one lock window
+    # every concurrent session contends for.
+    follow_up = _run_after_insert(plan, pending)
+
+    return pending, existing, conflicting, [], follow_up
+
+
+def _remapped(target, rows, remap: dict) -> list:
+    """Rewrite foreign keys whose parent took a different id than planned.
+
+    A parent with an `auto_increment` key cannot promise the id a plan chose,
+    so the insert reconciles it and the children follow. Empty `remap` returns
+    the rows unchanged.
+
+    Parameters
+    ----------
+    target : dj.Table
+        The table about to be written.
+    rows : sequence of dict
+        Its planned rows.
+    remap : dict
+        `{parent_table_name: {planned_id: actual_id}}`.
+
+    Returns
+    -------
+    list of dict
+    """
+    moved = {
+        attr: mapping
+        for name, mapping in remap.items()
+        if mapping
+        for attr in (_remap_attr(target, name),)
+        if attr is not None
+    }
+    if not moved:
+        return list(rows)
+
+    return [
+        dict(
+            row,
+            **{
+                attr: mapping.get(row[attr], row[attr])
+                for attr, mapping in moved.items()
+                if attr in row
+            },
+        )
+        for row in rows
+    ]
+
+
+def _remap_attr(target, parent_name: str):
+    """Return the attribute of `target` that references `parent_name`."""
+    try:
+        parent = next(
+            p
+            for p in target.parents(as_objects=True)
+            if p.full_table_name == parent_name
+        )
+    except (StopIteration, Exception):  # not a parent, or graph unreadable
+        return None
+    shared = set(parent.primary_key) & set(target.heading.names)
+    return next(iter(shared)) if len(shared) == 1 else None
+
+
+def _run_after_insert(plan: IngestionPlan, inserted) -> list:
+    """Call each inserted target's `after_insert`, collecting failures.
+
+    Parameters
+    ----------
+    plan : IngestionPlan
+    inserted : list of (str, dj.Table, list of dict)
+        What the transaction wrote.
+
+    Returns
+    -------
+    list of Problem
+        Soft problems, one per hook that raised. The rows are committed, so a
+        hook failing is follow-on work to redo rather than a failed ingest.
+    """
+    from spyglass.utils.ingestion_plan import FileContext
+
+    ctx = FileContext(nwb_file_name=plan.nwb_file_name)
+    problems = []
+
+    for name, target, rows in inserted:
+        hook = getattr(target, "after_insert", None)
+        if hook is None:
+            continue
+        try:
+            hook(ctx, {target: list(rows)})
+        except Exception as err:
+            logger.error(f"after_insert failed for {name}: {err}")
+            problems.append(
+                Problem(
+                    severity="soft",
+                    code="after_insert_failed",
+                    message=f"{type(err).__name__}: {err}",
+                    table=name,
+                    exc_type=type(err).__name__,
+                )
+            )
+
+    return problems
 
 
 def _merge_targets(plan: IngestionPlan):
