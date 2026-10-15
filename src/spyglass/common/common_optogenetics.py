@@ -366,6 +366,16 @@ class OpticalFiberImplant(SpyglassIngestion, dj.Manual):
     }
     _extension_requirements = {"ndx-ophys-devices": "0.3.0"}
 
+    def before_parse(self, ctx) -> None:
+        """Reset the per-file fiber counter, for planning as well as inserting.
+
+        `_fiber_index` is class-level, so without this a second parse of one
+        file continues the first parse's numbering and plans implant rows under
+        fresh keys. Planning never calls `insert_from_nwbfile`, which is why
+        resetting there alone was not enough.
+        """
+        self._fiber_index = dict()
+
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
         self._fiber_index[nwb_file_name] = (
             0  # reset fiber index for each NWB file
