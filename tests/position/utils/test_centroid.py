@@ -266,11 +266,11 @@ class TestGet4ptCentroid:
         np.testing.assert_allclose(centroid[0], [2.0, 2.0])
 
     def test_4pt_centroid_green_sides(self):
-        """Test 4-point centroid: green and left/right valid (equal 3-pt avg)."""
+        """Test 4-point centroid: green and left/right valid."""
         from spyglass.position.utils.centroid import get_4pt_centroid
 
-        # Green at (5, 5), left at (0, 0), right at (2, 0), center NaN
-        # Equal 3-pt average: x=(5+0+2)/3≈2.333, y=(5+0+0)/3≈1.667
+        # Green at (5, 5), left at (0, 0), right at (2, 0), center NaN.
+        # Midpoint of the sides is (1, 0); averaged with green -> (3, 2.5).
         pos_df = pd.DataFrame(
             {
                 ("green", "x"): [5.0],
@@ -296,9 +296,7 @@ class TestGet4ptCentroid:
             max_LED_separation=10.0,
         )
 
-        # Equal 3-pt average (matches V1 Centroid class): x=7/3, y=5/3
-        assert centroid.shape == (1, 2)
-        np.testing.assert_allclose(centroid[0], [7.0 / 3.0, 5.0 / 3.0])
+        np.testing.assert_allclose(centroid[0], [3.0, 2.5])
 
     def test_4pt_centroid_only_sides(self):
         """Test 4-point centroid: only left/right valid."""
@@ -568,6 +566,44 @@ class TestGet4ptCentroid:
         # Should fall back to right position (5, 6)
         assert centroid.shape == (1, 2)
         np.testing.assert_allclose(centroid[0], [5.0, 6.0])
+
+    @pytest.mark.parametrize("impl", ["functional", "v1_class"])
+    def test_4pt_centroid_green_sides_v1_weighting(self, impl):
+        """Green must carry half the weight when the center is missing.
+
+        V1 averaged the two red sides into a midpoint, then averaged that with
+        green. An equal three-point mean pulls the centroid toward the red
+        side: for this input it gives (2, 0) instead of (3, 0). Geometry
+        chosen so the two weightings cannot coincide.
+        """
+        from spyglass.position.utils.centroid import Centroid, get_4pt_centroid
+
+        pos_df = pd.DataFrame(
+            {
+                ("green", "x"): [6.0],
+                ("green", "y"): [0.0],
+                ("center", "x"): [np.nan],
+                ("center", "y"): [np.nan],
+                ("left", "x"): [0.0],
+                ("left", "y"): [-1.0],
+                ("right", "x"): [0.0],
+                ("right", "y"): [1.0],
+            }
+        )
+        pos_df.columns = pd.MultiIndex.from_tuples(pos_df.columns)
+        points = {
+            "greenLED": "green",
+            "redLED_C": "center",
+            "redLED_L": "left",
+            "redLED_R": "right",
+        }
+
+        if impl == "functional":
+            centroid = get_4pt_centroid(pos_df, points, max_LED_separation=20)
+        else:
+            centroid = Centroid(pos_df, points, max_LED_separation=20).centroid
+
+        np.testing.assert_allclose(centroid[0], [3.0, 0.0])
 
     def test_4pt_centroid_green_sides_vs_v1_class(self):
         """Verify functional get_4pt_centroid matches V1 Centroid class."""

@@ -848,9 +848,8 @@ def do_pose_estimation(
     analyze_videos(**core_params)
 
 
-# DLC 2.x evaluation-CSV headers, odd spacing and colon included. These are
-# the keys DLCModelEvaluation.make indexes, because V1 handed it the CSV row
-# verbatim.
+# DLC 2.x evaluation-CSV headers, odd spacing and colon included. These double
+# as the field names DLCModelEvaluation.make indexes.
 _LEGACY_EVAL_FIELDS = (
     "Training iterations:",
     " Train error(px)",
@@ -888,8 +887,8 @@ def to_legacy_eval_fields(csv_results: dict) -> dict:
 
     Notes
     -----
-    A 2.x row passes through untouched because V1 read it straight from the
-    file -- renaming it unconditionally replaced real measurements with
+    A 2.x row passes through untouched: its headers are already the field
+    names, so renaming it unconditionally replaced real measurements with
     whatever the 3.x lookups missed. An absent column maps to None rather than
     a stand-in value: ``DLCModelEvaluation`` persists this verbatim, so a
     guessed number would be stored as if it had been measured.
