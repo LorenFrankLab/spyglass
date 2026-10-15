@@ -2119,8 +2119,7 @@ class SLEAPStrategy(PoseToolStrategy):
         candidate = Path(output_dir) / run_name
         if candidate.exists():
             return candidate
-        # Fallback: search cwd
-        cwd_candidate = Path.cwd() / "models" / run_name
+        cwd_candidate = Path.cwd() / "models" / run_name  # Fallback: search cwd
         if cwd_candidate.exists():
             return cwd_candidate
         return candidate  # return even if absent; caller handles missing
@@ -2275,20 +2274,31 @@ class SLEAPStrategy(PoseToolStrategy):
             if not self._fs.exists(search_dir):
                 continue
 
-            # Primary: *.analysis.h5
+            # Primary: {video_stem}*.analysis.h5
             analysis_files = [
                 Path(p)
-                for p in self._fs.glob(str(search_dir / patterns["primary"]))
+                for p in self._fs.glob(
+                    str(
+                        search_dir
+                        / patterns["primary"].format(video_stem=video_path.stem)
+                    )
+                )
             ]
             if analysis_files:
                 latest = max(analysis_files, key=lambda p: p.stat().st_mtime)
                 output_files.append(str(latest))
                 continue
 
-            # Fallback: *.predictions.slp
-            slp_files = [
+            slp_files = [  # Fallback: {video_stem}*.predictions.slp
                 Path(p)
-                for p in self._fs.glob(str(search_dir / patterns["fallback"]))
+                for p in self._fs.glob(
+                    str(
+                        search_dir
+                        / patterns["fallback"].format(
+                            video_stem=video_path.stem
+                        )
+                    )
+                )
             ]
             if slp_files:
                 latest = max(slp_files, key=lambda p: p.stat().st_mtime)
@@ -2299,8 +2309,8 @@ class SLEAPStrategy(PoseToolStrategy):
     def get_output_file_patterns(self) -> Dict[str, str]:
         """Get SLEAP-specific output file patterns."""
         return {
-            "primary": "*.analysis.h5",  # SLEAP analysis export (preferred)
-            "fallback": "*.predictions.slp",  # SLEAP project with predictions
+            "primary": "{video_stem}*.analysis.h5",  # SLEAP analysis export
+            "fallback": "{video_stem}*.predictions.slp",  # embedded predictions
         }
 
 
