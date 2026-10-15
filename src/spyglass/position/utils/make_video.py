@@ -501,14 +501,16 @@ class VideoMaker:
             return frame_ind
 
         pos_ind = pos_ind[0]
-        likelihood_inds = pos_ind + self.window_ind
-        neg_inds = np.where(likelihood_inds < 0)[0]
-        likelihood_inds[neg_inds] = 0 if len(neg_inds) > 0 else -1
 
-        # Handle indices that are too large
-        max_likelihood_ind = len(list(self.likelihoods.values())[0]) - 1
-        large_inds = np.where(likelihood_inds > max_likelihood_ind)[0]
-        likelihood_inds[large_inds] = max_likelihood_ind
+        if self.likelihoods:  # Only needed for the likelihood subplot
+            likelihood_inds = pos_ind + self.window_ind
+            neg_inds = np.where(likelihood_inds < 0)[0]
+            likelihood_inds[neg_inds] = 0 if len(neg_inds) > 0 else -1
+
+            # Handle indices that are too large
+            max_likelihood_ind = len(list(self.likelihoods.values())[0]) - 1
+            large_inds = np.where(likelihood_inds > max_likelihood_ind)[0]
+            likelihood_inds[large_inds] = max_likelihood_ind
 
         dlc_centroid_data = self._get_centroid_data(pos_ind)
 
