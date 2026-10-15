@@ -21,6 +21,20 @@ from spyglass.utils.ingestion_plan import IngestionPlan
 
 
 @pytest.fixture
+def clean_staging(mini_copy_name):
+    """Clear this file's staged plan afterwards.
+
+    A test that stages a plan built from a patched parse leaves fabricated
+    entries behind, and the next plan without `force_replan` reuses them.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+
+    yield
+
+    IngestionPlanLog().clear(mini_copy_name)
+
+
+@pytest.fixture
 def clean_plan(common, mini_copy_name, mini_insert):
     """A plan for a file this fixture has *made sure* is fully ingested.
 
@@ -269,7 +283,7 @@ def test_verdict_is_partial_new_when_one_table_is_missing(
 
 
 def test_a_divergence_is_reported_without_changing_the_verdict(
-    common, mini_copy_name, mini_insert, monkeypatch
+    common, mini_copy_name, mini_insert, monkeypatch, clean_staging
 ):
     """A disagreement is a warning; the verdict still says what will happen.
 
@@ -756,7 +770,7 @@ def test_planning_never_reads_a_file_keyed_table_whole(
 
 
 def test_a_divergence_blocks_the_first_plan_and_warns_after(
-    common, mini_copy_name, monkeypatch
+    common, mini_copy_name, monkeypatch, clean_staging
 ):
     """Severity depends on whether the file has been planned before.
 
