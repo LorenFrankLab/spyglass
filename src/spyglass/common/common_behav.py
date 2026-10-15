@@ -429,9 +429,8 @@ class StateScriptFile(SpyglassIngestion, dj.Imported):
     ):
         """Expand one associated file into an entry per task epoch.
 
-        The file names its epochs in a comma-separated string. Only epochs
-        already present in TaskEpoch yield an entry, matching the previous
-        implementation, which ran once per existing TaskEpoch key.
+        The file names its epochs in a comma-separated string. Only epochs the
+        plan will hold yield an entry.
         """
         super_ins = super().generate_entries_from_nwb_object(
             nwb_obj, base_key, ctx
@@ -441,14 +440,18 @@ class StateScriptFile(SpyglassIngestion, dj.Imported):
         # TODO: update associated_file_obj.task_epochs to be an array of
         # 1-based ints, not a comma-separated string of ints
         named_epochs = str(nwb_obj.task_epochs).split(",")
-        task_epochs = TaskEpoch & {
-            "nwb_file_name": self_key.get("nwb_file_name")
-        }
+        # Through the plan: `TaskEpoch` is filled by this same ingestion, so
+        # its rows may not be written yet.
+        task_epochs = self.rows_from_plan(
+            ctx,
+            TaskEpoch(),
+            {"nwb_file_name": self_key.get("nwb_file_name")},
+        )
 
         return {
             self: [
                 dict(self_key, epoch=epoch)
-                for epoch in task_epochs.fetch("epoch")
+                for epoch in (row["epoch"] for row in task_epochs)
                 if str(epoch) in named_epochs
             ]
         }

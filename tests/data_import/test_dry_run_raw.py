@@ -104,7 +104,8 @@ def test_planning_a_raw_file_resolves_every_cross_reference(
     Five tables need a value from a table this same ingestion fills.
     SensorData and DIOEvents want `Raw`'s interval, TaskEpoch and VideoFile
     want `IntervalList`/`TaskEpoch`, ImportedLFP needs an
-    `LFPElectrodeGroup`. Querying for those rows finds nothing on a file that
+    `LFPElectrodeGroup`. `StateScriptFile` wants `TaskEpoch` too, but this
+    corpus has no associated files, so it is covered by a unit test instead. Querying for those rows finds nothing on a file that
     is not ingested yet, so each must read them from the plan instead.
 
     Asserted against the file's own content rather than against a plan of its
@@ -138,6 +139,20 @@ def test_planning_a_raw_file_resolves_every_cross_reference(
             + "a cross-reference resolved against the database instead of "
             + "the plan"
         )
+
+    # An LFP group's members are planned too, not fetched from stored
+    # `Electrode` rows a first ingestion does not have.
+    planned_members = sum(
+        len(rows)
+        for tp in plan.table_plans
+        for target, rows in tp.entries
+        if "l_f_p_electrode_group__l_f_p_electrode"
+        in getattr(target, "full_table_name", "")
+    )
+    assert planned_members >= 1, (
+        "LFPElectrodeGroup planned no electrode members, so its member list "
+        "resolved against stored Electrode rows instead of the plan"
+    )
 
     # The sharpest of the five: absent `Raw`, DIOEvents used to fall back to an
     # interval of its own, so it planned a different `interval_list_name` and
