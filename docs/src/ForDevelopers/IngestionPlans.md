@@ -17,6 +17,32 @@ out every row each table would write, checks those rows for problems, and
 reports all of them together. Nothing is written, so a file with five errors
 tells you about five errors instead of the first one.
 
+## The shape of an ingestion
+
+Two passes. The first reads the database but writes only to the log tables, so
+it is where `dry_run` stops. The second writes the rows the first already
+checked, in a single transaction — the only moment any data table is written.
+
+```mermaid
+graph TD
+    FILE[NWB file] --> PARSE
+    PARSE[parse every table<br/>in dependency order] --> STAGE
+    STAGE[stage the plan] --> DRY{dry_run?}
+    DRY -->|yes| STOP[report, and stop]
+    DRY -->|no| READ[merge targets,<br/>split off what is stored]
+    READ --> INSERT[insert]
+    INSERT --> MARK[mark inserted,<br/>clear payloads]
+
+    PARSE -.->|reads| DATA[(data tables)]
+    READ -.->|reads| DATA
+    INSERT ==>|the only data write,<br/>one transaction| DATA
+    STAGE -->|writes| LOG[(log tables)]
+    MARK -->|writes| LOG
+```
+
+Because both passes share one parse, what a dry run reports is what a real run
+does. The insert re-derives nothing: no file is reopened and no mapping re-run.
+
 ## Checking a file before you ingest it
 
 Pass `dry_run=True` to either entry point. Spyglass plans the file, prints the
@@ -90,29 +116,47 @@ minirec20230622_.nwb: no_op — already ingested, nothing to do
 ```
 
 A plan with problems leads with the same verdict, then groups what it found by
-severity, worst first:
+severity, worst first. This is a real report, from a copy of the test file with
+a camera device removed and one camera's manufacturer changed:
 
 ```text
-broken_.nwb: partial_new — 1 new entries
+docsdemo20230622_.nwb: partial_new — 190 new entries
 
 New entries:
-      1  `common`.`session`
+      4  `common_behav`.`_raw_position__pos_object`
+      2  `common_behav`.`_raw_position`
+      4  `common_behav`.`position_source__spatial_series`
+      2  `common_behav`.`position_source`
+      3  `common_dio`.`_d_i_o_events`
+     32  `common_ephys`.`_electrode_group`
+    128  `common_ephys`.`_electrode`
+      1  `common_ephys`.`_raw`
+      1  `common_ephys`.`_sample_count`
+      6  `common_interval`.`interval_list`
+      1  `common_sensors`.`_sensor_data`
+      1  `common_session`.`_session__data_acquisition_device`
+      2  `common_session`.`_session__experimenter`
+      1  `common_session`.`_session`
+      1  `lfp_electrode`.`l_f_p_electrode_group`
+      1  `lfp_imported`.`_imported_l_f_p`
 
 Disagrees with stored rows (1):
-  `common`.`subject` (1):
-    {'subject_id': '54321'} exists with different values for ['sex']
-      stored values: {'sex': 'M'}
-  -> The stored rows were kept. Edit the file to match, or update the rows,
-     if the file is right.
+  `common_device`.`camera_device` (1):
+    {'camera_name': 'test camera 1'} exists with different values for ['manufacturer']
+      stored values: {'manufacturer': 'Allied Vision'}
+  -> The stored rows were kept. Edit the file to match, or update the rows, if the file is right.
 
 Hard (1):
-  [hard] `common`.`session`: missing_attribute: institution_name is required
-         and absent (object abc-123)
-      -> The NWB file does not supply a required column. Add it to the file,
-         or declare it in the file's _spyglass_config.yaml.
+  [hard] `common_task`.`_task_epoch`: parse_error: No camera device found with ID [1] in NWB file docsdemo20230622_.nwb. Known camera IDs: [0]
+      -> A table raised while parsing. The traceback names where.
 
-Blocked by the above (1): `common`.`electrode`
+Blocked by the above (3): `common_behav`.`_state_script_file`, `common_behav`.`_video_file`, `common_optogenetics`.`optogenetic_protocol`
 ```
+
+One root cause, read top to bottom: the verdict says 190 entries would still be
+written, the counts say which tables they belong to, the disagreement is
+reported without stopping anything, and `TaskEpoch` failing accounts for the
+three tables below it rather than producing three more problems.
 
 Each problem names the NWB `object_id` where there is one, so you can find the
 thing in the file. Each *code* gets a one-line remedy, printed once per group
@@ -184,6 +228,12 @@ to avoid.
     ingest → read the report → **edit the file** → retry, so the file hash differs
     on every attempt by construction. Gating on it would discard the whole plan
     exactly when it is most useful. Validity is per entry.
+
+    It is `NULL` for a file holding a very large dataset. Planning bounds how much
+    of any one dataset it reads — hashing a multi-GB array to decide whether a parse
+    can be reused costs more than the parse — and a partial read is not the file's
+    hash, so none is recorded rather than a misleading one. `NwbfileHasher` without
+    that bound, as analysis-file provenance uses it, is unaffected.
 
 ## Migrating from `InsertError`
 

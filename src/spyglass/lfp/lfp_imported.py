@@ -66,13 +66,10 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
     def before_parse(self, ctx) -> None:
         """Clear the per-run group bookkeeping.
 
-        `_planned_groups` and `_planned_names` mean "resolved *this run*", and
-        `_plan_electrode_group` returns no entries for a group it has already
-        resolved -- correct within one pass, where the group was emitted the
-        first time. Reset here rather than in `insert_from_nwbfile`, because
-        planning never calls that: a second plan in the same process would
-        otherwise reference a group it had decided not to emit again, and the
-        report would name `LFPElectrodeGroup` as a missing parent.
+        These mean "resolved *this run*", and `_plan_electrode_group` emits no
+        entries for a group it already resolved. Reset here rather than in
+        `insert_from_nwbfile`, which planning never calls: a second plan in one
+        process would otherwise report `LFPElectrodeGroup` as a missing parent.
         """
         self._planned_groups, self._planned_names = dict(), set()
 

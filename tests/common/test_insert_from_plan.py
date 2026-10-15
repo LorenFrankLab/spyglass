@@ -177,7 +177,7 @@ def test_every_bad_table_is_reported_not_just_the_first(
     result = populate_all_common(mini_copy_name)
 
     assert result, "A file with two broken tables must not report success"
-    report = result.report(log=False)
+    report = result.report()
     for name in broken:
         assert (
             name.lower() in report.lower() or name in report

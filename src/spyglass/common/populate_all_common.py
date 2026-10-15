@@ -48,14 +48,9 @@ from spyglass.utils.nwb_helper_fn import get_config
 def _plan_only(nwb_file_name: str):
     """Plan a file, stage the plan, report, and write no data table.
 
-    The plan pass reads the database but never writes to it, so every problem
-    in the file is reported at once rather than one per table that happened to
-    fail, and nothing is half-ingested afterwards. The plan is staged so a
-    later attempt can see what this one worked out.
-
     Shared by `dry_run`, which stops here, and the real run, which hands the
-    result to `insert_plan`. One plan pass serves both, so what a dry run
-    reports is what a real run will do.
+    result to `insert_plan` -- so what a dry run reports is what a real run
+    will do.
 
     Parameters
     ----------
@@ -82,7 +77,7 @@ def _plan_only(nwb_file_name: str):
 
     plan = plan_nwbfile(nwb_file_name, config=config)
     IngestionPlanLog().stage(plan)
-    plan.report()
+    plan.log_report()
 
     return plan
 
@@ -93,11 +88,9 @@ def _insert_from_plan(
 ):
     """Plan the whole file, then insert what the plan worked out.
 
-    The point of the two passes: the first writes nothing, so every problem in
-    the file is reported before any table is touched, and a file that cannot be
-    ingested cleanly is not half-ingested first. The second re-derives nothing
-    -- it writes the rows the first pass already checked, skipping those already
-    stored, and closes the staging area on success.
+    The first pass writes nothing, so every problem is reported before any
+    table is touched. The second re-derives nothing -- it writes the rows the
+    first already checked, skipping those already stored.
 
     Parameters
     ----------
@@ -119,26 +112,13 @@ def _insert_from_plan(
 def ingestion_tables() -> Dict[str, List[dj.Table]]:
     """Return the tables an ingestion touches, in two categories.
 
-    One declared set, shared by the inserter and the planner:
-
-    - `"ingest"` -- tables that **parse the file**, parents before children.
-      The planner walks these in order, so each table's parents are planned
-      before it and a cross-reference resolves against the plan.
+    - `"ingest"` -- tables that **parse the file**, parents before children,
+      so a cross-reference resolves against the plan. The order is written out
+      rather than derived; `tests/common/test_ingestion_table_order.py` checks
+      it against DataJoint's graph, so a table added in the wrong place fails
+      a test rather than an ingestion.
     - `"targets"` -- tables that **receive rows without parsing anything**.
-      `TaskEpoch` emits `Task`, `PositionSource` emits `RawPosition`,
-      `ImportedLFP` emits `LFPElectrodeGroup`. They are declared here rather
-      than discovered by walking the foreign-key graph, so the set a plan can
-      name is written down in one place. Order is irrelevant: nothing parses
-      them.
-
-    Both lists hold real table classes, so a target carries its own heading,
-    parents and mixin -- no name-to-class registry, and no `FreeTable` stand-in.
-
-    The `"ingest"` order is written out rather than derived: the schema is
-    fixed at import time, so sorting on every call costs ~0.17s to rediscover
-    an answer that cannot change. `tests/common/test_ingestion_table_order.py`
-    checks it against DataJoint's own graph, so a table added in the wrong
-    place fails a test rather than an ingestion.
+      Order is irrelevant: nothing parses them.
 
     Returns
     -------
@@ -229,12 +209,9 @@ def lab_config() -> dict:
 def merged_config(nwb_file_name: str, config: dict = None) -> dict:
     """Return the config a file is ingested with, sidecar over defaults.
 
-    Entries may be declared in a `_spyglass_config.yaml` beside the NWB file
-    as well as in `entries.yaml`. Both share the `{TableName: [rows]}` shape
-    that `generate_entries_from_config` indexes by name, so each table is
-    handed the whole merged mapping -- a per-table lookup would yield a row
-    list. The file's own config wins: `entries.yaml` holds lab-wide defaults,
-    while the sidecar describes this session.
+    Both sources share the `{TableName: [rows]}` shape, and each table is
+    handed the whole mapping -- slicing it per table hands `Electrode` a row
+    list where it expects a dict.
 
     Parameters
     ----------

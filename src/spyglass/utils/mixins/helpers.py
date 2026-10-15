@@ -22,15 +22,10 @@ from spyglass.utils.mixins.base import BaseMixin
 class _TableForm:
     """Descriptor giving a table as a class or an instance, from either side.
 
-    A `@property` cannot do this. Accessed on the class, Python calls
-    `property.__get__(None, cls)`, which returns the property object itself --
-    so `Table.as_instance` would hand back a `<property>` rather than a table,
-    and the helper would only work when the caller already had an instance,
-    which is the case that needed no help. DataJoint's metaclass does not
-    forward attribute lookups, so there is nothing to fall back on.
-    Chaining `@classmethod` with `@property` was deprecated in Python 3.11 and
-    removed in 3.13. A descriptor receives `objtype` on class access, which is
-    what makes both sides work.
+    A descriptor rather than a `@property` because only a descriptor receives
+    `objtype` on class access; a property returns itself there, so
+    `Table.as_instance` would hand back a `<property>`. `@classmethod` with
+    `@property` was removed in Python 3.13.
 
     Parameters
     ----------

@@ -233,15 +233,17 @@ def test_a_refused_payload_costs_the_payload_not_the_run(
     log = IngestionPlanLog()
     log.clear(mini_copy_name)
 
-    original = IngestionPlanLog.Entry.insert
+    # `.__func__`, because DataJoint hands back a *bound* `Entry.insert`. The
+    # patch below is set on the class, so it is called with the instance as
+    # its first argument -- forwarding that to an already-bound method put the
+    # table in `insert`'s `rows` slot and the real rows in `replace`, so the
+    # retry reported success and inserted nothing.
+    original = IngestionPlanLog.Entry.insert.__func__
 
-    def refuse_payloads(*args, **kwargs):
-        # Positionally, not by name: `self.Entry.insert` may arrive bound or
-        # unbound, so the row list is found rather than assumed.
-        rows = next((a for a in args if isinstance(a, (list, tuple))), ())
+    def refuse_payloads(entry, rows, *args, **kwargs):
         if any(row.get("entry_blob") is not None for row in rows):
             raise RuntimeError("pretend the packet is too big")
-        return original(*args, **kwargs)
+        return original(entry, rows, *args, **kwargs)
 
     monkeypatch.setattr(IngestionPlanLog.Entry, "insert", refuse_payloads)
 

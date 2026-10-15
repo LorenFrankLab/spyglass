@@ -34,13 +34,10 @@ PLAN_DATASET_BYTES = 64 << 20
 def stored_keys(table, restriction=True) -> Optional[set]:
     """Return the primary keys a table holds, within `restriction`.
 
-    `fetch("KEY")` rather than `fetch()`: only the primary key is ever
-    compared, and fetching whole rows drags every blob along with them --
-    one `IntervalList.valid_times` per interval in the file, to answer a
-    question about identity.
-
-    The one place the database is read for key identity, so the restriction
-    cannot be forgotten at one of two call sites.
+    `fetch("KEY")` rather than `fetch()`: fetching whole rows drags every blob
+    along with them to answer a question about identity. The one place the
+    database is read for key identity, so the restriction cannot be forgotten
+    at one of two call sites.
 
     Parameters
     ----------
@@ -73,11 +70,9 @@ class VirtualKeySpace:
     the plan intends to add. Lazily read, and never written -- the only
     database access the planning pass makes.
 
-    Reads are scoped to the file being planned wherever the table is keyed by
-    one. **By scope, never by key:** restricting to the keys the plan happens
-    to name would hand identity back to the server, whose equivalence is a
-    *subset* of Spyglass's -- see `collated`. A file restriction narrows how
-    much is read without touching which rows count as the same.
+    **Scoped by file, never by key.** Restricting to the keys the plan names
+    would hand identity back to the server, whose equivalence is a *subset* of
+    Spyglass's -- see `collated`.
     """
 
     def __init__(self, nwb_file_name: str = None):
@@ -100,11 +95,6 @@ class VirtualKeySpace:
         file-scoped parent is reached from a child without it, so a parent row
         this plan refers to is always in this plan's file --
         `tests/common/test_ingestion_table_order.py` asserts both.
-
-        The tables this matters for are the ones that grow with the database:
-        `Electrode`, `IntervalList`, `Session`, every per-session table. The
-        ones it does not apply to are the shared metadata tables (`Task`,
-        `Institution`, `ProbeType`) which stay small by nature.
         """
         if self._nwb_file_name and "nwb_file_name" in table.primary_key:
             return {"nwb_file_name": self._nwb_file_name}
@@ -147,12 +137,9 @@ class VirtualKeySpace:
     def rows_for(self, table, restriction: dict = None) -> Tuple[dict, ...]:
         """Return the rows a table will hold once this plan is inserted.
 
-        The read side of `add_planned`, and the reason a table can resolve a
-        cross-reference while parsing without querying for rows this same
-        ingestion has yet to write. Planned rows come first and win on a shared
-        primary key: the plan is what is being described, and a disagreement
-        with a stored row is reported as a divergence rather than silently
-        resolved here.
+        Planned rows come first and win on a shared primary key: the plan is
+        what is being described, and a disagreement with a stored row is
+        reported as a divergence rather than silently resolved here.
 
         Parameters
         ----------
@@ -198,9 +185,8 @@ class VirtualKeySpace:
 def _matches(row: dict, restriction: dict = None) -> bool:
     """Whether a row satisfies a plain equality restriction.
 
-    Planned rows are not queryable, so the subset of DataJoint restriction
-    syntax these lookups use -- a dict of attribute equalities -- is applied
-    in memory instead.
+    Planned rows are not queryable, so the dict-of-equalities subset these
+    lookups use is applied in memory instead.
 
     Parameters
     ----------
@@ -219,13 +205,9 @@ def _matches(row: dict, restriction: dict = None) -> bool:
 def _as_table(target):
     """Return a plan target as a table instance.
 
-    Ingestion targets are Spyglass tables, which answer `as_instance`
-    whichever side they are asked from. A `FreeTable` -- how DataJoint hands
-    back a parent, and how config-declared part entries are keyed -- carries
-    no such descriptor but is already an instance.
-
-    Normalizing here, once, keeps every function below able to assume it was
-    handed an instance.
+    A `FreeTable` -- how DataJoint hands back a parent -- carries no
+    `as_instance` descriptor but is already an instance. Normalized here once,
+    so every function below can assume it was handed one.
     """
     return getattr(target, "as_instance", target)
 
@@ -240,12 +222,9 @@ def plan_nwbfile(
 ) -> IngestionPlan:
     """Plan the ingestion of one NWB file, writing nothing.
 
-    Parsing is the expensive half of ingestion and depends only on the file,
-    the config and the Spyglass version. The *verdict* does not: novelty,
-    divergence and foreign-key resolution are all read from the database, so
-    a plan describes a moment in it -- which is why a whole plan is never
-    cached, and why reuse (`force_replan`) is per table and re-checks the
-    database every time.
+    A parse depends only on the file, the config and the Spyglass version, but
+    the *verdict* is read from the database -- so a whole plan is never cached,
+    and reuse is per table and re-checks the database every time.
 
     Parameters
     ----------
@@ -258,19 +237,17 @@ def plan_nwbfile(
     tables : list, optional
         Tables to plan. Default: every ingestion table, in dependency order.
     nwb_file : pynwb.NWBFile, optional
-        An already-open file to plan from, for a file that has no `Nwbfile`
-        row yet. Default None, fetching the registered copy. Supplying this
-        is what lets a file be checked *before* it is ingested: the row every
-        session-keyed table refers to is then treated as part of the plan,
-        the same way a parent a table emits alongside its own rows is.
+        An already-open file to plan from, for a file with no `Nwbfile` row
+        yet. Default None, fetching the registered copy. Supplying it is what
+        lets a file be checked *before* it is ingested.
     nwb_path : str, optional
         Absolute path of `nwb_file`, used only for the read-set digests.
         Default None: without it those digests are None, which reads as
         "unknown" and never as "unchanged".
     force_replan : bool, optional
         Parse every table even where a staged plan says nothing it read has
-        changed. Default False, reusing what it safely can. Set this when the
-        suspicion is the reuse check itself.
+        changed. Default False. Set this when the suspicion is the reuse
+        check itself.
 
     Returns
     -------
@@ -591,11 +568,8 @@ def _declared_targets() -> Dict[str, object]:
     """Return `{full_table_name: table class}` for every declarable target.
 
     Built from the declared set rather than by walking the schema: a plan can
-    only name a table that ingestion declares, either as one that parses a file
-    or as one that merely receives rows. Parts come along with their masters.
-
-    This is why reuse needs no name-to-class registry -- every target is a real
-    class, carrying its own heading, parents and mixin.
+    only name a table ingestion declares. Parts come along with their masters,
+    so reuse needs no name-to-class registry.
 
     Returns
     -------
@@ -691,15 +665,9 @@ def insert_plan(
 ) -> IngestionPlan:
     """Insert what a plan worked out, re-deriving nothing.
 
-    The plan already holds every intended row, already checked. It writes them
-    in dependency order, in one transaction. No file is reopened and no mapping
-    is re-run: if a row is wrong here, the plan was wrong, which is a planner
-    gap rather than an ingestion error, and the transaction undoes it.
-
-    Freshness is judged per entry, never by comparing the file's hash to the
-    one recorded when the plan was made. The expected workflow edits the file
-    between attempts, so a whole-file comparison would reject every plan it
-    was meant to preserve.
+    Writes the plan's rows in dependency order, in one transaction. No file is
+    reopened and no mapping re-run: a wrong row here means the plan was wrong,
+    which is a planner gap rather than an ingestion error.
 
     Parameters
     ----------
@@ -795,7 +763,7 @@ def _refuse(
             f"{plan.nwb_file_name}: {len(blocking)} blocking problems, "
             + "nothing inserted. Fix them, or pass allow_partial=True."
         )
-        logger.error(plan.report(log=False))
+        logger.error(plan.report())
         return plan
 
     return None
@@ -869,14 +837,9 @@ def _merge_targets(plan: IngestionPlan):
     """Return one `(table_name, target, rows)` per target, parents first.
 
     Required, not tidying: `IntervalList` is emitted by more than one table
-    plan, and novelty is filtered before anything is written, so without
-    merging the same row is retained twice and the insert fails on itself.
-    Merged on `row_key`, so two emitters differing only in the case of a
-    shared key collapse too.
-
-    Keyed by the *target*, not the plan that emitted it: a table routinely
-    plans rows for another, and a staged entry belongs to where the row is
-    going.
+    plan, so without merging the same row is retained twice and the insert
+    fails on itself. Merged on `row_key`, so two emitters differing only in
+    the case of a shared key collapse too.
 
     Parameters
     ----------
@@ -1041,10 +1004,9 @@ def _by_field_set(rows) -> List[list]:
     """Group rows by the attributes they name, in first-seen order.
 
     DataJoint refuses one insert of rows whose fields differ, and merging a
-    target's rows across every table that emits them routinely produces a
-    mix: `IntervalList` arrives with `pipeline` from one emitter and without
-    it from another. Only visible against a database holding none of them,
-    where no row is filtered out before the insert.
+    target across its emitters routinely produces a mix: `IntervalList` arrives
+    with `pipeline` from one and without it from another. Only visible against
+    a database holding none of them.
 
     Parameters
     ----------

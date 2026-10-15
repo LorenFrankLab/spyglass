@@ -286,8 +286,7 @@ class NwbfileHasher:
 
         The digest is the target's *identity* -- file, path, size, mtime -- not
         its contents, which would mean hashing a file ~20x the copy on every
-        plan. So it detects replacement, resizing, or any write, but not an
-        edit that preserves size and mtime exactly.
+        plan. So an edit preserving size and mtime exactly goes unseen.
 
         Writes `self.objs` only, never `self.hashed`: the file-level hash is
         stored provenance and must stay byte-identical.
@@ -433,12 +432,9 @@ class NwbfileHasher:
         """Index the root NWBFile object over the metadata it alone owns.
 
         The traversal visits the root's members, never the root, so without
-        this the root has no digest and `read_set_digest` scores it as the
-        constant an unknown id gets -- unchangeable, so every table reading
-        file metadata looks reusable however that metadata is edited.
-
-        Scoped to paths no deeper object claims, so an edit inside a
-        container is not also an edit to the file's metadata.
+        this every table reading file metadata looks reusable however that
+        metadata is edited. Scoped to paths no deeper object claims, so an edit
+        inside a container is not also an edit to the file's metadata.
 
         Parameters
         ----------

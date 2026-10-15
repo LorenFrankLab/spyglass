@@ -184,7 +184,7 @@ def test_a_skipped_file_still_returns_a_result(
     (skipped,) = results
     assert skipped.nwb_file_name == mini_copy_name, "named by its copy"
     assert not skipped, "Skipping is not a failure, so the result is falsy"
-    assert "already ingested" in skipped.report(log=False), (
+    assert "already ingested" in skipped.report(), (
         "and the headline says so, in one line -- a clean plan does not pad "
         "itself with empty sections"
     )
@@ -197,4 +197,4 @@ def test_a_skipped_file_still_returns_a_result(
         if problem.code == "file_already_registered"
     ]
     assert "reinsert" in note.message, "which says how to override it"
-    assert "reinsert" in skipped.report(verbose=True, log=False)
+    assert "reinsert" in skipped.report(verbose=True)

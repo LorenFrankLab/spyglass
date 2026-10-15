@@ -56,9 +56,7 @@ def _broken(plan_types):
 
 def test_a_clean_plan_is_one_line(plan_types):
     """Padding a good result with empty sections trains people to skim."""
-    report = plan_types.IngestionPlan(nwb_file_name="clean_.nwb").report(
-        log=False
-    )
+    report = plan_types.IngestionPlan(nwb_file_name="clean_.nwb").report()
 
     assert report.count("\n") == 0, f"Expected one line, got:\n{report}"
     assert "no_op" in report and "clean_.nwb" in report
@@ -70,7 +68,7 @@ def test_the_verdict_leads(plan_types):
     A divergence no longer decides it: the verdict says what the run will do,
     and a disagreement about one stored row does not stop the rest.
     """
-    report = _broken(plan_types).report(log=False)
+    report = _broken(plan_types).report()
     first = report.splitlines()[0]
 
     assert first.startswith("broken_.nwb: partial_new"), first
@@ -82,7 +80,7 @@ def test_problems_group_by_severity_worst_first(plan_types):
     One hard problem, not two: the divergence is soft now and renders in its
     own section rather than among the severities.
     """
-    report = _broken(plan_types).report(verbose=True, log=False)
+    report = _broken(plan_types).report(verbose=True)
 
     assert report.index("Hard (1):") < report.index(
         "Soft (1):"
@@ -92,7 +90,7 @@ def test_problems_group_by_severity_worst_first(plan_types):
 
 def test_a_problem_names_the_object_and_the_remedy(plan_types):
     """The message says what happened; the remedy says what to change."""
-    report = _broken(plan_types).report(verbose=True, log=False)
+    report = _broken(plan_types).report(verbose=True)
 
     assert "(object abc-123)" in report, "The object id locates it in the file"
     assert "_spyglass_config.yaml" in report, "missing_attribute has a remedy"
@@ -107,7 +105,7 @@ def test_a_divergence_revision_is_pasteable(plan_types):
     It renders inside the divergence section now, and in the *default*
     report: a warning the reader has to ask for is not a warning.
     """
-    report = _broken(plan_types).report(log=False)
+    report = _broken(plan_types).report()
 
     assert "{'sex': 'M'}" in report, "The revision renders as a dict literal"
     assert "Disagrees with stored rows (1):" in report
@@ -121,7 +119,7 @@ def test_the_default_report_shows_warnings_but_not_resolutions(plan_types):
     a warning rather than a blocker, would have vanished from the report that
     replaced the prompt -- quieter than the behaviour it replaced.
     """
-    quiet = _broken(plan_types).report(log=False)
+    quiet = _broken(plan_types).report()
 
     assert "Soft (1):" in quiet, "An advisory problem is still news"
     assert "Hard (1):" in quiet, "Blocking problems always show"
@@ -143,13 +141,13 @@ def test_the_default_report_shows_warnings_but_not_resolutions(plan_types):
         ),
     )
 
-    assert "Info (1):" not in plan.report(log=False), "info is opt-in"
-    assert "Info (1):" in plan.report(verbose=True, log=False)
+    assert "Info (1):" not in plan.report(), "info is opt-in"
+    assert "Info (1):" in plan.report(verbose=True)
 
 
 def test_blocked_tables_are_named_once_at_the_end(plan_types):
     """A blocked table is a consequence, not a separate failure."""
-    report = _broken(plan_types).report(verbose=True, log=False)
+    report = _broken(plan_types).report(verbose=True)
 
     assert "Blocked by the above (1): `common`.`electrode`" in report
 
@@ -245,4 +243,60 @@ def test_a_fatal_plan_is_not_a_no_op(plan_types):
     assert unreadable.verdict == "fatal", "Not no_op, and not clean"
     assert not unreadable.is_clean
     assert len(unreadable.blocking) == 1, "fatal blocks, as hard does"
-    assert "already ingested" not in unreadable.report(log=False)
+    assert "already ingested" not in unreadable.report()
+
+
+def test_rendering_a_report_does_not_emit_it(plan_types, caplog):
+    """`report` renders; `log_report` emits. Folding both into one method made
+    `print(plan.report())` show the report twice.
+    """
+    plan = _broken(plan_types)
+
+    with caplog.at_level("INFO"):
+        text = plan.report()
+
+    assert text, "The report is still returned"
+    assert not caplog.records, (
+        "report() must not log; use log_report() where the report should be "
+        f"emitted. Got: {[r.message[:60] for r in caplog.records]}"
+    )
+
+    with caplog.at_level("WARNING"):
+        emitted = plan.log_report()
+
+    assert emitted == text, "log_report returns what report renders"
+    assert caplog.records, "log_report must emit"
+
+
+def test_a_problem_message_does_not_split_its_remedy(plan_types):
+    """A `parse_error` carries an exception's text, newline and all.
+
+    Unstripped, that newline landed between the problem and its remedy, so
+    the report looked like it had lost a line.
+    """
+    plan = plan_types.IngestionPlan(
+        nwb_file_name="noisy_.nwb",
+        table_plans=(
+            plan_types.TablePlan(
+                table_name="`common`.`session`",
+                entries=plan_types.PlannedEntries(),
+                status="failed",
+                problems=(
+                    plan_types.Problem(
+                        "hard",
+                        "parse_error",
+                        "something raised\n",
+                        table="`common`.`session`",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    report = plan.report()
+
+    assert "\n\n      ->" not in report, (
+        "A trailing newline in the message split the remedy off its line:\n"
+        f"{report}"
+    )
+    assert "something raised" in report

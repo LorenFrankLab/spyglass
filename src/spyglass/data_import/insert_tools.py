@@ -50,7 +50,7 @@ def _plan_raw_file(copy_name: str, raw_path: Path):
         )
 
     IngestionPlanLog().stage(plan)
-    plan.report()
+    plan.log_report()
 
     return plan
 
@@ -160,10 +160,8 @@ def insert_sessions(
                 f"Cannot insert data from {nwb_file_name}: {out_nwb_file_name}"
                 + " is already in Nwbfile table."
             )
-            # A result per file, including this one. Returning nothing for a
-            # skipped file left the list shorter than the input, so a caller
-            # with several files could not tell which had been skipped, or
-            # line results up with what it asked for.
+            # A skipped file still contributes a result, so a caller can line
+            # the list up with the files it asked for.
             results.append(
                 IngestionPlan(
                     nwb_file_name=out_nwb_file_name,
@@ -198,11 +196,9 @@ def insert_sessions(
     if raise_err and not dry_run and (blocked := [p for p in results if p]):
         raise ValueError(
             f"Ingestion did not complete for {len(blocked)} file(s):\n"
-            + "\n".join(p.report(log=False) for p in blocked)
+            + "\n".join(p.report() for p in blocked)
         )
 
-    # One result per file. Previously returned from inside the loop, so only
-    # the first file of a list was ever processed.
     return results
 
 

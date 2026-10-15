@@ -58,10 +58,8 @@ class IngestionMixin(BaseMixin):
     A table caching file-level state on itself -- a camera map, an epoch
     lookup, a counter -- must reset it in **`before_parse`**, not in
     `insert_from_nwbfile`: planning and inserting share `_parse` but not
-    `insert_from_nwbfile`, so a reset placed there never runs for a plan.
-    `populate` also loops files on one instance, and a class-level `dict()`
-    is shared by every instance. Three tables got this wrong and each served
-    a previous file's answers.
+    `insert_from_nwbfile`, so a reset placed there never runs for a plan, and
+    one instance serves every file a `populate` loops over.
     """
 
     _expected_duplicates = False  # If True, rows to be shared across sessions
@@ -401,11 +399,9 @@ class IngestionMixin(BaseMixin):
     def entries_for_source(self, source, ctx) -> PlannedEntries:
         """Return the entries one source object generates.
 
-        Default: a source that expands into rows -- a DynamicTable -- is
-        handed row by row to `entries_for_row`; anything else goes there
-        whole. Override this to work at the level of the container; override
-        `entries_for_row` to work at the level of its rows. Neither override
-        needs to test which it was given.
+        A source that expands into rows -- a DynamicTable -- is handed row by
+        row to `entries_for_row`; anything else goes there whole. Override this
+        for the container, `entries_for_row` for its rows.
 
         Parameters
         ----------
@@ -508,15 +504,10 @@ class IngestionMixin(BaseMixin):
     def populate(self, *restrictions, **kwargs):
         """Ingest whole NWB files rather than running `make` per key.
 
-        Ingestion tables are filled by `insert_from_nwbfile`, which parses a
-        file once and inserts every entry it yields, so `make` on these tables
-        is a deprecation shim. Callers reaching for the DataJoint idiom are
-        routed to the ingestion path, once per file that has no entries here
-        yet -- otherwise `populate()` would call the shim and raise for any
-        session whose rows this table happens to be missing.
-
-        Tables not keyed by `nwb_file_name` fall through to DataJoint's
-        `populate`, since a file cannot be identified for them.
+        `make` on these tables is a shim that raises, so the DataJoint idiom
+        is routed to `insert_from_nwbfile` instead, once per file with no
+        entries here yet. Tables not keyed by `nwb_file_name` fall through to
+        DataJoint's `populate`, there being no file to identify.
 
         Parameters
         ----------
@@ -1061,21 +1052,17 @@ class IngestionMixin(BaseMixin):
         """Report what would go wrong inserting rows this table planned.
 
         Each failure becomes a `Problem` rather than an exception, so one bad
-        table does not hide the rest of the file. A table answers for the
-        entries it plans -- including those destined for a table it feeds,
-        which need not itself ingest anything. Whether the file as a whole
-        can be ingested is the planner's question, not this one.
+        table does not hide the rest of the file. A table answers for every
+        entry it plans, including those destined for a table it feeds.
 
         Parameters
         ----------
         rows : iterable of dict
             The planned entries.
         key_space : VirtualKeySpace
-            The keys that will exist once the whole plan is inserted --
-            what the database holds now, plus what the plan intends to add.
-            Foreign keys are checked against it rather than against the
-            database, so a table that emits its parent's entries alongside
-            its own does not appear broken.
+            The keys that will exist once the whole plan is inserted. Foreign
+            keys are checked against it rather than the database, so a table
+            emitting its parent's entries does not appear broken.
         table : dj.Table, optional
             The table the rows are destined for, as an instance. Default
             None, this table.

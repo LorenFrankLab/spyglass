@@ -273,6 +273,109 @@ def master_analysis_table(common_nwbfile):
     return common_nwbfile.AnalysisNwbfile()
 
 
+def _analysis_tables(common_nwbfile):
+    """Every analysis table a test could have written to."""
+    from contextlib import suppress
+
+    tables = [common_nwbfile.AnalysisNwbfile()]
+    with suppress(Exception):  # registry unreadable: the master still sweeps
+        tables.extend(common_nwbfile.AnalysisRegistry().all_classes())
+    return tables
+
+
+@pytest.fixture
+def sweep_analysis_files(common_nwbfile, teardown):
+    """Remove the analysis rows and files a test created, however it ended.
+
+    Deliberately in fixture teardown rather than at the tail of a test body:
+    a failing assertion skips whatever follows it, so a cleanup written there
+    runs only when the test passed -- leaving rows and files behind in exactly
+    the case the next run most needs them gone.
+
+    Snapshots **both** the analysis directory and the analysis tables' keys.
+    Files alone were not enough: a file made by a fixture that ran before this
+    one is not new by the time the snapshot is taken, so the row naming it
+    would survive.
+    """
+    from contextlib import suppress
+
+    from spyglass.settings import analysis_dir
+
+    root = Path(analysis_dir)
+    files_before = set(root.rglob("*.nwb"))
+    tables = _analysis_tables(common_nwbfile)
+    keys_before = []
+    for table in tables:
+        with suppress(Exception):
+            keys_before.append((table, set(table.fetch("analysis_file_name"))))
+
+    yield
+
+    if not teardown:
+        return
+
+    created = set(root.rglob("*.nwb")) - files_before
+    names = {p.name for p in created}
+
+    for table, before in keys_before:
+        with suppress(Exception):
+            gained = set(table.fetch("analysis_file_name")) - before
+            names |= gained
+            if gained:
+                (
+                    table & [{"analysis_file_name": n} for n in gained]
+                ).delete_quick()
+
+    for table in tables:  # a row whose file predates the snapshot
+        with suppress(Exception):
+            if names:
+                (
+                    table & [{"analysis_file_name": n} for n in names]
+                ).delete_quick()
+
+    for path in created:
+        with suppress(Exception):
+            path.unlink()
+
+
+@pytest.fixture
+def sweep_new_rows(teardown):
+    """Factory: watch a table, and drop the rows it gains during the test.
+
+    `sweep_new_rows(table)` snapshots its primary keys; whatever the test adds
+    is deleted in fixture teardown, where a failing assertion cannot skip it.
+    For tables with no analysis file behind them -- see `sweep_analysis_files`
+    for those.
+    """
+    from contextlib import suppress
+
+    watched = []
+
+    def _watch(table):
+        with suppress(Exception):
+            watched.append(
+                (table, {tuple(sorted(k.items())) for k in table.fetch("KEY")})
+            )
+        return table
+
+    yield _watch
+
+    if not teardown:
+        return
+
+    for table, before in reversed(watched):
+        with suppress(Exception):
+            gained = [
+                dict(k)
+                for k in (
+                    {tuple(sorted(r.items())) for r in table.fetch("KEY")}
+                    - before
+                )
+            ]
+            if gained:
+                (table & gained).delete_quick()
+
+
 @pytest.fixture(scope="module")
 def custom_analysis_table(custom_config, dj_conn, common_nwbfile):
     """Create and return a custom AnalysisNwbfile table.

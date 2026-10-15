@@ -92,15 +92,10 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     success every entry is migrated to its real table and its blob cleared,
     leaving the hashes behind as provenance.
 
-    `nwb_hash` is recorded for provenance only and is never a validity gate.
-    The expected loop is ingest → read the report → edit the file → retry, so
-    the file hash differs on every attempt by construction; gating freshness
-    on it would discard the whole plan exactly when it is most useful.
-    Validity is per entry, via the read-set object digests.
-
-    `id_set_digest` *is* a gate, and the only whole-file one. It covers the
-    file's set of object ids, not their contents, so the retry loop above
-    does not disturb it.
+    `id_set_digest` is the only whole-file reuse gate. `nwb_hash` is not one:
+    the retry loop edits the file, so the file hash differs on every attempt
+    by construction, and gating on it would discard the plan exactly when it
+    is most useful.
     """
 
     definition = """
@@ -119,23 +114,10 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     class Entry(SpyglassMixinPart):
         """One prospective row, with the two hashes that classify it.
 
-        Two hashes, not one: `key_hash` is identity and `blob_hash` is
-        content, and same-key-different-blob is a divergence rather than
-        novelty. One hash cannot tell those apart.
-
-        `table_name` is a plain string, **not** a foreign key -- a prospective
-        entry routinely names a table whose rows do not exist yet.
-
-        `owner_table` is the table whose parse produced the row, which is a
-        different question from where the row is going: `IntervalList`
-        receives rows from four owners on the mini file alone, so it cannot
-        be derived from `table_name`.
-
-        `state` answers only what nothing else records: whether the row is in
-        its own table yet, and whether it disagrees with what is there.
-        *Why* an entry is still planned is `Table.status` for its
-        `owner_table`, or this row's own `problem_code`; which run wrote a
-        stored row is the real table's business.
+        Two hashes because same-key-different-blob is a divergence rather than
+        novelty, and one hash cannot tell those apart. `table_name` is a plain
+        string, **not** a foreign key: a prospective entry routinely names a
+        table whose rows do not exist yet.
         """
 
         definition = """
@@ -154,15 +136,9 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     class Table(SpyglassMixinPart):
         """One table's share of a plan, and whether its parse can be reused.
 
-        `read_set_digest` covers the NWB objects that table actually read, so
-        an equal digest means nothing it depends on moved. NULL means
-        *unknown*, never "unchanged": a file that could not be hashed must
-        re-parse rather than silently reuse.
-
-        It covers the *file* only, so `xrefs` carries the other half: what the
-        parse resolved out of other tables.
-
-        `table_name` is a plain string, for the same reason as on `Entry`.
+        `read_set_digest` covers the NWB objects the table read; `xrefs`
+        carries the other half, what it resolved out of other tables. Both
+        are needed to call a parse reusable.
         """
 
         definition = """
@@ -564,17 +540,9 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     ):
         """Build one staged row, hashing its key and its whole payload.
 
-        The two hashes must cover different things or the pair is useless:
-        `key_hash` over the primary key alone is what makes an entry
-        re-identifiable across attempts, and `blob_hash` over the whole entry
-        is what separates "already staged, unchanged" from "staged, and the
-        plan now disagrees with it".
-
-        `target` is the live table, so its primary key is known here without
-        resolving `table_name` back to a class. A plan rebuilt from storage
-        carries name-only targets; those fall back to hashing the whole
-        entry, which still detects change but cannot tell divergence from
-        novelty.
+        `key_hash` covers the primary key alone, which is what re-identifies
+        an entry across attempts; `blob_hash` covers the whole entry, which is
+        what separates "unchanged" from "the plan now disagrees".
 
         Parameters
         ----------

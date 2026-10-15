@@ -499,14 +499,11 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         """Return the valid times of each task epoch, resolved once per file.
 
         A video belongs to whichever epoch its timestamps fall inside, so
-        every epoch's times are needed to place a single video.
+        every epoch's times are needed to place one video.
 
-        Both `TaskEpoch` and `IntervalList` are filled by the same ingestion
-        that fills this table, and both are planned before it. Asked of the
-        context, this reads what the plan will contain; asked of the database
-        while planning a file that is not ingested, it would find no epochs and
-        place no videos at all -- reporting nothing wrong while planning
-        nothing.
+        Asked of the context, not the database: `TaskEpoch` and `IntervalList`
+        are filled by this same ingestion, so a query while planning an
+        un-ingested file finds no epochs and silently places no videos.
 
         Parameters
         ----------

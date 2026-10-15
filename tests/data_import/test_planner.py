@@ -302,8 +302,8 @@ def test_a_divergence_is_reported_without_changing_the_verdict(
         p.severity == "soft" for p in divergences
     ), "A divergence is a warning, not a blocker"
     assert not plan.blocking, "It must not block"
-    assert "Disagrees with stored rows" in plan.report(
-        log=False
+    assert (
+        "Disagrees with stored rows" in plan.report()
     ), "A soft divergence must still appear in the default report"
 
 
@@ -582,7 +582,7 @@ def test_a_soft_problem_is_visible_in_the_default_report(
         ),
     )
 
-    report = plan.report(log=False)
+    report = plan.report()
 
     assert "Disagrees with stored rows (1)" in report
     assert "institution_name" in report

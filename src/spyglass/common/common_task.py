@@ -448,17 +448,12 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
     def get_epoch_interval_name(cls, epoch, session_intervals):
         """Get the interval name for a given epoch based on matching number.
 
-        Handles the epoch tag formats `1`, `01`, `001`, `01_s1`, `epoch_01` and
-        a descriptive tag such as `baseline`. The epoch must match a whole token
-        -- a run of letters and digits -- rather than appear anywhere in the
-        name, so epoch 1 matches `01_s1` but not `1ae82410-f27d-...`.
-
-        Candidates are ranked in tiers and the first non-empty tier decides:
-        the whole name (`01`), then the leading token (`01_s1`), then any token
-        (`epoch_01`). Within a tier, a name that is a prefix of the others wins,
-        since derived intervals extend the session interval's name
-        (`01_s1_first9`). Anything still ambiguous logs a warning and returns
-        None rather than guessing.
+        The epoch must match a whole token -- a run of letters and digits --
+        rather than appear anywhere in the name, so epoch 1 matches `01_s1` but
+        not `1ae82410-f27d-...`. Candidates are tiered (whole name, leading
+        token, any token) and the first non-empty tier decides; within a tier
+        the shortest prefix wins, since derived intervals extend the session
+        interval's name. Still ambiguous returns None rather than guessing.
 
         Parameters
         ----------

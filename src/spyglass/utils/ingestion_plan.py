@@ -63,7 +63,10 @@ class Problem:
         # The object id is how a user finds the thing in the file, so it
         # belongs on the line rather than only in the stored record.
         which = f" (object {self.nwb_object_id})" if self.nwb_object_id else ""
-        return f"[{self.severity}] {where}{self.code}: {self.message}{which}"
+        # Stripped: a `parse_error` carries an exception's text, which often
+        # ends in a newline and would otherwise split the remedy off its line.
+        message = str(self.message).strip()
+        return f"[{self.severity}] {where}{self.code}: {message}{which}"
 
 
 def _target_key(table) -> str:
@@ -149,15 +152,9 @@ def hashable(value):
 def entry_digest(entry: dict) -> str:
     """Digest over a whole entry, faithful to what arrays actually hold.
 
-    Not `datajoint.hash.key_hash`, which is the right tool for a primary key
-    and the wrong one here: it hashes `str(value)`, and numpy abbreviates a
-    large array to `[0. 1. 2. ... 9997. 9998. 9999.]`. An edit in the middle
-    of an `IntervalList.valid_times` would hash identically, which for a
-    change-detection hash is the one unacceptable answer. `hashable` reduces
-    an array to its bytes instead.
-
-    Attribute names are included, so gaining or losing a column counts as a
-    change -- again unlike `key_hash`, which hashes values alone.
+    Not `datajoint.hash.key_hash`: it hashes `str(value)`, and numpy
+    abbreviates a large array to `[0. 1. ... 9998. 9999.]`, so an edit in the
+    middle of an `IntervalList.valid_times` would hash identically.
 
     Parameters
     ----------
@@ -202,27 +199,9 @@ def rows_digest(rows) -> str:
 def collated(value):
     """Reduce a string key value to Spyglass's notion of one identity.
 
-    **A Spyglass rule, not a mirror of the server's collation.** Two keys that
-    differ only in case or surrounding whitespace name one thing: `Sleep` and
-    `sleep` are one task. Deliberately *stricter* than the backend, so what
-    Spyglass calls one key the database always does too, and never the reverse.
-
-    Erring that way is the point, because the failure modes are not
-    symmetric:
-
-    - Too strict — two rows the database would keep apart collapse, or are
-      reported as a `duplicate_key`. Visible, and under the rule above it is
-      the intended answer rather than a defect.
-    - Too lax — a row looks novel and the insert then rejects it
-      (`planner_miss`), or a stored parent looks missing and `missing_parent`
-      blocks the table and everything beneath it. That is what comparing with
-      Python's `==` did.
-
-    Reading each column's collation and folding to match was built first and
-    removed. It made row identity depend on parsing collation names (`_ci`,
-    `_ai`, the `general_ci` special case, PAD vs NO PAD) -- backend detail
-    that drifts, and that no Spyglass behaviour should rest on. One rule the
-    project owns is easier to keep true than a reimplementation of MySQL's.
+    A Spyglass rule, not a mirror of the server's collation, and deliberately
+    *stricter*: what Spyglass calls one key the database always does too, never
+    the reverse. Being laxer is the direction that fails.
 
     Parameters
     ----------
@@ -236,16 +215,12 @@ def collated(value):
     if not isinstance(value, str):
         return value
 
-    # Accents are *not* folded: `Müller` and `Muller` stay two identities
-    # here, while the default collation calls them one, so that pair still
-    # reaches the insert and fails as a `planner_miss`. Judged not worth NFKD
-    # normalisation for how rarely it arises; written down so the gap is known
-    # rather than rediscovered.
+    # Accents are *not* folded: `Müller` and `Muller` stay two identities here
+    # while the default collation calls them one, so that pair reaches the
+    # insert and fails. A known gap, not an oversight.
     #
-    # `strip` is kept: a PAD SPACE collation (MySQL 5.7's default) ignores
-    # trailing spaces, so without it Spyglass would be *laxer* than that
-    # backend -- the direction that fails. A key with space around it is a
-    # typo in every case seen so far.
+    # `strip` stays: a PAD SPACE collation ignores trailing spaces, so without
+    # it Spyglass would be laxer than that backend.
     return value.strip().casefold()
 
 
@@ -368,12 +343,9 @@ class PlannedEntries:
     def in_dependency_order(self) -> Tuple[Tuple[Any, Tuple[dict, ...]], ...]:
         """Return (target, rows) pairs sorted so parents precede children.
 
-        Ranked by DataJoint's own topological sort of the dependency graph,
-        so a table that emits its parent's entries alongside its own need not
-        remember to put the parent first.
-
-        Targets the graph does not know -- a plan rebuilt from storage, say --
-        keep their first-seen order, after the ranked ones.
+        Ranked by DataJoint's own topological sort, so a table emitting its
+        parent's entries need not put the parent first. Targets the graph does
+        not know keep their first-seen order, after the ranked ones.
         """
         pairs = list(self)
         ranks = self._topological_ranks(pairs)
@@ -565,13 +537,14 @@ class IngestionPlan:
     def verdict(self) -> str:
         """Whether this file holds anything new.
 
-        One answer in place of a wall of duplicate errors on a re-run:
+        Returns
+        -------
+        str
+            One of `fatal` (could not be planned at all), `no_op` (every
+            entry already present and matching), `all_new`, or `partial_new`.
 
-        - `fatal` — the file could not be planned at all
-        - `no_op` — every planned entry is already present and matches
-        - `all_new` — none of it is in the database yet
-        - `partial_new` — some of it is
-
+        Notes
+        -----
         `fatal` is answered before the count, and must stay that way: a file
         that could not be read plans no entries, so nothing is novel, and
         counting alone would call it `no_op` -- already ingested.
@@ -588,18 +561,16 @@ class IngestionPlan:
         """Return the count of novel entries per table, omitting zeroes."""
         return {name: n for name, n in self.novel.items() if n}
 
-    def report(self, verbose: bool = False, log: bool = True) -> str:
+    def report(self, verbose: bool = False) -> str:
         """Render the plan as text, leading with the verdict.
 
-        A clean plan is one line to avoid empty sections.
+        A clean plan is one line to avoid empty sections. Renders only;
+        `log_report` is the one that emits.
 
         Parameters
         ----------
         verbose : bool, optional
             Include every problem, not only the blocking ones. Default False.
-        log : bool, optional
-            Also emit the report through `logger`, at `warning` when the plan
-            has blocking problems and `info` otherwise. Default True.
 
         Returns
         -------
@@ -676,27 +647,38 @@ class IngestionPlan:
                 + ", ".join(sorted(blocked))
             )
 
-        text = "\n".join(lines)
+        return "\n".join(lines)
 
-        if log:
-            from spyglass.utils.logging import logger
+    def log_report(self, verbose: bool = False) -> str:
+        """Emit the report through `logger`, and return it.
 
-            # Anything beyond `info` is news, so a file that only disagrees
-            # with stored rows still warns rather than whispering.
-            notable = [p for p in self.problems if p.severity != "info"]
-            emit = logger.warning if notable else logger.info
-            emit(text)
+        Parameters
+        ----------
+        verbose : bool, optional
+            Include every problem, not only the blocking ones. Default False.
+
+        Returns
+        -------
+        str
+            The report, as `report` renders it.
+        """
+        from spyglass.utils.logging import logger
+
+        text = self.report(verbose=verbose)
+        # Anything beyond `info` is news, so a file that only disagrees with
+        # stored rows still warns rather than whispering.
+        notable = [p for p in self.problems if p.severity != "info"]
+        emit = logger.warning if notable else logger.info
+        emit(text)
 
         return text
 
     def _divergence_lines(self) -> List[str]:
         """Render the rows the file disagrees with, grouped by table.
 
-        Its own section because a divergence is not a failure and should not
-        read like one: nothing is blocked, and the run will insert the rest.
-        Grouped and counted so a re-ingest that touched many rows stays
-        skimmable -- the whole point of reporting rather than prompting is
-        that the reader can take it in at once.
+        Its own section because a divergence is not a failure: nothing is
+        blocked and the run inserts the rest. Grouped and counted so a
+        re-ingest touching many rows stays skimmable.
         """
         divergences = [p for p in self.problems if p.code == "divergence"]
         if not divergences:
@@ -767,7 +749,7 @@ class IngestionPlan:
         return len(self.blocking)
 
     def __str__(self) -> str:
-        return self.report(log=False)
+        return self.report()
 
     def __repr__(self) -> str:
         verdict = "clean" if self.is_clean else "blocked"
@@ -781,11 +763,10 @@ class IngestionPlan:
 class FileContext:
     """What a table is given while parsing one NWB file.
 
-    Replaces caching file-level state on the table object, which outlives any
-    one ingestion. Also collects the objects a table read -- the read-set that
-    lets a later attempt re-parse only what actually changed -- and the
-    problems it hit, so parsing accumulates a report rather than stopping at
-    the first failure.
+    Holds what would otherwise be cached on the table object, which outlives
+    any one ingestion: the read-set a later attempt needs, and the problems
+    this parse hit, so it accumulates a report rather than stopping at the
+    first failure.
     """
 
     nwb_file_name: str
@@ -813,14 +794,10 @@ class FileContext:
         """Return the rows a table will hold, for a cross-reference.
 
         Ask this rather than querying, whenever a table needs a value from
-        another table that the same ingestion fills. Querying answers for the
-        database as it is now, which during planning is a file's *past*: the
-        rows are not written yet, so a parse that queries reports a failure or
-        quietly plans something different from what the insert will do.
-
-        With a plan in progress this answers `planned | stored`. Without one --
-        a plain insert -- it queries, which is correct there because each
-        table's rows are written before the tables that depend on them parse.
+        another table the same ingestion fills: during planning those rows are
+        not written yet, so a query would report a failure or plan something
+        different from what the insert does. Answers `planned | stored` with a
+        plan in progress, and queries without one.
 
         Parameters
         ----------
