@@ -848,6 +848,61 @@ def do_pose_estimation(
     analyze_videos(**core_params)
 
 
+# DLC 2.x evaluation-CSV headers, odd spacing and colon included. These are
+# the keys DLCModelEvaluation.make indexes, because V1 handed it the CSV row
+# verbatim.
+_LEGACY_EVAL_FIELDS = (
+    "Training iterations:",
+    " Train error(px)",
+    " Test error(px)",
+    "p-cutoff used",
+    "Train error with p-cutoff",
+    "Test error with p-cutoff",
+)
+
+# DLC 3.x writes the same measurements under its own column names.
+_MODERN_TO_LEGACY_EVAL = {
+    "Training iterations:": "Training epochs",
+    " Train error(px)": "train rmse",
+    " Test error(px)": "test rmse",
+    "p-cutoff used": "pcutoff",
+    "Train error with p-cutoff": "train rmse_pcutoff",
+    "Test error with p-cutoff": "test rmse_pcutoff",
+}
+
+
+def to_legacy_eval_fields(csv_results: dict) -> dict:
+    """Normalize a DLC evaluation-CSV row to the DLC 2.x field spellings.
+
+    Parameters
+    ----------
+    csv_results : dict
+        One parsed row of a DLC evaluation CSV.
+
+    Returns
+    -------
+    dict
+        *csv_results* unchanged when it already uses the 2.x spellings;
+        otherwise the 3.x columns renamed to them, with any column the file
+        does not carry mapped to None.
+
+    Notes
+    -----
+    A 2.x row passes through untouched because V1 read it straight from the
+    file -- renaming it unconditionally replaced real measurements with
+    whatever the 3.x lookups missed. An absent column maps to None rather than
+    a stand-in value: ``DLCModelEvaluation`` persists this verbatim, so a
+    guessed number would be stored as if it had been measured.
+    """
+    if any(field in csv_results for field in _LEGACY_EVAL_FIELDS):
+        return csv_results
+
+    return {
+        legacy: csv_results.get(modern)
+        for legacy, modern in _MODERN_TO_LEGACY_EVAL.items()
+    }
+
+
 def get_dlc_model_eval(
     yml_path: str,
     model_prefix: str,
@@ -925,24 +980,7 @@ def get_dlc_model_eval(
         with open(csv_file, newline="") as f:
             csv_results = list(csv.DictReader(f, delimiter=","))[0]
 
-        # Convert modern DLC format to legacy format expected by Spyglass
-        legacy_mapping = {
-            "Training iterations:": csv_results.get("Training epochs", "2"),
-            " Train error(px)": csv_results.get(
-                "train rmse", str(float("nan"))
-            ),
-            " Test error(px)": csv_results.get("test rmse", str(float("nan"))),
-            "p-cutoff used": csv_results.get("pcutoff", "0.1"),
-            "Train error with p-cutoff": csv_results.get(
-                "train rmse_pcutoff", str(float("nan"))
-            ),
-            "Test error with p-cutoff": csv_results.get(
-                "test rmse_pcutoff", str(float("nan"))
-            ),
-        }
-
-        results = legacy_mapping
-        return results
+        return to_legacy_eval_fields(csv_results)
 
     except (OSError, KeyError, ValueError, TypeError, AttributeError) as e:
         raise RuntimeError(
