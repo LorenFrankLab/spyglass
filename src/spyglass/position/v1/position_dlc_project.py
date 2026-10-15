@@ -496,28 +496,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
         Must be run on local machine to access GUI,
         cannot be run through ssh tunnel
         """
-        from deeplabcut import extract_frames
-        from deeplabcut.utils.auxiliaryfunctions import read_config
-
         config_path = (cls & key).fetch1("config_path")
-
-        with test_mode_suppress():
-            cfg = read_config(config_path)
-
-        # Clear any previously extracted PNG files so DLC always picks fresh
-        # frames. Without this, DLC skips frames that already exist on disk,
-        # which breaks idempotent re-runs (e.g. tests with --no-teardown).
-        label_dir = Path(cfg["project_path"]) / "labeled-data"
-        for video in cfg.get("video_sets", {}):
-            vid_label_dir = label_dir / Path(video).stem
-            if vid_label_dir.exists():
-                for png in vid_label_dir.glob("*.png"):
-                    png.unlink()
-
-        # Default to uniform sampling so frame indices are predictable and
-        # avoid frame 0 (img000) or frame 1 (img001) which are reserved for
-        # base test data in labeled-data directories.
-        kwargs.setdefault("algo", "uniform")
+        from deeplabcut import extract_frames
 
         with test_mode_suppress():
             extract_frames(config_path, **kwargs)
