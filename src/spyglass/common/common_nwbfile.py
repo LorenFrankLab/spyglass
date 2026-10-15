@@ -121,10 +121,8 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        # pathlib rather than string concatenation: it normalizes a trailing
-        # separator on raw_dir, and drops any directory the caller put in
-        # front of the name rather than producing `<raw_dir>/<their path>`.
-        file_path = str(Path(raw_dir) / Path(nwb_file_name).name)
+        nwb_file_name = Path(nwb_file_name).name
+        file_path = str(Path(raw_dir) / nwb_file_name)
         if new_file:
             return file_path
 
