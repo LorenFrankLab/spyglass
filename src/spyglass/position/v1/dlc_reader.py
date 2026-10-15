@@ -117,7 +117,7 @@ class PoseEstimation:  # Note: simplifying to require only project path
     @property
     def body_parts(self) -> list[str]:
         """List of body parts in the DLC output."""
-        return self.df.columns.levels[0]
+        return self.df.columns.levels[0].tolist()
 
     def reformat_rawdata(self) -> dict:
         """Reformat rawdata using shared utility (DEPRECATED - use .data property).
