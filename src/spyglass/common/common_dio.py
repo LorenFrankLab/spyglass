@@ -47,7 +47,8 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
         ctx : FileContext, optional
             Parse context, used to resolve `Raw`'s interval against the plan as
             well as the database. Default None, resolving against the database
-            alone -- correct on a plain insert, where `Raw` is written first.
+            alone, which is correct on a plain insert, where `Raw` is written
+            first.
 
         Returns
         -------
@@ -63,7 +64,7 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
         # Times for these events correspond to the valid times for the raw
         # data; with no raw data, these events get an interval of their own.
         # Asked of the context, which holds the `Raw` row this same ingestion
-        # plans -- a query would make the branch below turn on *when* the plan
+        # plans. A query would make the branch below turn on *when* the plan
         # was built.
         raw_interval = ctx.value_for(
             Raw(), "interval_list_name", {"nwb_file_name": nwb_file_name}

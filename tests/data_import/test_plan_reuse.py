@@ -38,7 +38,7 @@ def test_an_unchanged_file_reuses_every_table_that_found_something(
 
     Not *zero* parses, and the exception is not a shortfall. A table that found
     no source object read nothing, so its read-set is empty and its digest is a
-    digest of nothing -- add the object it was looking for and that digest is
+    digest of nothing. Add the object it was looking for and that digest is
     still unchanged. An empty read-set can detect a modification but not an
     appearance, so those tables must always parse. They are also the cheap
     ones: finding no source is an early return.
@@ -107,7 +107,7 @@ def test_a_changed_read_set_re_parses_only_its_table(
     parsed = set(parse_counter)
     assert target in parsed, "The table whose read-set changed must re-parse"
 
-    # Tables that found nothing always parse again -- see the test above --
+    # Tables that found nothing always parse again, as the test above shows,
     # so the claim is about the ones that did find something.
     productive = {
         tp.table_name
@@ -153,8 +153,8 @@ def test_nothing_staged_means_parse(
 ):
     """With no staged plan there is nothing to reuse, so everything parses.
 
-    Stated because the alternative -- treating "no record" as "unchanged" --
-    is the failure mode that would quietly plan an empty file.
+    Stated because the alternative, treating "no record" as "unchanged", is
+    the failure mode that would quietly plan an empty file.
     """
     from spyglass.common.common_usage import IngestionPlanLog
     from spyglass.data_import.planner import plan_nwbfile
@@ -174,7 +174,7 @@ def test_a_plan_from_another_spyglass_version_is_not_reused(
     The read-set digests cover NWB objects, so they notice the *file*
     changing and nothing else. Reuse fires precisely where a previous attempt
     left an incomplete plan, which is precisely where a Spyglass-side fix has
-    just changed what a parse would produce -- so without this, a user whose
+    just changed what a parse would produce. Without this, a user whose
     ingest was blocked by a bug, who upgrades and retries, is served the plan
     the broken version built.
     """
@@ -217,7 +217,7 @@ def test_a_changed_stored_row_re_parses_the_table_that_read_it(
     """A cross-reference resolved out of another table joins the reuse key.
 
     `DIOEvents` reads `Raw.interval_list_name` and writes it into every one
-    of its own entries, so reuse here does not merely cost nothing -- it
+    of its own entries, so reuse here does not merely cost nothing: it
     serves a plan naming an interval the insert would not write.
 
     Planned for `DIOEvents` alone so the lookup resolves against the stored
@@ -264,7 +264,7 @@ def test_a_changed_stored_row_re_parses_the_table_that_read_it(
         + "own entries"
     )
     assert staged.xrefs, (
-        "Premise: the parse recorded what it resolved out of Raw -- without "
+        "Premise: the parse recorded what it resolved out of Raw; without "
         + "it this test cannot distinguish the fix from its absence"
     )
 
@@ -294,8 +294,8 @@ def test_a_staged_plan_records_its_provenance(
 
     Both columns existed from the start and were filled only by the plan
     cache, which nothing enabled, so every staged plan carried NULL until the
-    version became a reuse gate. The hash costs nothing extra -- the read-set
-    index already computes it.
+    version became a reuse gate. The hash costs nothing extra, since the
+    read-set index already computes it.
     """
     from spyglass import __version__
     from spyglass.common.common_usage import IngestionPlanLog

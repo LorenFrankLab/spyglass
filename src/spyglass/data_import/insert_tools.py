@@ -17,9 +17,9 @@ def _plan_raw_file(copy_name: str, raw_path: Path):
     """Plan an ingestion from the raw file, before anything is registered.
 
     Reads the raw file and plans under the *copy's* name, which is what a real
-    ingestion keys its entries by. The two describe one session -- the copy
+    ingestion keys its entries by. The two describe one session: the copy
     holds links where the raw file holds ephys data, and an NWB `object_id` is
-    the same either way -- so what is planned is what would be inserted.
+    the same either way, so what is planned is what would be inserted.
 
     Parameters
     ----------
@@ -192,7 +192,7 @@ def insert_sessions(
         results.append(populate_all_common(out_nwb_file_name))
 
     # After the loop, so a list is fully reported before it stops. Never on a
-    # dry run -- reporting without raising is what that is for.
+    # dry run, since reporting without raising is what that is for.
     if raise_err and not dry_run and (blocked := [p for p in results if p]):
         raise ValueError(
             f"Ingestion did not complete for {len(blocked)} file(s):\n"

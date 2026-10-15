@@ -90,7 +90,7 @@ def test_one_rate_estimate_serves_the_whole_mapping(
 
     assert len(calls) == 1, (
         f"One mapping should estimate the rate once; it ran {len(calls)} "
-        "times -- the memo is not firing"
+        "times; the memo is not firing"
     )
     assert key["sampling_rate"], "The rate still reaches the key"
     assert len(key["valid_times"]), "And valid_times still computes"

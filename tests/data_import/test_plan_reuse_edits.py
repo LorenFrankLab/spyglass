@@ -14,7 +14,7 @@ from contextlib import contextmanager
 import h5py
 import pytest
 
-# An attribute the hasher folds into the object's digest -- not in
+# An attribute the hasher folds into the object's digest. Not in
 # IGNORED_KEYS, which exists so a version bump does not invalidate a file.
 PROBE_ATTR = "ffi_reuse_probe"
 
@@ -64,7 +64,7 @@ def _productive(plan):
 
     The claims below are about these. A table that found no source read
     nothing, so its digest is a digest of nothing and it must always
-    re-parse -- see `test_plan_reuse.py` for why that is not a shortfall.
+    re-parse. See `test_plan_reuse.py` for why that is not a shortfall.
     """
     return {tp.table_name for tp in plan.table_plans if tp.entry_count}
 
@@ -78,7 +78,7 @@ def _readers_of(plan, hasher, h5_path):
     re-parse collateral damage.
 
     Mirrors the index's ownership rule: a path no object claims belongs to
-    the root, and one that is claimed does not -- so an edit inside a
+    the root, and one that is claimed does not, so an edit inside a
     container is not also an edit to the file's metadata.
     """
     changed = {
@@ -194,7 +194,7 @@ def test_an_unrelated_edit_re_parses_nothing(
     """The invariant Phase 6 exists for: an unrelated fix costs nothing.
 
     `camera_frame_counts` is indexed, so an edit to it is visible to the
-    hasher, and no ingestion table reads it -- which is what makes it the
+    hasher, and no ingestion table reads it. That is what makes it the
     honest unrelated case rather than one the index simply cannot see.
     """
     from spyglass.data_import.planner import plan_nwbfile

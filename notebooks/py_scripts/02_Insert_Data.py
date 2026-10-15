@@ -222,8 +222,8 @@ sgc.ProbeType.insert1(
 #
 # Ingestion reads the whole file first and works out every row it would insert,
 # before writing anything. If something in the file prevents a table from being
-# filled, you get the whole list of problems and **nothing is written** — the
-# file is as it was, and you can fix it and try again.
+# filled, you get the whole list of problems and **nothing is written**. The
+# file is as it was, so you can fix it and try again.
 #
 # The return value is that plan, one per file you passed. It is falsy when
 # nothing blocked, so `if result:` reads as "was there a problem", and printing
@@ -242,16 +242,16 @@ else:
 
 # `dry_run=True` does the same work and writes nothing at all, so you can read
 # the report before committing to an ingest. This also works on a file Spyglass
-# has never seen — there is no copy and no `Nwbfile` entry yet, and a dry run
+# has never seen. There is no copy and no `Nwbfile` entry yet, and a dry run
 # creates neither.
 
 report = sgi.insert_sessions(nwb_file_name, dry_run=True)[0]
 print(report.report(verbose=True))  # verbose adds what was resolved
 
-# The verdict on the first line says what an ingest would do: `all_new`,
-# `partial_new`, `no_op` if everything is already stored, or `fatal` if the file
-# could not be read at all. Each problem names the NWB object it came from
-# where there is one, and each kind of problem gets a one-line suggestion.
+# The verdict on the first line says what an ingest would do, each problem
+# names the NWB object it came from where there is one, and each kind of problem
+# gets a one-line suggestion. The verdicts and severities are tabulated in
+# [Ingestion](https://lorenfranklab.github.io/spyglass/latest/Features/Ingestion/).
 #
 # Two flags adjust what happens when the news is bad:
 #

@@ -2,7 +2,7 @@
 
 Parses every ingestion table against one open file, checks the result for the
 integrity failures that would otherwise surface mid-transaction, and reports
-what it found -- including whether any of it is new.
+what it found, including whether any of it is new.
 
 The check that matters most is prospective: an entry's parent must exist
 either in the database *or* elsewhere in the same plan. Without that, tables
@@ -67,12 +67,12 @@ class VirtualKeySpace:
     """The primary keys a table would hold once a plan is inserted.
 
     `existing ∪ planned`: the union of what the database holds now and what
-    the plan intends to add. Lazily read, and never written -- the only
+    the plan intends to add. Lazily read, and never written. This is the only
     database access the planning pass makes.
 
     **Scoped by file, never by key.** Restricting to the keys the plan names
     would hand identity back to the server, whose equivalence is a *subset* of
-    Spyglass's -- see `collated`.
+    Spyglass's. See `collated`.
     """
 
     def __init__(self, nwb_file_name: str = None):
@@ -80,8 +80,8 @@ class VirtualKeySpace:
         Parameters
         ----------
         nwb_file_name : str, optional
-            The file being planned. Default None, reading tables whole --
-            correct but unbounded, so pass it from any real pass.
+            The file being planned. Default None, reading tables whole.
+            That is correct but unbounded, so pass it from any real pass.
         """
         self._nwb_file_name = nwb_file_name
         self._existing: Dict[str, set] = {}
@@ -93,7 +93,7 @@ class VirtualKeySpace:
 
         Sound because no foreign key renames `nwb_file_name` and no
         file-scoped parent is reached from a child without it, so a parent row
-        this plan refers to is always in this plan's file --
+        this plan refers to is always in this plan's file.
         `tests/common/test_ingestion_table_order.py` asserts both.
         """
         if self._nwb_file_name and "nwb_file_name" in table.primary_key:
@@ -103,7 +103,7 @@ class VirtualKeySpace:
     def existing_keys(self, table) -> set:
         """Return the primary keys this table already holds, for this file.
 
-        Takes an instance -- see `_as_table`, which normalizes once at the
+        Takes an instance. See `_as_table`, which normalizes once at the
         boundary rather than in every method here.
         """
         name = table.full_table_name
@@ -205,7 +205,7 @@ def _matches(row: dict, restriction: dict = None) -> bool:
 def _as_table(target):
     """Return a plan target as a table instance.
 
-    A `FreeTable` -- how DataJoint hands back a parent -- carries no
+    A `FreeTable`, which is how DataJoint hands back a parent, carries no
     `as_instance` descriptor but is already an instance. Normalized here once,
     so every function below can assume it was handed one.
     """
@@ -223,7 +223,7 @@ def plan_nwbfile(
     """Plan the ingestion of one NWB file, writing nothing.
 
     A parse depends only on the file, the config and the Spyglass version, but
-    the *verdict* is read from the database -- so a whole plan is never cached,
+    the *verdict* is read from the database. So a whole plan is never cached,
     and reuse is per table and re-checks the database every time.
 
     Parameters
@@ -326,8 +326,8 @@ def plan_nwbfile(
         # plan intends it: seeding the key space is the same prospective
         # integrity that lets a table emit its parent's rows alongside its own.
         # Without this, checking an unregistered file reports `missing_parent`
-        # for Session and blocks every table beneath it -- a report about the
-        # absence of a row the caller was about to create.
+        # for Session and blocks every table beneath it, reporting the absence
+        # of a row the caller was about to create.
         key_space.add_planned(Nwbfile(), [dict(nwb_key)])
         file_problems.append(
             Problem(
@@ -369,7 +369,7 @@ def plan_nwbfile(
             # planned in dependency order, so a parent's rows are already in it.
             #
             # The *whole* config, not `config[camel_name]`: every consumer
-            # indexes it by name itself -- the generic hook reads
+            # indexes it by name itself. The generic hook reads
             # `config[self.camel_name]` and its parts, and an override reads
             # whatever key it declares (`TaskEpoch` reads `Tasks`). Slicing
             # here handed `Electrode` its own row list, so `list.get` raised
@@ -388,8 +388,8 @@ def plan_nwbfile(
             name = table.full_table_name
 
             # The table that planned the rows answers for them, whichever
-            # table they are destined for -- a target may be an ordinary
-            # table, or a FreeTable part declared through config.
+            # table they are destined for. A target may be an ordinary table,
+            # or a FreeTable part declared through config.
             problems.extend(
                 instance.check_planned_rows(rows, key_space, table=table)
             )
@@ -437,7 +437,7 @@ def plan_nwbfile(
 def _reused_plan(instance, staged: dict, hasher, targets: dict, key_space):
     """Return a TablePlan rebuilt from storage, or None to parse.
 
-    Reusable when nothing the table read has changed -- neither the NWB
+    Reusable when nothing the table read has changed: neither the NWB
     objects, by digest, nor the values it resolved out of other tables, by
     re-resolving them. Returns None for any doubt: reuse has to be provably
     safe, while re-parsing is only slow.
@@ -472,7 +472,7 @@ def _reused_plan(instance, staged: dict, hasher, targets: dict, key_space):
         # A failed or blocked parse is not worth preserving, and a *skipped*
         # one must never be: a table that found no source object read nothing,
         # so its digest is a digest of nothing. Add the object it was looking
-        # for and that digest is unchanged -- reuse would report "still
+        # for and that digest is unchanged, so reuse would report "still
         # nothing here" about a file that now has data. An empty read-set
         # detects a modification but not an appearance. These are also the
         # cheap tables: finding no source is an early return.
@@ -480,7 +480,7 @@ def _reused_plan(instance, staged: dict, hasher, targets: dict, key_space):
 
     # Re-hash *the stored* read-set: a digest cannot be recomputed without
     # knowing what went into it, and what a table reads is only known after it
-    # parses -- which is the thing being avoided.
+    # parses, which is the thing being avoided.
     digest = hasher.read_set_digest(record["reads"])
     if digest is None or digest != record["read_set_digest"]:
         return None
@@ -496,8 +496,8 @@ def _reused_plan(instance, staged: dict, hasher, targets: dict, key_space):
         rehydrated.add(target, rows)
 
     # Re-sort parents before children. A parse emits its targets in that order
-    # deliberately -- `PositionSource` yields `IntervalList`, then itself, then
-    # its parts -- and the planner checks foreign keys in iteration order,
+    # deliberately: `PositionSource` yields `IntervalList`, then itself, then
+    # its parts. The planner checks foreign keys in iteration order,
     # adding each target to the key space as it goes. A fetch returns rows in
     # no meaningful order, so rehydrating them as they arrive reported a parent
     # as missing from a plan that contained it two entries later.
@@ -607,7 +607,7 @@ def _object_hasher(
 
     A file that cannot be hashed is not a failure: the plan is still correct,
     it just cannot say whether a later run could reuse any of it. Returning
-    None rather than raising keeps that distinction -- every `read_set_digest`
+    None rather than raising keeps that distinction. Every `read_set_digest`
     is then None, which reads as "unknown", not "unchanged".
 
     Parameters
@@ -741,7 +741,7 @@ def _refuse(
     # Closing the staging area on that would call a file complete that was
     # never read.
     # A divergence means the file disagrees with something stored, which is a
-    # thing to record even when there is no row to write -- and the shortcut
+    # thing to record even when there is no row to write. The shortcut
     # below marks every entry `exists` and clears its payload, which would
     # discard the planned value the warning exists to let a reader act on.
     diverges = any(p.code == "divergence" for p in plan.problems)
@@ -989,7 +989,7 @@ def _insert_rows(target, rows, nwb_file_name: str) -> None:
     """
     table = _as_table(target)
 
-    # A target may be a plain SpyglassMixin -- Task, say, which TaskEpoch
+    # A target may be a plain SpyglassMixin, such as Task, which TaskEpoch
     # plans rows for but which ingests nothing itself.
     insert = getattr(table, "_insert_plan", None)
 

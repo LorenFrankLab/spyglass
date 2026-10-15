@@ -3,7 +3,7 @@
 `ingestion_tables()` writes both out by hand rather than deriving them, because
 the schema is fixed at import time and sorting on every call rediscovers an
 answer that cannot change. The cost of writing them out is that a table added
-in the wrong place, or a target left undeclared, is silent -- so it is checked
+in the wrong place, or a target left undeclared, is silent, so it is checked
 here instead, against DataJoint's own graph and against a real plan.
 """
 
@@ -23,7 +23,7 @@ def test_ingest_list_is_dependency_ordered(common, declared):
 
     The planner walks this order, so a table listed before its parent would
     resolve a cross-reference against a plan that has not reached the parent
-    yet -- and would resolve it to nothing, quietly.
+    yet, and would resolve it to nothing, quietly.
     """
     ingest = [t.as_instance for t in declared["ingest"]]
     position = {
@@ -59,8 +59,8 @@ def test_every_plan_target_is_declared(common, mini_copy_name, mini_insert):
     This is the check that matters for reuse: a staged entry names its target
     by string, and rehydrating it means finding the class again. The declared
     set is that lookup, so a target missing from it is a target whose entries
-    cannot be reloaded. Five were missing before they were declared -- `Task`,
-    `RawPosition` and its part, `LFPElectrodeGroup` and its part -- each
+    cannot be reloaded. Five were missing before they were declared: `Task`,
+    `RawPosition` and its part, and `LFPElectrodeGroup` and its part, each
     emitted by a table in `ingest`.
     """
     from spyglass.common.populate_all_common import ingestion_tables

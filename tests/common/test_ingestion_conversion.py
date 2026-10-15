@@ -171,7 +171,7 @@ def test_interval_references_resolve(mini_insert, common, mini_dict):
     `EXPECTED_ENTRIES` pins which interval names exist; this pins that the
     tables referring to them resolve. Several ingestion tables emit an
     `IntervalList` entry alongside their own, so the plan has to order parent
-    before child -- a dangling reference here is the failure that ordering
+    before child. A dangling reference here is the failure that ordering
     exists to prevent, and a row count cannot see it.
 
     Relocated from the retired `tests/data_import/test_ingestion_plan.py`,

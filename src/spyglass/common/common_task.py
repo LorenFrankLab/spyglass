@@ -142,7 +142,7 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
         """Hold the caller's config, which `get_nwb_objects` also needs.
 
-        The config is resolved by the caller -- `merged_config` folds the
+        The config is resolved by the caller, where `merged_config` folds the
         file's own `_spyglass_config.yaml` into it. This table does
         not reload it. Kept on `self` only because `get_nwb_objects` and
         `_camera_name_map` take no config argument.
@@ -169,7 +169,7 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
         """Return the file's task tables."""
         # Take the camera map from the file in hand, before anything can
         # return early. `_camera_names` otherwise resolves the registered
-        # path and opens the file a second time -- a wasted read on every
+        # path and opens the file a second time, a wasted read on every
         # ingestion, and an outright failure when planning a file that has
         # not been registered yet, which is the case this check exists for.
         if (
@@ -253,8 +253,8 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
         """Return the interval names a file will hold, resolved once.
 
         Asked of the context: `IntervalList` is filled by the same ingestion
-        -- `Raw` and `PositionSource` both emit rows into it before this table
-        is planned -- so querying it while planning a file that is not ingested
+        because `Raw` and `PositionSource` both emit rows into it before this
+        table is planned, so querying it while planning a file that is not ingested
         yet finds nothing, and every epoch resolves to no interval.
 
         Parameters
@@ -448,7 +448,7 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
     def get_epoch_interval_name(cls, epoch, session_intervals):
         """Get the interval name for a given epoch based on matching number.
 
-        The epoch must match a whole token -- a run of letters and digits --
+        The epoch must match a whole token, a run of letters and digits,
         rather than appear anywhere in the name, so epoch 1 matches `01_s1` but
         not `1ae82410-f27d-...`. Candidates are tiered (whole name, leading
         token, any token) and the first non-empty tier decides; within a tier

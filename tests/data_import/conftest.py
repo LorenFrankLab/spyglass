@@ -39,8 +39,8 @@ def editable_copy(common, mini_path, mini_copy_name, raw_dir, mini_insert):
     """A private copy of the stripped mini file, safe to edit in place.
 
     The shared fixture file cannot be the subject: these tests mutate the
-    file, and a stray edit -- or a stray mtime, which the external-link
-    digest reads -- would change what every later test hashes.
+    file, and a stray edit, or a stray mtime that the external-link digest
+    reads, would change what every later test hashes.
 
     Registered in `Nwbfile`, as it would be on a real retry: ingestion
     creates that row before it reads anything, and a registered name is what

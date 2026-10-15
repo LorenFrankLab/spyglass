@@ -2,7 +2,7 @@
 
 Written before the implementation: these tests describe the contract the
 mixin is moving to. Four structural problems in the previous one each
-produced real defects --
+produced real defects:
 
   P1  entries carried in a bare dict, keyed by class *or* instance, with
       insert order enforced only by convention
@@ -22,7 +22,7 @@ from spyglass.utils.ingestion_plan import FileContext, PlannedEntries
 from spyglass.utils.mixins.helpers import HelperMixin
 
 # ---------------------------------------------------------------------------
-# PlannedEntries -- P1: identity, merging, ordering
+# PlannedEntries, P1: identity, merging, ordering
 # ---------------------------------------------------------------------------
 
 
@@ -30,7 +30,7 @@ class _Alpha(HelperMixin):
     """Stand-in for a table class.
 
     Inherits the helper mixin and names itself, as every ingestion target
-    does -- the collection identifies a target by asking it those things.
+    does. The collection identifies a target by asking it those things.
     """
 
     full_table_name = "`stand_in`.`alpha`"
@@ -135,8 +135,8 @@ def test_validation_does_not_change_what_will_be_inserted(common):
     """The rows a plan was checked against are the rows it inserts.
 
     The design is validate-then-insert, so a check that quietly rewrote an
-    entry would mean the plan no longer described the insert -- the worst
-    bug available here. A frozen wrapper used to stand in for this guarantee
+    entry would mean the plan no longer described the insert, the worst bug
+    available here. A frozen wrapper used to stand in for this guarantee
     and never covered it: it forbade `.add` while the rows inside stayed
     mutable dicts.
     """
@@ -157,7 +157,7 @@ def test_validation_does_not_change_what_will_be_inserted(common):
 
 
 # ---------------------------------------------------------------------------
-# FileContext -- P3: state, reads, problems
+# FileContext, P3: state, reads, problems
 # ---------------------------------------------------------------------------
 
 
@@ -206,7 +206,7 @@ def test_context_collects_problems_without_raising():
 
 
 # ---------------------------------------------------------------------------
-# Mixin methods -- P2: one contract per method
+# Mixin methods, P2: one contract per method
 # ---------------------------------------------------------------------------
 
 
@@ -297,7 +297,7 @@ def test_default_row_mapping_applies_table_key_to_obj_attr():
 
 
 # ---------------------------------------------------------------------------
-# Lifecycle hooks -- P4: purity, with named escape hatches
+# Lifecycle hooks, P4: purity, with named escape hatches
 # ---------------------------------------------------------------------------
 
 

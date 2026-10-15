@@ -74,7 +74,7 @@ def test_insert_sessions_resolves_the_nwbfile_foreign_key(
     Every session-keyed table refers to the `Nwbfile` row, and ingestion
     creates it before reading anything. Unless the plan accounts for the row
     it intends to create, the report is one `missing_parent` for `Session`
-    plus a blocked list of everything beneath it -- a complaint about the
+    plus a blocked list of everything beneath it, complaining about the
     absence of a row the caller was about to add.
     """
     from spyglass.data_import import insert_sessions
@@ -101,7 +101,7 @@ def test_planning_a_raw_file_resolves_every_cross_reference(
 ):
     """A cross-reference resolves against the plan, not the database.
 
-    Five tables need a value from a table this same ingestion fills --
+    Five tables need a value from a table this same ingestion fills.
     SensorData and DIOEvents want `Raw`'s interval, TaskEpoch and VideoFile
     want `IntervalList`/`TaskEpoch`, ImportedLFP needs an
     `LFPElectrodeGroup`. Querying for those rows finds nothing on a file that
@@ -134,14 +134,14 @@ def test_planning_a_raw_file_resolves_every_cross_reference(
     ):
         found = next((n for name, n in own.items() if fragment in name), 0)
         assert found >= least, (
-            f"{fragment} planned {found} rows, expected at least {least} -- "
+            f"{fragment} planned {found} rows, expected at least {least}: "
             + "a cross-reference resolved against the database instead of "
             + "the plan"
         )
 
     # The sharpest of the five: absent `Raw`, DIOEvents used to fall back to an
     # interval of its own, so it planned a different `interval_list_name` and
-    # an extra IntervalList row -- a plan disagreeing with its own insert.
+    # an extra IntervalList row, a plan disagreeing with its own insert.
     dio_rows = [
         row
         for tp in plan.table_plans

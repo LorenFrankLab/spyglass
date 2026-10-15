@@ -3,7 +3,7 @@
 The report is the only channel a user has: nothing prompts, and a plan that
 blocks says why here or nowhere. So each code needs a test that makes the
 system *emit* it, which a hand-built `Problem` carrying the same string does
-not do -- that checks the renderer, not the detector.
+not do. That checks the renderer, not the detector.
 """
 
 import pytest
@@ -37,8 +37,8 @@ def test_missing_attribute_when_a_required_column_is_absent(
     a parse can no longer produce such a row for a table that adjusts its own
     keys: the pass that collapses entries drops anything whose required
     attributes are absent. The detector still matters for targets that do not
-    adjust -- a parent emitted alongside another table's rows -- and for any
-    future caller that hands it a row directly.
+    adjust, such as a parent emitted alongside another table's rows, and for
+    any future caller that hands it a row directly.
     """
     from spyglass.data_import.planner import VirtualKeySpace
 

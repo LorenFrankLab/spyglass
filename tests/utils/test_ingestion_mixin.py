@@ -1,10 +1,10 @@
 """Unit tests for IngestionMixin's entry-composition paths.
 
 The mixin's single-table declarative path is well exercised by the tables that
-use it. Its *composition* paths -- merging entries across rows and source
-objects, validating entries for tables other than `self`, and routing
-`populate` -- were not, and every defect found while migrating tables to the
-mixin lived in one of them.
+use it. Its *composition* paths were not: merging entries across rows and
+source objects, validating entries for tables other than `self`, and routing
+`populate`. Every defect found while migrating tables to the mixin lived in
+one of them.
 
 Each test below pins one of those defects. They are deliberately close to the
 metal: several drive the mixin through a stand-in object rather than a real
@@ -116,7 +116,7 @@ def test_remove_null_from_dicts_takes_a_list():
 
     `_adjust_entries` passes a list of entries. This previously took a single
     dict and so raised AttributeError for every table lacking its own
-    `_adjust_keys_for_entry` -- any part declared with SpyglassMixin.
+    `_adjust_keys_for_entry`, meaning any part declared with SpyglassMixin.
     """
     table = _Stand_in()
 
@@ -185,7 +185,7 @@ def test_multi_object_merge_accepts_a_new_table(
 
     Asserted against a plan rather than an insert. The file is already
     ingested by the fixture, and TaskEpoch does not expect duplicates, so
-    re-inserting raises by design -- see the 0.5.6 breaking change. The merge
+    re-inserting raises by design. See the 0.5.6 breaking change. The merge
     is what this test is about, and planning exercises it without the raise.
 
     **Not asserted: TaskEpoch's own rows.** Planning this table alone gets no
@@ -214,7 +214,7 @@ def test_multi_object_merge_accepts_a_new_table(
         task_name is not None
     ), f"Expected Task entries emitted alongside, saw {names}"
     assert len(rows_by_name[task_name]) == 2, (
-        "Both task tables' Task entries must land under one merged key -- "
+        "Both task tables' Task entries must land under one merged key: "
         + f"saw {len(rows_by_name[task_name])}"
     )
 

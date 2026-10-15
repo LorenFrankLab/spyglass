@@ -527,7 +527,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         }
 
         # The valid times, not the row: `Interval(dict)` treats a dict as a
-        # key and looks it up, which is the very query being avoided -- for a
+        # key and looks it up, which is the very query being avoided. For a
         # planned row there is nothing to find.
         self._epoch_cache[nwb_file_name] = {
             row["epoch"]: Interval(
@@ -679,7 +679,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
     ):
         """Prepare a VideoFile entry dict for a given video object.
 
-        The camera is known to exist by here -- `_camera_missing` answered
+        The camera is known to exist by here, because `_camera_missing` answered
         that once for the whole video.
 
         Parameters

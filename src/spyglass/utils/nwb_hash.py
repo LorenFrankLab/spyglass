@@ -220,7 +220,7 @@ class NwbfileHasher:
             Implies `keep_obj_hash`. Default False, and additive: `hash` is
             byte-for-byte unchanged either way.
         max_dataset_bytes : int, optional
-            Hash at most this many bytes of any one dataset -- a head and a
+            Hash at most this many bytes of any one dataset: a head and a
             tail of that combined size, with shape and dtype as always.
             Default None, hashing every dataset whole. `hash` is None for a
             file that had any dataset bounded, since it is then not the file's
@@ -284,9 +284,9 @@ class NwbfileHasher:
         Needed because `visititems` follows hard links only, and in an NWB copy
         the bulk of the data is an external link into the raw file.
 
-        The digest is the target's *identity* -- file, path, size, mtime -- not
-        its contents, which would mean hashing a file ~20x the copy on every
-        plan. So an edit preserving size and mtime exactly goes unseen.
+        The digest is the target's *identity*, meaning file, path, size and
+        mtime, rather than its contents, which would mean hashing a file ~20x
+        the copy on every plan. So an edit preserving size and mtime exactly goes unseen.
 
         Writes `self.objs` only, never `self.hashed`: the file-level hash is
         stored provenance and must stay byte-identical.
@@ -340,7 +340,7 @@ class NwbfileHasher:
             # container itself: `SensorData` records the id of a series
             # *inside* `processing/analog`, so indexing only the link left it
             # unable to notice the raw file moving. The link's identity applies
-            # to the whole subtree -- if that file changed, all of it is
+            # to the whole subtree. If that file changed, all of it is
             # suspect. Deliberately coarse: any change to the target
             # invalidates every reader of it, which over-invalidates rather
             # than under-invalidates.
@@ -355,7 +355,7 @@ class NwbfileHasher:
         """Yield `(path, object)` for everything under a dereferenced link.
 
         h5py will read through an external link, so the target's own structure
-        is reachable -- it is only `visititems` on the *source* file that will
+        is reachable. It is only `visititems` on the *source* file that will
         not follow it.
 
         Parameters
@@ -387,8 +387,8 @@ class NwbfileHasher:
     def _index_object_ids(self) -> None:
         """Map each NWB object_id to its h5 path and a subtree digest.
 
-        A table records the `object_id` of what it read -- a Position
-        container, an ElectricalSeries. Asking whether that object changed
+        A table records the `object_id` of what it read, such as a Position
+        container or an ElectricalSeries. Asking whether that object changed
         means asking about the object *and its contents*, so each digest here
         folds in every path beneath it. The per-object digests themselves are
         whatever `compute_hash` already computed; this only aggregates them.
@@ -400,7 +400,7 @@ class NwbfileHasher:
         # One object can be reachable by several paths: NWB soft-links a
         # device into the series that uses it, and h5py hands back the
         # dereferenced object at both. Collect the candidates first, then
-        # pick where each object *lives* -- see _canonical_path.
+        # pick where each object *lives*. See _canonical_path.
         candidates: Dict[str, list] = {}
         for path in paths:
             obj, _ = self.objs[path]
@@ -467,7 +467,7 @@ class NwbfileHasher:
 
         A soft link's location holds none of the object's children, so a
         digest rolled up there would cover the object's own attributes and
-        nothing beneath it -- a probe would hash the same however its shanks
+        nothing beneath it, so a probe would hash the same however its shanks
         changed. Prefer the hard link, which is the object's real home.
 
         Parameters
@@ -506,8 +506,8 @@ class NwbfileHasher:
         Returns
         -------
         str or None
-            None if the file holds no such object -- which for a read-set
-            means the object is gone, and whatever read it must re-run.
+            None if the file holds no such object. For a read-set that means
+            the object is gone, and whatever read it must re-run.
         """
         found = self.obj_ids.get(str(object_id))
         return found[1] if found else None
@@ -675,9 +675,9 @@ class NwbfileHasher:
         """Return the row ranges of a dataset to hash, as `[(start, stop)]`.
 
         The whole dataset unless `max_dataset_bytes` is set and this one
-        exceeds it, in which case a head and a tail of that combined size --
-        but never fewer than one row from each end, so a dataset whose single
-        row is larger than the cap still contributes its contents.
+        exceeds it, in which case a head and a tail of that combined size.
+        Never fewer than one row from each end, so a dataset whose single row
+        is larger than the cap still contributes its contents.
 
         Parameters
         ----------
@@ -765,7 +765,7 @@ class NwbfileHasher:
                     this_hash.update(obj_value)
                     # `{k}`, not a literal "k": every child of a group
                     # otherwise collapses onto one overwritten cache key.
-                    # Cache-only -- `hashed` is updated from `k` and
+                    # Cache-only: `hashed` is updated from `k` and
                     # `obj_value` above, so stored hashes are unaffected.
                     self.add_to_cache(
                         f"{name}/{k}", v, md5(obj_value).hexdigest()

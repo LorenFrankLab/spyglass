@@ -289,7 +289,7 @@ def sweep_analysis_files(common_nwbfile, teardown):
 
     Deliberately in fixture teardown rather than at the tail of a test body:
     a failing assertion skips whatever follows it, so a cleanup written there
-    runs only when the test passed -- leaving rows and files behind in exactly
+    runs only when the test passed, leaving rows and files behind in exactly
     the case the next run most needs them gone.
 
     Snapshots **both** the analysis directory and the analysis tables' keys.
@@ -344,7 +344,7 @@ def sweep_new_rows(teardown):
 
     `sweep_new_rows(table)` snapshots its primary keys; whatever the test adds
     is deleted in fixture teardown, where a failing assertion cannot skip it.
-    For tables with no analysis file behind them -- see `sweep_analysis_files`
+    For tables with no analysis file behind them; see `sweep_analysis_files`
     for those.
     """
     from contextlib import suppress

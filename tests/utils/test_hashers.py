@@ -182,8 +182,8 @@ def test_object_indexed_where_it_lives_not_where_it_is_linked(mini_path):
             path
             for path, _ in hasher.obj_ids.values()
             # The root NWBFile object is indexed at "/", which is not a link
-            # and has no link info to ask about -- h5py raises rather than
-            # answering.
+            # and has no link info to ask about, so h5py raises rather
+            # than answering.
             if path != "/"
             and isinstance(file.get(path, getlink=True), h5py.SoftLink)
         ]
@@ -229,8 +229,8 @@ def test_the_root_object_is_indexed_over_the_metadata_it_owns(
     Every table that reads session, lab, institution or experimenter fields
     records the *root* NWBFile object. The traversal visits the root's
     members and never the root, so while it carried no digest those tables
-    hashed to the constant an unknown id scores -- unchangeable, so their
-    parses looked reusable however the metadata was edited.
+    hashed to the constant an unknown id scores. That is unchangeable, so
+    their parses looked reusable however the metadata was edited.
 
     Scope matters as much as presence: a root folding in the whole file would
     never under-invalidate, but would re-plan every metadata reader on any
@@ -280,7 +280,7 @@ def test_the_root_object_is_indexed_over_the_metadata_it_owns(
 
 # --- externally-linked objects -----------------------------------------------
 # An NWB copy keeps its bulk in the raw file and links to it. `visititems`
-# follows hard links only, so those objects are never traversed -- and a table
+# follows hard links only, so those objects are never traversed, and a table
 # that reads one had a read-set digest that could not change.
 
 
@@ -334,7 +334,7 @@ def test_externally_linked_objects_are_indexed(mini_copy_path, linked_objects):
     """A linked object must have a digest, not be silently absent.
 
     `read_set_digest` scores an unknown id as the constant `"missing"`, so an
-    object outside the index gives a digest that never moves -- and a table
+    object outside the index gives a digest that never moves, and a table
     reading it would look reusable forever.
     """
     from spyglass.utils.nwb_hash import NwbfileHasher
@@ -376,8 +376,8 @@ def test_a_change_to_the_link_target_moves_the_digest(
     """The point of the whole pass: a changed target invalidates the reader.
 
     Simulated by moving the raw file's mtime, which any write to it would do.
-    The copy's own bytes are untouched, so its file hash must *not* move --
-    the change belongs to the object index, which is what reuse consults.
+    The copy's own bytes are untouched, so its file hash must *not* move.
+    The change belongs to the object index, which is what reuse consults.
     """
     import os
 
@@ -411,7 +411,7 @@ def test_the_plan_cap_is_inert_on_the_copy_a_plan_hashes(mini_copy_path):
     """`PLAN_DATASET_BYTES` bounds nothing in an NWB copy.
 
     The property the production win rests on: the cap bites multi-GB datasets
-    and nothing else, so an ordinary file's digests -- and its stored hash --
+    and nothing else, so an ordinary file's digests, and its stored hash,
     are unaffected by it being set. The copy is the file a plan hashes; the
     raw file is the next test.
     """
@@ -438,7 +438,7 @@ def test_the_plan_cap_bounds_raw_ephys(mini_path):
     file; every other plan hashes the copy, where the same data is an external
     link and was never content-hashed anyway. So the cap costs a dry-run
     report the ability to notice an in-place, shape-preserving edit to raw
-    ephys -- which is not what a dry run is read for.
+    ephys, which is not what a dry run is read for.
     """
     from spyglass.data_import.planner import PLAN_DATASET_BYTES
     from spyglass.utils.nwb_hash import NwbfileHasher
@@ -457,7 +457,7 @@ def test_a_bounded_hash_refuses_to_pass_as_the_file_hash(mini_path):
 
     `NwbfileHasher.hash` is stored provenance in `SpikeSortingRecording`. A
     bounded run read part of the file, so handing back a digest that looks
-    like the file's would be silently wrong -- the reuse digests it exists to
+    like the file's would be silently wrong. The reuse digests it exists to
     build are still valid, and `id_set_digest` is untouched.
     """
     from spyglass.utils.nwb_hash import NwbfileHasher
@@ -491,8 +491,8 @@ def test_a_bounded_dataset_still_notices_a_shape_change(mini_path, tmp_path):
     copy = tmp_path / "copy_.nwb"
     shutil.copy2(mini_path, copy)
 
-    # `objs` is keyed by the `visititems` name, which carries no leading slash
-    # -- unlike `bounded`, which records `dataset.name`.
+    # `objs` is keyed by the `visititems` name, which carries no leading
+    # slash, unlike `bounded`, which records `dataset.name`.
     path = "acquisition/e-series/timestamps"
     before = NwbfileHasher(copy, object_ids=True, max_dataset_bytes=64)
 

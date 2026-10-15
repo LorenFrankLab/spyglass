@@ -10,9 +10,9 @@ edge cases the vendored copy hardened relative to upstream.
 Run with:  pytest tests/common/test_fir_filter.py
 
 The tests themselves are pure numerics and need no database, but the import
-below reaches ``spyglass.common.__init__``, which activates DataJoint schemas --
-so collection still requires the test MySQL container like the rest of the
-suite.
+below reaches ``spyglass.common.__init__``, which activates DataJoint
+schemas, so collection still requires the test MySQL container like the rest
+of the suite.
 """
 
 import numpy as np

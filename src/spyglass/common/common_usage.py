@@ -177,7 +177,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         """
         # Derived, not listed: a fourth part added to this master is cleared
         # by construction. `delete_quick` does not cascade, so the master
-        # delete fails on a foreign key if any part is left behind -- which is
+        # delete fails on a foreign key if any part is left behind, which is
         # how the previous hardcoded tuple announced itself when `Table` was
         # added.
         for part in self.parts(as_objects=True):
@@ -220,9 +220,9 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             `{table_name: {"status", "read_set_digest", "reads", "xrefs",
             "entries"}}`,
             where `entries` is `{target_table_name: [rows]}`. Empty when
-            nothing is staged. A table whose payload was dropped -- cleared on
-            migration, or refused by the database -- is omitted, so a caller
-            cannot mistake it for reusable.
+            nothing is staged. A table whose payload was dropped, whether
+            cleared on migration or refused by the database, is omitted, so a
+            caller cannot mistake it for reusable.
         """
         master_key = {"nwb_file_name": nwb_file_name}
 
@@ -399,9 +399,9 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     ) -> bool:
         """Stage one plan in a transaction, or say it did not fit.
 
-        Staging is an aid, not the ingestion: a plan the database refuses --
-        an entry past `max_allowed_packet`, say -- must cost the payload, not
-        the run.
+        Staging is an aid, not the ingestion. A plan the database refuses,
+        such as an entry past `max_allowed_packet`, must cost the payload
+        rather than the run.
 
         Parameters
         ----------
@@ -460,7 +460,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             written.
         conflicting : list of (str, table, rows), optional
             Rows whose stored version disagrees with the file. Recorded as
-            `conflict` and **keeping** their payload -- the one exception to
+            `conflict` and **keeping** their payload, the one exception to
             the rule above, because the planned value is the thing a reader
             needs in order to act on the warning, and re-deriving it means
             re-parsing the file.
@@ -489,7 +489,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
                 }
 
         # `written` is for the log line only: the column records that the row
-        # is in its table, not which run put it there -- the table answers
+        # is in its table, not which run put it there. The table answers
         # that, and better.
         done = [
             (entry_key, state, written)
@@ -512,7 +512,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
                 # restricted query, and the key is already complete.
                 # A conflict keeps its payload: the planned value is what a
                 # reader needs to act on the warning, and re-deriving it
-                # means re-parsing the file. Every other state loses it --
+                # means re-parsing the file. Every other state loses it,
                 # no blob for a row present in its own table.
                 update = {**entry_key, "state": state}
                 if state != "conflict":

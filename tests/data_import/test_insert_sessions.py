@@ -110,7 +110,7 @@ def test_raise_err_raises_once_every_file_has_been_planned(
 ):
     """`raise_err` is the caller's, and it waits for the whole list.
 
-    `insert_sessions` is the only place that raises -- everything below it
+    `insert_sessions` is the only place that raises; everything below it
     reports through the plan. Raising at the first blocked file would make the
     second file's report depend on the first file's luck, so both are named.
     """
@@ -133,7 +133,7 @@ def test_raise_err_raises_once_every_file_has_been_planned(
     message = str(err.value)
     for copy_name in copy_names:
         assert copy_name in message, (
-            f"{copy_name} is missing from the exception -- it raised before "
+            f"{copy_name} is missing from the exception; it raised before "
             + f"planning every file:\n{message}"
         )
 
@@ -185,7 +185,7 @@ def test_a_skipped_file_still_returns_a_result(
     assert skipped.nwb_file_name == mini_copy_name, "named by its copy"
     assert not skipped, "Skipping is not a failure, so the result is falsy"
     assert "already ingested" in skipped.report(), (
-        "and the headline says so, in one line -- a clean plan does not pad "
+        "and the headline says so, in one line; a clean plan does not pad "
         "itself with empty sections"
     )
 

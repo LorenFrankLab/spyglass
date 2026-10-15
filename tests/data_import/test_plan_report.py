@@ -117,7 +117,7 @@ def test_the_default_report_shows_warnings_but_not_resolutions(plan_types):
 
     Reversed with D7. Hiding soft problems meant a divergence, once it became
     a warning rather than a blocker, would have vanished from the report that
-    replaced the prompt -- quieter than the behaviour it replaced.
+    replaced the prompt, quieter than the behaviour it replaced.
     """
     quiet = _broken(plan_types).report()
 

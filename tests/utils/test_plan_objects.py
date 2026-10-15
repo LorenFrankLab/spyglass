@@ -33,7 +33,7 @@ class _NamedTable:
 
 
 # ---------------------------------------------------------------------------
-# TablePlan -- one table's share of the work
+# TablePlan: one table's share of the work
 # ---------------------------------------------------------------------------
 
 
@@ -43,7 +43,7 @@ TABLE_NAME = "`common_task`.`_task_epoch`"
 def _table_plan(**kwargs):
     """Build a TablePlan with sensible defaults.
 
-    Targets the table by name, as a plan rebuilt from storage does -- these
+    Targets the table by name, as a plan rebuilt from storage does. These
     tests are about the plan objects, not about any live table.
     """
     entries = PlannedEntries()
@@ -91,7 +91,7 @@ def test_table_plan_without_problems_has_no_severity():
 
 
 # ---------------------------------------------------------------------------
-# IngestionPlan -- the whole file
+# IngestionPlan: the whole file
 # ---------------------------------------------------------------------------
 
 
@@ -117,7 +117,7 @@ def test_plan_is_clean_when_nothing_blocks():
     )
 
     assert plan.is_clean
-    assert not plan, "A clean plan is falsy -- nothing blocks it"
+    assert not plan, "A clean plan is falsy: nothing blocks it"
 
 
 def test_plan_is_not_clean_with_a_hard_problem():
@@ -155,7 +155,7 @@ def test_plan_reports_per_table_status():
 
 
 # ---------------------------------------------------------------------------
-# plan_from_nwbfile -- parsing without inserting
+# plan_from_nwbfile: parsing without inserting
 # ---------------------------------------------------------------------------
 
 
@@ -234,7 +234,7 @@ def test_insert_from_nwbfile_still_returns_entries(
 
 
 # ---------------------------------------------------------------------------
-# Key identity -- a Spyglass rule, strictly coarser than any backend
+# Key identity: a Spyglass rule, strictly coarser than any backend
 # ---------------------------------------------------------------------------
 
 
@@ -263,7 +263,7 @@ def test_accents_are_a_known_and_accepted_gap():
     Not a bug to fix but a line drawn: folding accents needs NFKD
     normalisation for a case that effectively does not arise, so the pair
     reaches the insert and fails as a `planner_miss`. Pinned so the gap stays
-    deliberate -- if this ever starts biting, this test is where the decision
+    deliberate. If this ever starts biting, this test is where the decision
     is recorded.
     """
     from spyglass.utils.ingestion_plan import collated
@@ -293,7 +293,7 @@ def test_identity_needs_no_knowledge_of_the_backend():
     The first implementation read each table's collation and folded to match,
     which made row identity depend on parsing collation names and on PAD vs
     NO PAD. Pinned here because the pull toward re-adding it is real: it is
-    the "accurate" answer, and it is the wrong one -- Spyglass owns this rule.
+    the "accurate" answer, and it is the wrong one. Spyglass owns this rule.
     """
     import inspect
 
@@ -320,7 +320,7 @@ def test_spyglass_identity_is_at_least_as_strict_as_the_server(
 ):
     """The invariant that keeps the planner and the insert in agreement.
 
-    If the server calls two keys equal, Spyglass must too -- otherwise a
+    If the server calls two keys equal, Spyglass must too. Otherwise a
     stored row reads as novel and the insert rejects it (`planner_miss`), or a
     stored parent reads as missing and `missing_parent` blocks the table and
     everything beneath it. The converse is allowed: Spyglass may be stricter.
@@ -355,7 +355,7 @@ def test_a_row_the_server_already_holds_is_not_offered_as_novel(
 
     Deciding identity with Python's `==` returned a differently-cased row as
     new; the insert then raised `DuplicateError`, which `_write_plan` records
-    as `planner_miss` -- whose own remedy text asks the user to report it as a
+    as `planner_miss`, whose own remedy text asks the user to report it as a
     planner gap. It was one.
     """
     from spyglass.data_import.planner import _novel_rows
@@ -380,7 +380,7 @@ def test_a_stored_parent_is_not_reported_missing_under_another_case(
     """The foreign-key check must find what the insert would find.
 
     A miss here is `missing_parent` at severity `hard`, which blocks the table
-    and every table beneath it -- so a capitalisation difference in a shared
+    and every table beneath it, so a capitalisation difference in a shared
     key took out a whole branch of the plan.
     """
     from spyglass.data_import.planner import VirtualKeySpace

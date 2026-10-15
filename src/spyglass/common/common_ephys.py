@@ -176,7 +176,7 @@ class Electrode(SpyglassIngestion, dj.Imported):
 
         The config comes from `ctx`, not from a cache on `self`. It was held on
         `self` by an `insert_from_nwbfile` override, which the plan path never
-        calls -- so every config override was dropped while planning, which is
+        calls, so every config override was dropped while planning, which is
         now the only ingest path.
         """
         # `ctx` forwarded: the electrodes table is a DynamicTable, so super()

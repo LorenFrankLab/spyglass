@@ -33,8 +33,8 @@ def test_the_two_hashes_answer_different_questions(staged):
     """`key_hash` is identity; `blob_hash` is content.
 
     If both covered the whole entry they could never disagree, and
-    divergence -- same key, different values -- would be indistinguishable
-    from novelty. That is the whole reason there are two.
+    divergence, meaning same key with different values, would be
+    indistinguishable from novelty. That is the whole reason there are two.
     """
     log, key, _ = staged
     rows = (log.Entry & key).fetch(as_dict=True)
@@ -187,7 +187,7 @@ def test_staging_records_each_table_and_its_read_set(
     assert digests, "The mini file is hashable, so digests should be present"
     assert len(set(digests)) > 1, (
         "Different tables read different objects, so their digests must "
-        "differ -- one digest for everything would make reuse meaningless"
+        "differ; one digest for everything would make reuse meaningless"
     )
 
 
@@ -217,8 +217,8 @@ def test_a_refused_payload_costs_the_payload_not_the_run(
 ):
     """A database that will not take the blobs still gets the report.
 
-    No ingestion payload is expected to reach a database limit -- the largest
-    entry on a 843 GB file is 3.4 KB -- so there is no cap, and a refusal is
+    No ingestion payload is expected to reach a database limit, the largest
+    entry on a 843 GB file being 3.4 KB, so there is no cap and a refusal is
     a bug worth reporting rather than a case to design around. It must still
     not take the ingestion down with it: the hashes, statuses and problems
     are what provenance needs, and only reuse wants the payload.
@@ -235,7 +235,7 @@ def test_a_refused_payload_costs_the_payload_not_the_run(
 
     # `.__func__`, because DataJoint hands back a *bound* `Entry.insert`. The
     # patch below is set on the class, so it is called with the instance as
-    # its first argument -- forwarding that to an already-bound method put the
+    # its first argument. Forwarding that to an already-bound method put the
     # table in `insert`'s `rows` slot and the real rows in `replace`, so the
     # retry reported success and inserted nothing.
     original = IngestionPlanLog.Entry.insert.__func__
@@ -272,7 +272,7 @@ def test_a_conflicting_entry_keeps_its_payload(
     need, and re-deriving it means re-parsing the file. So a `conflict` row
     keeps its payload where `exists` and `inserted` lose theirs.
 
-    Written because the invariant test above cannot see this case — the mini
+    Written because the invariant test above cannot see this case. The mini
     file produces no divergence, so it asserted "no blob survives, states are
     exists or inserted" and passed for want of a counter-example rather than
     because the rule held.
@@ -326,8 +326,8 @@ def test_a_conflicting_entry_keeps_its_payload(
 def test_clearing_a_plan_leaves_no_part_behind(common, mini_copy_name):
     """Every part is cleared, including one added after this was written.
 
-    Derived from `parts()` on both sides -- the code that clears and the
-    assertion that checks it -- so a fourth part is covered without anyone
+    Derived from `parts()` on both sides, both the code that clears and the
+    assertion that checks it, so a fourth part is covered without anyone
     remembering to extend either. The hardcoded list this replaced announced
     itself by breaking every call site with a foreign-key error when `Table`
     was added, because `delete_quick` does not cascade.

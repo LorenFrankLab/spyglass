@@ -1,8 +1,8 @@
 """Inserting from a plan instead of table by table.
 
 The payoff of planning: check the whole file, then write what was checked, and
-decline to write anything when the file cannot be ingested cleanly -- the one
-thing inserting table by table could not do.
+decline to write anything when the file cannot be ingested cleanly. That is
+the one thing inserting table by table could not do.
 
 Equivalence with the per-table path is not asserted here, because that path no
 longer exists to compare against. It was established while both ran, by the
@@ -160,7 +160,7 @@ def test_every_bad_table_is_reported_not_just_the_first(
     from spyglass.common.populate_all_common import populate_all_common
     from spyglass.utils.mixins.ingestion import IngestionMixin
 
-    # Nothing staged, so nothing is reusable -- otherwise the tables this test
+    # Nothing staged, so nothing is reusable. Otherwise the tables this test
     # breaks are served from the last attempt and never parse at all.
     IngestionPlanLog().clear(mini_copy_name)
 
@@ -189,7 +189,7 @@ def test_the_default_path_inserts_from_a_plan(
 ):
     """Plan-then-insert is what a caller gets by default.
 
-    Pinned because the return type is the visible half of the contract --
+    Pinned because the return type is the visible half of the contract:
     callers testing the result switch from "None means it worked" to "falsy
     means nothing blocked it".
     """

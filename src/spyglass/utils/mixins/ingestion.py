@@ -55,8 +55,8 @@ class IngestionMixin(BaseMixin):
 
     Notes
     -----
-    A table caching file-level state on itself -- a camera map, an epoch
-    lookup, a counter -- must reset it in **`before_parse`**, not in
+    A table caching file-level state on itself, such as a camera map or an
+    epoch lookup, must reset it in **`before_parse`**, not in
     `insert_from_nwbfile`: planning and inserting share `_parse` but not
     `insert_from_nwbfile`, so a reset placed there never runs for a plan, and
     one instance serves every file a `populate` loops over.
@@ -126,8 +126,8 @@ class IngestionMixin(BaseMixin):
     def _generate_entries(self, nwb_obj, base_key, ctx=None):
         """Call the generate hook with this file's context.
 
-        Every override takes `ctx`, so it is passed at every call site --
-        including the per-row recursion below, which is what stops a table's
+        Every override takes `ctx`, so it is passed at every call site,
+        including the per-row recursion below. That is what stops a table's
         context from becoming None halfway down.
         """
         return self.generate_entries_from_nwb_object(nwb_obj, base_key, ctx)
@@ -369,7 +369,7 @@ class IngestionMixin(BaseMixin):
         """Prepare for parsing one file. Override to resolve file-level data.
 
         Runs before any source object is found, so lookups the mapping needs
-        -- a config, a camera map, the session's intervals -- belong here,
+        such as a config, a camera map or the session's intervals, belong here,
         cached on `ctx`, rather than on the table object.
 
         Parameters
@@ -399,8 +399,8 @@ class IngestionMixin(BaseMixin):
     def entries_for_source(self, source, ctx) -> PlannedEntries:
         """Return the entries one source object generates.
 
-        A source that expands into rows -- a DynamicTable -- is handed row by
-        row to `entries_for_row`; anything else goes there whole. Override this
+        A source that expands into rows, such as a DynamicTable, is handed row
+        by row to `entries_for_row`; anything else goes there whole. Override this
         for the container, `entries_for_row` for its rows.
 
         Parameters
@@ -909,8 +909,8 @@ class IngestionMixin(BaseMixin):
     def _dedup_planned(self, entries: IngestionEntries, ctx):
         """Collapse same-key rows while planning, reporting only conflicts.
 
-        Agreeing repeats are normal content -- two task epochs naming one
-        task -- so they collapse, matching what the direct insert path has
+        Agreeing repeats are normal content, such as two task epochs naming
+        one task, so they collapse, matching what the direct insert path has
         always done. A disagreement is reported rather than raised: planning
         reports, and neither row is stored, so there is no value to defer to.
         """
@@ -1004,7 +1004,7 @@ class IngestionMixin(BaseMixin):
 
         # Keep the stored row and report. Prompting here asked a question
         # with rows half-written, holding a lock open on an answer nobody was
-        # there to give -- and raising on a declined answer aborted a whole
+        # there to give, and raising on a declined answer aborted a whole
         # file over one mismatched attribute. Plan the file to get this as a
         # report instead.
         if differing := sorted(
@@ -1173,7 +1173,7 @@ class IngestionMixin(BaseMixin):
 
         A divergence is not novelty: the entry is present, and the plan
         disagrees with it. Recorded with the revision that would align the
-        two, never resolved here -- a dry run does not prompt.
+        two, never resolved here: a dry run does not prompt.
         """
         primary = {k: v for k, v in row.items() if k in table.primary_key}
         if len(primary) != len(table.primary_key):

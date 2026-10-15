@@ -114,7 +114,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         new_file : bool, optional
             Adding a new file to Nwbfile table. Defaults to False. The path is
             still resolved, so this is also how to name a file that is not in
-            the table yet -- checking one before ingesting it, say.
+            the table yet, such as when checking one before ingesting it.
 
         Returns
         -------

@@ -205,7 +205,7 @@ def test_epoch_does_not_claim_an_unrelated_uuid_interval(common):
 
     `"5" in "77c053e5-0b1d-..."` is true, so matching on a bare substring gave
     an epoch with no session interval a spikesorting interval instead, and
-    `TaskEpoch` gained a phantom row -- which `VideoFile`, keyed on TaskEpoch,
+    `TaskEpoch` gained a phantom row, which `VideoFile`, keyed on TaskEpoch,
     then turned into phantom video rows.
     """
     get_epoch = common.TaskEpoch.get_epoch_interval_name
@@ -222,8 +222,8 @@ def test_epoch_resolves_despite_derived_intervals(common):
     Once a database holds `01_s1_first9` and
     `lfp_test_01_s1_first9_valid times`, a bare substring match found several
     names for epoch 1, the uniqueness check gave up, and the epoch silently
-    produced no row -- invisible on a first ingestion, waiting for any later
-    re-plan.
+    produced no row, invisible on a first ingestion and waiting for any
+    later re-plan.
     """
     get_epoch = common.TaskEpoch.get_epoch_interval_name
 

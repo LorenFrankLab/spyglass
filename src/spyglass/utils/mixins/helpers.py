@@ -46,7 +46,7 @@ class HelperMixin(BaseMixin):
     """Helper methods for DataJoint tables."""
 
     # Tables reach code that cannot know whether it was handed the class or an
-    # instance -- ingestion targets, graph walks, delete helpers. Rather than
+    # instance: ingestion targets, graph walks, delete helpers. Rather than
     # `tbl() if inspect.isclass(tbl) else tbl` at each site, ask the table.
     as_instance = _TableForm(instance=True)
     as_class = _TableForm(instance=False)

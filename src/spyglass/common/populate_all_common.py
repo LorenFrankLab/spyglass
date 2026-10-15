@@ -49,7 +49,7 @@ def _plan_only(nwb_file_name: str):
     """Plan a file, stage the plan, report, and write no data table.
 
     Shared by `dry_run`, which stops here, and the real run, which hands the
-    result to `insert_plan` -- so what a dry run reports is what a real run
+    result to `insert_plan`, so what a dry run reports is what a real run
     will do.
 
     Parameters
@@ -68,7 +68,7 @@ def _plan_only(nwb_file_name: str):
     # The sidecar config sits beside the file, and locating it goes through
     # `Nwbfile.get_abs_path`, which raises for a file with no row. An
     # unregistered file has no plan to make, so skip the lookup and let the
-    # planner report `file_not_registered` -- reporting is the whole contract
+    # planner report `file_not_registered`. Reporting is the whole contract
     # here, and raising from a dry run breaks it.
     registered = bool(Nwbfile & {"nwb_file_name": nwb_file_name})
     config = (
@@ -89,7 +89,7 @@ def _insert_from_plan(
     """Plan the whole file, then insert what the plan worked out.
 
     The first pass writes nothing, so every problem is reported before any
-    table is touched. The second re-derives nothing -- it writes the rows the
+    table is touched. The second re-derives nothing: it writes the rows the
     first already checked, skipping those already stored.
 
     Parameters
@@ -112,12 +112,12 @@ def _insert_from_plan(
 def ingestion_tables() -> Dict[str, List[dj.Table]]:
     """Return the tables an ingestion touches, in two categories.
 
-    - `"ingest"` -- tables that **parse the file**, parents before children,
+    - `"ingest"`: tables that **parse the file**, parents before children,
       so a cross-reference resolves against the plan. The order is written out
       rather than derived; `tests/common/test_ingestion_table_order.py` checks
       it against DataJoint's graph, so a table added in the wrong place fails
       a test rather than an ingestion.
-    - `"targets"` -- tables that **receive rows without parsing anything**.
+    - `"targets"`: tables that **receive rows without parsing anything**.
       Order is irrelevant: nothing parses them.
 
     Returns
@@ -175,9 +175,9 @@ def ingestion_tables() -> Dict[str, List[dj.Table]]:
     ]
 
     # Emitted by a table above, never parsed themselves. Every one is a
-    # parent, child or part of something in `ingest` -- a table can only
-    # emit rows for something it is related to -- but they are listed rather
-    # than derived so the set is readable and reviewable.
+    # parent, child or part of something in `ingest`, since a table can only
+    # emit rows for something it is related to. They are listed rather than
+    # derived so the set is readable and reviewable.
     targets = [
         Task,  # from TaskEpoch
         RawPosition,  # from PositionSource
@@ -210,7 +210,7 @@ def merged_config(nwb_file_name: str, config: dict = None) -> dict:
     """Return the config a file is ingested with, sidecar over defaults.
 
     Both sources share the `{TableName: [rows]}` shape, and each table is
-    handed the whole mapping -- slicing it per table hands `Electrode` a row
+    handed the whole mapping. Slicing it per table hands `Electrode` a row
     list where it expects a dict.
 
     Parameters

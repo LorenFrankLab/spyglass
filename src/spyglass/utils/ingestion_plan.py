@@ -17,7 +17,7 @@ ingestion that created it.
 **Imports nothing from spyglass, and must not.** This is the vocabulary
 `utils.mixins.ingestion` speaks, imported there at module scope while
 `spyglass.utils` is still initializing. It therefore has to sit below every
-other spyglass module -- which is also why it lives here rather than under
+other spyglass module, which is also why it lives here rather than under
 `data_import`, whose package `__init__` reaches `spyglass.common`.
 """
 
@@ -243,7 +243,7 @@ def normalized(table, attr: str, value):
     Returns
     -------
     Any
-        An identity, not a record of what the row said -- show a reader the
+        An identity, not a record of what the row said. Show a reader the
         row's own value, never this.
     """
     return collated(hashable(coerced(table, attr, value)))
@@ -311,7 +311,7 @@ class PlannedEntries:
         if key not in self._entries:
             # The class is the canonical form: it is what callers name when
             # adding, and what they look up by. A target with no class form
-            # -- a FreeTable, or a plan rebuilt from storage -- is kept as
+            # such as a FreeTable, or a plan rebuilt from storage, is kept as
             # given, since its class cannot reproduce it.
             self._entries[key] = (getattr(table, "as_class", table), [])
         self._entries[key][1].extend(rows)
@@ -368,7 +368,7 @@ class PlannedEntries:
         """Return {full table name: position} from DataJoint's graph.
 
         Empty when no target can supply a connection, or the graph cannot be
-        read -- callers then keep first-seen order.
+        read, so callers then keep first-seen order.
         """
         for target, _ in pairs:
             connection = getattr(target, "connection", None)
@@ -547,7 +547,7 @@ class IngestionPlan:
         -----
         `fatal` is answered before the count, and must stay that way: a file
         that could not be read plans no entries, so nothing is novel, and
-        counting alone would call it `no_op` -- already ingested.
+        counting alone would call it `no_op`, meaning already ingested.
         """
         if any(problem.severity == "fatal" for problem in self.problems):
             return "fatal"
@@ -584,7 +584,7 @@ class IngestionPlan:
             "partial_new": f"{sum(self.novel.values())} new entries",
         }[self.verdict]
 
-        lines = [f"{self.nwb_file_name}: {self.verdict} — {headline}"]
+        lines = [f"{self.nwb_file_name}: {self.verdict}, {headline}"]
 
         if novel := self.new_entries_by_table():
             lines.append("")
@@ -820,7 +820,7 @@ class FileContext:
 
         The common shape of the lookups above: a single value, from a row this
         file owns. None when no such row is planned or stored, which the
-        caller decides what to do about -- silently different behaviour on a
+        caller decides what to do about. Silently different behaviour on a
         missing cross-reference is the failure mode this exists to prevent.
 
         Parameters

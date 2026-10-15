@@ -3,7 +3,7 @@
 A plain eager package, like every other Spyglass subpackage. It can be, because
 nothing under `spyglass.utils` imports from here: the plan vocabulary the
 ingestion mixin speaks lives in `spyglass.utils.ingestion_plan`, so importing
-this package is never part of `utils` initializing itself. Keep it that way --
+this package is never part of `utils` initializing itself. Keep it that way:
 a `utils` module that imports from `data_import` puts this package's import
 inside `spyglass.utils`'s own, at which point `settings`, `utils` and `common`
 are all half-built and nothing here can be imported at all.

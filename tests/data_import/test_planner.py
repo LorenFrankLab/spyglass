@@ -6,7 +6,7 @@ without writing anything:
   1. what would be inserted, table by table
   2. what would fail, and which tables are blocked as a consequence rather
      than being separate failures
-  3. whether any of it is new -- the novelty verdict that replaces a wall of
+  3. whether any of it is new, the novelty verdict that replaces a wall of
      duplicate errors on a re-run
 
 Measured on a file with one object removed: `Session` failed and six
@@ -26,14 +26,14 @@ def clean_plan(common, mini_copy_name, mini_insert):
 
     `mini_insert` ingests once per session, so a fixture that merely depended
     on it was asserting the suite's history: any test in between may leave a
-    table short of rows -- deliberately, as several do -- and the verdict then
+    table short of rows, deliberately in several cases, and the verdict then
     reads `partial_new` for reasons that have nothing to do with the test.
 
     So establish the premise rather than assume it: plan, insert whatever is
     still outstanding, and re-plan. Only rows the file itself describes are
     inserted, which is the state the suite expects anyway, so this converges
     toward the shared baseline rather than away from it. Extra rows left by
-    another test do not matter here -- novelty counts what is planned and
+    another test do not matter here: novelty counts what is planned and
     missing, not what is stored and unplanned.
     """
     from spyglass.data_import.planner import insert_plan
@@ -142,15 +142,15 @@ def test_planned_parents_satisfy_their_children(
 ):
     """An entry whose parent is planned in the same pass is not a failure.
 
-    Several tables emit their parent's rows alongside their own -- the
-    IntervalList pattern -- and those parents are not in the database yet, so
-    the check has to consider the plan as well as the database.
+    Several tables emit their parent's rows alongside their own, which is the
+    IntervalList pattern, and those parents are not in the database yet, so the
+    check has to consider the plan as well as the database.
 
     A smoke check only, and worth saying why: this file is already ingested,
     so its IntervalList rows exist and the foreign-key check resolves against
     them whatever order the plan is in. The ordering this guards is only
     observable when those parents are novel, which is the clean-database
-    golden-run comparison -- where exactly this bug did surface, as 18
+    golden-run comparison, where exactly this bug did surface, as 18
     missing_parent problems naming parents the plan held two entries later.
     Forcing an adverse order here does not reproduce it; that was tried.
     """
@@ -324,7 +324,7 @@ def test_a_fatal_plan_does_not_close_its_staging_area(common, mini_copy_name):
     """A file that could not be read has not "already been ingested".
 
     A fatal plan holds no table plans, so nothing is novel, so the verdict
-    used to read `no_op` -- and `insert_plan` checked that first. The result
+    used to read `no_op`, and `insert_plan` checked that first. The result
     was an unreadable file logging "already ingested, nothing to do" and
     marking its staging area complete. The return value was truthy, so a
     caller testing it still saw the failure; the log and the plan record did
@@ -552,7 +552,7 @@ def test_a_soft_problem_is_visible_in_the_default_report(
     D7 replaces the divergence prompt with a line in the report, which only
     works if the default report shows it. `report(verbose=False)` used to show
     blocking problems only, so making divergence `soft` without this would
-    have hidden it completely -- quieter than the behaviour it replaced.
+    have hidden it completely, quieter than the behaviour it replaced.
     """
     from spyglass.utils.ingestion_plan import (
         IngestionPlan,
@@ -616,9 +616,9 @@ def test_a_table_is_handed_the_whole_config_not_its_own_slice(
     The generic hook reads `config[self.camel_name]` and its parts; an
     override reads whatever key it declares, so `TaskEpoch` reads `Tasks`.
     Handing a table `config[camel_name]` instead gave `Electrode` its own row
-    list -- `list.get` raised, and the table planned as `failed` with zero
-    entries, blocking everything beneath it -- while `TaskEpoch` got an empty
-    dict and dropped config-declared tasks without a word.
+    list, so `list.get` raised and the table planned as `failed` with zero
+    entries, blocking everything beneath it. `TaskEpoch` got an empty dict and
+    dropped config-declared tasks without a word.
 
     Asserted on the shape each table receives, not on the entries it yields,
     because the two defects had opposite symptoms and only the shape is
@@ -661,7 +661,7 @@ def test_electrode_config_reaches_the_plan(common, mini_copy_name, mini_insert):
     """A config override must land on the planned row, not only on an insert.
 
     `Electrode` held the config on `self` via an `insert_from_nwbfile`
-    override, which the plan path never calls -- so on the only ingest path
+    override, which the plan path never calls, so on the only ingest path
     there is, every override was dropped. Nothing failed; the rows were just
     quietly wrong.
     """
@@ -698,7 +698,7 @@ def test_planning_never_reads_a_file_keyed_table_whole(
     """Every read of a file-keyed table is narrowed to the file being planned.
 
     `existing_keys` used to issue an unrestricted `fetch("KEY")` for each
-    table the plan touched *and each parent of each* — 29 tables on a median
+    table the plan touched *and each parent of each*, 29 tables on a median
     file, scaling with the whole database rather than the file, and paid by a
     dry run too. On a shared server that is the dominant cost of planning.
 
@@ -708,8 +708,8 @@ def test_planning_never_reads_a_file_keyed_table_whole(
     here.
 
     The shared metadata tables (`Task`, `Institution`, `ProbeType`, …) are
-    expected to be read whole — they carry no `nwb_file_name` to narrow by and
-    stay small by nature — so the assertion is scoped to tables that do.
+    expected to be read whole, since they carry no `nwb_file_name` to narrow
+    by and stay small by nature. The assertion is scoped to tables that do.
     """
     from spyglass.data_import import planner
 

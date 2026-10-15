@@ -38,8 +38,8 @@ def missing_leaf(common, mini_copy_name, mini_insert):
 
     Without this, a dry run of a fully-ingested file cannot be distinguished
     from a real one: both write nothing, because there is nothing left to
-    write. `super_delete` rather than `delete` -- the cautious path follows a
-    row delete by removing the NWB file from disk, which would take the test
+    write. `super_delete` rather than `delete`, because the cautious path
+    follows a row delete by removing the NWB file from disk, which would take the test
     corpus with it. `safemode=False` because `warn=False` silences only the
     bypass warning: without it the delete asks "Commit deletes?" on a stdin
     pytest has captured, and the suite hangs rather than fails.
@@ -87,7 +87,7 @@ def test_dry_run_writes_to_no_data_table(
     """The invariant the whole design rests on.
 
     A dry run touches log tables only. Asserted across every watched table
-    rather than the one a bug would most likely hit -- and with work
+    rather than the one a bug would most likely hit, and with work
     outstanding, so a run that quietly inserted would move a count.
     """
     from spyglass.common.populate_all_common import populate_all_common
@@ -138,7 +138,7 @@ def test_dry_run_stages_its_plan(common, mini_copy_name, mini_insert):
     populate_all_common(mini_copy_name, dry_run=True)
     staged = IngestionPlanLog & key
 
-    assert staged, "A dry run writes to the log tables -- that is the point"
+    assert staged, "A dry run writes to the log tables; that is the point"
     assert staged.fetch1("attempt") == before + 1, "This run did not stage"
     assert staged.fetch1("status") == "open", "Nothing was inserted"
 
@@ -205,7 +205,7 @@ def test_insert_sessions_dry_run_copies_nothing_and_registers_nothing(
 
     `insert_sessions` normally copies the raw file to `_.nwb` and registers it
     in `Nwbfile` before populating. Both are writes, so a dry run does
-    neither -- including the `reinsert` delete, which would remove a session
+    neither, including the `reinsert` delete, which would remove a session
     to report on it.
     """
     from spyglass.common.common_nwbfile import Nwbfile
@@ -230,7 +230,7 @@ def test_dry_run_of_an_unregistered_file_reports_rather_than_registering(
     Planning reads the `_.nwb` copy and the tables keyed by `nwb_file_name`
     refer to the `Nwbfile` row for it, so a file Spyglass has never seen
     cannot be planned without first writing both. A dry run says so instead
-    of quietly registering the file — which would be a data-table write, the
+    of quietly registering the file, which would be a data-table write, the
     one thing the flag promises not to do.
     """
     from spyglass.common.common_nwbfile import Nwbfile
