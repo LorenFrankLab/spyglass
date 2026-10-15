@@ -19,9 +19,26 @@ import numpy as np
 import pytest
 from scipy.signal import freqz
 
-from spyglass.common import _fir_filter as fir
-
 FS = 30000.0  # spyglass raw ephys rate
+
+# Bound by the autouse fixture below, before any test in this module runs.
+fir = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def import_fir_filter():
+    """Import the module under test once the database fixtures are ready.
+
+    Yields
+    ------
+    module
+        The vendored ``spyglass.common._fir_filter`` module.
+    """
+    global fir
+    from spyglass.common import _fir_filter
+
+    fir = _fir_filter
+    yield fir
 
 
 # --------------------------------------------------------------------------- #
