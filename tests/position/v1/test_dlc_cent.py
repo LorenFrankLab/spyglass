@@ -46,6 +46,38 @@ def test_validate_params(params_tbl):
     params_tbl.insert1(params, skip_duplicates=True)
 
 
+def test_insert_params_without_likelihood_thresh(params_tbl):
+    """Existing centroid param sets omit likelihood_thresh and must insert.
+
+    Centroid params filter on likelihood upstream in DLCSmoothInterp, so no
+    stored set carries the key -- requiring it rejected every pre-existing
+    configuration at insert time.
+    """
+    params_tbl.insert1(
+        {
+            "dlc_centroid_params_name": "no likelihood_thresh",
+            "params": {
+                "centroid_method": "two_pt_centroid",
+                "points": {"point1": "greenLED", "point2": "redLED_C"},
+                "interpolate": True,
+                "interp_params": {"max_cm_to_interp": 15},
+                "smooth": True,
+                "smoothing_params": {
+                    "smoothing_duration": 0.05,
+                    "smooth_method": "moving_avg",
+                },
+                "max_LED_separation": 12,
+                "speed_smoothing_std_dev": 0.100,
+            },
+        },
+        skip_duplicates=True,
+    )
+
+    assert "no likelihood_thresh" in params_tbl.fetch(
+        "dlc_centroid_params_name"
+    )
+
+
 @pytest.mark.parametrize(
     "key", ["one_pt_centroid", "two_pt_centroid", "four_led_centroid"]
 )
