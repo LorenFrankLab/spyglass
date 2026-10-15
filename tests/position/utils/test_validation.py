@@ -126,6 +126,78 @@ class TestSmoothingValidation:
                 }
             )
 
+    def test_likelihood_thresh_requirement_is_optional(
+        self, validate_smoothing_params
+    ):
+        """Callers that threshold upstream can opt out of the requirement.
+
+        Centroid parameter sets filter on likelihood in an earlier step, so
+        the key is legitimately absent from them.
+        """
+        params = {
+            "smooth": True,
+            "smoothing_params": {"method": "moving_avg"},
+            "interpolate": True,
+            "interp_params": {"max_cm_to_interp": 15},
+        }
+
+        with pytest.raises(ValueError, match="must include.*likelihood_thresh"):
+            validate_smoothing_params(params)
+
+        validate_smoothing_params(params, require_likelihood_thresh=False)
+
+
+class TestFourPointCentroidRoles:
+    """4pt validation checks the mapping's role keys, not its values.
+
+    ``points`` maps a fixed role vocabulary to arbitrary bodypart names --
+    ``Centroid`` reads ``points["greenLED"]`` to learn which bodypart to use --
+    so checking the values rejects every mapping whose bodyparts are not
+    themselves named after the roles.
+    """
+
+    BASE = {"method": "4pt", "max_LED_separation": 12.0}
+
+    def test_accepts_real_bodypart_names_as_values(
+        self, validate_centroid_params
+    ):
+        validate_centroid_params(
+            {
+                **self.BASE,
+                "points": {
+                    "greenLED": "green",
+                    "redLED_C": "red_c",
+                    "redLED_L": "red_l",
+                    "redLED_R": "red_r",
+                },
+            }
+        )
+
+    def test_accepts_identity_mapping(self, validate_centroid_params):
+        validate_centroid_params(
+            {
+                **self.BASE,
+                "points": {
+                    r: r
+                    for r in ["greenLED", "redLED_C", "redLED_L", "redLED_R"]
+                },
+            }
+        )
+
+    def test_rejects_a_missing_role(self, validate_centroid_params):
+        with pytest.raises(ValueError, match="4pt centroid requires points"):
+            validate_centroid_params(
+                {
+                    **self.BASE,
+                    "points": {
+                        "greenLED": "green",
+                        "redLED_C": "red_c",
+                        "redLED_L": "red_l",
+                        "redLED_X": "red_r",
+                    },
+                }
+            )
+
 
 class TestOrientationValidation:
     """Test orientation parameter validation."""
