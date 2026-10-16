@@ -14,6 +14,21 @@ import pytest
 
 
 @pytest.fixture
+def clean_staging(mini_copy_name):
+    """Clear this file's staged plan afterwards.
+
+    A test that stages a plan built from a patched parse or a one-off config
+    leaves entries behind, and the next plan without `force_replan` reuses
+    them.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+
+    yield
+
+    IngestionPlanLog().clear(mini_copy_name)
+
+
+@pytest.fixture
 def parse_counter(monkeypatch):
     """Count `_parse` calls per table, so reuse is observable.
 

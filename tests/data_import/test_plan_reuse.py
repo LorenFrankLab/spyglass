@@ -311,3 +311,40 @@ def test_a_staged_plan_records_its_provenance(
     assert row["nwb_hash"], "The file hash is computed anyway; record it"
 
     log.clear(mini_copy_name)
+
+
+def test_a_changed_config_re_parses(
+    common, mini_copy_name, parse_counter, clean_staging
+):
+    """A config edit invalidates the staged plan.
+
+    Reuse gates on the NWB reads and the cross-references, neither of which a
+    config edit touches, so without the config digest an edited override was
+    reported as reused and the old rows served.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.data_import.planner import plan_nwbfile
+
+    log = IngestionPlanLog()
+    log.clear(mini_copy_name)
+
+    first = {"Electrode": [{"electrode_id": 0, "name": "from_first_config"}]}
+    log.stage(plan_nwbfile(mini_copy_name, config=first, force_replan=True))
+
+    # Same config: the gate passes, so reuse is available.
+    parse_counter.clear()
+    plan_nwbfile(mini_copy_name, config=first)
+    reused = set(parse_counter)
+
+    # Changed config: every table re-parses, the whole-file digest being
+    # deliberately coarser than the keys each table reads.
+    parse_counter.clear()
+    changed = {"Electrode": [{"electrode_id": 0, "name": "from_second"}]}
+    plan_nwbfile(mini_copy_name, config=changed)
+    reparsed = set(parse_counter)
+
+    assert len(reparsed) > len(reused), (
+        "A changed config must invalidate the staged plan; re-parsed "
+        f"{len(reparsed)} tables against {len(reused)} with the config "
+        "unchanged"
+    )

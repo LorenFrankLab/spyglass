@@ -267,6 +267,31 @@ def rows_digest(rows) -> str:
     return rolled.hexdigest()
 
 
+def config_digest(config) -> Optional[str]:
+    """Digest over the config a parse was given, or None when there is none.
+
+    Not `datajoint.hash.key_hash`, which hashes values and uses keys only for
+    ordering: a config is keyed by table name, so moving an override from one
+    table to another would leave the digest unchanged.
+
+    Reordering keys within one entry changes the digest, since `hashable`
+    reduces a list to `str(value)`. That re-parses a file for an edit that
+    changed nothing, which is the safe direction to err in.
+
+    Parameters
+    ----------
+    config : dict or None
+        The merged config, as `merged_config` assembles it.
+
+    Returns
+    -------
+    str or None
+        None for an empty config, which reads as "nothing to compare": a
+        digest of nothing would not match a plan staged without one.
+    """
+    return entry_digest(config) if config else None
+
+
 def collated(value):
     """Reduce a string key value to Spyglass's notion of one identity.
 
@@ -608,6 +633,7 @@ class IngestionPlan:
     # reuse, since no per-table digest can notice an object appearing. None
     # means unknown.
     id_set_digest: Optional[str] = None
+    config_digest: Optional[str] = None
     # {table_name: count} for entries not already in the database
     novel: Dict[str, int] = field(default_factory=dict)
 

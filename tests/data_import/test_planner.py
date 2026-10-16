@@ -21,20 +21,6 @@ from spyglass.utils.ingestion_plan import IngestionPlan
 
 
 @pytest.fixture
-def clean_staging(mini_copy_name):
-    """Clear this file's staged plan afterwards.
-
-    A test that stages a plan built from a patched parse leaves fabricated
-    entries behind, and the next plan without `force_replan` reuses them.
-    """
-    from spyglass.common.common_usage import IngestionPlanLog
-
-    yield
-
-    IngestionPlanLog().clear(mini_copy_name)
-
-
-@pytest.fixture
 def clean_plan(common, mini_copy_name, mini_insert):
     """A plan for a file this fixture has *made sure* is fully ingested.
 

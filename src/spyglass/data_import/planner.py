@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Tuple
 
 from spyglass.utils.ingestion_plan import (
     IngestionPlan,
+    config_digest,
     PlannedEntries,
     Problem,
     TablePlan,
@@ -264,6 +265,7 @@ def plan_nwbfile(
 
     # Recorded as provenance, except `id_set_digest`, which gates reuse
     nwb_hash = id_set_digest = None
+    cfg_digest = config_digest(config)
 
     if nwb_file is None:
         if not registered:
@@ -319,7 +321,10 @@ def plan_nwbfile(
     staged, declared = dict(), dict()
     if not force_replan:
         staged = IngestionPlanLog().staged_plan(
-            nwb_file_name, for_version=version, for_id_set=id_set_digest
+            nwb_file_name,
+            for_version=version,
+            for_id_set=id_set_digest,
+            for_config=cfg_digest,
         )
         if staged:
             declared = _declared_targets()
@@ -449,6 +454,7 @@ def plan_nwbfile(
         novel=novel,
         nwb_hash=nwb_hash,
         id_set_digest=id_set_digest,
+        config_digest=cfg_digest,
         spyglass_version=version,
     )
 
@@ -953,11 +959,15 @@ def _run_after_insert(plan: IngestionPlan, inserted) -> list:
     problems = []
 
     for name, target, rows in inserted:
-        hook = getattr(target, "after_insert", None)
+        # Through `_as_table`: a target may be a class, and `getattr` on a
+        # class hands back an unbound function, so `ctx` bound to `self` and
+        # every call raised.
+        table = _as_table(target)
+        hook = getattr(table, "after_insert", None)
         if hook is None:
             continue
         try:
-            hook(ctx, {target: list(rows)})
+            hook(ctx, {table: list(rows)})
         except Exception as err:
             logger.error(f"after_insert failed for {name}: {err}")
             problems.append(

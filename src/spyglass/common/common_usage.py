@@ -92,7 +92,9 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     success every entry is migrated to its real table and its blob cleared,
     leaving the hashes behind as provenance.
 
-    `id_set_digest` is the only whole-file reuse gate. `nwb_hash` is not one:
+    `id_set_digest` and `config_digest` are the whole-file reuse gates.
+    `config_digest` covers the whole config rather than the keys each table
+    reads, so any config edit re-parses every table. `nwb_hash` is not a gate:
     the retry loop edits the file, so the file hash differs on every attempt
     by construction, and gating on it would discard the plan exactly when it
     is most useful.
@@ -106,6 +108,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     attempt = 1: int                     # how many times this file was planned
     nwb_hash = NULL: varchar(32)         # provenance only, never a gate
     id_set_digest = NULL: varchar(32)    # over the file's set of object ids
+    config_digest = NULL: varchar(32)    # over the whole effective config
     spyglass_version = NULL: varchar(32)
     dj_user: varchar(64)
     timestamp = CURRENT_TIMESTAMP: timestamp
@@ -196,7 +199,11 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             self._clear({"nwb_file_name": nwb_file_name})
 
     def staged_plan(
-        self, nwb_file_name: str, for_version=None, for_id_set=None
+        self,
+        nwb_file_name: str,
+        for_version=None,
+        for_id_set=None,
+        for_config=None,
     ) -> dict:
         """Return everything staged for a file, in three queries.
 
@@ -213,6 +220,9 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             Digest over the file's current set of NWB object ids. Returns
             none unless it matches what was staged. Default None, which
             matches only a plan staged without one.
+        for_config : str, optional
+            Digest over the effective config. Returns none unless it matches
+            what was staged, so a changed override re-parses.
 
         Returns
         -------
@@ -250,6 +260,13 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             logger.info(
                 f"{nwb_file_name}: the file holds a different set of NWB "
                 + "objects than the staged plan; re-planning from scratch."
+            )
+            return {}
+
+        if master["config_digest"] != for_config:
+            logger.info(
+                f"{nwb_file_name}: the effective config differs from the "
+                + "staged plan; re-planning from scratch."
             )
             return {}
 
@@ -314,6 +331,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
             attempt=attempt,
             nwb_hash=plan.nwb_hash,
             id_set_digest=plan.id_set_digest,
+            config_digest=plan.config_digest,
             spyglass_version=plan.spyglass_version,
             dj_user=dj.config["database.user"],
         )
