@@ -116,7 +116,7 @@ def test_table_structure(analysis_file_issues):
 
 
 def test_check1_file_existing(
-    analysis_file_issues, test_analysis_file, teardown
+    analysis_file_issues, test_analysis_file, sweep_new_rows
 ):
     """Test check1_file() with an existing, valid file."""
     analysis_file_name, analysis_tbl = test_analysis_file
@@ -126,8 +126,11 @@ def test_check1_file_existing(
         "full_table_name": analysis_tbl.full_table_name,
         "analysis_file_name": analysis_file_name,
     }
-    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    # Cleared before, and swept after: the clear is what makes the assertion
+    # indifferent to a prior --no-teardown run; the sweep is what keeps this
+    # test's own row from outliving a failure.
     (analysis_file_issues & key).delete_quick()
+    sweep_new_rows(analysis_file_issues)
 
     # Check the file - should not find issues
     issue_found = analysis_file_issues.check1_file(
@@ -203,7 +206,7 @@ def test_integration_check_all_files_returns_dict(common_nwbfile):
 
 
 def test_check1_file_missing_from_disk(
-    analysis_file_issues, test_analysis_file, teardown
+    analysis_file_issues, test_analysis_file, sweep_new_rows
 ):
     """Test check1_file() when file doesn't exist on disk (line 123-127)."""
     analysis_file_name, analysis_tbl = test_analysis_file
@@ -220,8 +223,11 @@ def test_check1_file_missing_from_disk(
         "analysis_file_name": analysis_file_name,
     }
 
-    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    # Cleared before, and swept after: the clear is what makes the assertion
+    # indifferent to a prior --no-teardown run; the sweep is what keeps this
+    # test's own row from outliving a failure.
     (analysis_file_issues & key).delete_quick()
+    sweep_new_rows(analysis_file_issues)
 
     try:
         # Check the file - should detect it's missing
@@ -239,16 +245,13 @@ def test_check1_file_missing_from_disk(
         assert "path not found" in issue_entry["issue"]
 
     finally:
-        # Restore the file
+        # Restored here, not swept: the file belongs to the fixture, and the
+        # next test needs it back whether or not this one passed.
         temp_path.rename(test_file_path)
-
-        # Cleanup issue entry
-        if teardown:
-            (analysis_file_issues & key).delete_quick()
 
 
 def test_check1_file_filenotfound_error(
-    analysis_file_issues, test_analysis_file, teardown
+    analysis_file_issues, test_analysis_file, sweep_new_rows
 ):
     """Test check1_file() when get_abs_path raises FileNotFoundError (line 128-130)."""
     analysis_file_name, analysis_tbl = test_analysis_file
@@ -258,8 +261,11 @@ def test_check1_file_filenotfound_error(
         "analysis_file_name": analysis_file_name,
     }
 
-    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    # Cleared before, and swept after: the clear is what makes the assertion
+    # indifferent to a prior --no-teardown run; the sweep is what keeps this
+    # test's own row from outliving a failure.
     (analysis_file_issues & key).delete_quick()
+    sweep_new_rows(analysis_file_issues)
 
     # Mock get_abs_path to raise FileNotFoundError
     error_msg = "File path could not be constructed"
@@ -280,13 +286,9 @@ def test_check1_file_filenotfound_error(
     assert not issue_entry["can_read"]
     assert error_msg in issue_entry["issue"]
 
-    # Cleanup
-    if teardown:
-        (analysis_file_issues & key).delete_quick()
-
 
 def test_check1_file_checksum_error(
-    analysis_file_issues, test_analysis_file, teardown
+    analysis_file_issues, test_analysis_file, sweep_new_rows
 ):
     """Test check1_file() when DataJointError is raised for checksum mismatch (line 131-138)."""
     analysis_file_name, analysis_tbl = test_analysis_file
@@ -296,8 +298,11 @@ def test_check1_file_checksum_error(
         "analysis_file_name": analysis_file_name,
     }
 
-    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    # Cleared before, and swept after: the clear is what makes the assertion
+    # indifferent to a prior --no-teardown run; the sweep is what keeps this
+    # test's own row from outliving a failure.
     (analysis_file_issues & key).delete_quick()
+    sweep_new_rows(analysis_file_issues)
 
     # Mock get_abs_path to raise DataJointError (simulating checksum mismatch)
     error_msg = "Checksum mismatch for file"
@@ -328,10 +333,6 @@ def test_check1_file_checksum_error(
     assert error_msg in issue_entry["issue"]
     # Should also capture the downstream table name
     assert issue_entry["table"] == "dummy_child_table"
-
-    # Cleanup
-    if teardown:
-        (analysis_file_issues & key).delete_quick()
 
 
 # ======================= _check_path (unit tests, no DB) ==========================
@@ -490,7 +491,7 @@ def test_resolve_table_refs_no_null_entries(analysis_file_issues):
 
 
 def test_resolve_table_refs_populates_table(
-    analysis_file_issues, test_analysis_file, teardown
+    analysis_file_issues, test_analysis_file, sweep_new_rows
 ):
     """resolve_table_refs populates the table field for matching children."""
     analysis_file_name, analysis_tbl = test_analysis_file
@@ -500,6 +501,7 @@ def test_resolve_table_refs_populates_table(
         "analysis_file_name": analysis_file_name,
     }
     (analysis_file_issues & key).delete_quick()
+    sweep_new_rows(analysis_file_issues)
 
     # Insert an issue with table=NULL
     analysis_file_issues.insert1(
@@ -528,9 +530,6 @@ def test_resolve_table_refs_populates_table(
     assert (analysis_file_issues & key).fetch1(
         "table"
     ) == "`test`.`child_table`"
-
-    if teardown:
-        (analysis_file_issues & key).delete_quick()
 
 
 # ======================= check_files new behaviors ==========================
@@ -576,7 +575,7 @@ def test_check_files_skips_deleted_files(
 
 
 def test_check_files_checksum_mismatch(
-    analysis_file_issues, test_analysis_file, teardown
+    analysis_file_issues, test_analysis_file, sweep_new_rows
 ):
     """check_files records a checksum issue when the stored hash doesn't match."""
     analysis_file_name, analysis_tbl = test_analysis_file
@@ -586,6 +585,7 @@ def test_check_files_checksum_mismatch(
         "analysis_file_name": analysis_file_name,
     }
     (analysis_file_issues & key).delete_quick()
+    sweep_new_rows(analysis_file_issues)
 
     wrong_hash = uuid.uuid4()
     restricted = analysis_tbl & {"analysis_file_name": analysis_file_name}
@@ -607,6 +607,3 @@ def test_check_files_checksum_mismatch(
     entry = (analysis_file_issues & key).fetch1()
     assert entry["on_disk"] is True or entry["on_disk"] == 1
     assert "checksum mismatch" in entry["issue"]
-
-    if teardown:
-        (analysis_file_issues & key).delete_quick()

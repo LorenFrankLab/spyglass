@@ -3,7 +3,7 @@ import json
 from functools import cached_property
 from hashlib import md5
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Dict, Optional, Union
 
 import h5py
 import numpy as np
@@ -171,6 +171,8 @@ class NwbfileHasher:
         precision_lookup: Union[int, Dict[str, int]] = PRECISION_LOOKUP,
         keep_obj_hash: bool = False,
         keep_file_open: bool = False,
+        object_ids: bool = False,
+        max_dataset_bytes: Optional[int] = None,
         verbose: bool = False,
         legacy_mode: bool = False,
     ):
@@ -210,6 +212,31 @@ class NwbfileHasher:
             keys/values are hashed; Dataset shape/dtype and data are excluded).
             Use only for comparing regenerated files against hashes computed
             before the bug fix. Default False.
+        object_ids : bool, optional
+            Also build `obj_ids`, mapping each NWB `object_id` to its h5 path
+            and a digest covering that object *and everything under it*, so a
+            container's digest changes when its datasets do. Lets a caller ask
+            "did the objects this table read change?" without re-parsing.
+            Implies `keep_obj_hash`. Default False, and additive: `hash` is
+            byte-for-byte unchanged either way.
+        max_dataset_bytes : int, optional
+            Hash at most this many bytes of any one dataset: a head and a
+            tail of that combined size, with shape and dtype as always.
+            Default None, hashing every dataset whole. `hash` is None for a
+            file that had any dataset bounded, since it is then not the file's
+            hash; `obj_ids` and `id_set_digest` are unaffected.
+
+        Notes
+        -----
+        `obj_ids` inherits this hasher's blind spots, and is only as good as
+        the digests it aggregates: root-level attributes are not hashed, and
+        datasets named `version` or `source_script` have their contents
+        skipped anywhere in the file. A change confined to those is invisible
+        here, as it is to `hash`.
+
+        `max_dataset_bytes` adds one more: an edit inside a bounded dataset
+        that preserves its shape and falls between the head and the tail.
+        `bounded` names those datasets.
         """
         if not legacy_mode:
             _require_h5py_v3()
@@ -227,14 +254,303 @@ class NwbfileHasher:
         self.precision = precision_lookup
         self.batch_size = batch_size
         self.verbose = verbose
-        self.keep_obj_hash = keep_obj_hash
+        # The index is built from self.objs, so it needs the cache kept.
+        self.keep_obj_hash = keep_obj_hash or object_ids
+        self.object_ids = object_ids
+        self.max_dataset_bytes = max_dataset_bytes
+        self.bounded = []  # datasets `_spans` read only part of
         self.objs = {}
+        self.obj_ids = {}
         self.hashed = md5("".encode())
-        self.hash = self.compute_hash()
+
+        digest = self.compute_hash()
+        # `hash` is stored provenance elsewhere, so a partial read must not
+        # pass as it. None rather than a flag the caller can forget to check.
+        self.hash = None if self.bounded else digest
+
+        if object_ids:  # before cleanup: reading attrs needs the open file
+            # Links first: they add objects the traversal cannot reach, and
+            # the index below reads whatever `self.objs` holds.
+            self._index_external_links()
+            self._index_object_ids()
 
         if not keep_file_open:
             self.cleanup()
             atexit.unregister(self.cleanup)
+
+    def _index_external_links(self) -> None:
+        """Add externally-linked objects to the index, keyed on the target.
+
+        Needed because `visititems` follows hard links only, and in an NWB copy
+        the bulk of the data is an external link into the raw file.
+
+        The digest is the target's *identity*, meaning file, path, size and
+        mtime, rather than its contents, which would mean hashing a file ~20x
+        the copy on every plan. So an edit preserving size and mtime exactly goes unseen.
+
+        Writes `self.objs` only, never `self.hashed`: the file-level hash is
+        stored provenance and must stay byte-identical.
+        """
+        found = {}
+
+        def walk(group, prefix=""):
+            for key in group.keys():
+                name = f"{prefix}/{key}".lstrip("/")
+                try:
+                    link = group.get(key, getlink=True)
+                except (KeyError, OSError):  # pragma: no cover - unreadable
+                    continue
+
+                if isinstance(link, h5py.ExternalLink):
+                    found[name] = link
+                    continue
+                if isinstance(link, h5py.SoftLink):
+                    continue  # a soft link's target is in this file already
+
+                try:
+                    item = group.get(key)
+                except (KeyError, OSError):  # pragma: no cover
+                    continue
+                if isinstance(item, h5py.Group):
+                    walk(item, name)
+
+        walk(self.file)
+
+        for name, link in found.items():
+            digest = md5(f"{link.filename}::{link.path}".encode())
+
+            target = Path(self.file.filename).parent / link.filename
+            try:
+                stat = target.stat()
+                digest.update(f"{stat.st_size}:{stat.st_mtime_ns}".encode())
+            except OSError:
+                # The target is gone. Say so in the digest rather than hashing
+                # as though nothing were wrong: a vanished link is a change.
+                digest.update(b"target-missing")
+
+            try:  # the dereferenced object, for its object_id attribute
+                obj = self.file[name]
+            except (KeyError, OSError):
+                continue  # target unreachable: nothing to key an id on
+
+            link_digest = digest.hexdigest()
+            self.objs[name] = (obj, link_digest)
+
+            # And everything beneath it. A table rarely reads the linked
+            # container itself: `SensorData` records the id of a series
+            # *inside* `processing/analog`, so indexing only the link left it
+            # unable to notice the raw file moving. The link's identity applies
+            # to the whole subtree. If that file changed, all of it is
+            # suspect. Deliberately coarse: any change to the target
+            # invalidates every reader of it, which over-invalidates rather
+            # than under-invalidates.
+            if isinstance(obj, h5py.Group):
+                for path, child in self._walk_linked(obj, name):
+                    self.objs[path] = (
+                        child,
+                        md5(f"{link_digest}:{path}".encode()).hexdigest(),
+                    )
+
+    def _walk_linked(self, group, prefix: str):
+        """Yield `(path, object)` for everything under a dereferenced link.
+
+        h5py will read through an external link, so the target's own structure
+        is reachable. It is only `visititems` on the *source* file that will
+        not follow it.
+
+        Parameters
+        ----------
+        group : h5py.Group
+            The dereferenced link target.
+        prefix : str
+            Path of the link in the source file, so indexed paths read as
+            though the objects lived there.
+
+        Yields
+        ------
+        tuple of (str, h5py object)
+        """
+        for key in group.keys():
+            path = f"{prefix}/{key}"
+            try:
+                child = group.get(key)
+            except (KeyError, OSError):  # pragma: no cover - unreadable
+                continue
+            if child is None:
+                continue
+
+            yield path, child
+
+            if isinstance(child, h5py.Group):
+                yield from self._walk_linked(child, path)
+
+    def _index_object_ids(self) -> None:
+        """Map each NWB object_id to its h5 path and a subtree digest.
+
+        A table records the `object_id` of what it read, such as a Position
+        container or an ElectricalSeries. Asking whether that object changed
+        means asking about the object *and its contents*, so each digest here
+        folds in every path beneath it. The per-object digests themselves are
+        whatever `compute_hash` already computed; this only aggregates them.
+        """
+        # Sorted once, so each subtree scan walks a contiguous run rather
+        # than re-filtering every path per object.
+        paths = sorted(self.objs)
+
+        # One object can be reachable by several paths: NWB soft-links a
+        # device into the series that uses it, and h5py hands back the
+        # dereferenced object at both. Collect the candidates first, then
+        # pick where each object *lives*. See _canonical_path.
+        candidates: Dict[str, list] = {}
+        for path in paths:
+            obj, _ = self.objs[path]
+            attrs = getattr(obj, "attrs", None)
+            if attrs is None or "object_id" not in attrs:
+                continue
+
+            object_id = self._normalize_h5str(attrs["object_id"])
+            if isinstance(object_id, bytes):  # h5py<3 returns bytes
+                object_id = object_id.decode()
+            candidates.setdefault(str(object_id), []).append(path)
+
+        for object_id, found in candidates.items():
+            path = self._canonical_path(found)
+
+            subtree = md5(str(self.objs[path][1]).encode())
+            prefix = f"{path}/" if path != "/" else "/"
+            for other in paths:
+                if other.startswith(prefix) and other != path:
+                    subtree.update(other.encode())
+                    subtree.update(str(self.objs[other][1]).encode())
+
+            self.obj_ids[object_id] = (path, subtree.hexdigest())
+
+        claimed = {path for found in candidates.values() for path in found}
+        self._index_root_object(paths, claimed)
+
+    def _index_root_object(self, paths: list, claimed: set) -> None:
+        """Index the root NWBFile object over the metadata it alone owns.
+
+        The traversal visits the root's members, never the root, so without
+        this every table reading file metadata looks reusable however that
+        metadata is edited. Scoped to paths no deeper object claims, so an edit
+        inside a container is not also an edit to the file's metadata.
+
+        Parameters
+        ----------
+        paths : list of str
+            Every hashed path, sorted, so the digest is order-independent.
+        claimed : set of str
+            Paths reaching an object with its own `object_id`, including soft
+            links: that object's own entry already answers for them.
+        """
+        attrs = getattr(self.file, "attrs", None)
+        if attrs is None or "object_id" not in attrs:
+            return
+
+        object_id = self._normalize_h5str(attrs["object_id"])
+        if isinstance(object_id, bytes):  # h5py<3 returns bytes
+            object_id = object_id.decode()
+
+        owned = tuple(f"{path}/" for path in claimed)
+        rolled = md5("".encode())
+        for path in paths:
+            if path in claimed or path.startswith(owned):
+                continue
+            rolled.update(path.encode())
+            rolled.update(str(self.objs[path][1]).encode())
+
+        self.obj_ids[str(object_id)] = ("/", rolled.hexdigest())
+
+    def _canonical_path(self, paths: list) -> str:
+        """Return where an object lives, given every path reaching it.
+
+        A soft link's location holds none of the object's children, so a
+        digest rolled up there would cover the object's own attributes and
+        nothing beneath it, so a probe would hash the same however its shanks
+        changed. Prefer the hard link, which is the object's real home.
+
+        Parameters
+        ----------
+        paths : list of str
+            Every indexed h5 path resolving to one object.
+
+        Returns
+        -------
+        str
+            The path to roll the subtree digest up from. Ties break on depth
+            then name, so the choice does not depend on iteration order.
+        """
+        if len(paths) == 1:
+            return paths[0]
+
+        def rank(path):
+            try:
+                is_link = isinstance(
+                    self.file.get(path, getlink=True), h5py.SoftLink
+                )
+            except Exception:  # unreadable: treat as a link, prefer the other
+                is_link = True
+            return (is_link, path.count("/"), path)
+
+        return min(paths, key=rank)
+
+    def digest_for(self, object_id: str) -> Optional[str]:
+        """Return the subtree digest for one NWB object_id, or None.
+
+        Parameters
+        ----------
+        object_id : str
+            An NWB object id, as recorded in a plan's read-set.
+
+        Returns
+        -------
+        str or None
+            None if the file holds no such object. For a read-set that means
+            the object is gone, and whatever read it must re-run.
+        """
+        found = self.obj_ids.get(str(object_id))
+        return found[1] if found else None
+
+    @property
+    def id_set_digest(self) -> Optional[str]:
+        """Return one digest over the *set* of object ids this file holds.
+
+        Ids only, never contents: this answers whether an object appeared or
+        vanished, which no per-object digest can.
+
+        Returns
+        -------
+        str or None
+            None when no object index was built, which reads as "unknown"
+            and never as "unchanged".
+        """
+        if not self.object_ids:
+            return None
+        return md5("".join(sorted(self.obj_ids)).encode()).hexdigest()
+
+    def read_set_digest(self, object_ids) -> str:
+        """Return one digest over the objects a table read.
+
+        Order-independent and absence-sensitive: an object that has vanished
+        contributes its id and a `missing` marker, so it does not silently
+        hash the same as one that is unchanged.
+
+        Parameters
+        ----------
+        object_ids : iterable of str
+            The read-set, e.g. a `TablePlan.reads`.
+
+        Returns
+        -------
+        str
+            A digest to compare against the one stored with a cached plan.
+        """
+        rolled = md5("".encode())
+        for object_id in sorted(set(str(o) for o in object_ids)):
+            rolled.update(object_id.encode())
+            rolled.update((self.digest_for(object_id) or "missing").encode())
+        return rolled.hexdigest()
 
     def cleanup(self):
         self.file.close()
@@ -340,22 +656,54 @@ class NwbfileHasher:
         # Hoist dtype check: dataset.dtype is constant across chunks.
         is_numeric = np.issubdtype(dataset.dtype, np.number)
 
-        size = dataset.shape[0]
-        start = 0
+        for start, stop in self._spans(dataset):
+            while start < stop:
+                end = min(start + self.batch_size, stop)
+                data = self._normalize_h5str(dataset[start:end])
+                start = end
 
-        while start < size:
-            end = min(start + self.batch_size, size)
-            data = self._normalize_h5str(dataset[start:end])
-            start = end
-
-            if precision and is_numeric:
-                data = np.round(data, precision)
-            if is_numeric:
-                this_hash.update(self._numeric_array_bytes(data))
-            else:
-                this_hash.update(self.serialize_attr_value(data))
+                if precision and is_numeric:
+                    data = np.round(data, precision)
+                if is_numeric:
+                    this_hash.update(self._numeric_array_bytes(data))
+                else:
+                    this_hash.update(self.serialize_attr_value(data))
 
         return this_hash.hexdigest()
+
+    def _spans(self, dataset: h5py.Dataset):
+        """Return the row ranges of a dataset to hash, as `[(start, stop)]`.
+
+        The whole dataset unless `max_dataset_bytes` is set and this one
+        exceeds it, in which case a head and a tail of that combined size.
+        Never fewer than one row from each end, so a dataset whose single row
+        is larger than the cap still contributes its contents.
+
+        Parameters
+        ----------
+        dataset : h5py.Dataset
+            A dataset with at least one dimension.
+
+        Returns
+        -------
+        list of tuple of int
+        """
+        size = dataset.shape[0]
+
+        if self.max_dataset_bytes is None:
+            return [(0, size)]
+
+        row_bytes = dataset.dtype.itemsize * int(
+            np.prod(dataset.shape[1:], dtype=np.int64)
+        )
+        limit = max(2, self.max_dataset_bytes // max(1, row_bytes))
+
+        if size <= limit:
+            return [(0, size)]
+
+        self.bounded.append(dataset.name)
+        half = limit // 2
+        return [(0, half), (size - half, size)]
 
     def hash_shape_dtype(self, obj: Union[h5py.Dataset, np.ndarray]) -> str:
         if not hasattr(obj, "shape") or not hasattr(obj, "dtype"):
@@ -415,8 +763,12 @@ class NwbfileHasher:
                     this_hash.update(k.encode())
                     obj_value = self.serialize_attr_value(v)
                     this_hash.update(obj_value)
+                    # `{k}`, not a literal "k": every child of a group
+                    # otherwise collapses onto one overwritten cache key.
+                    # Cache-only: `hashed` is updated from `k` and
+                    # `obj_value` above, so stored hashes are unaffected.
                     self.add_to_cache(
-                        f"{name}/k", v, md5(obj_value).hexdigest()
+                        f"{name}/{k}", v, md5(obj_value).hexdigest()
                     )
             else:
                 raise TypeError(

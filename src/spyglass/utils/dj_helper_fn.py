@@ -6,7 +6,7 @@ import multiprocessing.pool
 import os
 import re
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Tuple, Type, Union
+from typing import Iterable, List, Tuple, Type, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -533,47 +533,6 @@ def bytes_to_human_readable(size: int) -> str:
         size /= 1024
 
     return msg_template.format(size=size, unit="PB")
-
-
-def accept_divergence(
-    key: str,
-    new_value: Any,
-    existing_value: Any,
-    test_mode: bool = False,
-    table_name: Optional[str] = None,
-):
-    """Prompt to accept divergence in values between existing and new entries
-
-    Parameters
-    ----------
-    key : str
-        Name of the column where the divergence is found
-    new_value : Any
-        New value to be inserted into the table
-    existing_value : Any
-        Existing value in the table that is different from the new value
-    test_mode : bool, optional
-        If True, will not prompt and return False, by default False
-    table_name : str, optional
-        Name of the table where the divergence is found, by default None
-    """
-    if test_mode:
-        # If get here in test mode, is because want to test failure
-        logger.debug(
-            "\naccept_divergence called in testing, returning False w/o prompt"
-        )
-        return False
-    tbl_msg = ""
-    if table_name:  # optional message with table name
-        tbl_msg = f" of '{table_name}'"
-    response = dj.utils.user_choice(
-        f"Existing entry differs in '{key}' column{tbl_msg}.\n"
-        + "Accept the existing value of: \n"
-        + f"'{existing_value}' \n"
-        + "in place of the new value: \n"
-        + f"'{new_value}' ?\n"
-    )
-    return str_to_bool(response)
 
 
 def _replace_nan_with_default(data_dict, default_value=-1.0):

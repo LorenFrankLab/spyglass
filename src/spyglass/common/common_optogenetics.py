@@ -46,14 +46,18 @@ class OptogeneticProtocol(SpyglassIngestion, dj.Manual):
         "stimulus_signal": {"stimulus_object_id": "object_id"},
     }
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Generate a master entry plus whichever conditional parts apply.
 
         Called once per row of the optogenetic epochs table. Each row yields
         one master entry and a part entry for every trigger or condition the
         row switches on.
         """
-        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        entries = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
 
         if hasattr(nwb_obj, "to_dataframe"):
             # Handed the whole epochs table: super() has already expanded it
@@ -362,14 +366,22 @@ class OpticalFiberImplant(SpyglassIngestion, dj.Manual):
     }
     _extension_requirements = {"ndx-ophys-devices": "0.3.0"}
 
+    def before_parse(self, ctx) -> None:
+        """Reset the per-file fiber counter, for planning as well as inserting."""
+        self._fiber_index = dict()
+
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
         self._fiber_index[nwb_file_name] = (
             0  # reset fiber index for each NWB file
         )
         return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
-        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
+        entries = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
         self_entries = entries[self]
         for entry in self_entries:
             nwb_file_name = entry["nwb_file_name"]

@@ -1,3 +1,5 @@
+import re
+
 import datajoint as dj
 import pynwb
 
@@ -6,7 +8,6 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
-from spyglass.utils.dj_helper_fn import accept_divergence
 from spyglass.utils.nwb_helper_fn import get_nwb_file, is_nwb_obj_type
 
 schema = dj.schema("common_task")
@@ -26,6 +27,7 @@ class Task(SpyglassMixin, dj.Manual):
     # TaskEpoch is validated rather than reinserted.
     _expected_duplicates = True
 
+    # TODO: Remove? Not directly inserted. Managed by TaskEpoch
     def insert_from_nwbfile(self, nwbf: pynwb.NWBFile):
         """Insert tasks from an NWB file.
 
@@ -75,23 +77,17 @@ class Task(SpyglassMixin, dj.Manual):
                 inserts.append(task_dict)  # only append novel tasks
                 continue
             existing = query.fetch1()
-            for key in set(task_dict).union(existing):
-                if not unequal_vals(key, task_dict, existing):
-                    continue  # skip if values are equal
-                if not accept_divergence(
-                    key,
-                    task_dict.get(key),
-                    existing.get(key),
-                    self._test_mode,
-                    self.camel_name,
-                ):
-                    # If the user does not accept the divergence,
-                    # raise an error to prevent data inconsistency
-                    raise ValueError(
-                        f"Task {task_dict['task_name']} already exists "
-                        + f"with different values for {key}: "
-                        + f"{task_dict.get(key)} != {existing.get(key)}"
-                    )
+            # Keep the stored task and report.
+            if differing := sorted(
+                key
+                for key in set(task_dict).union(existing)
+                if unequal_vals(key, task_dict, existing)
+            ):
+                logger.info(
+                    f"Task {task_dict['task_name']} already exists with "
+                    + f"different values for {', '.join(differing)}; "
+                    + "kept what is stored."
+                )
         # Insert the tasks into the table
         self.insert(inserts)
 
@@ -146,17 +142,53 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
         """Hold the caller's config, which `get_nwb_objects` also needs.
 
-        The config is resolved by the caller -- `single_transaction_make`
-        merges the file's own `_spyglass_config.yaml` into it. This table does
+        The config is resolved by the caller, where `merged_config` folds the
+        file's own `_spyglass_config.yaml` into it. This table does
         not reload it. Kept on `self` only because `get_nwb_objects` and
         `_camera_name_map` take no config argument.
         """
-        self._camera_cache, self._interval_cache = dict(), dict()
         self._file_config = config or dict()
         return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
+    def before_parse(self, ctx) -> None:
+        """Clear the per-file lookups, for planning as well as inserting.
+
+        `before_parse` rather than `insert_from_nwbfile`: both paths run
+        `_parse`, only one runs `insert_from_nwbfile`. The interval cache in
+        particular is a snapshot of what the plan and database held at the time
+        it was built, so carrying it into a second plan answers the new run's
+        questions with the old run's answers.
+        """
+        self._camera_cache, self._interval_cache = dict(), dict()
+        # From the context, which carries the config this run was given. The
+        # plan path never calls `insert_from_nwbfile`, so `get_nwb_objects` was
+        # otherwise reading whichever config the last insert happened to leave.
+        self._file_config = ctx.config or dict()
+
+        # Built here so the devices it reads join this table's read-set: the
+        # map feeds every `camera_names` value, so a renamed camera must
+        # re-plan this table too.
+        if (nwb_file := ctx.nwb_file) is not None:
+            for device in nwb_file.devices.values():
+                if is_nwb_obj_type(device, "CameraDevice"):
+                    ctx.record_read(device)
+            self._camera_cache[ctx.nwb_file_name] = self._camera_name_map(
+                nwb_file
+            )
+
     def get_nwb_objects(self, nwb_file, nwb_file_name=None):
         """Return the file's task tables."""
+        # Take the camera map from the file in hand, before anything can
+        # return early. `_camera_names` otherwise resolves the registered
+        # path and opens the file a second time, a wasted read on every
+        # ingestion, and an outright failure when planning a file that has
+        # not been registered yet, which is the case this check exists for.
+        if (
+            nwb_file_name is not None
+            and nwb_file_name not in self._camera_cache
+        ):
+            self._camera_cache[nwb_file_name] = self._camera_name_map(nwb_file)
+
         tasks_mod = nwb_file.processing.get("tasks")
         task_tables = (
             [
@@ -228,32 +260,50 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
 
         return camera_names
 
-    def _session_intervals(self, nwb_file_name) -> list:
-        """Return the interval names already held for a file, fetched once.
+    def _session_intervals(self, nwb_file_name, ctx) -> list:
+        """Return the interval names a file will hold, resolved once.
+
+        Asked of the context: `IntervalList` is filled by the same ingestion
+        because `Raw` and `PositionSource` both emit rows into it before this
+        table is planned, so querying it while planning a file that is not ingested
+        yet finds nothing, and every epoch resolves to no interval.
 
         Parameters
         ----------
         nwb_file_name : str
             The file being ingested.
+        ctx : FileContext
+            Parse context.
 
         Returns
         -------
         list of str
-            Interval names in IntervalList for this file.
+            Interval names this file will have in IntervalList.
         """
         if nwb_file_name not in self._interval_cache:
-            self._interval_cache[nwb_file_name] = (
-                IntervalList & {"nwb_file_name": nwb_file_name}
-            ).fetch("interval_list_name")
+            self._interval_cache[nwb_file_name] = [
+                row["interval_list_name"]
+                for row in ctx.rows_for(
+                    IntervalList(), {"nwb_file_name": nwb_file_name}
+                )
+            ]
         return self._interval_cache[nwb_file_name]
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Generate a Task entry and one TaskEpoch entry per epoch.
 
         Called once per row of a task table. Task is returned first: it is
         TaskEpoch's parent and has to exist before the epoch rows land.
         """
-        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        # `ctx` forwarded: for the task table itself, super() loops the rows
+        # and calls back into this method per row. Dropping the context here
+        # would leave every per-row call resolving intervals against the
+        # database, which during planning holds none of them yet.
+        entries = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
 
         if hasattr(nwb_obj, "to_dataframe"):
             return entries  # the table itself; rows come back through here
@@ -283,11 +333,11 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
                 task_key,
                 nwb_obj.task_epochs,
                 nwb_file_name,
-                self._session_intervals(nwb_file_name),
+                self._session_intervals(nwb_file_name, ctx),
             ),
         }
 
-    def generate_entries_from_config(self, config, base_key=None):
+    def generate_entries_from_config(self, config, base_key=None, ctx=None):
         """Generate entries for tasks declared in the config file.
 
         The config names tasks in its own shape. A `Tasks` list of dicts,
@@ -315,7 +365,7 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
                     task_key,
                     task.get("task_epochs", []),
                     nwb_file_name,
-                    self._session_intervals(nwb_file_name),
+                    self._session_intervals(nwb_file_name, ctx),
                 )
             )
 
@@ -409,13 +459,12 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
     def get_epoch_interval_name(cls, epoch, session_intervals):
         """Get the interval name for a given epoch based on matching number.
 
-        This method implements flexible matching to handle various epoch tag
-        formats. It tries multiple formats to find a match:
-        1. Exact match (e.g., "1")
-        2. Two-digit zero-padded (e.g., "01")
-        3. Three-digit zero-padded (e.g., "001")
-        If multiple matches are found, the two-digit only match is prioritized if
-        present. If no unique match is found, a warning is logged.
+        The epoch must match a whole token, a run of letters and digits,
+        rather than appear anywhere in the name, so epoch 1 matches `01_s1` but
+        not `1ae82410-f27d-...`. Candidates are tiered (whole name, leading
+        token, any token) and the first non-empty tier decides; within a tier
+        the shortest prefix wins, since derived intervals extend the session
+        interval's name. Still ambiguous returns None rather than guessing.
 
         Parameters
         ----------
@@ -438,44 +487,72 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
         '02'
         >>> TaskEpoch.get_epoch_interval_name(3, session_intervals)
         '003'
+        >>> TaskEpoch.get_epoch_interval_name(1, ["01_s1", "01_s1_first9"])
+        '01_s1'
+        >>> TaskEpoch.get_epoch_interval_name(1, ["epoch_01"])
+        'epoch_01'
         """
         if epoch in session_intervals:
             return epoch
 
-        two_digit_matches = [
-            interval
-            for interval in session_intervals
-            if str(epoch).zfill(2) in interval
-        ]
-        if len(set(two_digit_matches)) == 1:
-            return two_digit_matches[0]
+        # `1`, `01`, `001`; deduplicated, since a wide epoch number collapses
+        # them. A non-numeric tag is unchanged by zfill, so it appears once.
+        forms = list(
+            dict.fromkeys(
+                [str(epoch), str(epoch).zfill(2), str(epoch).zfill(3)]
+            )
+        )
 
-        # Try multiple formats:
-        possible_formats = [
-            str(epoch),  # Try exact match first (e.g., "1")
-            str(epoch).zfill(2),  # Try 2-digit zero-pad (e.g., "01")
-            str(epoch).zfill(3),  # Try 3-digit zero-pad (e.g., "001")
-        ]
-        unique_formats = list(dict.fromkeys(possible_formats))
+        for form in forms:  # a name that *is* the epoch beats any holding it
+            if form in session_intervals:
+                return form
 
-        # Find matches for any format, remove duplicates preserving order
-        possible_targets = [
-            interval
-            for interval in session_intervals
-            for target in unique_formats
-            if target in interval
-        ]
+        form_set = set(forms)
+        leading, anywhere = [], []  # tier 2 and tier 3
+        for interval in session_intervals:
+            tokens = cls._tokens(interval)
+            if tokens and tokens[0] in form_set:
+                leading.append(interval)
+            elif form_set & set(tokens):
+                anywhere.append(interval)
 
-        if len(set(possible_targets)) == 1:
-            return possible_targets[0]
+        candidates = []
+        for tier in (leading, anywhere):
+            candidates = list(dict.fromkeys(tier))
+            if not candidates:
+                continue  # weaker evidence only speaks when there is no better
 
-        warn = "Multiple" if len(possible_targets) > 1 else "No"
+            if len(candidates) == 1:
+                return candidates[0]
+
+            # The session interval is the stem the others were built from.
+            shortest = min(candidates, key=len)
+            if all(other.startswith(shortest) for other in candidates):
+                return shortest
+
+            break  # ambiguous at this strength; a weaker tier cannot settle it
 
         cls()._warn_msg(
-            f"{warn} interval(s) found for epoch {epoch}. "
-            f"Available intervals: {session_intervals}"
+            f"{'Multiple' if candidates else 'No'} interval(s) found for epoch "
+            f"{epoch}. Available intervals: {session_intervals}"
         )
         return None
+
+    @staticmethod
+    def _tokens(interval_name: str) -> list:
+        """Split an interval name into runs of letters and digits.
+
+        `01_s1` -> `["01", "s1"]`; `1ae82410-f27d` -> `["1ae82410", "f27d"]`.
+
+        Parameters
+        ----------
+        interval_name : str
+
+        Returns
+        -------
+        list of str
+        """
+        return re.findall(r"[A-Za-z0-9]+", str(interval_name))
 
     @staticmethod
     def _check_videos_without_task(nwbf, nwb_file_name):

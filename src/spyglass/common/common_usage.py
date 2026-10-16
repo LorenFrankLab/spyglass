@@ -44,6 +44,15 @@ class CautiousDelete(dj.Manual):
 
 @schema
 class InsertError(dj.Manual):
+    """Ingestion failures, one row per exception. Deprecated.
+
+    Superseded by `IngestionPlanLog`, which records a whole file's problems
+    together with the entries they blocked, rather than one row per exception
+    with no memory of what was already staged. Reading is the part that has to
+    keep working, so the table stays declared with every column and `fetch`
+    warns once; a dry run records nothing here at all.
+    """
+
     definition = """
     id: int auto_increment
     ---
@@ -55,6 +64,543 @@ class InsertError(dj.Manual):
     error_message: varchar(255)
     error_raw = null: blob
     """
+
+    def _warn_deprecated(self) -> None:
+        """Point readers at IngestionPlanLog, once per session."""
+        ActivityLog().deprecate_log(
+            name="InsertError",
+            alt="IngestionPlanLog, which stages entries with their problems",
+        )
+
+    def fetch(self, *args, **kwargs):
+        """Fetch rows, warning once about deprecation."""
+        self._warn_deprecated()
+        return super().fetch(*args, **kwargs)
+
+    def fetch1(self, *args, **kwargs):
+        """Fetch one row, warning once about deprecation."""
+        self._warn_deprecated()
+        return super().fetch1(*args, **kwargs)
+
+
+@schema
+class IngestionPlanLog(SpyglassMixin, dj.Manual):
+    """A file's ingestion plan, staged at entry granularity.
+
+    A staging area for *incomplete* ingestion, never a second source of
+    truth. One live plan per file, updated in place across attempts. On full
+    success every entry is migrated to its real table and its blob cleared,
+    leaving the hashes behind as provenance.
+
+    `id_set_digest` and `config_digest` are the whole-file reuse gates.
+    `config_digest` covers the whole config rather than the keys each table
+    reads, so any config edit re-parses every table. `nwb_hash` is not a gate:
+    the retry loop edits the file, so the file hash differs on every attempt
+    by construction, and gating on it would discard the plan exactly when it
+    is most useful.
+    """
+
+    definition = """
+    nwb_file_name: varchar(64)
+    ---
+    verdict: varchar(16)                 # fatal|no_op|all_new|partial_new
+    status = "open": enum("open", "complete")
+    attempt = 1: int                     # how many times this file was planned
+    nwb_hash = NULL: varchar(32)         # provenance only, never a gate
+    id_set_digest = NULL: varchar(32)    # over the file's set of object ids
+    config_digest = NULL: varchar(32)    # over the whole effective config
+    spyglass_version = NULL: varchar(32)
+    dj_user: varchar(64)
+    timestamp = CURRENT_TIMESTAMP: timestamp
+    """
+
+    class Entry(SpyglassMixinPart):
+        """One prospective row, with the two hashes that classify it.
+
+        Two hashes because same-key-different-blob is a divergence rather than
+        novelty, and one hash cannot tell those apart. `table_name` is a plain
+        string, **not** a foreign key: a prospective entry routinely names a
+        table whose rows do not exist yet.
+        """
+
+        definition = """
+        -> master
+        table_name: varchar(128)
+        key_hash: varchar(32)            # of the primary key: stable identity
+        ---
+        state: enum("planned","stored","conflict")
+        owner_table = "": varchar(128)   # the table that planned this row
+        blob_hash = NULL: varchar(32)    # of the whole entry: change detection
+        entry_blob = NULL: longblob      # cleared once migrated
+        problem_code = NULL: varchar(64)
+        message = NULL: varchar(255)
+        """
+
+    class Table(SpyglassMixinPart):
+        """One table's share of a plan, and whether its parse can be reused.
+
+        `read_set_digest` covers the NWB objects the table read; `xrefs`
+        carries the other half, what it resolved out of other tables. Both
+        are needed to call a parse reusable.
+        """
+
+        definition = """
+        -> master
+        table_name: varchar(128)
+        ---
+        status: varchar(16)                  # ok|skipped|failed|blocked
+        read_set_digest = NULL: varchar(32)  # NULL means unknown, not unchanged
+        reads = NULL: blob                   # object ids the digest covers
+        xrefs = NULL: blob                   # values resolved from other tables
+        entry_count = 0: int
+        """
+
+    class Problem(SpyglassMixinPart):
+        """A file-level problem, belonging to no single entry."""
+
+        definition = """
+        -> master
+        problem_id: int
+        ---
+        table_name = "": varchar(128)
+        severity: varchar(16)
+        code: varchar(64)
+        message = "": varchar(255)
+        suggested_revision = NULL: blob
+        error_raw = NULL: blob
+        """
+
+    def _clear(self, master_key: dict) -> None:
+        """Remove a file's staged plan, parts before master.
+
+        Parameters
+        ----------
+        master_key : dict
+            `{"nwb_file_name": ...}`.
+        """
+        # Derived, not listed: a fourth part added to this master is cleared
+        # by construction. `delete_quick` does not cascade, so the master
+        # delete fails on a foreign key if any part is left behind, which is
+        # how the previous hardcoded tuple announced itself when `Table` was
+        # added.
+        for part in self.parts(as_objects=True):
+            (part & master_key).delete_quick()
+        (self & master_key).delete_quick()
+
+    def clear(self, nwb_file_name: str) -> None:
+        """Remove a file's staged plan entirely.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The file whose plan to discard.
+        """
+        with self._safe_context():
+            self._clear({"nwb_file_name": nwb_file_name})
+
+    def staged_plan(
+        self,
+        nwb_file_name: str,
+        for_version=None,
+        for_id_set=None,
+        for_config=None,
+    ) -> dict:
+        """Return everything staged for a file, in three queries.
+
+        Three for the whole file, never two per table: asking per table made
+        reuse slower than re-parsing.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+        for_version : str, optional
+            The Spyglass version about to do the planning. If updated,
+            invalidates previous plans and returns none.
+        for_id_set : str, optional
+            Digest over the file's current set of NWB object ids. Returns
+            none unless it matches what was staged. Default None, which
+            matches only a plan staged without one.
+        for_config : str, optional
+            Digest over the effective config. Returns none unless it matches
+            what was staged, so a changed override re-parses.
+
+        Returns
+        -------
+        dict
+            `{table_name: {"status", "read_set_digest", "reads", "xrefs",
+            "entries"}}`,
+            where `entries` is `{target_table_name: [rows]}`. Empty when
+            nothing is staged. A table whose payload was dropped, whether
+            cleared on migration or refused by the database, is omitted, so a
+            caller cannot mistake it for reusable.
+        """
+        master_key = {"nwb_file_name": nwb_file_name}
+
+        staged_master = (self & master_key).fetch(as_dict=True)
+        if not staged_master:
+            return {}
+        master = staged_master[0]
+
+        if (
+            for_version is not None
+            and master["spyglass_version"] != for_version
+        ):
+            # Updated version means potentially updated ingestion code
+            logger.info(
+                f"{nwb_file_name}: staged plan was built by "
+                + f"{master['spyglass_version'] or 'an unrecorded version'}, "
+                + f"not {for_version}; re-planning from scratch."
+            )
+            return {}
+
+        # Ahead of every per-table check: an id that appeared or vanished
+        # means no table's recorded read-set still describes this file,
+        # however unchanged each object in it is.
+        if master["id_set_digest"] != for_id_set:
+            logger.info(
+                f"{nwb_file_name}: the file holds a different set of NWB "
+                + "objects than the staged plan; re-planning from scratch."
+            )
+            return {}
+
+        if master["config_digest"] != for_config:
+            logger.info(
+                f"{nwb_file_name}: the effective config differs from the "
+                + "staged plan; re-planning from scratch."
+            )
+            return {}
+
+        tables = (self.Table & master_key).fetch(as_dict=True)
+        if not tables:
+            return {}
+
+        staged = {
+            row["table_name"]: {
+                "status": row["status"],
+                "read_set_digest": row["read_set_digest"],
+                "reads": list(row["reads"] or []),
+                "xrefs": list(row["xrefs"] or []),
+                "entries": {},
+            }
+            for row in tables
+        }
+
+        dropped = set()
+        for entry in (self.Entry & master_key).fetch(as_dict=True):
+            owner = entry["owner_table"]
+            if owner not in staged:
+                continue  # staged before this file's plan was last replaced
+            if entry["entry_blob"] is None:
+                dropped.add(owner)
+                continue
+            # Already a dict: DataJoint packs a `longblob` on insert and
+            # unpacks it on fetch, so unpacking again treats a dict as bytes.
+            staged[owner]["entries"].setdefault(entry["table_name"], []).append(
+                entry["entry_blob"]
+            )
+
+        for owner in dropped:
+            staged.pop(owner, None)
+
+        return staged
+
+    def stage(self, plan) -> dict:
+        """Record a plan, updating the entries it already holds.
+
+        Parameters
+        ----------
+        plan : IngestionPlan
+            The dataclass from `spyglass.utils.ingestion_plan`, as
+            returned by `plan_nwbfile`.
+
+        Returns
+        -------
+        dict
+            The master key of the staged plan.
+        """
+        from spyglass.utils.ingestion_plan import BLOCKING
+
+        master_key = {"nwb_file_name": plan.nwb_file_name}
+        existing = self & master_key
+        attempt = (existing.fetch1("attempt") + 1) if existing else 1
+
+        master = dict(
+            master_key,
+            verdict=plan.verdict,
+            status="open",
+            attempt=attempt,
+            nwb_hash=plan.nwb_hash,
+            id_set_digest=plan.id_set_digest,
+            config_digest=plan.config_digest,
+            spyglass_version=plan.spyglass_version,
+            dj_user=dj.config["database.user"],
+        )
+
+        rows, problems, table_rows = [], [], []
+        for table_plan in plan.table_plans:
+            table_rows.append(
+                dict(
+                    master_key,
+                    table_name=table_plan.table_name,
+                    status=table_plan.status,
+                    read_set_digest=table_plan.read_set_digest,
+                    # The object ids the digest covers. Kept so a later attempt
+                    # can re-hash *the same* set and compare: the digest alone
+                    # cannot be recomputed without knowing what went into it,
+                    # and what a table reads is only known after it parses.
+                    reads=list(table_plan.reads),
+                    xrefs=list(table_plan.xrefs),
+                    entry_count=table_plan.entry_count,
+                )
+            )
+            # Every staged entry is `planned`, including one whose table
+            # failed or was skipped: not-yet-stored is the whole claim, and
+            # the `Table` row above already says why.
+            for target, entries in table_plan.entries:
+                name = getattr(target, "full_table_name", str(target))
+                for entry in entries:
+                    rows.append(
+                        self._entry_row(
+                            master_key,
+                            target,
+                            name,
+                            entry,
+                            owner_table=table_plan.table_name,
+                        )
+                    )
+
+            for problem in table_plan.problems:
+                problems.append(problem)
+        problems.extend(plan.fatal)
+
+        problem_rows = [
+            dict(
+                master_key,
+                problem_id=index,
+                table_name=problem.table or "",
+                severity=problem.severity,
+                code=problem.code,
+                message=(problem.message or "")[:255],
+                suggested_revision=problem.suggested_revision,
+                error_raw=getattr(problem, "traceback", None),
+            )
+            for index, problem in enumerate(problems)
+        ]
+
+        if not self._write(master_key, master, table_rows, rows, problem_rows):
+            logger.error(
+                "Please report this at "
+                + "github.com/LorenFrankLab/spyglass/issues: no ingestion "
+                + "payload is expected to reach a database limit."
+            )
+            # Payloads are what reuse needs; the report is what provenance
+            # needs. Keep the half that still fits rather than losing both.
+            stripped = [dict(row, entry_blob=None) for row in rows]
+            if not self._write(
+                master_key, master, table_rows, stripped, problem_rows
+            ):
+                logger.error(
+                    f"{plan.nwb_file_name}: nothing staged; the next attempt "
+                    + "re-parses the whole file."
+                )
+                return master_key
+
+        blocked = sum(1 for p in problems if p.severity in BLOCKING)
+        logger.info(
+            f"Staged plan for {plan.nwb_file_name}: attempt {attempt}, "
+            + f"{len(rows)} entries, {blocked} blocking problems"
+        )
+        return master_key
+
+    def _write(
+        self, master_key, master, table_rows, rows, problem_rows
+    ) -> bool:
+        """Stage one plan in a transaction, or say it did not fit.
+
+        Staging is an aid, not the ingestion. A plan the database refuses,
+        such as an entry past `max_allowed_packet`, must cost the payload
+        rather than the run.
+
+        Parameters
+        ----------
+        master_key : dict
+        master : dict
+        table_rows, rows, problem_rows : list of dict
+
+        Returns
+        -------
+        bool
+            False when the write was refused.
+        """
+        try:
+            with self._safe_context():
+                # Replace rather than append: an entry keeps its identity
+                # across attempts, so re-planning updates what is staged.
+                self._clear(master_key)
+                self.insert1(master)
+                self.Table.insert(table_rows)
+                self.Entry.insert(rows)
+                self.Problem.insert(problem_rows)
+            return True
+        except Exception as err:
+            logger.error(
+                "Could not stage the plan for "
+                + f"{master_key['nwb_file_name']}: {type(err).__name__}: {err}"
+            )
+            return False
+
+    def mark_inserted(
+        self,
+        plan,
+        inserted,
+        existing=(),
+        conflicting=(),
+        complete: bool = False,
+    ) -> None:
+        """Record which staged entries made it into their real tables.
+
+        Clears `entry_blob` for those entries: keeping a payload for a row
+        that now exists in its own table would make the log a second copy of
+        the data, which is the failure this design exists to avoid. The
+        hashes stay, as provenance.
+
+        Parameters
+        ----------
+        plan : IngestionPlan
+            The plan that was inserted.
+        inserted : list of (str, table, rows)
+            What `insert_plan` actually wrote.
+        existing : list of (str, table, rows), optional
+            What it found already stored and so did not write. These are
+            recorded as `exists` and lose their payload too: the invariant
+            is that no blob is kept for an entry present in its own table,
+            and an entry that was skipped is no less present than one just
+            written.
+        conflicting : list of (str, table, rows), optional
+            Rows whose stored version disagrees with the file. Recorded as
+            `conflict` and **keeping** their payload, the one exception to
+            the rule above, because the planned value is the thing a reader
+            needs in order to act on the warning, and re-deriving it means
+            re-parsing the file.
+        complete : bool, optional
+            Whether every entry is now stored, closing the plan. Default
+            False.
+        """
+        from datajoint.hash import key_hash
+
+        from spyglass.utils.ingestion_plan import row_key
+
+        master_key = {"nwb_file_name": plan.nwb_file_name}
+        if not (self & master_key):  # never staged; nothing to record
+            return
+
+        def identify(table_name, target, rows):
+            for row in rows:
+                try:
+                    identity = key_hash(dict(row_key(target, row)))
+                except Exception:
+                    identity = key_hash(row)
+                yield {
+                    **master_key,
+                    "table_name": table_name,
+                    "key_hash": identity,
+                }
+
+        # `written` is for the log line only: the column records that the row
+        # is in its table, not which run put it there. The table answers
+        # that, and better.
+        done = [
+            (entry_key, state, written)
+            for state, written, group in (
+                ("stored", True, inserted),
+                ("stored", False, existing),
+                ("conflict", False, conflicting),
+            )
+            for table_name, target, rows in group
+            for entry_key in identify(table_name, target, rows)
+        ]
+
+        # One transaction with the state change: a crash between the data
+        # write and this would leave a stale blob claiming work already done.
+        with self._safe_context():
+            for entry_key, state, _ in done:
+                if not (self.Entry & entry_key):
+                    continue  # not staged, nothing to migrate
+                # update1 on the table itself: DataJoint refuses it on a
+                # restricted query, and the key is already complete.
+                # A conflict keeps its payload: the planned value is what a
+                # reader needs to act on the warning, and re-deriving it
+                # means re-parsing the file. Every other state loses it,
+                # no blob for a row present in its own table.
+                update = {**entry_key, "state": state}
+                if state != "conflict":
+                    update["entry_blob"] = None
+                self.Entry.update1(update)
+            if complete:
+                self.update1({**master_key, "status": "complete"})
+
+        migrated = sum(1 for _, _, written in done if written)
+        clashed = sum(1 for _, state, _ in done if state == "conflict")
+        logger.info(
+            f"{plan.nwb_file_name}: {migrated} entries migrated, "
+            + f"{len(done) - migrated} already stored"
+            + (f" ({clashed} in conflict)" if clashed else "")
+            + (", plan complete" if complete else "")
+        )
+
+    def _entry_row(
+        self,
+        master_key: dict,
+        target,
+        table_name: str,
+        entry: dict,
+        owner_table: str = "",
+    ):
+        """Build one staged row, hashing its key and its whole payload.
+
+        `key_hash` covers the primary key alone, which is what re-identifies
+        an entry across attempts; `blob_hash` covers the whole entry, which is
+        what separates "unchanged" from "the plan now disagrees".
+
+        Parameters
+        ----------
+        master_key : dict
+            The plan this entry belongs to.
+        target : dj.Table
+            The table the entry is destined for.
+        table_name : str
+            Its full table name, as stored.
+        entry : dict
+            The prospective row.
+        owner_table : str, optional
+            The table whose parse produced it.
+        """
+        from datajoint.hash import key_hash
+
+        from spyglass.utils.ingestion_plan import entry_digest, row_key
+
+        try:
+            # DataJoint's own key hash, as JobTable uses for the same job.
+            # Sound here because primary keys are scalars, where `str` is
+            # faithful, and `row_key` has already coerced them to the
+            # column's declared type.
+            primary = key_hash(dict(row_key(target, entry)))
+        except Exception:  # name-only target, from a rebuilt plan
+            primary = key_hash(entry)
+
+        blob = dict(entry)
+        row = dict(
+            master_key,
+            table_name=table_name,
+            key_hash=primary,
+            # Not key_hash: it would abbreviate a large array and miss an
+            # edit inside it. See entry_digest.
+            blob_hash=entry_digest(blob),
+            state="planned",
+            owner_table=owner_table,
+        )
+
+        return dict(row, entry_blob=blob)
 
 
 @schema

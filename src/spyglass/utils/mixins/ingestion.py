@@ -1,4 +1,6 @@
 import inspect
+from datetime import datetime
+from traceback import format_exc
 from typing import Callable, Dict, List, Optional, Type, Union
 
 import datajoint as dj
@@ -6,7 +8,13 @@ import numpy as np
 from packaging.version import Version
 from pynwb import NWBFile
 
-from spyglass.utils.dj_helper_fn import accept_divergence
+from spyglass.utils.ingestion_plan import (
+    FileContext,
+    PlannedEntries,
+    Problem,
+    TablePlan,
+    row_key,
+)
 from spyglass.utils.logging import logger
 from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import get_file_namespaces
@@ -27,8 +35,6 @@ class IngestionMixin(BaseMixin):
     _expected_duplicates : bool
         If true, checks that pre-existing entries are consistent in secondary
         keys with inserted, entries and allows for skipping duplicates on insert
-    _prompt_insert : bool
-        If true, prompts user before inserting new table entries from NWB file.
     _only_ingest_first : bool
         If true, only ingests the first matching NWB object from the file.
     _source_nwb_object_name : str, optional
@@ -47,10 +53,16 @@ class IngestionMixin(BaseMixin):
         The type of NWB object to import from the NWB file. If None, the table
         must implement get_nwb_objects.
 
+    Notes
+    -----
+    A table caching file-level state on itself, such as a camera map or an
+    epoch lookup, must reset it in **`before_parse`**, not in
+    `insert_from_nwbfile`: planning and inserting share `_parse` but not
+    `insert_from_nwbfile`, so a reset placed there never runs for a plan, and
+    one instance serves every file a `populate` loops over.
     """
 
     _expected_duplicates = False  # If True, rows to be shared across sessions
-    _prompt_insert = False
     _only_ingest_first = False
     _source_nwb_object_name = None  # Optional filter on object name
     _source_nwb_object_description = None  # Optional filter on description
@@ -92,7 +104,7 @@ class IngestionMixin(BaseMixin):
         return {tbl: [dict(base_key, **entry) for entry in entries]}
 
     def generate_entries_from_config(
-        self, config: dict, base_key=None
+        self, config: dict, base_key=None, ctx=None
     ) -> IngestionEntries:
         """Generates a list of table entries from a config dictionary."""
         base_key = base_key or dict()
@@ -111,8 +123,17 @@ class IngestionMixin(BaseMixin):
 
         return entries
 
+    def _generate_entries(self, nwb_obj, base_key, ctx=None):
+        """Call the generate hook with this file's context.
+
+        Every override takes `ctx`, so it is passed at every call site,
+        including the per-row recursion below. That is what stops a table's
+        context from becoming None halfway down.
+        """
+        return self.generate_entries_from_nwb_object(nwb_obj, base_key, ctx)
+
     def generate_entries_from_nwb_object(
-        self, nwb_obj, base_key=None
+        self, nwb_obj, base_key=None, ctx=None
     ) -> IngestionEntries:
         """Generates a list of table entries from an NWB object.
 
@@ -120,7 +141,6 @@ class IngestionMixin(BaseMixin):
         returned before the child in the IngestionEntries dict.
         """
         base_key = base_key or dict()
-        base_key = base_key.copy()  # avoid modifying original
 
         # For table objects, generate entry(s) for each row
         if (
@@ -134,14 +154,32 @@ class IngestionMixin(BaseMixin):
                 # may produce part entries or a parent's entries alongside
                 # its own. First-seen order is preserved, so a subclass that
                 # yields a parent before self keeps that ordering.
-                for (
-                    table,
-                    table_entries,
-                ) in self.generate_entries_from_nwb_object(
-                    row, base_key
+                # Through `_generate_entries`, so the row-level call reaches
+                # the same override with the same context the container did.
+                for table, table_entries in self._generate_entries(
+                    row, base_key, ctx
                 ).items():
                     entries.setdefault(table, []).extend(table_entries)
             return entries
+
+        return self._entries_from_mapping(nwb_obj, base_key)
+
+    def _entries_from_mapping(self, nwb_obj, base_key=None) -> IngestionEntries:
+        """Apply `table_key_to_obj_attr` to one object, yielding one entry.
+
+        Parameters
+        ----------
+        nwb_obj : object
+            The NWB object, or one row of one, to read attributes from.
+        base_key : dict, optional
+            Key fields the entry inherits.
+
+        Returns
+        -------
+        IngestionEntries
+            `{self: [entry]}` for this table alone.
+        """
+        base_key = dict(base_key or dict())  # avoid modifying original
 
         obj_ = None
         for object_name, mapping in self.table_key_to_obj_attr.items():
@@ -177,18 +215,302 @@ class IngestionMixin(BaseMixin):
                     )
         return {self: [base_key]}
 
+    def plan_from_nwbfile(
+        self,
+        nwb_file_name: str,
+        config: dict = None,
+        nwb_file=None,
+        key_space=None,
+    ) -> TablePlan:
+        """Parse an NWB file into the entries this table would insert.
+
+        Writes nothing. Every failure becomes a `Problem` on the returned
+        plan rather than an exception out of it, so one bad table does not
+        hide what is wrong with the rest of the file.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of the NWB file to parse.
+        config : dict, optional
+            A configuration dictionary to supplement NWB data. Default None.
+        nwb_file : pynwb.NWBFile, optional
+            An already-open file, so a caller planning many tables opens it
+            once. Default None, fetching it here.
+        key_space : VirtualKeySpace, optional
+            What the whole plan will hold, for resolving a reference to a
+            table this same ingestion fills. Default None: a table planned on
+            its own resolves against the database, which is right for one
+            table and wrong for a whole file, where the rows it would look for
+            have not been written yet.
+
+        Returns
+        -------
+        TablePlan
+            The entries this table would insert, its status, and any problems.
+        """
+        from spyglass.common.common_nwbfile import Nwbfile
+
+        empty = PlannedEntries()
+        nwb_key = {"nwb_file_name": nwb_file_name}
+
+        if nwb_file is None:
+            if not (query := Nwbfile & nwb_key):
+                return TablePlan(
+                    table_name=self.full_table_name,
+                    entries=empty,
+                    status="failed",
+                    problems=(
+                        Problem(
+                            severity="fatal",
+                            code="file_not_registered",
+                            message=f"NWB file {nwb_file_name} not in Nwbfile",
+                            table=self.full_table_name,
+                        ),
+                    ),
+                )
+            nwb_file = query.fetch_nwb()[0]
+
+        base_entry = nwb_key if "nwb_file_name" in self.primary_key else dict()
+        ctx = FileContext(
+            nwb_file_name=nwb_file_name,
+            nwb_file=nwb_file,
+            config=config or dict(),
+            base_key=base_entry,
+            key_space=key_space,
+        )
+
+        try:
+            planned = self._parse(ctx)
+        except Exception as err:  # a raise here is this table's failure alone
+            return TablePlan(
+                table_name=self.full_table_name,
+                entries=empty,
+                status="failed",
+                problems=tuple(ctx.problems)
+                + (
+                    Problem(
+                        severity="hard",
+                        code="parse_error",
+                        message=str(err),
+                        table=self.full_table_name,
+                        nwb_object_id=ctx.current_source_id,
+                        exc_type=type(err).__name__,
+                        traceback=format_exc()[-2000:],
+                    ),
+                ),
+                reads=tuple(ctx.reads),
+                xrefs=tuple(ctx.xrefs),
+            )
+
+        return TablePlan(
+            table_name=self.full_table_name,
+            entries=planned,
+            status="ok" if planned else "skipped",
+            problems=tuple(ctx.problems),
+            reads=tuple(ctx.reads),
+            xrefs=tuple(ctx.xrefs),
+        )
+
+    def _parse(self, ctx) -> PlannedEntries:
+        """Run the parse contract for one file, returning its entries.
+
+        Shared by planning and inserting; performs no writes.
+
+        Parameters
+        ----------
+        ctx : FileContext
+            Context for this file.
+
+        Returns
+        -------
+        PlannedEntries
+            Entries for this table and any other it feeds.
+        """
+        planned = PlannedEntries()
+
+        self.before_parse(ctx)
+
+        sources = self.find_sources(ctx)
+        if len(sources) == 0 and not ctx.config:
+            return planned  # config may still supply entries on its own
+
+        # check extension requirements (if any). Logs warning if objects found
+        # and requirements not met
+        if not self.check_extension_requirements(ctx.nwb_file_name):
+            ctx.problem(
+                "soft",
+                "extension_unmet",
+                f"{ctx.nwb_file_name} does not meet this table's extension "
+                + "requirements",
+                table=self.full_table_name,
+            )
+            return planned
+
+        if self._only_ingest_first:
+            sources = sources[:1]
+
+        for nwb_obj in sources:
+            ctx.record_read(nwb_obj)
+            ctx.current_source_id = getattr(nwb_obj, "object_id", None)
+            planned.extend(self.entries_for_source(nwb_obj, ctx))
+        ctx.current_source_id = None
+
+        planned.extend(self.entries_for_config(ctx))
+
+        # Applied here rather than on the insert path alone: a table whose key
+        # the file never supplied must plan no row at all. A file with no
+        # institution would otherwise plan an Institution entry with no
+        # institution_name, and that `missing_attribute` blocked Session and
+        # the nine tables under it.
+        adjusted = self._adjust_entries(planned.as_dict()) or {}
+        return PlannedEntries.from_dict(self._dedup_planned(adjusted, ctx))
+
+    # ------------------------- parse contract --------------------------
+
+    def before_parse(self, ctx) -> None:
+        """Prepare for parsing one file. Override to resolve file-level data.
+
+        Runs before any source object is found, so lookups the mapping needs
+        such as a config, a camera map or the session's intervals, belong here,
+        cached on `ctx`, rather than on the table object.
+
+        Parameters
+        ----------
+        ctx : FileContext
+            Context for this file.
+        """
+
+    def find_sources(self, ctx) -> List:
+        """Return the NWB objects this table ingests from.
+
+        Default: every object matching `_source_nwb_object_type`, filtered by
+        `_source_nwb_object_name` if set.
+
+        Parameters
+        ----------
+        ctx : FileContext
+            Context for this file.
+
+        Returns
+        -------
+        list
+            Source objects, each passed to `entries_for_source`.
+        """
+        return self.get_nwb_objects(ctx.nwb_file, ctx.nwb_file_name)
+
+    def entries_for_source(self, source, ctx) -> PlannedEntries:
+        """Return the entries one source object generates.
+
+        A source that expands into rows, such as a DynamicTable, is handed row
+        by row to `entries_for_row`; anything else goes there whole. Override this
+        for the container, `entries_for_row` for its rows.
+
+        Parameters
+        ----------
+        source : object
+            One NWB object from `find_sources`.
+        ctx : FileContext
+            Context for this file. `ctx.base_key` holds the key fields every
+            entry inherits, e.g. the file name.
+
+        Returns
+        -------
+        PlannedEntries
+            Entries for this table, and any other table it feeds.
+        """
+        # Legacy path: a table overriding generate_entries_from_nwb_object
+        # still drives ingestion through it, row expansion included. An
+        # override that needs to resolve a reference to another table this
+        # ingestion fills declares a `ctx` parameter and is handed the context;
+        # the rest keep the two-argument signature they were written with.
+        if self._overrides_legacy_generate:
+            return PlannedEntries.from_dict(
+                self._generate_entries(source, dict(ctx.base_key), ctx)
+            )
+
+        if hasattr(source, "to_dataframe") and not self._single_entry_per_table:
+            entries = PlannedEntries()
+            for row in source.to_dataframe().itertuples():
+                entries.extend(self.entries_for_row(row, ctx))
+            return entries
+
+        return self.entries_for_row(source, ctx)
+
+    def entries_for_row(self, row, ctx) -> PlannedEntries:
+        """Return the entries one row generates.
+
+        Default: apply `table_key_to_obj_attr` to the row.
+
+        Parameters
+        ----------
+        row : object
+            One row of a source object, or the object itself when it does not
+            expand into rows.
+        ctx : FileContext
+            Context for this file.
+
+        Returns
+        -------
+        PlannedEntries
+            Entries for this table, and any other table it feeds.
+        """
+        return PlannedEntries.from_dict(
+            self._entries_from_mapping(row, dict(ctx.base_key))
+        )
+
+    def entries_for_config(self, ctx) -> PlannedEntries:
+        """Return the entries this table's config declares.
+
+        Default: the generic handling, which reads entries shaped as table
+        keys. Override for a config that names its data some other way.
+
+        Parameters
+        ----------
+        ctx : FileContext
+            Context for this file.
+
+        Returns
+        -------
+        PlannedEntries
+            Entries the config supplies, empty if it supplies none.
+        """
+        if not ctx.config:
+            return PlannedEntries()
+
+        return PlannedEntries.from_dict(
+            self.generate_entries_from_config(ctx.config, ctx.base_key, ctx)
+        )
+
+    def after_insert(self, ctx, inserted) -> None:
+        """Run after entries are inserted. Override for follow-on work.
+
+        The place for side effects that must follow persistence, which
+        parsing itself must not perform.
+
+        Parameters
+        ----------
+        ctx : FileContext
+            Context for this file.
+        inserted : dict
+            The entries that were inserted, keyed by table.
+        """
+
+    @property
+    def _overrides_legacy_generate(self) -> bool:
+        """Whether this table still defines generate_entries_from_nwb_object."""
+        return (
+            type(self).generate_entries_from_nwb_object
+            is not IngestionMixin.generate_entries_from_nwb_object
+        )
+
     def populate(self, *restrictions, **kwargs):
         """Ingest whole NWB files rather than running `make` per key.
 
-        Ingestion tables are filled by `insert_from_nwbfile`, which parses a
-        file once and inserts every entry it yields, so `make` on these tables
-        is a deprecation shim. Callers reaching for the DataJoint idiom are
-        routed to the ingestion path, once per file that has no entries here
-        yet -- otherwise `populate()` would call the shim and raise for any
-        session whose rows this table happens to be missing.
-
-        Tables not keyed by `nwb_file_name` fall through to DataJoint's
-        `populate`, since a file cannot be identified for them.
+        `make` on these tables is a shim that raises, so the DataJoint idiom
+        is routed to `insert_from_nwbfile` instead, once per file with no
+        entries here yet. Tables not keyed by `nwb_file_name` fall through to
+        DataJoint's `populate`, there being no file to identify.
 
         Parameters
         ----------
@@ -331,54 +653,18 @@ class IngestionMixin(BaseMixin):
         nwb_file = query.fetch_nwb()[0]
         base_entry = nwb_key if "nwb_file_name" in self.primary_key else dict()
 
-        # fetch relevant NWB objects from file
-        fetched_objs = self.get_nwb_objects(nwb_file, nwb_file_name)
-        if len(fetched_objs) == 0 and not config:
-            return dict()  # config may still supply entries on its own
-
-        # check extension requirements (if any). Logs warning if objects found and
-        # requirements not met
-        if not self.check_extension_requirements(nwb_file_name):
-            return dict()
-
-        # compile list of table entries from all objects in this file
-        entries = (
-            self.generate_entries_from_nwb_object(
-                nwb_obj=fetched_objs[0],
-                base_key=base_entry.copy(),
-            )
-            if fetched_objs
-            else dict()
+        # One parse, shared with plan_from_nwbfile: the entries inserted here
+        # are the entries a plan would have reported. Merging across source
+        # objects is PlannedEntries' job, so a later object may introduce a
+        # table the first did not.
+        ctx = FileContext(
+            nwb_file_name=nwb_file_name,
+            nwb_file=nwb_file,
+            config=config or dict(),
+            base_key=base_entry,
         )
-        if not self._only_ingest_first:
-            next_objs = fetched_objs[1:] if len(fetched_objs) > 1 else []
-            for nwb_obj in next_objs:
-                obj_entries = self.generate_entries_from_nwb_object(
-                    nwb_obj,
-                    base_entry.copy(),
-                )
-                for table, table_entries in obj_entries.items():
-                    # setdefault, not indexing: a later object may generate
-                    # entries for a table the first object did not touch.
-                    entries.setdefault(table, []).extend(table_entries)
-
-        if config:
-            # Pass the base key: config entries need the file they belong to
-            config_entries = self.generate_entries_from_config(
-                config, base_entry.copy()
-            )
-            for table, table_entries in config_entries.items():
-                if table in entries:
-                    entries[table].extend(table_entries)
-                else:
-                    entries[table] = table_entries
-
-        # Remove tables with no entries - if all entries 'None', skip table
-        # Motivated by nwb with no Institution, results in nulled fk subj ref
-        debug_backup = entries.copy()
-        _ = debug_backup  # Intentionally kept for debugging
-        entries = self._adjust_entries(entries, nwb_file_name=nwb_file_name)
-        if entries is None or len(entries) == 0:
+        entries = self._parse(ctx).as_dict()
+        if not entries:
             return dict()
 
         # validate that new entries are consistent with existing entries
@@ -389,6 +675,7 @@ class IngestionMixin(BaseMixin):
             self._run_nwbfile_insert(
                 entries_to_insert, nwb_file_name=nwb_file_name
             )
+            self.after_insert(ctx, entries_to_insert)
 
         return entries
 
@@ -408,6 +695,28 @@ class IngestionMixin(BaseMixin):
                 )
                 self._insert_logline(nwb_file_name, len(table_entries), table)
 
+    def _insert_plan(self, rows, nwb_file_name: str = None) -> None:
+        """Insert rows a plan already validated, deriving nothing.
+
+        The mechanical half of `_run_nwbfile_insert`, for the path where the
+        rows come from a plan rather than from a parse that just happened.
+        No adjustment, no duplicate validation, no divergence prompt: the
+        plan pass did all of that, and redoing it here would let the two
+        disagree.
+
+        Parameters
+        ----------
+        rows : sequence of dict
+            Entries destined for this table.
+        nwb_file_name : str, optional
+            For the log line only.
+        """
+        if not rows:
+            return
+
+        self.insert(list(rows), skip_duplicates=False, allow_direct_insert=True)
+        self._insert_logline(nwb_file_name, len(rows), self)
+
     def _key_has_required_attrs(self, key):
         """Check that all non-nullable attributes are present in the key."""
         for attr in self.heading.attributes.values():
@@ -422,19 +731,40 @@ class IngestionMixin(BaseMixin):
 
     def _adjust_keys_for_entry(self, keys: List[dict]) -> List[dict]:
         """Passthrough. Allows children to adjust keys before comparing."""
-        # Motivated by Subject.sex: comparing None to "U" should be equal
-        # Without this step, reinsert triggers accept_divergence prompt
+        # Motivated by Subject.sex: comparing None to "U" should be equal,
+        # so a reinsert is not reported as a divergence.
         # By default, checks that all non-nullable keys present
         return [key for key in keys if self._key_has_required_attrs(key)]
+
+    def _adjust_for(self, tbl, rows: List[dict]) -> List[dict]:
+        """Adjust rows the way their own table wants them adjusted.
+
+        A table generated alongside this one may be a plain `SpyglassMixin`
+        with no adjustment of its own, hence the fallback.
+
+        Parameters
+        ----------
+        tbl : dj.Table
+            The table the rows are destined for, instanced.
+        rows : list of dict
+
+        Returns
+        -------
+        list of dict
+        """
+        adjust = getattr(
+            tbl, "_adjust_keys_for_entry", self._remove_null_from_dicts
+        )
+        return adjust(rows)
 
     def _remove_null_from_dicts(self, keys: List[dict]) -> List[dict]:
         """Remove null-valued items from each key in a list.
 
         Fallback for tables that do not implement `_adjust_keys_for_entry` --
         a table declared with SpyglassMixin rather than SpyglassIngestion,
-        such as a parent generated alongside this one. Takes the same
-        list-in/list-out shape as the method it stands in for; it previously
-        took a single dict and so raised AttributeError for every caller.
+        such as a parent generated alongside this one. Takes a list and
+        returns a list, matching the method it stands in for: callers pass
+        a table's entries, never one of them.
 
         Parameters
         ----------
@@ -459,36 +789,29 @@ class IngestionMixin(BaseMixin):
         return value is None or value == ""
 
     def _adjust_entries(
-        self, entries: IngestionEntries, nwb_file_name: str = None
+        self, entries: IngestionEntries
     ) -> Optional[IngestionEntries]:
-        """Run _adjust_key for each table in planned entries.
+        """Drop rows the file did not supply a key for, and emptied tables.
 
-        Given a Dict[TableObject, List[dict]], with planned entries values,
-        run each table's _adjust_keys_for_entry function on the list of dicts.
-        Removes invalid/null entries and tables with no valid entries.
+        Each table answers for its own rows through `_adjust_keys_for_entry`;
+        a table generated alongside this one is a plain `SpyglassMixin` with no
+        adjustment of its own, hence the fallback.
         """
 
-        null_keys = dict()  # key as emitted -> instanced, for the log line
+        null_keys = dict()  # key as emitted -> instanced
 
         for table, table_entries in entries.items():
             # ensure instanced
-            tbl = table() if inspect.isclass(table) else table
+            tbl = table.as_instance
 
-            # Allow children to adjust keys before comparing. A parent
-            # generated alongside this table is a plain SpyglassMixin, with no
-            # adjustment of its own.
-            adjust_func = getattr(
-                tbl, "_adjust_keys_for_entry", self._remove_null_from_dicts
-            )
-            adjusted_entries = adjust_func(table_entries)
+            adjusted_entries = self._adjust_for(tbl, table_entries)
 
             if not any(adjusted_entries):
                 null_keys[table] = tbl  # mark for removal from dict
             else:
                 entries[table] = adjusted_entries
 
-        for table, tbl in null_keys.items():
-            self._insert_logline(nwb_file_name, 0, tbl)
+        for table in null_keys:
             _ = entries.pop(table)
 
         return entries if len(entries) > 0 else None
@@ -514,54 +837,102 @@ class IngestionMixin(BaseMixin):
         """
         return getattr(tbl, "_expected_duplicates", self._expected_duplicates)
 
-    def _dedup_within_batch(self, tbl, table_entries: List[dict]) -> List[dict]:
-        """Collapse planned entries that share a primary key.
-
-        The database check in `validate1_duplicate` compares each entry to what
-        is already stored, not to its siblings in the same plan. Two objects in
-        one file can name the same novel parent and `_run_nwbfile_insert`
-        inserts with `skip_duplicates=False`, so the pair would raise and abort
-        the file.
+    def _collapse_by_primary_key(self, tbl, rows: List[dict]):
+        """Group rows by primary key, keeping the first of each.
 
         Parameters
         ----------
         tbl : dj.Table
-            The table the entries are planned for.
-        table_entries : list of dict
-            Planned entries for that table, in emission order.
+            The table the rows are destined for.
+        rows : list of dict
+            Planned rows for that table, in emission order.
 
         Returns
         -------
-        list of dict
-            The entries with later same-primary-key repeats removed.
+        tuple of (list of dict, list of tuple)
+            The rows to keep, and one `(key, attrs)` pair for each primary key
+            whose repeats disagreed, `attrs` naming the columns that differ.
+        """
+        seen, kept, conflicts = dict(), [], []
+
+        for row in rows:
+            # `row_key`, not the raw values: two rows the database considers
+            # one key must collapse here, or they reach the insert and raise.
+            pk = row_key(tbl, row)
+            if (first := seen.get(pk)) is None:
+                seen[pk] = row
+                kept.append(row)
+                continue
+            if differing := sorted(
+                key
+                for key in set(first).union(row)
+                if self._unequal_vals(key, first, row)
+            ):
+                # The row's own values, not `pk`, which is folded for
+                # comparison and would show a reader a key they never wrote.
+                # Keyed on `tbl`, not `self`: the rows may be destined for a
+                # table this one merely feeds, with a different primary key.
+                conflicts.append(
+                    (
+                        {
+                            attr: row.get(attr)
+                            for attr in sorted(tbl.primary_key)
+                        },
+                        differing,
+                    )
+                )
+
+        return kept, conflicts
+
+    def _dedup_within_batch(self, tbl, table_entries: List[dict]) -> List[dict]:
+        """Collapse planned entries that share a primary key.
+
+        Two objects in one file can name the same novel parent, and
+        `_run_nwbfile_insert` inserts with `skip_duplicates=False`, so the pair
+        would raise and abort the file.
 
         Raises
         ------
         dj.errors.DuplicateError
-            If two planned entries share a primary key but disagree on a
-            secondary value. Neither is stored yet, so there is no existing
-            value to defer to.
+            If two entries share a primary key but disagree on a secondary
+            value. Neither is stored yet, so there is no existing value to
+            defer to.
         """
-        seen = dict()
-        deduped = []
+        kept, conflicts = self._collapse_by_primary_key(tbl, table_entries)
 
-        for entry in table_entries:
-            pk = tuple(entry.get(attr) for attr in tbl.primary_key)
-            if (first := seen.get(pk)) is None:
-                seen[pk] = entry
-                deduped.append(entry)
-                continue
-            for key in set(first).union(entry):
-                if self._unequal_vals(key, first, entry):
-                    raise dj.errors.DuplicateError(
-                        f"{self.camel_name} generated conflicting entries "
-                        + f"for {tbl.camel_name} key "
-                        + f"{dict(zip(tbl.primary_key, pk))}: {key} is "
-                        + f"{first.get(key)} in one and {entry.get(key)} "
-                        + "in another."
-                    )
+        for key, differing in conflicts:
+            raise dj.errors.DuplicateError(
+                f"{self.camel_name} generated conflicting entries for "
+                + f"{tbl.camel_name} key {key}: "
+                + f"{', '.join(differing)} disagree."
+            )
 
-        return deduped
+        return kept
+
+    def _dedup_planned(self, entries: IngestionEntries, ctx):
+        """Collapse same-key rows while planning, reporting only conflicts.
+
+        Agreeing repeats are normal content, such as two task epochs naming
+        one task, so they collapse, matching what the direct insert path has
+        always done. A disagreement is reported rather than raised: planning
+        reports, and neither row is stored, so there is no value to defer to.
+        """
+        for table, rows in entries.items():
+            tbl = table.as_instance
+            kept, conflicts = self._collapse_by_primary_key(tbl, rows)
+
+            for key, differing in conflicts:
+                ctx.problem(
+                    "hard",
+                    "duplicate_key",
+                    f"Two planned entries for {key} disagree on "
+                    + ", ".join(differing),
+                    table=tbl.full_table_name,
+                )
+
+            entries[table] = kept
+
+        return entries
 
     def validate_duplicates(self, entry_dict: Dict[dj.Table, List[dict]]):
         """Validate new entries against existing entries in the database.
@@ -619,14 +990,9 @@ class IngestionMixin(BaseMixin):
             The new entry to insert after validation, or None if the entry
             already exists and is consistent.
         """
-        # NOTE: `tbl` rather than `self` so that a table generated alongside
-        # this one is validated against itself, not against this table.
-        # Same fallback as _adjust_entries: tbl may be a plain SpyglassMixin
-        # table generated alongside this one, with no adjustment of its own.
-        adjust_func = getattr(
-            tbl, "_adjust_keys_for_entry", self._remove_null_from_dicts
-        )
-        adjusted_entries = adjust_func([new_key])
+        # `tbl` rather than `self`, so a table generated alongside this one
+        # is validated against itself.
+        adjusted_entries = self._adjust_for(tbl, [new_key])
         if not adjusted_entries:
             return  # entry filtered out by adjustment
 
@@ -639,23 +1005,21 @@ class IngestionMixin(BaseMixin):
 
         existing = query.fetch1()
 
-        for key in set(adj_new_key).union(existing):
-            if not self._unequal_vals(key, adj_new_key, existing):
-                continue  # skip if values are equal
-            if not accept_divergence(
-                key,
-                adj_new_key.get(key),
-                existing.get(key),
-                self._test_mode,
-                tbl.camel_name,
-            ):
-                # If the user does not accept the divergence,
-                # raise an error to prevent data inconsistency
-                raise dj.errors.DuplicateError(
-                    f"Attempted entry in {self.camel_name} already exists "
-                    + f"with different values for {key}: "
-                    + f"{adj_new_key.get(key)} != {existing.get(key)}"
-                )
+        # Keep the stored row and report. Prompting here asked a question
+        # with rows half-written, holding a lock open on an answer nobody was
+        # there to give, and raising on a declined answer aborted a whole
+        # file over one mismatched attribute. Plan the file to get this as a
+        # report instead.
+        if differing := sorted(
+            key
+            for key in set(adj_new_key).union(existing)
+            if self._unequal_vals(key, adj_new_key, existing)
+        ):
+            self._info_msg(
+                f"{tbl.camel_name} already holds "
+                + f"{ {k: v for k, v in primary_key.items()} } with different "
+                + f"values for {', '.join(differing)}; kept what is stored."
+            )
 
         return  # validated existing entry, nothing to insert
 
@@ -670,6 +1034,13 @@ class IngestionMixin(BaseMixin):
         if isinstance(a_val, np.ndarray) or isinstance(b_val, np.ndarray):
             return not np.array_equal(a_val, b_val)
 
+        # Datetimes are stored at second resolution and without a timezone,
+        # so a value read back never matches the one parsed from the file
+        # exactly. Compare what the database can actually hold.
+        if isinstance(a_val, datetime) and isinstance(b_val, datetime):
+            naive = [value.replace(tzinfo=None) for value in (a_val, b_val)]
+            return abs((naive[0] - naive[1]).total_seconds()) >= 1
+
         # Only None collapses to "": the point is to avoid a false positive on
         # None vs "". Coalescing every false value would treat a stored 0,
         # 0.0 or False as missing and hide a genuine divergence.
@@ -679,6 +1050,234 @@ class IngestionMixin(BaseMixin):
         if isinstance(a_val, str) and isinstance(b_val, str):
             return a_val.lower() != b_val.lower()
         return a_val != b_val
+
+    def value_from_plan(self, ctx, table, attr: str, restriction: dict):
+        """Return one attribute of a row, preferring the plan over storage.
+
+        Parameters
+        ----------
+        ctx : FileContext or None
+            Parse context. None reads the database.
+        table : dj.Table
+            The table to read, instanced.
+        attr : str
+            Attribute to return.
+        restriction : dict
+            Attribute equalities the row must satisfy.
+
+        Returns
+        -------
+        Any or None
+            None when no such row is planned or stored.
+        """
+        # The plan first, never whichever is non-empty.
+        if ctx is not None:
+            return ctx.value_for(table, attr, restriction)
+        found = (table & restriction).fetch(attr)
+        return found[0] if len(found) else None
+
+    def rows_from_plan(self, ctx, table, restriction: dict = None) -> tuple:
+        """Return the rows a table will hold, preferring the plan over storage.
+
+        Parameters
+        ----------
+        ctx : FileContext or None
+            Parse context. None reads the database.
+        table : dj.Table
+            The table to read, instanced.
+        restriction : dict, optional
+            Attribute equalities every returned row must satisfy.
+
+        Returns
+        -------
+        tuple of dict
+        """
+        if ctx is not None:
+            return ctx.rows_for(table, restriction)
+        return tuple((table & (restriction or True)).fetch(as_dict=True))
+
+    def check_planned_rows(
+        self, rows, key_space, table=None, first_plan: bool = False
+    ) -> tuple:
+        """Report what would go wrong inserting rows this table planned.
+
+        Each failure becomes a `Problem` rather than an exception, so one bad
+        table does not hide the rest of the file. A table answers for every
+        entry it plans, including those destined for a table it feeds.
+
+        Parameters
+        ----------
+        rows : iterable of dict
+            The planned entries.
+        key_space : VirtualKeySpace
+            The keys that will exist once the whole plan is inserted. Foreign
+            keys are checked against it rather than the database, so a table
+            emitting its parent's entries does not appear broken.
+        table : dj.Table, optional
+            The table the rows are destined for, as an instance. Default
+            None, this table.
+        first_plan : bool, optional
+            Whether this is the file's first plan, which makes a divergence
+            blocking. Default False, reporting it as a warning.
+
+        Returns
+        -------
+        tuple of Problem
+
+        Notes
+        -----
+        Same-key rows are not checked here: `_dedup_planned` collapsed them
+        inside `_parse`, through the same `row_key`, so no input can reach
+        this with two.
+        """
+        table = self if table is None else table
+        problems: List[Problem] = []
+
+        for row in rows:
+            problems.extend(self._required_attribute_problems(table, row))
+            problems.extend(self._attribute_fit_problems(table, row))
+            problems.extend(self._foreign_key_problems(table, row, key_space))
+            problems.extend(
+                self._divergence_problems(table, row, first_plan=first_plan)
+            )
+
+        return tuple(problems)
+
+    def _required_attribute_problems(self, table, row) -> List[Problem]:
+        """Report attributes the table requires and the row does not supply."""
+        return [
+            Problem(
+                severity="hard",
+                code="missing_attribute",
+                message=f"{attr.name} is required and absent",
+                table=table.full_table_name,
+            )
+            for attr in table.heading.attributes.values()
+            if not (
+                attr.nullable or attr.autoincrement or attr.default is not None
+            )
+            and row.get(attr.name) is None
+        ]
+
+    def _attribute_fit_problems(self, table, row) -> List[Problem]:
+        """Report values that do not fit the columns they are destined for."""
+        problems = []
+
+        for name, value in row.items():
+            attr = table.heading.attributes.get(name)
+            if attr is None or value is None:
+                continue
+
+            if attr.type.startswith("varchar") and isinstance(value, str):
+                limit = int(attr.type[len("varchar(") : -1])
+                if len(value) > limit:
+                    problems.append(
+                        Problem(
+                            severity="hard",
+                            code="value_too_long",
+                            message=(
+                                f"{name} is {len(value)} characters, "
+                                + f"{attr.type} holds {limit}"
+                            ),
+                            table=table.full_table_name,
+                        )
+                    )
+
+        return problems
+
+    def _foreign_key_problems(self, table, row, key_space) -> List[Problem]:
+        """Report parents this row points at that nothing will supply."""
+        problems = []
+
+        for parent, props in table.parents(
+            as_objects=True, foreign_key_info=True
+        ):
+            # attr_map maps parent attribute -> child attribute
+            attr_map = props.get("attr_map") or {}
+
+            parent_key = {}
+            for parent_attr in parent.primary_key:
+                child_attr = attr_map.get(parent_attr, parent_attr)
+                if child_attr not in row:
+                    parent_key = None
+                    break
+                parent_key[parent_attr] = row[child_attr]
+
+            if parent_key is None:  # nothing in this row addresses that parent
+                continue
+            if any(value is None for value in parent_key.values()):
+                continue  # nullable foreign key, left empty
+
+            if not key_space.holds(parent, row_key(parent, parent_key)):
+                problems.append(
+                    Problem(
+                        severity="hard",
+                        code="missing_parent",
+                        message=(
+                            f"{parent.full_table_name} has no entry for "
+                            + f"{parent_key}, in the database or in this plan"
+                        ),
+                        table=table.full_table_name,
+                    )
+                )
+
+        return problems
+
+    def _divergence_problems(
+        self, table, row, first_plan: bool = False
+    ) -> List[Problem]:
+        """Report a planned entry that exists already with different values.
+
+        Blocking on a file's first plan, so a disagreement is seen and decided
+        before anything is written. A warning on every later plan, since by
+        then the reader has had the report and chose to go ahead.
+
+        Parameters
+        ----------
+        table : dj.Table
+            The table the row is destined for, as an instance.
+        row : dict
+            The planned entry.
+        first_plan : bool, optional
+            Whether this is the file's first plan. Default False.
+
+        Returns
+        -------
+        list of Problem
+        """
+        primary = {k: v for k, v in row.items() if k in table.primary_key}
+        if len(primary) != len(table.primary_key):
+            return []
+        if not (query := (table & primary)):
+            return []
+
+        existing = query.fetch1()
+        # Only what the plan actually specifies: an attribute the plan leaves
+        # unset is not a disagreement with the row already stored, it is a
+        # column this table does not populate.
+        differing = {
+            key: existing.get(key)
+            for key in row
+            if key not in table.primary_key
+            and key in existing
+            and self._unequal_vals(key, row, existing)
+        }
+        if not differing:
+            return []
+
+        return [
+            Problem(
+                severity="hard" if first_plan else "soft",
+                code="divergence",
+                message=(
+                    f"{primary} exists with different values for "
+                    + f"{sorted(differing)}"
+                ),
+                table=table.full_table_name,
+                suggested_revision=differing,
+                primary_key=primary,
+            )
+        ]
 
     def check_extension_requirements(self, nwb_file_name: str) -> bool:
         """Check that the NWB file meets the extension requirements (if any).

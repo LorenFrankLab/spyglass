@@ -103,3 +103,406 @@ def nwb_legacy_hasher(mini_path):
 def test_nwb_legacy_hasher(nwb_legacy_hasher):
     hash = nwb_legacy_hasher.hash
     assert hash.startswith("4e0c"), "Unexpected NWB file hash"
+
+
+def test_object_id_index_does_not_change_the_file_hash(mini_path):
+    """The index is additive: stored hashes must not shift because of it.
+
+    Production hashes in `SpikeSortingRecording` depend on this value, so the
+    new flag has to be provably inert with respect to it.
+    """
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    plain = NwbfileHasher(mini_path)
+    indexed = NwbfileHasher(mini_path, object_ids=True)
+
+    assert (
+        plain.hash == indexed.hash
+    ), "object_ids=True must not alter the file hash"
+    assert indexed.obj_ids, "The index should hold the file's objects"
+    assert not plain.obj_ids, "The index should be off by default"
+
+
+def test_object_id_index_addresses_nested_objects(mini_path):
+    """Group children are keyed by name, so nested objects are reachable.
+
+    `add_to_cache` was called with a literal "k" rather than the loop
+    variable, collapsing every child of a group onto one overwritten key.
+    """
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    hasher = NwbfileHasher(mini_path, object_ids=True)
+    paths = [path for path, _ in hasher.obj_ids.values()]
+
+    assert not [
+        p for p in paths if p.endswith("/k")
+    ], "No object should be indexed under a literal 'k'"
+    assert any(
+        p.count("/") >= 2 for p in paths
+    ), "Nested objects should be addressable by their own path"
+
+
+def test_read_set_digest_is_order_free_and_absence_sensitive(mini_path):
+    """The digest answers 'did what this table read change?'"""
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    hasher = NwbfileHasher(mini_path, object_ids=True)
+    read = list(hasher.obj_ids)[:4]
+
+    assert hasher.read_set_digest(read) == hasher.read_set_digest(
+        list(reversed(read))
+    ), "The order a table read objects in is not part of its identity"
+    assert hasher.read_set_digest(read) != hasher.read_set_digest(
+        read[:-1]
+    ), "Reading fewer objects is a different read-set"
+    assert hasher.read_set_digest(read) != hasher.read_set_digest(
+        read + ["not-in-this-file"]
+    ), "An object that has vanished must not hash as unchanged"
+    assert (
+        hasher.digest_for("not-in-this-file") is None
+    ), "An unknown object id has no digest"
+
+
+def test_object_indexed_where_it_lives_not_where_it_is_linked(mini_path):
+    """A soft-linked object is indexed at its real home.
+
+    NWB soft-links a device into the series that uses it, and h5py hands back
+    the dereferenced object at both paths. Rolling the subtree digest up at
+    the link would cover the object's own attributes and nothing beneath it,
+    so a probe would hash the same however its shanks changed.
+    """
+    import h5py
+
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    hasher = NwbfileHasher(mini_path, object_ids=True)
+
+    with h5py.File(mini_path, "r") as file:
+        linked = [
+            path
+            for path, _ in hasher.obj_ids.values()
+            # The root NWBFile object is indexed at "/", which is not a link
+            # and has no link info to ask about, so h5py raises rather
+            # than answering.
+            if path != "/"
+            and isinstance(file.get(path, getlink=True), h5py.SoftLink)
+        ]
+
+    assert not linked, f"Objects indexed at a soft link: {linked}"
+
+
+def test_a_child_change_moves_its_container_digest(mini_path, tmp_path):
+    """A container's digest covers what is under it, not just its own attrs."""
+    import shutil
+
+    import h5py
+
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    copy = tmp_path / "copy_.nwb"
+    shutil.copy2(mini_path, copy)
+
+    before = NwbfileHasher(copy, object_ids=True)
+    container = next(
+        (oid, path)
+        for oid, (path, _) in before.obj_ids.items()
+        if any(p.startswith(f"{path}/") for p, _ in before.obj_ids.values())
+    )
+    object_id, path = container
+
+    with h5py.File(copy, "r+") as file:
+        child = next(iter(file[path]))
+        file[f"{path}/{child}"].attrs["_probe_of_change"] = "edited"
+
+    after = NwbfileHasher(copy, object_ids=True)
+
+    assert before.digest_for(object_id) != after.digest_for(
+        object_id
+    ), "A change beneath a container must change the container's digest"
+
+
+def test_the_root_object_is_indexed_over_the_metadata_it_owns(
+    mini_path, tmp_path
+):
+    """File metadata moves the root's digest; a container's contents do not.
+
+    Every table that reads session, lab, institution or experimenter fields
+    records the *root* NWBFile object. The traversal visits the root's
+    members and never the root, so while it carried no digest those tables
+    hashed to the constant an unknown id scores. That is unchangeable, so
+    their parses looked reusable however the metadata was edited.
+
+    Scope matters as much as presence: a root folding in the whole file would
+    never under-invalidate, but would re-plan every metadata reader on any
+    edit anywhere, which is the invariant Phase 6 exists to establish.
+    """
+    import shutil
+
+    import h5py
+
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    copy = tmp_path / "copy_.nwb"
+    shutil.copy2(mini_path, copy)
+
+    before = NwbfileHasher(copy, object_ids=True)
+    with h5py.File(copy, "r") as file:
+        root_id = before._normalize_h5str(file.attrs["object_id"])
+        if isinstance(root_id, bytes):  # h5py<3 returns bytes
+            root_id = root_id.decode()
+    root_id = str(root_id)
+
+    assert (
+        before.digest_for(root_id) is not None
+    ), "The root object must be indexed, or its readers never invalidate"
+
+    with h5py.File(copy, "r+") as file:
+        file["general/lab"].attrs["_probe_of_change"] = "edited"
+
+    after = NwbfileHasher(copy, object_ids=True)
+    assert before.digest_for(root_id) != after.digest_for(
+        root_id
+    ), "Editing file metadata must move the root digest"
+
+    # An edit the root does not own: a deeper object claims this path, so it
+    # answers for the change and the file's metadata is untouched.
+    owned = NwbfileHasher(copy, object_ids=True)
+    with h5py.File(copy, "r+") as file:
+        file["processing/sample_count/sample_count"].attrs[
+            "_probe_of_change"
+        ] = "edited"
+
+    scoped = NwbfileHasher(copy, object_ids=True)
+    assert owned.digest_for(root_id) == scoped.digest_for(
+        root_id
+    ), "An edit inside a container must not count as a metadata change"
+
+
+# --- externally-linked objects -----------------------------------------------
+# An NWB copy keeps its bulk in the raw file and links to it. `visititems`
+# follows hard links only, so those objects are never traversed, and a table
+# that reads one had a read-set digest that could not change.
+
+
+@pytest.fixture
+def mini_copy_path(mini_path):
+    """Path of the `_.nwb` copy, which is the file that holds the links.
+
+    The raw file holds the data; the copy links to it. Only the copy has
+    external links, so it is the copy these tests hash.
+    """
+    from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
+
+    return mini_path.parent / get_nwb_copy_filename(mini_path.name)
+
+
+@pytest.fixture
+def linked_objects(mini_copy_path):
+    """The copy's external links, with the object id behind each.
+
+    Skips rather than fails where a copy has no links: the point is the
+    behaviour of a linked object, and a corpus without one has nothing to say
+    about it.
+    """
+    import h5py
+
+    links = {}
+
+    def walk(group, prefix=""):
+        for key in group.keys():
+            name = f"{prefix}/{key}".lstrip("/")
+            link = group.get(key, getlink=True)
+            if isinstance(link, h5py.ExternalLink):
+                links[name] = link
+                continue
+            if isinstance(link, h5py.SoftLink):
+                continue
+            item = group.get(key)
+            if isinstance(item, h5py.Group):
+                walk(item, name)
+
+    with h5py.File(mini_copy_path, "r") as handle:
+        walk(handle)
+        if not links:
+            pytest.skip("this copy holds no external links")
+        ids = {name: str(handle[name].attrs["object_id"]) for name in links}
+
+    return links, ids
+
+
+def test_externally_linked_objects_are_indexed(mini_copy_path, linked_objects):
+    """A linked object must have a digest, not be silently absent.
+
+    `read_set_digest` scores an unknown id as the constant `"missing"`, so an
+    object outside the index gives a digest that never moves, and a table
+    reading it would look reusable forever.
+    """
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    _, ids = linked_objects
+    hasher = NwbfileHasher(mini_copy_path, object_ids=True)
+
+    for name, object_id in ids.items():
+        assert hasher.digest_for(object_id) is not None, (
+            f"{name} is linked from another file and has no digest, so "
+            "nothing that reads it can ever be invalidated"
+        )
+
+
+def test_indexing_links_leaves_the_file_hash_byte_identical(
+    mini_copy_path, linked_objects
+):
+    """Extends the stability guarantee to cover the link pass.
+
+    The file hash is stored as provenance and compared across runs, so the
+    link pass must touch `self.objs` and never `self.hashed`. Asserted
+    separately from the object-index test because it is a separate pass with
+    the same obligation.
+    """
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    plain = NwbfileHasher(mini_copy_path)
+    indexed = NwbfileHasher(mini_copy_path, object_ids=True)
+
+    assert plain.hash == indexed.hash, (
+        "Indexing external links must not move the file hash; production "
+        "hashes depend on it"
+    )
+
+
+def test_a_change_to_the_link_target_moves_the_digest(
+    mini_copy_path, mini_path, linked_objects
+):
+    """The point of the whole pass: a changed target invalidates the reader.
+
+    Simulated by moving the raw file's mtime, which any write to it would do.
+    The copy's own bytes are untouched, so its file hash must *not* move.
+    The change belongs to the object index, which is what reuse consults.
+    """
+    import os
+
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    _, ids = linked_objects
+    stat = os.stat(mini_path)
+
+    before = NwbfileHasher(mini_copy_path, object_ids=True)
+    digests = {n: before.read_set_digest([i]) for n, i in ids.items()}
+
+    os.utime(mini_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
+    try:
+        after = NwbfileHasher(mini_copy_path, object_ids=True)
+
+        for name, object_id in ids.items():
+            assert digests[name] != after.read_set_digest([object_id]), (
+                f"{name} reads data in the raw file, so a change there must "
+                "move its digest"
+            )
+        assert (
+            before.hash == after.hash
+        ), "The copy's own bytes did not change, so its file hash must not"
+    finally:
+        # Restored however the test ends: the corpus is shared, and a stray
+        # mtime would invalidate these digests for every later test.
+        os.utime(mini_path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+
+
+def test_the_plan_cap_is_inert_on_the_copy_a_plan_hashes(mini_copy_path):
+    """`PLAN_DATASET_BYTES` bounds nothing in an NWB copy.
+
+    The property the production win rests on: the cap bites multi-GB datasets
+    and nothing else, so an ordinary file's digests, and its stored hash,
+    are unaffected by it being set. The copy is the file a plan hashes; the
+    raw file is the next test.
+    """
+    from spyglass.data_import.planner import PLAN_DATASET_BYTES
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    plain = NwbfileHasher(mini_copy_path, object_ids=True)
+    capped = NwbfileHasher(
+        mini_copy_path, object_ids=True, max_dataset_bytes=PLAN_DATASET_BYTES
+    )
+
+    assert not capped.bounded, "No dataset in the copy reaches the cap"
+    assert capped.hash == plain.hash, (
+        "A cap that bounded nothing read the whole file, so the hash is still "
+        "the file's"
+    )
+    assert capped.obj_ids == plain.obj_ids, "Every object digest is unchanged"
+
+
+def test_the_plan_cap_bounds_raw_ephys(mini_path):
+    """A raw file's ephys *is* over the cap, and that is the intended bite.
+
+    Only `insert_sessions(dry_run=True)` on an unregistered file hashes a raw
+    file; every other plan hashes the copy, where the same data is an external
+    link and was never content-hashed anyway. So the cap costs a dry-run
+    report the ability to notice an in-place, shape-preserving edit to raw
+    ephys, which is not what a dry run is read for.
+    """
+    from spyglass.data_import.planner import PLAN_DATASET_BYTES
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    capped = NwbfileHasher(
+        mini_path, object_ids=True, max_dataset_bytes=PLAN_DATASET_BYTES
+    )
+
+    assert any(
+        "e-series" in path for path in capped.bounded
+    ), f"Expected raw ephys to be bounded; bounded {capped.bounded}"
+
+
+def test_a_bounded_hash_refuses_to_pass_as_the_file_hash(mini_path):
+    """`hash` is None once anything was bounded.
+
+    `NwbfileHasher.hash` is stored provenance in `SpikeSortingRecording`. A
+    bounded run read part of the file, so handing back a digest that looks
+    like the file's would be silently wrong. The reuse digests it exists to
+    build are still valid, and `id_set_digest` is untouched.
+    """
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    full = NwbfileHasher(mini_path, object_ids=True)
+    # 64 bytes bounds essentially every dataset, which is the point: the
+    # assertion is about what a bounded run reports, not about any one cap.
+    bounded = NwbfileHasher(mini_path, object_ids=True, max_dataset_bytes=64)
+
+    assert bounded.bounded, "A 64-byte cap must bound something"
+    assert bounded.hash is None, "A partial read must not pass as the hash"
+    assert full.hash is not None, "An unbounded run still reports one"
+    assert (
+        bounded.id_set_digest == full.id_set_digest
+    ), "Bounding contents must not change which objects the file holds"
+
+
+def test_a_bounded_dataset_still_notices_a_shape_change(mini_path, tmp_path):
+    """Shape and dtype are hashed whatever the cap, so a resize is caught.
+
+    What the cap gives up is narrower than it looks: an edit has to preserve
+    the dataset's shape *and* miss both the head and the tail to go unseen.
+    """
+    import shutil
+
+    import h5py
+    import numpy as np
+
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    copy = tmp_path / "copy_.nwb"
+    shutil.copy2(mini_path, copy)
+
+    # `objs` is keyed by the `visititems` name, which carries no leading
+    # slash, unlike `bounded`, which records `dataset.name`.
+    path = "acquisition/e-series/timestamps"
+    before = NwbfileHasher(copy, object_ids=True, max_dataset_bytes=64)
+
+    with h5py.File(copy, "r+") as file:
+        data = file[path][:]
+        del file[path]
+        file[path] = np.concatenate([data, data[-1:]])
+
+    after = NwbfileHasher(copy, object_ids=True, max_dataset_bytes=64)
+
+    assert (
+        before.objs[path][1] != after.objs[path][1]
+    ), "A resized dataset must hash differently however tight the cap"

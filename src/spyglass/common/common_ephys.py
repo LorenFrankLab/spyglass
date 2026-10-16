@@ -60,9 +60,23 @@ class ElectrodeGroup(SpyglassIngestion, dj.Imported):
         return getattr(device, "probe_type", None)
 
     def fetch_add_brain_region(self, nwb_obj):
-        """Fetch or add the brain region from the NWB object."""
-        region_name = nwb_obj.location
-        return BrainRegion.fetch_add(region_name=region_name)
+        """Return the region id for this object's location."""
+        return BrainRegion.reserve_id(region_name=nwb_obj.location)
+
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ) -> IngestionEntries:
+        """Emit the brain regions this group needs alongside its own row.
+
+        Parents first, so the plan writes a new region before the group that
+        references it. Repeats collapse in `PlannedEntries`.
+        """
+        entries = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
+        if rows := BrainRegion.reserved_rows():
+            return {BrainRegion: rows, **entries}
+        return entries
 
     def hemisphere_from_targeted_x(self, nwb_obj):
         """Determine hemisphere from targeted_x coordinate."""
@@ -150,9 +164,8 @@ class Electrode(SpyglassIngestion, dj.Imported):
         return nwb_obj[0]
 
     def fetch_add_brain_region(self, nwb_obj):
-        """Fetch or add the brain region from the NWB object."""
-        region_name = nwb_obj.group.location
-        return BrainRegion.fetch_add(region_name=region_name)
+        """Return the region id for this object's group location."""
+        return BrainRegion.reserve_id(region_name=nwb_obj.group.location)
 
     def device_probe_type_default_none(self, nwb_obj):
         """Fetch the probe type from the NWB object."""
@@ -166,36 +179,28 @@ class Electrode(SpyglassIngestion, dj.Imported):
             return [nwb_file.electrodes]
         return []
 
-    _cached_config = None
-
-    def insert_from_nwbfile(
-        self,
-        nwb_file_name: str,
-        config: dict = None,
-        dry_run: bool = False,
-    ):
-        """Insert Electrode entries from NWB file, using config for overrides."""
-        self._cached_config = config
-        try:
-            return_val = super().insert_from_nwbfile(
-                nwb_file_name, config, dry_run
-            )
-        finally:
-            self._cached_config = None
-        return return_val
-
     def generate_entries_from_nwb_object(
-        self, nwb_obj, base_key=None
+        self, nwb_obj, base_key=None, ctx=None
     ) -> IngestionEntries:
         """Generates a list of table entries from an NWB object.
 
-        Overrides Base to allow integrating info from config YAML for non-default columns.
-        """
-        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        Overrides Base to allow integrating info from config YAML for
+        non-default columns.
 
-        if (self._cached_config is None) or not (
-            electrode_config := self._cached_config.get("Electrode", None)
-        ):
+        The config comes from `ctx`, not from a cache on `self`. It was held on
+        `self` by an `insert_from_nwbfile` override, which the plan path never
+        calls, so every config override was dropped while planning, which is
+        now the only ingest path.
+        """
+        # `ctx` forwarded: the electrodes table is a DynamicTable, so super()
+        # loops its rows and calls back into this method per row. Dropping it
+        # here would leave every per-row call without the config.
+        entries = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
+
+        config = ctx.config if ctx is not None else dict()
+        if not (electrode_config := config.get("Electrode", None)):
             return entries
         # map electrode id to dictof electrode information from config YAML
         for entry in entries.get(self, []):
@@ -219,6 +224,8 @@ class Electrode(SpyglassIngestion, dj.Imported):
                     )
                 else:
                     entry.update(cfg)
+        if rows := BrainRegion.reserved_rows():
+            return {BrainRegion: rows, **entries}
         return entries
 
     @classmethod
@@ -301,16 +308,27 @@ class Raw(SpyglassIngestion, dj.Imported):
         }
 
     def _rate_fallback(self, nwb_object):
-        """Return the rate if available, otherwise None."""
+        """Return the object's rate, estimating it from timestamps if absent."""
         rate = getattr(nwb_object, "rate", None)
         if rate is not None:
             return rate
+
+        # `_valid_times_from_raw` needs this too, and estimating reads a
+        # million timestamps off disk. Compared by identity against a held
+        # reference, so a recycled `id()` cannot serve another object's rate.
+        memo = getattr(self, "_rate_memo", None)
+        if memo is not None and memo[0] is nwb_object:
+            return memo[1]
+
         timestamps = getattr(nwb_object, "timestamps", None)
         if timestamps is None:
             raise ValueError("Neither rate nor timestamps are available.")
-        return estimate_sampling_rate(
+
+        estimated = estimate_sampling_rate(
             np.asarray(timestamps[: int(1e6)]), 1.5, verbose=not self._test_mode
         )
+        self._rate_memo = (nwb_object, estimated)
+        return estimated
 
     def _valid_times_from_raw(self, nwb_object):
         """Return valid times from the raw data."""
@@ -330,9 +348,13 @@ class Raw(SpyglassIngestion, dj.Imported):
             warn=not self._test_mode,
         )
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Add IntervalList entry to the generated entries."""
-        super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        super_ins = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
         self_key = super_ins[self][0]
         valid_times = self_key.pop("valid_times")  # remove from self key
         interval_insert = {

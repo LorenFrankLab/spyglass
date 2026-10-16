@@ -1,11 +1,12 @@
 from pathlib import Path
-from typing import List, Union
+from typing import Dict, List, Union
 
 import datajoint as dj
 import yaml
 
 from spyglass.common.common_behav import (
     PositionSource,
+    RawPosition,
     RawCompassDirection,
     StateScriptFile,
     VideoFile,
@@ -28,6 +29,7 @@ from spyglass.common.common_ephys import (
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
 from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_region import BrainRegion
 from spyglass.common.common_optogenetics import (
     OpticalFiberDevice,
     OpticalFiberImplant,
@@ -38,69 +40,192 @@ from spyglass.common.common_optogenetics import (
 from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
 from spyglass.common.common_subject import Subject
-from spyglass.common.common_task import TaskEpoch
-from spyglass.common.common_usage import InsertError
+from spyglass.common.common_task import Task, TaskEpoch
 from spyglass.settings import base_dir
-from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import declare_all_merge_tables
 from spyglass.utils.nwb_helper_fn import get_config
 
 
-def log_insert_error(
-    table: str, err: Exception, error_constants: dict = None
-) -> None:
-    """Log a given error to the InsertError table.
+def _plan_only(nwb_file_name: str):
+    """Plan a file, stage the plan, report, and write no data table.
+
+    Shared by `dry_run`, which stops here, and the real run, which hands the
+    result to `insert_plan`, so what a dry run reports is what a real run
+    will do.
 
     Parameters
     ----------
-    table : str
-        The table name where the error occurred.
-    err : Exception
-        The exception that was raised.
-    error_constants : dict, optional
-        Dictionary with keys for dj_user, connection_id, and nwb_file_name.
-        Defaults to checking dj.conn and using "Unknown" for nwb_file_name.
+    nwb_file_name : str
+        The copy file registered in Nwbfile.
+
+    Returns
+    -------
+    IngestionPlan
+        Falsy when nothing blocks it; printable as the report.
     """
-    if error_constants is None:
-        error_constants = dict(
-            dj_user=dj.config["database.user"],
-            connection_id=dj.conn().connection_id,
-            nwb_file_name="Unknown",
-        )
-    InsertError.insert1(
-        dict(
-            **error_constants,
-            table=table.__name__,
-            error_type=type(err).__name__,
-            error_message=str(err)[:255],  # limit to 255 chars
-            error_raw=str(err),
-        )
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.data_import.planner import plan_nwbfile
+
+    # The sidecar config sits beside the file, and locating it goes through
+    # `Nwbfile.get_abs_path`, which raises for a file with no row. An
+    # unregistered file has no plan to make, so skip the lookup and let the
+    # planner report `file_not_registered`. Reporting is the whole contract
+    # here, and raising from a dry run breaks it.
+    registered = bool(Nwbfile & {"nwb_file_name": nwb_file_name})
+    config = (
+        merged_config(nwb_file_name, lab_config()) if registered else dict()
     )
 
+    plan = plan_nwbfile(nwb_file_name, config=config)
+    IngestionPlanLog().stage(plan)
+    plan.log_report()
 
-def single_transaction_make(
-    tables: List[dj.Table],
+    return plan
+
+
+def _insert_from_plan(
     nwb_file_name: str,
-    raise_err: bool = False,
-    error_constants: dict = None,
-    config: dict = None,
+    allow_partial: bool = False,
 ):
-    """Ingest each table from the NWB file, inside one transaction.
+    """Plan the whole file, then insert what the plan worked out.
 
-    Every table here is a SpyglassIngestion table, so each parses the file
-    once via `insert_from_nwbfile` rather than running `make` per key_source
-    key. Failures are logged per table unless `raise_err` is set.
+    The first pass writes nothing, so every problem is reported before any
+    table is touched. The second re-derives nothing: it writes the rows the
+    first already checked, skipping those already stored.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        The copy file registered in Nwbfile.
+    allow_partial : bool, optional
+        Insert the tables that planned cleanly even though others did not.
+
+    Returns
+    -------
+    IngestionPlan
+        Falsy when everything asked for was inserted.
     """
+    from spyglass.data_import.planner import insert_plan
 
-    # Entries may also be declared in a `_spyglass_config.yaml` beside the NWB
-    # file. Both configs share the {TableName: [rows]} shape that
-    # `generate_entries_from_config` indexes by name, so each table is handed
-    # the whole merged mapping -- a per-table lookup would yield a row list.
-    # The file's own config wins: `entries.yaml` holds lab-wide defaults,
-    # while the sidecar describes this session. Before this PR the sidecar was
-    # the only config any table that read one consulted.
-    # `or dict()`: yaml.safe_load returns None for an empty file, and the
-    # config argument is optional.
+    return insert_plan(_plan_only(nwb_file_name), allow_partial=allow_partial)
+
+
+def ingestion_tables() -> Dict[str, List[dj.Table]]:
+    """Return the tables an ingestion touches, in two categories.
+
+    - `"ingest"`: tables that **parse the file**, parents before children,
+      so a cross-reference resolves against the plan. The order is written out
+      rather than derived; `tests/common/test_ingestion_table_order.py` checks
+      it against DataJoint's graph, so a table added in the wrong place fails
+      a test rather than an ingestion.
+    - `"targets"`: tables that **receive rows without parsing anything**.
+      Order is irrelevant: nothing parses them.
+
+    Returns
+    -------
+    dict
+        `{"ingest": [...], "targets": [...]}`.
+    """
+    from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
+    from spyglass.lfp.lfp_imported import ImportedLFP
+    from spyglass.position.v1.imported_pose import ImportedPose
+    from spyglass.spikesorting.imported import ImportedSpikeSorting
+
+    ingest = [
+        # no parents among these
+        CameraDevice,
+        DataAcquisitionDeviceAmplifier,
+        DataAcquisitionDeviceSystem,
+        Institution,
+        Lab,
+        LabMember,
+        LabTeam,
+        OpticalFiberDevice,
+        ProbeType,
+        Subject,
+        Virus,
+        # devices and probes
+        DataAcquisitionDevice,  # -> DataAcq*Amplifier, DataAcq*System
+        Probe,  # -> ProbeType
+        Probe.Shank,  # -> Probe
+        Probe.Electrode,  # -> Probe.Shank
+        # the session, and what hangs from it
+        Session,  # -> Subject, Institution, Lab
+        Session.Experimenter,  # -> Session, LabMember
+        Session.DataAcquisitionDevice,  # -> Session, DataAcq*Device
+        VirusInjection,  # -> Session, Virus
+        ElectrodeGroup,  # -> Session
+        ImportedSpikeSorting,  # -> Session
+        IntervalList,  # -> Session
+        OpticalFiberImplant,  # -> Session, OpticalFiberDevice
+        PositionSource,  # -> Session, IntervalList
+        Raw,  # -> Session, IntervalList
+        RawCompassDirection,  # -> Session, IntervalList
+        SampleCount,  # -> Session
+        SensorData,  # -> Session, IntervalList
+        TaskEpoch,  # -> Session, Task, CameraDevice, IntervalList
+        VideoFile,  # -> TaskEpoch
+        # last: depend on the above
+        DIOEvents,  # -> Session, IntervalList
+        Electrode,  # -> ElectrodeGroup, Probe.Electrode
+        ImportedLFP,  # -> LFPElectrodeGroup, IntervalList
+        ImportedPose,  # -> IntervalList
+        OptogeneticProtocol,  # -> TaskEpoch
+        StateScriptFile,  # -> TaskEpoch
+        # NwbfileKachery, # Not used by default
+    ]
+
+    # Emitted by a table above, never parsed themselves. Every one is a
+    # parent, child or part of something in `ingest`, since a table can only
+    # emit rows for something it is related to. They are listed rather than
+    # derived so the set is readable and reviewable.
+    targets = [
+        BrainRegion,  # from ElectrodeGroup and Electrode
+        Task,  # from TaskEpoch
+        RawPosition,  # from PositionSource
+        RawPosition.PosObject,  # from PositionSource
+        LFPElectrodeGroup,  # from ImportedLFP
+        LFPElectrodeGroup.LFPElectrode,  # from ImportedLFP
+    ]
+
+    return {"ingest": ingest, "targets": targets}
+
+
+def lab_config() -> dict:
+    """Return the lab-wide config entries, from `entries.yaml` in base_dir.
+
+    Returns
+    -------
+    dict
+        `{TableName: [rows]}`, empty when there is no such file.
+    """
+    entries_path = Path(base_dir) / "entries.yaml"
+    if not entries_path.exists():
+        return dict()
+
+    with open(entries_path, "r") as stream:
+        # yaml.safe_load returns None for an empty file
+        return yaml.safe_load(stream) or dict()
+
+
+def merged_config(nwb_file_name: str, config: dict = None) -> dict:
+    """Return the config a file is ingested with, sidecar over defaults.
+
+    Both sources share the `{TableName: [rows]}` shape, and each table is
+    handed the whole mapping. Slicing it per table hands `Electrode` a row
+    list where it expects a dict.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        The file whose sidecar config to read.
+    config : dict, optional
+        Defaults the sidecar overrides. Default None, no defaults.
+
+    Returns
+    -------
+    dict
+    """
     file_config = (
         get_config(
             Nwbfile.get_abs_path(nwb_file_name),
@@ -108,140 +233,42 @@ def single_transaction_make(
         )
         or dict()
     )
-    merged_config = {**(config or dict()), **file_config}
-
-    with Nwbfile._safe_context():
-        for table in tables:
-            try:
-                table().insert_from_nwbfile(nwb_file_name, config=merged_config)
-            except Exception as err:
-                if raise_err:
-                    raise err
-                log_insert_error(
-                    table=table, err=err, error_constants=error_constants
-                )
+    return {**(config or dict()), **file_config}
 
 
 def populate_all_common(
-    nwb_file_name, rollback_on_fail=False, raise_err=False
+    nwb_file_name,
+    dry_run=False,
+    allow_partial=False,
 ) -> Union[List, None]:
     """Insert all common tables for a given NWB file.
+
+    Checks the whole file, reports every problem, then writes what was
+    checked in one transaction. Nothing is written unless the plan is clean,
+    so a file does not half-ingest before failing, and a re-attempt skips
+    what is already stored.
 
     Parameters
     ----------
     nwb_file_name : str
         The name of the NWB file to populate.
-    rollback_on_fail : bool, optional
-        If True, will delete the Session entry if any errors occur.
-        Defaults to False.
-    raise_err : bool, optional
-        If True, will raise any errors that occur during population.
-        Defaults to False. This will prevent any rollback from occurring.
+    dry_run : bool, optional
+        Plan the file and return the report without inserting anything.
+        Default False.
+    allow_partial : bool, optional
+        Insert the tables that planned cleanly even though others did not.
+        Default False: a blocking problem inserts nothing, so a half-ingested
+        file is a choice rather than an accident.
 
     Returns
     -------
-    List
-        A list of keys for InsertError entries if any errors occurred.
-
-    Notes
-    -----
-    InsertError rows logged by an earlier attempt at the same file, under the
-    same user and connection, are cleared before population starts, so the
-    returned list only ever describes the current attempt.
+    IngestionPlan
+        Falsy when nothing blocks it, iterable over its blocking problems,
+        and printable as the report.
     """
-    from spyglass.lfp.lfp_imported import ImportedLFP
-    from spyglass.position.v1.imported_pose import ImportedPose
-    from spyglass.spikesorting.imported import ImportedSpikeSorting
-
     _ = declare_all_merge_tables()
 
-    error_constants = dict(
-        dj_user=dj.config["database.user"],
-        connection_id=dj.conn().connection_id,
-        nwb_file_name=nwb_file_name,
-    )
+    if dry_run:
+        return _plan_only(nwb_file_name)
 
-    # Drop errors logged by an earlier attempt at this same file, user, and
-    # connection. Without this, the check below reports stale failures and can
-    # roll back an otherwise clean ingestion. See issue #1497. InsertError has
-    # no dependent tables, so delete_quick is safe here.
-    (InsertError & error_constants).delete_quick()
-
-    table_lists: List[List[dj.Table]] = [
-        # Tables that can be inserted in a single transaction
-        [
-            Institution,  # Parent node
-            Lab,  # Parent node
-            LabMember,  # Parent node
-            LabTeam,  # Parent node
-            Subject,  # Parent node
-            CameraDevice,  # Parent node
-            ProbeType,  # Parent node
-            DataAcquisitionDeviceAmplifier,  # Parent node
-            DataAcquisitionDeviceSystem,  # Parent node
-            DataAcquisitionDevice,  # Depends on DataAcq*Amp, DataAcq*Sys
-            OpticalFiberDevice,  # Parent node
-            Virus,  # Parent node
-        ],
-        [
-            Probe,  # Depends on ProbeType, DataAcquisitionDevice
-            Probe.Shank,  # Depends on Probe
-            Probe.Electrode,  # Depends on Probe
-            Session,  # Depends on Subject, Institution, Lab
-            Session.Experimenter,  # Depends on Session
-            Session.DataAcquisitionDevice,  # Depends on Sess, DataAcq*Device
-            ElectrodeGroup,  # Depends on Session
-            Raw,  # Depends on Session
-            SampleCount,  # Depends on Session
-            DIOEvents,  # Depends on Session
-            ImportedSpikeSorting,  # Depends on Session
-            SensorData,  # Depends on Session
-            IntervalList,  # Depends on Session
-            TaskEpoch,  # Depends on Session, Task, CamearaDevice, IntervalList
-            # NwbfileKachery, # Not used by default
-        ],
-        [  # Tables that depend on above transaction
-            Electrode,  # Depends on ElectrodeGroup
-            PositionSource,  # Depends on Session. Also fills RawPosition
-            RawCompassDirection,  # Depends on Session
-            VideoFile,  # Depends on TaskEpoch
-            StateScriptFile,  # Depends on TaskEpoch
-            ImportedPose,  # Depends on Session
-            ImportedLFP,  # Depends on ElectrodeGroup
-            VirusInjection,  # Depends on Session
-            OpticalFiberImplant,  # Depends on Session and OpticalFiberDevice
-            OptogeneticProtocol,  # Depends on Session and TaskEpoch
-        ],
-    ]
-
-    config = dict()
-    entries_path = Path(base_dir) / "entries.yaml"
-    if entries_path.exists():
-        with open(f"{base_dir}/entries.yaml", "r") as stream:
-            config = yaml.safe_load(stream)
-
-    for tables in table_lists:
-        single_transaction_make(
-            tables=tables,
-            nwb_file_name=nwb_file_name,
-            raise_err=raise_err,
-            error_constants=error_constants,
-            config=config,
-        )
-
-    err_query = InsertError & error_constants
-    nwbfile_query = Nwbfile & {"nwb_file_name": nwb_file_name}
-
-    if err_query and nwbfile_query and rollback_on_fail:
-        logger.error(f"Rolling back population for {nwb_file_name}...")
-        # Should this be safemode=False to prevent confirmation prompt?
-        nwbfile_query.super_delete(warn=False)
-
-    if err_query:
-        err_tables = err_query.fetch("table")
-        logger.error(
-            f"Errors occurred during population for {nwb_file_name}:\n\t"
-            + f"Failed tables {err_tables}\n\t"
-            + "See common_usage.InsertError for more details"
-        )
-        return err_query.fetch("KEY")
+    return _insert_from_plan(nwb_file_name, allow_partial=allow_partial)

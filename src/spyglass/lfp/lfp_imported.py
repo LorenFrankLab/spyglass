@@ -63,10 +63,15 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
         }
         return series
 
-    def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
-        """Insert entries, numbering interval names by position in the file."""
+    def before_parse(self, ctx) -> None:
+        """Clear the per-run group bookkeeping.
+
+        These mean "resolved *this run*", and `_plan_electrode_group` emits no
+        entries for a group it already resolved. Reset here rather than in
+        `insert_from_nwbfile`, which planning never calls: a second plan in one
+        process would otherwise report `LFPElectrodeGroup` as a missing parent.
+        """
         self._planned_groups, self._planned_names = dict(), set()
-        return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
     def enumerated_interval_name(
         self, nwb_obj: pynwb.ecephys.ElectricalSeries
@@ -119,7 +124,9 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
 
         return f"imported_lfp_{max(suffixes) + 1 if suffixes else 0:03}"
 
-    def _plan_electrode_group(self, session_key, electrode_ids) -> tuple:
+    def _plan_electrode_group(
+        self, session_key, electrode_ids, ctx=None
+    ) -> tuple:
         """Resolve one series' electrode group without writing it.
 
         Parameters
@@ -128,6 +135,9 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
             The session the group belongs to.
         electrode_ids : array-like
             The electrodes the series was recorded on.
+        ctx : FileContext, optional
+            Parse context, so the group's members resolve against the plan.
+            Default None, resolving against the database alone.
 
         Returns
         -------
@@ -146,6 +156,7 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
             session_key=session_key,
             electrode_ids=electrode_ids,
             group_name=group_name,
+            ctx=ctx,
         )
         self._planned_groups[planned_key] = group_key
         if entries:  # only a name this plan will actually write
@@ -153,7 +164,9 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
 
         return group_key, entries
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Add the electrode group and interval one electrical series needs."""
         timestamps = nwb_obj.get_timestamps()
         if len(timestamps) == 0:
@@ -172,12 +185,16 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
                 self: [],
             }
 
-        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        entries = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
         self_key = entries[self][0]
         session_key = {"nwb_file_name": self_key["nwb_file_name"]}
 
         group_key, group_entries = self._plan_electrode_group(
-            session_key, nwb_obj.electrodes.to_dataframe().index.values
+            session_key,
+            nwb_obj.electrodes.to_dataframe().index.values,
+            ctx=ctx,
         )
         self_key.update(group_key)
 

@@ -129,7 +129,11 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             )
 
     def plan_cautious_insert(
-        self, session_key: dict, electrode_ids: List[int], group_name: str
+        self,
+        session_key: dict,
+        electrode_ids: List[int],
+        group_name: str,
+        ctx=None,
     ) -> tuple:
         """Resolve an electrode group to a key plus the entries it still needs.
 
@@ -137,12 +141,15 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
         ingestion can hold the entries and write them under its own gate --
         `insert_from_nwbfile(dry_run=True)` must not write.
 
-        Every check here reads the database, so a plan is only correct against
-        what is stored. A caller planning several groups before writing any of
-        them has to dedupe electrode sets and pick names itself: this would
-        otherwise hand back the same name twice, having no way to see the
-        group the previous call planned. See
+        The group lookups read the database, so a plan is only correct against
+        the groups already stored. A caller planning several groups before
+        writing any of them has to dedupe electrode sets and pick names itself:
+        this would otherwise hand back the same name twice, having no way to
+        see the group the previous call planned. See
         `ImportedLFP._plan_electrode_group`.
+
+        Members come from `ctx` when one is given, so a group planned before
+        its electrodes are written still gets them.
 
         Parameters
         ----------
@@ -188,11 +195,19 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
 
         # Unique group and set of electrodes, plan the insert
         master_insert = dict(**session_key, lfp_electrode_group_name=group_name)
-        electrode_keys = (
-            Electrode()
-            & session_key
-            & [{"electrode_id": e_id} for e_id in e_ids]
-        ).fetch("KEY")
+        if ctx is not None:
+            primary = Electrode().primary_key
+            electrode_keys = [
+                {key: row[key] for key in primary}
+                for row in ctx.rows_for(Electrode(), session_key)
+                if int(row["electrode_id"]) in e_ids
+            ]
+        else:
+            electrode_keys = (
+                Electrode()
+                & session_key
+                & [{"electrode_id": e_id} for e_id in e_ids]
+            ).fetch("KEY")
         e_group_dict = dict(lfp_electrode_group_name=group_name)
         electrode_inserts = [
             dict(e_key, **e_group_dict) for e_key in electrode_keys

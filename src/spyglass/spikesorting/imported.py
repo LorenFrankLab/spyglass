@@ -49,32 +49,28 @@ class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
             return []
         return [nwb_file.units]
 
-    def insert_from_nwbfile(
-        self,
-        nwb_file_name: str,
-        config: dict = None,
-        dry_run: bool = False,
-    ):
-        """Override base method to add merge table integration."""
-        # Call the base implementation first
-        result = super().insert_from_nwbfile(nwb_file_name, config, dry_run)
+    def after_insert(self, ctx, inserted) -> None:
+        """Register the sorting in the spike-sorting merge table.
 
-        if dry_run or not result or self not in result:
-            return result
-
-        # Add merge table integration
-        orig_key = {"nwb_file_name": nwb_file_name}
+        Parameters
+        ----------
+        ctx : FileContext
+            Context for this file.
+        inserted : dict
+            The entries that were inserted, keyed by table.
+        """
+        if not inserted or self not in inserted:
+            return
 
         from spyglass.spikesorting.spikesorting_merge import (
             SpikeSortingOutput,
         )  # noqa: F401
 
-        part_name = SpikeSortingOutput._part_name(self.table_name)
         SpikeSortingOutput._merge_insert(
-            [orig_key], part_name=part_name, skip_duplicates=True
+            [{"nwb_file_name": ctx.nwb_file_name}],
+            part_name=SpikeSortingOutput._part_name(self.table_name),
+            skip_duplicates=True,
         )
-
-        return result
 
     def make(self, key):
         """Legacy make method - replaced by insert_from_nwbfile."""

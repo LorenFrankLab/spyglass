@@ -34,7 +34,7 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
         return pynwb.behavior.BehavioralEvents
 
     def generate_entries_from_nwb_object(
-        self, nwb_obj, base_key=None
+        self, nwb_obj, base_key=None, ctx=None
     ) -> Dict["SpyglassIngestion", List[dict]]:
         """Generate entries from nwb object.
 
@@ -44,6 +44,11 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
             The NWB file object.
         base_key : dict, optional
             The base key to use for the entries, by default None
+        ctx : FileContext, optional
+            Parse context, used to resolve `Raw`'s interval against the plan as
+            well as the database. Default None, resolving against the database
+            alone, which is correct on a plain insert, where `Raw` is written
+            first.
 
         Returns
         -------
@@ -56,12 +61,17 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
         if not nwb_file_name:
             raise ValueError("nwb_file_name must be provided in base_key")
 
-        # Times for these events correspond to the valid times for the raw data
-        # If no raw data found, create a default interval list named
-        # "dio data valid times"
-        interval_list_name = "dio data valid times"
-        if raw_query := (Raw() & {"nwb_file_name": nwb_file_name}):
-            interval_list_name = (raw_query).fetch1("interval_list_name")
+        # Times for these events correspond to the valid times for the raw
+        # data; with no raw data, these events get an interval of their own.
+        # Asked of the context, which holds the `Raw` row this same ingestion
+        # plans. A query would make the branch below turn on *when* the plan
+        # was built.
+        raw_interval = self.value_from_plan(
+            ctx, Raw(), "interval_list_name", {"nwb_file_name": nwb_file_name}
+        )
+
+        has_raw = raw_interval is not None
+        interval_list_name = raw_interval or "dio data valid times"
 
         dio_inserts = []
         time_range_list = []
@@ -83,7 +93,7 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
             time_range_list.extend([timestamps[0], timestamps[-1]])
 
         interval_key = []
-        if not raw_query:
+        if not has_raw:
             interval_key.append(
                 dict(
                     nwb_file_name=nwb_file_name,

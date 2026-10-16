@@ -1,7 +1,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, List, Optional, Union
 
 import datajoint as dj
 import h5py
@@ -108,16 +108,21 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         ----------
         nwb_file_name : str
             The name of an NWB file that has been inserted into the Nwbfile()
-            table. May be file substring. May include % wildcard(s).
+            table. May be file substring. May include % wildcard(s). Accepts a
+            name with directories in front of it, or a `Path`; only the file
+            name is used, since the directory is always the raw directory.
         new_file : bool, optional
-            Adding a new file to Nwbfile table. Defaults to False.
+            Adding a new file to Nwbfile table. Defaults to False. The path is
+            still resolved, so this is also how to name a file that is not in
+            the table yet, such as when checking one before ingesting it.
 
         Returns
         -------
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        file_path = raw_dir + "/" + nwb_file_name
+        nwb_file_name = Path(nwb_file_name).name
+        file_path = str(Path(raw_dir) / nwb_file_name)
         if new_file:
             return file_path
 

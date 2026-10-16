@@ -191,10 +191,10 @@ class TestFileOperations:
 
     def test_add_to_database(
         self,
+        sweep_analysis_files,
         mini_copy_name,
         temp_analysis_file,
         custom_analysis_table,
-        teardown,
     ):
         """Test adding analysis file to database."""
         # Add to database
@@ -205,10 +205,6 @@ class TestFileOperations:
             "analysis_file_name": temp_analysis_file
         }
         assert len(entry) == 1
-
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
 
     def test_add_nwb_object_dataframe(
         self, mini_copy_name, custom_analysis_table
@@ -298,7 +294,7 @@ class TestFileOperations:
             file_path.unlink()
 
     def test_copy_analysis_file(
-        self, mini_copy_name, custom_analysis_table, teardown
+        self, sweep_analysis_files, mini_copy_name, custom_analysis_table
     ):
         """Test copying an existing analysis file."""
         # Create and register original file
@@ -319,14 +315,6 @@ class TestFileOperations:
         # Note: copied file is NOT automatically registered
         query = custom_analysis_table & {"analysis_file_name": copied_file}
         assert len(query) == 0
-
-        if teardown:
-            (
-                custom_analysis_table & {"analysis_file_name": original_file}
-            ).delete_quick()
-            copy_path = custom_analysis_table.get_abs_path(copied_file)
-            if Path(copy_path).exists():
-                Path(copy_path).unlink()
 
 
 # ==================== 4. CLEANUP AND ORPHAN DETECTION TESTS ===================
@@ -604,7 +592,11 @@ class TestIntegration:
     """Integration tests combining multiple features."""
 
     def test_full_workflow(
-        self, mini_copy_name, custom_analysis_table, analysis_registry, teardown
+        self,
+        sweep_analysis_files,
+        mini_copy_name,
+        custom_analysis_table,
+        analysis_registry,
     ):
         """Test complete workflow: create -> populate -> register -> fetch."""
         # 1. Create file
@@ -635,15 +627,6 @@ class TestIntegration:
         fetched = entry.fetch1()
         assert fetched["analysis_file_name"] == analysis_file_name
         assert fetched["nwb_file_name"] == mini_copy_name
-
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
-            file_path = Path(
-                custom_analysis_table.get_abs_path(analysis_file_name)
-            )
-            if file_path.exists():
-                file_path.unlink()
 
     def test_multiple_tables_isolation(
         self,

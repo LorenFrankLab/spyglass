@@ -19,8 +19,37 @@ from spyglass.utils.dj_helper_fn import (
 from spyglass.utils.mixins.base import BaseMixin
 
 
+class _TableForm:
+    """Descriptor giving a table as a class or an instance, from either side.
+
+    A descriptor rather than a `@property` because only a descriptor receives
+    `objtype` on class access; a property returns itself there, so
+    `Table.as_instance` would hand back a `<property>`. `@classmethod` with
+    `@property` was removed in Python 3.13.
+
+    Parameters
+    ----------
+    instance : bool
+        Whether to return an instance. False returns the class.
+    """
+
+    def __init__(self, instance: bool):
+        self._instance = instance
+
+    def __get__(self, obj, objtype=None):
+        if not self._instance:
+            return objtype if obj is None else type(obj)
+        return obj if obj is not None else objtype()
+
+
 class HelperMixin(BaseMixin):
     """Helper methods for DataJoint tables."""
+
+    # Tables reach code that cannot know whether it was handed the class or an
+    # instance: ingestion targets, graph walks, delete helpers. Rather than
+    # `tbl() if inspect.isclass(tbl) else tbl` at each site, ask the table.
+    as_instance = _TableForm(instance=True)
+    as_class = _TableForm(instance=False)
 
     def dict_to_pk(self, key):
         """Return primary key from dictionary."""

@@ -22,7 +22,11 @@ class TestBasicFunctionality:
     """Test basic builder functionality: creation, registration, paths."""
 
     def test_auto_registration_happy_path(
-        self, master_analysis_table, mini_copy_name, mock_create, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        mock_create,
+        sweep_analysis_files,
     ):
         """Test that builder auto-registers file on successful exit."""
         table = master_analysis_table
@@ -39,13 +43,12 @@ class TestBasicFunctionality:
         entry = table & {"analysis_file_name": analysis_file}
         assert len(entry) == 1, "File should be auto-registered"
 
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
     def test_manual_registration(
-        self, master_analysis_table, mini_copy_name, mock_create, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        mock_create,
+        sweep_analysis_files,
     ):
         """Test that manual register() call works (idempotent)."""
         table = master_analysis_table
@@ -68,13 +71,12 @@ class TestBasicFunctionality:
         entry = table & {"analysis_file_name": analysis_file}
         assert len(entry) == 1
 
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
     def test_file_creation(
-        self, master_analysis_table, mini_copy_name, mock_create, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        mock_create,
+        sweep_analysis_files,
     ):
         """Test that builder creates file with correct name."""
         table = master_analysis_table
@@ -91,13 +93,12 @@ class TestBasicFunctionality:
             # Parent file name should be stored
             assert builder.nwb_file_name == mini_copy_name
 
-        # Cleanup
-        if teardown:
-            (table & {"analysis_file_name": analysis_file}).delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
     def test_path_retrieval(
-        self, master_analysis_table, mini_copy_name, mock_create, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        mock_create,
+        sweep_analysis_files,
     ):
         """Test that get_path() returns correct absolute path."""
         table = master_analysis_table
@@ -116,11 +117,6 @@ class TestBasicFunctionality:
             expected_path = table.get_abs_path(analysis_file)
             assert path == expected_path
 
-        # Cleanup
-        if teardown:
-            (table & {"analysis_file_name": analysis_file}).delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
 
 # ========================= 2. HELPER METHOD TESTS ============================
 
@@ -134,7 +130,7 @@ class TestHelperMethods:
         mini_copy_name,
         common,
         load_config,
-        teardown,
+        sweep_analysis_files,
     ):
         """Test add_nwb_object() works before registration."""
         table = master_analysis_table
@@ -156,18 +152,13 @@ class TestHelperMethods:
         entry = table & {"analysis_file_name": analysis_file}
         assert len(entry) == 1
 
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
     def test_add_units_before_registration(
         self,
         master_analysis_table,
         mini_copy_name,
         common,
         load_config,
-        teardown,
+        sweep_analysis_files,
     ):
         """Test add_units() works before registration."""
         table = master_analysis_table
@@ -192,18 +183,13 @@ class TestHelperMethods:
         entry = table & {"analysis_file_name": analysis_file}
         assert len(entry) == 1
 
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
     def test_multiple_helper_calls(
         self,
         master_analysis_table,
         mini_copy_name,
         common,
         load_config,
-        teardown,
+        sweep_analysis_files,
     ):
         """Test multiple helper calls in sequence."""
         table = master_analysis_table
@@ -227,18 +213,13 @@ class TestHelperMethods:
         entry = table & {"analysis_file_name": analysis_file}
         assert len(entry) == 1
 
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
     def test_open_nwb_before_registration(
         self,
         master_analysis_table,
         mini_copy_name,
         common,
         load_config,
-        teardown,
+        sweep_analysis_files,
     ):
         """Test open_nwb property works before registration."""
         table = master_analysis_table
@@ -254,11 +235,6 @@ class TestHelperMethods:
         entry = table & {"analysis_file_name": analysis_file}
         assert len(entry) == 1
 
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
 
 # ======================== 3. STATE ENFORCEMENT TESTS =========================
 
@@ -267,15 +243,17 @@ class TestStateEnforcement:
     """Test state machine validation and error messages."""
 
     def test_error_on_add_nwb_object_after_registration(
-        self, master_analysis_table, mini_copy_name, mock_create, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        mock_create,
+        sweep_analysis_files,
     ):
         """Test that add_nwb_object() fails after registration."""
         table = master_analysis_table
         mock_create(table)
 
         with table.build(mini_copy_name) as builder:
-            analysis_file = builder.analysis_file_name
-
             # Register early
             builder.register()
 
@@ -285,21 +263,18 @@ class TestStateEnforcement:
             with pytest.raises(ValueError, match="REGISTERED"):
                 builder.add_nwb_object(test_df, "data")
 
-        # Cleanup
-        if teardown:
-            (table & {"analysis_file_name": analysis_file}).delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
     def test_error_on_add_units_after_registration(
-        self, master_analysis_table, mini_copy_name, mock_create, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        mock_create,
+        sweep_analysis_files,
     ):
         """Test that add_units() fails after registration."""
         table = master_analysis_table
         mock_create(table)
 
         with table.build(mini_copy_name) as builder:
-            analysis_file = builder.analysis_file_name
-
             # Register early
             builder.register()
 
@@ -311,32 +286,24 @@ class TestStateEnforcement:
             with pytest.raises(ValueError, match="REGISTERED"):
                 builder.add_units(units, units_valid_times, units_sort_interval)
 
-        # Cleanup
-        if teardown:
-            (table & {"analysis_file_name": analysis_file}).delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
     def test_error_on_open_nwb_after_registration(
-        self, master_analysis_table, mini_copy_name, mock_create, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        mock_create,
+        sweep_analysis_files,
     ):
         """Test that open_nwb property fails after registration."""
         table = master_analysis_table
         mock_create(table)
 
         with table.build(mini_copy_name) as builder:
-            analysis_file = builder.analysis_file_name
-
             # Register early
             builder.register()
 
             # Try to open file after registration
             with pytest.raises(ValueError, match="REGISTERED"):
                 builder.open_nwb
-
-        # Cleanup
-        if teardown:
-            (table & {"analysis_file_name": analysis_file}).delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
 
     def test_error_on_operations_before_create(
         self, master_analysis_table, mini_copy_name
@@ -357,7 +324,11 @@ class TestStateEnforcement:
             builder.get_path()
 
     def test_idempotent_registration(
-        self, master_analysis_table, mini_copy_name, mock_create, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        mock_create,
+        sweep_analysis_files,
     ):
         """Test that register() can be called multiple times (idempotent)."""
         table = master_analysis_table
@@ -375,11 +346,6 @@ class TestStateEnforcement:
             entry = table & {"analysis_file_name": analysis_file}
             assert len(entry) == 1
 
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
 
 # ======================= 4. EXCEPTION HANDLING TESTS ========================
 
@@ -388,7 +354,11 @@ class TestExceptionHandling:
     """Test exception handling and cleanup."""
 
     def test_file_not_registered_on_exception(
-        self, master_analysis_table, mini_copy_name, mock_create, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        mock_create,
+        sweep_analysis_files,
     ):
         """Test that file is NOT registered when exception occurs."""
         table = master_analysis_table
@@ -410,16 +380,12 @@ class TestExceptionHandling:
             entry = table & {"analysis_file_name": analysis_file}
             assert len(entry) == 0, "File should not be registered on exception"
 
-            # Cleanup
-            if teardown:
-                Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
     def test_failed_file_logged_for_cleanup(
         self,
         master_analysis_table,
         mini_copy_name,
         mock_create,
-        teardown,
+        sweep_analysis_files,
     ):
         """Test that failed files are logged for cleanup detection."""
         table = master_analysis_table
@@ -444,11 +410,15 @@ class TestExceptionHandling:
         assert err_type is RuntimeError, "Failed to log exception type"
 
         # Cleanup
-        if teardown and analysis_file:
+        if sweep_analysis_files and analysis_file:
             Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
 
     def test_no_auto_register_on_exception(
-        self, master_analysis_table, mini_copy_name, mock_create, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        mock_create,
+        sweep_analysis_files,
     ):
         """Test that auto-registration does not happen on exception."""
         table = master_analysis_table
@@ -470,14 +440,12 @@ class TestExceptionHandling:
                 entry = table & {"analysis_file_name": analysis_file}
                 assert len(entry) == 0
 
-                # Cleanup
-                if teardown:
-                    Path(table.get_abs_path(analysis_file)).unlink(
-                        missing_ok=True
-                    )
-
     def test_manual_register_after_exception(
-        self, master_analysis_table, mini_copy_name, mock_create, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        mock_create,
+        sweep_analysis_files,
     ):
         """Test that manual register() can be called in exception handler."""
         table = master_analysis_table
@@ -502,11 +470,6 @@ class TestExceptionHandling:
         entry = table & {"analysis_file_name": analysis_file}
         assert len(entry) == 1
 
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
 
 # ========================= 5. INTEGRATION TESTS ==============================
 
@@ -520,7 +483,7 @@ class TestIntegration:
         mini_copy_name,
         common,
         load_config,
-        teardown,
+        sweep_analysis_files,
     ):
         """Test builder works with master AnalysisNwbfile table."""
         table = master_analysis_table
@@ -538,18 +501,13 @@ class TestIntegration:
         entry = table & {"analysis_file_name": analysis_file}
         assert len(entry) == 1
 
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
     def test_with_custom_table(
         self,
         custom_analysis_table,
         mini_copy_name,
         common,
         load_config,
-        teardown,
+        sweep_analysis_files,
     ):
         """Test builder works with custom AnalysisNwbfile table."""
         table = custom_analysis_table
@@ -567,18 +525,13 @@ class TestIntegration:
         entry = table & {"analysis_file_name": analysis_file}
         assert len(entry) == 1
 
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
-
     def test_full_workflow(
         self,
         master_analysis_table,
         mini_copy_name,
         common,
         load_config,
-        teardown,
+        sweep_analysis_files,
     ):
         """Test complete workflow: create → populate → register → fetch."""
         table = master_analysis_table
@@ -610,18 +563,13 @@ class TestIntegration:
         file_path = Path(table.get_abs_path(analysis_file))
         assert file_path.exists()
 
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
-            file_path.unlink(missing_ok=True)
-
     def test_with_real_nwb_data(
         self,
         master_analysis_table,
         mini_copy_name,
         common,
         load_config,
-        teardown,
+        sweep_analysis_files,
     ):
         """Test builder with actual NWB file creation (not mocked)."""
         table = master_analysis_table
@@ -649,8 +597,3 @@ class TestIntegration:
         # File should be registered
         entry = table & {"analysis_file_name": analysis_file}
         assert len(entry) == 1
-
-        # Cleanup
-        if teardown:
-            entry.delete_quick()
-            Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)

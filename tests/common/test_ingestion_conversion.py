@@ -165,28 +165,30 @@ def test_part_table_counts(mini_insert, common, mini_restr, master, part):
     ), f"{master}.{part} has {found} rows, expected {expected}"
 
 
-def test_reingest_logs_no_new_failures(mini_insert, common, mini_copy_name):
-    """Ingesting the file again surfaces no failure beyond duplicates.
+def test_interval_references_resolve(mini_insert, common, mini_dict):
+    """Tables that emit an IntervalList row point at the row they emitted.
 
-    A conversion that starts raising something other than DuplicateError on
-    an already-ingested file has changed behavior. Clears the log first:
-    ingestion state persists across runs under `--no-teardown`.
+    `EXPECTED_ENTRIES` pins which interval names exist; this pins that the
+    tables referring to them resolve. Several ingestion tables emit an
+    `IntervalList` entry alongside their own, so the plan has to order parent
+    before child. A dangling reference here is the failure that ordering
+    exists to prevent, and a row count cannot see it.
+
+    Relocated from the retired `tests/data_import/test_ingestion_plan.py`,
+    which pinned pre-refactor behaviour. It was the one assertion there not
+    already covered more strictly here.
     """
-    from spyglass.common.common_usage import InsertError
-    from spyglass.common.populate_all_common import populate_all_common
+    intervals = set(
+        (common.IntervalList & mini_dict).fetch("interval_list_name")
+    )
+    assert intervals, "No IntervalList entries created during ingestion"
 
-    InsertError().delete(safemode=False)
-    try:
-        populate_all_common(mini_copy_name, raise_err=False)
-        unexpected = [
-            f"{err['table']}: {err['error_type']}: {err['error_message']}"
-            for err in InsertError().fetch(as_dict=True)
-            if err["error_type"] != "DuplicateError"
-        ]
-    finally:
-        InsertError().delete(safemode=False)
-
-    assert not unexpected, f"Re-ingestion logged new failures: {unexpected}"
+    for table_name in ("Raw", "TaskEpoch"):
+        table = getattr(common, table_name)()
+        for name in (table & mini_dict).fetch("interval_list_name"):
+            assert (
+                name in intervals
+            ), f"{table_name} references missing interval {name!r}"
 
 
 def test_electrode_group_links_probe(mini_insert, common, mini_restr):
@@ -441,6 +443,9 @@ def test_video_partial_import_counts_source_series(common, monkeypatch):
         return [], "no timestamp overlap with epoch", 0.0
 
     monkeypatch.setattr(table, "_validate_video_timestamps", fake_validate)
+    # The subject here is the counting, not the camera: these stand-in videos
+    # carry no device for `_camera_missing` to resolve.
+    monkeypatch.setattr(table, "_camera_missing", lambda nwb_obj, ctx: False)
 
     base_key = {"nwb_file_name": "fake_.nwb"}
     placed = table.generate_entries_from_nwb_object(

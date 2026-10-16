@@ -119,3 +119,29 @@ def test_fetch_nwb_with_annotations_multiple_sessions(
     spikes_df = result[0]["object_id"]
     assert list(spikes_df.index) == [0, 1, 2]
     assert spikes_df["score"].tolist() == [0.0, 1.0, 2.0]
+
+
+def test_planned_ingest_registers_the_spike_sorting_merge(
+    two_sessions_with_annotations, imported_spike
+):
+    """A planned ingest reaches `SpikeSortingOutput`, not just ImportedSpikeSorting.
+
+    The plan path does not call `insert_from_nwbfile`, which used to be the
+    only caller of `_merge_insert`. Asserted on the merge table rather than on
+    the hook being invoked, so a hook that runs and registers nothing still
+    fails.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    sessions = two_sessions_with_annotations
+    part_name = SpikeSortingOutput._part_name(
+        imported_spike.ImportedSpikeSorting().table_name
+    )
+    part = getattr(SpikeSortingOutput, part_name)
+
+    for info in sessions:
+        key = {"nwb_file_name": info["nwb_file_name"]}
+        assert part & key, (
+            f"{info['nwb_file_name']} populated ImportedSpikeSorting without "
+            "reaching the spike-sorting merge table"
+        )

@@ -13,6 +13,31 @@
 ```
 -->
 
+### Breaking Changes
+
+#### Ingestion Plans the File Before Writing (#1685)
+
+`insert_sessions` and `populate_all_common` parse the whole file, report every
+problem, then insert what was checked.
+
+- A file with a blocking problem now writes nothing unless `allow_partial=True`.
+- The insert runs in one transaction, removing the need for `rollback_on_fail`.
+- The return value is the plan, prints as the report.
+- `InsertError` is no longer written. Readable for backwards compatibility.
+- Mismatched metadata is reported rather than prompted. The stored value is kept
+    and the run continues.
+
+See `ForDevelopers/IngestionPlans` for the full breakdown.
+
+#### Spyglass Decides Primary Key Identity, Not the Database (#1685)
+
+Spyglass previously deferred to MySQL to trigger duplicate entry errors, which
+may vary in case-sensitivity depending on table collation. To prevent this
+backend variability across deployments, Spyglass added rules that are
+deliberately stricter than any collation, removing whitespace and normalizing
+case (e.g., `sleep` vs ` Sleep`). Accents are deliberately not normalized in
+this adjustment (e.g., `Müller` vs. `Muller`).
+
 ### Documentation
 
 - Add LFP artifact detection to the LFP notebook #1641
@@ -32,6 +57,8 @@
     call's file handler when these calls nested #1679
 - Correct `Populate.md` on `_parallel_make`, the double `make_fetch` call, and
     the `None` return from `make_compute` #1679
+- Add ingestion plans: parse an NWB file and report every problem before
+    anything is written #1685
 
 ### Pipelines
 

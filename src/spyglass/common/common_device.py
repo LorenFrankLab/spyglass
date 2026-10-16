@@ -13,7 +13,6 @@ import datajoint as dj
 from spyglass.common.errors import PopulateException
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassIngestion, logger
-from spyglass.utils.dj_helper_fn import accept_divergence
 
 schema = dj.schema("common_device")
 
@@ -26,7 +25,6 @@ class DataAcquisitionDeviceSystem(SpyglassIngestion, dj.Manual):
     """
 
     _expected_duplicates = True
-    _prompt_insert = True
 
     @property
     def table_key_to_obj_attr(self):
@@ -45,7 +43,6 @@ class DataAcquisitionDeviceAmplifier(SpyglassIngestion, dj.Manual):
     """
 
     _expected_duplicates = True
-    _prompt_insert = True
 
     @property
     def table_key_to_obj_attr(self):
@@ -171,13 +168,15 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         ----------
         new_device_dict : dict
             Dict of new device properties
+        test_mode : bool, optional
+            Treat a disagreement with the stored entry as an error rather than
+            reporting it and keeping what is stored. Default None.
 
         Raises
         ------
         PopulateException
-            If user chooses not to add a device to the database when prompted or
-            if the device properties from the NWB file do not match the
-            properties of the corresponding database entry.
+            If `test_mode` and the device properties from the NWB file do not
+            match the properties of the corresponding database entry.
         """
         name = new_device_dict["data_acquisition_device_name"]
         all_values = DataAcquisitionDevice.fetch(
@@ -191,20 +190,22 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         db_dict = (
             DataAcquisitionDevice & {"data_acquisition_device_name": name}
         ).fetch1()
-        for k, existing_val in db_dict.items():
-            new_val = new_device_dict.get(k, None)
-            if new_val == existing_val:
-                continue  # values match, no need to check further
-            # if the values do not match, check whether the user wants to
-            # accept the entry in the database, or raise an exception
-            if not accept_divergence(
-                k, new_val, existing_val, test_mode, cls.camel_name
-            ):
+        # Keep the stored device and report, as the plan path does.
+        if differing := sorted(
+            k
+            for k, existing_val in db_dict.items()
+            if new_device_dict.get(k, None) != existing_val
+        ):
+            message = (
+                f"Data acquisition device '{name}' already exists with "
+                + f"different values for {', '.join(differing)}"
+            )
+            if test_mode:
                 raise PopulateException(
-                    "Data acquisition device properties of PyNWB Device object "
-                    + f"with name '{name}': {new_device_dict} do not match "
-                    f"properties of the corresponding database entry: {db_dict}"
+                    f"{message}: {new_device_dict} does not match the stored "
+                    + f"entry {db_dict}"
                 )
+            logger.info(f"{message}; kept what is stored.")
 
     @classmethod
     def _add_system(cls, system: Optional[str] = None) -> Optional[str]:
@@ -418,7 +419,7 @@ class Probe(SpyglassIngestion, dj.Manual):
 
         def _adjust_keys_for_entry(self, keys):
             """Adjust key to ensure correct types/formats."""
-            # Avoids triggering 'accept_divergence' on reinsert
+            # So a reinsert is not reported as a divergence
             adjusted = []
             for key in keys.copy():
                 key["probe_shank"] = int(key.get("probe_shank", -1))

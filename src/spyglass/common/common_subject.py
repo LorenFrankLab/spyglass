@@ -53,7 +53,7 @@ class Subject(SpyglassIngestion, dj.Manual):
 
     def _adjust_keys_for_entry(self, keys):
         """Fill in any NULL values in the key with defaults."""
-        # Avoids triggering 'accept_divergence' on reinsert
+        # So a reinsert is not reported as a divergence
         adjusted = []
         for key in keys.copy():
             key["sex"] = self.standardized_sex_string(key, warn=False)

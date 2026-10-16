@@ -97,6 +97,7 @@ nav:
     - Custom Pipelines: ForDevelopers/CustomPipelines.md
     - Using NWB: ForDevelopers/UsingNWB.md
     - File Backends: ForDevelopers/FileBackends.md
+    - Ingestion Plans: ForDevelopers/IngestionPlans.md
     - Ingestion Mapping: ForDevelopers/ingestion_mapping.md
   - Fixing Bugs:
     - Overview: FixingBugs/index.md
