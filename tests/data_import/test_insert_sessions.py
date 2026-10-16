@@ -106,7 +106,7 @@ def test_insert_sessions_processes_every_file(two_raw_files, common):
 
 
 def test_raise_err_raises_once_every_file_has_been_planned(
-    two_raw_files, common, monkeypatch
+    two_raw_files, common, monkeypatch, quiet_logs
 ):
     """`raise_err` is the caller's, and it waits for the whole list.
 
@@ -138,7 +138,9 @@ def test_raise_err_raises_once_every_file_has_been_planned(
         )
 
 
-def test_a_dry_run_reports_without_raising(two_raw_files, monkeypatch):
+def test_a_dry_run_reports_without_raising(
+    two_raw_files, monkeypatch, quiet_logs
+):
     """`dry_run` never raises, even asked to.
 
     Reporting without stopping is the whole job; an exception would deny the

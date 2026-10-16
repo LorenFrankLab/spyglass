@@ -213,7 +213,7 @@ def test_restaging_replaces_the_table_rows(common, mini_copy_name, mini_insert):
 
 
 def test_a_refused_payload_costs_the_payload_not_the_run(
-    common, mini_copy_name, mini_insert, monkeypatch
+    common, mini_copy_name, mini_insert, monkeypatch, quiet_logs
 ):
     """A database that will not take the blobs still gets the report.
 

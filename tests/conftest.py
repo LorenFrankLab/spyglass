@@ -593,6 +593,26 @@ def verbose():
     yield VERBOSE
 
 
+@pytest.fixture
+def quiet_logs(verbose):
+    """Raise the Spyglass log level for one test.
+
+    For a test that induces a failure on purpose: the report it provokes is
+    the expected result, and logging it buries the run's real output. Honours
+    `--verbose`, so the lines are still there when asked for.
+    """
+    from spyglass.utils import logger
+
+    if verbose:
+        yield
+        return
+
+    previous = logger.level
+    logger.setLevel("CRITICAL")
+    yield
+    logger.setLevel(previous)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def verbose_context(verbose):
     """Verbosity context for suppressing Spyglass logging."""

@@ -115,7 +115,7 @@ def test_planned_run_is_idempotent(common, mini_copy_name, mini_insert, counts):
 
 
 def test_planned_run_writes_nothing_when_the_plan_blocks(
-    common, mini_copy_name, emptied_leaves, counts, monkeypatch
+    common, mini_copy_name, emptied_leaves, counts, monkeypatch, quiet_logs
 ):
     """The behaviour the per-table path could not offer.
 
@@ -148,7 +148,7 @@ def test_planned_run_writes_nothing_when_the_plan_blocks(
 
 
 def test_every_bad_table_is_reported_not_just_the_first(
-    common, mini_copy_name, emptied_leaves, monkeypatch
+    common, mini_copy_name, emptied_leaves, monkeypatch, quiet_logs
 ):
     """The pass finishes, so the report carries every problem.
 
