@@ -6,6 +6,7 @@ from os import environ as os_environ
 from pathlib import Path
 from pprint import pprint
 from subprocess import run as sub_run
+from sys import executable as sys_executable
 from typing import Dict, List, Optional, Tuple, Union
 
 import datajoint as dj
@@ -94,7 +95,12 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
 
     def _get_pip_freeze(self) -> List[str]:
         """Fetch the pip freeze output."""
-        ret = sub_run(["pip", "freeze"], **SUBPROCESS_KWARGS)
+        # Use the running interpreter's pip, not whatever is first on PATH:
+        # PATH may hold another env's pip, or none at all when the env's
+        # python is invoked by absolute path without activation.
+        ret = sub_run(
+            [sys_executable, "-m", "pip", "freeze"], **SUBPROCESS_KWARGS
+        )
         if ret.returncode != 0:
             logger.error(  # pragma: no cover
                 "Failed to retrieve the pip environment. "

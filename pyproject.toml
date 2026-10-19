@@ -148,7 +148,7 @@ lint.ignore = [ "E402", "E501", "F401" ]
 
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
-ignore-words-list = 'nevers,notin'
+ignore-words-list = 'nevers,notin,sortings'
 # Nevers - name in Citation
 # notin - UnitSelectionParams.unit_criteria operator, paired with isin
 
