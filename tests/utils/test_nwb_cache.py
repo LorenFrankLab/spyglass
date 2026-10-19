@@ -504,9 +504,12 @@ def test_config_coerces_to_float(SpyglassConfig):
 def test_cache_reads_live_config(NWBFileCache, sg_config):
     """The cache honors thresholds changed after it was built."""
     cache = NWBFileCache()
-    with patch.dict(sg_config._nwb_cache, {"min_free_gb": 1e6}):
-        assert not cache._free_ram_ok()  # 1M GB free RAM is never available
-    assert cache._free_ram_ok()
+    # Fake the RAM for both asserts: the second one reads the default
+    # thresholds, which a busy host can genuinely fail.
+    with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
+        with patch.dict(sg_config._nwb_cache, {"min_free_gb": 1e6}):
+            assert not cache._free_ram_ok()  # 1M GB free RAM is never available
+        assert cache._free_ram_ok()
 
 
 @pytest.mark.parametrize(
