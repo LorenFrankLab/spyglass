@@ -60,15 +60,16 @@ and closes files when either resource runs low. A file you may still read from
 is *held*, and the two limits treat a hold differently:
 
 - **File descriptors**, above `max_file_fraction` of the limit your OS places on
-    how many files one process may hold open at once. Spyglass closes files,
-    least recently used first, until the process is back inside the budget —
-    including a held file if nothing else is left, because the alternative is
-    the next open failing outright. On Unix-based systems it counts **every**
+    how many files one process may hold open at once. Spyglass closes unheld
+    files, least recently used first, until the process is back inside the
+    budget. A held file is closed only above a higher mark, `0.95` of the limit,
+    where the next open would fail outright; between the two, descriptor
+    pressure leaves held files alone. On Unix-based systems it counts **every**
     descriptor the process holds, not just its own NWB files, because sockets,
     pipes, and GPU device handles draw on the same budget. The default of `0.8`
-    starts closing at roughly 820 files where the OS limit is the common 1024.
-    Windows has no equivalent limit to read, so only the RAM check applies
-    there.
+    starts closing at roughly 820 files where the OS limit is the common 1024,
+    and held files only past roughly 970. Windows has no equivalent limit to
+    read, so only the RAM check applies there.
 - **Free RAM**, below `min_free_gb` gigabytes or `min_free_pct` of total,
     whichever is larger. Spyglass closes at most one unheld file per check and
     never a held one. Closing an NWB file returns little memory to the OS, so
@@ -106,10 +107,11 @@ fetched, because a hold is a flag on the file rather than a count per caller.
 #### What a hold does and does not promise
 
 While you hold a file, low memory will not close it. Descriptor pressure still
-can, as a last resort, when every cached file is held and the process would
-otherwise fail its next open. A hold is therefore a strong preference, not a
-guarantee: for a job that opens many files, raise the open-file limit (see
-below) rather than relying on holds alone.
+can, as a last resort, when every cached file is held and the count has reached
+`0.95` of the OS limit — the point past which the next open fails anyway. Below
+that mark a hold is honoured even while unheld files are being closed. A hold is
+therefore a strong preference, not a guarantee: for a job that opens many files,
+raise the open-file limit (see below) rather than relying on holds alone.
 
 That same flag means a library method calling `close_nwb()` releases *your* hold
 as well — `LFPV1.fetch1_dataframe()` does exactly this. If you still need a file

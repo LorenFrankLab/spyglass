@@ -27,6 +27,11 @@ try:  # no RLIMIT_NOFILE on Windows
 except ImportError:  # pragma: no cover
     resource = None
 
+# Close a file a caller still holds only this close to the descriptor limit.
+# Below it the next open still succeeds, so closing a held file breaks that
+# caller's pending reads and buys nothing.
+HELD_CLOSE_FRACTION = 0.95
+
 
 class NWBFileCache(BaseMixin):
     """LRU cache of open NWB files, closing them under resource pressure.
@@ -44,10 +49,11 @@ class NWBFileCache(BaseMixin):
 
     - **Open descriptors** at or above ``max_file_fraction`` × the
       ``RLIMIT_NOFILE`` soft limit. The whole process is counted, not just the
-      cache, so sockets and device handles consume the same budget. Files are
-      closed, least recently used first, until the process is back inside the
-      budget — a held file too, as a last resort, because the alternative is
-      the next open raising ``EMFILE``.
+      cache, so sockets and device handles consume the same budget. Unheld
+      files are closed, least recently used first, until the process is back
+      inside the budget. A held file is closed only above the higher
+      :data:`HELD_CLOSE_FRACTION`, where the next open would raise ``EMFILE``
+      anyway; between the two, descriptor pressure leaves held files alone.
     - **Free RAM** below ``min_free_gb`` GB *or* ``min_free_pct`` × total RAM,
       whichever is larger. At most one unheld file is closed per check, and
       never a held one.
@@ -146,10 +152,25 @@ class NWBFileCache(BaseMixin):
         )
         return vm.available >= min_free_bytes
 
-    def _num_open_ok(self) -> bool:
+    def _num_open_ok(self, fraction: float = None) -> bool:
+        """Report whether open descriptors are inside *fraction* of the limit.
+
+        Parameters
+        ----------
+        fraction : float, optional
+            Fraction of the ``RLIMIT_NOFILE`` soft limit to allow. Defaults to
+            ``max_file_fraction``, the budget for closing unheld files.
+        """
         if resource is None:  # no fd limit to compare against
             return True
         from spyglass.settings import sg_config
+
+        # A configured max_file_fraction above HELD_CLOSE_FRACTION needs no
+        # clamp: the only caller passing a fraction runs inside the loop that
+        # already found the count past max_file_fraction, so the held-close
+        # check is past its own fraction too.
+        if fraction is None:
+            fraction = sg_config.nwb_max_file_fraction
 
         soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
         try:
@@ -166,7 +187,7 @@ class NWBFileCache(BaseMixin):
             num_open = len(self._cache)
         except (AttributeError, NotImplementedError, psutil.Error):
             num_open = len(self._cache)  # POSIX-only; fall back
-        return num_open < sg_config.nwb_max_file_fraction * soft_limit
+        return num_open < fraction * soft_limit
 
     def _unheld(self) -> set:
         """Return the paths no caller is holding."""
@@ -184,13 +205,16 @@ class NWBFileCache(BaseMixin):
     def _make_fd_room(self) -> None:
         """Close files until this process is inside the descriptor budget.
 
-        Loops, and closes a held file as a last resort: exceeding the limit
-        means the next open raises ``EMFILE``, which is worse than a failed
-        lazy read.
+        Loops, and closes a held file only once within
+        ``HELD_CLOSE_FRACTION`` of the limit: there, the next open would fail
+        outright, which is worse than a failed lazy read. Between the two
+        fractions the open still succeeds, so a held file stays open.
         """
         while self._cache and not self._num_open_ok():
             candidates = self._unheld()
             if not candidates:
+                if self._num_open_ok(HELD_CLOSE_FRACTION):
+                    break  # headroom left; keep held files readable
                 candidates = set(self._cache)
                 self._held_evictions += 1
                 self._warn_once(

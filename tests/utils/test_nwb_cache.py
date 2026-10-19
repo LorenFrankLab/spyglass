@@ -651,7 +651,8 @@ def test_held_close_warns_under_fd_pressure(NWBFileCache):
     with (
         patch("psutil.virtual_memory", return_value=_fake_vm(16)),
         patch("resource.getrlimit", return_value=(1024, 1024)),
-        patch("psutil.Process", return_value=_fake_proc([1020, 800, 800])),
+        # over budget, still over the held-close fraction, then under
+        patch("psutil.Process", return_value=_fake_proc([1020, 1020, 800])),
         patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
         _add(cache, "/b.nwb")
@@ -659,6 +660,68 @@ def test_held_close_warns_under_fd_pressure(NWBFileCache):
 
     io_a.close.assert_called_once()
     assert cache._held_evictions == 1
+
+
+def test_held_file_kept_while_fd_headroom_remains(NWBFileCache):
+    """Between the two fractions, a held file survives descriptor pressure.
+
+    900 of a 1024 limit is over the 0.8 budget but under the 0.95 held-close
+    fraction, so the next open still succeeds and closing the held file would
+    break its reads for nothing.
+    """
+    cache = NWBFileCache()
+    io_a = _make_io()
+
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=_fake_proc(10)),
+    ):
+        cache["/a.nwb"] = _opened(io_a)
+
+    cache.acquire("/a.nwb")  # every file is now held
+
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=(1024, 1024)),
+        patch("psutil.Process", return_value=_fake_proc(900)),
+        patch.object(NWBFileCache, "_warn_msg") as mock_warn,
+    ):
+        _add(cache, "/b.nwb")
+
+    io_a.close.assert_not_called()
+    mock_warn.assert_not_called()
+    assert "/a.nwb" in cache
+    assert cache._held_evictions == 0
+
+
+def test_held_file_readable_under_outside_fd_pressure(
+    NWBFileCache, nwb_mod, tmp_path
+):
+    """A held file's lazy read survives fd pressure from outside the cache.
+
+    The reviewer's repro: descriptors consumed elsewhere push the process over
+    the budget while headroom to the real limit remains.
+    """
+    cache = NWBFileCache()
+    path_a = _write_nwb(tmp_path / "a_.nwb")
+    path_b = _write_nwb(tmp_path / "b_.nwb")
+
+    try:
+        with patch.dict(vars(nwb_mod), {"__open_nwb_files": cache}):
+            lazy = nwb_mod.get_nwb_file(path_a).acquisition["ts"].data
+            nwb_mod._acquire_nwb_file(path_a)
+            with (
+                patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+                patch("resource.getrlimit", return_value=(1024, 1024)),
+                patch("psutil.Process", return_value=_fake_proc(900)),
+            ):
+                nwb_mod.get_nwb_file(path_b)
+
+        assert path_a in cache  # held, and headroom was left
+        assert lazy[:3].tolist() == [0.0, 1.0, 2.0]
+    finally:
+        cache.close_all()
 
 
 def test_low_ram_never_closes_held_file(NWBFileCache):
@@ -724,7 +787,8 @@ def test_held_eviction_warns_once(NWBFileCache):
 
     # Each open finds only held files to close. Descriptors read over the
     # budget then under, so one file closes per open and the cache persists.
-    over_then_under = [1020, 800] * 3
+    # Per open: over budget, still over the held-close fraction, then under
+    over_then_under = [1020, 1020, 800] * 3
     with (
         patch("psutil.virtual_memory", return_value=_fake_vm(16)),
         patch("resource.getrlimit", return_value=(1024, 1024)),
