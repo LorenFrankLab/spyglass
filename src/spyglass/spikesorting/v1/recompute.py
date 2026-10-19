@@ -347,7 +347,12 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             f"Inserting recompute attempts for {len(inserts)} files."
         )
 
-        self.insert(inserts, at_creation=False, **kwargs)
+        self.insert(
+            inserts,
+            at_creation=False,
+            force_attempt=force_attempt,
+            **kwargs,
+        )
 
     # --- Xfail detection ---
 

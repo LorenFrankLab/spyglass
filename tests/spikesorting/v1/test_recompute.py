@@ -175,3 +175,32 @@ def test_delete_cancelled(spare_attempt, monkeypatch):
 
     assert tbl & key, "Cancelled delete removed the entry"
     assert path.exists(), "Cancelled delete removed the attempt file"
+
+
+def test_attempt_all_force_env_mismatch(
+    recomp_module, recomp_selection, pop_rec, monkeypatch
+):
+    """Test that force_attempt inserts despite an environment mismatch."""
+    recomp_module.RecordingRecomputeVersions().populate(pop_rec)
+
+    monkeypatch.setattr(  # env that cannot recompute the existing file
+        recomp_module.RecordingRecomputeVersions,
+        "_has_matching_env",
+        lambda *args, **kwargs: False,
+    )
+    monkeypatch.setattr(  # attempt_all's own filter ignores rounding, so
+        recomp_module,  # hide entries other tests made for this recording
+        "RecordingRecompute",
+        recomp_module.RecordingRecompute() & "rounding = -1",
+    )
+
+    restr = dict(pop_rec, rounding=98)
+    try:
+        recomp_selection.attempt_all(
+            restr=pop_rec, rounding=98, force_attempt=True
+        )
+        assert (
+            recomp_selection & restr
+        ), "force_attempt did not insert on env mismatch"
+    finally:
+        (recomp_selection & restr).delete_quick()
