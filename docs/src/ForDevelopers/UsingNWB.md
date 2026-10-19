@@ -106,6 +106,11 @@ fetched, because a hold is a flag on the file rather than a count per caller.
 
 #### What a hold does and does not promise
 
+`fetch_nwb()` is what takes a hold, and `close_nwb()` on the same restriction is
+what releases it. A file opened by calling `get_nwb_file()` directly is never
+held, so it is the first thing closed under either limit — read what you need
+from it before the next file is opened.
+
 While you hold a file, low memory will not close it. Descriptor pressure still
 can, as a last resort, when every cached file is held and the count has reached
 `0.95` of the OS limit — the point past which the next open fails anyway. Below
