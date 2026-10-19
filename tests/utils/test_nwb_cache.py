@@ -72,6 +72,19 @@ def _opened(io=None, streamed=False):
     return Opened(io=io or _make_io(), nwbfile=MagicMock(), streamed=streamed)
 
 
+def _add(cache, path, opened=None):
+    """Insert in the order ``_open_nwb_file`` uses: make room, then add.
+
+    ``__setitem__`` makes no room of its own, so a test that exercises either
+    limit -- to show a file closes or to show none does -- has to call
+    ``make_room()`` where the opener does. Plain setup inserts need not.
+    """
+    opened = opened if opened is not None else _opened()
+    cache.make_room()
+    cache[path] = opened
+    return opened
+
+
 def _write_nwb(path):
     """Write a small NWB file with a 10-sample TimeSeries. Return its path."""
     from datetime import datetime, timezone
@@ -188,8 +201,8 @@ def test_no_eviction_when_memory_ok(NWBFileCache):
     cache = NWBFileCache()
     io_a = _make_io()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
-        cache["/a.nwb"] = _opened(io_a)
-        cache["/b.nwb"] = _opened()
+        _add(cache, "/a.nwb", _opened(io_a))
+        _add(cache, "/b.nwb")
     assert len(cache) == 2
     io_a.close.assert_not_called()
 
@@ -202,9 +215,9 @@ def test_eviction_on_low_memory(NWBFileCache):
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
         cache["/a.nwb"] = _opened(io_a)
 
-    # Simulate low available RAM for the second insert
+    # Simulate low available RAM for the second open
     with patch("psutil.virtual_memory", return_value=_fake_vm(0.5)):
-        cache["/b.nwb"] = _opened()
+        _add(cache, "/b.nwb")
 
     # /a.nwb was LRU and should have been evicted
     io_a.close.assert_called_once()
@@ -216,7 +229,7 @@ def test_low_ram_closes_one_unheld_per_check(NWBFileCache):
     """Low RAM closes a single unheld file, not the whole cache.
 
     Closing an NWB file returns almost nothing to the OS, so a loop that ran
-    until free RAM recovered would drain the cache on every insert.
+    until free RAM recovered would drain the cache on every open.
     """
     cache = NWBFileCache()
     io_a, io_b = _make_io(), _make_io()
@@ -225,11 +238,11 @@ def test_low_ram_closes_one_unheld_per_check(NWBFileCache):
         time.sleep(0.01)
         cache["/b.nwb"] = _opened(io_b)
 
-    # RAM stays low for the whole insert; only the LRU unheld file closes
+    # RAM stays low for the whole open; only the LRU unheld file closes
     with patch(
         "psutil.virtual_memory", return_value=_fake_vm(40, total_gb=512)
     ):
-        cache["/c.nwb"] = _opened()
+        _add(cache, "/c.nwb")
 
     io_a.close.assert_called_once()  # LRU of the unheld
     io_b.close.assert_not_called()  # cache not drained
@@ -279,7 +292,7 @@ def test_lru_eviction_order(NWBFileCache):
     # loop stops before also evicting /a.
     mem_responses = [_fake_vm(0.5), _fake_vm(16)]
     with patch("psutil.virtual_memory", side_effect=mem_responses):
-        cache["/c.nwb"] = _opened()
+        _add(cache, "/c.nwb")
 
     io_b.close.assert_called_once()
     io_a.close.assert_not_called()
@@ -309,7 +322,7 @@ def test_eviction_on_fd_limit(NWBFileCache):
         patch("resource.getrlimit", return_value=(1024, 1024)),
         patch("psutil.Process", return_value=_fake_proc([1020, 800])),
     ):
-        cache["/b.nwb"] = _opened(io_b)
+        _add(cache, "/b.nwb", _opened(io_b))
 
     io_a.close.assert_called_once()
     assert "/a.nwb" not in cache
@@ -326,8 +339,8 @@ def test_no_eviction_when_fd_ok(NWBFileCache):
         patch("resource.getrlimit", return_value=(1024, 4096)),
         patch("psutil.Process", return_value=_fake_proc(10)),
     ):
-        cache["/a.nwb"] = _opened(io_a)
-        cache["/b.nwb"] = _opened()
+        _add(cache, "/a.nwb", _opened(io_a))
+        _add(cache, "/b.nwb")
 
     assert len(cache) == 2
     io_a.close.assert_not_called()
@@ -355,7 +368,7 @@ def test_fd_eviction_counts_non_cache_fds(NWBFileCache, sg_config):
         patch("psutil.Process", return_value=_fake_proc([900, 700])),
         patch.dict(sg_config._nwb_cache, {"max_file_fraction": 0.8}),
     ):
-        cache["/c.nwb"] = _opened()
+        _add(cache, "/c.nwb")
 
     io_a.close.assert_called_once()  # LRU of the two
     io_b.close.assert_not_called()
@@ -383,7 +396,7 @@ def test_fd_count_falls_back_to_cache_size(NWBFileCache):
         patch("resource.getrlimit", return_value=(1, 1024)),
         patch("psutil.Process", return_value=no_num_fds),
     ):
-        cache["/b.nwb"] = _opened()
+        _add(cache, "/b.nwb")
 
     io_a.close.assert_called_once()
     assert "/a.nwb" not in cache
@@ -419,8 +432,8 @@ def test_fd_check_skipped_without_resource(NWBFileCache, nwb_mod):
         patch("psutil.Process", return_value=_fake_proc(10**6)),
         patch.object(nwb_mod, "resource", None),
     ):
-        cache["/a.nwb"] = _opened(io_a)
-        cache["/b.nwb"] = _opened()
+        _add(cache, "/a.nwb", _opened(io_a))
+        _add(cache, "/b.nwb")
 
     assert len(cache) == 2
     io_a.close.assert_not_called()
@@ -436,13 +449,13 @@ def test_warns_once_when_fd_pressure_outlives_cache(NWBFileCache):
         patch("psutil.Process", return_value=_fake_proc(1020)),
         patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
-        cache["/a.nwb"] = _opened()
-        cache["/b.nwb"] = _opened()
+        _add(cache, "/a.nwb")
+        _add(cache, "/b.nwb")
         warnings = _warn_texts(mock_warn)
 
-    assert len(warnings) == 1  # one warning despite two inserts
+    assert len(warnings) == 1  # one warning despite two opens
     assert "ulimit" in warnings[0]
-    assert len(cache) == 1  # /a evicted on /b's insert, /b still added
+    assert len(cache) == 1  # /a evicted on /b's open, /b still added
 
 
 # ── room made before the open ─────────────────────────────────────────────────
@@ -475,6 +488,36 @@ def test_room_made_before_open(NWBFileCache, nwb_mod):
 
     backend.open.assert_called_once()
     assert set(cache) == {"/b.nwb"}
+
+
+def test_one_open_closes_one_unheld_file(NWBFileCache, nwb_mod):
+    """Sustained low RAM closes one unheld file per open, not two.
+
+    The limits used to be checked both before the open and again on insert, so
+    a single open closed two files where the policy allows one.
+    """
+    cache = NWBFileCache()
+    io_a, io_b = _make_io(), _make_io()
+    with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
+        cache["/a.nwb"] = _opened(io_a)
+        time.sleep(0.01)
+        cache["/b.nwb"] = _opened(io_b)
+
+    backend = MagicMock()
+    backend.open.side_effect = lambda path: _opened()
+
+    # RAM stays low throughout, so a second check would close /b as well
+    with (
+        patch.dict(vars(nwb_mod), {"__open_nwb_files": cache}),
+        patch("psutil.virtual_memory", return_value=_fake_vm(40, total_gb=512)),
+        patch("resource.getrlimit", return_value=(1024, 4096)),
+        patch("psutil.Process", return_value=_fake_proc(10)),
+    ):
+        nwb_mod._open_nwb_file("/c.nwb", source=backend)
+
+    io_a.close.assert_called_once()  # LRU of the unheld
+    io_b.close.assert_not_called()
+    assert set(cache) == {"/b.nwb", "/c.nwb"}
 
 
 # ── threshold settings ────────────────────────────────────────────────────────
@@ -580,7 +623,7 @@ def test_unheld_closed_before_held(NWBFileCache):
         patch("psutil.virtual_memory", side_effect=mem_responses),
         patch("resource.getrlimit", return_value=(1024, 4096)),
     ):
-        cache["/c.nwb"] = _opened()
+        _add(cache, "/c.nwb")
 
     io_a.close.assert_called_once()  # /a closed, it was unheld
     io_b.close.assert_not_called()  # /b protected by its hold
@@ -611,7 +654,7 @@ def test_held_close_warns_under_fd_pressure(NWBFileCache):
         patch("psutil.Process", return_value=_fake_proc([1020, 800, 800])),
         patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
-        cache["/b.nwb"] = _opened()
+        _add(cache, "/b.nwb")
         assert any("still held" in w for w in _warn_texts(mock_warn))
 
     io_a.close.assert_called_once()
@@ -632,7 +675,7 @@ def test_low_ram_never_closes_held_file(NWBFileCache):
         patch("psutil.virtual_memory", return_value=_fake_vm(40, total_gb=512)),
         patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
-        cache["/b.nwb"] = _opened()
+        _add(cache, "/b.nwb")
 
     io_a.close.assert_not_called()
     mock_warn.assert_not_called()
@@ -679,8 +722,8 @@ def test_held_eviction_warns_once(NWBFileCache):
             cache[path] = _opened()
             cache.acquire(path)
 
-    # Each insert finds only held files to close. Descriptors read over the
-    # budget then under, so one file closes per insert and the cache persists.
+    # Each open finds only held files to close. Descriptors read over the
+    # budget then under, so one file closes per open and the cache persists.
     over_then_under = [1020, 800] * 3
     with (
         patch("psutil.virtual_memory", return_value=_fake_vm(16)),
@@ -689,7 +732,7 @@ def test_held_eviction_warns_once(NWBFileCache):
         patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
         for path in ("/c.nwb", "/d.nwb", "/e.nwb"):
-            cache[path] = _opened()
+            _add(cache, path)
             cache.acquire(path)
         warnings = _warn_texts(mock_warn)
 

@@ -39,8 +39,8 @@ class NWBFileCache(BaseMixin):
     calling ``fetch_nwb()`` acquires each opened file; calling ``close_nwb()``
     on the same table instance releases them.
 
-    Two limits are checked before each insert, descriptors first, and they are
-    not enforced with equal force:
+    Two limits are checked once before each open, descriptors first, and they
+    are not enforced with equal force:
 
     - **Open descriptors** at or above ``max_file_fraction`` × the
       ``RLIMIT_NOFILE`` soft limit. The whole process is counted, not just the
@@ -82,10 +82,14 @@ class NWBFileCache(BaseMixin):
         return opened
 
     def __setitem__(self, path, opened):
-        """Add an ``Opened`` record, closing LRU files if resources are tight."""
+        """Add an ``Opened`` record, closing any handle it replaces.
+
+        Makes no room of its own: ``_open_nwb_file`` calls ``make_room()``
+        before the open, and a second check here would close a second file for
+        the same open.
+        """
         if path in self._cache:
             self._cache[path][0].io.close()
-        self.make_room()
         self._cache[path] = (opened, time.monotonic(), False)
 
     def __contains__(self, path):
@@ -218,9 +222,9 @@ class NWBFileCache(BaseMixin):
     def make_room(self) -> None:
         """Close cached files until this process is inside both limits.
 
-        Descriptors first, then RAM. Called before a file is opened as well as
-        before it is inserted: an open that exceeds the descriptor limit raises
-        ``EMFILE``, which no amount of closing afterwards can undo.
+        Descriptors first, then RAM. Called once per open, before the file is
+        opened: an open that exceeds the descriptor limit raises ``EMFILE``,
+        which no amount of closing afterwards can undo.
         """
         self._make_fd_room()
         self._make_ram_room()
