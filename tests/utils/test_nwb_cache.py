@@ -37,6 +37,13 @@ def nwb_mod():
     return mod
 
 
+@pytest.fixture(scope="module")
+def nwb_cache_defaults():
+    from spyglass.settings import NWB_CACHE_DEFAULTS
+
+    return dict(NWB_CACHE_DEFAULTS)
+
+
 def _fake_vm(available_gb, total_gb=32.0):
     """Return a psutil.virtual_memory()-like object."""
     vm = MagicMock()
@@ -562,11 +569,59 @@ def test_cache_reads_live_config(NWBFileCache, sg_config):
         {"max_file_fraction": 1.5},
         {"min_free_gb": -1.0},
         {"min_free_pct": 1.5},
+        {"min_free_gb": "abc"},  # non-numeric
+        {"min_free_pct": None},
+        {"max_file_fraction": {"nested": 1}},
     ],
 )
-def test_config_rejects_out_of_range(SpyglassConfig, bad):
-    with pytest.raises(ValueError):
-        SpyglassConfig._validated_nwb_cache(bad)
+def test_config_falls_back_on_bad_value(
+    SpyglassConfig, nwb_cache_defaults, bad, caplog
+):
+    """A bad threshold takes its default and warns; nothing is raised.
+
+    Raising here would stop `import spyglass`, since sg_config is built at
+    module scope.
+    """
+    key = next(iter(bad))
+
+    with caplog.at_level("WARNING"):
+        ret = SpyglassConfig._validated_nwb_cache(bad)
+
+    assert ret == nwb_cache_defaults
+    messages = [r.getMessage() for r in caplog.records]
+    assert len(messages) == 1, f"expected one warning, got {messages}"
+    assert key in messages[0]
+    assert "Using the default" in messages[0]
+
+
+def test_config_bad_value_spares_the_others(
+    SpyglassConfig, nwb_cache_defaults, caplog
+):
+    """One bad threshold does not discard a good one supplied beside it."""
+    with caplog.at_level("WARNING"):
+        ret = SpyglassConfig._validated_nwb_cache(
+            {"min_free_gb": 4, "min_free_pct": 1.5}
+        )
+
+    assert ret["min_free_gb"] == 4.0  # kept
+    assert ret["min_free_pct"] == nwb_cache_defaults["min_free_pct"]
+    warned = [r for r in caplog.records if "min_free_pct" in r.getMessage()]
+    assert len(warned) == 1
+
+
+def test_config_null_nwb_cache_is_empty(
+    SpyglassConfig, nwb_cache_defaults, caplog
+):
+    """A `null` custom.nwb_cache behaves as an absent one.
+
+    `{**defaults, **None}` raised TypeError without naming the setting, and it
+    did so at import.
+    """
+    with caplog.at_level("WARNING"):
+        ret = SpyglassConfig._validated_nwb_cache(None or {})
+
+    assert ret == nwb_cache_defaults
+    assert not caplog.records  # defaults are valid, so nothing to warn about
 
 
 # ── hybrid eviction (idle time + ref count) ───────────────────────────────────

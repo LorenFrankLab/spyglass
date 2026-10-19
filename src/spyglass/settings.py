@@ -19,6 +19,13 @@ NWB_CACHE_DEFAULTS = {
     "max_file_fraction": 0.8,
 }
 
+# Permitted range per threshold: a test, and the text shown when it fails
+NWB_CACHE_RANGES = {
+    "min_free_gb": (lambda v: v >= 0, ">= 0"),
+    "min_free_pct": (lambda v: 0 <= v <= 1, "between 0 and 1"),
+    "max_file_fraction": (lambda v: 0 < v <= 1, "in (0, 1]"),
+}
+
 
 class SpyglassConfig:
     """Gets Spyglass dirs from dj.config or environment variables.
@@ -76,6 +83,10 @@ class SpyglassConfig:
     def _validated_nwb_cache(supplied: dict) -> dict:
         """Merge supplied NWB cache thresholds over defaults, checking ranges.
 
+        A value that is non-numeric or outside its range is replaced by its own
+        default and logged; the other thresholds are unaffected. Nothing is
+        raised, so one mistyped threshold cannot stop ``import spyglass``.
+
         Parameters
         ----------
         supplied : dict
@@ -85,21 +96,23 @@ class SpyglassConfig:
         -------
         dict
             One float per key of ``NWB_CACHE_DEFAULTS``.
-
-        Raises
-        ------
-        ValueError
-            If a threshold falls outside its permitted range.
         """
         merged = {**NWB_CACHE_DEFAULTS, **supplied}
-        ret = {key: float(merged[key]) for key in NWB_CACHE_DEFAULTS}
+        ret = dict()
 
-        if ret["min_free_gb"] < 0:
-            raise ValueError("nwb_cache min_free_gb must be >= 0")
-        if not 0 <= ret["min_free_pct"] <= 1:
-            raise ValueError("nwb_cache min_free_pct must be between 0 and 1")
-        if not 0 < ret["max_file_fraction"] <= 1:
-            raise ValueError("nwb_cache max_file_fraction must be in (0, 1]")
+        for key, default in NWB_CACHE_DEFAULTS.items():
+            in_range, range_text = NWB_CACHE_RANGES[key]
+            try:
+                value = float(merged[key])
+            except (TypeError, ValueError):
+                value = None  # same treatment as out of range, below
+            if value is None or not in_range(value):
+                logger.warning(
+                    f"Ignoring nwb_cache {key}={merged[key]!r}: must be"
+                    f" {range_text}. Using the default of {default}."
+                )
+                value = float(default)
+            ret[key] = value
 
         return ret
 
@@ -322,8 +335,10 @@ class SpyglassConfig:
         if test_mode and test_mode_is_bound and not self._config:
             self.load_failed = True
 
+        # `or {}` so an explicit "nwb_cache": null reaches the validator as an
+        # empty mapping rather than failing the merge inside it.
         self._nwb_cache = self._validated_nwb_cache(
-            dj_custom.get("nwb_cache", {})
+            dj_custom.get("nwb_cache") or {}
         )
 
         resolved_base = (
