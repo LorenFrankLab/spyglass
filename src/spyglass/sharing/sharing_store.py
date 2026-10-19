@@ -64,6 +64,31 @@ def most_restrictive(scopes) -> str:
     return min(known, key=SCOPES.index) if known else "private"
 
 
+def _require_known_teams(teams) -> None:
+    """Raise if any name is not a `LabTeam`.
+
+    Checked before any write, local or remote: the selection part table's FK
+    would otherwise reject the name only after the scope had been changed.
+
+    Parameters
+    ----------
+    teams : iterable of str
+        `LabTeam` names.
+
+    Raises
+    ------
+    ValueError
+        Naming every team that does not exist.
+    """
+    unknown = set(teams) - set(LabTeam.fetch("team_name"))
+
+    if unknown:
+        raise ValueError(
+            f"No such LabTeam: {', '.join(sorted(unknown))}. "
+            + "Create the team before sharing to it."
+        )
+
+
 def _scope_row(selection, key: dict, scope: str, inherited: bool) -> dict:
     """Return the selection row for a scope, marking how it was arrived at.
 
@@ -419,14 +444,9 @@ class _UploadMixin(_SharedFile):
 
         teams = list(teams or []) if scope == "group" else []
 
-        # Before the broker call: a name the local FK rejects would other-
-        # wise fail after the broker had already applied the change.
-        unknown = set(teams) - set(LabTeam.fetch("team_name"))
-        if unknown:
-            raise ValueError(
-                f"No such LabTeam: {', '.join(sorted(unknown))}. "
-                + "Create the team before sharing to it."
-            )
+        # Before the broker call, which would otherwise have applied a change
+        # the local FK then rejects.
+        _require_known_teams(teams)
 
         file_id = (self & key).fetch1("file_id")
         selection_key = (self._selection & key).fetch1("KEY")
@@ -435,7 +455,7 @@ class _UploadMixin(_SharedFile):
 
         # Only now is the declaration true. One transaction, so a failure
         # cannot leave a 'group' row naming no team.
-        with self.connection.transaction:
+        with self._safe_context():
             self._selection.update1(
                 _scope_row(self._selection, selection_key, scope, _inherited)
             )
@@ -521,7 +541,7 @@ class _UploadMixin(_SharedFile):
                     key, scope=scope, teams=teams, _inherited=True
                 )
             else:  # not uploaded; the next populate carries the new scope
-                with self.connection.transaction:
+                with self._safe_context():
                     AnalysisFileSelection.update1(
                         _scope_row(AnalysisFileSelection, key, scope, True)
                     )
@@ -774,7 +794,8 @@ def share_file(
     Raises
     ------
     ValueError
-        If `scope` or `file_class` is unknown, or a group scope names no team.
+        If `scope` or `file_class` is unknown, a group scope names no team, or
+        a named team does not exist.
     """
     if scope not in SCOPES:
         raise ValueError(f"Unknown scope {scope!r}; pick one of {SCOPES}.")
@@ -785,6 +806,9 @@ def share_file(
         )
     if file_class not in ("raw", "analysis"):
         raise ValueError(f"Unknown file_class {file_class!r}.")
+
+    teams = list(teams or []) if scope == "group" else []
+    _require_known_teams(teams)
 
     is_raw = file_class == "raw"
     selection = RawFileSelection if is_raw else AnalysisFileSelection
@@ -805,17 +829,19 @@ def share_file(
     # though it had worked.
     row = _scope_row(selection, key, scope, inherited=False)
 
-    if selection & key:
-        selection.update1(row)
-    else:
-        selection.insert1(row)
+    # One transaction, so a failure cannot leave the scope changed with the
+    # teams half-replaced. Teams are replaced rather than added to, and only a
+    # group scope keeps any: a row left behind from an earlier group
+    # declaration would take effect again the moment the scope flipped back.
+    with selection._safe_context():
+        if selection & key:
+            selection.update1(row)
+        else:
+            selection.insert1(row)
 
-    # Teams are replaced, not added to, and only a group scope keeps any:
-    # a row left behind from an earlier group declaration would take effect
-    # again the moment the scope was flipped back.
-    (selection.Team & key).delete_quick()
-    if scope == "group":
-        selection.Team.insert([{**key, "team_name": t} for t in teams])
+        (selection.Team & key).delete_quick()
+        if scope == "group":
+            selection.Team.insert([{**key, "team_name": t} for t in teams])
 
     # The cascade `update_visibility` performs, which this path bypassed. It
     # runs before the upload so a derivative still to be transferred carries

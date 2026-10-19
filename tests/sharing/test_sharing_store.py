@@ -693,6 +693,54 @@ def test_narrowing_a_raw_narrows_its_derivatives(
     assert not (store.AnalysisFileSelection.Team & key)
 
 
+def test_share_file_rejects_an_unknown_team_before_writing(
+    store, declared, broker_configured, fake_client
+):
+    """A name the FK will reject must not change the scope on its way there.
+
+    The scope was written first, so the row was left `group` with its teams
+    deleted and none inserted — a declaration that names nobody.
+    """
+    with pytest.raises(ValueError, match="No such LabTeam"):
+        store.share_file(
+            declared["nwb_file_name"],
+            scope="group",
+            teams=["No Such Team"],
+            file_class="raw",
+            populate=False,
+        )
+
+    assert (store.RawFileSelection & declared).fetch1("scope") == "private"
+    assert not (store.RawFileSelection.Team & declared)
+
+
+def test_share_file_replaces_teams_across_a_round_trip(
+    store, declared, broker_configured, fake_client, team_names
+):
+    """Flipping away from group and back leaves only the teams last named."""
+    alpha, beta = team_names
+    name = declared["nwb_file_name"]
+
+    store.share_file(
+        name, scope="group", teams=[alpha], file_class="raw", populate=False
+    )
+    assert set((store.RawFileSelection.Team & declared).fetch("team_name")) == {
+        alpha
+    }
+
+    store.share_file(name, scope="public", file_class="raw", populate=False)
+    assert not (store.RawFileSelection.Team & declared)
+
+    store.share_file(
+        name, scope="group", teams=[beta], file_class="raw", populate=False
+    )
+
+    assert (store.RawFileSelection & declared).fetch1("scope") == "group"
+    assert set((store.RawFileSelection.Team & declared).fetch("team_name")) == {
+        beta
+    }
+
+
 def test_narrowing_an_un_uploaded_raw_narrows_its_derivatives(
     store, declared, build_analysis, broker_configured, fake_client, team_names
 ):
