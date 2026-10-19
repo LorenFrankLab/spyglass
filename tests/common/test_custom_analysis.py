@@ -365,6 +365,8 @@ class TestCleanupAndRegistry:
         teardown,
         common,
         mock_create,
+        monkeypatch,
+        request,
     ):
         """Test orphan detection across all registered tables.
 
@@ -382,6 +384,16 @@ class TestCleanupAndRegistry:
 
         master_table = common.common_nwbfile.AnalysisNwbfile()
         custom_table, downstream = custom_analysis_tables
+        created_paths = {}
+
+        def _cleanup_created_files():
+            if not teardown:
+                return
+            for path in created_paths.values():
+                if path.exists():
+                    path.unlink()
+
+        request.addfinalizer(_cleanup_created_files)
 
         # Use mock_create fixture for fast file creation
         mock_create(custom_table)
@@ -408,10 +420,125 @@ class TestCleanupAndRegistry:
         downstream.insert_by_name(export_file)
         custom_table._copy_to_common(export_file)
 
-        # TODO: use `cleanup()` logic to find orphans
-        # Simulate orphan detection across all registered tables
-        # insert table entries without downstream fk-references
-        master_table.cleanup()
+        created_paths = {
+            "null": Path(null_fp).resolve(),
+            "orphan": Path(orph_fp).resolve(),
+            "valid": Path(valid_fp).resolve(),
+            "export": Path(export_fp).resolve(),
+        }
+
+        # This integration test exercises cleanup against the database rows
+        # above, not the filesystem walk itself (covered in test_nwbfile.py).
+        # Restrict discovery to files owned by this test so a concurrent pytest
+        # session sharing the analysis directory cannot have its unregistered
+        # files mistaken for this session's cleanup candidates.
+        discovered_paths = tuple(sorted(created_paths.values()))
+
+        # cleanup() discovers files via CleanupPlan.walk_analysis_files; patch
+        # that static method (signature: analysis_dir, logger) so discovery is
+        # restricted to this test's own files.
+        def _walk_created_analysis_files(analysis_dir, logger):
+            yield from discovered_paths
+
+        monkeypatch.setattr(
+            common.common_nwbfile.CleanupPlan,
+            "walk_analysis_files",
+            staticmethod(_walk_created_analysis_files),
+        )
+
+        expected_deleted_paths = {
+            created_paths["null"],
+            created_paths["orphan"],
+        }
+
+        def _relative_paths(paths):
+            return [
+                (
+                    str(path.relative_to(base_dir))
+                    if path.is_relative_to(base_dir)
+                    else str(path)
+                )
+                for path in sorted(paths)
+            ]
+
+        before_cleanup = {
+            path for path in created_paths.values() if path.exists()
+        }
+        missing_before_cleanup = set(created_paths.values()) - before_cleanup
+        assert not missing_before_cleanup, (
+            "AnalysisNwbfile.cleanup test setup did not create expected files: "
+            f"{_relative_paths(missing_before_cleanup)}"
+        )
+
+        def _snapshot():
+            """Files, contents, rows, and externals, across BOTH tables.
+
+            Snapshotting only the common table would miss exactly the rows
+            cleanup touches first -- the custom table's -- so a regression
+            there would go unnoticed.
+            """
+            files = {
+                path: path.read_bytes()
+                for path in created_paths.values()
+                if path.exists()
+            }
+            rows = {
+                "common": set(master_table.fetch("analysis_file_name")),
+                "custom": set(custom_table.fetch("analysis_file_name")),
+            }
+            externals = {
+                "common": {
+                    str(fp[1])
+                    for fp in master_table._ext_tbl.fetch_external_paths()
+                },
+                "custom": {
+                    str(fp[1])
+                    for fp in custom_table._ext_tbl.fetch_external_paths()
+                },
+            }
+            return files, rows, externals
+
+        # Snapshot BEFORE the dry run and compare immediately after. An
+        # after-only snapshot cannot distinguish a correct dry run from one
+        # that deleted everything before the destructive call ran.
+        before_dry_run = _snapshot()
+
+        # min_file_age_hours=0 on BOTH calls: these files were created
+        # seconds ago, so the 24-hour default would defer them and the dry
+        # run would preview a different, empty candidate set from the
+        # destructive run that follows.
+        immediate_cleanup = dict(min_file_age_hours=0)
+
+        master_table.cleanup(dry_run=True, **immediate_cleanup)
+
+        after_dry_run = _snapshot()
+        assert (
+            after_dry_run[0] == before_dry_run[0]
+        ), "dry_run=True changed analysis files on disk"
+        assert (
+            after_dry_run[1] == before_dry_run[1]
+        ), "dry_run=True changed analysis rows in common or custom table"
+        assert (
+            after_dry_run[2] == before_dry_run[2]
+        ), "dry_run=True changed external table entries"
+
+        master_table.cleanup(**immediate_cleanup)
+
+        after_cleanup = {
+            path for path in created_paths.values() if path.exists()
+        }
+        deleted_paths = before_cleanup - after_cleanup
+        missing_deleted_paths = expected_deleted_paths - deleted_paths
+        unexpected_deleted_paths = deleted_paths - expected_deleted_paths
+        assert not unexpected_deleted_paths, (
+            "AnalysisNwbfile.cleanup deleted .nwb files not created as "
+            "expected cleanup targets by this test: "
+            f"{_relative_paths(unexpected_deleted_paths)}"
+        )
+        assert not missing_deleted_paths, (
+            "AnalysisNwbfile.cleanup did not delete expected cleanup targets: "
+            f"{_relative_paths(missing_deleted_paths)}"
+        )
 
         assert not Path(null_fp).exists(), "Null file should be deleted"
 

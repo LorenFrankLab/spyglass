@@ -75,7 +75,7 @@ dependencies = [
 ]
 
 optional-dependencies.dlc = [
-  "deeplabcut[tf]", # removing dlc pin removes need to pin tf/numba
+  "deeplabcut[tf]<3", # Pending position V2
   "ffmpeg",
 ]
 optional-dependencies.docs = [
@@ -148,8 +148,9 @@ lint.ignore = [ "E402", "E501", "F401" ]
 
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
-ignore-words-list = 'nevers'
+ignore-words-list = 'nevers,notin,sortings'
 # Nevers - name in Citation
+# notin - UnitSelectionParams.unit_criteria operator, paired with isin
 
 [tool.pytest.ini_options]
 minversion = "7.0"

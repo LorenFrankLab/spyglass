@@ -187,11 +187,16 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     def get_sort_group_info(cls, key):
         """get the sort group info associated with a spike sorting output
         (e.g. electrode location, brain region, etc.)
-        Parameters:
-        -----------
+
+        One row per electrode of each sort group.
+
+        Parameters
+        ----------
         key : dict
-            dictionary specifying the restriction (note: multi-source not currently supported)
-        Returns:
+            dictionary specifying the restriction (note: multi-source not
+            currently supported)
+
+        Returns
         -------
         sort_group_info : Table
             Table linking a merge id to information about the electrode group.

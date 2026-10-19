@@ -15,7 +15,7 @@ import numpy as np
 from datajoint.table import Table
 from datajoint.user_tables import TableMeta, UserTable
 from spyglass.utils.logging import logger
-from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
+from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 # Tables that should be excluded from the undirected graph when finding paths
 # for TableChain objects and searching for an upstream key.
@@ -260,14 +260,6 @@ def fetch_nwb(*attrs, **kwargs):
     raise NotImplementedError(
         "fetch_nwb is deprecated. Use (table & key).fetch_nwb() instead."
     )
-
-
-def _get_nwb_object(objects, object_id):
-    """Retrieve NWB object and try to convert to dataframe if possible"""
-    try:
-        return objects[object_id].to_dataframe()
-    except AttributeError:
-        return objects[object_id]
 
 
 def get_child_tables(table):

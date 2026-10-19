@@ -28,7 +28,7 @@
 #
 # - To set up your Spyglass environment and database, see
 #   [the Setup notebook](./00_Setup.ipynb)
-# - To insert data, see [the Insert Data notebook](./01_Insert_Data.ipynb)
+# - To insert data, see [the Insert Data notebook](./02_Insert_Data.ipynb)
 # - For additional info on DataJoint syntax, including table definitions and
 #   inserts, see
 #   [these additional tutorials](https://github.com/datajoint/datajoint-tutorials)
@@ -306,6 +306,6 @@ from spyglass.common import Nwbfile
 #
 
 # %% [markdown]
-# In the [next notebook](./10_Spike_Sorting.ipynb), we'll start working with
+# In the [spike sorting notebook](./10_Spike_SortingV1.ipynb), we'll start working with
 # ephys data with spike sorting.
 #

@@ -5,6 +5,8 @@ conftest.py files in subdirectories have fixtures that are only available to
 tests in that subdirectory.
 """
 
+import importlib
+import logging
 import os
 
 # ---------------------------------------------------------------------------
@@ -57,8 +59,40 @@ from hdmf.build.warnings import MissingRequiredBuildWarning
 from numba import NumbaWarning
 from pandas.errors import PerformanceWarning
 
+from ._teardown_exit import escalate_exit_on_teardown_failure
 from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
+
+# --------- Fix DeepLabCut's reload of the logging module ---------------------
+# deeplabcut.pose_estimation_tensorflow.training.train_network runs
+# `importlib.reload(logging); logging.shutdown()`. The reload installs a fresh
+# Manager and root logger, so every logger already held by an imported module
+# (spyglass's included) keeps emitting into the orphaned old hierarchy while
+# pytest's caplog attaches to the new root -- silently capturing nothing. Any
+# later test asserting on log output then fails purely because a DLC test ran
+# earlier in the session. Both calls are patched here rather than repaired
+# afterwards: DLC does the reload from a function-local `import importlib`, so
+# replacing the attribute is enough, and shutdown() must go too -- with the
+# reload blocked it would otherwise close pytest's and spyglass's live
+# handlers instead of the fresh module's empty handler list.
+_orig_importlib_reload = importlib.reload
+_orig_logging_shutdown = logging.shutdown
+
+
+def _reload_except_logging(module, *args, **kwargs):
+    """importlib.reload that leaves the logging module alone."""
+    if module is logging:
+        return logging
+    return _orig_importlib_reload(module, *args, **kwargs)
+
+
+def _no_shutdown(*args, **kwargs):
+    """No-op logging.shutdown; the real one runs at interpreter exit."""
+    return None
+
+
+importlib.reload = _reload_except_logging
+logging.shutdown = _no_shutdown
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
@@ -202,7 +236,8 @@ _sklearn_parallel.warnings = _ModuleWarningsProxy(
 )
 
 # globals in pytest_configure:
-#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
+#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS,
+#     NO_DLC
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
@@ -272,11 +307,13 @@ def pytest_addoption(parser):
     Parameters
     ----------
     --quiet-spy (bool):  Default False. Allow print statements from Spyglass.
-    --base-dir (str): Default './tests/test_data/'. Dir for local input file.
+    --base-dir (str): Default './tests/_data/'. Dir for local input files.
+        SPYGLASS_BASE_DIR is ignored by the test suite.
     --no-teardown (bool): Default False. Delete pipeline on close.
     --no-docker (bool): Default False. Run datajoint mysql server in Docker.
     --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
-    --container-name (str): Default 'spyglass-pytest'. Docker container name.
+    --container-name (str): Default None (derived from git branch as
+        'spyglass-pytest-<branch>'). Docker container name.
     --container-port (str): Default None (uses 330[mysql_version]). Port mapping.
     """
     parser.addoption(
@@ -289,12 +326,13 @@ def pytest_addoption(parser):
     parser.addoption(
         "--base-dir",
         action="store",
-        default=None,
+        default="./tests/_data/",
         dest="base_dir",
         help=(
-            "Directory for local input file. "
-            "Also reads SPYGLASS_BASE_DIR env var when unset. "
-            "Default: './tests/_data/'."
+            "Directory for local test input files. "
+            "Default: ./tests/_data/. SPYGLASS_BASE_DIR in the environment is "
+            "ignored by the test suite to keep destructive tests off shared "
+            "storage; pass --base-dir explicitly to override the default."
         ),
     )
     parser.addoption(
@@ -321,9 +359,12 @@ def pytest_addoption(parser):
     parser.addoption(  # Allows for concurrency with other pytest runs
         "--container-name",
         action="store",
-        default="spyglass-pytest",
+        default=None,
         dest="container_name",
-        help="Docker container name for MySQL server.",
+        help="Docker container name for MySQL server. Default: derived from "
+        + "the current git branch, so concurrent runs on different branches "
+        + "don't share a container (or, with --container-vol-dir, a data "
+        + "dir).",
     )
     parser.addoption(  # Allows for concurrency with other pytest runs
         "--container-port",
@@ -332,10 +373,41 @@ def pytest_addoption(parser):
         dest="container_port",
         help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
     )
+    parser.addoption(  # Keeps MySQL data off a potentially small root disk
+        "--container-vol-dir",
+        action="store",
+        default=None,
+        dest="container_vol_dir",
+        help="Parent dir for the container's MySQL data, bind-mounted as "
+        + "<vol-dir>/<container-name> -> /var/lib/mysql. Default: "
+        + "Docker-managed storage.",
+    )
+
+
+def _refuse_preimported_spyglass(modules=None):
+    """Refuse Spyglass imports that predate pytest's filesystem sandbox.
+
+    Cached directory values can live in module globals, imported bindings, and
+    class attributes throughout Spyglass.  Environment or DataJoint updates
+    cannot prove all of that state safe, so pytest requires a fresh process
+    rather than trying to reload an already-imported package.
+    """
+    modules = sys.modules if modules is None else modules
+    if any(
+        name == "spyglass" or name.startswith("spyglass.") for name in modules
+    ):
+        raise pytest.UsageError(
+            "Refusing to start Spyglass tests because Spyglass was imported "
+            "before pytest configured its filesystem sandbox. Cached module, "
+            "class, and DataJoint state cannot be made reliably safe by "
+            "reloading. Start pytest in a fresh Python process without "
+            "importing Spyglass first."
+        )
 
 
 def pytest_configure(config):
-    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS, NO_DLC
+    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
+    global NO_DLC
 
     TEST_FILE = "minirec20230622.nwb"
     TEARDOWN = not config.option.no_teardown
@@ -344,18 +416,48 @@ def pytest_configure(config):
     NO_DLC = config.option.no_dlc
     pytest.NO_DLC = NO_DLC
 
-    _base_dir = config.option.base_dir or os.environ.get(
-        "SPYGLASS_BASE_DIR", "./tests/_data/"
-    )
-    BASE_DIR = Path(_base_dir).expanduser().absolute()
+    # Validate the requested base dir before anything is created or
+    # downloaded. settings.py enforces this too, but only once spyglass is
+    # first imported, which happens after BASE_DIR.mkdir() and after the
+    # DataDownloader starts fetching.
+    _requested_base = Path(config.option.base_dir).expanduser().resolve()
+    if "tests" not in _requested_base.parts:
+        raise pytest.UsageError(
+            f"--base-dir {str(_requested_base)!r} does not contain a 'tests' "
+            "path component. The test suite runs Spyglass in test_mode and "
+            "performs destructive cleanup; point --base-dir inside a tests/ "
+            "directory (default: ./tests/_data/)."
+        )
+
+    # This must precede environment mutation, directory creation, Docker, and
+    # downloads. Cached module globals cannot be repaired by changing the
+    # environment after Spyglass has already been imported.
+    _refuse_preimported_spyglass()
+
+    # Tests never honor SPYGLASS_BASE_DIR — a shell-exported value pointing at
+    # shared/production storage would let destructive tests (e.g.
+    # AnalysisNwbfile.cleanup) scan and delete real analysis files. Warn once
+    # if set so the user notices, then drop it from the environment.
+    _env_base = os.environ.pop("SPYGLASS_BASE_DIR", None)
+    if _env_base:
+        warnings.warn(
+            f"Ignoring SPYGLASS_BASE_DIR={_env_base!r} in the test environment; "
+            "pass --base-dir to override the ./tests/_data/ default.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    BASE_DIR = _requested_base
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
+
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU for tests
 
     SERVER = DockerMySQLManager(
         container_name=config.option.container_name,
         port=config.option.container_port,
+        vol_dir=config.option.container_vol_dir,
         restart=TEARDOWN,
         shutdown=TEARDOWN,
         null_server=config.option.no_docker,
@@ -368,6 +470,13 @@ def pytest_configure(config):
     # frozen with test_mode=False.
     dj.config.update(SERVER.credentials)
 
+    # Point spyglass_dirs.base at the resolved test base so dj.config and the
+    # resolved path agree. Non-test directory paths in dj.config["custom"] are
+    # refused by the SpyglassConfig test_mode guard at load_config time.
+    dj.config.setdefault("custom", {})["spyglass_dirs"] = {
+        "base": str(BASE_DIR)
+    }
+
     DOWNLOADS = DataDownloader(
         base_dir=BASE_DIR,
         verbose=VERBOSE,
@@ -375,17 +484,137 @@ def pytest_configure(config):
     )
 
 
+def pytest_sessionfinish(session, exitstatus):
+    # Stash the session so pytest_unconfigure (which only receives ``config``)
+    # can escalate the exit status if teardown fails. wrap_session returns
+    # ``session.exitstatus`` after pytest_unconfigure runs, so a value set
+    # there is reflected in the process exit code.
+    global SESSION
+    SESSION = session
+
+
 def pytest_unconfigure(config):
+    server = globals().get("SERVER")
+    if server is None:
+        return
+
     from spyglass.utils.nwb_helper_fn import close_nwb_files
 
-    close_nwb_files()
-    if TEARDOWN:
-        SERVER.stop()
-        analysis_dir = BASE_DIR / "analysis"
-        for file in analysis_dir.glob("*.nwb"):
-            file.unlink()
-        for subdir in ["export", "moseq", "recording", "spikesorting", "tmp"]:
-            shutil_rmtree(str(BASE_DIR / subdir), ignore_errors=True)
+    base_dir = globals().get("BASE_DIR")
+    teardown = globals().get("TEARDOWN", False)
+    failures = []
+
+    # Each step runs independently: a stop failure must not skip cleanup, a
+    # cleanup failure must stay visible, and a secondary failure must not
+    # mask the first.
+    steps = [("close_nwb_files", close_nwb_files)]
+    if teardown:
+        steps.append(("server.stop", server.stop))
+        steps.append(("data cleanup", lambda: _teardown_test_data(base_dir)))
+
+    for label, action in steps:
+        try:
+            action()
+        except Exception as err:  # noqa: BLE001 - reported, not swallowed
+            failures.append(f"{label}: {err}")
+
+    if failures:
+        print("pytest teardown failures:")
+        for failure in failures:
+            print(f"  - {failure}")
+        escalate_exit_on_teardown_failure(globals().get("SESSION"))
+
+
+def _teardown_test_data(base_dir, data_root=None):
+    """Remove generated test data, but only from the canonical test base.
+
+    A 'tests' path component proves location, not ownership: a custom
+    --base-dir may hold real data, so teardown is limited to the
+    repository's own tests/_data, and every owned child is re-checked for
+    being a symlink before it is touched.
+
+    `analysis` is swept non-recursively because concurrent pytest sessions
+    are supported (--container-name / --container-port) and share this base by
+    default; without per-run ownership metadata, traversing nested session
+    directories could erase another run's active files. The other owned
+    subdirectories are removed recursively, which carries that same
+    concurrent-session race -- this function keeps teardown inside the test
+    tree, it does not make it concurrency-safe. Nested analysis cleanup would
+    need a per-base session lock or ownership manifest.
+
+    Raises
+    ------
+    RuntimeError
+        If one or more owned children could not be removed. Failures are
+        aggregated so a single unremovable entry does not strand the rest.
+    """
+    if base_dir is None:
+        return
+
+    data_root = (
+        Path(data_root) if data_root else Path(__file__).parent / "_data"
+    )
+    canonical = data_root.resolve()
+    if Path(base_dir).resolve() != canonical:
+        print(
+            f"Skipping test-data cleanup: {base_dir} is not the canonical "
+            f"test base {canonical}"
+        )
+        return
+    if data_root.is_symlink():
+        print(
+            "Skipping test-data cleanup: tests/_data is a symlink; its "
+            "target is not owned by the test suite"
+        )
+        return
+
+    owned = ["analysis", "export", "moseq", "recording", "spikesorting", "tmp"]
+
+    # Each child is re-validated without following links. A symlinked
+    # tests/_data/analysis would otherwise let glob traverse into it and
+    # unlink files outside the test tree -- the same escape the parent check
+    # closes one level up.
+    # Each child is attempted independently and failures are aggregated:
+    # one unremovable directory must not leave every later one behind.
+    child_failures = []
+    for name in owned:
+        child = Path(base_dir) / name
+        try:
+            # Inside the try: is_symlink()/exists() re-raise EACCES, which
+            # would otherwise escape before the aggregation and strand every
+            # later child.
+            if child.is_symlink():
+                print(
+                    f"Skipping test-data cleanup of {name}: it is a symlink; "
+                    "its target is not owned by the test suite"
+                )
+                continue
+            if not child.exists():
+                continue
+            if name == "analysis":
+                # unlink() on a symlink removes the LINK, never its target,
+                # so symlinks are removed here like any other entry. Leaving
+                # them would be the dangerous choice: a surviving leaf link can
+                # later authorize cleanup to delete its external target.
+                # Non-recursive (see the docstring for why): a `*.nwb` glob
+                # touches only flat leaves, each unlinked independently so one
+                # unremovable entry does not strand the rest.
+                for file in child.glob("*.nwb"):
+                    try:
+                        file.unlink()
+                    except OSError as err:
+                        child_failures.append(f"{name}/{file.name}: {err}")
+            else:
+                # No ignore_errors: failures must surface, not vanish.
+                shutil_rmtree(str(child))
+        except OSError as err:
+            child_failures.append(f"{name}: {err}")
+
+    if child_failures:
+        raise RuntimeError(
+            f"test-data cleanup: {len(child_failures)} failures "
+            "(files and/or directories): " + "; ".join(child_failures)
+        )
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------
@@ -567,6 +796,41 @@ def load_config(dj_conn, base_dir):
     )
 
 
+def _repair_raw_checksum(nwbfile_tbl, mini_dict):
+    """Realign the raw external-table checksum with the file on disk.
+
+    The docker container and BASE_DIR are independent state. Reusing a
+    container (--no-teardown) after the raw file has been regenerated leaves
+    the external table holding the previous size and contents_hash, and every
+    later fetch of that file fails with "downloaded but size did not match" --
+    a failure that looks like a code bug but is only stale metadata. Rewrite
+    the row to match what is actually on disk.
+    """
+    from spyglass.common.common_nwbfile import schema as common_schema
+    from spyglass.utils.dj_helper_fn import _write_external_checksum
+
+    file_name = mini_dict["nwb_file_name"]
+    abs_path = Path(nwbfile_tbl.get_abs_path(file_name))
+    if not abs_path.exists():
+        return
+
+    query = common_schema.external["raw"] & f"filepath LIKE '%{file_name}'"
+    if len(query) != 1:
+        return
+
+    row = query.fetch1()
+    on_disk_size = abs_path.stat().st_size
+    on_disk_hash = _dj_hash.uuid_from_file(abs_path)
+    if row["size"] == on_disk_size and row["contents_hash"] == on_disk_hash:
+        return
+
+    dj_logger.warning(
+        f"Stale external checksum for {file_name}; updating to match disk. "
+        "The container was reused after the raw file was regenerated."
+    )
+    _write_external_checksum(abs_path, common_schema.external["raw"], row)
+
+
 @pytest.fixture(autouse=True, scope="session")
 def mini_insert(
     dj_conn, mini_path, mini_content, teardown, server, load_config, mini_dict
@@ -590,6 +854,7 @@ def mini_insert(
 
     if len(Nwbfile & mini_dict) != 0:
         dj_logger.warning("Skipping insert, use existing data.")
+        _repair_raw_checksum(Nwbfile, mini_dict)
 
     else:
         # Useful try/except for avoiding a full run on insert failure

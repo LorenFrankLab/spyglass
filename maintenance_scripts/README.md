@@ -100,7 +100,8 @@ regularly as cron jobs.
     `crontab -e` and adding the script.
 
 Note that the log file will automatically be truncated to `SPYGLASS_MAX_LOG`
-lines on each run. 1000 lines should be sufficient.
+lines on each run, including runs that fail partway through (truncation runs
+from an `EXIT` trap). 1000 lines should be sufficient.
 
 To enable slack notifications, you will need to create a slack app and generate
 a token following the instructions

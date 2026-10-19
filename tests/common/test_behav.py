@@ -24,15 +24,23 @@ def test_valid_epoch_num(common):
 
 
 @pytest.mark.slow
-def test_pos_source_make(common):
-    """Test custom populate"""
-    common.PositionSource().make(common.Session())
+def test_pos_source_ingest(common, mini_copy_name):
+    """Test ingestion is a no-op when the file is already ingested.
+
+    PositionSource now ingests via `insert_from_nwbfile` rather than a custom
+    `make` driven by key_source, so this exercises that path directly.
+    """
+    before = len(common.PositionSource() & {"nwb_file_name": mini_copy_name})
+    common.PositionSource().insert_from_nwbfile(mini_copy_name)
+    after = len(common.PositionSource() & {"nwb_file_name": mini_copy_name})
+
+    assert before == after, "Re-ingestion changed PositionSource row count"
 
 
-def test_pos_source_make_invalid(common):
-    """Test invalid populate"""
+def test_pos_source_ingest_invalid(common):
+    """Test ingestion of a file that is not in the Nwbfile table"""
     with pytest.raises(ValueError):
-        common.PositionSource().make(dict())
+        common.PositionSource().insert_from_nwbfile("not_a_real_file_.nwb")
 
 
 def test_raw_position_fetch_nwb(common, mini_pos, mini_pos_interval_dict):
@@ -65,20 +73,22 @@ def test_raw_position_fetch_multi_df(common, mini_pos, mini_pos_interval_dict):
 
 
 @pytest.fixture(scope="session")
-def pop_state_script(common):
-    """Populate state script"""
-    keys = common.StateScriptFile.key_source
-    common.StateScriptFile.populate()
-    yield keys
+def pop_state_script(common, mini_insert):
+    """State script entries ingested from the mini file."""
+    yield common.StateScriptFile()
 
 
-def test_populate_state_script(common, pop_state_script):
-    """Test populate state script
+def test_populate_state_script(common, pop_state_script, mini_restr):
+    """Test state script ingestion
 
-    See #849. Expect no result for this table."""
-    assert len(common.StateScriptFile.key_source) == len(
-        pop_state_script
-    ), "StateScript populate unexpected effect"
+    See #849. Expect no result for this table: the mini file's
+    `associated_files` processing module is empty, so there is nothing to
+    ingest. Previously driven through `populate()`; StateScriptFile now
+    ingests via `insert_from_nwbfile`, so the assertion is on the rows the
+    table holds rather than on the key_source populate consumed."""
+    assert (
+        len(pop_state_script & mini_restr) == 0
+    ), "StateScript ingestion unexpected effect"
 
 
 def test_videofile_update_entries(common, video_keys):
