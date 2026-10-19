@@ -689,6 +689,8 @@ class StoreBackend(FileBackend):
 
         import requests
 
+        from spyglass.sharing.store_client import TRANSFER_TIMEOUTS
+
         record, client = self._resolved_with_client(nwb_file_path)
         if record is None:
             return False
@@ -704,7 +706,7 @@ class StoreBackend(FileBackend):
                 client.content_url(record["file_id"]),
                 headers=client.auth_headers(),
                 stream=True,
-                timeout=None,  # a whole-file transfer, not an API call
+                timeout=TRANSFER_TIMEOUTS,
             ) as response:
                 response.raise_for_status()
                 with temp.open("wb") as f:

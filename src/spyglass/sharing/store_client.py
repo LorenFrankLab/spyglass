@@ -36,7 +36,7 @@ import os
 import stat
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 from urllib.parse import urljoin
 
 from spyglass.utils.logging import logger
@@ -52,9 +52,19 @@ API_PREFIX = "/api/v1"
 #: token.
 DEFAULT_TOKEN_PATH = Path.home() / ".spyglass" / "store_token.json"
 
-#: Seconds to wait for an ordinary API call. Generous, because the broker
-#: reaches a database and an object store before it answers.
+#: Seconds to wait for an answer to an ordinary API call. Generous, because the
+#: broker reaches a database and an object store before it answers.
 DEFAULT_TIMEOUT = 30
+
+#: `(connect, read)` for an ordinary API call. The connect half is short
+#: because `StoreBackend.has` probes the broker once per file, so an
+#: unreachable broker costs it on every one before the chain reaches DANDI.
+DEFAULT_TIMEOUTS = (5, DEFAULT_TIMEOUT)
+
+#: `(connect, read)` for a whole-file transfer. `requests` applies the read
+#: timeout to each socket read rather than to the transfer, so this bounds a
+#: connection that has gone quiet without capping a large file's duration.
+TRANSFER_TIMEOUTS = (DEFAULT_TIMEOUT, 300)
 
 
 class StoreError(Exception):
@@ -277,8 +287,9 @@ class StoreClient:
         `sg_config.store_url`.
     token : str, optional
         Broker token. Defaults to the cached credential for `base_url`.
-    timeout : int, optional
-        Per-request timeout in seconds.
+    timeout : int or tuple of (float, float), optional
+        Per-request timeout in seconds, as `requests` takes it: one number for
+        both halves, or `(connect, read)`.
 
     Attributes
     ----------
@@ -290,7 +301,7 @@ class StoreClient:
         self,
         base_url: Optional[str] = None,
         token: Optional[str] = None,
-        timeout: int = DEFAULT_TIMEOUT,
+        timeout: Union[float, Tuple[float, float]] = DEFAULT_TIMEOUTS,
     ):
         from spyglass.settings import _clean_store_url
 
@@ -996,7 +1007,7 @@ class StoreClient:
                     url,
                     data=f,
                     headers=target.get("upload_headers") or {},
-                    timeout=None,  # a whole-file transfer, not an API call
+                    timeout=TRANSFER_TIMEOUTS,
                 )
             except requests.RequestException as err:
                 raise StoreError(

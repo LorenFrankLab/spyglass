@@ -1063,3 +1063,82 @@ def test_a_hand_set_scope_survives_a_parent_rescope(
     assert (store.AnalysisFileSelection & key).fetch1(
         "scope"
     ) == "public", "Re-derivation overrode a hand-set scope"
+
+
+# -------------------------- inside a transaction --------------------------
+
+
+@pytest.fixture
+def classic_make(store, common, mini_copy_name):
+    """A `dj.Computed` whose classic `make` builds an analysis file.
+
+    The documented pattern opens `build()` inside a single `make`, so the
+    builder's inserts run in the transaction `populate` already opened. Every
+    other builder test here runs outside one.
+    """
+    import datajoint as dj
+
+    # Named explicitly, so the definition's references resolve without
+    # relying on this frame's locals.
+    schema = dj.schema(
+        "store_classic_make",
+        context=dict(
+            Nwbfile=common.Nwbfile, AnalysisNwbfile=common.AnalysisNwbfile
+        ),
+    )
+
+    @schema
+    class ClassicMake(dj.Computed):
+        definition = """
+        -> Nwbfile
+        ---
+        -> AnalysisNwbfile
+        """
+
+        def make(self, key):
+            with common.AnalysisNwbfile().build(key["nwb_file_name"]) as b:
+                name = b.analysis_file_name
+            self.insert1({**key, "analysis_file_name": name})
+
+    table = ClassicMake()
+
+    yield table
+
+    names = list(table.fetch("analysis_file_name"))
+    table.delete_quick()
+
+    for name in names:
+        key = {"analysis_file_name": name}
+        path = Path(common.AnalysisNwbfile.get_abs_path(name))
+        (store.AnalysisFileSelection & key).delete(
+            safemode=False, force_permission=True
+        )
+        (common.AnalysisNwbfile & key).delete(
+            safemode=False, force_permission=True
+        )
+        path.unlink(missing_ok=True)
+
+
+def test_the_builder_queues_inside_a_classic_make(
+    store, declared, broker_configured, classic_make, mini_copy_name, common
+):
+    """Queuing must not open a transaction the caller already holds.
+
+    DataJoint cannot nest one: taking `connection.transaction` here rolled the
+    caller's `make` back and left the connection in autocommit, so the
+    `AnalysisNwbfile` row vanished and the rest of the `make` committed
+    statement by statement.
+    """
+    key = {"nwb_file_name": mini_copy_name}
+
+    classic_make.populate(key)
+
+    assert len(classic_make & key) == 1, "make() did not commit its own row"
+
+    analysis = (classic_make & key).fetch1("analysis_file_name")
+    akey = {"analysis_file_name": analysis}
+
+    assert len(common.AnalysisNwbfile & akey) == 1, "Registration rolled back"
+    assert (store.AnalysisFileSelection & akey).fetch1(
+        "scope"
+    ) == "private", "Inherited share was not queued"
