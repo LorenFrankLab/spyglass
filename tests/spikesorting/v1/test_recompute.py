@@ -188,11 +188,6 @@ def test_attempt_all_force_env_mismatch(
         "_has_matching_env",
         lambda *args, **kwargs: False,
     )
-    monkeypatch.setattr(  # attempt_all's own filter ignores rounding, so
-        recomp_module,  # hide entries other tests made for this recording
-        "RecordingRecompute",
-        recomp_module.RecordingRecompute() & "rounding = -1",
-    )
 
     restr = dict(pop_rec, rounding=98)
     try:
@@ -202,5 +197,23 @@ def test_attempt_all_force_env_mismatch(
         assert (
             recomp_selection & restr
         ), "force_attempt did not insert on env mismatch"
+    finally:
+        (recomp_selection & restr).delete_quick()
+
+
+def test_attempt_all_new_rounding(recomp_selection, recomp_tbl, pop_rec):
+    """Test that a prior attempt does not block a different rounding."""
+    assert recomp_tbl & pop_rec, "No prior recompute attempt to test against"
+
+    restr = dict(pop_rec, rounding=97)
+    assert not (recomp_selection & restr), "Test rounding already selected"
+
+    try:
+        recomp_selection.attempt_all(
+            restr=pop_rec, rounding=97, force_attempt=True
+        )
+        assert (
+            recomp_selection & restr
+        ), "attempt_all skipped a new rounding for an attempted recording"
     finally:
         (recomp_selection & restr).delete_quick()
