@@ -693,6 +693,37 @@ def test_narrowing_a_raw_narrows_its_derivatives(
     assert not (store.AnalysisFileSelection.Team & key)
 
 
+def test_narrowing_an_un_uploaded_raw_narrows_its_derivatives(
+    store, declared, build_analysis, broker_configured, fake_client, team_names
+):
+    """Re-scoping a raw reaches its derivatives whether or not it has uploaded.
+
+    The derivative uploads on its own schedule, so a raw narrowed while still
+    only declared would otherwise leave an already-public derivative public.
+    """
+    alpha, _ = team_names
+    store.RawFileSelection.update1({**declared, "scope": "public"})
+
+    analysis = build_analysis()
+    key = {"analysis_file_name": analysis}
+
+    assert (store.AnalysisFileSelection & key).fetch1("scope") == "public"
+    assert not (store.SharedRawFile & declared), "Raw must not be uploaded"
+
+    store.share_file(
+        declared["nwb_file_name"],
+        scope="group",
+        teams=[alpha],
+        file_class="raw",
+        populate=False,
+    )
+
+    assert (store.AnalysisFileSelection & key).fetch1("scope") == "group"
+    assert set((store.AnalysisFileSelection.Team & key).fetch("team_name")) == {
+        alpha
+    }
+
+
 def test_widening_a_raw_widens_its_derivatives(
     store, declared, build_analysis, broker_configured, fake_client
 ):

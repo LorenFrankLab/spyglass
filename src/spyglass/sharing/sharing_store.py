@@ -817,6 +817,11 @@ def share_file(
     if scope == "group":
         selection.Team.insert([{**key, "team_name": t} for t in teams])
 
+    # The cascade `update_visibility` performs, which this path bypassed. It
+    # runs before the upload so a derivative still to be transferred carries
+    # the new scope rather than the old one.
+    shared()._resync_inherited(key)
+
     if populate:
         shared.populate(key)
 
