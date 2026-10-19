@@ -708,11 +708,7 @@ def queue_inherited_share(
 
     # One transaction: a half-written declaration would pass the
     # already-declared check above, so its missing parents could never be
-    # repaired and it could never be re-derived.
-    #
-    # `_safe_context`, not `connection.transaction`: DataJoint cannot nest a
-    # transaction, so inside a caller's `make()` the latter would ROLLBACK the
-    # caller's and leave the connection in autocommit for the rest of it.
+    # repaired and it could never be re-derived. Sometimes run in `make`
     with AnalysisFileSelection._safe_context():
         AnalysisFileSelection.insert1({**key, "scope": scope, "inherited": 1})
         AnalysisFileSelection.Team.insert(

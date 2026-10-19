@@ -1073,8 +1073,7 @@ def classic_make(store, common, mini_copy_name):
     """A `dj.Computed` whose classic `make` builds an analysis file.
 
     The documented pattern opens `build()` inside a single `make`, so the
-    builder's inserts run in the transaction `populate` already opened. Every
-    other builder test here runs outside one.
+    builder's inserts run in the transaction `populate` already opened.
     """
     import datajoint as dj
 
@@ -1122,12 +1121,11 @@ def classic_make(store, common, mini_copy_name):
 def test_the_builder_queues_inside_a_classic_make(
     store, declared, broker_configured, classic_make, mini_copy_name, common
 ):
-    """Queuing must not open a transaction the caller already holds.
+    """A `make` that builds an analysis file commits it, share and all.
 
-    DataJoint cannot nest one: taking `connection.transaction` here rolled the
-    caller's `make` back and left the connection in autocommit, so the
-    `AnalysisNwbfile` row vanished and the rest of the `make` committed
-    statement by statement.
+    Queuing runs in the caller's transaction, so nothing here may open one of
+    its own: DataJoint cannot nest them, and the rollback would take the
+    caller's `AnalysisNwbfile` row with it.
     """
     key = {"nwb_file_name": mini_copy_name}
 
