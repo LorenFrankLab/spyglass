@@ -92,13 +92,14 @@ def get_spiking_sorting_v1_merge_ids(
             name of the nwb file
         interval_list_name : str
             name of the interval list
-        sort_group_name : str
-            name of the sort group
+        sort_group_id : int
+            id of the sort group
         artifact_param_name : str
             name of the artifact parameter
         curation_id : int, optional
             id of the curation (if not specified, uses the latest curation)
-        Keys are applied only to the tables whose heading declares them.
+        Keys are applied only to the tables whose heading declares them. A
+        key no table declares is ignored, with a warning.
     recording_restr : dict, optional
         Extra restriction applied to SpikeSortingRecordingSelection only.
         Overrides matching keys in ``restriction``.
@@ -119,6 +120,16 @@ def get_spiking_sorting_v1_merge_ids(
     restriction = dict(restriction or {})
     recording_restr = {**restriction, **(recording_restr or {})}
     artifact_restr = {**restriction, **(artifact_restr or {})}
+
+    known = (
+        set(SpikeSortingRecordingSelection().heading.names)
+        | set(ArtifactDetectionSelection().heading.names)
+        | set(SpikeSortingSelection().heading.names)
+        | {"curation_id"}
+    )
+    all_keys = set(restriction) | set(recording_restr) | set(artifact_restr)
+    if unknown := all_keys - known:
+        logger.warning(f"Ignoring unknown restriction keys: {sorted(unknown)}")
 
     if curation_id is None:
         curation_id = restriction.get("curation_id", None)

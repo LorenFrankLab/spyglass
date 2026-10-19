@@ -14,6 +14,8 @@ Three defects are covered here:
 
 A sorting whose selected curation has no merge entry is omitted from the
 return, so the omission must be logged rather than passed over in silence.
+A restriction key no table declares is likewise ignored, and must be logged -
+a mistyped key otherwise widens the query without saying so.
 """
 
 from uuid import UUID
@@ -338,6 +340,35 @@ def test_unmerged_latest_curation_logged(
     assert (
         str(unmerged_latest_curation) in caplog.text
     ), "Omission warning does not name the sorting"
+
+
+def test_unknown_restriction_key_warns(merge_id_util, mini_dict, caplog):
+    """A key no table declares is named in a warning, not silently dropped."""
+    merge_id_util(dict(mini_dict, sort_group=1))  # typo for sort_group_id
+
+    assert (
+        "unknown restriction keys" in caplog.text
+    ), "Unknown restriction key dropped without a warning"
+    assert "sort_group" in caplog.text, "Warning does not name the bad key"
+
+
+def test_documented_restriction_keys_do_not_warn(
+    merge_id_util, mini_dict, caplog
+):
+    """Every key the docstring advertises is a key some table declares."""
+    merge_id_util(
+        dict(
+            mini_dict,
+            interval_list_name="01_s1",
+            sort_group_id=0,
+            artifact_param_name="default",
+            curation_id=0,
+        )
+    )
+
+    assert (
+        "unknown restriction keys" not in caplog.text
+    ), "Documented restriction keys triggered the unknown-key warning"
 
 
 def test_no_match_returns_empty(merge_id_util):
