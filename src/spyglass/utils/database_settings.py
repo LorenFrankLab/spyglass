@@ -25,21 +25,15 @@ SHARED_MODULES = [
     # EDIT: waveform not used as a spyglass schema prefix
 ]
 # Privileges granted to `dj_user` on shared schema prefixes: an explicit
-# privilege list without CREATE, so only an admin can declare new shared
-# tables. See issue #1065. Order matches MySQL's own ordering in `SHOW GRANTS`
-# output.
-# TRIGGER is load-bearing: AnalysisNwbfile.cleanup() blocks inserts by
-# creating triggers on every registered analysis table, `common_nwbfile`
-# among them, so dropping it makes cleanup fail for a regular user.
+# privilege list without CREATE or DROP (limited to admin).
+# TRIGGER is required for AnalysisNwbfile.cleanup()
 SHARED_PRIVILEGES = (
-    "SELECT, INSERT, UPDATE, DELETE, DROP, REFERENCES, INDEX, ALTER, "
+    "SELECT, INSERT, UPDATE, DELETE, REFERENCES, INDEX, ALTER, "
     "LOCK TABLES, TRIGGER"
 )
 GRANT_ALL = "GRANT ALL PRIVILEGES ON "
 GRANT_SHARED = f"GRANT {SHARED_PRIVILEGES} ON "
-# Read access pairs SELECT with REFERENCES: a foreign key is checked against
-# the *parent* table, so a role that can only SELECT a schema cannot declare a
-# table pointing into it. Order matches MySQL's `SHOW GRANTS` output.
+# Read access pairs SELECT with REFERENCES for fk-resolution on deletes.
 GRANT_SEL = "GRANT SELECT, REFERENCES ON "
 GRANT_SHOW = "GRANT SHOW DATABASES ON "
 CREATE_USR = "CREATE USER IF NOT EXISTS "

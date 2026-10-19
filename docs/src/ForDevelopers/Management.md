@@ -50,10 +50,10 @@ or the user's own prefix will raise a warning.
 #### Declaring tables in shared schemas
 
 On shared prefixes, the `dj_user` role is granted an explicit privilege list
-without `CREATE`, namely `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `ALTER`,
-`DROP`, `INDEX`, `REFERENCES`, `LOCK TABLES`, and `TRIGGER`. Regular users can
-therefore add, edit, and remove data in shared schemas, but **declaring a new
-table in a shared schema requires an admin**.
+without `CREATE` or `DROP`, namely `SELECT`, `INSERT`, `UPDATE`, `DELETE`,
+`ALTER`, `INDEX`, `REFERENCES`, `LOCK TABLES`, and `TRIGGER`. Regular users can
+therefore add, edit, and delete the *data* in a shared table, but **declaring a
+new table in a shared schema, or dropping an existing one, requires an admin**.
 
 `TRIGGER` is included so a regular user can run `AnalysisNwbfile().cleanup()`
 when every registered analysis table is in a shared prefix or in that user's own
@@ -88,7 +88,7 @@ the following roles:
 - `dj_guest`: `SELECT`, `REFERENCES` on all schemas.
 - `dj_collab`: `ALL` on user schema, `SELECT`/`REFERENCES` on all other schemas.
 - `dj_user`: `ALL` on user schema, an explicit privilege list without `CREATE`
-    on shared schemas, `SELECT`/`REFERENCES` on all other schemas.
+    or `DROP` on shared schemas, `SELECT`/`REFERENCES` on all other schemas.
 - `dj_admin`: `ALL` on all schemas.
 
 If new shared modules are introduced, the `add_module` method should be used to

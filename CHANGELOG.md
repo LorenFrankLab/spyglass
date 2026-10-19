@@ -60,8 +60,8 @@ regions = {row["merge_id"]: row["region_name"] for row in rows}
 - Correct `Populate.md` on `_parallel_make`, the double `make_fetch` call, and
     the `None` return from `make_compute` #1679
 - Fix `SpyglassMixinPart.delete` recursion; add `force` for part deletes #1678
-- Grant `dj_user` an explicit privilege list without `CREATE` on shared prefixes
-    #1678
+- Grant `dj_user` an explicit privilege list without `CREATE` or `DROP` on
+    shared prefixes #1678
 - Grant `REFERENCES` alongside `SELECT` on all read-access schemas #1678
 - Default analysis schema prefix to `database.user` when unset #1678
 - Import `_fir_filter` in a fixture, not at test-module scope #1678
