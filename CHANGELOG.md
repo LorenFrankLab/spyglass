@@ -109,6 +109,15 @@ regions = {row["merge_id"]: row["region_name"] for row in rows}
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
         #1678
+    - `get_spiking_sorting_v1_merge_ids` warns when a selected curation has no
+        merge entry, rather than silently returning fewer ids #XXXX
+    - `get_spiking_sorting_v1_merge_ids` warns on restriction keys no table
+        declares, rather than ignoring them. Its docstring named
+        `sort_group_name`, which no table declares; the key is `sort_group_id`
+        #XXXX
+    - `RecordingRecomputeSelection.attempt_all` forwards `force_attempt` to
+        `insert`, so forcing an attempt works when the environment does not match
+        #XXXX
 
 ## [0.6.0] (Sep 1st 2026)
 
