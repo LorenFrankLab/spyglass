@@ -109,3 +109,69 @@ def test_recheck(recomp_tbl):
     key = recomp_tbl.fetch("KEY")[0]
     result = recomp_tbl.recheck(key)
     assert result, "Recheck failed"
+
+
+@pytest.fixture
+def spare_attempt(recomp_module, recomp_selection, pop_rec):
+    """Yield a disposable recompute entry, its table and attempt file.
+
+    Delete tests run on this extra 'rounding' variant of the recording, so
+    that they neither depend on nor remove the entry other tests use.
+    """
+    recomp_module.RecordingRecomputeVersions().populate(pop_rec)
+
+    restr = dict(pop_rec, rounding=99)
+    recomp_selection.insert1(
+        restr, force_attempt=True, skip_xfail=False, skip_duplicates=True
+    )
+    assert recomp_selection & restr, f"Could not add selection entry {restr}"
+
+    tbl = recomp_module.RecordingRecompute()
+    key = (recomp_selection & restr).fetch1("KEY")
+    tbl.insert1(
+        dict(key, matched=False, err_msg="spare attempt"),
+        allow_direct_insert=True,
+    )
+
+    path = tbl._get_paths(key)[1]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+
+    yield tbl, key, path
+
+    path.unlink(missing_ok=True)
+    (tbl & key).delete_quick()
+    (recomp_selection & key).delete_quick()
+
+
+def test_delete_no_prompt(spare_attempt, monkeypatch):
+    """Test that safemode=False removes rows and files without prompting."""
+    import datajoint.table
+
+    tbl, key, path = spare_attempt
+
+    def no_prompt(*args, **kwargs):  # pragma: no cover
+        pytest.fail("safemode=False prompted for user input")
+
+    # recompute calls dj.utils.user_choice, Table.delete its own import
+    monkeypatch.setattr("datajoint.utils.user_choice", no_prompt)
+    monkeypatch.setattr(datajoint.table, "user_choice", no_prompt)
+    monkeypatch.setitem(dj.config, "safemode", True)
+
+    (tbl & key).delete(safemode=False)
+
+    assert not (tbl & key), "Delete did not remove the entry"
+    assert not path.exists(), "Delete did not remove the attempt file"
+
+
+def test_delete_cancelled(spare_attempt, monkeypatch):
+    """Test that answering 'no' keeps both the attempt file and the row."""
+    tbl, key, path = spare_attempt
+
+    monkeypatch.setattr("datajoint.utils.user_choice", lambda *a, **kw: "no")
+    monkeypatch.setitem(dj.config, "safemode", True)
+
+    (tbl & key).delete(safemode=True)
+
+    assert tbl & key, "Cancelled delete removed the entry"
+    assert path.exists(), "Cancelled delete removed the attempt file"
