@@ -8,10 +8,18 @@ Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
 
 ```python
-# Add `github_user_name` to LabMember.LabMemberInfo
+# Add `github_user_name` to LabMember.LabMemberInfo. `alter()` cannot add the
+# unique index, so run the DDL directly. `AFTER` keeps positional inserts in
+# the same order as a fresh instance. Restart Python afterward.
 from spyglass.common.common_lab import LabMember
 
-LabMember.LabMemberInfo().alter()
+info = LabMember.LabMemberInfo
+info.connection.query(
+    f"ALTER TABLE {info.full_table_name} "
+    + "ADD COLUMN `github_user_name` varchar(200) DEFAULT NULL "
+    + 'COMMENT "For shared-store identity" AFTER `datajoint_user_name`, '
+    + "ADD UNIQUE INDEX (`github_user_name`)"
+)
 ```
 
 ### Documentation

@@ -67,7 +67,6 @@ class LabMember(SpyglassIngestion, dj.Manual):
     # named Jack Black that have data in this database, this will create an
     # incorrect linkage. NWB does not yet provide unique IDs for names.
 
-    # NOTE: PR requires table alter.
     class LabMemberInfo(SpyglassMixin, dj.Part):
         definition = """
         # Information about lab member in the context of Frank lab network
@@ -83,7 +82,9 @@ class LabMember(SpyglassIngestion, dj.Manual):
         """
 
         # NOTE: index present for new instances. pending surgery, not enforced
-        # for existing instances.
+        # for existing instances. `github_user_name` is the exception: the
+        # 0.6.1 release note ships DDL that adds its index, because `alter()`
+        # cannot add one.
 
         # `github_user_name` defaults to null rather than "", so that the many
         # members who have not linked an account do not collide under the
