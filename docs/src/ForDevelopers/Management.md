@@ -49,21 +49,24 @@ or the user's own prefix will raise a warning.
 
 #### Declaring tables in shared schemas
 
-On shared prefixes, the `dj_user` role is granted every privilege *except*
-`CREATE`, namely `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP`,
-`INDEX`, `REFERENCES`, `LOCK TABLES`, and `TRIGGER`. Regular users can therefore
-add, edit, and remove data in shared schemas, but **declaring a new table in a
-shared schema requires an admin**.
+On shared prefixes, the `dj_user` role is granted an explicit privilege list
+without `CREATE`, namely `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `ALTER`,
+`DROP`, `INDEX`, `REFERENCES`, `LOCK TABLES`, and `TRIGGER`. Regular users can
+therefore add, edit, and remove data in shared schemas, but **declaring a new
+table in a shared schema requires an admin**.
 
-`TRIGGER` is included so regular users can still run
-`AnalysisNwbfile().cleanup()`, which blocks concurrent inserts by creating
-triggers on the registered analysis tables.
+`TRIGGER` is included so a regular user can run `AnalysisNwbfile().cleanup()`
+when every registered analysis table is in a shared prefix or in that user's own
+prefix. Cleanup also creates triggers on other users' custom `{user}_nwbfile`
+tables. If any are registered, an admin must run cleanup.
 
 If a user runs code that declares a table not yet present in a shared schema,
 MySQL will reject it with an access-denied error. An admin should import the
 relevant module once to declare the table; every other user can then use and
 populate it as usual. Users keep `ALL` privileges on their own prefix, so
-prototyping new tables there requires no admin involvement.
+prototyping new tables there requires no admin involvement. An admin should also
+run `schema.jobs` once on each new shared schema if users will populate with
+`reserve_jobs=True`.
 
 #### Role activation
 
@@ -84,8 +87,8 @@ the following roles:
 
 - `dj_guest`: `SELECT`, `REFERENCES` on all schemas.
 - `dj_collab`: `ALL` on user schema, `SELECT`/`REFERENCES` on all other schemas.
-- `dj_user`: `ALL` on user schema, all privileges except `CREATE` on shared
-    schemas, `SELECT`/`REFERENCES` on all other schemas.
+- `dj_user`: `ALL` on user schema, an explicit privilege list without `CREATE`
+    on shared schemas, `SELECT`/`REFERENCES` on all other schemas.
 - `dj_admin`: `ALL` on all schemas.
 
 If new shared modules are introduced, the `add_module` method should be used to

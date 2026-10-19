@@ -24,9 +24,10 @@ SHARED_MODULES = [
     "spikesorting",
     # EDIT: waveform not used as a spyglass schema prefix
 ]
-# Privileges granted to `dj_user` on shared schema prefixes: everything
-# except CREATE, so only an admin can declare new shared tables. See issue
-# #1065. Order matches MySQL's own ordering in `SHOW GRANTS` output.
+# Privileges granted to `dj_user` on shared schema prefixes: an explicit
+# privilege list without CREATE, so only an admin can declare new shared
+# tables. See issue #1065. Order matches MySQL's own ordering in `SHOW GRANTS`
+# output.
 # TRIGGER is load-bearing: AnalysisNwbfile.cleanup() blocks inserts by
 # creating triggers on every registered analysis table, `common_nwbfile`
 # among them, so dropping it makes cleanup fail for a regular user.

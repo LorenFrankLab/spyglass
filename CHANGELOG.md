@@ -31,13 +31,10 @@ first row — will now see one row per electrode of the group.
 # OLD: one row per sort group
 info = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch1()
 
-# NEW: restrict to the electrode you want
-info = (
-    SpikeSortingOutput().get_sort_group_info(merge_keys) & {"electrode_id": 0}
-).fetch1()
-
-# ... or keep every electrode of the group
+# NEW: one row per electrode. Group-level fields (e.g. region) repeat on
+# every row, so reduce to one value per merge id if that is all you need
 rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
+regions = {row["merge_id"]: row["region_name"] for row in rows}
 ```
 
 ### Documentation
@@ -63,7 +60,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Correct `Populate.md` on `_parallel_make`, the double `make_fetch` call, and
     the `None` return from `make_compute` #1679
 - Fix `SpyglassMixinPart.delete` recursion; add `force` for part deletes #1678
-- Grant `dj_user` all but `CREATE` on shared prefixes #1678
+- Grant `dj_user` an explicit privilege list without `CREATE` on shared prefixes
+    #1678
 - Grant `REFERENCES` alongside `SELECT` on all read-access schemas #1678
 - Default analysis schema prefix to `database.user` when unset #1678
 - Import `_fir_filter` in a fixture, not at test-module scope #1678
@@ -491,8 +489,6 @@ for label, interval_data in results.groupby("interval_labels"):
         injects the `tempdir` scratch-dir param only for sorters that declare it
         (only `mountainsort4`), instead of injecting it into every sorter and
         maintaining hardcoded removal lists #1655
-    - Fix `MetricCuration` dropping non-empty `merge_groups` #1626
-    - Add `unit_criteria` to `UnitSelectionParams` #1670
 
 ## [0.5.5] (Aug 6, 2025)
 
