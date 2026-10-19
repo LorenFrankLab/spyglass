@@ -113,7 +113,8 @@ def get_spiking_sorting_v1_merge_ids(
     Returns
     -------
     merge_id_list : list
-        list of merge ids for the given restriction
+        list of merge ids for the given restriction. Sortings whose selected
+        curation has no merge entry are omitted and logged as a warning.
     """
     restriction = dict(restriction or {})
     recording_restr = {**restriction, **(recording_restr or {})}
@@ -198,6 +199,14 @@ def get_spiking_sorting_v1_merge_ids(
         return []
 
     # list of merge ids for the desired curation(s)
-    return list(
-        (SpikeSortingOutput.CurationV1() & curation_keys).fetch("merge_id")
-    )
+    merged_ids, merged_sortings = (
+        SpikeSortingOutput.CurationV1() & curation_keys
+    ).fetch("merge_id", "sorting_id")
+    unmerged = {k["sorting_id"] for k in curation_keys} - set(merged_sortings)
+    if unmerged:
+        logger.warning(
+            f"Omitting {len(unmerged)} sorting(s) with no merge entry for "
+            + f"the selected curation: {sorted(map(str, unmerged))}"
+        )
+
+    return list(merged_ids)

@@ -11,6 +11,9 @@ Three defects are covered here:
 3. The fallback for sortings run without artifact detection ran
    unconditionally, so a recording with no artifact entries contributed merge
    ids even when the caller named an artifact parameter.
+
+A sorting whose selected curation has no merge entry is omitted from the
+return, so the omission must be logged rather than passed over in silence.
 """
 
 from uuid import UUID
@@ -140,6 +143,32 @@ def raw_sorting(spike_v1, spike_merge, mini_dict, team_name, pop_spike_merge):
     # test_recording.py::test_spike_sorting. The cascade takes the sorting,
     # curation and merge entry with it.
     (spike_v1.SpikeSortingRecordingSelection & rec_key).delete(safemode=False)
+
+
+@pytest.fixture(scope="function")
+def unmerged_latest_curation(
+    spike_v1, spike_merge, pop_spike_merge, merged_curation_id
+):
+    """A curation later than the merged one, with no merge entry of its own.
+
+    Yields
+    ------
+    uuid.UUID
+        ``sorting_id`` whose latest curation is absent from the merge table.
+    """
+    sorting_id = (spike_merge.CurationV1 & pop_spike_merge).fetch1("sorting_id")
+
+    curation_key = spike_v1.CurationV1.insert_curation(
+        sorting_id=str(sorting_id),
+        parent_curation_id=merged_curation_id,
+        description="unmerged latest curation",
+    )
+    if curation_key["curation_id"] <= merged_curation_id:
+        pytest.fail("Fixture did not become the latest curation.")
+
+    yield sorting_id
+
+    (spike_v1.CurationV1 & curation_key).delete(safemode=False)
 
 
 def test_backcompat_single_positional_restriction(
@@ -281,12 +310,34 @@ def test_raw_sorting_excluded_by_artifact_restr(
 def test_latest_curation_default(
     merge_id_util, mini_dict, second_artifact, pop_spike_merge
 ):
-    """With no curation_id, the util still resolves without raising."""
+    """With no curation_id, the util resolves the latest merged curation."""
     ret = merge_id_util(mini_dict)
 
-    assert isinstance(ret, list), "Expected a list of merge_ids"
+    assert len(ret) > 0, "No merge_ids returned for the latest curation"
+    assert pop_spike_merge["merge_id"] in list(
+        ret
+    ), "Latest-curation default dropped the merged curation"
     for merge_id in ret:
         assert isinstance(merge_id, UUID), "Unexpected type from util"
+
+
+def test_unmerged_latest_curation_logged(
+    merge_id_util,
+    mini_dict,
+    pop_spike_merge,
+    unmerged_latest_curation,
+    caplog,
+):
+    """A latest curation with no merge entry is omitted, and says so."""
+    ret = merge_id_util(mini_dict)
+
+    assert pop_spike_merge["merge_id"] not in list(
+        ret
+    ), "Merge id returned for a curation the util did not select"
+    assert "no merge entry" in caplog.text, "Silent omission of a sorting"
+    assert (
+        str(unmerged_latest_curation) in caplog.text
+    ), "Omission warning does not name the sorting"
 
 
 def test_no_match_returns_empty(merge_id_util):
