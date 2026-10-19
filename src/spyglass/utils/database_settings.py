@@ -59,11 +59,11 @@ class DatabaseSettings:
         - dj_guest:  select/references for all prefix
         - dj_collab: select/references for all prefix, all for user prefix
         - dj_user:   select/references for all prefix, all for user prefix,
-          all but create for shared prefix
+          all but create/drop for shared prefix
         - dj_admin:     all for all prefix
 
-        Note: dj_user cannot create tables in shared prefixes. An admin must
-        declare new shared tables. See issue #1065.
+        Note: dj_user can neither declare nor drop tables in shared prefixes.
+        An admin must do both. See issue #1065.
 
         Note: read access grants REFERENCES alongside SELECT. A foreign key is
         validated against the parent table, so SELECT alone would leave a role
