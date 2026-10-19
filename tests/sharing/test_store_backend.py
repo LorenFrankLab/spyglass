@@ -271,6 +271,95 @@ def test_resolution_falls_back_to_the_name(backend, tmp_path, monkeypatch):
     assert asked == {"name": "a.nwb", "sha256": None}
 
 
+def test_a_name_match_of_the_wrong_class_is_refused(
+    backend, tmp_path, monkeypatch
+):
+    """The broker matched a name; the class says it is not this file.
+
+    Streaming it would read another session's data under the expected name,
+    with nothing to signal the substitution.
+    """
+    monkeypatch.setattr(StoreBackend, "_known_hash", lambda self, n: None)
+    monkeypatch.setattr(
+        StoreBackend, "_expected_file_class", staticmethod(lambda p: "analysis")
+    )
+
+    record = {**RECORD, "file_class": "raw"}
+
+    with _with_client(_client(find=lambda name=None, sha256=None: record)):
+        assert backend.has(str(tmp_path / "a.nwb")) is False
+
+
+def test_a_name_match_of_the_wrong_size_is_refused(
+    backend, tmp_path, monkeypatch
+):
+    """A size this instance recorded is evidence the bytes differ."""
+    monkeypatch.setattr(StoreBackend, "_known_hash", lambda self, n: None)
+    monkeypatch.setattr(
+        StoreBackend, "_expected_file_class", staticmethod(lambda p: "raw")
+    )
+    monkeypatch.setattr(
+        StoreBackend, "_recorded_size", staticmethod(lambda n, c: 999)
+    )
+
+    record = {**RECORD, "file_class": "raw"}  # size_bytes is 7
+
+    with _with_client(_client(find=lambda name=None, sha256=None: record)):
+        assert backend.has(str(tmp_path / "a.nwb")) is False
+
+
+def test_a_name_match_that_agrees_is_accepted(backend, tmp_path, monkeypatch):
+    """Agreement on both comparable fields resolves as it always did."""
+    monkeypatch.setattr(StoreBackend, "_known_hash", lambda self, n: None)
+    monkeypatch.setattr(
+        StoreBackend, "_expected_file_class", staticmethod(lambda p: "raw")
+    )
+    monkeypatch.setattr(
+        StoreBackend, "_recorded_size", staticmethod(lambda n, c: 7)
+    )
+
+    record = {**RECORD, "file_class": "raw"}
+
+    with _with_client(_client(find=lambda name=None, sha256=None: record)):
+        assert backend.has(str(tmp_path / "a.nwb")) is True
+
+
+def test_a_hash_match_is_not_class_checked(backend, tmp_path, monkeypatch):
+    """A digest already names the bytes, so the record needs no corroborating.
+
+    Checking it would reject a file this instance holds a hash for but whose
+    class its local path does not imply.
+    """
+    monkeypatch.setattr(StoreBackend, "_known_hash", lambda self, n: "cd" * 32)
+    monkeypatch.setattr(
+        StoreBackend, "_expected_file_class", staticmethod(lambda p: "analysis")
+    )
+
+    record = {**RECORD, "file_class": "raw"}
+
+    with _with_client(_client(find=lambda name=None, sha256=None: record)):
+        assert backend.has(str(tmp_path / "a.nwb")) is True
+
+
+def test_a_refused_name_match_is_not_cached(backend, tmp_path, monkeypatch):
+    """A rejection must not strand the name, as a miss must not."""
+    monkeypatch.setattr(StoreBackend, "_known_hash", lambda self, n: None)
+    monkeypatch.setattr(
+        StoreBackend, "_expected_file_class", staticmethod(lambda p: "analysis")
+    )
+
+    path = str(tmp_path / "a.nwb")
+    mismatched = {**RECORD, "file_class": "raw"}
+
+    with _with_client(_client(find=lambda name=None, sha256=None: mismatched)):
+        assert backend.has(path) is False
+
+    agreeing = {**RECORD, "file_class": "analysis"}
+
+    with _with_client(_client(find=lambda name=None, sha256=None: agreeing)):
+        assert backend.has(path) is True
+
+
 def test_an_unreachable_sharing_schema_falls_back(backend, monkeypatch):
     """No grants, no schema, no connection: resolve by name rather than fail.
 

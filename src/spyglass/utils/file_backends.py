@@ -532,6 +532,108 @@ class StoreBackend(FileBackend):
 
         return None
 
+    @staticmethod
+    def _expected_file_class(nwb_file_path: str) -> Optional[str]:
+        """Return the file class a local path implies, or None.
+
+        Parameters
+        ----------
+        nwb_file_path : str
+            Absolute path of the file as Spyglass expects it locally.
+
+        Returns
+        -------
+        str or None
+            "raw", "analysis", or None if the path is under neither
+            directory and no class can be claimed.
+        """
+        from spyglass.settings import analysis_dir, raw_dir
+
+        path = Path(nwb_file_path)
+
+        for directory, file_class in (
+            (raw_dir, "raw"),
+            (analysis_dir, "analysis"),
+        ):
+            if directory and path.is_relative_to(directory):
+                return file_class
+
+        return None
+
+    @staticmethod
+    def _recorded_size(name: str, file_class: str) -> Optional[int]:
+        """Return the size the external table holds for a name, or None.
+
+        Parameters
+        ----------
+        name : str
+            Spyglass file name.
+        file_class : str
+            "raw" or "analysis".
+
+        Returns
+        -------
+        int or None
+            Size in bytes, or None where no single row records one.
+        """
+        try:
+            from spyglass.common.common_nwbfile import schema as common_schema
+
+            external = common_schema.external[file_class]
+            sizes = (external & f"filepath LIKE '%{name}'").fetch("size")
+
+            return int(sizes[0]) if len(sizes) == 1 else None
+        except Exception as err:  # no schema, no grants, no connection
+            logger.debug(f"No local size on record for {name}: {err}")
+
+        return None
+
+    def _record_matches(self, nwb_file_path: str, record: dict) -> bool:
+        """Return True if a record resolved by name is the expected file.
+
+        A name is not unique at the broker, so it can name a different
+        session registered by another instance. Compares what this instance
+        can claim about the file: the class its path implies, and the size the
+        external table recorded.
+
+        Parameters
+        ----------
+        nwb_file_path : str
+            Absolute path of the file as Spyglass expects it locally.
+        record : dict
+            Broker file record.
+
+        Returns
+        -------
+        bool
+            False where a comparable field disagrees. True where every field
+            agrees or none is comparable.
+        """
+        name = Path(nwb_file_path).name
+        expected = self._expected_file_class(nwb_file_path)
+        found = record.get("file_class")
+
+        if expected and found and found != expected:
+            logger.warning(
+                f"Ignoring a shared {found} file named {name}; this instance "
+                + f"expects {expected}. The broker matched the name only, so "
+                + "it holds a different file under it."
+            )
+            return False
+
+        size = self._recorded_size(name, expected) if expected else None
+        remote = record.get("size_bytes")
+
+        if size is not None and remote is not None and int(remote) != size:
+            logger.warning(
+                f"Ignoring a shared file named {name}; it is {remote} bytes "
+                + f"where this instance recorded {size}. The broker matched "
+                + "the name only, so it holds a different file under it."
+            )
+            return False
+
+        return True
+
     def _resolve(self, nwb_file_path: str) -> Optional[dict]:
         """Return the broker's record for this file, or None.
 
@@ -539,7 +641,8 @@ class StoreBackend(FileBackend):
         disagree about what the broker holds.
 
         Resolves by content hash where this instance recorded one, and by name
-        otherwise. See `_known_hash` for why that distinction matters.
+        otherwise. See `_known_hash` for why that distinction matters, and
+        `_record_matches` for what a name-resolved record must agree with.
 
         A refusal and a miss both return None. That is what the resolution
         chain needs — try the next backend either way — but it does mean a
@@ -583,9 +686,15 @@ class StoreBackend(FileBackend):
             return None
 
         digest = self._known_hash(name)
-        record = (
-            client.find(sha256=digest) if digest else client.find(name=name)
-        )
+
+        if digest:  # names the same bytes, so it needs no further checking
+            record = client.find(sha256=digest)
+        else:
+            record = client.find(name=name)
+            if record is not None and not self._record_matches(
+                nwb_file_path, record
+            ):
+                return None
 
         # Only a hit is cached. `find` collapses a refusal, a miss and a
         # broker outage into None, and this instance lives for the process —
