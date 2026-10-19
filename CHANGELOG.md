@@ -121,6 +121,9 @@ regions = {row["merge_id"]: row["region_name"] for row in rows}
     - `RecordingRecomputeSelection.attempt_all` skipped any recording with a prior
         attempt, ignoring `env_id` and `rounding`, so its `rounding` argument had
         no effect on a recording already attempted #XXXX
+    - `get_spiking_sorting_v1_merge_ids` skipped the raw-interval sorting of any
+        recording that had an artifact entry, so those merge ids were unreachable.
+        Such lookups now return them alongside the artifact-based ids #XXXX
 
 ## [0.6.0] (Sep 1st 2026)
 

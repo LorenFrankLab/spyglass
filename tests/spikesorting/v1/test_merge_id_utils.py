@@ -16,6 +16,9 @@ A sorting whose selected curation has no merge entry is omitted from the
 return, so the omission must be logged rather than passed over in silence.
 A restriction key no table declares is likewise ignored, and must be logged -
 a mistyped key otherwise widens the query without saying so.
+
+A raw-interval sorting is returned for every recording, including one that also
+has an artifact entry, unless the lookup names an artifact.
 """
 
 from uuid import UUID
@@ -145,6 +148,75 @@ def raw_sorting(spike_v1, spike_merge, mini_dict, team_name, pop_spike_merge):
     # test_recording.py::test_spike_sorting. The cascade takes the sorting,
     # curation and merge entry with it.
     (spike_v1.SpikeSortingRecordingSelection & rec_key).delete(safemode=False)
+
+
+@pytest.fixture(scope="function")
+def raw_sorting_on_artifact_rec(
+    spike_v1, spike_merge, mini_dict, pop_rec, pop_spike_merge
+):
+    """A curated, merged raw-interval sorting on the artifact-bearing recording.
+
+    Yields
+    ------
+    dict
+        ``recording_id`` of the recording, and the ``merge_id`` of its
+        raw-interval sorting.
+    """
+    _ = pop_spike_merge  # artifact-based pipeline must finish first
+
+    param_name = "no_artifact_raw"
+    params = dict(
+        (
+            spike_v1.SpikeSorterParameters
+            & {
+                "sorter": "clusterless_thresholder",
+                "sorter_param_name": "default_clusterless",
+            }
+        ).fetch1("sorter_params")
+    )
+    params["detect_threshold"] = 1e9  # uV -- nothing crosses this
+    spike_v1.SpikeSorterParameters.insert1(
+        {
+            "sorter": "clusterless_thresholder",
+            "sorter_param_name": param_name,
+            "sorter_params": params,
+        },
+        skip_duplicates=True,
+    )
+
+    sort_key = {
+        **mini_dict,
+        "recording_id": pop_rec["recording_id"],
+        "sorter": "clusterless_thresholder",
+        "sorter_param_name": param_name,
+        "interval_list_name": "01_s1",  # raw interval, not an artifact id
+    }
+    spike_v1.SpikeSortingSelection.insert_selection(sort_key)
+    sel_pk = (spike_v1.SpikeSortingSelection & sort_key).fetch1("KEY")
+    spike_v1.SpikeSorting.populate(sel_pk)
+
+    if not (spike_v1.SpikeSorting & sel_pk):
+        pytest.fail("Could not build a raw sorting on the artifact recording.")
+
+    curation_key = spike_v1.CurationV1.insert_curation(
+        sorting_id=str(sel_pk["sorting_id"]),
+        description="raw sorting on an artifact-bearing recording",
+    )
+    merge_src = {
+        "sorting_id": curation_key["sorting_id"],
+        "curation_id": curation_key["curation_id"],
+        "analysis_file_name": curation_key["analysis_file_name"],
+    }
+    spike_merge.insert([merge_src], part_name="CurationV1")
+
+    yield {
+        "recording_id": pop_rec["recording_id"],
+        "merge_id": (spike_merge << merge_src).fetch1("merge_id"),
+    }
+
+    # Leave the recording in place - the rest of the suite sorts on it. The
+    # cascade takes the curation and merge entry with the selection.
+    (spike_v1.SpikeSortingSelection & sort_key).delete(safemode=False)
 
 
 @pytest.fixture(scope="function")
@@ -307,6 +379,35 @@ def test_raw_sorting_excluded_by_artifact_restr(
     assert (
         ret == []
     ), f"Artifact-free sorting bypassed an explicit artifact_restr: {ret}"
+
+
+def test_raw_sorting_on_artifact_recording(
+    merge_id_util, pop_spike_merge, raw_sorting_on_artifact_rec
+):
+    """A recording's raw sorting is returned despite its artifact entry."""
+    restriction = {"recording_id": raw_sorting_on_artifact_rec["recording_id"]}
+
+    ret = list(merge_id_util(restriction))
+
+    assert (
+        raw_sorting_on_artifact_rec["merge_id"] in ret
+    ), "Raw sorting of an artifact-bearing recording was not returned"
+    assert (
+        pop_spike_merge["merge_id"] in ret
+    ), "Artifact-based sorting lost when the raw sorting was added"
+
+    artifact_only = list(
+        merge_id_util(
+            restriction, artifact_restr={"artifact_param_name": "default"}
+        )
+    )
+
+    assert (
+        raw_sorting_on_artifact_rec["merge_id"] not in artifact_only
+    ), "Raw sorting bypassed an explicit artifact_restr"
+    assert (
+        pop_spike_merge["merge_id"] in artifact_only
+    ), "artifact_restr dropped the artifact-based sorting"
 
 
 def test_latest_curation_default(

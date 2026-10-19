@@ -79,10 +79,9 @@ def get_spiking_sorting_v1_merge_ids(
     A recording may have any number of ``ArtifactDetectionSelection`` entries -
     the schema does not enforce a 1:1 mapping. Every matching artifact is
     followed, and all resulting merge ids are returned. Pass ``artifact_restr``
-    (e.g. ``{"artifact_param_name": "default"}``) to narrow the set. Recordings
-    with no artifact entry at all are followed through sortings that were run
-    without artifact detection, unless the lookup names an artifact id or
-    parameter.
+    (e.g. ``{"artifact_param_name": "default"}``) to narrow the set. Every
+    recording is also followed through sortings that were run without artifact
+    detection, unless the lookup names an artifact id or parameter.
 
     Parameters
     ----------
@@ -162,16 +161,14 @@ def get_spiking_sorting_v1_merge_ids(
         for r_id, a_id in zip(art_recording_ids, artifact_ids)
     ]
     # sortings run without artifact detection keep the original interval. Skip
-    # them when an artifact was named: unconditionally, a recording with no
-    # artifact entries bypasses the caller's filter.
+    # the whole loop when an artifact was named, or those sortings would bypass
+    # the caller's filter.
     artifact_only = set(ArtifactDetectionSelection().heading.names) - set(
         SpikeSortingRecordingSelection().heading.names
     )
     if not artifact_only & set(artifact_restr):
         raw_interval = restriction.get("interval_list_name", None)
         for r_id in recording_ids:
-            if r_id in has_artifact:
-                continue
             key = {"recording_id": str(r_id)}
             if raw_interval is not None:
                 key["interval_list_name"] = raw_interval
