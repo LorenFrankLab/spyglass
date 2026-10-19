@@ -7,7 +7,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.1
 #   kernelspec:
-#     display_name: '1335'
+#     display_name: spyglass
 #     language: python
 #     name: python3
 # ---

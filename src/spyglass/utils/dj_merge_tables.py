@@ -20,8 +20,6 @@ from spyglass.utils.mixins.export import ExportMixin
 RESERVED_PRIMARY_KEY = "merge_id"
 RESERVED_SECONDARY_KEY = "source"
 RESERVED_SK_LENGTH = 32
-# Spyglass version in which the deprecated ``merge_X`` methods are removed.
-# Single source of truth for the warning text (docstrings mirror this literal).
 MERGE_DEFINITION = (
     f"\n    {RESERVED_PRIMARY_KEY}: uuid\n    ---\n"
     + f"    {RESERVED_SECONDARY_KEY}: varchar({RESERVED_SK_LENGTH})\n    "
