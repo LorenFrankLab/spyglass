@@ -151,6 +151,23 @@ def test_logout_forgets_only_this_broker(token_file):
     assert sc.StoreClient(base_url="https://other.org").token == "other"
 
 
+def test_logout_narrows_a_widened_cache(token_file):
+    """Logging out rewrites the cache at 0600 rather than truncating it.
+
+    `O_TRUNC` on an existing file leaves its mode alone, so a cache that had
+    been widened would stay readable with the remaining tokens in it.
+    """
+    sc._write_token(BROKER, TOKEN)
+    sc._write_token("https://other.org", {"access_token": "other"})
+    token_file.chmod(0o644)
+
+    sc.StoreClient(base_url=BROKER).logout()
+
+    mode = stat.S_IMODE(token_file.stat().st_mode)
+    assert mode == stat.S_IRUSR | stat.S_IWUSR, f"Left {oct(mode)}"
+    assert sc.StoreClient(base_url="https://other.org").token == "other"
+
+
 def test_call_without_a_token_names_the_fix(token_file):
     """The error tells the user to log in rather than reporting a 401."""
     with pytest.raises(sc.StoreAuthError, match="spyglass-store login"):

@@ -207,24 +207,16 @@ def _read_tokens() -> dict:
     return stored if isinstance(stored, dict) else {}
 
 
-def _write_token(base_url: str, record: dict) -> None:
-    """Cache one broker's credential at 0600.
-
-    The mode is set on the descriptor before anything is written, rather than
-    chmod'ed afterward, so the token is never briefly world-readable.
+def _write_tokens(tokens: dict) -> None:
+    """Replace the token cache at 0600.
 
     Parameters
     ----------
-    base_url : str
-        Broker this credential belongs to.
-    record : dict
-        The broker's token response.
+    tokens : dict
+        Every broker's credential, keyed by base URL.
     """
     path = token_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-
-    tokens = _read_tokens()
-    tokens[base_url] = record
 
     # Written to a fresh 0600 file and renamed over the cache. O_CREAT does
     # not narrow an existing file, so writing in place would put the token in
@@ -242,6 +234,22 @@ def _write_token(base_url: str, record: dict) -> None:
         os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)
+
+
+def _write_token(base_url: str, record: dict) -> None:
+    """Cache one broker's credential, leaving the others in place.
+
+    Parameters
+    ----------
+    base_url : str
+        Broker this credential belongs to.
+    record : dict
+        The broker's token response.
+    """
+    tokens = _read_tokens()
+    tokens[base_url] = record
+
+    _write_tokens(tokens)
 
 
 def possession_proof(file_path, offset: int, length: int) -> str:
@@ -648,14 +656,7 @@ class StoreClient:
         if tokens.pop(self.base_url, None) is None:
             return
 
-        path = token_path()
-        fd = os.open(
-            path,
-            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-            stat.S_IRUSR | stat.S_IWUSR,
-        )
-        with os.fdopen(fd, "w") as f:
-            json.dump(tokens, f, indent=2)
+        _write_tokens(tokens)
 
         self._record, self._token = {}, None
 
