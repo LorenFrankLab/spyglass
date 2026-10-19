@@ -118,6 +118,9 @@ regions = {row["merge_id"]: row["region_name"] for row in rows}
     - `RecordingRecomputeSelection.attempt_all` forwards `force_attempt` to
         `insert`, so forcing an attempt works when the environment does not match
         #XXXX
+    - `RecordingRecomputeSelection.attempt_all` skipped any recording with a prior
+        attempt, ignoring `env_id` and `rounding`, so its `rounding` argument had
+        no effect on a recording already attempted #XXXX
 
 ## [0.6.0] (Sep 1st 2026)
 
