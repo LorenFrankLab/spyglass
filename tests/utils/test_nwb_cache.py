@@ -656,7 +656,13 @@ def test_held_close_warns_under_fd_pressure(NWBFileCache):
         patch.object(NWBFileCache, "_warn_msg") as mock_warn,
     ):
         _add(cache, "/b.nwb")
-        assert any("still held" in w for w in _warn_texts(mock_warn))
+        held = [w for w in _warn_texts(mock_warn) if "still held" in w]
+        assert held
+        # A populate() job holds files from internal code, so name the two
+        # actions its caller does have: release between calls, or raise the
+        # limit.
+        assert "close_nwb_files() between populate()" in held[0]
+        assert "ulimit -n" in held[0]
 
     io_a.close.assert_called_once()
     assert cache._held_evictions == 1

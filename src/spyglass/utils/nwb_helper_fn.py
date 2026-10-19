@@ -222,7 +222,9 @@ class NWBFileCache(BaseMixin):
                     "NWB cache must close a file that is still held to stay"
                     " within the open file limit. Pending lazy h5py reads from"
                     " it may fail. Call close_nwb() when finished with"
-                    " fetch_nwb(), or close_nwb_files() to release everything.",
+                    " fetch_nwb(), or close_nwb_files() between populate()"
+                    " calls. Where the holds are not yours to release, raise"
+                    " the limit with `ulimit -n`.",
                 )
             self._close_lru(candidates)
         if not self._cache and not self._num_open_ok():
